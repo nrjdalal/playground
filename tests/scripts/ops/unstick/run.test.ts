@@ -29,6 +29,8 @@ spec = importlib.util.spec_from_file_location("run", sys.argv[1])
 run = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(run)
 call = json.loads(sys.stdin.read())
+if "at" in call:
+    run.time.time = lambda: call["at"]
 notified = []
 run.notify = lambda text, to="dispatcher": notified.append([to, text])
 paths = [run.CODE, run.LW, run.OPS, run.HERE]
@@ -52,7 +54,7 @@ const scratch = (): string => {
 const drive = async (
   env: Record<string, string>,
   config: string,
-  body: { args: unknown[]; fn: string; notified?: true; state?: true },
+  body: { args: unknown[]; at?: number; fn: string; notified?: true; state?: true },
 ): Promise<unknown> => {
   const proc = Bun.spawn([...PYTHON, "-I", "-c", DRIVER, RUN_PY], {
     env: {
@@ -220,8 +222,8 @@ describe("ops-unstick reads Claude Code's weekly limit line", () => {
   })
 })
 
-// the 98% line and the dialog's room judge a session by the --account its spawn.sh resume record names, none for a GLM pin, else this machine's own login.
-describe("a session's account, for the 98% shutdown line and the dialog's room", () => {
+// the capped account line and the dialog's room judge a session by the --account its spawn.sh resume record names, none for a GLM pin, else this machine's own login.
+describe("a session's account, for the capped account line and the dialog's room", () => {
   // three days ahead, on the hour as usage.json's resets_at falls, so run.py never skips it as past and the wobble test's round(reset / 3600) holds
   const RESET = Math.ceil(Date.now() / 3_600_000) * 3600 + 3 * DAY
   const write = (path: string, body: string): void => {
@@ -262,7 +264,7 @@ describe("a session's account, for the 98% shutdown line and the dialog's room",
 
   test("posts no line for usage.json's account at 98% when no live session runs on it", async () => {
     const config = machine(98, 22)
-    const { notified: sent, result } = await notified(config, "shutdown_alert", [
+    const { notified: sent, result } = await notified(config, "capped_alert", [
       "worker-on-two",
       "dispatcher-2",
     ])
@@ -270,30 +272,21 @@ describe("a session's account, for the 98% shutdown line and the dialog's room",
     expect(result).toEqual([])
   })
 
-  test("posts one naming a live session's account at 98%, to dispatcher and both leads", async () => {
-    const config = machine(40, 98.4)
-    const { notified: sent, result } = await notified(config, "shutdown_alert", ["worker-on-two"])
-    expect(sent.map(([to]) => to)).toEqual(["dispatcher", "builder", "ops"])
-    for (const [, line] of sent)
-      expect(line).toStartWith("SHUTDOWN 98%: two@example.com's week is at 98%")
-    expect((result as { name: string }[]).map((a) => a.name)).toEqual(["two@example.com"])
-  })
-
   test("counts a session by its record's account line, a login spawn.sh's usage gate picked (PG-2137)", async () => {
-    const config = machine(40, 98.4)
+    const config = machine(40, 100)
     write(
       join(config, "playground", "resume", "worker-picked.sh"),
       "#!/bin/bash\n# server: factory\n# account: two@example.com\nexec /x/scripts/spawn.sh resume worker-picked /x 0b9e8f1a\n",
     )
-    const { notified: sent } = await notified(config, "shutdown_alert", ["worker-picked"])
-    expect(sent).toHaveLength(3)
-    expect(sent[0][1]).toStartWith("SHUTDOWN 98%: two@example.com's week is at 98%")
+    const { notified: sent } = await notified(config, "capped_alert", ["worker-picked"])
+    expect(sent).toHaveLength(2)
+    expect(sent[0][1]).toStartWith("CAP 100%: two@example.com's week is at 100%")
   })
 
   test("counts a session with no --account on this machine's own login", async () => {
-    const { notified: sent } = await notified(machine(98, 22), "shutdown_alert", ["worker-plain"])
-    expect(sent).toHaveLength(3)
-    expect(sent[0][1]).toStartWith("SHUTDOWN 98%: own@example.net's week")
+    const { notified: sent } = await notified(machine(100, 22), "capped_alert", ["worker-plain"])
+    expect(sent).toHaveLength(2)
+    expect(sent[0][1]).toStartWith("CAP 100%: own@example.net's week")
   })
 
   test("counts a session with no --account on usage.json's storedLogin while usage.json reads a factory account", async () => {
@@ -301,11 +294,11 @@ describe("a session's account, for the 98% shutdown line and the dialog's room",
     const own = JSON.parse(readFileSync(join(config, "playground", "usage.json"), "utf8"))
     write(
       join(config, "playground", "usage.json"),
-      JSON.stringify({ ...own, storedLogin: { account: "stored@example.org", week: 98 } }),
+      JSON.stringify({ ...own, storedLogin: { account: "stored@example.org", week: 100 } }),
     )
-    const { notified: sent } = await notified(config, "shutdown_alert", ["worker-plain"])
-    expect(sent).toHaveLength(3)
-    expect(sent[0][1]).toStartWith("SHUTDOWN 98%: stored@example.org's week is at 98%")
+    const { notified: sent } = await notified(config, "capped_alert", ["worker-plain"])
+    expect(sent).toHaveLength(2)
+    expect(sent[0][1]).toStartWith("CAP 100%: stored@example.org's week is at 100%")
   })
 
   const stored = (config: string, week: number) => {
@@ -318,7 +311,7 @@ describe("a session's account, for the 98% shutdown line and the dialog's room",
 
   test("reads a fresh storedLogin over a stale file of the same account, with that file's reset", async () => {
     const config = machine(40, 22)
-    stored(config, 98)
+    stored(config, 100)
     usage(
       config,
       "usage-stored.json",
@@ -327,17 +320,20 @@ describe("a session's account, for the 98% shutdown line and the dialog's room",
       RESET,
       new Date(Date.now() - 3_600_000),
     )
-    expect(await call(config, "room", "worker-plain")).toEqual([true, "stored@example.org: 7d 98%"])
-    const { notified: sent } = await notified(config, "shutdown_alert", ["worker-plain"])
-    expect(sent).toHaveLength(3)
+    expect(await call(config, "room", "worker-plain")).toEqual([
+      false,
+      "stored@example.org: 7d 100%",
+    ])
+    const { notified: sent } = await notified(config, "capped_alert", ["worker-plain"])
+    expect(sent).toHaveLength(2)
     expect(sent[0][1]).toStartWith(
-      `SHUTDOWN 98%: stored@example.org's week is at 98% (resets ${new Date(RESET * 1000).toUTCString().slice(0, 3)}`,
+      `CAP 100%: stored@example.org's week is at 100% (resets ${new Date(RESET * 1000).toUTCString().slice(0, 3)}`,
     )
   })
 
   test("takes no reset already past from a stale file of the storedLogin's account", async () => {
     const config = machine(40, 22)
-    stored(config, 98)
+    stored(config, 100)
     const past = Math.floor(Date.now() / 1000) - DAY
     usage(
       config,
@@ -347,28 +343,28 @@ describe("a session's account, for the 98% shutdown line and the dialog's room",
       past,
       new Date(Date.now() - 2 * DAY * 1000),
     )
-    const { notified: sent } = await notified(config, "shutdown_alert", ["worker-plain"])
+    const { notified: sent } = await notified(config, "capped_alert", ["worker-plain"])
     expect(sent[0][1]).toStartWith(
-      "SHUTDOWN 98%: stored@example.org's week is at 98% (resets unknown)",
+      "CAP 100%: stored@example.org's week is at 100% (resets unknown)",
     )
     const keys = JSON.parse(
-      readFileSync(join(config, "playground", "ops", "unstick", "shutdown-98.json"), "utf8"),
+      readFileSync(join(config, "playground", "ops", "unstick", "capped-sent.json"), "utf8"),
     ).keys
     expect(keys["stored@example.org"]).toMatch(/^\d{4}-W\d{2}$/)
   })
 
   test("sends a storedLogin's line once a week though no file reads its reset", async () => {
     const config = machine(40, 22)
-    stored(config, 98)
+    stored(config, 100)
     const sends = async () =>
-      (await notified(config, "shutdown_alert", ["worker-plain"])).notified.length
-    expect(await sends()).toBe(3)
+      (await notified(config, "capped_alert", ["worker-plain"])).notified.length
+    expect(await sends()).toBe(2)
     expect(await sends()).toBe(0)
-    const sentPath = join(config, "playground", "ops", "unstick", "shutdown-98.json")
+    const sentPath = join(config, "playground", "ops", "unstick", "capped-sent.json")
     const sentFile = JSON.parse(readFileSync(sentPath, "utf8"))
     expect(sentFile.keys["stored@example.org"]).toMatch(/^\d{4}-W\d{2}$/)
     write(sentPath, JSON.stringify({ ...sentFile, keys: { "stored@example.org": "2020-W01" } }))
-    expect(await sends()).toBe(3)
+    expect(await sends()).toBe(2)
   })
 
   test("names why a GLM pin has no room", async () => {
@@ -379,15 +375,15 @@ describe("a session's account, for the 98% shutdown line and the dialog's room",
   })
 
   test("sends once across a reset that wobbles by a second over the hour, and again the next week", async () => {
-    const config = machine(98, 22)
+    const config = machine(100, 22)
     const sends = async (reset: number) => {
-      usage(config, "usage.json", "own@example.net", 98, reset)
-      return (await notified(config, "shutdown_alert", ["worker-plain"])).notified.length
+      usage(config, "usage.json", "own@example.net", 100, reset)
+      return (await notified(config, "capped_alert", ["worker-plain"])).notified.length
     }
-    expect(await sends(RESET)).toBe(3)
+    expect(await sends(RESET)).toBe(2)
     expect(await sends(RESET - 1)).toBe(0)
     expect(await sends(RESET)).toBe(0)
-    expect(await sends(RESET + 7 * DAY)).toBe(3)
+    expect(await sends(RESET + 7 * DAY)).toBe(2)
   })
 
   test("reads no room for a session whose record names a spare at 100%, though usage.json has room", async () => {
@@ -721,10 +717,7 @@ describe("block alerts", () => {
     expect(await call(config, "limit_targets", "probe-herdr-answer", transcript)).toEqual([
       "worker-mild-lark",
     ])
-    expect(await call(config, "limit_targets", "worker-mild-lark", transcript)).toEqual([
-      "builder",
-      "dispatcher",
-    ])
+    expect(await call(config, "limit_targets", "worker-mild-lark", transcript)).toEqual([])
   })
 })
 
@@ -1561,12 +1554,14 @@ run.manager_kind_of_name = lambda name: None
 run.named_kind = lambda name: None
 run.quiet_for = lambda path, now_t: 3600
 run.screen = lambda s: ["You've hit your weekly limit"]
-run.read_block = lambda lines, s: (sys.argv[2], "You've hit your weekly limit", None)
+stuck = sys.argv[2] == "usage-limit-stuck"
+run.read_block = lambda lines, s: (None, None, ("You've hit your weekly limit", 1800)) if stuck else (sys.argv[2], "You've hit your weekly limit", None)
 run.session_account = lambda name: "acct-spent"
 run.moving = lambda now_t=None: None
 for fn in ("stall",):
     setattr(run, fn, lambda *a, **k: None)
-for fn in ("shutdown_alert", "api_stop_alerts", "slot_idle_alerts", "docker_check", "memory_files", "heavy_jobs", "slot_alerts"):
+run.capped_alert = lambda names, limited=None: sent.append(["limited", ",".join(sorted(limited or []))]) or []
+for fn in ("ending_alert", "api_stop_alerts", "slot_idle_alerts", "docker_check", "memory_files", "heavy_jobs", "slot_alerts"):
     setattr(run, fn, lambda *a, **k: [])
 run.heavy_cap = lambda: 1
 run.slot_stuck = lambda *a, **k: None
@@ -1606,7 +1601,7 @@ print(json.dumps(sent))
     return JSON.parse(out)
   }
 
-  test("alerts each recipient once, then one summary an hour, and the alert names the account with the most room", async () => {
+  test("a worker's limit line goes nowhere; the summary an hour stays", async () => {
     const sent = await replay({
       "acct-half": { week: 60 },
       "acct-roomy": { week: 20 },
@@ -1614,40 +1609,89 @@ print(json.dumps(sent))
     })
     for (const to of ["builder", "dispatcher"]) {
       const lines = sent.filter(([who]) => who === to).map(([, text]) => text)
-      const alerts = lines.filter((text) => text.includes("is at its usage limit"))
+      expect(
+        lines.filter((text) => text.includes("is at its usage limit")),
+        to,
+      ).toHaveLength(0)
       const summaries = lines.filter((text) => text.includes("blocked on the usage limit"))
-      expect(alerts, to).toHaveLength(1)
       expect(summaries, to).toHaveLength(8)
-      expect(lines, to).toHaveLength(9)
-      expect(alerts[0]).toContain("Most room: acct-roomy (week 20%)")
+      expect(lines, to).toHaveLength(8)
       expect(summaries[0]).toBe(
         "1 session blocked on the usage limit. Nothing blocked for another reason. On the limit: worker-a",
       )
     }
   })
 
-  test("says so when no account has room", async () => {
-    const sent = await replay({
-      "acct-also": { week: 100 },
-      "acct-spent": { week: 100 },
-    })
-    expect(sent.find(([, text]) => text.includes("is at its usage limit"))?.[1]).toContain(
-      "No account in usage.json's accounts has room",
-    )
+  test("a limit dialog still showing past its reset tells its manager once and never caps its account; a live one caps it (#1457)", async () => {
+    const accounts = { "acct-spent": { week: 3 } }
+    const limitedBy = (sent: [string, string][]) => [
+      ...new Set(sent.filter(([who]) => who === "limited").map(([, accts]) => accts)),
+    ]
+    const stuck = await replay(accounts, "usage-limit-stuck")
+    expect(limitedBy(stuck)).toEqual([""])
+    const told = stuck.filter(([who]) => who === "lead").map(([, text]) => text)
+    expect(told).toHaveLength(1)
+    expect(told[0]).toContain("nudge it")
+    expect(limitedBy(await replay(accounts))).toEqual(["acct-spent"])
   })
-  test("names a week past its reset as 0 and never the session's own account", async () => {
-    const most = async (accounts: object) =>
-      (await replay(accounts)).find(([, text]) => text.includes("is at its usage limit"))?.[1]
-    expect(await most({ "acct-roomy": { week: 20 }, "acct-spent": { week: 5 } })).toContain(
-      "Most room: acct-roomy (week 20%)",
-    )
+
+  test("most_room reads usage.json's accounts map: a week past its reset as 0, never the skipped account", async () => {
+    const most = async (accounts: object, skip = "acct-spent") => {
+      const config = scratch()
+      writeFileSync(
+        join(config, "playground", "usage.json"),
+        JSON.stringify({ account: "acct-spent", accounts, writtenAt: "2027-01-15T08:00:00Z" }),
+      )
+      return call(config, "most_room", skip)
+    }
+    expect(await most({ "acct-roomy": { week: 20 }, "acct-spent": { week: 5 } })).toEqual([
+      "acct-roomy",
+      20,
+    ])
     expect(
       await most({
         "acct-reset": { week: 100, weekReset: 1_700_000_000 },
         "acct-roomy": { week: 20 },
         "acct-spent": { week: 100 },
       }),
-    ).toContain("Most room: acct-reset (week 0%)")
+    ).toEqual(["acct-reset", 0])
+    expect(await most({ "acct-spent": { week: 100 } })).toBeNull()
+  })
+
+  test("a probe's limit line names the account with the most room, and says so when none has room", async () => {
+    const probeLine = async (accounts: object) => {
+      const config = scratch()
+      writeFileSync(
+        join(config, "playground", "usage.json"),
+        JSON.stringify({ account: "acct-spent", accounts, writtenAt: "2027-01-15T08:00:00Z" }),
+      )
+      const transcript = join(config, "probe.jsonl")
+      writeFileSync(
+        transcript,
+        `${JSON.stringify({
+          message: {
+            content:
+              "You are probe-herdr-answer, a probe in the Playground factory; you report to worker-mild-lark. Report to worker-mild-lark with SendMessage (to: worker-mild-lark).",
+            role: "user",
+          },
+          type: "user",
+        })}\n`,
+      )
+      const { notified: sent } = await notified(
+        config,
+        "limit_alert",
+        "probe-herdr-answer",
+        "You've hit your weekly limit",
+        transcript,
+      )
+      return sent[0]?.[1]
+    }
+    expect(await probeLine({ "acct-roomy": { week: 20 }, "acct-spent": { week: 100 } })).toContain(
+      "Most room: acct-roomy (week 20%)",
+    )
+    expect(await probeLine({ "acct-spent": { week: 100 } })).toContain(
+      "No account in usage.json's accounts has room",
+    )
   })
 
   test("any other block still alerts every 10 minutes", async () => {
@@ -1655,5 +1699,133 @@ print(json.dumps(sent))
     expect(sent.filter(([, text]) => text.includes("is blocked on a picker prompt"))).toHaveLength(
       49,
     )
+  })
+})
+describe("the capped and ending account lines (#1457)", () => {
+  const RESET = Math.ceil(Date.now() / 3_600_000) * 3600 + 3 * DAY
+  const write = (path: string, body: string): void => {
+    mkdirSync(join(path, ".."), { recursive: true })
+    writeFileSync(path, body)
+  }
+  const usage = (
+    config: string,
+    file: string,
+    account: string,
+    pct: number,
+    reset = RESET,
+    at = new Date(),
+  ) =>
+    write(
+      join(config, "playground", file),
+      JSON.stringify({
+        account,
+        rate_limits: { seven_day: { resets_at: reset, used_percentage: pct } },
+        writtenAt: at.toISOString().replace(/\.\d{3}Z$/, "Z"),
+      }),
+    )
+  const record = (config: string, name: string, flags: string) =>
+    write(
+      join(config, "playground", "resume", `${name}.sh`),
+      `#!/bin/bash\n# server: factory\nexec /x/scripts/spawn.sh resume ${name} /x 0b9e8f1a ${flags}\n`,
+    )
+  const machine = (ownPct: number, twoPct: number, twoEnds?: string) => {
+    const config = scratch()
+    mkdirSync(join(config, "playground", "ops", "unstick"), { recursive: true })
+    usage(config, "usage.json", "own@example.net", ownPct)
+    usage(config, "usage-two.json", "two@example.com", twoPct)
+    write(
+      join(config, "playground", "usage.json"),
+      JSON.stringify({
+        account: "own@example.net",
+        accounts: { "own@example.net": { week: ownPct }, "two@example.com": { week: twoPct } },
+        rate_limits: { seven_day: { resets_at: RESET, used_percentage: ownPct } },
+        writtenAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      }),
+    )
+    record(config, "worker-on-two", "--account two@example.com --model claude-opus-5-5")
+    record(config, "worker-plain", "")
+    record(config, "worker-two-b", "--account two@example.com")
+    record(config, "worker-two-c", "--account two@example.com --model claude-sonnet-5-5")
+    if (twoEnds)
+      storeWith(join(config, "playground"), {}, {
+        "usage.accounts": [{ email: "two@example.com", provider: "claude", ends: twoEnds }],
+      } as never)
+    return config
+  }
+
+  test("a week at 98% with a live session on the account sends nothing (#1457)", async () => {
+    const config = machine(98, 22)
+    const { notified: sent } = await notified(config, "capped_alert", ["worker-plain"])
+    expect(sent).toEqual([])
+  })
+
+  test("a capped account names every live session on it and the roomiest target, once per reset (#1457)", async () => {
+    const config = machine(40, 100)
+    const { notified: sent } = await notified(config, "capped_alert", [
+      "worker-on-two",
+      "worker-two-b",
+      "worker-two-c",
+      "worker-plain",
+    ])
+    expect(sent).toHaveLength(2)
+    expect(sent.map(([to]) => to)).toEqual(["builder", "ops"])
+    const line = sent[0]![1]
+    expect(line).toContain("two@example.com")
+    expect(line).toContain("worker-on-two")
+    expect(line).toContain("worker-two-b")
+    expect(line).toContain("worker-two-c")
+    expect(line).not.toContain("worker-plain")
+    expect(line).toContain("own@example.net")
+    expect(line).toContain("spawn.sh close")
+    const again = (
+      await notified(config, "capped_alert", [
+        "worker-on-two",
+        "worker-two-b",
+        "worker-two-c",
+        "worker-plain",
+      ])
+    ).notified
+    expect(again).toEqual([])
+  })
+
+  test("an ending account with room sends ops one line naming the account, its end and the points left (#1457)", async () => {
+    const config = machine(40, 55, new Date(Date.now() + 12 * 3_600_000).toISOString())
+    const { notified: sent } = await notified(config, "ending_alert")
+    expect(sent).toHaveLength(1)
+    expect(sent[0]![0]).toBe("ops")
+    expect(sent[0]![1]).toContain("two@example.com")
+    expect(sent[0]![1]).toContain("points left")
+  })
+
+  test("an ending account's line goes once per end: the next tick and the next hour send nothing, a new end sends again (#1457)", async () => {
+    const config = machine(40, 55, new Date(Date.now() + 12 * 3_600_000).toISOString())
+    const sends = async (hours = 0) =>
+      (
+        (await drive({}, config, {
+          args: [],
+          at: Date.now() / 1000 + hours * 3600,
+          fn: "ending_alert",
+          notified: true,
+        })) as { notified: unknown[] }
+      ).notified.length
+    expect(await sends()).toBe(1)
+    expect(await sends()).toBe(0)
+    expect(await sends(1)).toBe(0)
+    storeWith(join(config, "playground"), {}, {
+      "usage.accounts": [
+        {
+          email: "two@example.com",
+          provider: "claude",
+          ends: new Date(Date.now() + 10 * 3_600_000).toISOString(),
+        },
+      ],
+    } as never)
+    expect(await sends()).toBe(1)
+  })
+
+  test("an ending account at 100% sends nothing (#1457)", async () => {
+    const config = machine(40, 100, new Date(Date.now() + 12 * 3_600_000).toISOString())
+    const { notified: sent } = await notified(config, "ending_alert")
+    expect(sent).toEqual([])
   })
 })

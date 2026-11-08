@@ -7,6 +7,7 @@ import { SQL } from "bun"
 
 import { ASK_EXAMPLES } from "../../../../../api/hono/src/lib/dashboard/ask-shape"
 import { ASK_CODE_COLUMNS } from "../../../../../packages/config/src/inbox"
+import { testContainerName } from "../../../../container"
 import { onLiveDashboard } from "../../../../dashboard-fixture"
 import { liveReadsEnv } from "../../../../live-reads"
 import { slowChild } from "../../../../slow-child"
@@ -104,6 +105,8 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("dashboard-ask"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",
