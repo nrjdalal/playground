@@ -605,7 +605,7 @@ test("pre-push reads a pushed branch while the checked-out one has nothing new",
   }
 }, 60_000)
 
-// two tests read every tracked file's text, so a commit anywhere can break them, and with no hook to run them a break went red in CI minutes after its push
+// two tests scan the tracked tree's text, so a commit anywhere can break them, and with no hook to run them a break went red in CI minutes after its push
 const TREE_TEXT_TESTS = ["tests/cmux.test.ts", "tests/shell-read-redirect.test.ts"]
 
 test("one pre-commit job runs both whole-tree text tests, beside trace-count", async () => {

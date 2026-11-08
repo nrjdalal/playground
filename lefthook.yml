@@ -95,7 +95,7 @@ pre-commit:
         - "*.woff2"
       run: bun run test:file tests/packages/scripts/src/trace-count/count.test.ts && bun --no-env-file packages/scripts/src/trace-count/cli.ts --lists
     text-tests:
-      # the two tests that read every tracked file's text, as CI runs them, so a commit that breaks one stops here rather than going red in CI; a commit of images and fonts alone skips it
+      # the two tests that scan the tracked tree's text, as CI runs them, so a commit that breaks one stops here rather than going red in CI; a commit of images and fonts alone skips it
       priority: 4
       exclude:
         - "*.gif"
