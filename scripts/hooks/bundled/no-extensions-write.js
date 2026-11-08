@@ -7457,11 +7457,13 @@ if (false) {}
 
 // scripts/hooks/no-extensions-write.ts
 var shown = (word) => (word.raw ?? word.value).replaceAll(UNKNOWN, () => "$\u2026").replaceAll(READ, () => "$\u2026");
-var ROUTE = "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand.";
+var WHY_ROOT = "every guard reads its list and policy.json from there, so a session's write would change what a guard allows.";
+var ROUTE = `${WHY_ROOT} A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand.`;
 var PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"]);
 var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves";
 var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
 var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
+var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS = new Set([
   "[",
@@ -7524,6 +7526,32 @@ var WRITER_TAKES = {
 };
 var DUPLICATE = /^(?:\d+|-)$/;
 var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !DUPLICATE.test(target?.value ?? "");
+function redirectsWrite(commands) {
+  return commands.some((cmd) => cmd.redirects.some(writer) || !!cmd.inner && redirectsWrite(cmd.inner()));
+}
+function caseOpener(cmd) {
+  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted);
+  const before = cmd.words.slice(0, Math.max(at, 0));
+  const word = cmd.words[at + 2];
+  return at !== -1 && (before.length === 0 || onlyReserved({ ...cmd, words: before })) && word?.value === "in" && !word.quoted;
+}
+function casePatterns(commands) {
+  const out = new Set;
+  for (let k = 0;k < commands.length; k++) {
+    if (!caseOpener(commands[k]) && commands[k].follows !== ";;")
+      continue;
+    let end = k;
+    while (commands[end + 1]?.follows === "|")
+      end++;
+    const body = commands[end + 1];
+    const run = commands.slice(k, end + 1);
+    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
+      continue;
+    for (const c of run)
+      out.add(c);
+  }
+  return out;
+}
 var GLOB = /[*?[{(]/;
 var RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/;
 var GIT_TEXT = /^GIT_(?:AUTHOR|COMMITTER)_/;
@@ -7729,7 +7757,8 @@ function scoreAsOther(words, cmd, parsed, env) {
 }
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
 var AWK_RUNS = /system|getline|[>@]/;
-var awkRuns = (program) => AWK_RUNS.test(program) || awkPipe(program);
+var AWK_PATTERN = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.)*\//g;
+var awkRuns = (program) => AWK_RUNS.test(program.replace(AWK_PATTERN, "$1$2RE")) || awkPipe(program);
 var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
 var AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g;
 function awkPipe(program) {
@@ -7977,7 +8006,7 @@ function narrow(cmd, env) {
     return sedReads(args);
   if (base === "perl")
     return perlReads(parsed, env);
-  if (base === "cut")
+  if (base === "cut" || base === "echo" || base === "lsof")
     return true;
   if (base === "gh") {
     const filters = ghFilters(parsed);
@@ -8217,6 +8246,9 @@ async function inspect(raw, environment, unknown = false) {
   let steadyAt = () => NONE2;
   let whole = false;
   let rootLine = false;
+  let patterns = new Set;
+  let lineWrites = false;
+  let textDepth = 0;
   const varsRead = new WeakMap;
   const varsJudged = new WeakMap;
   const since = (store, vars, key) => {
@@ -8229,7 +8261,10 @@ async function inspect(raw, environment, unknown = false) {
       return vars.get(k) ?? [];
     });
   };
+  const unwritten = (named, cmd, env) => !lineWrites && !named.endsWith(" in its text") && !inRoot(named) && (textDepth > 0 || READERS.has(program(parse3(cmd).name)) || narrow(cmd, env));
   const visit = async (cmd, parsed, env) => {
+    if (patterns.has(cmd))
+      return;
     const slot = slotWords(parsed);
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
@@ -8293,7 +8328,8 @@ async function inspect(raw, environment, unknown = false) {
       if (seen.has(line))
         continue;
       seen.add(line);
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map }, visit, true);
+      textDepth++;
+      const verdict = await run(lex(line, env.known), { ...env, vars: new Map }, visit, true).finally(() => textDepth--);
       if (verdict)
         return verdict;
     }
@@ -8347,7 +8383,7 @@ async function inspect(raw, environment, unknown = false) {
           continue;
         const named = names(word, here, remover, literal);
         if (named)
-          return refuse(`${verb} on ${named}`);
+          return (unwritten(named, cmd, here) ? refuseUnwritten : refuse)(`${verb} on ${named}`);
       }
       if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`);
@@ -8399,6 +8435,8 @@ async function inspect(raw, environment, unknown = false) {
   };
   rootLine = rooted(lexed.commands);
   whole = rootLine || wholeLine(lexed.commands, env);
+  patterns = casePatterns(lexed.commands);
+  lineWrites = redirectsWrite(lexed.commands);
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER);
   const verdict = await run(lexed, env, visit, true);

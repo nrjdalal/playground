@@ -18,7 +18,7 @@ pre-commit:
       glob:
         - "skills/zerostarter/**/*.md"
         - "packages/scripts/src/skills-manager.ts"
-      run: bun packages/scripts/src/skills-manager.ts && git add AGENTS.md
+      run: bun packages/scripts/src/skills-manager.ts && git add skills/zerostarter/README.md
     lint-staged:
       # --no-stash: lint-staged keeps no backup in the stash list every worktree shares, so no session's pop can take it
       priority: 3

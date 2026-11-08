@@ -48,7 +48,7 @@ Leave out a `Co-authored-by` trailer (repo rule): the commit-msg hook refuses on
 
 1. `main-checkout` refuses a commit in the factory's main checkout (the one `~/.playground/ops/run-slot.sh` links into), naming the fix: commit in a worktree under `.claude/worktrees/`.
 2. `conflict-markers` refuses a staged `<<<<<<<` or `>>>>>>>` line, named by file and line, before the formatter can rewrite it into Markdown that reads clean. `bun run precommit:light` runs it too, and pre-push runs it over what each pushed ref sends, so a commit made with hooks off is refused at the push, unless the push runs with hooks off too (`scripts/hooks/README.md`).
-3. `skills-manager` regenerates the AGENTS.md skills tables when a skill changed.
+3. `skills-manager` regenerates the skills tables in `skills/zerostarter/README.md` when a skill changed.
 4. `lint-staged` formats and lints the staged files, and stages what it fixed. It runs with `--no-stash`, so it writes no backup into the stash list every worktree shares. When it cannot put a partially staged file's unstaged lines back, because the formatter changed a line beside them, the file is left in conflict, with the unstaged patch kept under `.git/lint-staged/`: resolve the markers, stage the file, and commit again.
 5. `agents-rules` runs `bun run test:file tests/AGENTS.test.ts` when AGENTS.md, CLAUDE.md, a `.agents/dashboard/*.md` file or `tests/AGENTS.test.ts` is staged (Markdown alone included; a reworded `ALWAYS:` rule, a dashboard topic file with no pointer, or AGENTS.md grown past 97% of its `BUDGET`, the test's `MARGIN`, fails it).
 6. `docs-wrap` refuses a staged wrapped doc (`PATTERNS` in `packages/scripts/src/docs-wrap/cli.ts`) that holds a line of more than one sentence or one over its limit, reading the docs as lint-staged's formatter left them: run `bun run docs:wrap`; the wrap rule is the `doc-sync` skill's.
@@ -86,4 +86,5 @@ Stop after the commit. Push only when the user says "commit and push", "push the
 ## Notes
 
 - Never commit directly to canary (the default branch); branch first, then PR.
+- Squash a branch with `git reset --soft $(git merge-base HEAD origin/<base>)`, never onto a base that has moved: the soft reset keeps the branch's old copies of whatever the base changed since, and the squash reverts it. Check the file list after.
 - The pre-commit build prints the size table only. Refresh the graph svg manually: `bun packages/scripts/src/build-sizes.ts --graph`.

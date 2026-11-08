@@ -204,6 +204,22 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - A worker, reviewer or tester that ends automatically takes its worktrees with it, one at a time: dev stack, worktree, `playground-<worktree>-db` and `-redis` containers and branch (`cleanWorktree` in `scripts/ops/optimizer/auto_end.ts`; the factory's SESSIONS.md End holds the rules).
 - After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.
 
+## Shared git hooks and the turbo cache
+
+- Every worktree shares one `.git/hooks`, and lefthook.yml's `lefthook: bun node_modules/.bin/lefthook` makes each hook run the committing worktree's own lefthook, never the binary of whichever worktree last ran `bun install` (which goes when that worktree is removed).
+  So a worktree commits, pushes or merges once it has run `bun install`; one that stops on `error: Script not found "node_modules/.bin/lefthook"` needs it.
+  lefthook rewrites the shared hooks whenever the committing worktree's config differs from the last install's, so a worktree branched before this setting puts the old hook back on its next commit until it rebases onto `canary`.
+- turbo.json's `cacheDir` keeps each worktree's turbo cache inside that worktree (turbo would otherwise share the main checkout's `.turbo/cache`), so no build, dev stack or pre-commit hook in a worktree leaves files in the main checkout.
+  The pre-commit hook sets `TURBO_CACHE_DIR` to `~/.cache/turbo/playground`, one folder outside every checkout, so worktrees share entries keyed by their inputs and the main checkout stays clean.
+
+## A ZeroStarter sync
+
+- A ZeroStarter sync overlays `lefthook.yml` and `packages/scripts/src/skills-manager.ts` with the starter's and drops the docs this repo adds to the docs-wrap job's glob, so after one, restore each until `tests/lefthook.test.ts` and `tests/packages/scripts/src/skills-manager.test.ts` pass, then run `bun node_modules/.bin/lefthook install`,
+  since the sync's own install rewrote the shared `.git/hooks` outside run-slot.
+- The sync also asks for the skills-table markers back in `AGENTS.md`: leave `AGENTS.md` as it is, since this repo's `skills-manager.ts` writes the tables to `skills/zerostarter/README.md`.
+- Its publish-step files (`auto-release.yml`, `changelog.config.json`, `release-version.ts`, `changelog-manager.ts`, the `changelogen` catalog entry) stay out, since they commit and tag on `canary`; a ship's GitHub release notes still take their shape, rendered at the ship by `bun run release:notes` with no commit (the `release` skill's step 4).
+- In `skills/zerostarter/.sync.json`, each skill that takes the update keeps the entry the sync wrote, so `skills-manager.ts --outdated` reads it as synced rather than edited here.
+
 ## Run slots
 
 - Heavy runs go through `~/.playground/ops/run-slot.sh <name> -- <command>`; the load rules, the lanes and the switches are written in [ops/README.md](ops/README.md#run-slot).
