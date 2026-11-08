@@ -101,7 +101,7 @@ export const staleBranches = (input: {
   return out
 }
 
-// Pure: what the docker step removes and names as kept. An exited playground-<worktree>-db or -redis container whose worktree folder is gone is removed; the live dashboard's database (and pglaunch's beside it), a Vibeground copy, a running container and any other name stay, and one of those over 1 GB is named as kept.
+// Pure: what the docker step removes and names as kept. An exited playground-<worktree>-db or -redis container whose worktree folder is gone is removed; the live dashboard's database (and pglaunch's beside it), a Vibeground copy, a running container and any other name stay, and one over 1 GB is named as kept, but the live dashboard's, pglaunch's and a Vibeground copy, which stay unnamed.
 export const staleContainers = (
   listed: { name: string; size: number; state: string }[],
   folders: string[],

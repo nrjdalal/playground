@@ -132,7 +132,7 @@ describe("worktrees", () => {
   })
 })
 
-test("branches: merged ones and a done PR's still at its head go, the rest are asked or kept", () => {
+test("branches: merged ones and a done PR's still at its head go, the rest are archived or kept", () => {
   const plan = staleBranches({
     checkedOut: new Set(["PG-6-out"]),
     keep: new Set(["canary", "main", "live/dashboard"]),
@@ -388,7 +388,7 @@ describe("one night's run against a fixture data folder", () => {
     ...more,
   })
 
-  test("the two orphans go with -fv and are named, every other container and the volume stay and are named, and no decision is asked", async () => {
+  test("the two orphans go with -fv and are named, every other container and the volume stay, the ones over 1 GB named, and no decision is asked", async () => {
     const { ctx, deps, inputs, ops, runs, sent } = night(leftovers())
     await nightlyClean(deps)(ctx)
     const removals = runs
