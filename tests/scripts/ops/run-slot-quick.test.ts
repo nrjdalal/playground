@@ -511,7 +511,7 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(false)
   })
 
-  // round 1, nit 2: the boundaries of the skip, a run outside quick naming exactly 3 files still counts, and a quick run naming any number counts
+  // the skip's boundaries: a run outside quick naming exactly 3 files still counts, and a quick run naming any number counts
   test("and a file that ran long in a 3-file run outside quick still stays out of quick", async () => {
     const log = history([
       ["bun run test:file tests/slow.test.ts tests/a.test.ts tests/b.test.ts", "run-slot-2", 400],
