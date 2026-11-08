@@ -75,8 +75,7 @@ describe("run-slot.focus", () => {
     expect(existsSync(join(m.ops, "run-slot.focus"))).toBe(false)
   })
 
-  // issue 1491: a second process moves the focus between the presence check and the read, and canary's cut after the check prints its error (seen 7 Nov)
-  // the fake head stands in for that process at the point both sides pass through: focus_holder's switch_on is the second focus read (the first is the startup switch sweep's), and this one removes the file after reading, so each side's read meets no file
+  // issue 1491: a second process lifts the focus right after focus_holder's switch_on reads it, the second focus read (the first is the startup sweep's) and the point both sides pass through, so each side's read meets no file
   test("the focus file going between the presence check and the read reads as no focus, with no cut error", async () => {
     const m = machine({ idle: 30 })
     m.hold("run-slot", 2, "medium")
@@ -94,7 +93,6 @@ describe("run-slot.focus", () => {
       .split("\n")
       .filter((l) => l !== "" && l.search(WAITING) !== 0)
     expect(stray).toEqual([])
-    expect(existsSync(join(m.ops, "run-slot.focus"))).toBe(false)
     await stop(queued.p)
   })
 
@@ -201,6 +199,25 @@ describe("run-slot.sh preempt", () => {
     hang(m)
     const other = m.start("worker-x", { RUN_SLOT_SIZE: "small" }, SCRIPT, ["hang"])
     await started(other)
+    const r = await preempt(m)
+    expect(r.code).toBe(2)
+    expect(r.err).toContain("no focus stands")
+    expect(other.p.exitCode).toBeNull()
+    await stop(other.p)
+  })
+
+  test("a focus that goes between the presence check and the read stops nothing", async () => {
+    const m = machine()
+    hang(m)
+    const other = m.start("worker-x", { RUN_SLOT_SIZE: "small" }, SCRIPT, ["hang"])
+    await started(other)
+    await set(m, "worker-f", "focus", "--for", "30m", "--reason", "an urgent ticket")
+    // the fake head stands in for a second process that lifts the focus right after preempt's switch_on reads it
+    writeFileSync(
+      join(m.bin, "head"),
+      `#!/bin/bash\nout=$(/usr/bin/head "$@"); rc=$?\ncase "$*" in *run-slot.focus*) rm -f "${m.ops}/run-slot.focus" ;; esac\nprintf '%s' "$out"\nexit $rc\n`,
+    )
+    chmodSync(join(m.bin, "head"), 0o755)
     const r = await preempt(m)
     expect(r.code).toBe(2)
     expect(r.err).toContain("no focus stands")
