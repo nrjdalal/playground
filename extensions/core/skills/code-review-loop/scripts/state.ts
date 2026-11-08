@@ -1,16 +1,5 @@
 #!/usr/bin/env -S bun --no-env-file
 import { spawnSync } from "node:child_process"
-/** A PR's review state, read from GitHub and git each time, with no memory of its own.
-
-  state.ts pr <owner/repo> <n>                          one PR: head, newest verdict, open (over REST, unknown) threads, what was said since
-  state.ts scan <owner/repo>                            every open PR: is its head scored, and who holds it? (the recovery scan)
-  state.ts delta <worktree> <base> <old head> <new head>  did a push change the PR's own work, or only merge the base?
-  state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
-  state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules
-
-A verdict is a comment by this gh account whose first line is
-`## ReviewBot · round <r>: <s>/5 at <sha7>`, the line `bun run pr:merge` reads.
-*/
 import { readFileSync, readdirSync } from "node:fs"
 import { join, relative, dirname, basename } from "node:path"
 
@@ -262,16 +251,23 @@ export const saidSince = (
 export const firstLine = (body: string | null | undefined): string =>
   (body || "").trim().split("\n", 1)[0]!.slice(0, 120)
 
+// A text's lines as Python's splitlines() gives them, with no empty last line after a final newline
+const linesOf = (text: string): string[] => {
+  const lines = text.split("\n")
+  if (lines.at(-1) === "") lines.pop()
+  return lines
+}
+
 export const normalize = (diff: string): string[] =>
-  diff
-    .split("\n")
-    .filter((line) => !line.startsWith("index ") && !line.startsWith("@@") && !line.startsWith(" "))
+  linesOf(diff).filter(
+    (line) => !line.startsWith("index ") && !line.startsWith("@@") && !line.startsWith(" "),
+  )
 
 export const perFile = (diff: string): Record<string, string> => {
   const out: Record<string, string> = {}
   let name: string | null = null
   let body: string[] = []
-  for (const line of diff.split("\n")) {
+  for (const line of linesOf(diff)) {
     if (line.startsWith("diff --git a/")) {
       if (name) out[name] = normalize(body.join("\n")).join("\n")
       name = line.slice("diff --git a/".length).split(" b/", 1)[0]!
@@ -403,7 +399,7 @@ const planNaming = (plan: Json[], repo: string, n: number): Json[] => {
 const planHolders = (roster: Json | null, plan: Json[], repo: string, n: number): string[] => {
   const live = new Set(liveAgents(roster).map((a) => a.name as string))
   const words = planNaming(plan, repo, n).flatMap((i) =>
-    typeof i.worker === "string" ? i.worker.split(/\s+/) : [],
+    typeof i.worker === "string" ? i.worker.trim().split(/\s+/).slice(0, 1) : [],
   )
   return [...new Set(words.filter((w) => w && live.has(w)))].sort()
 }

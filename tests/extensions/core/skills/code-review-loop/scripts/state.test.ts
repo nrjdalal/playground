@@ -220,6 +220,11 @@ const plan = [
   { id: "pr-159", pr: "https://github.com/acme/archive/pull/159", worker: "reviewer-old" },
   { id: "pr-160", pr: "https://github.com/acme/archive/pull/160", worker: null },
   { id: "pr-161", pr: "https://github.com/acme/archive/pull/1610", worker: "worker-other" },
+  {
+    id: "pr-162",
+    pr: "https://github.com/acme/archive/pull/162",
+    worker: "reviewer-old worker-greed",
+  },
   { id: "no-pr", worker: "worker-other" },
   "not an item",
 ]
@@ -238,6 +243,10 @@ test("04m plan.json's items hold or park a PR by their live workers", () => {
     false,
   ])
   expect(state.holderTag(roster, {}, "acme/archive", 160, undefined, undefined, plan)).toEqual([
+    "no agent; parked in plan.json",
+    false,
+  ])
+  expect(state.holderTag(roster, {}, "acme/archive", 162, undefined, undefined, plan)).toEqual([
     "no agent; parked in plan.json",
     false,
   ])
@@ -1094,4 +1103,12 @@ test("10q a test joining a changed file's path from its package root is listed; 
     "tests/api/hono/src/routers/yard.test.ts",
     "tests/web/next/src/lib/outbox-reader.test.ts",
   ])
+})
+
+test("07z a file that was last in the old diff and is not last in the new one reads unchanged", () => {
+  const file = (name: string, line: string) =>
+    `diff --git a/${name} b/${name}\nindex 111..222 100644\n--- a/${name}\n+++ b/${name}\n@@ -1 +1 @@\n-old\n+${line}\n`
+  expect(
+    state.deltaKind(file("a.ts", "x") + file("b.ts", "y"), file("b.ts", "y") + file("c.ts", "z")),
+  ).toEqual(["OWN", ["a.ts", "c.ts"]])
 })
