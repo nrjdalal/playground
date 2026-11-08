@@ -1639,13 +1639,13 @@ fi
 # Claude's folder trust and MCP picker approve a folder in the owner's name, so spawn.sh answers them only under the two roots the owner trusts (#i502, #i503); anywhere else the prompt stays for the owner.
 # herdr matches one screen row at a time, and a narrow column wraps each row, so the trust and ready patterns are each a part short enough for a narrow row to keep.
 TRUST_RE='Yes, I trust'
-# The picker's own title (Claude Code 2.1.302), since a REPL's status line can name an MCP server too.
-MCP_RE='New MCP server found in this project'
+# The pickers' own titles (Claude Code 2.1.319), since a REPL's status line can name an MCP server too: one server's, then several servers', which leads with their count.
+MCP_RE='New MCP server found in this project|[0-9]+ new MCP servers found'
 # Claude Code's mode mark leads its status line and survives the cut: 27 columns read "⏵⏵ bypass permissions" and 12 read "⏵⏵" (measured, 24 Oct).
 READY_RE='⏵⏵'
 # The screens come in order (trust, then the MCP picker, then the REPL), so each wait looks only for what can still come and a screen already answered never matches twice. One key a request, since herdr drops part of several keys sent together.
 herdr_answer() {
-  local want="$TRUST_RE|$MCP_RE|$READY_RE" line
+  local want="$TRUST_RE|$MCP_RE|$READY_RE" line k
   while :; do
     line=$(hr pane wait-output "$PANE" --regex "$want" --source visible --timeout 120000 |
       python3 -I -c 'import json, sys; print(json.load(sys.stdin)["result"]["matched_line"])' 2>/dev/null) ||
@@ -1657,10 +1657,17 @@ herdr_answer() {
         { echo "spawn.sh: $NAME waits at Claude's folder trust prompt for $CWD, outside $(code_root) and each org's folder, so it is the owner's to answer" >&2; return 1; }
       hr pane send-keys "$PANE" down >/dev/null && hr pane send-keys "$PANE" enter >/dev/null || return 1
       want="$MCP_RE|$READY_RE"
-    elif [[ $want != "$READY_RE" ]] && grep -q "$MCP_RE" <<<"$line"; then
+    elif [[ $want != "$READY_RE" ]] && grep -qE "$MCP_RE" <<<"$line"; then
       trusted_root "$CWD" ||
         { echo "spawn.sh: $NAME waits at Claude's MCP server picker for $CWD, outside $(code_root) and each org's folder, so it is the owner's to answer" >&2; return 1; }
-      hr pane send-keys "$PANE" esc >/dev/null || return 1
+      # Esc on either picker writes its servers to disabledMcpjsonServers, so the answer enables them: Claude Code drops keys in a picker's first 250 ms, so it waits first, then picks one server's "Use this MCP server", two rows above the focused "Continue without", or moves past several servers, all selected at the start, to "Enable selected".
+      sleep 0.5
+      if [[ $line =~ ([0-9]+)\ new\ MCP\ servers ]]; then
+        for ((k = 0; k < BASH_REMATCH[1]; k++)); do hr pane send-keys "$PANE" down >/dev/null || return 1; done
+      else
+        hr pane send-keys "$PANE" up >/dev/null && hr pane send-keys "$PANE" up >/dev/null || return 1
+      fi
+      hr pane send-keys "$PANE" enter >/dev/null || return 1
       want=$READY_RE
     else
       return 0

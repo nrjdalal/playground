@@ -171,7 +171,7 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
         "wait-output",
         "w5:p1",
         "--regex",
-        "Yes, I trust|New MCP server found in this project|⏵⏵",
+        "Yes, I trust|New MCP server found in this project|[0-9]+ new MCP servers found|⏵⏵",
         "--source",
         "visible",
         "--timeout",
@@ -488,7 +488,9 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
     expect(placing(r).filter((c) => c[1] === "send-keys")).toEqual([
       ["pane", "send-keys", "w5:p1", "down"],
       ["pane", "send-keys", "w5:p1", "enter"],
-      ["pane", "send-keys", "w5:p1", "esc"],
+      ["pane", "send-keys", "w5:p1", "up"],
+      ["pane", "send-keys", "w5:p1", "up"],
+      ["pane", "send-keys", "w5:p1", "enter"],
     ])
   })
 
