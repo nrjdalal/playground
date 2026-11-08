@@ -42,7 +42,7 @@ describe("a start refuses a brief that is not a file (#1471)", () => {
     ["runner", ["runner", "runner-calm-heron", "brief-r.md"], "runner-calm-heron", none],
     [
       "column",
-      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "handoffs/rev.md"],
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "handoffs/rev.md", "--pr", "1"],
       "reviewer-x",
       none,
     ],

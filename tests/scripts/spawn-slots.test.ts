@@ -38,7 +38,11 @@ describe("the slots gate admits a new worker only when run-slot has room for its
   })
 
   test.each(["reviewer", "tester"])("a %s start passes on the same full lanes", async (role) => {
-    const r = await start(["column", role, `${role}-x`, "worker-x", "w1:p2", "b.md"], 4, 2)
+    const r = await start(
+      ["column", role, `${role}-x`, "worker-x", "w1:p2", "b.md", "--pr", "1"],
+      4,
+      2,
+    )
     expect(r.code).toBe(0)
     expect(capacityLog(r)).toEqual([expect.objectContaining({ verdict: "pass" })])
   })

@@ -106,8 +106,14 @@ describe("the capacity gate refuses and spawns nothing", () => {
 
     // a PR's first review waited a median 47 minutes, so a checker takes the band a small worker keeps back, and every other small start keeps today's line
     test.each<{ args: string[]; passes: boolean }>([
-      { args: ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"], passes: true },
-      { args: ["column", "tester", "tester-x", "worker-x", "w1:p2", "r.md"], passes: true },
+      {
+        args: ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
+        passes: true,
+      },
+      {
+        args: ["column", "tester", "tester-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
+        passes: true,
+      },
       {
         args: ["column", "probe", "probe-x", "ops", "w1:p2", "p.md", "--size", "small"],
         passes: true,
@@ -143,7 +149,17 @@ describe("the capacity gate refuses and spawns nothing", () => {
     ])(
       "a $role with no --size starts small, and --size still wins: $size",
       async ({ passes, role, size, sizeArgs, units }) => {
-        const column = ["column", role, `${role}-x`, "worker-x", "w1:p2", "r.md", ...sizeArgs]
+        const column = [
+          "column",
+          role,
+          `${role}-x`,
+          "worker-x",
+          "w1:p2",
+          "r.md",
+          "--pr",
+          "1",
+          ...sizeArgs,
+        ]
         const r = await spawn(column, [], { FAKE_LOAD5: "12.00" })
         if (passes) expect(r.code).toBe(0)
         else expect(r.code).not.toBe(0)

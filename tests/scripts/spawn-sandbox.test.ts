@@ -142,8 +142,8 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
   test.each([
     ["a worker", ["worker", "worker-brave-otter", "b.md"]],
     ["a runner", ["runner", "runner-calm-heron", "b.md"]],
-    ["a reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"]],
-    ["a tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"]],
+    ["a reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"]],
+    ["a tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1"]],
     ["the dispatcher", ["column", "dispatcher", "dispatcher", "ops", "w1:p2", "h.md"]],
     ["an optimizer", ["manager", "optimizer", "b.md"]],
   ])("%s keeps today's settings, with no sandbox", async (_, args) => {

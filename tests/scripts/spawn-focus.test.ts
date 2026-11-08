@@ -34,7 +34,7 @@ describe("focus holds every new session", () => {
     const until = new Date(Date.now() + 3_600_000)
     for (const role of ["reviewer", "tester"]) {
       const own = await spawn(
-        ["column", role, `${role}-owner`, "owner-desk", "w1:p2", "r.md"],
+        ["column", role, `${role}-owner`, "owner-desk", "w1:p2", "r.md", "--pr", "1"],
         [],
         {},
         script,
@@ -44,7 +44,7 @@ describe("focus holds every new session", () => {
       expect(own.code).toBe(0)
     }
     const other = await spawn(
-      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"],
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
       [],
       {},
       script,
@@ -66,7 +66,7 @@ describe("focus holds every new session", () => {
     })
     const resume = (name: string) =>
       spawn(
-        ["resume", name, root, "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"],
+        ["resume", name, root, "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27", "--pr", "1"],
         [],
         { ROSTER_JSON },
         script,

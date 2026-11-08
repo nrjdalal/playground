@@ -179,7 +179,7 @@ describe("with no --runtime, a start opens in herdr whatever its spawner's termi
   // spawn.sh starts nothing in cmux: --runtime cmux is refused in every mode, before any cmux or herdr call and any pin.
   test.each([
     ["a worker", ["worker", "worker-brave-otter", "b.md"]],
-    ["a column", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"]],
+    ["a column", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"]],
     ["a probe", ["probe", "probe-x", OLD.ops, "p.md"]],
     ["a manager", ["manager", "optimizer", "b.md"]],
     ["a resume", ["resume", "worker-x", root, "0b6e3c1a-4d2f-4e8a-9c7b-1f2e3d4c5b6a"]],

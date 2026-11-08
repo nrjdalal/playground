@@ -69,6 +69,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
      "${PLAYGROUND_REPO:?}/scripts/spawn.sh" column <reviewer|tester|probe> <name> <reports-to> <the newest member's herdr pane id> <brief>
      ```
 
+     A reviewer or tester adds `--pr <url>`, the PR it serves (its issue's URL while the PR is not yet opened): spawn.sh refuses its start without it, and writes it to the checker's roster row before the pane opens, since no-outside-pr-code reads that row at the checker's first tool call.
+
    - **A manager** opens the same way as a column in the `Managers` workspace, to the right of the newest manager, named once: `column <name> <pane> <brief>`.
      A name whose roster kind, else its name (an `<id>-<kind>`, a `sessions.names` name or a `sessions.aliases` one), is builder, ops or planner opens as a lead reporting to the first dispatcher (a new name gets its kind first, `scripts/roster.ts set <name> kind=builder task=<what it does>`, which writes a `starting` entry that `managerOf` keeps behind the live one until it answers);
      the first dispatcher (its `sessions.names` name, an alias of it, or an `<id>-dispatcher`) opens briefed by the session running spawn.sh, its prompt reporting to no one, and from outside a session (no `CLAUDE_PID`) takes the long form `column dispatcher <name> <the lead that briefs it> <pane> <brief>`.
@@ -77,7 +79,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
      in the main checkout's `.claude/worktrees/leads` (`manager <name> <brief>`, the optimizer by its name or its roster kind, a new name given `kind=optimizer` first the same way;
      an orchestrator of any other manager kind in `kinds.ts`, such as the Assistant or the seatless `orchestrator` kind the sidebar's plus starts, any number at once, opens there too, as a lead reporting to the session its row names, once `scripts/roster.ts set <name> kind=<kind> reportsTo=<session> task=<what it does>` has given it both, and spawn.sh refuses it naming that line until it has;
      spawn.sh refuses the second dispatcher on Claude without `--account <email>`, a second account, so it never shares the first's login, and a resume of it whose pin reads claude needs `--account` again, since nothing records the account).
-     After a restart, `python3 scripts/ops/up.py --sessions` prints the `spawn.sh resume <name> <dir> <session-id>` line that brings each session back, with `--backend glm` for a session whose newest turn ran on GLM;
+     After a restart, `python3 scripts/ops/up.py --sessions` prints the `spawn.sh resume <name> <dir> <session-id>` line that brings each session back, with `--backend glm` for a session whose newest turn ran on GLM and, for a reviewer or tester, `--pr` with the PRs its roster row serves, its `pr` first;
      `--brief <file>`, with resume alone, makes the resumed session's first prompt tell it to read `~/.playground/<file>` and follow it, so it comes back working rather than idle.
      Without it, the first prompt has the session act on the `after-resume` hook's instruction (re-arm its background tasks, re-send its unanswered messages, the **context** rule), so a session idle at the restart still takes a turn, and names whom it reports to now, from its roster row ([scripts/README.md](../../../../scripts/README.md#spawnsh) holds the order).
      After a resume, restart any dev stack you served, then re-arm your watches: run CronList before CronCreate, since a resume keeps the session's crons and drops only its background tasks.
@@ -136,7 +138,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    The start records its runtime in `~/.playground/runtimes/<name>`, and a resume whose pin reads `cmux` opens in herdr and rewrites the pin.
    With no `--runtime`, every start and resume opens in herdr, from any terminal; spawn.sh starts nothing in cmux, so it refuses `--runtime cmux` and a column anchored on a cmux `surface:N`.
    After a herdr server's restart, which brings each pane back as a shell under its label, ops-herdr runs `spawn.sh restore` for that server (LIFECYCLE.md, Ops jobs), which resumes every session whose resume record in `~/.playground/resume` names it on that server (its `# server:` line, the factory's when it has none) and whose roster row is not done, ended, parked or paused,
-   each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with and an `--effort` other than high,
+   each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with, an `--effort` other than high and, for a reviewer or tester, `--pr` with the PRs its roster row serves,
    in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, no runtime pin, a runtime other than herdr, or an exec line that does not parse or that it does not run) or `not restored <name>: <reason>`, a gate's refusal included; it is safe to run again, one at a time:
    while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
    A readable record on another server gets no line, since that server's own restore reads it.
@@ -337,7 +339,7 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
   Then it goes to the 7-day trash through `playground rm --worktree` (`--pr <url>` at a merge), which keeps one a process holds, and then loses its `playground-<worktree>-db` and `-redis` containers (`docker rm -fv`, each name matched whole, never the live dashboard's database) and its local branch.
   Another repo's worktree goes through `git -C <repo> worktree remove <path>` with no force flag, then `git worktree prune` and `git branch -D`; the main checkout is never one.
 - Guards: only a worker, reviewer or tester, not busy for 10+ minutes, with no uncommitted or unpushed work in a worktree it used (the main checkout, where every session starts, is not one, nor a Playground worktree whose PR `playground rm` confirms merged or closed, which the cleanup discards); otherwise its lead gets a `Not ended` line saying why, and the session waits.
-- A reviewer ended idle is resumed by its worker on the next push, under the same name (**rounds**): `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir> --pr <its PR's URL>`, since spawn.sh refuses a checker's start on an ended row that names no PR; its `Ended` line goes to its worker too.
+- A reviewer ended idle is resumed by its worker on the next push, under the same name (**rounds**): `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir> --pr <its PR's URL>`, since spawn.sh refuses every checker start that names no PR; its `Ended` line goes to its worker too.
 
 A session ends by closing its pane, so the workspace's other sessions live on, by the one it reports to, through spawn.sh, since the `no-raw-spawn` hook refuses `herdr pane close` to every factory session (herdr's socket has no access control):
 
@@ -353,7 +355,7 @@ Once the pane closes it sets the session's roster row to `ended` itself, and lea
 
 Record why it ended with `report <name> "<why it ended>"` (ROSTER.md, It ends).
 `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir>` reopens the session later if it is needed, in the folder it ran in, or anywhere with its session id after `<dir>`: a resume by name alone refuses a folder whose transcripts hold no session of that name.
-A reviewer or tester adds `--pr <the PR it serves now>`, since its row reads ended.
+A reviewer or tester adds `--pr <the PR it serves now>`, as every checker start does.
 A herdr session's end is its roster `ended`: with any status but done, ended, parked or paused, `spawn.sh restore` brings it back after the server's next restart.
 Done for a herdr session when `bun run --cwd <dashboard checkout> verify ended <name>`, read-only against the live dashboard, which it finds through portless from that checkout (`.agents/dashboard/writes.md`), passes:
 it reads the session Ended as the Dashboard does, the roster showing `ended` and no live session holding its name, and fails while live sessions or a herdr server could not be read.

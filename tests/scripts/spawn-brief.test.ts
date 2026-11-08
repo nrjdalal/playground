@@ -144,7 +144,10 @@ describe("--reports-to names the session a worker reports to (#1727)", () => {
 
   test.each([
     ["runner", ["runner", "runner-calm-heron", "b.md"]],
-    ["column", ["column", "reviewer", "reviewer-brave-otter", "builder", "w1:p2", "b.md"]],
+    [
+      "column",
+      ["column", "reviewer", "reviewer-brave-otter", "builder", "w1:p2", "b.md", "--pr", "1"],
+    ],
     ["probe", ["probe", "probe-x", "ops", "b.md", "--runtime", "herdr"]],
     ["manager", ["manager", "dispatcher-2", "b.md"]],
     ["resume", ["resume", "worker-brave-otter", "/tmp"]],
@@ -213,6 +216,8 @@ describe("a brief still holding its role's template slot is refused before herdr
     readFileSync(join(root, "scripts", "briefs", `new-${role}.md`), "utf8")
   const slotsOf = (role: string) => [...new Set(template(role).match(/__[A-Z0-9]+__/g))].sort()
   const column = (role: string) => [
+    "--pr",
+    "1",
     "column",
     role,
     `${role}-brave-otter`,
@@ -292,7 +297,7 @@ describe("a brief still holding its role's template slot is refused before herdr
   test("a reviewer's resume with a --brief holding its slot is refused", async () => {
     const id = "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"
     const r = await spawn(
-      ["resume", "reviewer-brave-otter", root, id, "--brief", "r.md"],
+      ["resume", "reviewer-brave-otter", root, id, "--brief", "r.md", "--pr", "1"],
       [],
       { BRIEF_FILE: "r.md" },
       undefined,
