@@ -19,7 +19,7 @@ describe(".agents/decisions.md, the decisions register", () => {
     expect(lines.length).toBeGreaterThan(0)
   })
 
-  test("every entry's link target exists (an ADR file, or an issue number that parses)", () => {
+  test("every entry's link target holds (an issue number that parses, or a repo doc that exists, an ADR's included)", () => {
     for (const line of lines) {
       expect(line, line).toContain(" -> ")
       const target = line.split(" -> ").at(-1)?.trim()
