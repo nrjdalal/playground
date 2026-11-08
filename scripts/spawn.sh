@@ -1661,20 +1661,37 @@ for r in rows[titles[-1] + 1:]:
         print(row.group(1))
 '
 }
-# Whether the names on stdin are $1 servers, each one of the factory's own MCP file, ~/.mcp.json, the only servers spawn.sh enables in the owner's name.
+# Why the picker is the owner's, printed, unless the names on stdin are $1 servers, each one of the factory's own MCP file, ~/.mcp.json, the only servers spawn.sh enables in the owner's name.
+# Claude Code merges the .mcp.json of $CWD and of each folder above it but /, the nearest taking a name over, so another on that walk that defines a server leaves the picker to the owner; a plugin's server reads "<name> (from plugin <plugin>)", which no key matches.
 mcp_factory_only() {
   python3 -I -c '
-import json, sys
-try:
-    servers = set(json.load(open(sys.argv[1]))["mcpServers"])
-except Exception:
+import json, os, sys
+def stop(why):
+    print(why)
     sys.exit(1)
+factory = os.path.realpath(sys.argv[1])
+try:
+    servers = set(json.load(open(factory))["mcpServers"])
+except Exception:
+    stop(f"has no server list it can read in {sys.argv[1]}")
+d = os.path.realpath(sys.argv[3])
+while d != os.path.dirname(d):
+    f = os.path.join(d, ".mcp.json")
+    if os.path.lexists(f) and os.path.realpath(f) != factory:
+        try:
+            other = json.load(open(f)).get("mcpServers") or {}
+        except Exception:
+            other = None
+        if other != {}:
+            stop(f"also reads {f}")
+    d = os.path.dirname(d)
 names = set(sys.stdin.read().splitlines()) - {""}
-sys.exit(0 if len(names) == int(sys.argv[2]) and names <= servers else 1)' "$HOME/.mcp.json" "$1"
+if len(names) != int(sys.argv[2]) or not names <= servers:
+    stop(f"lists a server from outside {sys.argv[1]}")' "$HOME/.mcp.json" "$1" "$CWD"
 }
 # The screens come in order (trust, then the MCP picker, then the REPL), so each wait looks only for what can still come and a screen already answered never matches twice. One key a request, since herdr drops part of several keys sent together.
 herdr_answer() {
-  local want="$TRUST_RE|$MCP_RE|$READY_RE" line k n names
+  local want="$TRUST_RE|$MCP_RE|$READY_RE" line k n names why
   while :; do
     line=$(hr pane wait-output "$PANE" --regex "$want" --source visible --timeout 120000 |
       python3 -I -c 'import json, sys; print(json.load(sys.stdin)["result"]["matched_line"])' 2>/dev/null) ||
@@ -1700,8 +1717,8 @@ herdr_answer() {
         sleep 0.2
         names+=$'\n'$(mcp_names)
       done
-      mcp_factory_only "$n" <<<"$names" ||
-        { echo "spawn.sh: $NAME waits at Claude's MCP server picker for $CWD, which lists a server outside $HOME/.mcp.json, so it is the owner's to answer" >&2; return 1; }
+      why=$(mcp_factory_only "$n" <<<"$names") ||
+        { echo "spawn.sh: $NAME waits at Claude's MCP server picker for $CWD, which $why, so it is the owner's to answer" >&2; return 1; }
       # Then "Enable selected", one row below the last server with all selected at the start, or one server's "Use this MCP server", two rows above the focused "Continue without".
       if [ "$n" -gt 1 ]; then
         hr pane send-keys "$PANE" down >/dev/null || return 1

@@ -1,14 +1,14 @@
 import { expect, setDefaultTimeout, test } from "bun:test"
-import { writeFileSync } from "node:fs"
+import { realpathSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { herdrPin, placing, spawn } from "./spawn-fake"
 
 setDefaultTimeout(40_000)
 
+// Claude Code 2.1.319's two project MCP pickers, as read in its binary: what a run of keys writes to the folder's .claude/settings.local.json.
 type Written = { disabledMcpjsonServers: string[]; enabledMcpjsonServers: string[] }
 
-// Claude Code 2.1.319's two project MCP pickers, as read in its binary: what a run of keys writes to the folder's .claude/settings.local.json.
 // One server: options "Use this MCP server", "Use this and all future MCP servers in this project", "Continue without using this MCP server", focus starting on the last; Esc picks the last.
 const onePicker = (server: string, keys: string[]): Written => {
   let focus = 2
@@ -52,8 +52,8 @@ const manyPicker = (servers: string[], keys: string[]): Written => {
 const nothing: Written = { disabledMcpjsonServers: [], enabledMcpjsonServers: [] }
 const FACTORY = ["fs", "git", "a", "b", "c", "d", "e"]
 
-// The factory's own MCP file, ~/.mcp.json, with FACTORY's servers, or none at all.
-const keysFor = async (screen: string, mcpFile = true) => {
+// The factory's own MCP file, ~/.mcp.json, with FACTORY's servers, or none at all, and any other file the case writes.
+const keysFor = async (screen: string, mcpFile = true, more = (_home: string) => {}) => {
   const r = await spawn(
     ["manager", "optimizer", "b.md", "--runtime", "herdr"],
     [],
@@ -67,6 +67,7 @@ const keysFor = async (screen: string, mcpFile = true) => {
           join(home, ".mcp.json"),
           JSON.stringify({ mcpServers: Object.fromEntries(FACTORY.map((s) => [s, {}])) }),
         )
+      more(home)
     },
   )
   return {
@@ -115,12 +116,43 @@ for (const [screen, servers] of [
     expect(
       (servers.length > 1 ? manyPicker : (k: string[]) => onePicker("evil", k))([...servers], keys),
     ).toEqual(nothing)
-    expect(err).toContain("lists a server outside")
+    expect(err).toContain("lists a server from outside")
   })
 }
+
+test("a plugin's server, which the picker labels with its plugin, stays for the owner", async () => {
+  const { err, keys } = await keysFor("mcpplugin")
+  expect(keys).not.toContain("enter")
+  expect(manyPicker(["fs", "git (from plugin tools)"], keys)).toEqual(nothing)
+  expect(err).toContain("lists a server from outside")
+})
+
+// The folder a manager starts in, whose parent's .mcp.json Claude Code also reads, the nearest taking a name over.
+const above = (home: string) => join(home, "code", "factory", ".mcp.json")
+
+test("a .mcp.json on the folder's walk that redefines a factory server stays for the owner, naming the file", async () => {
+  let file = ""
+  const { err, keys } = await keysFor("mcp", true, (home) => {
+    file = above(home)
+    writeFileSync(file, JSON.stringify({ mcpServers: { fs: { command: "other" } } }))
+  })
+  expect(keys).toEqual([])
+  expect(err).toContain(`also reads ${realpathSync(file)}`)
+})
+
+test("a .mcp.json on the folder's walk that defines no server leaves the picker answered", async () => {
+  const { code, keys } = await keysFor("mcp", true, (home) =>
+    writeFileSync(above(home), JSON.stringify({ mcpServers: {} })),
+  )
+  expect(code).toBe(0)
+  expect(onePicker("fs", keys)).toEqual({
+    disabledMcpjsonServers: [],
+    enabledMcpjsonServers: ["fs"],
+  })
+})
 
 test("with no factory MCP file, the one-server picker stays for the owner", async () => {
   const { err, keys } = await keysFor("mcp", false)
   expect(keys).toEqual([])
-  expect(err).toContain("lists a server outside")
+  expect(err).toContain("has no server list it can read")
 })
