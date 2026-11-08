@@ -1,6 +1,6 @@
 // PreToolUse hook: puts a reviewer or tester session (role.ts), its sub-agents included, in read mode while its roster row serves an outside author's PR or names none, and in read mode refuses a Bash or Monitor line unless every command on it is one the allowlist below names, since running the PR's tests, scripts or installs runs its author's code on this machine.
 import "../../packages/env/src/aliases"
-import { existsSync, mkdirSync, realpathSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
@@ -34,6 +34,8 @@ export type Lookup = {
   ) => boolean
   main: string
   prsOf: (sessionId: unknown) => Promise<string[]>
+  // the program a script's first line runs it with, `env`'s program for an env line, or undefined with no readable shebang
+  runner: (script: string) => string | undefined
 }
 
 const CHECKERS = new Set(["reviewer", "tester"])
@@ -222,7 +224,8 @@ export async function inspect(
   lookup: Lookup,
 ): Promise<boolean> {
   const data = dataDirOf(environment)
-  const skills = [join(data, "orgs"), join(lookup.main, "extensions")]
+  // each root where it lands, as each script's path is judged
+  const skills = [join(data, "orgs"), join(lookup.main, "extensions")].map(real)
   const slot = join(data, "ops", "run-slot.sh")
   let allowed = true
   // A script of a skill installed in the data folder or kept in the main checkout's extensions, run as a program or by an interpreter with no option of its own.
@@ -233,6 +236,15 @@ export async function inspect(
       (root) => under(path, root) && path.slice(root.length).toLowerCase().includes("/skills/"),
     )
   }
+  // Whether bun, run from a folder, could read a bunfig.toml the main checkout does not own: the folder or one above it up to its work tree's root, walked though bun 1.4.4 reads the folder's own alone, and an unknown folder counts as one.
+  const foreignBunfig = (folder: string | undefined): boolean => {
+    if (folder === undefined) return true
+    const main = real(lookup.main)
+    for (let at = real(folder); ; at = dirname(at)) {
+      if (at !== main && lookup.holds(at, "bunfig.toml")) return true
+      if (lookup.holds(at, ".git") || dirname(at) === at) return false
+    }
+  }
   const permitted = (cmd: Command, parsed: Parsed, here: Env): boolean => {
     const { args, first, local, name } = parsed
     // a bare assignment reaches a later program only through a variable the session already exports (PATH, BASH_ENV), and one on a command reaches it always
@@ -242,7 +254,11 @@ export async function inspect(
     const program = first ? pathOf(first, here) : undefined
     if (first && first.value.includes("/")) {
       if (program && under(program, slot) && program.length === slot.length) return true
-      return skillScript(program)
+      // a skill script whose shebang runs bun reads the folder's bunfig.toml first, as the playground command does
+      return (
+        skillScript(program) &&
+        !(lookup.runner(real(program!)) === "bun" && foreignBunfig(here.cwd))
+      )
     }
     const words = [name, ...args.map((a) => a.value)]
     // git first, since read-only.ts's git reads say nothing of the folder git takes its repository from
@@ -365,6 +381,25 @@ const isPr = (read: unknown): read is Pr =>
     (key) => typeof (read as Record<string, unknown>)[key] === "string",
   )
 
+// A script's first line, or undefined when it cannot be read.
+const firstLine = (script: string): string | undefined => {
+  try {
+    return readFileSync(script, "utf8").split("\n", 1)[0]
+  } catch {
+    return undefined
+  }
+}
+
+// Pure: the program a shebang line runs, by its name: the interpreter's own, or the first word after env and its options (`#!/usr/bin/env -S bun --flag`).
+export const runnerOf = (line: string | undefined): string | undefined => {
+  if (!line?.startsWith("#!")) return undefined
+  const [interpreter, ...rest] = line.slice(2).trim().split(/\s+/)
+  if (!interpreter) return undefined
+  if (basename(interpreter) !== "env") return basename(interpreter)
+  const program = rest.find((word) => !word.startsWith("-") && !word.includes("="))
+  return program && basename(program)
+}
+
 // The machine's own lookup: the session's roster row by its registry name, and a PR's author by gh, kept in the data folder since it never changes; a read that fails is kept for an hour, so a PR GitHub cannot answer costs one call an hour.
 export function live(environment: Environment): Lookup {
   const data = dataDirOf(environment)
@@ -411,6 +446,7 @@ export function live(environment: Environment): Lookup {
         return []
       }
     },
+    runner: (script) => runnerOf(firstLine(script)),
   }
 }
 

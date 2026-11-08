@@ -22,6 +22,7 @@ import { check as headlessLogin } from "../../../scripts/hooks/no-headless-login
 import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
 import { check as linearTicket } from "../../../scripts/hooks/no-linear-ticket"
 import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
+import { check as outsidePrCode, live } from "../../../scripts/hooks/no-outside-pr-code"
 import { check as playgroundLeak } from "../../../scripts/hooks/no-playground-leak"
 import { check as publicLeak } from "../../../scripts/hooks/no-public-leak"
 import { check as rawDelete } from "../../../scripts/hooks/no-raw-delete"
@@ -242,6 +243,37 @@ const BUNDLED: Checks = Object.fromEntries(
   ),
 ) as Checks
 
+// A reviewer of a made-up outside author's PR, for no-outside-pr-code: its skill scripts are real files whose shebangs the live lookup reads, and its clones real folders whose .git and bunfig.toml it finds; the main checkout, which holds a bunfig.toml of its own, is PATHS.MAIN.
+const REVIEW = join(SCRATCH, "review")
+const CLONE = join(REVIEW, "outside")
+const UNDER_BUNFIG = join(REVIEW, "under-bunfig")
+const PLAIN = join(REVIEW, "plain")
+for (const dir of [
+  join(CLONE, ".git"),
+  join(CLONE, "sub"),
+  join(CLONE, "own"),
+  join(UNDER_BUNFIG, "clone", ".git"),
+  join(PLAIN, ".git"),
+])
+  mkdirSync(dir, { recursive: true })
+for (const folder of [CLONE, join(CLONE, "own"), UNDER_BUNFIG, PATHS.MAIN])
+  writeFileSync(join(folder, "bunfig.toml"), 'preload = ["./pre.ts"]\n')
+for (const skills of [
+  join(DATA, "orgs", "home", "abc123", "skills"),
+  join(PATHS.MAIN, "extensions", "core", "skills"),
+]) {
+  const scripts = join(skills, "code-review-loop", "scripts")
+  mkdirSync(scripts, { recursive: true })
+  writeFileSync(join(scripts, "state.ts"), "#!/usr/bin/env bun\n")
+  writeFileSync(join(scripts, "state.py"), "#!/usr/bin/env python3\n")
+  writeFileSync(join(scripts, "state.mjs"), "#!/usr/bin/env node\n")
+}
+const OUTSIDE_PR = {
+  author: "ext-dev",
+  owner: "acme-owner",
+  ownerType: "User",
+}
+
 // Each guard's check with the environment its own test gives it, and the folders it runs in, each a cwd and the HOME that goes with it.
 const guardsOf = (
   c: Checks,
@@ -320,6 +352,27 @@ const guardsOf = (
       "main checkout": [PATHS.MAIN, HOME],
     },
     run: (raw, home) => c.mainCheckout(raw, { HOME: home }, PATHS.MAIN),
+  },
+  // run from its source alone, since this guard has no bundle
+  "no-outside-pr-code": {
+    folders: {
+      "main checkout": [PATHS.MAIN, HOME],
+      "outside clone": [CLONE, HOME],
+      "outside clone subfolder": [join(CLONE, "sub"), HOME],
+      "outside clone subfolder with bunfig": [join(CLONE, "own"), HOME],
+      "outside clone under a bunfig": [join(UNDER_BUNFIG, "clone"), HOME],
+      "plain clone": [PLAIN, HOME],
+      "unknown folder": ["outside", HOME],
+    },
+    run: (raw, home) => {
+      const environment = { HOME: home, PATH: "/usr/bin:/bin", PLAYGROUND_ROLE: "reviewer" }
+      return outsidePrCode(raw, environment, {
+        ...live(environment),
+        author: async () => OUTSIDE_PR,
+        main: PATHS.MAIN,
+        prsOf: async () => ["https://github.com/acme-owner/widgets/pull/501"],
+      })
+    },
   },
   "no-playground-leak": {
     folders: { "data folder": [DATA, HOME], home: [HOME, HOME] },

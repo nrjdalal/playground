@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { check, live, type Lookup, readMode } from "../../../scripts/hooks/no-outside-pr-code"
+import {
+  check,
+  live,
+  type Lookup,
+  readMode,
+  runnerOf,
+} from "../../../scripts/hooks/no-outside-pr-code"
 
 // A made-up machine: every repo, login, session and folder here is invented, and only the live lookup's rows touch a scratch folder.
 // HOME is this machine's own, since the shell reader expands a ~ by it
@@ -41,11 +47,15 @@ const HELD: Record<string, string[]> = {
   [OUTSIDE]: [".git", "bunfig.toml"],
 }
 
+const RUNNERS: Record<string, string> = { ".mjs": "node", ".py": "python3", ".ts": "bun" }
+
 const lookup: Lookup = {
   author: async (repo, pr) => PRS[`${repo}#${pr}`],
   holds: (folder, entry) => HELD[folder]?.includes(entry) ?? false,
   main: MAIN,
   prsOf: async (sessionId) => SESSIONS[String(sessionId)] ?? [],
+  // each made-up script's shebang by its extension, as a skill's scripts name theirs
+  runner: (script) => RUNNERS[script.slice(script.lastIndexOf("."))],
 }
 
 const call = (
@@ -108,6 +118,21 @@ describe("no-outside-pr-code keeps a checker of an outside author's PR in read m
     [
       "bun on a skill's script, since bun reads the folder's bunfig.toml",
       call(`bun ${SKILLS}/x/y.ts`),
+    ],
+    [
+      "a bun skill script by its path in a clone that holds a bunfig.toml",
+      call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, OUTSIDE),
+    ],
+    [
+      "a bun core skill script by its path in a subfolder of that clone",
+      call(
+        `${MAIN}/extensions/core/skills/code-review-loop/scripts/state.ts pr 501`,
+        `${OUTSIDE}/src`,
+      ),
+    ],
+    [
+      "a bun skill script by its path from a folder the hook cannot read",
+      call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, "review-501"),
     ],
     [
       "the playground command in a folder with the PR's bunfig.toml",
@@ -239,6 +264,14 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
     ["a variable of the line's own", call(`S=${OUTSIDE}; cat $S/x`)],
     ["the clock", call("date -u +%FT%TZ")],
     ["the review skill's state.py from the main checkout", call(`python3 ${CORE_STATE} pr 501`)],
+    [
+      "a bun skill script by its path from the main checkout",
+      call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`),
+    ],
+    [
+      "a python skill script by its path in a clone with a bunfig.toml",
+      call(`${STATE} pr 501`, OUTSIDE),
+    ],
     ["that state.py by its path", call(`${CORE_STATE} wait acme-owner/widgets 501 abc`)],
     ["a quiet fetch of two refs", call(`git -C ${OUTSIDE} fetch -q origin pr-501 canary`)],
     ["a quiet detached checkout", call(`git -C ${OUTSIDE} checkout -q --detach abc`)],
@@ -439,5 +472,22 @@ describe("no-outside-pr-code's live lookup", () => {
     )
     expect(await live(environment).author("acme-owner/widgets", 501)).toEqual(pr)
     expect(await live(environment).author("acme-owner/widgets", 509)).toBeUndefined()
+  })
+})
+
+describe("runnerOf names the program a shebang line runs", () => {
+  test.each([
+    ["#!/usr/bin/env bun", "bun"],
+    ["#!/usr/bin/env -S bun --smol", "bun"],
+    ["#!/usr/bin/env FORCE_COLOR=0 bun", "bun"],
+    ["#!/opt/homebrew/bin/bun", "bun"],
+    ["#! /usr/bin/env python3", "python3"],
+    ["#!/usr/bin/env node", "node"],
+    ["#!/bin/sh", "sh"],
+    ["console.log(1)", undefined],
+    ["#!", undefined],
+    [undefined, undefined],
+  ])("%p runs %p", (line, runner) => {
+    expect(runnerOf(line)).toBe(runner)
   })
 })
