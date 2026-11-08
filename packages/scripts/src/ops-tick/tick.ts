@@ -1,5 +1,6 @@
-import { realpathSync, statfsSync } from "node:fs"
+import { readFileSync, realpathSync, statfsSync } from "node:fs"
 import { appendFile, mkdir, stat, unlink } from "node:fs/promises"
+import { loadavg } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 import {
@@ -635,13 +636,27 @@ const freeBytes = (dir: string): number => {
   return fs.bavail * fs.bsize
 }
 
-// The trash playground rm fills, beside ops in the data folder, emptied hourly by purgeTrash (@packages/safe-delete): each batch over 7 days old, then the oldest while its disk has under 50 GB free; one line in ops/log/trash-purge.log.
+// The load cap the single-slot switch holds (scripts/ops/README.md): the ops switch run-slot.load5-cap's value while it stands, 22 at most, else 22.
+export const loadCapOf = (ops: string): number => {
+  try {
+    const cap = Number(readFileSync(join(ops, "run-slot.load5-cap"), "utf8").split("\n")[1]?.trim())
+    if (Number.isFinite(cap) && cap > 0) return Math.min(cap, 22)
+  } catch {}
+  return 22
+}
+
+// The trash playground rm fills, beside ops in the data folder, emptied hourly by purgeTrash (@packages/safe-delete): each batch over 7 days old, then the oldest while its disk has under 50 GB free, every batch taken only while the load is under the cap the single-slot switch holds, or at any load once the disk is under the 5 GB floor; one line in ops/log/trash-purge.log, naming the batches the load held.
 export const trashPurge =
-  (trash?: string, free = freeBytes) =>
+  (trash?: string, free = freeBytes, load: () => number = () => loadavg()[1] ?? 0) =>
   async (ctx: Context) => {
     const root = trash ?? join(dirname(ctx.ops), "trash")
-    const { removed, skipped } = purgeTrash(root, { free: () => free(root), now: ctx.now })
-    const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}`
+    const { removed, skipped, leftForLoad } = purgeTrash(root, {
+      free: () => free(root),
+      load,
+      loadCap: loadCapOf(ctx.ops),
+      now: ctx.now,
+    })
+    const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}${leftForLoad.length ? `, left for load (${leftForLoad.join(", ")})` : ""}`
     await mkdir(join(ctx.ops, "log"), { recursive: true })
     await appendFile(join(ctx.ops, "log", "trash-purge.log"), `${isoSeconds(ctx.now)} ${line}\n`)
   }
