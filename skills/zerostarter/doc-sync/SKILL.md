@@ -45,7 +45,7 @@ rg -n "<changed-path-or-command>" web/next/content/docs README.md AGENTS.md .age
 
 Fix each hit in the same change. Before the first edit to an agent-facing surface (a `SKILL.md` or a file beside it, `AGENTS.md`, an `.agents/dashboard` file, `.agents/testing.md`, `scripts/README.md` or `scripts/hooks/README.md`, a `docs/<bucket>/<name>.md` page), call the Skill tool with `writing-for-agents` when it is installed, and follow it; that page also follows `.agents/writing-docs.md` where that file exists. Three couplings are easy to miss:
 
-- **Adding or removing a skill** touches the `AGENTS.md` skills table (generated, so run `bun packages/scripts/src/skills-manager.ts`). A vendored one also touches `skills-lock.json` when it is a stub pinned for integrity (`agent-browser`); one copied in full (`portless`) has no lock entry.
+- **Adding or removing a skill** touches the skills table in `skills/zerostarter/README.md` (generated, so run `bun packages/scripts/src/skills-manager.ts`). A vendored one also touches `skills-lock.json` when it is a stub pinned for integrity (`agent-browser`); one copied in full (`portless`) has no lock entry.
 - **Adding, removing, or renaming a doc page** touches `web/next/docs.config.ts`, not the `.mdx` alone.
 - **Editing a wrapped doc** (`PATTERNS` in `packages/scripts/src/docs-wrap/cli.ts`) means one sentence per line, a sentence over 400 characters broken at a comma, colon or semicolon: run `bun run docs:wrap` after the edit, and its `--check`, which pre-commit and `test:skills` run, passes.
 

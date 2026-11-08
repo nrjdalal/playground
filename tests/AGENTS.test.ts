@@ -3,8 +3,8 @@ import { dirname, join } from "node:path"
 
 const ROOT = join(import.meta.dir, "..")
 
-// AGENTS.md plus every file it imports, in chars: what every session loads before its first turn, set at 39,774 plus 5% after #1473's trim.
-const BUDGET = 41_800
+// AGENTS.md plus every file it imports, in chars: what every session loads before its first turn, set at 32,929 plus 5% after #1473's trim, the skills tables moved out.
+const BUDGET = 34_600
 
 // The test goes red at this share of BUDGET, which keeps 3% of it free for PRs that pass alone and merge together.
 const MARGIN = 0.97

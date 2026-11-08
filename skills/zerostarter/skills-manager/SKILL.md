@@ -1,6 +1,6 @@
 ---
 name: skills-manager
-description: Keep the AGENTS.md skills tables generated from skill descriptions, and understand how a fork syncs its skills from upstream. Use after editing a skill's frontmatter, when adding or removing a skill, or when the AGENTS.md skills-table check fails.
+description: Keep the skills tables in skills/zerostarter/README.md generated from skill descriptions, and understand how a fork syncs its skills from upstream. Use after editing a skill's frontmatter, when adding or removing a skill, or when the skills-table check fails.
 source: https://github.com/nrjdalal/zerostarter
 files:
   - packages/scripts/src/skills-manager.ts
@@ -11,7 +11,7 @@ files:
 
 # Skills Manager
 
-The AGENTS.md skills tables duplicate each skill's own `description`, so they are generated, never hand-kept. `packages/scripts/src/skills-manager.ts` is the maintainer, and a `pre-commit` hook runs it automatically whenever a skill (or the manager) changes, so the catalog never drifts.
+The skills tables in `skills/zerostarter/README.md` duplicate each skill's own `description`, so they are generated, never hand-kept, and live outside `AGENTS.md`, since every session already reads each description in its skill listing. `packages/scripts/src/skills-manager.ts` is the maintainer, and a `pre-commit` hook runs it automatically whenever a skill (or the manager) changes, so the catalog never drifts.
 
 Each skill carries its **provenance** in frontmatter:
 
