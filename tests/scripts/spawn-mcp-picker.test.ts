@@ -1,4 +1,6 @@
 import { expect, setDefaultTimeout, test } from "bun:test"
+import { writeFileSync } from "node:fs"
+import { join } from "node:path"
 
 import { herdrPin, placing, spawn } from "./spawn-fake"
 
@@ -47,16 +49,31 @@ const manyPicker = (servers: string[], keys: string[]): Written => {
   return { disabledMcpjsonServers: [], enabledMcpjsonServers: [] }
 }
 
-const keysFor = async (screen: string) => {
+const nothing: Written = { disabledMcpjsonServers: [], enabledMcpjsonServers: [] }
+const FACTORY = ["fs", "git", "a", "b", "c", "d", "e"]
+
+// The factory's own MCP file, ~/.mcp.json, with FACTORY's servers, or none at all.
+const keysFor = async (screen: string, mcpFile = true) => {
   const r = await spawn(
     ["manager", "optimizer", "b.md", "--runtime", "herdr"],
     [],
     { FAKE_SCREENS: `${screen},ready` },
     undefined,
     undefined,
-    herdrPin(),
+    (home) => {
+      herdrPin()(home)
+      if (mcpFile)
+        writeFileSync(
+          join(home, ".mcp.json"),
+          JSON.stringify({ mcpServers: Object.fromEntries(FACTORY.map((s) => [s, {}])) }),
+        )
+    },
   )
-  return { code: r.code, keys: placing(r).flatMap((c) => (c[1] === "send-keys" ? [c[3]!] : [])) }
+  return {
+    code: r.code,
+    err: r.err,
+    keys: placing(r).flatMap((c) => (c[1] === "send-keys" ? [c[3]!] : [])),
+  }
 }
 
 test("under the code root, the one-server MCP picker is answered with its server used, and none disabled", async () => {
@@ -75,4 +92,35 @@ test("under the code root, the many-server MCP picker is answered with every ser
     disabledMcpjsonServers: [],
     enabledMcpjsonServers: ["fs", "git"],
   })
+})
+
+test("a picker of more servers than its five rows show is read as it scrolls, and every server is enabled", async () => {
+  const { code, keys } = await keysFor("mcpseven")
+  expect(code).toBe(0)
+  expect(manyPicker(FACTORY, keys)).toEqual({
+    disabledMcpjsonServers: [],
+    enabledMcpjsonServers: FACTORY,
+  })
+})
+
+// A picker naming a server outside ~/.mcp.json gets no Enter, so it writes nothing and stays for the owner.
+for (const [screen, servers] of [
+  ["mcpother", ["evil"]],
+  ["mcpmanyother", ["fs", "evil"]],
+  ["mcpsevenother", ["fs", "git", "a", "b", "c", "d", "evil"]],
+] as const) {
+  test(`a ${screen} picker, which lists a server outside the factory's MCP file, stays for the owner`, async () => {
+    const { err, keys } = await keysFor(screen)
+    expect(keys).not.toContain("enter")
+    expect(
+      (servers.length > 1 ? manyPicker : (k: string[]) => onePicker("evil", k))([...servers], keys),
+    ).toEqual(nothing)
+    expect(err).toContain("lists a server outside")
+  })
+}
+
+test("with no factory MCP file, the one-server picker stays for the owner", async () => {
+  const { err, keys } = await keysFor("mcp", false)
+  expect(keys).toEqual([])
+  expect(err).toContain("lists a server outside")
 })

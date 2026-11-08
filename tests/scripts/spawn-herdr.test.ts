@@ -482,7 +482,10 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
       { FAKE_SCREENS: "trust,mcp,ready" },
       undefined,
       undefined,
-      herdrPin(),
+      (home) => {
+        herdrPin()(home)
+        writeFileSync(join(home, ".mcp.json"), JSON.stringify({ mcpServers: { fs: {} } }))
+      },
     )
     expect(r.code).toBe(0)
     expect(placing(r).filter((c) => c[1] === "send-keys")).toEqual([

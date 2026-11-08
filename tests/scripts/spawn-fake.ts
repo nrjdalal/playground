@@ -434,7 +434,7 @@ export const others = (n: number, from = 1000): Session[] =>
 export const workers = (n: number, from = 2000): Session[] =>
   Array.from({ length: n }, (_, k) => ({ name: `worker-w-${k}`, pid: from + k }))
 
-// A fake herdr at the path its pin names: it logs each call as one line of words each ended by a unit separator, answers placement as herdr 0.9.5 does, and shows the screens FAKE_SCREENS lists (trust, trustcut, mcp, mcpmany, mcpstatus, cut, bare, blank, ready) one row per wait, each matched against the wait's regex.
+// A fake herdr at the path its pin names: it logs each call as one line of words each ended by a unit separator, answers placement as herdr 0.9.5 does, and shows the screens FAKE_SCREENS lists (trust, trustcut, mcp, mcpother, mcpmany, mcpmanyother, mcpseven, mcpsevenother, mcpstatus, cut, bare, blank, ready) one row per wait, each matched against the wait's regex, and a picker's whole screen to a read.
 const herdrBin = join(bin, "herdr-fake")
 writeFileSync(
   herdrBin,
@@ -470,7 +470,9 @@ case "$1 \${2:-}" in
       trust) l="❯ 1. Yes, I trust this folder" ;;
       trustcut) l="❯ 1. Yes, I trust" ;;
       mcp) l="New MCP server found in this project: fs" ;;
-      mcpmany) l="2 new MCP servers found in this project" ;;
+      mcpother) l="New MCP server found in this project: evil" ;;
+      mcpmany | mcpmanyother) l="2 new MCP servers found in this project" ;;
+      mcpseven | mcpsevenother) l="7 new MCP servers found in this project" ;;
       mcpstatus) l="⏵⏵ bypass permissions on · 1 MCP server failed" ;;
       cut) l="⏵⏵ bypass permissions" ;;
       bare) l="⏵⏵" ;;
@@ -480,6 +482,33 @@ case "$1 \${2:-}" in
     # herdr matches the regex against one screen row at a time, so a row it does not match times out
     [[ $l =~ $5 ]] || { echo '{"error":{"code":"timeout","message":"timed out waiting for output match"}}'; exit 1; }
     printf '{"result":{"matched_line":"%s"}}\\n' "$l" ;;
+  "pane read")
+    n=$(( $(cat "$HOME/herdr.screen" 2>/dev/null || echo 1) - 1 ))
+    IFS=, read -ra screens <<<"\${FAKE_SCREENS:-ready}"
+    one= many=
+    case "\${screens[$n]:-ready}" in
+      mcp) one=fs ;;
+      mcpother) one=evil ;;
+      mcpmany) many="fs git" ;;
+      mcpmanyother) many="fs evil" ;;
+      mcpseven) many="fs git a b c d e" ;;
+      mcpsevenother) many="fs git a b c d evil" ;;
+    esac
+    if [ -n "$one" ]; then
+      printf '%s\\n' "New MCP server found in this project: $one" "MCP servers may execute code or access system resources." "  Use this MCP server" "  Use this and all future MCP servers in this project" "❯ Continue without using this MCP server"
+    elif [ -n "$many" ]; then
+      read -ra names <<<"$many"
+      # the picker shows five servers at a time and scrolls with the focus, which each down since the screen's wait moves
+      focus=$(tr '\\037' ' ' < "$HOME/herdr.calls" | awk '$2 == "wait-output" {c = 0} $2 == "send-keys" && $4 == "down" {c++} END {print c + 0}')
+      [ "$focus" -lt "\${#names[@]}" ] || focus=$((\${#names[@]} - 1))
+      from=$((focus > 4 ? focus - 4 : 0))
+      printf '%s\\n' "\${#names[@]} new MCP servers found in this project" "Select any you wish to enable." "MCP servers may execute code or access system resources."
+      for ((i = from; i < from + 5 && i < \${#names[@]}; i++)); do
+        [ "$i" = "$focus" ] && p="❯" || p=" "
+        printf '%s [✔] %s\\n' "$p" "\${names[$i]}"
+      done
+      echo "  Enable selected"
+    fi ;;
 esac
 exit 0
 `,

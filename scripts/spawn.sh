@@ -1643,9 +1643,38 @@ TRUST_RE='Yes, I trust'
 MCP_RE='New MCP server found in this project|[0-9]+ new MCP servers found'
 # Claude Code's mode mark leads its status line and survives the cut: 27 columns read "⏵⏵ bypass permissions" and 12 read "⏵⏵" (measured, 24 Oct).
 READY_RE='⏵⏵'
+# The servers an MCP picker's screen shows, one a line: the one server's name from its title, or each `[✔] <name>` row under several servers' title.
+mcp_names() {
+  hr pane read "$PANE" --source recent-unwrapped --lines 80 | python3 -I -c '
+import re, sys
+rows = sys.stdin.read().splitlines()
+titles = [i for i, r in enumerate(rows) if re.search(r"New MCP server found in this project|[0-9]+ new MCP servers found", r)]
+if not titles:
+    sys.exit(1)
+one = re.search(r"New MCP server found in this project: (.+?)\s*$", rows[titles[-1]])
+if one:
+    print(one.group(1))
+    sys.exit(0)
+for r in rows[titles[-1] + 1:]:
+    row = re.search(r"\[[^\]]?\]\s*(\S.*?)\s*$", r)
+    if row:
+        print(row.group(1))
+'
+}
+# Whether the names on stdin are $1 servers, each one of the factory's own MCP file, ~/.mcp.json, the only servers spawn.sh enables in the owner's name.
+mcp_factory_only() {
+  python3 -I -c '
+import json, sys
+try:
+    servers = set(json.load(open(sys.argv[1]))["mcpServers"])
+except Exception:
+    sys.exit(1)
+names = set(sys.stdin.read().splitlines()) - {""}
+sys.exit(0 if len(names) == int(sys.argv[2]) and names <= servers else 1)' "$HOME/.mcp.json" "$1"
+}
 # The screens come in order (trust, then the MCP picker, then the REPL), so each wait looks only for what can still come and a screen already answered never matches twice. One key a request, since herdr drops part of several keys sent together.
 herdr_answer() {
-  local want="$TRUST_RE|$MCP_RE|$READY_RE" line k
+  local want="$TRUST_RE|$MCP_RE|$READY_RE" line k n names
   while :; do
     line=$(hr pane wait-output "$PANE" --regex "$want" --source visible --timeout 120000 |
       python3 -I -c 'import json, sys; print(json.load(sys.stdin)["result"]["matched_line"])' 2>/dev/null) ||
@@ -1660,10 +1689,22 @@ herdr_answer() {
     elif [[ $want != "$READY_RE" ]] && grep -qE "$MCP_RE" <<<"$line"; then
       trusted_root "$CWD" ||
         { echo "spawn.sh: $NAME waits at Claude's MCP server picker for $CWD, outside $(code_root) and each org's folder, so it is the owner's to answer" >&2; return 1; }
-      # Esc on either picker writes its servers to disabledMcpjsonServers, so the answer enables them: Claude Code drops keys in a picker's first 250 ms, so it waits first, then picks one server's "Use this MCP server", two rows above the focused "Continue without", or moves past several servers, all selected at the start, to "Enable selected".
+      # Esc on either picker writes its servers to disabledMcpjsonServers, so the answer enables them, and only the factory's own: Claude Code drops keys in a picker's first 250 ms, so it waits first.
       sleep 0.5
-      if [[ $line =~ ([0-9]+)\ new\ MCP\ servers ]]; then
-        for ((k = 0; k < BASH_REMATCH[1]; k++)); do hr pane send-keys "$PANE" down >/dev/null || return 1; done
+      n=1
+      [[ $line =~ ([0-9]+)\ new\ MCP\ servers ]] && n=${BASH_REMATCH[1]}
+      names=$(mcp_names)
+      # Several servers show five rows at a time, scrolled with the focus, so each move down reads the rows it brings in; a picker left before "Enable selected" writes nothing.
+      for ((k = 1; k < n; k++)); do
+        hr pane send-keys "$PANE" down >/dev/null || return 1
+        sleep 0.2
+        names+=$'\n'$(mcp_names)
+      done
+      mcp_factory_only "$n" <<<"$names" ||
+        { echo "spawn.sh: $NAME waits at Claude's MCP server picker for $CWD, which lists a server outside $HOME/.mcp.json, so it is the owner's to answer" >&2; return 1; }
+      # Then "Enable selected", one row below the last server with all selected at the start, or one server's "Use this MCP server", two rows above the focused "Continue without".
+      if [ "$n" -gt 1 ]; then
+        hr pane send-keys "$PANE" down >/dev/null || return 1
       else
         hr pane send-keys "$PANE" up >/dev/null && hr pane send-keys "$PANE" up >/dev/null || return 1
       fi
