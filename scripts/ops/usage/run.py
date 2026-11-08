@@ -213,7 +213,8 @@ def probed(account, s, stored, now):
     """usage.json's data from one account's probe reading, naming the stored login beside it when there is one."""
     limits = {"seven_day": {"used_percentage": s["week"], "resets_at": int(s["weekReset"]) if s.get("weekReset") else None}}
     if s.get("five") is not None:
-        limits["five_hour"] = {"used_percentage": s["five"], "resets_at": int(s["fiveReset"]) if s.get("fiveReset") else None}
+        # a 5-hour figure past its reset says nothing about the window now, so it counts as none in use
+        limits["five_hour"] = {"used_percentage": 0 if s.get("fiveReset") and now >= s["fiveReset"] else s["five"], "resets_at": int(s["fiveReset"]) if s.get("fiveReset") else None}
     data = {"account": account, "rate_limits": limits, "readAt": iso(s["at"]), "source": "token/ratelimit-headers", "writtenAt": iso(now)}
     if stored:
         data["storedLogin"] = {"account": stored["account"], "week": (stored["rate_limits"].get("seven_day") or {}).get("used_percentage")}
