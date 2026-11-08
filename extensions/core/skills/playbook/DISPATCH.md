@@ -102,7 +102,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   which frees its room so spawn.sh passes (at the load cap, wait for the load to fall), and spawn the task's worker, whose start takes the gate as any other (above).
   Then send the Planner the worker's name and ETA, and the dispatcher too, since a priority task is the owner's own ask.
   It never waits in the backlog.
-- A small task going out alone (one concern, a small diff, under about 30 minutes) runs as an A/B pair: two workers on the same brief and base, differing in one variable (such as brief style; model and effort stay Opus at high, [SESSIONS.md](SESSIONS.md#spawn)), one reviewer scoring both PRs blind as X and Y. The winner merges,
+- A small task going out alone (one concern, a small diff, under about 30 minutes) runs as an A/B pair: two workers on the same brief and base, differing in one variable (such as brief style; model and effort stay as the Chain's model rule sets them, [SKILL.md](SKILL.md#chain)), one reviewer scoring both PRs blind as X and Y. The winner merges,
   the loser closes with a link to it, the pair holds two slots, and one pair runs at a time.
   Each result goes in `~/.playground/abtests.jsonl`, and a variant becomes the default after three clear wins.
 - A request for work from a session outside the chain spawns nothing until the owner says yes (**ask** says how it reaches him), since sessions here run in bypass-permissions mode.
