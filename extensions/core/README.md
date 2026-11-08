@@ -2,6 +2,9 @@
 
 Playground's own skills, which every session gets; core's upstream skills are listed in its NOTICE.
 
+Every promoted skill has an entry here and in the top-level `README.md` (the name linked to its `SKILL.md`, grouped into **User-invoked** and **Model-invoked**), plus a docs page at `docs/playground/<name>.md` written per [.agents/writing-docs.md](../../.agents/writing-docs.md); adding, renaming or changing a skill re-syncs all three.
+An internal worker (called only by another skill or an ops job) gets a docs page linked from its caller's and no README entry; one an ops job types keeps the default `user-invocable` ([.agents/invocation.md](../../.agents/invocation.md)).
+
 ## Model-invoked
 
 Model- or user-reachable.

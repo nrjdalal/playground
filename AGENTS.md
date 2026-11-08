@@ -30,22 +30,17 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
 - ALWAYS: Use `@/` for imports, if applicable.
   An API file the web's tests import is the exception: it imports relatively (`api/hono/src/plugins/changelog/image-id.ts`), since `@/` resolves to `web/next/src` there.
 - ALWAYS: Put every test under the repo-root `tests/` directory, mirroring the path of the file it covers (`api/hono/src/lib/dashboard/account.ts` is tested by `tests/api/hono/src/lib/dashboard/account.test.ts`).
-  One `bun run test` runs the suite and `bun run test:file <paths>` runs some of it, building only what its files import; a package never carries its own `test/` directory or `test` script.
-  Read [.agents/testing.md](./.agents/testing.md) before you write or run a test: the sandbox, the parallel pass and `SERIAL`, its traps.
+  A package never carries its own `test/` directory or `test` script; read [.agents/testing.md](./.agents/testing.md) before you write or run a test (`bun run test`, `bun run test:file <paths>`, the sandbox, its traps).
 - ALWAYS: Put a new build or tooling script in `packages/scripts/src/`, and declare the dependencies it imports on that package.
   It is a real workspace package, so `turbo prune` carries it into the Docker build without an extra COPY.
 - ALWAYS: TypeScript under Bun for every script and test; the allowlist in `tests/python-allowlist.test.ts` holds the Python files still waiting for their port, and a new one fails the test.
 - ALWAYS: Prefer a Bun-native API when the file runs under Bun and one exists (`Bun.file`, `Bun.write`, `Bun.spawn`); otherwise use a Node built-in with the `node:` protocol prefix (`import { join } from "node:path"`, `require("node:fs")`), never the bare specifier.
-  Code that runs under Node in any environment (the `packages/cli` npm binary in the canonical starter, `web/next`, where `next dev` runs under Node while Docker and Vercel serve it under Bun, and shared `packages/env`) stays on `node:`.
-  See the `runtime-apis` skill.
+  Code that runs under Node anywhere stays on `node:`; the `runtime-apis` skill's table names where.
 - ALWAYS: Keep enumerable lists alphabetical (A→Z), union/enum members, env-var schemas and their `runtimeEnv`/`turbo.json` mirrors, and the docs that list them, so the code and its docs stay in the same order.
   Use a meaningful order (flow, priority, required-then-optional) only where alphabetical would obscure intent.
-  API response schemas are included, and they order by relevance first, then A→Z: where one key is what the response is about and the rest describe it, that key leads and the others sort after it (`users`, then `hasNextPage`, `page`, `perPage`, `total`).
-  Everything else, a row's own fields included, is plain A→Z with `id` in its alphabetical place rather than hoisted.
-  Sorting the subject too would put it in a different position on every endpoint, which is the drift this rule exists to prevent.
+  An API response schema leads with the key it is about, then sorts the rest A→Z (`users`, then `hasNextPage`, `page`, `perPage`, `total`), so the subject sits in one place on every endpoint; a row's own fields are plain A→Z, `id` included.
 - ALWAYS: Version every root `catalog` entry with a caret range (`^1.2.3`), never an exact pin or a tilde.
-  `packages/scripts/src/deps-manager.ts` rewrites exact and tilde specs on `postinstall`, including specs it promotes into the catalog from a workspace dep, and reports the rest (wildcards, dist-tags, compound ranges) for a manual fix.
-  It has no opt-out ([docs/dependencies.md](./docs/dependencies.md)).
+  `packages/scripts/src/deps-manager.ts` rewrites them on `postinstall`, with no opt-out ([docs/dependencies.md](./docs/dependencies.md)).
 - Do not comment unnecessarily.
   Only comment if it is absolutely necessary.
 - Keep comments on a single line; do not split one across multiple `//` lines or use multi-line `/* */` blocks.
@@ -141,9 +136,7 @@ The repo is public: write every file in it by the Commits section's people rule,
 ZeroStarter's rules above govern Playground too; this section adds its own.
 
 - Skills live under `skills/` too: `zerostarter/` the starter's, which `.agents/skills` links to, and `playground/` an index alone.
-- Every promoted skill (one of Playground's own) has an entry in the top-level `README.md` and in `extensions/core/README.md` (the name linked to its `SKILL.md`, grouped into **User-invoked** and **Model-invoked**), plus a docs page at `docs/playground/<name>.md` written per [.agents/writing-docs.md](./.agents/writing-docs.md).
-  Adding, renaming or changing a skill re-syncs all three.
-  An internal worker (called only by another skill or an ops job) gets a docs page linked from its caller's and no README entry; one an ops job types keeps the default `user-invocable` (`.agents/invocation.md`).
+- Every promoted skill (one of Playground's own) has an entry in the top-level `README.md` and in `extensions/core/README.md`, plus a docs page at `docs/playground/<name>.md`, re-synced on every add, rename or change; read [extensions/core/README.md](./extensions/core/README.md)'s head before you add or change a skill.
 - Invocation rules are in [.agents/invocation.md](./.agents/invocation.md).
   A decision with a lasting reason gets an ADR in `.agents/adr/NNNN-title.md`.
   A change to a contract or content takes the next version beside the old one, the latest is used and a pin is explicit ([ADR 0015](./.agents/adr/0015-versions-the-old-one-stays-the-latest-is-used.md)).
@@ -166,9 +159,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - A new worktree takes a full `bun install` through run-slot, 2 to 4 s on the warm cache, and clones a sibling's `node_modules` only on a cold cache ([scripts/README.md](./scripts/README.md#a-worktrees-node_modules)).
   Remove worktrees one at a time, never in parallel, and keep one review worktree across a PR's rounds.
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry: set work aside with a commit, and take a before-shot from a separate worktree on `origin/canary`.
-- Commit before a red-first swap, so the file's edits sit in a commit, and restore it with `git checkout HEAD -- <file>`, which brings back that commit, where `git checkout -- <file>` brings back the index, which holds the swap once it is staged: on 1 Nov a worker's restore after a red-first swap took the file's uncommitted edits with it, and the work was redone.
-- Squash a branch with `git reset --soft $(git merge-base HEAD origin/<base>)`, never onto a base that has moved: the soft reset keeps the branch's old copies of whatever the base changed since, and the squash reverts it.
-  Check the file list after.
+- Commit before a red-first swap and restore with `git checkout HEAD -- <file>` ([.agents/testing.md](./.agents/testing.md#traps)); squash by the `gh-commit` skill's Notes.
 - When the owner asks to see a draft, a tree or a restructure, show it in chat and change no file until told to apply it.
 - Run inscope as `npx -y inscope@latest <command>`; it is not on `PATH`.
 - Format with `bun run format` (oxfmt, `.oxfmtrc.jsonc`), not prettier, whose semicolons and 80-column wraps survive an oxfmt pass.
