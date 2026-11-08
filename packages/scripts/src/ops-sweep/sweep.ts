@@ -215,7 +215,7 @@ const pullOf = (pr: unknown, repo: string): number | undefined => {
   return m ? Number(m[1]) : undefined
 }
 
-// A worker's PR whose head has been ready (its checks green) REVIEWER_LATE seconds with no review round (a ReviewBot verdict at any head) and no live session for the reviewer the roster names on it: one line to the worker's lead, once per head, since a reviewer started late or by hand left heads ready for over an hour. A parked row waits by design, as the runner check below reads it.
+// A worker's PR whose head has been ready (its checks green) REVIEWER_LATE seconds with no review round (a ReviewBot verdict at any head) and no live session for the reviewer the roster names on it, by its pr or any entry of its prs: one line to the worker's lead, once per head, since a reviewer started late or by hand left heads ready for over an hour. A parked row waits by design, as the runner check below reads it.
 export async function lateReviewers(
   ctx: Context,
   agents: Json[],
@@ -281,7 +281,9 @@ export async function lateReviewers(
     if ((pr.comments?.nodes ?? []).some((c) => /^## ReviewBot · round /.test(c.body ?? "")))
       continue
     const reviewers = open.filter(
-      (a) => kindOf(String(a.name), a.kind) === "reviewer" && pullOf(a.pr, repo) === n,
+      (a) =>
+        kindOf(String(a.name), a.kind) === "reviewer" &&
+        [a.pr, ...(Array.isArray(a.prs) ? a.prs : [])].some((u) => pullOf(u, repo) === n),
     )
     if (reviewers.some((a) => live.has(String(a.name)))) continue
     if (keep[n] === pr.headRefOid) continue

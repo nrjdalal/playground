@@ -414,6 +414,84 @@ describe("lateReviewers", () => {
   test("a GraphQL answer it cannot read is reviewer-check-unreadable", async () => {
     expect((await late("not json")).found).toEqual(["reviewer-check-unreadable"])
   })
+
+  // the two PRs as GitHub's GraphQL answers one query carrying both aliases, each ready the minutes given
+  const answerTwo = (ready: number) =>
+    JSON.stringify({
+      data: {
+        repository: Object.fromEntries(
+          [146, 147].map((n) => [
+            `p${n}`,
+            {
+              comments: { nodes: [] },
+              commits: {
+                nodes: [
+                  {
+                    commit: {
+                      statusCheckRollup: {
+                        contexts: {
+                          nodes: [
+                            { completedAt: minutesAgo(ready + 5) },
+                            { completedAt: minutesAgo(ready) },
+                          ],
+                        },
+                        state: "SUCCESS",
+                      },
+                    },
+                  },
+                ],
+              },
+              headRefOid: `b9860000000000000000000000000000000000${n}`,
+              state: "OPEN",
+            },
+          ]),
+        ),
+      },
+    })
+
+  test("a reviewer row whose prs names the PR covers it, and a PR no row names still alerts (#1533)", async () => {
+    const { ctx } = setup()
+    const told: Call[] = []
+    ctx.factory = async () => "acme/app"
+    ctx.run = async (argv, options = {}) => {
+      if (argv[1] === "/repo/scripts/ops/notify.sh") told.push({ argv, env: options.env })
+      return { code: 0, err: "", out: argv[0] === "gh" ? answerTwo(21) : "" }
+    }
+    const agents = [
+      { kind: "builder", name: "builder" },
+      {
+        kind: "worker",
+        name: "bbbbb-worker",
+        pr: "https://github.com/acme/app/pull/146",
+        status: "working",
+      },
+      {
+        kind: "worker",
+        name: "ccccc-worker",
+        pr: "https://github.com/acme/app/pull/147",
+        status: "working",
+      },
+      {
+        kind: "reviewer",
+        name: "ghjkmn-reviewer",
+        pr: "145",
+        prs: ["145", "146"],
+        status: "working",
+      },
+    ]
+    roster(ctx, agents)
+    const found = await lateReviewers(ctx, agents, new Map([["ghjkmn-reviewer", "busy"]]))
+    expect(found).toEqual([])
+    // PR 146 is covered by the live reviewer's prs, so it stays quiet; PR 147, named by no row, still alerts
+    expect(told).toHaveLength(1)
+    expect(told[0]!.argv[3]).toContain("PR #147 (ccccc-worker)")
+    expect(told[0]!.argv[3]).toContain("no reviewer on the roster")
+    // once that reviewer's session is gone, PR 146 alerts by its name; PR 147 was told at this head already
+    await lateReviewers(ctx, agents, new Map())
+    expect(told).toHaveLength(2)
+    expect(told[1]!.argv[3]).toContain("PR #146 (bbbbb-worker)")
+    expect(told[1]!.argv[3]).toContain("no live session for ghjkmn-reviewer")
+  })
 })
 
 describe("stalledPrs", () => {
