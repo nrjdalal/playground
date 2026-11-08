@@ -47,6 +47,7 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
 - Round 1 of a PR that adds a member to a kind (a status, a type, a choice, a button) files every list still naming the kind's old members as one finding, found by one grep for each list's wording, so later rounds spend no turn on lists outside the diff.
 - Round 1 also greps the agent-facing and web docs for each term whose meaning the diff changes, and files every doc still describing the old meaning as one finding, each by `file:line`, so later rounds spend no turn finding them one at a time.
 - A reviewer reuses its newest free review clone, one whose PR has merged or closed and that no live reviewer holds, moving it to `review-<n>` before it checks out PR n, since the nightly clean reads a detached clone's PR from its folder's name; it makes a fresh clone, about 115k files, only when none is free.
+  Once it moves a clone, it sends the session it reports to the old and new paths, so the cleanup that clone's last PR handed it to drops the old one.
 - A verdict posts with every blank filled, and a review's sub-agents search inside its clone and the paths its brief names, stopping every background task of theirs before they report.
   Each sub-agent makes its scratch folder first and writes every probe output to an absolute path inside it.
 - No verdict stands on stale CI: the reviewer reads the head's checks again right before it posts, and a check gone red since its earlier read is a blocking finding in that verdict.
