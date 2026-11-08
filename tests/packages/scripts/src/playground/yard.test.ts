@@ -177,4 +177,20 @@ describe("yardIo reads the live dashboard checkout's .env", () => {
     expect(io.api).toBe("https://api.yard.example")
     expect(io.web).toBe("https://yard.example")
   })
+
+  test("with no live checkout, the running checkout's .env stays unread and the CLI says it is not set up", async () => {
+    delete process.env.YARD_API_URL
+    delete process.env.YARD_WEB_URL
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "yard-live-")))
+    dirs.push(root)
+    Bun.spawnSync(["git", "init", "-q", root])
+    writeFileSync(join(root, ".env"), "YARD_API_URL=https://api.yard.example\n")
+    const lines: string[] = []
+    const io = { ...(await yardIo(root, async () => "")), err: (l: string) => lines.push(l) }
+    expect(io.api).toBeUndefined()
+    expect(await runYard(["channels"], io)).toBe(1)
+    expect(lines).toEqual([
+      "Yard is not set up here: set YARD_API_URL in your environment or the live dashboard checkout's .env",
+    ])
+  })
 })
