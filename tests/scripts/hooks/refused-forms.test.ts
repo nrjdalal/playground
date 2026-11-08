@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -22,6 +23,7 @@ import { check as headlessLogin } from "../../../scripts/hooks/no-headless-login
 import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
 import { check as linearTicket } from "../../../scripts/hooks/no-linear-ticket"
 import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
+import { check as outsidePrCode, live } from "../../../scripts/hooks/no-outside-pr-code"
 import { check as playgroundLeak } from "../../../scripts/hooks/no-playground-leak"
 import { check as publicLeak } from "../../../scripts/hooks/no-public-leak"
 import { check as rawDelete } from "../../../scripts/hooks/no-raw-delete"
@@ -42,7 +44,8 @@ import { storeWith } from "./render-set"
 import { git } from "./scratch-git"
 
 const CHECKOUT = join(import.meta.dir, "..", "..", "..")
-const SCRATCH = mkdtempSync(join(tmpdir(), "refused-forms-"))
+// where it lands, since no-outside-pr-code judges a skill script's path past this Mac's /var link
+const SCRATCH = realpathSync(mkdtempSync(join(tmpdir(), "refused-forms-")))
 afterAll(() => rmSync(SCRATCH, { force: true, recursive: true }))
 
 // A home whose data folder holds an extensions root, its links and files, as the guards' own tests build it.
@@ -242,6 +245,48 @@ const BUNDLED: Checks = Object.fromEntries(
   ),
 ) as Checks
 
+// A reviewer of a made-up outside author's PR, for no-outside-pr-code: its skill scripts are real files whose shebangs the live lookup reads, and its clones real folders whose .git and bunfig.toml it finds; the main checkout, which holds a bunfig.toml of its own, is PATHS.MAIN.
+const REVIEW = join(SCRATCH, "review")
+const CLONE = join(REVIEW, "outside")
+const UNDER_BUNFIG = join(REVIEW, "under-bunfig")
+const PLAIN = join(REVIEW, "plain")
+const ENV_CLONE = join(REVIEW, "env-file")
+const LOOSE = join(REVIEW, "loose")
+for (const dir of [
+  join(ENV_CLONE, ".git"),
+  join(LOOSE, "sub"),
+  join(PATHS.MAIN, ".git"),
+  join(PATHS.MAIN, "docs"),
+  join(CLONE, ".git"),
+  join(CLONE, "sub"),
+  join(CLONE, "own"),
+  join(UNDER_BUNFIG, "clone", ".git"),
+  join(PLAIN, ".git"),
+])
+  mkdirSync(dir, { recursive: true })
+for (const folder of [CLONE, join(CLONE, "own"), UNDER_BUNFIG, PATHS.MAIN])
+  writeFileSync(join(folder, "bunfig.toml"), 'preload = ["./pre.ts"]\n')
+// an env file bun loads into the script's variables, a harmless one: the hook judges the folder, never the file's lines
+for (const folder of [ENV_CLONE, PATHS.MAIN]) writeFileSync(join(folder, ".env"), "MADE_UP=1\n")
+for (const skills of [
+  join(DATA, "orgs", "home", "abc123", "skills"),
+  join(PATHS.MAIN, "extensions", "core", "skills"),
+]) {
+  const scripts = join(skills, "code-review-loop", "scripts")
+  mkdirSync(scripts, { recursive: true })
+  writeFileSync(join(scripts, "state.ts"), "#!/usr/bin/env bun\n")
+  writeFileSync(join(scripts, "state.py"), "#!/usr/bin/env python3\n")
+  writeFileSync(join(scripts, "state.mjs"), "#!/usr/bin/env node\n")
+  writeFileSync(join(scripts, "canary.ts"), "#!/usr/bin/env bun-canary\n")
+  writeFileSync(join(scripts, "glued.ts"), "#!/usr/bin/env -SFOO=1 bun\n")
+  writeFileSync(join(scripts, "quoted.ts"), "#!/usr/bin/env -S'bun'\n")
+}
+const OUTSIDE_PR = {
+  author: "ext-dev",
+  owner: "acme-owner",
+  ownerType: "User",
+}
+
 // Each guard's check with the environment its own test gives it, and the folders it runs in, each a cwd and the HOME that goes with it.
 const guardsOf = (
   c: Checks,
@@ -320,6 +365,30 @@ const guardsOf = (
       "main checkout": [PATHS.MAIN, HOME],
     },
     run: (raw, home) => c.mainCheckout(raw, { HOME: home }, PATHS.MAIN),
+  },
+  // run from its source alone, since this guard has no bundle
+  "no-outside-pr-code": {
+    folders: {
+      "main checkout": [PATHS.MAIN, HOME],
+      "main checkout subfolder": [join(PATHS.MAIN, "docs"), HOME],
+      "outside clone": [CLONE, HOME],
+      "outside clone subfolder": [join(CLONE, "sub"), HOME],
+      "outside clone subfolder with bunfig": [join(CLONE, "own"), HOME],
+      "outside clone under a bunfig": [join(UNDER_BUNFIG, "clone"), HOME],
+      "outside clone with an env file": [ENV_CLONE, HOME],
+      "plain clone": [PLAIN, HOME],
+      "scratch folder": [join(LOOSE, "sub"), HOME],
+      "unknown folder": ["outside", HOME],
+    },
+    run: (raw, home) => {
+      const environment = { HOME: home, PATH: "/usr/bin:/bin", PLAYGROUND_ROLE: "reviewer" }
+      return outsidePrCode(raw, environment, {
+        ...live(environment),
+        author: async () => OUTSIDE_PR,
+        main: PATHS.MAIN,
+        prsOf: async () => ["https://github.com/acme-owner/widgets/pull/501"],
+      })
+    },
   },
   "no-playground-leak": {
     folders: { "data folder": [DATA, HOME], home: [HOME, HOME] },
@@ -416,6 +485,20 @@ describe("each refusal of a #1198 row names the eval and its fix", () => {
       )
     },
   )
+})
+
+// a call the shell runs when it reads an unquoted heredoc's body is judged as one typed on the line, so its refusal names the call itself: the settings set of a guard key, or the rm on the root, which from a folder above the root reads as the root in its text, as a typed rm does
+describe("each no-extensions-write refusal of a #1428 row names the call as one typed on the line does", () => {
+  test.each(
+    CASES.filter(
+      (c) => c.id.startsWith("#1428 ") && c.guard === "no-extensions-write" && !allowed(c),
+    ).map((c) => [c.key, c] as const),
+  )("%s", async (_, c) => {
+    const at = GUARDS[c.guard].folders[c.folder] as [string, string]
+    expect(await GUARDS[c.guard].run(input(c.call, at[0]), at[1])).toMatch(
+      /playground settings set of live\.branch, a key a guard reads|refuses rm on \S+\/extensions( in its text)?:/,
+    )
+  })
 })
 
 describe("every refused form stays refused unless the allow list names it", () => {

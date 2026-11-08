@@ -892,6 +892,7 @@ const CHECKS = [
   "focus-marks",
   "health",
   "map",
+  "memory",
   "pages",
   "problems",
   "rail",

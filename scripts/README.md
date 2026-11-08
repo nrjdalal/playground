@@ -69,9 +69,12 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   Keep a worker's title to 32 characters, so its checkers' titles show whole.
   `--reports-to <session>` names the session a `worker` reports to, in both places its first prompt names it and as the row's `reportsTo`, in place of the builder, whose seat a worker's row records without it, as a runner's records ops'; it is refused for a value that is not a session name and with every other mode.
   `--in <dir>` starts a `worker` in that folder in place of this checkout: an existing folder under the code root (`paths.codeRoot`) or under `~/<org>` for an org `ext.links` guards, the folders whose trust prompt spawn.sh answers; any other folder, and every other mode, is refused.
-  `--memory <dir>` turns Claude Code's auto-memory on for that one start or resume, writing to `<dir>`, for the auto-memory trial; a later resume without it, and every restore, starts the session with memory off.
+  `--memory <dir>` turns Claude Code's auto-memory on for that one start or resume, writing to `<dir>`, whatever the session's role.
   Its launch reads a built settings file of its own, `factory-settings-<...>k-memory-<name>.json`, which adds `autoMemoryEnabled: true` and `autoMemoryDirectory: <dir>`, so the shared file every other launch reads stays as it is.
-  It is refused for a folder that is not absolute, given twice, and with restore or close.
+  `--memory off` keeps it off for that one start or resume, on the shared settings file, whatever arm the role or the row would take.
+  It is refused for a value that is neither an absolute folder nor `off`, given twice, and with restore or close.
+  Without either, each start takes the auto-memory trial's arm by its role ([ADR 0022](../.agents/adr/0022-auto-memory-runs-as-a-reviewed-trial.md)): on for the dispatcher and the builder, ops and planner leads in the data folder's `memory/<kind>/`, on for every second fresh worker start in `memory/worker-b/`, and off for every other session.
+  A resume keeps its roster row's `memory=on` or `memory=off`, which every start records.
   `spawn.sh column` opens a split right of the herdr pane it names and names a manager once;
   `spawn.sh manager` opens the first dispatcher, `sessions.names`' dispatcher, on this machine's own login, reporting to no session (`playground dispatcher` runs it), the second dispatcher, a dispatcher's name with `-2` (from `sessions.names` or `sessions.aliases`) or an `<id>-dispatcher` it records as `slot=2` (on `--backend glm`, or on Claude with a second account's `--account`),
   the optimizer, `optimizer` (`playground optimizer` runs it) or an `<id>-optimizer` (or a session the roster gives the optimizer kind), or the builder, ops or the planner by `sessions.names` (`playground builder`, `playground ops` and `playground planner` run it),
@@ -191,6 +194,13 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
 - A worker, reviewer or tester that ends automatically takes its worktrees with it, one at a time: dev stack, worktree, `playground-<worktree>-db` and `-redis` containers and branch (`cleanWorktree` in `scripts/ops/optimizer/auto_end.ts`; the factory's SESSIONS.md End holds the rules).
 - After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.
+
+## Run slots
+
+- Heavy runs go through `~/.playground/ops/run-slot.sh <name> -- <command>`; the load rules, the lanes and the switches are written in [ops/README.md](ops/README.md#run-slot).
+- In single-slot mode (`run-slot.single`) the machine holds 4 units across slots 1 and 2, so beside a big run's 3 units only a 1-unit run fits, by design, and a 2-unit waiter waits for the big to end (measured: it started 22.2 s after it arrived, when the big's 20 s hold ended, and the free slot stood idle the whole hold);
+  the rule and its 7 Nov window are written in [ops/README.md](ops/README.md#run-slot).
+- A backlog drains spaced: a small run that has waited past `BACKLOG_WAIT` waits for `burst_held` as medium and big runs do, since load5 shows a draining queue's starts only about a minute later, while a fresh small run starts at once; the rule and its 7 Nov burst are in [ops/README.md](ops/README.md#run-slot).
 
 ## bun run test:skills
 

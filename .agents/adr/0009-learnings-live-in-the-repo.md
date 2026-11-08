@@ -1,5 +1,7 @@
 # Learnings live in the repo, not in Claude Code's memory
 
+> Superseded in part by [ADR 0022](./0022-auto-memory-runs-as-a-reviewed-trial.md): the trial's sessions keep auto-memory notes in the data folder's `memory/`, and every learning still reaches the repo by a PR.
+
 Until 7 Oct 2026 sessions kept what they learned in Claude Code's auto-memory, one folder per project under `~/.claude/projects/*/memory`: 310 files across six projects, read only by sessions started in that one project, and never reviewed. The owner's reason: learnings go to the repo, so every session works better for them.
 
 ## Decision

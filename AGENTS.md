@@ -177,7 +177,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
   That means a lean document, reference disclosed into sibling files, a completion criterion on every step, positive phrasing, and leading words.
   A PR body is written for the owner, in the pr skill's template (Shipping step 1), so it is outside this rule.
 - ALWAYS: Land everything you learn in this repo, as a PR or a line to your lead (playbook's **memory** rule), so every session works better from what one learned.
-  Claude Code's auto-memory (`~/.claude/projects/*/memory`) stays off: `.claude/settings.json` and `scripts/factory-settings.json` set `autoMemoryEnabled` to false, and `tests/scripts/factory-settings.test.ts` holds both to it; [ADR 0009](./.agents/adr/0009-learnings-live-in-the-repo.md) records why.
+  Claude Code's auto-memory stays off in both shared settings files, which `tests/scripts/factory-settings.test.ts` holds, and spawn.sh turns it on for the trial's sessions in the data folder's `memory/<role>/` ([ADR 0022](./.agents/adr/0022-auto-memory-runs-as-a-reviewed-trial.md)).
 - ALWAYS: Track Playground's work as GitHub issues on the repo `factory.repo` names, so every item carries a number: an item's ID is `PG-<issue number>`, its branch `PG-<n>-<slug>`, its PR scope `(PG-<n>)`, and the issue stays open until the PR that says `Closes #<n>` merges.
   The repo tracks the factory's own work alone, since an org's work goes in that org's extension repo and a person's in their login extension ([ADR 0016](./.agents/adr/0016-playground-is-generic-with-a-small-core.md)).
   The key is written uppercase, and branch and title readers take either case; macOS ignores case, so a new branch never reuses an old one's number and slug in the other case.
@@ -298,8 +298,8 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
    Done when the body's Evidence names each touched doc and skill with its check, doc-sync's result and each list grep and changed-term grep with its hits, before the review's round 1 opens.
 2. Have a reviewer agent other than its author (a session started for the review, working in its own scratch clone, whose brief carries the signal rule from The factory, above) score it out of 5 through the [code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md) skill, and fix what it finds, until it scores 5/5 on the latest head,
    GitHub Actions' `Audit, Lint, and Build` and `test` are green there, and nothing is left you would change.
-3. Mark it ready at 5/5 and merge it with `bun run pr:merge <n>`, or let merge-on-ready land it (`bun run pr:train ready`): the only ways a Playground PR reaches `canary`.
-   Their gates, the merge lock and the merge queue are written in [packages/scripts/src/pr-merge/README.md](./packages/scripts/src/pr-merge/README.md); read it before a merge or a ruling on a gate.
+3. Mark it ready at 5/5 and merge it with `bun run pr:merge <n>` bare and unpiped, or let merge-on-ready land it (`bun run pr:train ready`): the only ways a Playground PR reaches `canary`.
+   Their gates, the merge lock and the merge queue are written in [packages/scripts/src/pr-merge/README.md](./packages/scripts/src/pr-merge/README.md); read it before a merge or gate ruling.
 4. `main`, which the main checkout and so every installed skill follows, moves only through the `release` skill, run by Ops on the owner's standing go-ahead (playbook's **release** rule).
    Once a release lands, bring the main checkout up to it by the skill's step 5 (pull, install, build, restart each ops job whose source changed, `scripts/link-skills.sh`), and say what landed.
 
