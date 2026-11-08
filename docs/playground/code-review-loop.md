@@ -32,7 +32,7 @@ The reviewer pastes the spec's text beside its path into the `code-review` call 
 
 ## State lives on the PR
 
-A reviewer session keeps nothing it cannot read back: the skill's `state.py` asks GitHub and git each time for the head, the newest verdict, the open threads and what others said since.
+A reviewer session keeps nothing it cannot read back: the skill's `state.ts` asks GitHub and git each time for the head, the newest verdict, the open threads and what others said since.
 So a session that restarts, or a new reviewer taking over, picks up exactly where the last verdict left off, and when GitHub cuts a list at its page size the script says so rather than reading the rest as absent.
 When the shared GraphQL budget is spent it reads the same facts over REST and says so, marking each review thread's resolution unknown rather than reading it as settled.
 The same script tells a base merge apart from new work: any commit of the PR's own in the push is new work, and otherwise it compares the PR's own changed lines on each side of the push, because a range diff across a merge of `canary` shows `canary`'s work as the PR's; a conflict resolved by hand that kept both sides reads as a base merge too.
@@ -57,7 +57,7 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
 - A reviewer also checks each waiting 5/5's head for a merge conflict with canary each time canary moves, with `git merge-tree --write-tree --name-only`: a conflict is a blocking verdict that names the conflicted files, and the worker merges canary in.
   On a stack held at 5/5 until the owner's try, that verdict is one signal to sync it with canary, and between syncs the reviewer runs only this conflict check on it.
 - The touched tests a reviewer runs come from the diff: the test of every file the PR changes, every test file it changes, every test that names or imports one of those files, by its path or from the test's own folder, plus the tests that scan the whole repo;
-  `state.py touched-tests` lists them, and in a Python repo it adds each test that scans a folder holding a changed file and, when a prompt template changes, each test that pins a built prompt's digest.
+  `state.ts touched-tests` lists them, and in a Python repo it adds each test that scans a folder holding a changed file and, when a prompt template changes, each test that pins a built prompt's digest.
 - When GitHub's `test` and `Audit, Lint, and Build` checks are green at the exact head, and canary has changed none of the PR's files since the base that run merged, the last 5/5 cites that run's link in place of a local run of the touched tests, since CI already ran the whole suite there.
   It fetches canary again once both checks are green and reads those conditions against it, since canary can move while CI runs.
   While those checks still run at the head, with canary unchanged on the PR's files, the reviewer waits for CI still running at the head and cites it, queueing a local run only when a condition fails or a check goes red.
@@ -79,7 +79,7 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
   It applies a patch or a suggested wording in its clone and runs the checks its files call for before it posts, the trace ratchet's test and the em-dash check among them on any doc, so its own fix never costs the PR a round.
   A patch to a promoted skill's `SKILL.md` also greps each changed term over that skill's docs page and every README that lists it, and patches every hit.
 - When a round leaves only fixes the next push can close, the reviewer asks the worker to merge canary in with that push, so the 5/5 candidate scores a head canary has not moved past.
-- After a compaction, a resume, or a notice that background tasks did not finish before the previous session ended, the reviewer runs `state.py pr` for each PR it holds and re-arms every `state.py wait` with none running, since an account flip kills the waiters with no notice.
+- After a compaction, a resume, or a notice that background tasks did not finish before the previous session ended, the reviewer runs `state.ts pr` for each PR it holds and re-arms every `state.ts wait` with none running, since an account flip kills the waiters with no notice.
 - A finding that asks for a behaviour states the behaviour wanted, not only the defect.
 - On a collaborator's org PR whose review ask came to you, the session that posts your review turns at once to the work org's extension (triage-and-implement's PR.md) for what follows a review you were asked for.
 - A reviewer agrees with an author's reply only once it has reproduced the author's reason with one command, named in its reply.

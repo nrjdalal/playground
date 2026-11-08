@@ -107,14 +107,14 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
 })
 
 describe("code-review-loop's touched tests come from the diff (#1104, #1525)", () => {
-  test("one definition runs state.py touched-tests and names its four rules", async () => {
+  test("one definition runs state.ts touched-tests and names its four rules", async () => {
     const text = await skill()
     expect(text.match(/\*\*The touched tests\*\*/g)?.length).toBe(1)
     const rule = text.split("**The touched tests**")[1]?.split("**Done when** every test")[0] ?? ""
     expect(rule).toContain("come from the diff")
-    expect(rule).toContain("state.py touched-tests <clone> <merge base> <head>")
+    expect(rule).toContain("state.ts touched-tests <clone> <merge base> <head>")
     expect(rule).toContain(
-      "state.py touched-tests <clone> <merge base> <head> > <scratch>/touched.txt",
+      "state.ts touched-tests <clone> <merge base> <head> > <scratch>/touched.txt",
     )
     expect(rule).toContain("in a TypeScript repo, the file holds at least one path")
     expect(rule).toContain("A Python repo's list can be empty with nothing wrong")
@@ -130,7 +130,7 @@ describe("code-review-loop's touched tests come from the diff (#1104, #1525)", (
     expect(rule).toContain("`SCANS_THROUGH_SOURCE` in the script")
     expect(rule).toContain("`rglob(`, `.glob(`, `os.walk` or `read_text(`")
     const script = await Bun.file(
-      join(root, "extensions/core/skills/code-review-loop/scripts/state.py"),
+      join(root, "extensions/core/skills/code-review-loop/scripts/state.ts"),
     ).text()
     for (const file of [
       "tests/packages/scripts/src/parity/record.test.ts",
@@ -142,7 +142,7 @@ describe("code-review-loop's touched tests come from the diff (#1104, #1525)", (
       "tests/skills/built-in-names.test.ts",
     ])
       expect(script).toContain(file)
-    expect(script).toContain("GIT_GREP = ")
+    expect(script).toContain("const GIT_GREP")
     expect(await page()).toContain("come from the diff")
   })
 
@@ -238,7 +238,7 @@ describe("code-review-loop runs its newest text every round (PG-213)", () => {
       "1. **Recover.** Read this skill's newest text from its folder in the main checkout, `$PLAYGROUND_REPO/extensions/core/skills/code-review-loop`,",
     )
     expect(recover).toContain(
-      "That folder is the one `${CLAUDE_SKILL_DIR}` stands for in every command the round runs, `scripts/state.py` included",
+      "That folder is the one `${CLAUDE_SKILL_DIR}` stands for in every command the round runs, `scripts/state.ts` included",
     )
     expect(recover.split("**Done when**")[1] ?? "").toContain(
       "read code-review-loop's SKILL.md from the main checkout this round and the round's scripts and references come from that folder",

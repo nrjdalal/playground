@@ -439,7 +439,7 @@ describe("status", () => {
       ["scripts/ops/optimizer/idle_sessions.ts", "r\\.status"],
       ["scripts/ops/up.py", 'a\\.get\\("status"\\)'],
       ["scripts/spawn.sh", 'a\\.get\\("status"\\)'],
-      ["extensions/core/skills/code-review-loop/scripts/state.py", 'a\\.get\\("status"\\)'],
+      ["extensions/core/skills/code-review-loop/scripts/state.ts", "a\\.status"],
       ["web/next/src/components/dashboard/status-table.tsx", "agent\\.status"],
       ["web/next/src/lib/agents.ts", "agent\\.status"],
     ] as const) {
