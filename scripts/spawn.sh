@@ -36,7 +36,8 @@ set -euo pipefail
 #      its row reading it unread; a missing 5-hour window is an account with no 5-hour limit, read as none) and each other login's
 #      usage-<name>.json or reading in login-flip.json's seen (the same checks, readings no older than 60 minutes); with no --account it
 #      starts on the passing login next in the account split, else the one with the lowest week, naming it, and refuses
-#      only when every login is over, its pick kept off the resume record's exec line so a restore picks afresh; --account skips the usage
+#      only when every login is over, its pick kept off the resume record's exec line so a restore picks afresh; a login whose usage.accounts
+#      row is parked (parkedUntil a later time) counts as over, and an --account naming it is refused; --account skips the usage
 #      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; GLM reads zai-usage.json
 #      (the 5-hour window under 95% of its credits, with no week check, and no empty balance (its `balance`), valid only
 #      while the zai usage job's last beat is ok and within 3 cycles)
