@@ -208,6 +208,26 @@ describe("pr:train", () => {
     expect(held).toEqual([{ n: 3, why: "not gated: parent" }])
   })
 
+  // one PR whose facts cannot be read (a failed fetch, a pr template the head cannot show) holds that PR alone, so the pass goes on (#1581)
+  test("a PR whose facts cannot be read is held with why, and the others are gated as before", async () => {
+    const w = world({
+      3: { "a.txt": edit("3") },
+      5: { "b.txt": edit("5") },
+      7: { "c.txt": edit("7") },
+    })
+    const h = hub(w, [3, 5, 7])
+    const local = localOf(w, h, { queue: [3, 5, 7] })
+    const unreadable = async (run: Run, repo: string, n: number): Promise<PrFacts> => {
+      if (n === 5) throw new Error("git fetch exited 128: couldn't find remote ref")
+      return local.facts(run, repo, n)
+    }
+    const { held, order } = await gatedOf(h.run, REPO, unreadable, local.queue)
+    expect(order.map((c) => c.n)).toEqual([3, 7])
+    expect(held).toEqual([
+      { n: 5, why: "not gated: facts unreadable (git fetch exited 128: couldn't find remote ref)" },
+    ])
+  })
+
   test("outside a scratch lock folder and a git stub, it refuses to run", async () => {
     const w = world({})
     const h = hub(w, [])
