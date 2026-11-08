@@ -32,7 +32,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    a `--priority` start passes it while `priority.json`, an org's own `priority-<name>.json` or a job's own `priority-start.json` stands in the data folder, since priority work comes first,
    and so does a resume within 15 minutes of `spawn.sh close` ending a row that read live, since that session already counts in the load it comes back into;
    memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`),
-   and for a fresh worker start alone no paging: swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`) and swap used under 85% of its total (`gates.swapUsedMax`, `sysctl -n vm.swapusage`), since free memory counts compressible pages and read 62% on 7 Nov while the machine paged hard, while checkers and resumes keep their pass;
+   and for a fresh worker start alone swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), refusing when vm_stat gives no reading, since free memory counts compressible pages and read 62% on 7 Nov while 150 pages swapped in a second; every other start keeps its pass, as at the slots gate;
    for a fresh worker start alone, a run-slot lane free with the load units for a run, or an empty queue (`scripts/ops/run-slot.sh room`), so a new worker never joins a queue it has no room in, while checkers, resumes and moves skip it,
    and a `--priority` start passes a full queue with a priority file standing, as at the load gate; and the launching backend's usage:
    Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone,

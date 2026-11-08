@@ -1,9 +1,11 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 
-import { capacityLog, minutesAgo, others, placing, spawn, workers } from "./spawn-fake"
+import { capacityLog, minutesAgo, others, placing, root, spawn, workers } from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them; one took 19.9s on the loaded runner box, so each gets twice that.
 setDefaultTimeout(40_000)
+
+const ID = "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"
 
 describe("the capacity gate refuses and spawns nothing", () => {
   // No cap on the count of sessions: no count of live sessions or workers holds a spawn; the load, memory, slots and usage gates guard the Mac.
@@ -177,18 +179,11 @@ describe("the capacity gate refuses and spawns nothing", () => {
   })
 })
 
-// #1430: free memory counts compressible pages, so it read 62% on 7 Nov while swap held 10.68 of 12.29 GB and 150 pages swapped in a second; a fresh worker start also waits while the machine pages, and a checker keeps its pass, as at the slots gate.
+// #1430: free memory counts compressible pages, so it read 62% on 7 Nov while 150 pages swapped in a second; a fresh worker start also waits on the swap-ins, and every other start keeps its pass, as at the slots gate.
 describe("the memory gate holds a fresh worker start while the machine pages", () => {
-  const GB = (n: number) => (n * 1024).toFixed(2)
-  const PAGING = {
-    FAKE_FREE: "62",
-    FAKE_PRESSURE: "1",
-    FAKE_SWAP_TOTAL: GB(12.29),
-    FAKE_SWAP_USED: GB(10.68),
-    FAKE_SWAPINS: "150",
-  }
+  const PAGING = { FAKE_FREE: "62", FAKE_PRESSURE: "1", FAKE_SWAPINS: "150" }
 
-  test("7 Nov's readings refuse a fresh worker start, naming the swap-ins and the free share", async () => {
+  test("7 Nov's readings refuse a fresh worker start on the swap-ins, naming them and the free share", async () => {
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], PAGING)
     expect(r.code).not.toBe(0)
     expect(placing(r)).toEqual([])
@@ -200,40 +195,34 @@ describe("the memory gate holds a fresh worker start while the machine pages", (
     ])
   })
 
-  test("swap used over its share refuses a fresh worker start with the swap-ins under their line", async () => {
-    const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], {
-      ...PAGING,
-      FAKE_SWAPINS: "0",
-    })
-    expect(r.code).not.toBe(0)
-    expect(placing(r)).toEqual([])
-    expect(r.err).toContain(
-      "the memory gate holds it: swap used is 10.68 of 12.29 GB (87%, sysctl vm.swapusage), 85% is the line, while free reads 62% (sysctl kern.memorystatus_level), which counts compressible pages",
-    )
-  })
-
-  test("a swap use it cannot read refuses a fresh worker start", async () => {
-    const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], {
-      FAKE_SWAPUSAGE_BROKEN: "1",
-    })
+  test("swap-ins it cannot read refuse a fresh worker start", async () => {
+    const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], { FAKE_VMSTAT_BROKEN: "1" })
     expect(r.code).not.toBe(0)
     expect(r.err).toContain(
-      "the memory gate holds it: it cannot read the swap used (sysctl vm.swapusage)",
+      "the memory gate holds it: it cannot read the swap-ins (vm_stat -c 2 1)",
     )
   })
 
   test.each([
-    ["a reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"]],
-    ["a tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"]],
-  ])("%s start keeps its pass while the machine pages", async (_, args) => {
-    const r = await spawn(args, [], PAGING)
+    ["a reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"], undefined],
+    ["a tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"], undefined],
+    ["a runner", ["runner", "runner-calm-heron", "b.md"], undefined],
+    ["a manager", ["manager", "optimizer", "b.md"], undefined],
+    ["a resume", ["resume", "worker-brave-otter", root, ID], "worker-brave-otter"],
+  ])("%s start keeps its pass while the machine pages", async (_, args, pinned) => {
+    const r = await spawn(
+      args,
+      [],
+      PAGING,
+      undefined,
+      pinned ? { backend: "claude", name: pinned } : undefined,
+    )
     expect(r.code, r.err).toBe(0)
   })
 
-  test("a fresh worker start passes once the swap-ins and the swap used are under their lines", async () => {
+  test("a fresh worker start passes once the swap-ins are under their line", async () => {
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], {
       ...PAGING,
-      FAKE_SWAP_USED: GB(10.4),
       FAKE_SWAPINS: "99",
     })
     expect(r.code, r.err).toBe(0)
