@@ -275,7 +275,7 @@ for (const skills of [
   const scripts = join(skills, "code-review-loop", "scripts")
   mkdirSync(scripts, { recursive: true })
   writeFileSync(join(scripts, "state.ts"), "#!/usr/bin/env bun\n")
-  writeFileSync(join(scripts, "state.py"), "#!/usr/bin/env python3\n")
+  writeFileSync(join(scripts, "script.py"), "#!/usr/bin/env python3\n")
   writeFileSync(join(scripts, "state.mjs"), "#!/usr/bin/env node\n")
   writeFileSync(join(scripts, "canary.ts"), "#!/usr/bin/env bun-canary\n")
   writeFileSync(join(scripts, "glued.ts"), "#!/usr/bin/env -SFOO=1 bun\n")
