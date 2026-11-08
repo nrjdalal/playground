@@ -434,7 +434,7 @@ export const others = (n: number, from = 1000): Session[] =>
 export const workers = (n: number, from = 2000): Session[] =>
   Array.from({ length: n }, (_, k) => ({ name: `worker-w-${k}`, pid: from + k }))
 
-// A fake herdr at the path its pin names: it logs each call as one line of words each ended by a unit separator, answers placement as herdr 0.9.5 does, and shows the screens FAKE_SCREENS lists (trust, trustcut, mcp, mcpstatus, cut, bare, blank, ready) one row per wait, each matched against the wait's regex.
+// A fake herdr at the path its pin names: it logs each call as one line of words each ended by a unit separator, answers placement as herdr 0.9.5 does, and shows the screens FAKE_SCREENS lists (trust, trustcut, mcp, mcpmany, mcpstatus, cut, bare, blank, ready) one row per wait, each matched against the wait's regex.
 const herdrBin = join(bin, "herdr-fake")
 writeFileSync(
   herdrBin,
@@ -469,7 +469,8 @@ case "$1 \${2:-}" in
     case "\${screens[$n]:-ready}" in
       trust) l="❯ 1. Yes, I trust this folder" ;;
       trustcut) l="❯ 1. Yes, I trust" ;;
-      mcp) l="New MCP server found in this project:" ;;
+      mcp) l="New MCP server found in this project: fs" ;;
+      mcpmany) l="2 new MCP servers found in this project" ;;
       mcpstatus) l="⏵⏵ bypass permissions on · 1 MCP server failed" ;;
       cut) l="⏵⏵ bypass permissions" ;;
       bare) l="⏵⏵" ;;
