@@ -27,7 +27,7 @@ ccusage refresh never fires; a failed or timed-out run leaves the last figures a
 """
 import datetime, fcntl, json, os, shutil, subprocess, sys, time, urllib.request
 
-HERE = os.path.join(os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state
+HERE = os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state
 OPS = os.path.dirname(HERE)
 OUT = os.path.join(os.path.dirname(OPS), "usage.json")
 STORED = os.path.join(HERE, "stored-login.json")

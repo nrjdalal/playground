@@ -9,7 +9,7 @@ On exit it writes the alerts to ALERT and prints them. It never answers or types
 import json, os, subprocess, sys, time
 from datetime import datetime, timezone
 
-STATE_DIR = os.path.join(os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")), "ops", "dashboard")
+STATE_DIR = os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path")), "ops", "dashboard")
 STATE = os.path.join(STATE_DIR, "stuck-state.json")
 ALERT = os.path.join(STATE_DIR, "stuck-alert.json")
 LOG = os.path.join(STATE_DIR, "stuck-watch.log")

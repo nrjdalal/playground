@@ -76,6 +76,7 @@ fi
 
 
 # Each extension checks its own needs with its scripts/setup/check.sh, run with the same --fix and the checkout as PLAYGROUND_REPO.
+case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "check.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 DATA="${PLAYGROUND_DATA_DIR:-$HOME/.playground}"
 for ext in "$DATA"/extensions/*/scripts/setup/check.sh; do
   [ -f "$ext" ] && [ "$ext" != "$DATA/extensions/core/scripts/setup/check.sh" ] || continue
