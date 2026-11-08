@@ -8,8 +8,7 @@ type Env = Record<string, string | undefined>
 export const configDirOf = (env: Env = process.env): string =>
   env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")
 
-// The folder the dashboard and the factory keep their files in outside the database: PLAYGROUND_DATA_DIR when the env given names it, else .playground in the home folder. The env is required, `{}` for a folder that never follows PLAYGROUND_DATA_DIR, so no caller drops it by leaving it out.
-// A relative value is refused with why: each process would read it against its own folder (spawn.sh after its cd /, the API from api/hono), so two would keep two data folders.
+// The folder the dashboard and the factory keep their files in outside the database: PLAYGROUND_DATA_DIR when the env given names it, else .playground in the home folder. The env is required, `{}` for a folder that never follows PLAYGROUND_DATA_DIR, so no caller drops it by leaving it out. A relative value is refused with why: each process would read it against its own folder (spawn.sh after its cd /, the API from api/hono), so two would keep two data folders.
 export const dataDirOf = (env: Env, home = env.HOME || homedir()): string => {
   const named = env.PLAYGROUND_DATA_DIR
   if (!named) return join(home, ".playground")
