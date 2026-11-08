@@ -68,6 +68,10 @@ const PRIVACY_ROUTE =
 const refuse = (what: string) =>
   `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`
 
+// A refusal of a command that shows no write, no redirect on the typed line that writes and no writer or remover, which the reader most often reaches by reading text as a path, so it routes to the lead as a likely false positive
+const refuseUnwritten = (what: string) =>
+  `no-extensions-write hook refuses ${what}: every guard reads its list and policy.json from there, so a session's write would change what a guard allows. If this command writes nothing, report it to your lead as a false positive.`
+
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
 
@@ -149,6 +153,42 @@ const DUPLICATE = /^(?:\d+|-)$/
 // Whether a redirect writes a file: >, >>, >|, <> or >& to a name, not an fd
 const writer = ({ op, target }: { op: string; target?: Word }): boolean =>
   [">", ">>", ">|", "<>"].includes(op) || (op === ">&" && !DUPLICATE.test(target?.value ?? ""))
+
+// Whether a line as typed holds a redirect that writes a file, a subshell's included; a redirect read out of a quoted text (`awk 'NR>1'` read as a line) is none
+function redirectsWrite(commands: Command[]): boolean {
+  return commands.some(
+    (cmd) => cmd.redirects.some(writer) || (!!cmd.inner && redirectsWrite(cmd.inner())),
+  )
+}
+
+// A case statement's opener, `case <word> in <pattern>`, its reserved words before it skipped
+function caseOpener(cmd: Command): boolean {
+  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted)
+  const before = cmd.words.slice(0, Math.max(at, 0))
+  const word = cmd.words[at + 2]
+  return (
+    at !== -1 &&
+    (before.length === 0 || onlyReserved({ ...cmd, words: before })) &&
+    word?.value === "in" &&
+    !word.quoted
+  )
+}
+
+// The commands of a line that are a case statement's patterns, which the shell matches and never runs: the run of piped alternatives a ) ends, after the opener's `in` or a `;;`, with no redirect of its own
+function casePatterns(commands: Command[]): Set<Command> {
+  const out = new Set<Command>()
+  for (let k = 0; k < commands.length; k++) {
+    if (!caseOpener(commands[k]) && commands[k].follows !== ";;") continue
+    let end = k
+    while (commands[end + 1]?.follows === "|") end++
+    const body = commands[end + 1]
+    const run = commands.slice(k, end + 1)
+    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
+      continue
+    for (const c of run) out.add(c)
+  }
+  return out
+}
 const GLOB = /[*?[{(]/
 // Variables that make git or a pager run a program, or point git at a config file that can, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/
@@ -967,6 +1007,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   let steadyAt: (cmd: Command) => Steady = () => NONE
   let whole = false
   let rootLine = false
+  let patterns = new Set<Command>()
+  let lineWrites = false
   // where each scope's variables were read to for their lines, and judged to for each cwd and remover, so each variable is read once rather than once a command
   type Cursors = WeakMap<Map<string, Text>, Map<string, number>>
   const varsRead: Cursors = new WeakMap()
@@ -982,6 +1024,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     })
   }
   const visit: Visit = async (cmd: Command, parsed, env) => {
+    // a case pattern is matched, never run, so its words are no path and no program; a substitution in it is its own command
+    if (patterns.has(cmd)) return
     const slot = slotWords(parsed)
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
@@ -1176,7 +1220,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           (filters.has(word) && !word.glob)
         if (text && !texts(word).some((t) => holds(t.value, here))) continue
         const named = names(word, here, remover, literal)
-        if (named) return refuse(`${verb} on ${named}`)
+        if (named)
+          return (lineWrites || remover || WRITERS.has(tool) ? refuse : refuseUnwritten)(
+            `${verb} on ${named}`,
+          )
       }
       if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`)
@@ -1261,6 +1308,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
   rootLine = rooted(lexed.commands)
   whole = rootLine || wholeLine(lexed.commands, env)
+  patterns = casePatterns(lexed.commands)
+  lineWrites = redirectsWrite(lexed.commands)
   // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER)
