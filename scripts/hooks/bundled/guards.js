@@ -15415,7 +15415,7 @@ var GUARDS = [
   { factory: true, name: "no-stash", run: (raw, env) => check13(raw, env) },
   { factory: true, name: "no-unslotted-run", run: (raw, env) => check20(raw, env) }
 ];
-var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs. Fix: bun run hooks:bundle in the main checkout, else report to your lead.`;
+var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`;
 async function check21(raw, environment = process.env, guards = GUARDS) {
   let factory;
   const reasons = await Promise.all(guards.map(async ({ factory: gated, name, run }) => {
@@ -15443,26 +15443,5 @@ if (import.meta.main)
 export {
   GUARDS,
   check21 as check,
-  check as desktopOwnerApp,
-  check2 as envDump,
-  check4 as extensionRepoWrite,
-  guarded as extensionsWrite,
-  check6 as falseGreen,
-  refusal as glmHeavyPath,
-  check7 as headlessLogin,
-  hook,
-  check9 as killByName,
-  check10 as linearTicket,
-  check11 as macWebBuild,
-  check5 as mainCheckout,
-  check12 as offPaletteLabel,
-  check14 as oursMerge,
-  check3 as playgroundLeak,
-  check15 as promptStop,
-  check16 as publicLeak,
-  check17 as rawDelete,
-  check18 as rawSpawn,
-  check19 as releaseComment,
-  check13 as stash,
-  check20 as unslottedRun
+  hook
 };

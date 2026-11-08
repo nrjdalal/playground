@@ -23,31 +23,6 @@ import { check as stash } from "./no-stash"
 import { check as unslottedRun } from "./no-unslotted-run"
 import { fromFactory } from "./role"
 
-// Each guard's own entry, so a test holds this file's bundle to each guard's source.
-export {
-  desktopOwnerApp,
-  envDump,
-  extensionRepoWrite,
-  extensionsWrite,
-  falseGreen,
-  glmHeavyPath,
-  headlessLogin,
-  killByName,
-  linearTicket,
-  macWebBuild,
-  mainCheckout,
-  offPaletteLabel,
-  oursMerge,
-  playgroundLeak,
-  promptStop,
-  publicLeak,
-  rawDelete,
-  rawSpawn,
-  releaseComment,
-  stash,
-  unslottedRun,
-}
-
 type Environment = Record<string, string | undefined>
 
 export type Guard = {
@@ -87,7 +62,7 @@ export const GUARDS: readonly Guard[] = [
 ]
 
 const threw = (name: string, error: unknown) =>
-  `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs. Fix: bun run hooks:bundle in the main checkout, else report to your lead.`
+  `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`
 
 // Every refusal the guards give, in GUARDS' order, one paragraph each, or undefined when none refuses; the factory's gate is read once, for the guards that take it.
 export async function check(
@@ -109,7 +84,7 @@ export async function check(
   return reasons.filter(Boolean).join("\n\n") || undefined
 }
 
-// The hook's exit: 2 with the reasons on stderr, else 0; the launcher in both settings files calls it from the main checkout's bundle.
+// The hook's exit: 2 with the reasons on stderr, else 0.
 export async function hook(): Promise<number> {
   const reason = await check(await Bun.stdin.text())
   if (!reason) return 0

@@ -134,7 +134,7 @@ describe("check", () => {
   })
 })
 
-// The bundle the launcher in both settings files imports, run as its own process with the input on stdin, as guard-probe runs it.
+// The bundle, run as its own process with the input on stdin, as guard-probe runs it.
 describe("the bundle runs as a hook", () => {
   const run = async (raw: string) => {
     const proc = Bun.spawn(
