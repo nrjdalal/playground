@@ -28,7 +28,7 @@ type DryTask = {
   taskId: string
 }
 type DryRun = {
-  globalCacheInputs: { environmentVariables: { configured: string[] } }
+  globalCacheInputs: { environmentVariables: { configured: string[]; passthrough?: string[] } }
   tasks: DryTask[]
 }
 
@@ -95,8 +95,9 @@ describe("bun run dev", () => {
   // next dev's telemetry flush can outlive the stack it belongs to and hold the worktree's files, so the launcher turns it off and turbo passes the value through to the dev tasks
   test("sets NEXT_TELEMETRY_DISABLED=1 for next dev, and turbo passes it through", async () => {
     const { dry } = await dryRun(["--filter=@web/next"])
-    const web = dry.tasks.find((task) => task.taskId === "@web/next#dev")
-    expect(web?.environmentVariables.passthrough).toContain(hashed("NEXT_TELEMETRY_DISABLED", "1"))
+    expect(dry.globalCacheInputs.environmentVariables.passthrough).toContain(
+      hashed("NEXT_TELEMETRY_DISABLED", "1"),
+    )
     const turbo = Bun.JSONC.parse(await Bun.file(join(ROOT, "turbo.json")).text()) as {
       globalPassThroughEnv?: string[]
     }

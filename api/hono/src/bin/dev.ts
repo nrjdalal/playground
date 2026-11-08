@@ -67,6 +67,8 @@ const serving = process.argv.includes("--serve")
 const args = process.argv.slice(2).filter((arg) => arg !== "--serve")
 const { env, notes } = devEnv(process.env, head.exitCode === 0 ? head.stdout.toString().trim() : "")
 for (const note of notes) console.error(`dev: ${note}`)
+// next dev's telemetry flush can outlive the stack it belongs to and hold the worktree's files, so the launcher turns it off; turbo passes it through to the dev tasks (turbo.json's globalPassThroughEnv)
+env.NEXT_TELEMETRY_DISABLED = "1"
 
 // The API's settings as read, kept for the fixture's folder, which the API takes from .env as well as the shell.
 let settings: ApiSettings = {}
