@@ -1024,7 +1024,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Restart a live session whose Claude login expired, with no terminal step: spawn.sh closes the pane it opened and resumes the same conversation in its folder, a reviewer or tester naming the PRs its roster row lists (`--pr`: its prs, else its pr), on `account` (a Claude account added in Settings > Accounts, with its token kept) or, with none, on this Mac's own login. A fixture stack runs nothing and clears the session's login block. A refusal names its reason: NOT_FOUND for no such live session or no such kept account, CONFLICT for a reviewer or tester whose row names no PR, refused before the close since spawn.sh would refuse its resume, ERROR for spawn.sh's own words.",
+        "Restart a live session whose Claude login expired, with no terminal step: spawn.sh closes the pane it opened and resumes the same conversation in its folder, a reviewer or tester naming the PRs its roster row lists (`--pr`: its prs, else its pr), on `account` (a Claude account added in Settings > Accounts, with its token kept) or, with none, on this Mac's own login. A fixture stack runs nothing and clears the session's login block. A refusal names its reason: NOT_FOUND for no such live session or no such kept account, CONFLICT for a reviewer or tester whose row names no pull request, refused before the close since spawn.sh would refuse its resume, ERROR for spawn.sh's own words.",
       responses: {
         200: {
           description: "Restarted: the session runs again on the account named",
@@ -1044,7 +1044,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ...notFoundErrorResponses,
         409: errorResponse(
           "CONFLICT",
-          "A reviewer or tester whose roster row names no PR, so its resume after the close would be refused",
+          "A reviewer or tester whose roster row names no pull request, so its resume after the close would be refused",
         ),
         502: errorResponse("ERROR", "spawn.sh refused or failed, its reason passed through"),
       },
@@ -1080,7 +1080,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         throw new ApiError(
           409,
           "CONFLICT",
-          `${worker.name} is a reviewer or tester whose roster row names no PR, so spawn.sh would refuse its resume after the close: name the PR it serves with roster.ts set ${worker.name} prs=<url>, then restart it`,
+          `${worker.name} is a reviewer or tester whose roster row names no pull request, so spawn.sh would refuse its resume after the close: name the PR it serves with roster.ts set ${worker.name} prs=<pull url>, then restart it`,
         )
       const restarted = await restartSession({
         account,

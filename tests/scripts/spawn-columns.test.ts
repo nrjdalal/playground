@@ -333,6 +333,7 @@ describe("under the gates it spawns", () => {
     expect(r.code).not.toBe(0)
     expect(r.err).toContain("its roster write failed before its pane opened")
     expect(placing(r)).toEqual([])
+    expect(readdirSync(join(r.home, ".playground", "launch"))).toEqual([])
   })
 
   test.each([
