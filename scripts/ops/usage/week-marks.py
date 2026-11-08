@@ -10,7 +10,7 @@ Ops' tick relays the alerts."""
 import calendar, datetime, json, os, sys, time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-HERE = os.path.expanduser("~/.playground/ops/usage")  # the state folder by name, so a run by its repo path still reads the live state
+HERE = os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state
 sys.path.insert(0, os.path.dirname(HERE))
 from beat import OPS, setting  # noqa: E402
 
@@ -51,7 +51,11 @@ def sample(path, t, account, used, reset):
 rows, rate = sample(samples, now, account, used, reset) if counted else ([], None)
 # the pace across every account ops-usage reads (login-flip.json's `accounts`), since the spares' budget is one %/h for all of them
 spares = {a: r for a, r in (u.get("accounts") or {}).items() if a != account}
-others = {a: sample(others_samples, calendar.timegm(time.strptime(r["readAt"], "%Y-%m-%dT%H:%M:%SZ")), a, r["week"], r["weekReset"])[1] for a, r in spares.items()}
+def spare_pace(a, r):
+    """The account's %/h over the last hour; a week that cannot spend before its reset, or one parked by its limitedUntil, counts as 0 and the combined figure stays a number."""
+    pace = sample(others_samples, calendar.timegm(time.strptime(r["readAt"], "%Y-%m-%dT%H:%M:%SZ")), a, r["week"], r["weekReset"])[1]
+    return 0.0 if pace is None and (r["week"] >= 100 or (r.get("limitedUntil") or 0) > now) else pace
+others = {a: spare_pace(a, r) for a, r in spares.items()}
 pace = [rate, *others.values()]
 combined = f"; combined {'?' if None in pace else f'{sum(pace):.1f}'}%/h across {len(pace)} accounts" if others else ""
 # the owner's day, midnight to midnight in clock.ownerZone; a value the setting takes but zoneinfo cannot read (an offset such as +05:30) runs the day in UTC and says so

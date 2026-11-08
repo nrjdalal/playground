@@ -7,6 +7,7 @@ import { TYPES_BUDGET_MS } from "./types"
 export type Readied = {
   merged?: { n: number; sha: string; why: string }
   refused: { n: number; why: string }[]
+  unreadable: { n: number; why: string }[]
 }
 
 // merge: how one PR merges, given what is left of the call's types budget: pr:merge's own path unless a test hands its own.
@@ -37,8 +38,10 @@ export async function mergeReady(
   const merge =
     local.merge ??
     ((n: number, typesBudgetMs: number) => prMerge(n, { repo: name }, run, { typesBudgetMs }))
-  const readied: Readied = { refused: [] }
-  for (const { facts: pr, n } of (await gatedOf(run, name, facts, queue)).order) {
+  const { held, order } = await gatedOf(run, name, facts, queue)
+  const unreadable = held.filter(({ why }) => why.startsWith("not gated: facts unreadable"))
+  const readied: Readied = { refused: [], unreadable }
+  for (const { facts: pr, n } of order) {
     const all = gatesOf(pr, options)
     // a draft is marked ready on every other gate, as gatedOf does
     const marked = marksReady(pr, all)
@@ -54,3 +57,15 @@ export async function mergeReady(
   }
   return readied
 }
+
+// What pr:train ready prints: its lines, each unreadable PR as an error line, and exit 1 when one was unreadable and nothing merged, so the merge train's log, which keeps a failing run, keeps the error as canary's throw did
+export const readyReport = (readied: Readied) => ({
+  code: readied.unreadable.length > 0 && !readied.merged ? 1 : 0,
+  errors: readied.unreadable.map(({ n, why }) => `✗ #${n} ${why}`),
+  lines: [
+    readied.merged
+      ? `Merged #${readied.merged.n} on ready at ${readied.merged.sha}: ${readied.merged.why}`
+      : "Nothing merged on ready.",
+    ...readied.refused.map((r) => `- #${r.n} refused: ${r.why}`),
+  ],
+})

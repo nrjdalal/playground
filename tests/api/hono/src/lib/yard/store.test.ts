@@ -3,6 +3,8 @@ import { join } from "node:path"
 
 import { SQL } from "bun"
 
+import { testContainerName } from "../../../../../container"
+
 process.env.BETTER_AUTH_SECRET ||= "yard-store-test-secret-not-for-use-anywhere"
 const { createDatabase } = await import("../../../../../../packages/db/dist/index.mjs")
 const store = await import("../../../../../../api/hono/src/lib/yard/store")
@@ -48,6 +50,8 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("yard-store"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",

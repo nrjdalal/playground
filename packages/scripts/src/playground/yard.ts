@@ -2,6 +2,7 @@ import { approvePath, type Channel, MESSAGE_KINDS } from "@packages/message"
 
 import { type YardClient, YardError, yardClient } from "../../../../api/hono/src/lib/yard/client"
 import { type Keychain, keychain } from "../../../../api/hono/src/lib/yard/keychain"
+import { dashboardCheckout } from "./probe"
 
 // playground yard: this Mac's Yard from the terminal, with the token the Keychain keeps, the same token and hosted Yard the local Dashboard reads.
 
@@ -34,7 +35,7 @@ export async function runYard(words: string[], io: YardIo): Promise<number> {
   const [verb, ...rest] = words
   if (!io.api) {
     io.err(
-      "Yard is not set up here: set YARD_API_URL in your environment or the factory checkout's .env",
+      "Yard is not set up here: set YARD_API_URL in your environment or the live dashboard checkout's .env",
     )
     return 1
   }
@@ -116,10 +117,11 @@ export async function runYard(words: string[], io: YardIo): Promise<number> {
   return 2
 }
 
-// YARD_API_URL and YARD_WEB_URL from the environment, else from the factory checkout's .env, as the local API reads them.
-const setting = async (name: string, repo: string): Promise<string | undefined> => {
+// YARD_API_URL and YARD_WEB_URL from the environment, else from the live dashboard checkout's .env, the checkout live.branch names, as the local API reads its settings. The main checkout keeps no .env, so the checkout the command runs from is never read.
+const setting = async (name: string, live: string | null): Promise<string | undefined> => {
   if (process.env[name]) return process.env[name]
-  const file = Bun.file(`${repo}/.env`)
+  if (!live) return undefined
+  const file = Bun.file(`${live}/.env`)
   if (!(await file.exists())) return undefined
   const line = (await file.text()).split("\n").find((l) => l.startsWith(`${name}=`))
   return (
@@ -130,12 +132,15 @@ const setting = async (name: string, repo: string): Promise<string | undefined> 
   )
 }
 
-export const yardIo = async (repo: string, readSecret: YardIo["readSecret"]): Promise<YardIo> => ({
-  api: await setting("YARD_API_URL", repo),
-  client: yardClient,
-  err: console.error,
-  keychain: keychain(),
-  out: console.log,
-  readSecret,
-  web: await setting("YARD_WEB_URL", repo),
-})
+export const yardIo = async (repo: string, readSecret: YardIo["readSecret"]): Promise<YardIo> => {
+  const live = dashboardCheckout(repo)
+  return {
+    api: await setting("YARD_API_URL", live),
+    client: yardClient,
+    err: console.error,
+    keychain: keychain(),
+    out: console.log,
+    readSecret,
+    web: await setting("YARD_WEB_URL", live),
+  }
+}

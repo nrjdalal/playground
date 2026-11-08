@@ -7,6 +7,7 @@ import {
   feedItemNeed,
   feedNeeds,
   hashAnchor,
+  hashTarget,
   isAnswered,
   isNeedsYouAnchor,
   mayHaveGone,
@@ -241,7 +242,7 @@ describe("Feed cards", () => {
 
   // Only after a refusal that may have let the answer through does the card ask to send again deliberately.
   test("an answer may have gone only after herdr took its keys and could not show them land", () => {
-    for (const code of ["CMUX_FAILED", "INTERRUPTED", "UNCONFIRMED"])
+    for (const code of ["INTERRUPTED", "SESSIONS_FAILED", "UNCONFIRMED"])
       expect(mayHaveGone(code)).toBe(true)
     for (const code of ["INVALID", "DISABLED", "NOT_PENDING", "BUSY", undefined]) {
       expect(mayHaveGone(code)).toBe(false)
@@ -629,5 +630,28 @@ describe("lostPrompt", () => {
   test("none while its prompt is in the Feed, or it waits on nothing", () => {
     expect(lostPrompt(worker({ feed: picker(), lifecycle: "needsInput" }))).toBeNull()
     expect(lostPrompt(worker({ lifecycle: "running" }))).toBeNull()
+  })
+})
+
+describe("hashTarget", () => {
+  test("a card's hash on a fresh load asks as a link, so the Inbox leaves its shelf shut", () => {
+    expect(hashTarget(null, "needs-you-a")).toEqual({ anchor: "needs-you-a", source: "link" })
+  })
+
+  test("a row's click keeps its source once the same anchor reaches the hash", () => {
+    const click = { anchor: "needs-you-a", source: "click" } as const
+    expect(hashTarget(click, "needs-you-a")).toBe(click)
+  })
+
+  test("a different card's hash after a click asks as a link", () => {
+    const click = { anchor: "needs-you-a", source: "click" } as const
+    expect(hashTarget(click, "needs-you-b")).toEqual({ anchor: "needs-you-b", source: "link" })
+  })
+
+  test("a hash that names no card changes nothing", () => {
+    const click = { anchor: "needs-you-a", source: "click" } as const
+    expect(hashTarget(click, "fn-1")).toBe(click)
+    expect(hashTarget(click, "")).toBe(click)
+    expect(hashTarget(null, "fn-1")).toBeNull()
   })
 })

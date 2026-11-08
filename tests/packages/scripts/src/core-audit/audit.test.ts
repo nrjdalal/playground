@@ -33,7 +33,7 @@ function linked(list?: string | null, policy?: string): Record<string, string> {
         JSON.stringify({
           companies: ["Widgetco"],
           handles: ["jdoe-made"],
-          linearKeys: ["MADE"],
+          linearKeys: ["MADE", "DUNE"],
           names: ["Jane Madeup"],
           slackIds: ["C0MADE0001"],
         }),
@@ -42,7 +42,6 @@ function linked(list?: string | null, policy?: string): Record<string, string> {
     join(ext, "policy.json"),
     policy ??
       JSON.stringify({
-        orgs: { acme: { "firefighting.start.prefixes": ["DUNE"] } },
         values: {
           "ext.links": { acme: ["dunecorp"], me: ["*"] },
           "ext.repos": { acme: "me/vault-one" },
@@ -93,7 +92,7 @@ describe("leg 1: a linked org's terms, read at run time", () => {
     expect(login && "refusal" in login && login.refusal).toContain("no login")
   })
 
-  test("reports a keyed and a bare tracker key, the org's name and its prefixes, each as file:line", async () => {
+  test("reports a keyed and a bare tracker key of each listed key and the org's name, each as file:line", async () => {
     const terms = (await orgTerms(linked())) as Terms
     const files: File[] = [
       { path: "src/a.ts", text: "ok\nsee MADE-12 here\n" },

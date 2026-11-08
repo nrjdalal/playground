@@ -4,6 +4,7 @@ import { dirname, join } from "node:path"
 
 import { SQL } from "bun"
 
+import { testContainerName } from "../../../../container"
 import { liveReadsEnv } from "../../../../live-reads"
 import { slowChild } from "../../../../slow-child"
 
@@ -38,6 +39,8 @@ describe.skipIf(!dockerUp())("the bun run thread CLI", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("dashboard-thread"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",

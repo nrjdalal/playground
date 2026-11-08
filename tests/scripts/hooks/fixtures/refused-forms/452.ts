@@ -41,4 +41,6 @@ export const allowed: string[] = [
   "a quiet commit whose -m message holds a parenthesised scope",
   "a quiet commit whose -am message holds a parenthesised scope",
   "a quiet commit whose --message= holds a parenthesised scope",
+  // #1455: a quiet message is text git never runs, so one naming a gated call runs
+  "a quiet message that names a gated call",
 ]

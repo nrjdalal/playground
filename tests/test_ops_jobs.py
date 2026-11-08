@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """scripts/ops's jobs: up.py, ops-dashboard's run.sh and supervisor.sh, and the session resume they print.
 
-- up.py starts every terminal job in herdr, a job stored as cmux or auto included, and judges each by its heartbeat alone (fake process tables).
+- up.py starts every terminal job in herdr, whatever runtime word its row holds, and judges each by its heartbeat alone (fake process tables).
 - ops-dashboard's run.sh and supervisor.sh stop their recorded process groups on SIGHUP and once their parent is gone, and nothing else: each
   runs on scratch state with stub git, bun, curl, docker, cmux and claude, so its stack is a few sleeps this test starts, never the dashboard.
   Started from the repo's copy, run.sh execs the checkout's own once at its first start (#1330), so the scratch checkout holds a copy of scripts/ops.
@@ -89,9 +89,9 @@ def test_up(scratch):
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     with open(os.path.join(state, "ops-x.json"), "w") as f:
         json.dump({"job": "ops-x", "pid": me, "startedAt": now, "lastBeatAt": now, "lastResult": "ok", "cycleSeconds": 60}, f)
-    job = {"name": "ops-x", "heartbeat": "ops-x", "runtime": "cmux"}
-    check(up.healthy(job) == (True, "ok"), "up: a job stored as cmux is judged by its fresh heartbeat alone")
-    check(up.healthy({**job, "runtime": "auto"}) == (True, "ok"), "up: so is a job stored as auto")
+    job = {"name": "ops-x", "heartbeat": "ops-x", "runtime": "made-up"}
+    check(up.healthy(job) == (True, "ok"), "up: a job stored with an old runtime word is judged by its fresh heartbeat alone")
+    check(up.is_herdr(job) and up.is_herdr({**job, "runtime": "herdr"}), "up: and it is a terminal job, whatever word its row holds")
     check(up.healthy({"name": "ops-x", "heartbeat": "ops-x", "launchd": "com.x.ops-x"})[0], "up: a launchd job is judged by its heartbeat alone")
 
 def test_unguarded(scratch):
@@ -437,7 +437,7 @@ def test_up_herdr(scratch):
     def job(name, **extra):
         os.makedirs(os.path.join(folder, name), exist_ok=True)
         open(os.path.join(folder, name, "run.py"), "w").close()
-        return {"name": name, "heartbeat": name, "runtime": "cmux", "command": f"python3 {folder}/{name}/run.py", "cwd": "/x", **extra}
+        return {"name": name, "heartbeat": name, "runtime": "herdr", "command": f"python3 {folder}/{name}/run.py", "cwd": "/x", **extra}
 
     def pass_with(jobs, quiet=True):
         with open(os.path.join(state, "jobs.json"), "w") as f:
@@ -525,9 +525,9 @@ def test_up_herdr(scratch):
         del os.environ["STUB_HERDR_RUN_FAIL"]
         check(said[0] == said[1] and "could not start ops-stale" in said[0] and "m old" not in said[0], "up: the printed line leaves out the heartbeat's age", said)
 
-        # a job stored as cmux starts in herdr
-        far = pass_with([job("ops-far")], quiet=False)
-        check("started ops-far in herdr" in far and any(p.get("label") == "ops-far" for p in herdr_st()["panes"]), "up: a job stored as cmux starts in herdr", far)
+        # a job stored with an old runtime word starts in herdr
+        far = pass_with([job("ops-far", runtime="made-up")], quiet=False)
+        check("started ops-far in herdr" in far and any(p.get("label") == "ops-far" for p in herdr_st()["panes"]), "up: a job stored with an old runtime word starts in herdr", far)
         check(open(cmux_log).read() == "", "up: and no pass calls cmux", open(cmux_log).read())
 
         # a missing server socket refuses a herdr start and stops nothing: a copy whose heartbeat went stale keeps running

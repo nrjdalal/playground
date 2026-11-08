@@ -70,10 +70,10 @@ export function relayRouter({
       },
       upgrade((c) => {
         const userId = c.get("caller").id
-        // attach's own release, kept from onOpen, since onClose's context is a new object
-        let release = () => {}
+        // attach's own release, kept from onOpen, since onClose's context is a new object; the close code tells a replaced socket from one that went
+        let release: (code?: number) => void = () => {}
         return {
-          onClose: () => release(),
+          onClose: ({ code }) => release(code),
           onMessage: (event, socket) => hub.answer(userId, String(event.data), socket),
           onOpen: (_, socket) => {
             release = hub.attach(userId, socket)

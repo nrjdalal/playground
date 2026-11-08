@@ -4,6 +4,8 @@ import { join, resolve } from "node:path"
 
 import { SQL } from "bun"
 
+import { testContainerName } from "../../../../container"
+
 const ROOT = resolve(import.meta.dir, "../../../../..")
 const API = join(ROOT, "api/hono")
 const HOSTED = join(API, "src/hosted.ts")
@@ -71,6 +73,8 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("routers-yard"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",
@@ -192,6 +196,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       requests: [{ login: "ow", method: "GET", path: "/api/v1/workers?x=1" }],
       status: { online: true, since: null },
       statusAfter: { online: false, since: "string" },
+      statusReplaced: { online: false, since: null },
       signedWrite: [201, { sent: true }],
       write: 404,
       writeMember: 403,

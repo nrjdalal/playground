@@ -48,6 +48,7 @@ describe("under the gates it spawns", () => {
       "surface=",
       "title=Plain test work",
       "task=brief-x.md",
+      "memory=off",
     ])
   })
 
@@ -274,6 +275,8 @@ describe("under the gates it spawns", () => {
         "worker-brave-otter",
         "w1:p2",
         "brief-reviewer.md",
+        "--pr",
+        "1",
       ],
       workers(9),
     )
@@ -297,9 +300,12 @@ describe("under the gates it spawns", () => {
       "set",
       "reviewer-brave-otter",
       "kind=reviewer",
+      "prs+=1",
+      "pr=1",
       "worker=worker-brave-otter",
       "title=Plain test work",
       "task=brief-reviewer.md",
+      "memory=off",
     ])
   })
 
@@ -320,12 +326,12 @@ describe("under the gates it spawns", () => {
       { name: "reviewer-x", role: "worker", status: "working", task: "t", title: "Review #37" },
     ],
   }
-  const reviewerOf = ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"]
+  const reviewerOf = ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"]
   // one test per start, so each start has the whole timeout to itself on a loaded runner
   test.each<[string, string[], Record<string, string>, (r: Spawned) => void]>([
     [
       "a tester",
-      ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"],
+      ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1"],
       { NO_TITLE: "1", ROSTER_JSON: JSON.stringify(titled) },
       (tester) => {
         expect(tester.code).toBe(0)
@@ -360,7 +366,15 @@ describe("under the gates it spawns", () => {
       reviewerOf,
       { NO_TITLE: "1", ROSTER_JSON: JSON.stringify(triage) },
       (triaged) =>
-        expect(triaged.roster).toEqual(["set", "reviewer-x", "kind=reviewer", "worker=worker-x"]),
+        expect(triaged.roster).toEqual([
+          "set",
+          "reviewer-x",
+          "kind=reviewer",
+          "prs+=1",
+          "pr=1",
+          "worker=worker-x",
+          "memory=off",
+        ]),
     ],
   ])(
     "a checker with no title takes Review: or Test: before its worker's, keeps its own, and is refused with neither; a probe keeps its words-only default: %s",
@@ -404,40 +418,61 @@ describe("under the gates it spawns", () => {
   })
 
   test("under inscope the title check reads the roster spawn.sh itself edits, ~/.claude's, so a titled entry keeps its own", async () => {
-    const r = await spawn(["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"], [], {
-      CLAUDE_CONFIG_DIR: "/no/such/inscope/dir",
-      INSCOPE_CCD: "/no/such/inscope/dir",
-      NO_TITLE: "1",
-      ROSTER_JSON: JSON.stringify({
-        agents: [
-          {
-            name: "reviewer-x",
-            role: "worker",
-            status: "working",
-            task: "t",
-            title: "Review #37",
-          },
-        ],
-      }),
-    })
+    const r = await spawn(
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
+      [],
+      {
+        CLAUDE_CONFIG_DIR: "/no/such/inscope/dir",
+        INSCOPE_CCD: "/no/such/inscope/dir",
+        NO_TITLE: "1",
+        ROSTER_JSON: JSON.stringify({
+          agents: [
+            {
+              name: "reviewer-x",
+              role: "worker",
+              status: "working",
+              task: "t",
+              title: "Review #37",
+            },
+          ],
+        }),
+      },
+    )
     expect(r.code).toBe(0)
-    expect(r.roster).toEqual(["set", "reviewer-x", "kind=reviewer", "worker=worker-x"])
+    expect(r.roster).toEqual([
+      "set",
+      "reviewer-x",
+      "kind=reviewer",
+      "prs+=1",
+      "pr=1",
+      "worker=worker-x",
+      "memory=off",
+    ])
   })
 
-  // spawn.sh starts nothing in cmux, so a column beside a cmux surface:N is refused before any cmux or herdr call.
-  test("a column beside a cmux surface:N is refused, naming #2076", async () => {
-    const r = await spawn(["column", "tester", "tester-x", "worker-x", "surface:7", "t.md"], [])
+  // a column opens beside a herdr pane id alone, so an old cmux surface:N is refused as any other anchor is, before any cmux or herdr call.
+  test("a column beside an old cmux surface:N is refused as no herdr pane id", async () => {
+    const r = await spawn(
+      ["column", "tester", "tester-x", "worker-x", "surface:7", "t.md", "--pr", "1"],
+      [],
+    )
     expect(r.code).toBe(1)
     expect(r.cmux).toBeUndefined()
     expect(placing(r)).toEqual([])
-    expect(r.err).toContain("surface:7 is a cmux surface, and spawn.sh starts nothing in cmux")
+    expect(r.err).toContain("surface:7 is not a herdr pane id (w1:p2)")
   })
 
   test("a resume reopens the session by name in its folder, its role read from its name", async () => {
-    const r = await spawn(["resume", "reviewer-brave-otter", root], [], {}, undefined, {
-      name: "reviewer-brave-otter",
-      backend: "claude",
-    })
+    const r = await spawn(
+      ["resume", "reviewer-brave-otter", root, "--pr", "1"],
+      [],
+      {},
+      undefined,
+      {
+        name: "reviewer-brave-otter",
+        backend: "claude",
+      },
+    )
     expect(r.code).toBe(0)
     expect(opened(r)).toEqual([
       "workspace",

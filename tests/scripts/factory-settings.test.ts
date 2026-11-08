@@ -4,6 +4,7 @@ import { join } from "node:path"
 
 const root = join(import.meta.dir, "..", "..")
 
+// The shared files keep it off for every session spawn.sh did not start; the trial's own built files turn it on, as tests/scripts/spawn-memory.test.ts holds (ADR 0022)
 describe("auto-memory", () => {
   for (const file of [join("scripts", "factory-settings.json"), join(".claude", "settings.json")])
     test(`${file} turns it off`, async () => {

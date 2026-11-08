@@ -21,11 +21,13 @@ import {
   realLockRoot,
   prMerge,
   takeLock,
+  unfoundTokens,
   type Run,
   type RunResult,
 } from "../../../../../packages/scripts/src/pr-merge/merge"
 import "./scratch-config"
 import { storeWith } from "../../../../scripts/hooks/render-set"
+import { PR_TEMPLATE, SKILL_BODY } from "./bodies"
 import { greenChecks } from "./suite"
 
 const HEAD = "69a6a4c5e6caf46c4abda6a89de4ce6f3b309e88"
@@ -62,17 +64,24 @@ const local = ({
   canary = CANARY,
   clean = [] as string[],
   parents = { [HEAD]: ["p0"] } as Record<string, string[]>,
+  template = PR_TEMPLATE as string | null,
   tree = TREE as string | null,
 }: {
   answer?: RunResult
   canary?: string
   clean?: string[]
   parents?: Record<string, string[]>
+  template?: string | null
   tree?: string | null
 } = {}) => {
   const lockRoot = mkdtempSync(join(scratch, "lock-"))
   const git: Run = async (args) => {
     if (args[0] === "fetch") return ok("")
+    if (args[0] === "show") {
+      return template === null
+        ? { code: 128, stderr: "fatal: path not in tree", stdout: "" }
+        : ok(template)
+    }
     if (args[0] === "merge-base") return ok(`${canary}\n`)
     if (args[0] === "rev-list" && args.includes("--parents")) {
       const sha = args.at(-1) ?? ""
@@ -121,7 +130,9 @@ function stub({
   comments = PASSING,
   files = ["AGENTS.md", "packages/scripts/src/pr-merge/cli.ts"],
   merges = [ok("")],
+  parents = {},
   stateAfter = ["MERGED"],
+  viewBody,
 }: {
   aheadBy?: string
   author?: string
@@ -132,7 +143,9 @@ function stub({
   ready?: RunResult
   files?: string[]
   merges?: RunResult[]
+  parents?: Record<number, RunResult>
   stateAfter?: string[]
+  viewBody?: string
 } = {}) {
   const calls: string[][] = []
   let merge = 0
@@ -140,11 +153,15 @@ function stub({
   const run: Run = async (args) => {
     calls.push(args)
     const joined = args.join(" ")
+    if (joined.startsWith("pr view") && joined.endsWith("--json state --jq .state")) {
+      return parents[Number(args[2])] ?? { code: 1, stderr: `no PR ${args[2]}`, stdout: "" }
+    }
     if (joined.startsWith("pr view") && joined.includes("baseRefName")) {
       return ok(
         JSON.stringify({
           author: { login: author },
           baseRefName: "canary",
+          body: viewBody,
           headRefOid: HEAD,
           isDraft: draft,
           state: "OPEN",
@@ -614,6 +631,15 @@ describe("the merge lock", () => {
     ])
   })
 
+  test("a pr template the head cannot show, or one with no placeholder, stops the run with why, so the body gate fails closed", async () => {
+    await expect(
+      prMerge(112, { repo: REPO }, stub().run, local({ template: null })),
+    ).rejects.toThrow("the body gate cannot read the pr template's placeholders")
+    await expect(
+      prMerge(112, { repo: REPO }, stub().run, local({ template: "no fence here\n" })),
+    ).rejects.toThrow("its first markdown fence holds none")
+  })
+
   test("outside the CLI, a run without a git stub throws before it fetches or locks, whatever NODE_ENV says", async () => {
     const { calls, run } = stub()
     await expect(prMerge(112, { repo: REPO }, run, { lockRoot: local().lockRoot })).rejects.toThrow(
@@ -854,5 +880,71 @@ describe("a head with no finished GitGuardian check", () => {
     const { run } = stub({ checks: greenChecks() })
     const outcome = await prMerge(112, { repo: "acme/other" }, run, local())
     expect(outcome).toMatchObject({ kind: "merged" })
+  })
+})
+
+describe("a stacked PR (PG-1274)", () => {
+  const stacked = `${SKILL_BODY.replace("**After:** one.", "**After:** one. `AGENTS.md` checked.")}\n- Stacked on #12`
+
+  test("pr:merge refuses while its parent is open, naming the parent, and never calls gh pr merge", async () => {
+    const { calls, run } = stub({ parents: { 12: ok("OPEN") }, viewBody: stacked })
+    const outcome = await prMerge(112, { repo: REPO }, run, local())
+    expect(outcome.kind).toBe("refused")
+    expect(outcome.gates.find((gate) => gate.name === "parent")).toMatchObject({ ok: false })
+    expect(outcome.gates.find((gate) => gate.name === "parent")?.detail).toContain("#12")
+    expect(merges(calls)).toEqual([])
+  })
+
+  test("a parent whose state gh cannot read refuses too", async () => {
+    const { calls, run } = stub({ viewBody: stacked })
+    const outcome = await prMerge(112, { repo: REPO }, run, local())
+    expect(outcome.kind).toBe("refused")
+    expect(outcome.gates.find((gate) => gate.name === "parent")?.ok).toBe(false)
+    expect(merges(calls)).toEqual([])
+  })
+
+  test("a merged parent, or none declared, merges as today", async () => {
+    const parented = stub({ parents: { 12: ok("MERGED") }, viewBody: stacked })
+    expect(await prMerge(112, { repo: REPO }, parented.run, local())).toMatchObject({
+      kind: "merged",
+    })
+    const plain = stub({ viewBody: stacked.replace("\n- Stacked on #12", "") })
+    expect(await prMerge(112, { repo: REPO }, plain.run, local())).toMatchObject({
+      kind: "merged",
+    })
+    expect(plain.calls.some((args) => args.join(" ").endsWith("--json state --jq .state"))).toBe(
+      false,
+    )
+  })
+})
+
+describe("the body gate's token grep at the head", () => {
+  test("names the tokens no file at the head holds, and throws when git grep cannot run", async () => {
+    const repo = mkdtempSync(join(scratch, "grep-"))
+    const inRepo = (...args: string[]) => Bun.spawnSync(["git", "-C", repo, ...args])
+    inRepo("init", "-q")
+    writeFileSync(join(repo, "clock.ts"), "export const CLOCK_EXEMPT = []\n")
+    inRepo("add", "clock.ts")
+    inRepo("-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "-m", "a")
+    const git: Run = async (args) => {
+      const proc = Bun.spawnSync(["git", "-C", repo, ...args])
+      return { code: proc.exitCode, stderr: proc.stderr.toString(), stdout: proc.stdout.toString() }
+    }
+    expect(await unfoundTokens(git, "HEAD", ["CLOCK_EXEMPT", "SUITE_LINE"])).toEqual(["SUITE_LINE"])
+    expect(await unfoundTokens(git, "HEAD", [])).toEqual([])
+    await expect(unfoundTokens(git, "no-such-ref", ["SUITE_LINE"])).rejects.toThrow(
+      "git grep exited",
+    )
+  })
+
+  test("at this repo's own head, the gate's sample tokens stay unfound, since the grep leaves out the gate's own folders", async () => {
+    const root = join(import.meta.dir, "..", "..", "..", "..", "..")
+    const git: Run = async (args) => {
+      const proc = Bun.spawnSync(["git", "-C", root, ...args])
+      return { code: proc.exitCode, stderr: proc.stderr.toString(), stdout: proc.stdout.toString() }
+    }
+    expect(await unfoundTokens(git, "HEAD", ["CLOCK_EXEMPT", "SKILLS_LINE", "SUITE_LINE"])).toEqual(
+      ["SKILLS_LINE", "SUITE_LINE"],
+    )
   })
 })
