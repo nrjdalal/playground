@@ -281,7 +281,9 @@ export async function lateReviewers(
     if ((pr.comments?.nodes ?? []).some((c) => /^## ReviewBot · round /.test(c.body ?? "")))
       continue
     const reviewers = open.filter(
-      (a) => kindOf(String(a.name), a.kind) === "reviewer" && pullOf(a.pr, repo) === n,
+      (a) =>
+        kindOf(String(a.name), a.kind) === "reviewer" &&
+        [a.pr, ...(Array.isArray(a.prs) ? a.prs : [])].some((u) => pullOf(u, repo) === n),
     )
     if (reviewers.some((a) => live.has(String(a.name)))) continue
     if (keep[n] === pr.headRefOid) continue

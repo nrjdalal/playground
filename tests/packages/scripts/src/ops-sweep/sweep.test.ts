@@ -480,9 +480,9 @@ describe("lateReviewers", () => {
       },
     ]
     roster(ctx, agents)
-    const found = await lateReviewers(ctx, agents, new Map())
+    const found = await lateReviewers(ctx, agents, new Map([["ghjkmn-reviewer", "busy"]]))
     expect(found).toEqual([])
-    // PR 146 is covered by the reviewer's prs, so it stays quiet; PR 147, named by no row, still alerts
+    // PR 146 is covered by the live reviewer's prs, so it stays quiet; PR 147, named by no row, still alerts
     expect(told).toHaveLength(1)
     expect(told[0]!.argv[3]).toContain("PR #147 (ccccc-worker)")
     expect(told[0]!.argv[3]).toContain("no reviewer on the roster")
