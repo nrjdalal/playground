@@ -56,8 +56,11 @@ type Environment = Record<string, string | undefined>
 const shown = (word: Word): string =>
   (word.raw ?? word.value).replaceAll(UNKNOWN, () => "$…").replaceAll(READ, () => "$…")
 
-const ROUTE =
-  "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand."
+// Why a write under the root is refused, which both routes below open with
+const WHY_ROOT =
+  "every guard reads its list and policy.json from there, so a session's write would change what a guard allows."
+
+const ROUTE = `${WHY_ROOT} A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand.`
 
 // The guard keys Privacy on the Dashboard's Settings page saves at your login's scope, so a write there names that page as its route.
 const PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"])
@@ -67,6 +70,10 @@ const PRIVACY_ROUTE =
 
 const refuse = (what: string) =>
   `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`
+
+// A refusal that likely names no write (`unwritten`), which the reader most often reaches by reading text as a path, so it routes to the lead as a likely false positive
+const refuseUnwritten = (what: string) =>
+  `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`
 
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
@@ -149,6 +156,42 @@ const DUPLICATE = /^(?:\d+|-)$/
 // Whether a redirect writes a file: >, >>, >|, <> or >& to a name, not an fd
 const writer = ({ op, target }: { op: string; target?: Word }): boolean =>
   [">", ">>", ">|", "<>"].includes(op) || (op === ">&" && !DUPLICATE.test(target?.value ?? ""))
+
+// Whether a line as typed holds a redirect that writes a file, a subshell's included; a redirect read out of a quoted text (`awk 'NR>1'` read as a line) is none
+function redirectsWrite(commands: Command[]): boolean {
+  return commands.some(
+    (cmd) => cmd.redirects.some(writer) || (!!cmd.inner && redirectsWrite(cmd.inner())),
+  )
+}
+
+// A case statement's opener, `case <word> in <pattern>`, its reserved words before it skipped
+function caseOpener(cmd: Command): boolean {
+  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted)
+  const before = cmd.words.slice(0, Math.max(at, 0))
+  const word = cmd.words[at + 2]
+  return (
+    at !== -1 &&
+    (before.length === 0 || onlyReserved({ ...cmd, words: before })) &&
+    word?.value === "in" &&
+    !word.quoted
+  )
+}
+
+// The commands of a line that are a case statement's patterns, which the shell matches and never runs: the run of piped alternatives a ) ends, after the opener's `in` or a `;;`, with no redirect of its own
+function casePatterns(commands: Command[]): Set<Command> {
+  const out = new Set<Command>()
+  for (let k = 0; k < commands.length; k++) {
+    if (!caseOpener(commands[k]) && commands[k].follows !== ";;") continue
+    let end = k
+    while (commands[end + 1]?.follows === "|") end++
+    const body = commands[end + 1]
+    const run = commands.slice(k, end + 1)
+    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
+      continue
+    for (const c of run) out.add(c)
+  }
+  return out
+}
 const GLOB = /[*?[{(]/
 // Variables that make git or a pager run a program, or point git at a config file that can, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/
@@ -408,7 +451,10 @@ function scoreAsOther(words: Word[], cmd: Command, parsed: Parsed, env: Env): bo
 const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
 // what lets an awk program run a command or write a file: system(), getline, a > redirect or an @ directive, and a | pipe outside the literals awkPipe allows
 const AWK_RUNS = /system|getline|[>@]/
-const awkRuns = (program: string) => AWK_RUNS.test(program) || awkPipe(program)
+// a regex literal where awk reads only a pattern: at the program's start or after {, }, ;, !, (, ,, ~, &&, || or a newline, holding no quote, no [ and no newline, so a > in it (`/^>>>>>>> /`) is a character it matches, never a redirect
+const AWK_PATTERN = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.)*\//g
+const awkRuns = (program: string) =>
+  AWK_RUNS.test(program.replace(AWK_PATTERN, "$1$2RE")) || awkPipe(program)
 
 // The literals a | may sit in without piping: a regex that is the program's whole leading pattern (`/a|b/`, `/a|b/ {…}`), and a regex or a string right after ~ (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, no [ and no newline
 const AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/
@@ -659,7 +705,7 @@ function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
   )
 }
 
-// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, git, grep, head, perl, sed, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
   const { args, first } = parsed
@@ -684,7 +730,7 @@ function narrow(cmd: Command, env: Env): boolean {
   if (base === "git") return reads(parsed, env) && !args.some(({ value }) => marked(value))
   if (SEDS.has(base)) return sedReads(args)
   if (base === "perl") return perlReads(parsed, env)
-  if (base === "cut") return true
+  if (base === "cut" || base === "echo" || base === "lsof") return true
   // a read-only gh call is narrow when its jq filter is the only word that holds a space
   if (base === "gh") {
     const filters = ghFilters(parsed)
@@ -967,6 +1013,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   let steadyAt: (cmd: Command) => Steady = () => NONE
   let whole = false
   let rootLine = false
+  let patterns = new Set<Command>()
+  let lineWrites = false
+  // how deep the walk is in a line read out of a quoted text (runsOf), whose commands no one typed
+  let textDepth = 0
   // where each scope's variables were read to for their lines, and judged to for each cwd and remover, so each variable is read once rather than once a command
   type Cursors = WeakMap<Map<string, Text>, Map<string, number>>
   const varsRead: Cursors = new WeakMap()
@@ -981,7 +1031,15 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       return vars.get(k) ?? []
     })
   }
+  // a refusal that likely names no write: no writing redirect on the typed line, a word read as a folder above the root or a glob there rather than as the root's own path, and a command read out of a quoted text or a reader that writes nothing as called
+  const unwritten = (named: string, cmd: Command, env: Env) =>
+    !lineWrites &&
+    !named.endsWith(" in its text") &&
+    !inRoot(named) &&
+    (textDepth > 0 || READERS.has(program(parse(cmd).name)) || narrow(cmd, env))
   const visit: Visit = async (cmd: Command, parsed, env) => {
+    // a case pattern is matched, never run, so its words are no path and no program; a substitution in it is its own command
+    if (patterns.has(cmd)) return
     const slot = slotWords(parsed)
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
@@ -1091,7 +1149,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
+      textDepth++
+      const verdict = await run(
+        lex(line, env.known),
+        { ...env, vars: new Map() },
+        visit,
+        true,
+      ).finally(() => textDepth--)
       if (verdict) return verdict
     }
     // a quiet commit's message is text git never runs, a gated call it names included, and an in-place sed's script is text sed reads as a program of its own
@@ -1176,7 +1240,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           (filters.has(word) && !word.glob)
         if (text && !texts(word).some((t) => holds(t.value, here))) continue
         const named = names(word, here, remover, literal)
-        if (named) return refuse(`${verb} on ${named}`)
+        if (named)
+          return (unwritten(named, cmd, here) ? refuseUnwritten : refuse)(`${verb} on ${named}`)
       }
       if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`)
@@ -1261,6 +1326,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
   rootLine = rooted(lexed.commands)
   whole = rootLine || wholeLine(lexed.commands, env)
+  patterns = casePatterns(lexed.commands)
+  lineWrites = redirectsWrite(lexed.commands)
   // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER)
