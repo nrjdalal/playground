@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import * as state from "../../../../../../extensions/core/skills/code-review-loop/scripts/state"
+import { REQUIRED_CHECKS } from "../../../../../../packages/scripts/src/pr-merge/gates"
 
 const ROOT = join(import.meta.dir, "..", "..", "..", "..", "..", "..")
 const STATE_TS = join(ROOT, "extensions/core/skills/code-review-loop/scripts/state.ts")
@@ -488,6 +489,177 @@ test("05o a second close after a reopen is read once more too", async () => {
   expect(reads).toBe(4)
 })
 
+// A concluded run completes at 1000100 s by default, after the waiter's start at 1000000 s.
+const at = (s: number): string => new Date(s * 1000).toISOString()
+const run = (name: string, conclusion: string | null, id = 1, done = 1000100) => ({
+  completed_at: conclusion ? at(done) : null,
+  conclusion,
+  id,
+  name,
+})
+const runs = (...list: object[]): string => JSON.stringify(list)
+const AUDIT = "Audit, Lint, and Build"
+
+// Each poll reads the pull, then the head's check runs while the PR is open at <sha>; a Called in either list is a failed read.
+const checksThrough = async (
+  pulls: (string | state.Called)[],
+  checkRuns: (string | state.Called)[],
+  now = 1000000,
+): Promise<[string, number[], string[]]> => {
+  const naps: number[] = []
+  const paths: string[] = []
+  let p = 0
+  let c = 0
+  let out = ""
+  const next = (list: (string | state.Called)[], i: number): string => {
+    const item = list[Math.min(i, list.length - 1)]!
+    if (item instanceof state.Called) throw item
+    return response(item)
+  }
+  await withIo(
+    (...a: string[]) => {
+      paths.push(a[3]!)
+      return a[3]!.includes("/check-runs") ? next(checkRuns, c++) : next(pulls, p++)
+    },
+    async () => {
+      const realSleep = state.io.sleep
+      const realTime = state.io.time
+      state.io.sleep = (s: number) => {
+        naps.push(s)
+        if (naps.length > 20) throw new Error("the wait never returned")
+        return Promise.resolve()
+      }
+      state.io.time = () => now
+      const lines: string[] = []
+      const realLog = console.log
+      const realWrite = process.stderr.write.bind(process.stderr)
+      console.log = (line?: unknown) => {
+        lines.push(String(line))
+      }
+      process.stderr.write = () => true
+      try {
+        await state.cmdChecks("acme/archive", "160", HEAD.slice(0, 7))
+      } finally {
+        console.log = realLog
+        process.stderr.write = realWrite
+        state.io.sleep = realSleep
+        state.io.time = realTime
+      }
+      out = lines.join("\n").trim()
+    },
+  )
+  return [out, naps, paths]
+}
+
+test("05p checks: a check that fails, then passes on a re-run at the same head, ends with both conclusions (#1410)", async () => {
+  const [out, naps, paths] = await checksThrough(
+    [still],
+    [
+      runs(run(AUDIT, null), run("test", "failure")),
+      runs(run(AUDIT, "success"), run("test", null, 2)),
+      runs(run(AUDIT, "success"), run("test", "success", 2), run("Shards", "success")),
+    ],
+  )
+  expect(out).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+  expect(naps).toEqual([300, 300])
+  expect(paths.filter((x) => x.includes("/check-runs"))).toEqual(
+    Array(3).fill(`repos/acme/archive/commits/${HEAD}/check-runs?per_page=100`),
+  )
+})
+
+test("05q checks: both checks concluded, one red, end the wait at once, since red is a conclusion (#1410)", async () => {
+  const [out, naps] = await checksThrough(
+    [still],
+    [runs(run("test", "failure"), run(AUDIT, "success"))],
+  )
+  expect(out).toBe(`CHECK success ${AUDIT}\nCHECK failure test`)
+  expect(naps).toEqual([])
+})
+
+test("05w checks: a red that concludes after the other check is reported, and the next waiter sees its re-run clear (#1410)", async () => {
+  const red = runs(run("test", "success", 1, 1000100), run(AUDIT, "failure", 1, 1000400))
+  const [first, firstNaps] = await checksThrough(
+    [still],
+    [runs(run("test", "success"), run(AUDIT, null)), red],
+  )
+  expect(first).toBe(`CHECK failure ${AUDIT}\nCHECK success test`)
+  expect(firstNaps).toEqual([300])
+  const [next, naps] = await checksThrough(
+    [still],
+    [
+      red,
+      runs(run("test", "success"), run(AUDIT, null, 2)),
+      runs(run("test", "success"), run(AUDIT, "success", 2, 1002000)),
+    ],
+    1000500,
+  )
+  expect(next).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+  expect(naps).toEqual([300, 300])
+})
+
+test("05x checks: a cancelled run from before the waiter started is waited past too (#1410)", async () => {
+  const [out, naps] = await checksThrough(
+    [still],
+    [
+      runs(run("test", "cancelled", 1, 999000), run(AUDIT, "success")),
+      runs(run("test", "success", 2), run(AUDIT, "success")),
+    ],
+  )
+  expect(out).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+  expect(naps).toEqual([300])
+})
+
+test("05r checks: a gate check with no run yet, or two runs of one name, waits on the newest (#1410)", async () => {
+  const [out] = await checksThrough(
+    [still],
+    [
+      runs(run(AUDIT, "success")),
+      runs(run("test", "success", 3), run(AUDIT, "success"), run("test", "failure", 2)),
+    ],
+  )
+  expect(out).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+})
+
+test("05s checks: a head that moves mid-wait ends it as MOVED (#1410)", async () => {
+  const [out, naps] = await checksThrough(
+    [still, moved],
+    [runs(run(AUDIT, null), run("test", null))],
+  )
+  expect(out).toBe("MOVED abcdef0123456789abcdef0123456789abcdef01")
+  expect(naps).toEqual([300])
+})
+
+test("05t checks: a closed PR ends it as CLOSED, read once more a poll later, with no check read (#1410)", async () => {
+  const [out, naps, paths] = await checksThrough([closed, closed], [runs()])
+  expect(out).toBe("CLOSED CLOSED")
+  expect(naps).toEqual([300])
+  expect(paths.some((x) => x.includes("/check-runs"))).toBe(false)
+  const merged = `{"merged": true, "sha": "${HEAD}", "state": "closed"}`
+  expect((await checksThrough([merged], [runs()]))[0]).toBe("CLOSED MERGED")
+})
+
+test("05u checks: a rate-limited check read waits for its reset, then reads again (#1410)", async () => {
+  const limited = new state.Called(
+    ["gh"],
+    response(
+      '{"message": "API rate limit exceeded"}',
+      "403 Forbidden",
+      "X-Ratelimit-Remaining: 0\r\nX-Ratelimit-Reset: 1000600\r\n",
+    ),
+    "",
+  )
+  const [out, naps] = await checksThrough(
+    [still],
+    [limited, runs(run(AUDIT, "success"), run("test", "success"))],
+  )
+  expect(out).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+  expect(naps).toEqual([605])
+})
+
+test("05v the checks it waits on are the gate's own (#1410)", () => {
+  expect(state.GATE_CHECKS).toEqual(REQUIRED_CHECKS)
+})
+
 test("05i the comment and thread lists past a page are named as cut", () => {
   const page = {
     comments: { pageInfo: { hasPreviousPage: true } },
@@ -658,6 +830,7 @@ test("08 input it does not implement is refused, never ignored", () => {
     [["scan", "acme/archive", "--table"], "an extra flag"],
     [["pr", "acme/archive", "#12"], "a PR number with a #"],
     [["wait", "x/y", "1", "HEAD"], "a ref that is not a SHA"],
+    [["checks", "x/y", "1", "HEAD"], "a checks ref that is not a SHA"],
     [["review"], "an unknown command"],
   ] as [string[], string][]) {
     const out = runCli(args)

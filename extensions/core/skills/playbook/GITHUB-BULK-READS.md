@@ -96,7 +96,7 @@ On a refused call, wait for the reset the rule names and retry nothing before it
 ## On a rate limit
 
 Wait until the reset the failing call's own `X-RateLimit-Reset` header gives (`gh api -i` prints it), or, when no header came back, each quota's `reset` from `gh api rate_limit`, though that can disagree, and retry nothing before then.
-code-review-loop's `state.ts wait` does both.
+code-review-loop's `state.ts wait` and `state.ts checks` do both.
 Done when the reset has passed and the retried call answers.
 
 ## Reading canary's own checks
