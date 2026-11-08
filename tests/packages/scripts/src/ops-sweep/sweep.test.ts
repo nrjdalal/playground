@@ -486,6 +486,11 @@ describe("lateReviewers", () => {
     expect(told).toHaveLength(1)
     expect(told[0]!.argv[3]).toContain("PR #147 (ccccc-worker)")
     expect(told[0]!.argv[3]).toContain("no reviewer on the roster")
+    // once that reviewer's session is gone, PR 146 alerts by its name; PR 147 was told at this head already
+    await lateReviewers(ctx, agents, new Map())
+    expect(told).toHaveLength(2)
+    expect(told[1]!.argv[3]).toContain("PR #146 (bbbbb-worker)")
+    expect(told[1]!.argv[3]).toContain("no live session for ghjkmn-reviewer")
   })
 })
 
