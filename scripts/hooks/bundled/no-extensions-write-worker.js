@@ -6782,7 +6782,8 @@ function namings(command) {
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
   const text = quotedBodiesOut(command);
-  let blind = EVALUATES.some((evaluates) => evaluates.test(text)) || SUBSCRIPT.test(text) || SUBSCRIPT.test(unquoted(text)) || QUALIFIER.test(singleQuotesOut(text)) || INDIRECTS.test(text);
+  const unquotedSpans = singleQuotesOut(text);
+  let blind = EVALUATES.some((evaluates) => evaluates.test(text)) || SUBSCRIPT.test(unquotedSpans) || SUBSCRIPT.test(unquoted(unquotedSpans)) || QUALIFIER.test(singleQuotesOut(text)) || INDIRECTS.test(text);
   for (const [, flags, closed] of text.matchAll(/\$\{\(([^)]*)(\)?)/g))
     if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags))
       blind = true;
