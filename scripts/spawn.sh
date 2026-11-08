@@ -1513,17 +1513,23 @@ TAG=
 # A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own. Workers and testers join once the worker git flow runs inside it, as run-slot and spawn.sh do.
 SANDBOX=
 [ "$ROLE" = probe ] && SANDBOX=sandbox-
-BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k.json"
+# A manager hands every build, read or research to a worker session (playbook's **workers**), so its file of its own denies the Agent and Workflow tools, which a bare deny takes out of its tools; every other session keeps both, a reviewer's code-review sub-agents among them.
+MANAGER=
+case "$ROLE" in dispatcher | lead) MANAGER=manager- ;; esac
+BUILT="$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k.json"
 # A --memory launch builds a file of its own, so the shared one every other session reads keeps the factory's memory off.
 [ -n "$MEMORY_DIR" ] && BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k-memory-$NAME.json"
 # The folder the session runs in, as the launch below moves to it.
 OWN=${DIR:-$REPO}
 [ "$MODE" = column ] && OWN=$REPO
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" "$MANAGER" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
-src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory = sys.argv[1:12]
+src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager = sys.argv[1:13]
 settings = json.load(open(src))
 settings["autoCompactWindow"] = int(window)
+if manager:
+    permissions = settings.get("permissions", {})
+    settings["permissions"] = {**permissions, "deny": sorted({*permissions.get("deny", []), "Agent", "Workflow"})}
 # The home skill set link-skills.sh turns on at user scope stays off here, since the session loads its own set (below) and two plugins that ship one name refuse it at call time.
 settings["enabledPlugins"] = {**settings.get("enabledPlugins", {}), "ws-home@ws": False}
 if backend == "glm":
