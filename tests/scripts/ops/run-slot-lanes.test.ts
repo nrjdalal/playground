@@ -59,7 +59,7 @@ describe("slots 2 to 4 open on the CPU's idle share", () => {
 })
 
 // load1 64 after a burst of starts, 73 after a clone let through at load5 under 30, and 58 at 04:15Z on 3 Nov: a spike shuts the lanes however idle top found the CPU
-describe("load1 at 45 is a hard stop", () => {
+describe("load1 at 45, the stop while run-slot.load1-max is absent, is a hard stop", () => {
   test("load1 at 45 shuts slots 2 to 4 at 80% idle", () => {
     expect(slots({ idle: 80, load1: 45 })).toBe("1\n")
   })
