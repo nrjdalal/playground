@@ -1,6 +1,7 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import {
   copyFileSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -63,6 +64,22 @@ describe("slots 2 to 4 with single-slot mode off", () => {
     const now = Math.floor(Date.now() / 1000)
     m.ticket(now * 1e9, "worker-reread", `s2 22 2 medium - ${now - 301}`)
     expect(slots(m)).toBe("4\n")
+  })
+
+  // review round 3: a short name's first 10 characters held its dashes, so the hold's sum failed and capacity counted no lanes
+  test("and slots reads a short ticket name's leading number, as an older copy's or a fixture's", () => {
+    const m = loaded(18, 15, [])
+    m.ticket(2, "worker-a", "s2 22 2 medium")
+    expect(slots(m)).toBe("4\n")
+  })
+
+  test("but a dead waiter's old ticket times no hold", async () => {
+    const m = loaded(18, 15, [])
+    const gone = Bun.spawn(["true"])
+    await gone.exited
+    mkdirSync(join(m.ops, "run-slot.waiters"), { recursive: true })
+    writeFileSync(join(m.ops, "run-slot.waiters", `2-${gone.pid}-worker-gone`), "s2 22 2 medium\n")
+    expect(slots(m)).toBe("1\n")
   })
 
   test("and a waiter that runs a new copy of run-slot.sh keeps its first ask in its new ticket", async () => {

@@ -1718,14 +1718,19 @@ load_line() {
   cap=$(switch_on run-slot.load5-cap && tail -n 1 "$OPS/run-slot.load5-cap" | grep -xE '[0-9]{1,3}'); [ -n "$cap" ] || cap=22; [ "$cap" -le 22 ] || cap=22
   echo "$cap"
 }
-# sets OLDEST to the earliest second a ticket in the queue first asked at, its line's sixth field, which survives a reread, else its name's leading nanosecond (an older copy's), else now, so the wait loop, first_waiter, room, slots and can-take time the load5 hold from one waiter; builtins alone
+# sets OLDEST to the earliest second a live waiter's ticket in the queue first asked at, its line's sixth field, which survives a reread, else its name's leading nanosecond (an older copy's), else now, so the wait loop, first_waiter, room, slots and can-take time the load5 hold from one waiter; builtins alone
 oldest_asked() {
-  local t a
+  local t a p
   OLDEST=
   for t in "$QUEUE"/[0-9]*; do
     [ -e "$t" ] || break
+    # a dead waiter's ticket times no hold (its name is <ns>-<pid>-<who>)
+    p=${t##*/} p=${p#*-} p=${p%%-*}
+    case "$p" in '' | *[!0-9]*) continue ;; esac
+    alive "$p" || continue
     a=; read -r _ _ _ _ _ a _ < "$t" 2>/dev/null
-    case "$a" in '' | *[!0-9]*) a=${t##*/} a=${a:0:10} ;; esac
+    case "$a" in '' | *[!0-9]*) a=${t##*/} a=${a%%-*} a=${a:0:10} ;; esac
+    case "$a" in '' | *[!0-9]*) continue ;; esac
     { [ -z "$OLDEST" ] || [ "$a" -lt "$OLDEST" ]; } && OLDEST=$a
   done
   [ -n "$OLDEST" ] || OLDEST=$(date +%s)
