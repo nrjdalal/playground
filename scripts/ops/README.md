@@ -135,6 +135,10 @@ How to read an account's week for the factory's **usage** rule (`extensions/core
 - The report's table is each account's latest reading: `login-flip.json`'s `seen` for each account `usage.accounts` lists (`five` and `week`, their resets `fiveReset` and `weekReset`, and `at`), and `stored-login.json` (its `rate_limits` and `writtenAt`) for the stored login.
   The stored login's `seen` entry, when `usage.accounts` lists it, takes login-flip's run time as its `at` (`login-flip.py:101`), so its row and its age come from `stored-login.json` alone.
   `playground accounts list` prints the two percents for each Claude account, and the report marks an account read more than 15 minutes ago stale with its age.
+- ops-sweep turns spawn.sh's week pace off by itself while the forecast leaves headroom: each pass (`paceOff()` in `packages/scripts/src/ops-sweep/sweep.ts`) projects the week of each account `login-flip.json`'s split gives a share of new sessions (usage.json's account while the split is 30 minutes old or more) from these rows, at its rate over the last 3 hours of its week, an hour of them at least, to a reading under 30 minutes old.
+  While one projects under 100% at its own week reset, it writes `usage-pace-off-until` an hour on, never past that account's reset, renewed each pass, so the pace comes back within the hour of a stopped sweep; once none does, it removes the time it wrote.
+  `ops/sweep/pace-off.json` records each pass's forecast, `{at, forecast, until}`, each account by its `usage.accounts` label, else `account <n>` by its row, and `until` null while the pace stays on.
+  A future time in the file that `until` does not name is a person's, written by hand, and stands as it is; a floor for one account, such as a reserve, is outside this forecast, held by Ops' usage watch.
 
 ## Ops switches
 
