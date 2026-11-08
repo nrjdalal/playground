@@ -301,7 +301,7 @@ describe("readAccountUsages", () => {
 
   test("a map entry with a full week and its reset ahead reads fresh past the 30 minutes, and stale once usage.json is (#1587)", async () => {
     // run.py's fresh() serves a full week until its reset, so its readAt stops moving while the entry stays
-    const entry = { readAt: "2026-10-06T07:48:00Z", week: 100, weekReset: 1791000000 }
+    const entry = { readAt: "2026-10-06T07:48:00Z", week: 100, weekReset: 1794000000 }
     const fresh = await readAccountUsages(null, withMap({ "bo@example.com": entry }), NOW)
     expect(fresh.find((a) => a.account === "bo@example.com")!.usage.stale).toBe(false)
     // a usage.json written 20 minutes ago still means the job stopped writing the map

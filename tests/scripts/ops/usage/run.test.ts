@@ -655,7 +655,7 @@ test("factory_reading returns none, and does not raise, when the factory names a
 })
 
 test("a settings read that fails keeps the factory's reading, since no account is known to be removed (#1587)", () => {
-  expect(runUnlisted("factory-unknown-list", { accounts: null, seenAt: -2520, week: 40 })).toEqual({
+  expect(runUnlisted("factory-unknown-list", { accounts: null, seenAt: -60, week: 40 })).toEqual({
     factory: "gone@example.test",
   })
 })

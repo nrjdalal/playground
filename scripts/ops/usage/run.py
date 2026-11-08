@@ -8,8 +8,8 @@ usage.json, the file the dashboard's Week tooltip reads. It never refreshes that
 rotates the refresh token Claude Code holds); an expired one waits for Claude Code to refresh it.
 While login-flip.json names a `factory` account other than the stored login (the factory's sessions run on that account's token,
 spawn.sh --account), usage.json holds that account's limits instead: login-flip's own reading of it, from one 1-token call's
-rate-limit headers (a setup-token's inference scope cannot read /usage), taken here when login-flip's is 14 minutes old or more and
-shared through login-flip.json, so the two never probe the same account twice in that time. usage.json then adds `readAt` (when the
+rate-limit headers (a setup-token's inference scope cannot read /usage), taken here when login-flip's is 14 minutes old or more and its
+limitedUntil has passed, and shared through login-flip.json, so the two never probe the same account twice in that time. usage.json then adds `readAt` (when the
 limits were measured), `source` "token/ratelimit-headers" and `storedLogin` (the stored login's account and week). Remove `factory`
 from login-flip.json when the factory moves back to the stored login. login-flip.json's `accounts` lists every account the factory's
 sessions spend into; each is probed the same way, and usage.json's `accounts` holds each fresh week reading, which week-marks.py sums.
@@ -189,7 +189,7 @@ def rotation(flip):
 def factory_reading(stored, flip, accounts):
     """usage.json's data for login-flip.json's `factory` account, when that is not the stored login and usage.accounts still lists it; else None."""
     factory = flip.get("factory")
-    if not factory or (stored and factory == stored["account"]) or factory not in accounts:
+    if not factory or (stored and factory == stored["account"]) or (accounts is not None and factory not in accounts):
         return None
     now = time.time()
     s = seen(flip, factory, now)
@@ -202,7 +202,8 @@ def fresh(s, now):
     # a full week cannot change before its weekReset, so its last reading stays fresh until then and goes stale again after
     if s.get("week") is not None and s["week"] >= 100 and s.get("weekReset"):
         return now < s["weekReset"]
-    return now - s.get("at", 0) < FRESH_FOR and s.get("week") is not None
+    # a reading seen() holds until its limitedUntil stays fresh that long, then goes stale as before
+    return (now - s.get("at", 0) < FRESH_FOR or now < s.get("limitedUntil", 0)) and s.get("week") is not None
 
 
 def probed(account, s, stored, now):
@@ -247,7 +248,7 @@ while True:
         FACTORY = [a["email"] for a in setting("usage.accounts") if a.get("provider", "claude") == "claude"]
     except SystemExit as e:
         problems.append(f"usage.accounts: {e}")
-        FACTORY = []
+        FACTORY = None  # no list known, so no account counts as removed this cycle
     try:
         stored = stored_login()
         write(STORED, stored)
@@ -263,7 +264,7 @@ while True:
     # a factory login-flip names, the stored login included, is the account the sessions run on, so the added ones are read only while it names none
     if not data and not flip.get("factory"):
         try:
-            data = added_reading(stored, flip, FACTORY)
+            data = added_reading(stored, flip, FACTORY or [])
         except Exception as e:
             problems.append(f"added account: {type(e).__name__}: {e}")
     data = data or stored
@@ -280,8 +281,8 @@ while True:
         write(OUT, data)
         account, limits = data["account"], data["rate_limits"]
         # the outbox needs a session to relay it; the marks also go to ops/alerts-usage.json, which ops-unstick folds into alerts-pending.json
-        out = week_alerts(data, FACTORY)
-        if account in FACTORY:
+        out = week_alerts(data, FACTORY or [])
+        if account in (FACTORY or []):
             # dispatcher, 8 Oct: the 5-hour window at 90% or more, while it lasts, so the Builder slows spawns before the cap
             five = limits.get("five_hour") or {}
             if isinstance(five.get("used_percentage"), (int, float)) and five["used_percentage"] >= 90:
