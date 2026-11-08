@@ -4,11 +4,11 @@
 Marks: the 5-hour window at 70, 80 and 90%, the week at 15, 80 and 90% (dispatcher: "alert me when the 5h window passes 70% and when the week passes 15%").
 Reads usage.json in the data folder for the stored login, and login-flip.json's token readings for the other accounts: one of those
 older than 14 minutes is read again here with one 1-token Haiku call (dispatcher, 16 Oct, "Pick (a)"), and a limited account is not read
-again until its reset. Remembers what it printed in near-limit.json in the state folder, ~/.playground/ops/usage.
+again until its reset. Remembers what it printed in near-limit.json in the state folder, the data folder's ops/usage.
 """
 import json, os, subprocess, sys, time, urllib.request
 
-HERE = os.path.expanduser("~/.playground/ops/usage")  # the state folder by name, so a run by its repo path still reads the live state
+HERE = os.path.join(os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state
 sys.path.insert(0, os.path.dirname(HERE))
 from beat import OPS, setting  # noqa: E402
 

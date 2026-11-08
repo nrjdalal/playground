@@ -228,7 +228,7 @@ function pattern(environment: Environment, checkout = CHECKOUT): RegExp {
 // Built once per call, from the terms file, the roster and the skills as they stand.
 let TERM = pattern({})
 
-const REPHRASE = "Say it without the term: name the work, not who did it or how it is run."
+export const REPHRASE = "Say it without the term: name the work, not who did it or how it is run."
 const READABLE = `Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md, or -F /abs/msg.md for a commit). ${NOT_RUN}`
 const MCP_READABLE = "Pass the input as an object whose fields are strings."
 
@@ -1467,14 +1467,13 @@ function candidate(command: string): boolean {
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""))
 }
 
-// Fails closed only on a call that may carry a factory term to a guarded org (leakPolicy, over the orgs the data folder's policy names, or a policy it cannot read): an error on any other call lets it run, so a parser bug cannot block every call.
-export async function check(
-  raw: string,
+// The factory-term pattern the hook reads a write with, for a check outside it (the public-draft check, public-draft.ts): the terms list read as the hook reads it, with the roster and the skills as they stand, or the list's refusal.
+export async function factoryTerms(
   environment: Environment = process.env,
   checkout = CHECKOUT,
   lists = join(coreDir(), "lists"),
-): Promise<string | undefined> {
-  const loadedTerms = await guardList(
+): Promise<{ pattern: RegExp; refusal?: undefined } | { pattern?: undefined; refusal: string }> {
+  const loaded = await guardList(
     "no-playground-leak",
     "playground-terms",
     isTerms,
@@ -1482,6 +1481,20 @@ export async function check(
     environment,
     join(lists, "playground-terms.json"),
   )
+  if (loaded.refusal !== undefined) return { refusal: loaded.refusal }
+  terms = loaded.list
+  return { pattern: pattern(environment, checkout) }
+}
+
+// Fails closed only on a call that may carry a factory term to a guarded org (leakPolicy, over the orgs the data folder's policy names, or a policy it cannot read): an error on any other call lets it run, so a parser bug cannot block every call.
+export async function check(
+  raw: string,
+  environment: Environment = process.env,
+  checkout = CHECKOUT,
+  lists = join(coreDir(), "lists"),
+): Promise<string | undefined> {
+  const loadedTerms = await factoryTerms(environment, checkout, lists)
+  if (loadedTerms.refusal !== undefined) return refusedList(raw, loadedTerms.refusal)
   const loadedCleared = await guardList(
     "no-playground-leak",
     "slack-cleared",
@@ -1490,11 +1503,9 @@ export async function check(
     environment,
     join(lists, "slack-cleared.json"),
   )
-  const refusal = loadedTerms.refusal ?? loadedCleared.refusal
-  if (refusal) return refusedList(raw, refusal)
-  terms = loadedTerms.list ?? EMPTY_TERMS
-  CLEARED = loadedCleared.list ?? {}
-  TERM = pattern(environment, checkout)
+  if (loadedCleared.refusal !== undefined) return refusedList(raw, loadedCleared.refusal)
+  CLEARED = loadedCleared.list
+  TERM = loadedTerms.pattern
   const read = await readPolicy(dataDir(environment))
   if (read.refusal !== undefined)
     return refusedList(

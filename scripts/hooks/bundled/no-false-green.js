@@ -307,96 +307,6 @@ var ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"]);
 var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
-var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
-var LEADS = new Set([
-  "!",
-  "-",
-  "builtin",
-  "command",
-  "elif",
-  "exec",
-  "if",
-  "nocorrect",
-  "noglob",
-  "time",
-  "until",
-  "while"
-]);
-var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
-var ZSH_ARRAYS = new Set([
-  "aliases",
-  "argv",
-  "builtins",
-  "cdpath",
-  "commands",
-  "comppostfuncs",
-  "compprefuncs",
-  "compstate",
-  "dirstack",
-  "dis_aliases",
-  "dis_builtins",
-  "dis_functions",
-  "dis_functions_source",
-  "dis_galiases",
-  "dis_patchars",
-  "dis_reswords",
-  "dis_saliases",
-  "epochtime",
-  "errnos",
-  "fignore",
-  "fpath",
-  "funcfiletrace",
-  "funcsourcetrace",
-  "funcstack",
-  "functions",
-  "functions_source",
-  "functrace",
-  "galiases",
-  "history",
-  "historywords",
-  "jobdirs",
-  "jobstates",
-  "jobtexts",
-  "keymaps",
-  "killring",
-  "langinfo",
-  "mailpath",
-  "manpath",
-  "match",
-  "mbegin",
-  "mend",
-  "module_path",
-  "modules",
-  "nameddirs",
-  "options",
-  "parameters",
-  "patchars",
-  "path",
-  "pipestatus",
-  "psvar",
-  "region_highlight",
-  "registers",
-  "reply",
-  "reswords",
-  "saliases",
-  "signals",
-  "sysparams",
-  "termcap",
-  "terminfo",
-  "userdirs",
-  "usergroups",
-  "watch",
-  "widgets",
-  "words",
-  "zle_bracketed_paste",
-  "zle_highlight",
-  "zsh_eval_context",
-  "zsh_scheduled_events"
-]);
-var oneWord = (written) => {
-  const plain = ONE_WORD.exec(written);
-  return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "");
-};
 var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
@@ -492,8 +402,8 @@ var unknown = (why) => ({ unknown: why, value: UNKNOWN });
 var setLog = new WeakMap;
 var merge = (out, part) => {
   out.value += part.value;
-  if (part.splits && out.splits !== "always")
-    out.splits = part.splits;
+  if (part.splits)
+    out.splits = true;
   if (part.unknown)
     out.unknown ??= part.unknown;
   if (part.variable)
@@ -852,6 +762,23 @@ function heredocs(lx, pending, nested) {
     const body = lines.map((line) => `${line}
 `).join("");
     doc.redirect.body = doc.quoted ? { value: body } : expandHeredoc(body);
+    if (!doc.quoted)
+      textCommands(lx, body);
+  }
+}
+function textCommands(lx, text) {
+  const sub = { ...lx, i: 0, src: text };
+  while (sub.i < text.length) {
+    tick();
+    const c = text[sub.i];
+    if (c === "\\")
+      sub.i += 2;
+    else if (c === "$")
+      dollar(sub, true);
+    else if (c === "`")
+      backtick(sub);
+    else
+      sub.i++;
   }
 }
 function expandHeredoc(body) {
@@ -896,23 +823,18 @@ function word(lx) {
     } else if (c === "$" && next === '"')
       lx.i++;
     else if (c === "$" || c === "`") {
-      const from = lx.i;
       const text = c === "$" ? dollar(lx) : backtick(lx);
       merge(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
-      const written = src.slice(from, lx.i);
       if (marked(text.value))
-        merge(out, {
-          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
-          value: ""
-        });
+        out.splits = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir3();
       lx.i++;
     } else {
       if (c === UNKNOWN || c === READ)
-        out.splits = "always";
+        out.splits = true;
       out.value += c;
       bare += c;
       lx.i++;
@@ -945,10 +867,10 @@ function double(lx) {
       lx.i += 2;
     } else if (c === "$" || c === "`") {
       const from = lx.i;
-      const text = c === "$" ? dollar(lx) : backtick(lx);
+      const text = c === "$" ? dollar(lx, true) : backtick(lx);
       merge(out, text);
       if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
-        out.splits = "always";
+        out.splits = true;
     } else {
       out.value += c;
       lx.i++;
@@ -966,14 +888,15 @@ function ansi(lx) {
   lx.i = i + 1;
   return { value: decode(raw) };
 }
-function dollar(lx) {
+function dollar(lx, plain = false) {
   tick();
   const { src } = lx;
+  const readText = plain ? textCommands : inner;
   const next = src[lx.i + 1] ?? "";
   const variable = (name) => name !== undefined && lx.known[name] !== undefined ? { value: lx.known[name], variable: name } : { ...unknown("a shell variable"), variable: name };
   if (src.startsWith("$((", lx.i)) {
-    const end = balanced(src, lx.i + 1, "(", ")");
-    inner(lx, src.slice(lx.i + 3, end - 2));
+    const end = balanced(src, lx.i + 1, "(", ")", plain);
+    readText(lx, src.slice(lx.i + 3, end - 2));
     lx.i = end;
     return unknown("an arithmetic expansion");
   }
@@ -984,9 +907,9 @@ function dollar(lx) {
     return substituted(lx.commands.slice(from), lx.known);
   }
   if (next === "{") {
-    const end = balanced(src, lx.i + 1, "{", "}");
+    const end = balanced(src, lx.i + 1, "{", "}", plain);
     const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1];
-    inner(lx, src.slice(lx.i + 2, end - 1));
+    readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
   }
@@ -1022,14 +945,14 @@ function inner(lx, src) {
       sub.i++;
   }
 }
-function balanced(src, from, open, close) {
+function balanced(src, from, open, close, plain = false) {
   let depth = 0;
   for (let i = from;i < src.length; i++) {
     tick();
     const c = src[i];
     if (c === "\\")
       i++;
-    else if (c === "'") {
+    else if (c === "'" && !plain) {
       const end = src.indexOf("'", i + 1);
       i = end === -1 ? src.length : end;
     } else if (c === open)

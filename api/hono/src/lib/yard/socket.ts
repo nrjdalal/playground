@@ -39,9 +39,22 @@ const sendHere = (userIds: string[], frame: Frame) => {
       }
 }
 
+// The key a delivery reads once by: a message frame's id with its status, so a publish whose first try landed and then reported a closed connection reaches a socket once, while a pending message's send or deny, the same id in a new status, still does.
+export const deliveryKey = (raw: string): string | undefined => {
+  try {
+    const read = JSON.parse(raw) as { frame?: Frame }
+    return read.frame?.type === "message"
+      ? `${read.frame.message.id}:${read.frame.message.status ?? "sent"}`
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
 // With KV_URL set, every instance subscribes to one Redis channel, so a post on one instance reaches a socket held by another; without it, the instance's own sockets alone.
 const channel = env.KV_URL
   ? redisChannel({
+      id: deliveryKey,
       name: CHANNEL,
       onMessage: (raw) => {
         const { frame, userIds } = JSON.parse(raw) as { frame: Frame; userIds: string[] }

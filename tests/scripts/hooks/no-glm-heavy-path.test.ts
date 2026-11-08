@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -523,6 +523,12 @@ describe("what it passes and how it fails", () => {
     expect(await check("{not json: git push", GLM, CALM)).toContain("could not read this call")
     expect(await check("{not json: echo hi", GLM, CALM)).toBeUndefined()
   })
+
+  test("a runner the prefilter lets through to the parse runs when the parse fails, since the catch path reads its own prefilter", async () => {
+    expect(await check("{not json: bun run build", GLM, CALM)).toBeUndefined()
+    expect(await check("{not json: cd $D && ./cli.ts", GLM, CALM)).toBeUndefined()
+    expect(await check("{not json: gh pr list", GLM, CALM)).toContain("glm rule")
+  })
 })
 
 describe("a GLM session while load5 is over 15", () => {
@@ -908,6 +914,17 @@ describe("a GLM session's org tools", () => {
       name: "mcp__github-shared__get_file_contents",
       input: { owner: "qzx", repo: "x" },
     },
+    { $label: "Claude Code's resource list", name: "ListMcpResourcesTool" },
+    {
+      $label: "Claude Code's resource read",
+      name: "ReadMcpResourceTool",
+      input: { server: "linear-shared", uri: "made-up://MADE-1" },
+    },
+    {
+      $label: "Claude Code's resource folder read",
+      name: "ReadMcpResourceDirTool",
+      input: { server: "linear-shared", uri: "made-up://MADE" },
+    },
   ])(
     "an MCP tool of $label is refused on GLM and passes on Claude",
     async ({ name, input: given }) => {
@@ -915,6 +932,7 @@ describe("a GLM session's org tools", () => {
       expect(claude).toBeUndefined()
       expect(glm).toContain(name)
       expect(glm).toContain("glm rule")
+      expect(glm).toContain("report to your lead")
     },
   )
 
@@ -967,5 +985,244 @@ describe("a GLM session's org tools", () => {
     { $label: "gh api's markdown render", command: "gh api markdown -f text=hi" },
   ])("$label passes on GLM", async ({ command }) => {
     expect(await refusal(input(command), ON_GLM, CALM)).toBeUndefined()
+  })
+})
+
+describe("a GLM session's reads of an org's checkout and its database calls", () => {
+  // a data folder whose ext.links guards the made-up org acme-blue, its checkout, a checkout whose remotes git cannot read, and a folder in no checkout
+  const DATA = storeWith(
+    join(DIR, "read-data"),
+    {},
+    { "ext.links": { "made-up-org": ["acme-blue"] } },
+  )
+  const ORG = join(DIR, "read-org-repo")
+  const BROKEN = join(DIR, "read-broken-repo")
+  const LOOSE = join(DIR, "read-loose")
+  const ON_GLM = { ...GLM, PLAYGROUND_DATA_DIR: DATA }
+  const ON_CLAUDE = { PLAYGROUND_DATA_DIR: DATA }
+  beforeAll(() => {
+    git(DIR, "init", "-q", ORG)
+    git(ORG, "remote", "add", "origin", "https://github.com/acme-blue/demo.git")
+    mkdirSync(join(BROKEN, ".git"), { recursive: true })
+    mkdirSync(LOOSE)
+  })
+  const call = (name: string, toolInput: Record<string, unknown>, cwd = REPO) =>
+    JSON.stringify({
+      cwd,
+      hook_event_name: "PreToolUse",
+      session_id: "s-none",
+      tool_input: toolInput,
+      tool_name: name,
+    })
+  const both = async (raw: string) => ({
+    claude: await refusal(raw, ON_CLAUDE, CALM),
+    glm: await refusal(raw, ON_GLM, CALM),
+  })
+
+  test("each read tool and a shell read of an org's checkout are refused on GLM, naming the org and the glm rule, and pass on Claude", async () => {
+    for (const raw of [
+      call("Read", { file_path: join(ORG, "README.md") }),
+      call("Grep", { path: ORG, pattern: "token" }),
+      call("Glob", { path: join(ORG, "src"), pattern: "**/*.ts" }),
+      call("Grep", { pattern: "token" }, ORG),
+      input(`cat ${join(ORG, "README.md")}`),
+      input("cd ../read-org-repo && ls"),
+      input("head README.md", ORG),
+    ]) {
+      const { claude, glm } = await both(raw)
+      expect(claude).toBeUndefined()
+      expect(glm).toContain("acme-blue/demo")
+      expect(glm).toContain("glm rule")
+      expect(glm).toContain("report to your lead")
+    }
+  })
+
+  test("a shell read naming an org's checkout by a bare word, and a call in one the hook cannot parse, are refused on GLM", async () => {
+    for (const raw of [
+      input("rg token read-org-repo", DIR),
+      input("ls read-org-repo", DIR),
+      input(`cat README.md "`, ORG),
+    ]) {
+      const { claude, glm } = await both(raw)
+      expect(claude).toBeUndefined()
+      expect(glm).toContain("acme-blue/demo")
+      expect(glm).toContain("glm rule")
+    }
+  })
+
+  test("a read outside any guarded checkout passes on GLM: its own checkout, a folder in no checkout, and a checkout whose remotes git cannot read", async () => {
+    for (const raw of [
+      call("Read", { file_path: join(REPO, "README.md") }),
+      call("Grep", { pattern: "token" }),
+      call("Read", { file_path: join(LOOSE, "notes.md") }),
+      call("Glob", { path: LOOSE, pattern: "*" }),
+      call("Read", { file_path: join(BROKEN, "README.md") }),
+      input(`cat ${join(LOOSE, "notes.md")}`),
+      input(`cat ${join(BROKEN, "README.md")}`),
+    ])
+      expect(await refusal(raw, ON_GLM, CALM)).toBeUndefined()
+  })
+
+  test("a database client or URL aimed off this machine is refused on GLM, naming the host and the glm rule, and passes on Claude", async () => {
+    for (const [command, names] of [
+      ["psql -h db.example.com -U app app", "db.example.com"],
+      ["psql postgres://app@db.example.com:5432/app", "db.example.com"],
+      [`psql "host=db.example.com dbname=app"`, "db.example.com"],
+      ["PGHOST=db.example.com psql app", "db.example.com"],
+      ["pg_dump --host=db.example.com app", "db.example.com"],
+      ["mysql -hdb.example.com app", "db.example.com"],
+      ["mongosh mongodb+srv://app@cluster.example.net/app", "cluster.example.net"],
+      ["redis-cli -h cache.example.com", "cache.example.com"],
+      ["bun run seed.ts postgres://app@db.example.com/app", "db.example.com"],
+      ["psql $DATABASE_URL", "cannot read"],
+    ]) {
+      const { claude, glm } = await both(input(command))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain(names)
+      expect(glm).toContain("glm rule")
+      expect(glm).toContain("report to your lead")
+    }
+  })
+
+  test("a read of an org's checkout through what the shell opens is refused on GLM: a redirect, a substitution, a glob, ~+ and a link", async () => {
+    writeFileSync(join(ORG, "README.md"), "demo\n")
+    symlinkSync(join("..", "read-org-repo", "README.md"), join(REPO, "org-link.md"))
+    for (const raw of [
+      input("cat < ../read-org-repo/README.md"),
+      input('while read l; do echo "$l"; done < ../read-org-repo/README.md'),
+      input('echo "$(< ../read-org-repo/README.md)"'),
+      input("echo ../read-org-repo/README.md | xargs cat"),
+      input("cat ../read-org-rep*/README.md"),
+      input("ls ~+/../read-org-repo"),
+      input("cat org-link.md"),
+      input("sort -o out.txt ../read-org-repo/README.md"),
+      input("echo x > ../read-org-repo/notes.md"),
+    ]) {
+      const { claude, glm } = await both(raw)
+      expect(claude).toBeUndefined()
+      expect(glm).toContain("acme-blue/demo")
+      expect(glm).toContain("glm rule")
+    }
+  })
+
+  test("a shell read that opens nothing in a guarded checkout passes on GLM: its own files by a redirect, a glob of its docs or ~+, and echo's plain words inside the checkout", async () => {
+    for (const raw of [
+      input("cat < README.md"),
+      input("cat docs/*.md"),
+      input("ls ~+/src"),
+      input('echo "$(< README.md)"'),
+      input("echo hi there", ORG),
+      input("printf '%s\\n' done", ORG),
+      input("cat ../read-loos*/notes.md"),
+    ])
+      expect(await refusal(raw, ON_GLM, CALM)).toBeUndefined()
+  })
+
+  test("a database client reading a host past its first is refused on GLM: hostaddr, a later host, a URL's host list and parameters, a service, MYSQL_HOST, a positional mongo host, a pg_ program, pgcli and docker", async () => {
+    for (const [command, names] of [
+      ["PGHOSTADDR=10.0.0.5 psql app", "10.0.0.5"],
+      [`psql "hostaddr=10.0.0.5 dbname=app"`, "10.0.0.5"],
+      [`psql "host=127.0.0.1 dbname=app host=db.example.com"`, "db.example.com"],
+      ["psql postgresql://app@127.0.0.1:1,db.example.com/app", "db.example.com"],
+      [`psql "postgresql:///app?host=db.example.com"`, "db.example.com"],
+      ["psql service=prod", "cannot tell"],
+      ["PGSERVICE=prod psql", "cannot tell"],
+      ["MYSQL_HOST=db.example.com mysql app", "db.example.com"],
+      ["mongosh db.example.com:27017/app", "db.example.com"],
+      ["pg_basebackup -h db.example.com -D out", "db.example.com"],
+      ["pgcli -h db.example.com app", "db.example.com"],
+      ["docker exec x psql -h db.example.com app", "db.example.com"],
+      ["docker run --rm postgres psql -h db.example.com", "db.example.com"],
+      ["docker exec -e PGHOST=db.example.com x psql app", "db.example.com"],
+      ["docker compose exec db psql -h db.example.com app", "db.example.com"],
+    ]) {
+      const { claude, glm } = await both(input(command))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain(names)
+      expect(glm).toContain("glm rule")
+    }
+  })
+
+  test("a database client aimed off this machine is refused on GLM under a policy that guards no org", async () => {
+    const open = storeWith(join(DIR, "no-org-data"), {}, {})
+    for (const command of [
+      "psql -h db.example.com app",
+      "pg_basebackup -h db.example.com -D out",
+      "pgcli -h db.example.com app",
+      "pgbench -h db.example.com app",
+      "mycli -h db.example.com app",
+      "mysqldump -h db.example.com app",
+      "mongo --host db.example.com",
+      "mongosh --host db.example.com",
+      "redis-cli -h db.example.com",
+    ]) {
+      const reason = await refusal(input(command), { ...GLM, PLAYGROUND_DATA_DIR: open }, CALM)
+      expect(reason).toContain("db.example.com")
+      expect(reason).toContain("glm rule")
+    }
+  })
+
+  test("a database client on this machine passes on GLM", async () => {
+    for (const command of [
+      "psql -h 127.0.0.1 -U postgres app",
+      "psql -h localhost app",
+      "psql app",
+      "psql postgres://postgres@127.0.0.1:55432/app",
+      "psql postgresql://postgres@[::1]/app",
+      "redis-cli",
+      "redis-cli -h 127.0.0.1 ping",
+      "docker exec playground-x-db psql -U postgres -c 'select 1'",
+      "docker exec x psql -h 127.0.0.1 app",
+      "echo postgres://app@db.example.com/app",
+      "mongosh -h",
+      "mongosh app",
+      "mongosh ./scripts/seed.js",
+      "mongosh localhost:27017/app",
+      "psql postgresql://app@%2Fvar%2Frun/app",
+      `psql "host=127.0.0.1 hostaddr=127.0.0.1 dbname=app"`,
+      "psql postgresql://app@127.0.0.1:5432,localhost/app",
+      `psql "postgresql:///app?host=/tmp"`,
+    ])
+      expect(await refusal(input(command), ON_GLM, CALM)).toBeUndefined()
+  })
+})
+
+describe("its registration", () => {
+  // the matcher each settings file registers the hook under, read from the file a session loads
+  const matchers = async () =>
+    Promise.all(
+      [".claude/settings.json", "scripts/factory-settings.json"].map(async (file) => {
+        const { hooks } = (await Bun.file(join(root, file)).json()) as {
+          hooks: { PreToolUse: { hooks: { command: string }[]; matcher: string }[] }
+        }
+        const entry = hooks.PreToolUse.find((e) =>
+          e.hooks.some((h) => h.command.includes("no-glm-heavy-path")),
+        )
+        return { file, matcher: new RegExp(entry?.matcher ?? "(?!)") }
+      }),
+    )
+
+  test("both settings files send it every Bash call, every MCP tool and Claude Code's three MCP resource tools, and no other tool", async () => {
+    for (const { file, matcher } of await matchers()) {
+      for (const tool of [
+        "Bash",
+        "ListMcpResourcesTool",
+        "ReadMcpResourceDirTool",
+        "ReadMcpResourceTool",
+        "mcp__linear-shared__list_issues",
+        "mcp__slack-shared__conversations_history",
+      ])
+        expect({ file, tool, sent: matcher.test(tool) }).toEqual({ file, tool, sent: true })
+      for (const tool of [
+        "Edit",
+        "Write",
+        "WebFetch",
+        "Agent",
+        "xBash",
+        "Bashful",
+        "ListMcpResourcesToolx",
+      ])
+        expect({ file, tool, sent: matcher.test(tool) }).toEqual({ file, tool, sent: false })
+    }
   })
 })

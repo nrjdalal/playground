@@ -1,5 +1,7 @@
 # The factory decides two-way doors
 
+> Superseded in part by [ADR 0021](./0021-the-grilling-batch-keeps-one-way-doors-only.md): the grilling batch sends the owner only its one-way-door questions, and the factory decides the two-way ones itself, as this decision's own principle says.
+
 The factory asked the owner for every choice it was unsure of. The **ask** rule already sent the owner's decisions to the Inbox rather than chat, and it named a list of what goes to the owner. But a design pick, an order or a scope question inside work the owner had approved still reached the owner as an Inbox item, and the upstream grilling skill, which this decision adopts as the first step of every ask, would put each of its questions to the owner one by one. The 18 Oct decision: the factory makes wise decisions itself, with the user involved the least.
 
 ## Decision

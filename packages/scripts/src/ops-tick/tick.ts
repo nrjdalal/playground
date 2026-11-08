@@ -1,5 +1,6 @@
-import { realpathSync, statfsSync } from "node:fs"
+import { readFileSync, realpathSync, statfsSync, statSync } from "node:fs"
 import { appendFile, mkdir, stat, unlink } from "node:fs/promises"
+import { loadavg } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 import {
@@ -20,6 +21,7 @@ import {
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
+import { dashboardCheckout, NO_CHECKOUT } from "../playground/probe"
 import { swapBundles, unswapBundles } from "../swap-bundles"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
@@ -634,16 +636,61 @@ const freeBytes = (dir: string): number => {
   return fs.bavail * fs.bsize
 }
 
-// The trash playground rm fills, beside ops in the data folder, emptied hourly by purgeTrash (@packages/safe-delete): each batch over 7 days old, then the oldest while its disk has under 50 GB free; one line in ops/log/trash-purge.log.
+// The load5 cap as run-slot.sh's load_line reads it (scripts/ops/README.md): run-slot.load5-cap's last line, a whole number, while the switch stands (its expiry on the first line, else 4 hours from its mtime), 22 at most, else 22.
+export const loadCapOf = (ops: string, now: Date): number => {
+  try {
+    const path = join(ops, "run-slot.load5-cap")
+    const lines = readFileSync(path, "utf8").trimEnd().split("\n")
+    const ends = /^\S+ [\d-]{10}T[\d:]{8}Z ([\d-]{10}T[\d:]{8}Z) /.exec(lines[0] ?? "")?.[1]
+    const until = ends ? Date.parse(ends) : statSync(path).mtimeMs + 4 * 3_600_000
+    const cap = lines.at(-1) ?? ""
+    if (until > now.getTime() && /^\d{1,3}$/.test(cap)) return Math.min(Number(cap), 22)
+  } catch {}
+  return 22
+}
+
+// The trash playground rm fills, beside ops in the data folder, emptied hourly by purgeTrash (@packages/safe-delete): each batch over 7 days old, then the oldest while its disk has under 50 GB free, every batch taken only while load5 is under run-slot.load5-cap's cap (22 while it is off), or at any load once the disk is under the 5 GB floor; one line in ops/log/trash-purge.log, naming the batches the load held.
 export const trashPurge =
-  (trash?: string, free = freeBytes) =>
+  (trash?: string, free = freeBytes, load: () => number = () => loadavg()[1] ?? 0) =>
   async (ctx: Context) => {
     const root = trash ?? join(dirname(ctx.ops), "trash")
-    const { removed, skipped } = purgeTrash(root, { free: () => free(root), now: ctx.now })
-    const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}`
+    const { removed, skipped, leftForLoad } = purgeTrash(root, {
+      free: () => free(root),
+      load,
+      loadCap: loadCapOf(ctx.ops, ctx.now),
+      now: ctx.now,
+    })
+    const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}${leftForLoad.length ? `, left for load (${leftForLoad.join(", ")})` : ""}`
     await mkdir(join(ctx.ops, "log"), { recursive: true })
     await appendFile(join(ctx.ops, "log", "trash-purge.log"), `${isoSeconds(ctx.now)} ${line}\n`)
   }
+
+// The idle-compaction trial (ADR 0020): the idle-compact bin sends /compact to each worker or runner of 200k+ tokens 50 to 58 minutes after its last turn, and each line it prints lands in ops/log/idle-compact.log; a failed pass throws, so the beat reads failed. PLAYGROUND_LIVE_READS names the live machine outright, since the Dashboard checkout reads it by its branch only while git answers, and a stray PLAYGROUND_FIXTURE beside it refuses into the log.
+// The beat runs the bin straight from the Dashboard's checkout, not `bun run idle-compact` from ops-tick's folder: the package.json script's prebuild starts an unslotted turbo build in the main checkout right after a ship, and the bin's env validates only against the Dashboard checkout's own .env, which load-dotenv reads from the --cwd.
+export const idleCompact = async (ctx: Context, checkout = dashboardCheckout(ctx.repo)) => {
+  if (checkout === null) throw new Error(`idle-compact: ${NO_CHECKOUT}`)
+  const pass = await ctx.run(
+    [
+      "env",
+      "PLAYGROUND_LIVE_READS=1",
+      "bun",
+      "--cwd",
+      join(checkout, "api/hono"),
+      "--no-env-file",
+      join(checkout, "api/hono/src/bin/idle-compact.ts"),
+    ],
+    120_000,
+  )
+  const said = lines(pass.out)
+  if (said.length > 0) {
+    await mkdir(join(ctx.ops, "log"), { recursive: true })
+    await appendFile(
+      join(ctx.ops, "log", "idle-compact.log"),
+      said.map((line) => `${isoSeconds(ctx.now)} ${line.slice(0, 300)}\n`).join(""),
+    )
+  }
+  if (pass.code !== 0) throw new Error(`idle-compact: ${said.at(-1) ?? `exit ${pass.code}`}`)
+}
 
 const words = (text: string) => async (ctx: Context) => void (await ctx.send("optimizer", text))
 
@@ -837,9 +884,10 @@ export const BEATS: Beat[] = [
     cron: "0 3 * * *",
     name: "nightly-clean",
     run: nightlyClean(),
-    to: "ops/log/nightly-clean.log, and the Inbox",
+    to: "ops/log/nightly-clean.log, the outbox line to ops, and the Inbox",
   },
   { cron: "17 * * * *", name: "trash-purge", run: trashPurge(), to: "ops/log/trash-purge.log" },
+  { cron: "*/5 * * * *", name: "idle-compact", run: idleCompact, to: "ops/log/idle-compact.log" },
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
   { cron: "*/5 * * * *", name: "relay-watch", run: relayWatch, to: "the Inbox, by bun run ask" },
   { cron: "*/10 * * * *", name: "guard-probe", run: guardProbe, to: "dispatcher" },

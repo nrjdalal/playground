@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
 import { ASK_CODE_COLUMNS } from "../../../../../packages/config/src/inbox"
-import { DashboardContext } from "../../../../../web/next/src/components/dashboard/dashboard"
+import {
+  SessionsContext,
+  sessionsOf,
+} from "../../../../../web/next/src/components/dashboard/dashboard"
 import {
   TranscriptMarkdown,
   fitWidth,
@@ -124,13 +127,14 @@ describe("links", () => {
 
   // An @Name that names a live agent links to its view, as the sender label does, and keeps the agent's raw session name on hover. The dashboard here holds one live session, builder.
   describe("with a dashboard", () => {
-    const dashboard = {
-      workers: [{ name: "builder", sessionId: "s-1" }],
-    } as unknown as DashboardContext
+    const dashboard = sessionsOf(
+      [{ name: "builder", sessionId: "s-1" }] as unknown as Parameters<typeof sessionsOf>[0],
+      null,
+    )
     const inDashboard = (text: string) =>
       renderToStaticMarkup(
         createElement(
-          DashboardContext,
+          SessionsContext,
           { value: dashboard },
           createElement(TranscriptMarkdown, {}, text),
         ),

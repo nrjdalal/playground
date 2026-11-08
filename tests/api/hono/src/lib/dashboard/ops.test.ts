@@ -12,7 +12,6 @@ import {
   readOps,
   RUNNER_NAMES,
 } from "../../../../../../api/hono/src/lib/dashboard/ops"
-import { writeHeartbeat } from "../../../../../../packages/scripts/src/loom-relay/cli"
 import { beat as herdrBeat } from "../../../../../../packages/scripts/src/ops-herdr/herdr"
 import { liveReads } from "../../../../../live-reads"
 
@@ -49,6 +48,19 @@ describe("opsRowOf", () => {
     })
     // whether the pid runs is unknown when ps could not be read, which judges nothing
     expect(opsRowOf("ops-dashboard", beat(), null, NOW).status).toBe("running")
+  })
+
+  // #1336: a job that refuses its config writes why to its heartbeat, which Settings > Jobs' card shows beside the config
+  test("carries the heartbeat's configRefused, its last refusal of its config, and none while it holds none (#1336)", () => {
+    const why = "config.hours takes HH-HH, not made-up"
+    expect(opsRowOf("ops-dashboard", beat({ configRefused: why }), true, NOW)).toMatchObject({
+      configRefused: why,
+      status: "running",
+    })
+    expect(opsRowOf("ops-dashboard", beat(), true, NOW)).not.toHaveProperty("configRefused")
+    expect(opsRowOf("ops-dashboard", beat({ configRefused: 7 }), true, NOW)).not.toHaveProperty(
+      "configRefused",
+    )
   })
 
   test("carries the callsModel and model jobs.json marks, whatever the id says", () => {
@@ -374,22 +386,5 @@ describe("the ops-herdr job's heartbeat", () => {
       "failing",
       "factory: down, not started on an unpinned binary",
     ])
-  })
-})
-
-describe("the Loom relay's heartbeat", () => {
-  const dir = mkdtempSync(join(tmpdir(), "loom-relay-beat-"))
-  afterAll(() => rmSync(dir, { force: true, recursive: true }))
-
-  test("reads as Running, with its line", async () => {
-    const path = join(dir, "ops-loom-relay.json")
-    await writeHeartbeat(path, "2026-10-12T14:00:00Z", "ok")
-    expect(opsRowOf("ops-loom-relay", await Bun.file(path).text(), true, Date.now())).toMatchObject(
-      {
-        does: "Sends Loom usage counts, never names",
-        reason: null,
-        status: "running",
-      },
-    )
   })
 })

@@ -48,6 +48,7 @@ describe("under the gates it spawns", () => {
       "surface=",
       "title=Plain test work",
       "task=brief-x.md",
+      "memory=off",
     ])
   })
 
@@ -300,6 +301,7 @@ describe("under the gates it spawns", () => {
       "worker=worker-brave-otter",
       "title=Plain test work",
       "task=brief-reviewer.md",
+      "memory=off",
     ])
   })
 
@@ -360,7 +362,13 @@ describe("under the gates it spawns", () => {
       reviewerOf,
       { NO_TITLE: "1", ROSTER_JSON: JSON.stringify(triage) },
       (triaged) =>
-        expect(triaged.roster).toEqual(["set", "reviewer-x", "kind=reviewer", "worker=worker-x"]),
+        expect(triaged.roster).toEqual([
+          "set",
+          "reviewer-x",
+          "kind=reviewer",
+          "worker=worker-x",
+          "memory=off",
+        ]),
     ],
   ])(
     "a checker with no title takes Review: or Test: before its worker's, keeps its own, and is refused with neither; a probe keeps its words-only default: %s",
@@ -421,16 +429,22 @@ describe("under the gates it spawns", () => {
       }),
     })
     expect(r.code).toBe(0)
-    expect(r.roster).toEqual(["set", "reviewer-x", "kind=reviewer", "worker=worker-x"])
+    expect(r.roster).toEqual([
+      "set",
+      "reviewer-x",
+      "kind=reviewer",
+      "worker=worker-x",
+      "memory=off",
+    ])
   })
 
-  // spawn.sh starts nothing in cmux, so a column beside a cmux surface:N is refused before any cmux or herdr call.
-  test("a column beside a cmux surface:N is refused, naming #2076", async () => {
+  // a column opens beside a herdr pane id alone, so an old cmux surface:N is refused as any other anchor is, before any cmux or herdr call.
+  test("a column beside an old cmux surface:N is refused as no herdr pane id", async () => {
     const r = await spawn(["column", "tester", "tester-x", "worker-x", "surface:7", "t.md"], [])
     expect(r.code).toBe(1)
     expect(r.cmux).toBeUndefined()
     expect(placing(r)).toEqual([])
-    expect(r.err).toContain("surface:7 is a cmux surface, and spawn.sh starts nothing in cmux")
+    expect(r.err).toContain("surface:7 is not a herdr pane id (w1:p2)")
   })
 
   test("a resume reopens the session by name in its folder, its role read from its name", async () => {

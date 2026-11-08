@@ -74,6 +74,7 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
       "kind=dispatcher",
       "surface=",
       `task=brief-${OLD.dispatcher}-2.md`,
+      "memory=off",
     ])
   })
 
@@ -489,7 +490,7 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
       .filter((l) => !l.startsWith("spawn.sh: "))
     expect(lines[0]).toStartWith("  spawn.sh worker ")
     expect(r.err).toContain("  --effort <level> ")
-    expect(lines.at(-1)).toStartWith("    The runtime is recorded at the start")
+    expect(lines.at(-1)).toStartWith("    The runtime is recorded at every start and resume")
   })
 
   // The optimizer is a manager that reports to OLD.dispatcher and runs on Claude (brief-optimizer.md), so it starts as a lead.
@@ -521,6 +522,7 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
       "kind=optimizer",
       "surface=",
       "task=brief-optimizer.md",
+      "memory=off",
     ])
   })
 

@@ -9,7 +9,7 @@ import datetime, json, os, subprocess, sys, urllib.request
 if len(sys.argv) != 2 or "@" not in sys.argv[1]:
     sys.exit("usage: account-watch.py <email>")
 email = sys.argv[1]
-sys.path.insert(0, os.path.expanduser("~/.playground/ops"))
+sys.path.insert(0, os.path.join(os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")), "ops"))
 from beat import OPS, setting  # noqa: E402
 
 OUT = os.path.join(os.path.dirname(OPS), f"usage-{email.split('@')[0]}.json")
