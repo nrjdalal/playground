@@ -20,6 +20,15 @@ describe("PLAYGROUND_DATA_DIR is the one data folder spawn.sh and its hooks read
   const scratch = mkdtempSync(join(tmpdir(), "data-folder-"))
   afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
+  // #1296: after its cd /, spawn.sh read a relative value as a folder under /, while the API read it under api/hono
+  test("spawn.sh refuses a relative PLAYGROUND_DATA_DIR with why, before any launch", async () => {
+    const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], {
+      PLAYGROUND_DATA_DIR: "data",
+    })
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("PLAYGROUND_DATA_DIR is relative (data)")
+  })
+
   test("spawn.sh reads the usage files and the pace override there, logs its gate there, and hands the folder to the session", async () => {
     const offUntil = new Date(Math.floor(Date.now() / 1000 + 86_400) * 1000)
     const week = usage({

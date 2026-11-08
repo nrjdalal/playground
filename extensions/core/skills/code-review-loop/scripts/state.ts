@@ -1,7 +1,7 @@
 #!/usr/bin/env -S bun --no-env-file
 import { spawnSync } from "node:child_process"
 import { readFileSync, readdirSync } from "node:fs"
-import { join, relative, dirname, basename } from "node:path"
+import { join, relative, dirname, basename, isAbsolute } from "node:path"
 
 export const VERDICT = /^##\s*ReviewBot\s*·\s*round\s+(\d+):\s*(\d)\/5\s+at\s+`?([0-9a-f]{7,40})/i
 export const WAIT_SECONDS = 300
@@ -85,8 +85,15 @@ export const scanRow = (pr: Json, login: string): Json => {
   }
 }
 
-export const dataDir = (): string =>
-  process.env.PLAYGROUND_DATA_DIR || `${process.env.HOME}/.playground`
+// A relative PLAYGROUND_DATA_DIR is refused, as packages/env/src/data-dir.ts refuses it.
+export const dataDir = (): string => {
+  const named = process.env.PLAYGROUND_DATA_DIR
+  if (named && !isAbsolute(named))
+    throw new Error(
+      `PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`,
+    )
+  return named || `${process.env.HOME}/.playground`
+}
 
 export const rosterPath = (): string => join(dataDir(), "roster.json")
 

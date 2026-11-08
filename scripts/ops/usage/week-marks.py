@@ -10,7 +10,7 @@ Ops' tick relays the alerts."""
 import calendar, datetime, json, os, sys, time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-HERE = os.path.join(os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state
+HERE = os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state
 sys.path.insert(0, os.path.dirname(HERE))
 from beat import OPS, setting  # noqa: E402
 

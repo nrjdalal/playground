@@ -169,6 +169,7 @@
   so every `playground/<path>` these rules name is under it;
   a fixture stack keeps to its fixture's `playground`.
   The factory's own writers resolve the same folder (`scripts/roster.ts`, `scripts/spawn.sh`, `scripts/link-skills.sh`, the hooks, the Python ops jobs), and the session-state hook keeps its own `session-state` folder (`sessionStateDir` in `packages/config/src/session-state.ts`).
+  Every reader of `PLAYGROUND_DATA_DIR`, in TypeScript, Python or shell, refuses a relative value with why and stops, since each process would read it against its own working folder (spawn.sh after its `cd /`, the API from `api/hono`), so it is always an absolute path.
   The factory's scripts in `packages/scripts` read the same folder, `PLAYGROUND_DATA_DIR` included (`dataDir()` there, or `dataDirOf(<config>, process.env)`, one folder per job), but for what spawn.sh and herdr keep under HOME's `~/.claude` (briefs, backend pins, the herdr sockets, the factory settings), which follows HOME and never `PLAYGROUND_DATA_DIR`,
   and `pr:merge` and `pr:train` run with `bun --no-env-file`, so a worktree's `.env` never moves the merge lock.
   A renamed setting keeps its old name readable after the new one: each `DESK_*` name and each name under the prefix before it for its `PLAYGROUND_*` one, filled in by `packages/env/src/aliases.ts` for every TypeScript reader that imports it and read second by each shell and Python reader.
