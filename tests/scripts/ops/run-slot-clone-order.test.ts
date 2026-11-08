@@ -6,6 +6,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { join } from "node:path"
@@ -52,6 +53,19 @@ describe("a big run on a CPU slot", () => {
     expect(await clone(m, "worker-c")).toBe("waited")
   })
 
+  // issue 1317, 7 Nov 10:24 to 11:55Z: about 11 clones asked and none started while back-to-back big runs held a slot
+  test("but a worker's clone that has waited CLONE_WAIT_MAX s passes it", async () => {
+    const m = machine()
+    m.hold("run-slot-2", 3, "big")
+    mkdirSync(join(m.root, "node_modules"), { recursive: true })
+    const run = m.start("worker-c", { RUN_SLOT_CLONE_WAIT_MAX: "2" }, SCRIPT, [
+      "cp",
+      "-R",
+      "node_modules",
+    ])
+    expect(await run.ran()).toBe(true)
+  })
+
   test("and the roll's clone still waits for the load brake", async () => {
     expect(await clone(machine({ cores: 8, load1: 2, load5: 4 }), "ops-dashboard")).toBe("waited")
   })
@@ -85,6 +99,37 @@ describe("the clone lane", () => {
     expect(started(m)[0]).toBe("ops-dashboard")
   })
 
+  // issue 1317's added Done when: a queue read sees each clone waiter
+  test("lists each waiting clone in run-slot.clone-waiters", async () => {
+    const m = machine()
+    m.hold("run-slot-clone", 1, "small")
+    const run = cloning(m, "worker-listed")
+    expect(await run.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
+    const listed = readdirSync(join(m.ops, "run-slot.clone-waiters"))
+    await stop(run.p)
+    expect(listed.map((n) => n.split("-").slice(3).join("-"))).toEqual(["worker-listed"])
+  })
+
+  // the lead's check on the round 1 fix: a waiter no gate holds keeps its place across a reread
+  test("and an older waiter that runs a new copy keeps its place ahead of a newer one", async () => {
+    const m = machine()
+    const copy = join(m.root, "run-slot.sh")
+    copyFileSync(SCRIPT, copy)
+    m.hold("run-slot-clone", 1, "small")
+    const older = cloning(m, "worker-older", copy)
+    expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
+    const newer = cloning(m, "worker-newer")
+    expect(await newer.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
+    copyFileSync(SCRIPT, `${copy}.new`)
+    utimesSync(`${copy}.new`, new Date(), new Date())
+    renameSync(`${copy}.new`, copy)
+    expect(await older.saw(/running the new copy/g)).toBe(true)
+    m.release("run-slot-clone")
+    while (started(m).length === 0) await Bun.sleep(50)
+    await Promise.all([stop(older.p), stop(newer.p)])
+    expect(started(m)[0]).toBe("worker-older")
+  })
+
   // review round 1: a reread's exec kept the entry while the new copy waited in clone_held, so a clone clone-allow names waited behind a waiter clone-off parked
   test("and a waiter a gate holds after its reread holds back no clone the gate lets through", async () => {
     const m = machine({ pressure: 4 })
@@ -96,6 +141,8 @@ describe("the clone lane", () => {
     writeFileSync(join(m.ops, "run-slot.clone-off"), "")
     writeFileSync(join(m.ops, "run-slot.clone-allow"), "worker-allowed\n")
     copyFileSync(SCRIPT, `${copy}.new`)
+    // copyFileSync keeps the source's mtime on macOS, so the copy takes the moment it lands, as a pull's write does
+    utimesSync(`${copy}.new`, new Date(), new Date())
     renameSync(`${copy}.new`, copy)
     expect(await parked.saw(/running the new copy/g)).toBe(true)
     m.release("run-slot-clone")
