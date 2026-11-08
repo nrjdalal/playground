@@ -516,7 +516,17 @@ except Skip:
 # 4 usage: the launching backend's own window
 try:
     readings["backend"] = backend or "claude"
+    # usage.accounts' rows parked until a later time (parkedUntil), by email: no new session starts on one, picked or named
+    parked = {}
+    for row in gates["accounts"]:
+        try:
+            if from_iso(row["parkedUntil"]) > now:
+                parked[row["email"].lower()] = row["parkedUntil"]
+        except (KeyError, TypeError, ValueError, AttributeError):
+            pass
     if account:
+        if account.lower() in parked:
+            refuse("usage", f"--account {account} is parked until {parked[account.lower()]} (usage.accounts parkedUntil). Name another account, or none, so it starts on the login with the most room")
         # a week at 100% leaves no room on any login, so a reading that names the account (usage.json, stored-login.json or a usage-<name>.json) refuses it before its week resets.
         names = ["usage.json", "ops/usage/stored-login.json"] + [os.path.basename(p) for p in sorted(glob.glob(os.path.join(data_dir, "usage-*.json")))]
         for name in names:
@@ -702,6 +712,7 @@ try:
             logins.append((email, name, email, seen, detail))
             if detail is None:
                 known.add(email.lower())
+        logins = [(email, name, acct, seen, detail or (f"it is parked until {parked[email.lower()]} (usage.accounts parkedUntil)" if email.lower() in parked else None)) for email, name, acct, seen, detail in logins]
         passing = [login for login in logins if login[4] is None]
         if not passing:
             readings.update(logins[0][3])
@@ -798,17 +809,17 @@ GLM_ACCOUNT=
 GLM_GIVEN=
 # The models a session runs on (models.*) and the capacity gate's lines (gates.*) are settings, each in the docs' list of keys, so changing one is a settings write, never an edit here.
 MODEL_SETTINGS=$(env $UNSET "$BUN" "$REPO/packages/scripts/src/playground/setting.ts" --text models.claude models.default models.checker models.glm models.glmKeychainService \
-  gates.glmLoad5Max gates.glmSwapinsMax gates.memoryFreeMin gates.reviewReserve gates.smallReserve gates.startsWindow sessions.names sessions.aliases context.window 2>&1) ||
+  gates.glmLoad5Max gates.glmSwapinsMax gates.memoryFreeMin gates.reviewReserve gates.smallReserve gates.startsWindow sessions.names sessions.aliases context.window usage.accounts 2>&1) ||
   { echo "spawn.sh refuses: it cannot read the model and gate settings: $MODEL_SETTINGS" >&2; exit 1; }
 {
   read -r CLAUDE_MODELS; read -r DEFAULT_MODEL; read -r CHECKER_MODEL; read -r GLM_ID; read -r GLM_KEYCHAIN
   read -r GLM_LOAD5_MAX; read -r GLM_SWAPINS_MAX; read -r MEMORY_FREE_MIN; read -r REVIEW_RESERVE; read -r SMALL_RESERVE; read -r STARTS_WINDOW
-  read -r SESSION_NAMES; read -r SESSION_ALIASES; read -r WINDOW
+  read -r SESSION_NAMES; read -r SESSION_ALIASES; read -r WINDOW; read -r USAGE_ACCOUNTS
 } <<<"$MODEL_SETTINGS"
 SESSION_KINDS=$(python3 -I -c 'import json, sys; n, a = map(json.loads, sys.argv[1:3]); [print(*row) for row in [(v, k) for k, v in n.items()] + [(n["dispatcher"] + "-2", "dispatcher")] + list(a.items())]' "$SESSION_NAMES" "$SESSION_ALIASES")
 # slots.peers, the ops folders of the other factories on this machine, whose starts the load gate counts beside this one's; none when unread
 PEERS=$(setting slots.peers) || PEERS=; [ -n "$PEERS" ] || PEERS="[]"
-GATES="{\"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"reviewReserve\": $REVIEW_RESERVE, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
+GATES="{\"accounts\": ${USAGE_ACCOUNTS:-[]}, \"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"reviewReserve\": $REVIEW_RESERVE, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
 MODELS=$(printf '%s\n' $CLAUDE_MODELS | awk '{ m[NR] = $0 } END { for (i = 1; i <= NR; i++) printf "%s%s", m[i], (i < NR - 1 ? ", " : i == NR - 1 ? " or " : "") }')
 CLAUDE_MODEL=
 EFFORT=
