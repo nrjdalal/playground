@@ -419,6 +419,106 @@ describe("one night's run against a fixture data folder", () => {
     )
   })
 
+  // issue 1554: rm refuses the 4th trash move in a minute ("quarantined 3 paths in the last minute, the most one session may"), and the beat counted that refusal as done, so 7 of 10 stale worktrees stayed behind with no line naming them for the next run; the beat paces under the cap, waiting out the minute on the injected sleep, under a total-wait bound, and names anything the bound leaves
+  test("the beat finishes its stale worktrees under rm's 3-a-minute cap", async () => {
+    const root = scratch()
+    const data = join(root, "data")
+    const ops = join(data, "ops")
+    const main = join(root, "main")
+    const names = Array.from({ length: 10 }, (_, i) => `pg-${i + 1}`)
+    for (const name of names)
+      mkdirSync(join(main, ".claude", "worktrees", name), { recursive: true })
+    mkdirSync(join(ops, "log"), { recursive: true })
+    writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
+    const wt = (name: string) => join(main, ".claude", "worktrees", name)
+    const porcelain = [
+      `worktree ${main}\nHEAD a\nbranch refs/heads/main`,
+      ...names.map(
+        (name, i) =>
+          `worktree ${wt(name)}\nHEAD ${"abcdefghij"[i]}\nbranch refs/heads/PG-${i + 1}-x`,
+      ),
+    ].join("\n\n")
+    const answers: Answers = {
+      "docker ps": "playground-dashboard-db\trunning\t10B",
+      "docker system df": JSON.stringify({ Volumes: [] }),
+      "for-each-ref refs/heads": [...names.map((_, i) => `PG-${i + 1}-x h${i + 1}`), "main m"].join(
+        "\n",
+      ),
+      "for-each-ref refs/remotes/origin": "HEAD x",
+      "branch --merged": names.map((_, i) => `PG-${i + 1}-x`).join("\n"),
+      "worktree list": porcelain,
+      "--reason nightly-clean":
+        "Moved to the trash as 20261108T030000Z-shell/1 (3 files); playground rm --restore 20261108T030000Z-shell/1 brings it back",
+    }
+    const base = fakeRun(answers)
+    const accepted: number[] = []
+    let t = 0
+    const waits: number[] = []
+    const run: Context["run"] = async (argv, timeoutMs, stdin) => {
+      if (argv.join(" ").includes("rm --worktree")) {
+        if (accepted.filter((at) => t - at < 60_000).length >= 3)
+          return {
+            code: 1,
+            out: "",
+            err: "nightly-clean quarantined 3 paths in the last minute, the most one session may\n",
+          }
+        accepted.push(t)
+      }
+      return base.run(argv, timeoutMs, stdin)
+    }
+    const sleep = async (ms: number) => {
+      waits.push(ms)
+      t += ms
+    }
+    const sent: { text: string; to: string }[] = []
+    const ctx: Context = {
+      now: new Date("2026-11-05T03:00:00Z"),
+      ops,
+      repo: main,
+      run,
+      send: async (to, text) => {
+        sent.push({ text, to })
+        return true
+      },
+    }
+    const deps = {
+      cleanup: async () => ({
+        containers: async () => [],
+        devStop: async () => ({ ok: true, out: "" }),
+        finished: async () => false,
+        git: async (dir, args) =>
+          args[0] === "rev-parse"
+            ? `${dir}/.git\n${main}/.git`
+            : args[0] === "status"
+              ? " M wip.ts"
+              : "",
+        held: async () => null,
+        live,
+        liveBranch: "live/dashboard",
+        main,
+        removeContainer: async () => true,
+        rm: async () => ({ ok: true, out: "" }),
+      }),
+      free: () => 100 * 1024 ** 3,
+      prs: async () => ({
+        ...prsOf(
+          Object.fromEntries(
+            names.map((_, i) => [`PG-${i + 1}-x`, pr("MERGED", `h${i + 1}`, i + 1)]),
+          ),
+        ),
+        repo: "https://github.com/acme/app",
+      }),
+      sleep,
+      turbo: join(root, "turbo"),
+    } as NightDeps
+    await nightlyClean(deps)(ctx)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log.match(/trashed /g)).toHaveLength(10)
+    expect(log).not.toContain("its trash move failed")
+    expect(log).not.toContain("left for the next run")
+    expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(600_000)
+  })
+
   // #1515
   test("an unmerged branch on origin is archived as a tag before any delete, then deleted on origin and locally, and no ask new names a decision", async () => {
     const { ctx, deps, inputs, ops, runs, sent } = night({
