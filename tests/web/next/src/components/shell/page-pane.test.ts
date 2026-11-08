@@ -13,7 +13,7 @@ const read = async (path: string) =>
 const IMPORT = 'import { PAGE_PANE } from "@/components/shell/page-pane"'
 
 // A channel renders through ChannelView on both shells, so it looks the same only while both draw the page in one box: these hold the dashboard's page and the members' /yard page to PAGE_PANE.
-describe("the page box the local and hosted shells share", () => {
+describe("the page box the dashboard and the members' /yard pages share", () => {
   test("scrolls on its own inside a column, so a channel's header and composer stay in view", () => {
     expect(PAGE_PANE.split(" ").sort()).toEqual(
       ["flex", "flex-col", "min-h-0", "overflow-y-auto"].sort(),
@@ -29,7 +29,7 @@ describe("the page box the local and hosted shells share", () => {
     )
   })
 
-  test("is the hosted Yard's page, one screen tall as the dashboard's box is", async () => {
+  test("is the members' /yard page, one screen tall as the dashboard's box is", async () => {
     const source = await read("app/(yard)/yard/(app)/layout.tsx")
     expect(source).toContain(IMPORT)
     expect(source).toContain('<div className={cn("h-svh", PAGE_PANE)}>{children}</div>')
