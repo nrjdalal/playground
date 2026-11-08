@@ -2452,6 +2452,42 @@ describe("a held path past any other heredoc or a quote the scan cannot place is
   })
 })
 
+// #1616: the subscript scan read quoted text, so a selector or a jq filter in single quotes left no variable held on its line
+describe("a single-quoted subscript no command reads as a name leaves the line's variables held", () => {
+  test.each([
+    [
+      "cp to a held path beside an assignment's single-quoted value",
+      `D=/tmp/d; ST='x[y]'; cp x "$D/y"`,
+    ],
+    [
+      "tee to a held path beside an assignment's single-quoted value",
+      `D=/tmp/d; ST='x[\\"'; echo x | tee "$D/a.log"`,
+    ],
+    ["cp to a held path beside a jq filter", `D=/tmp/d; jq '.a[b]' f; cp x "$D/y"`],
+    [
+      "cp to a held path beside a selector an echo prints",
+      `D=/tmp/d; echo 'q("a[href]")'; cp x "$D/y"`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+})
+
+describe("a single-quoted subscript a command reads as a name still holds no variable", () => {
+  test.each([
+    ["read", `D=/tmp/d; read 'a[i]' < /tmp/f; cp x "$D/y"`],
+    ["printf -v", `D=/tmp/d; printf -v 'a[i]' x; cp x "$D/y"`],
+    ["unset", `D=/tmp/d; unset 'a[i]'; cp x "$D/y"`],
+    ["[[ -v", `D=/tmp/d; [[ -v 'a[i]' ]]; cp x "$D/y"`],
+    ["declare", `D=/tmp/d; declare 'a[i]=1'; cp x "$D/y"`],
+    ["read of a held value", `D=/tmp/d; X='a[i]'; read "$X" < /tmp/f; cp x "$D/y"`],
+    ["unset of a held value", `D=/tmp/d; X='a[i]'; unset "$X"; cp x "$D/y"`],
+    ["printf -v of a held value", `D=/tmp/d; X='a[i]'; printf -v "$X" x; cp x "$D/y"`],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeDefined()
+  })
+})
+
 // An eval of literal text is followed as the line its words make, so it runs where those commands would; refused-forms/1198.ts holds the forms it refuses
 describe("an eval of literal text runs", () => {
   test.each([
