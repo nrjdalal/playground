@@ -1,6 +1,7 @@
 {
   "autoCompactWindow": 400000,
   "autoMemoryEnabled": false,
+  "enableArtifact": false,
   "env": {
     "DISABLE_AUTOUPDATER": "1",
     "HOMEBREW_NO_INSTALL_CLEANUP": "1",
@@ -402,8 +403,5 @@
         ]
       }
     ]
-  },
-  "permissions": {
-    "deny": ["Artifact"]
   }
 }

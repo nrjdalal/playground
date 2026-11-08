@@ -268,13 +268,15 @@ describe("the standing rules at session start", () => {
   })
 })
 
-// playbook's **local page**: a page for the owner is a local HTML file, since an artifact publishes under whichever account the session holds; a bare tool name in permissions.deny takes the tool out of the session's context, bypass mode included (https://code.claude.com/docs/en/permissions)
+// playbook's **local page**: a page for the owner is a local HTML file, since an artifact publishes under whichever account the session holds; enableArtifact false is Claude Code's own off switch, honored from a project or --settings file and turned back on by none (https://code.claude.com/docs/en/artifacts#disable-artifacts)
 describe("the Artifact tool", () => {
   for (const file of [join("scripts", "factory-settings.json"), join(".claude", "settings.json")])
-    test(`${file} denies it`, async () => {
+    test(`${file} turns it off with enableArtifact false, not a deny rule`, async () => {
       const settings = (await Bun.file(join(root, file)).json()) as {
+        enableArtifact?: boolean
         permissions?: { deny?: string[] }
       }
-      expect(settings.permissions?.deny).toContain("Artifact")
+      expect(settings.enableArtifact).toBe(false)
+      expect(settings.permissions?.deny ?? []).not.toContain("Artifact")
     })
 })
