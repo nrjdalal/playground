@@ -7870,7 +7870,11 @@ function sedReads(args) {
   const read = scripts.length ? scripts : operands.slice(0, 1);
   return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value));
 }
-var SED_IN_PLACE = /^-[Enrsuz]*i[\w.~-]*$|^--in-place(?:=[\w.~-]*)?$/;
+var SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/;
+var SED_SUFFIX = /^(?:\.[\w.~-]*)?$/;
+var SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
+var SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}${SED_TEXT}[gpI0-9]*)[ \t]*`;
+var SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`);
 function sedInPlace(cmd, parsed) {
   const { args, local, name } = parsed;
   if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed))
@@ -7880,25 +7884,31 @@ function sedInPlace(cmd, parsed) {
   let inPlace = false;
   for (let k = 0;k < args.length; k++) {
     const { value } = args[k];
-    if (value === "-e" || value === "--expression") {
+    const suffix = SED_IN_PLACE.exec(value);
+    if (value === "-e") {
       if (!args[k + 1])
         return;
       scripts.push(args[++k]);
-    } else if (value === "--")
-      operands.push(...args.slice(++k));
-    else if (SED_IN_PLACE.test(value))
+    } else if (value === "--") {
+      operands.push(...args.slice(k + 1));
+      break;
+    } else if (suffix) {
       inPlace = true;
-    else if (value.startsWith("-") && value !== "-") {
-      if (!SED_FLAG.test(value))
+      if (suffix[1])
+        continue;
+      const word = args[++k];
+      if (!word || !literal(word) || !SED_SUFFIX.test(word.value))
+        return;
+    } else if (value.startsWith("-") && value !== "-") {
+      if (!/^-[Enrsuz]+$/.test(value))
         return;
     } else
       operands.push(args[k]);
-    if (value === "--")
-      break;
   }
-  const script = (w) => literal(w) && SED_SCRIPT.test(w.value);
-  const read = scripts.length ? scripts : operands.filter(script);
-  if (!inPlace || read.length === 0 || !read.every(script))
+  const read = scripts.length ? scripts : operands.slice(0, 1);
+  if (!inPlace || read.length === 0)
+    return;
+  if (!read.every((w) => literal(w) && SED_EDIT.test(w.value)))
     return;
   return new Set(read);
 }
@@ -7995,7 +8005,8 @@ function wholeLine(commands, env) {
     if (words.some((word) => word.procs && wholeLine(word.procs, env)))
       return true;
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
-    return writes || !(narrow(cmd, env) || quietCommit(cmd, parse3(cmd), env) || sedInPlace(cmd, parse3(cmd)));
+    const parsed = parse3(cmd);
+    return writes || !(narrow(cmd, env) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed));
   });
 }
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);

@@ -566,10 +566,16 @@ function sedReads(args: Word[]): boolean {
   return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value))
 }
 
-// sed's in-place option: -i alone or after SED_FLAG's letters, with a backup suffix holding no / or * (GNU writes a suffix with either into another folder), or --in-place with the same suffix
-const SED_IN_PLACE = /^-[Enrsuz]*i[\w.~-]*$|^--in-place(?:=[\w.~-]*)?$/
+// sed's in-place option as macOS sed reads it: -i after any of -E, -n, -r, -s, -u and -z, its backup suffix attached (holding no / or *, which GNU writes into another folder) or, when nothing is attached, the next word
+const SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/
+// a bare -i's suffix word: empty or a dot and letters, so a GNU sed, which reads that word as its script, reads it as no command or none it knows
+const SED_SUFFIX = /^(?:\.[\w.~-]*)?$/
+const SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
+const SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}${SED_TEXT}[gpI0-9]*)[ \t]*`
+// an in-place sed's script read whole by its allowlist: line, $ or /regex/ addresses and their ranges, then d, p, or s/// with flags from g, p, I and digits; every other command and flag (w, W, r, R, e, s///w, s///e) is off it
+const SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`)
 
-// The scripts of a sed call that edits its files in place and writes nothing else, or undefined: sed as its own program (ownProgram) with no variable set in the call, an in-place option (SED_IN_PLACE), every other option on SED_FLAG's list, and every script a literal word that SED_SCRIPT holds (each -e value, else each operand it holds), so a script writes no w file and runs no e command, while each other operand, a file it edits, is judged as any word is
+// The scripts of a sed call that edits its files in place and writes nothing else, or undefined, its argv read as macOS sed reads it: sed as its own program (ownProgram) with no variable set in the call, an in-place option (SED_IN_PLACE) whose bare form takes the next word as its suffix (SED_SUFFIX), every other option on -E, -n, -r, -s, -u and -z, and every script (each -e value, else the first operand) a literal word that SED_EDIT holds, while each other operand, a file it edits, is judged as any word is
 function sedInPlace(cmd: Command, parsed: Parsed): Set<Word> | undefined {
   const { args, local, name } = parsed
   if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed)) return undefined
@@ -578,19 +584,25 @@ function sedInPlace(cmd: Command, parsed: Parsed): Set<Word> | undefined {
   let inPlace = false
   for (let k = 0; k < args.length; k++) {
     const { value } = args[k]
-    if (value === "-e" || value === "--expression") {
+    const suffix = SED_IN_PLACE.exec(value)
+    if (value === "-e") {
       if (!args[k + 1]) return undefined
       scripts.push(args[++k])
-    } else if (value === "--") operands.push(...args.slice(++k))
-    else if (SED_IN_PLACE.test(value)) inPlace = true
-    else if (value.startsWith("-") && value !== "-") {
-      if (!SED_FLAG.test(value)) return undefined
+    } else if (value === "--") {
+      operands.push(...args.slice(k + 1))
+      break
+    } else if (suffix) {
+      inPlace = true
+      if (suffix[1]) continue
+      const word = args[++k]
+      if (!word || !literal(word) || !SED_SUFFIX.test(word.value)) return undefined
+    } else if (value.startsWith("-") && value !== "-") {
+      if (!/^-[Enrsuz]+$/.test(value)) return undefined
     } else operands.push(args[k])
-    if (value === "--") break
   }
-  const script = (w: Word) => literal(w) && SED_SCRIPT.test(w.value)
-  const read = scripts.length ? scripts : operands.filter(script)
-  if (!inPlace || read.length === 0 || !read.every(script)) return undefined
+  const read = scripts.length ? scripts : operands.slice(0, 1)
+  if (!inPlace || read.length === 0) return undefined
+  if (!read.every((w) => literal(w) && SED_EDIT.test(w.value))) return undefined
   return new Set(read)
 }
 
@@ -726,10 +738,8 @@ function wholeLine(commands: Command[], env: Env): boolean {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
     if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
-    return (
-      writes ||
-      !(narrow(cmd, env) || quietCommit(cmd, parse(cmd), env) || sedInPlace(cmd, parse(cmd)))
-    )
+    const parsed = parse(cmd)
+    return writes || !(narrow(cmd, env) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed))
   })
 }
 

@@ -20,7 +20,11 @@ export const groups: Group[] = [
         `sed -i '' '/kept.push(\`worktree /d' ${WORK}/a.ts`,
       ],
       ["an in-place sed whose /regex/d holds a (", `sed -i '' '/kept.push(/d' ${WORK}/a.ts`],
-      ["an in-place GNU sed whose /regex/d holds a *", `sed -i '/a*b/d' ${WORK}/a.ts`],
+      ["an in-place sed whose suffix is attached", `sed -i.bak '/a*b/d' ${WORK}/a.ts`],
+      [
+        "an in-place sed whose s/// holds a ( and its flags",
+        `sed -n -i '' 's/a(/b/gp' ${WORK}/a.ts`,
+      ],
       ["an in-place sed whose -e script holds a [", `sed -i '' -e '/a[bc]/d' ${WORK}/a.ts`],
       ["an in-place sed whose range holds a ?", `sed -i '' '/ab?/,/end/d' ${WORK}/a.ts`],
       [
@@ -50,6 +54,54 @@ export const groups: Group[] = [
         "home",
       ],
       [
+        "an in-place sed whose bare -i takes a /regex/d holding a * as its suffix",
+        `sed -i '/a*b/d' ${WORK}/a.ts`,
+      ],
+      [
+        "an in-place sed whose bare -i takes a harmless script as its suffix, before a w through a link to the root",
+        `cd ${WORK} && sed -i p '/x/w ../store/login/x' a.ts`,
+        "home",
+      ],
+      [
+        "an in-place sed whose bare -i takes a harmless script as its suffix, before a w through a link to the data folder",
+        `cd ${WORK} && sed -i p '/x/w ../pg/extensions/login/x' a.ts`,
+        "home",
+      ],
+      [
+        "an in-place sed whose bare -i takes a harmless script as its suffix, before a w from the home",
+        `sed -i p '/x/w store/login/x' work/a.ts`,
+        "home",
+      ],
+      [
+        "an in-place sed -n whose bare -i takes a harmless script as its suffix, before a w through a link",
+        `cd ${WORK} && sed -n -i p '/x/w ../store/login/x' a.ts`,
+        "home",
+      ],
+      [
+        "an in-place sed whose script writes a W file through a link to the root",
+        `cd ${WORK} && sed -i '' '/x/W ../store/login/x' a.ts`,
+        "home",
+      ],
+      [
+        "an in-place sed whose s/// writes its w file through a link to the root",
+        `cd ${WORK} && sed -i '' 's/x/y/w ../store/login/x' a.ts`,
+        "home",
+      ],
+      [
+        "an in-place sed whose s/// runs its e flag",
+        `sed -i '' 's/x/rm -rf ${NEVER_MADE} #/e' ${WORK}/a.ts`,
+      ],
+      [
+        "an in-place sed whose script reads an r file through a link to the root",
+        `cd ${WORK} && sed -i '' '/x/r ../store/login/x' a.ts`,
+        "home",
+      ],
+      [
+        "an in-place sed whose script comes from a -f file through a link to the root",
+        `cd ${WORK} && sed -i '' -f ../store/login/x.sed a.ts`,
+        "home",
+      ],
+      [
         "a quiet commit whose message holds the root's path",
         `git commit -m "fix: playground migrate in ${ROOT}"`,
       ],
@@ -67,7 +119,8 @@ export const allowed: string[] = [
   "a sed range address",
   "an in-place sed whose /regex/d holds a ( and a backtick",
   "an in-place sed whose /regex/d holds a (",
-  "an in-place GNU sed whose /regex/d holds a *",
+  "an in-place sed whose suffix is attached",
+  "an in-place sed whose s/// holds a ( and its flags",
   "an in-place sed whose -e script holds a [",
   "an in-place sed whose range holds a ?",
   "a quiet commit whose message names playground migrate",
