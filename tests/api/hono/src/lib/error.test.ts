@@ -5,7 +5,7 @@ import { ERROR_CODES } from "../../../../../api/hono/src/lib/error"
 
 const ROOT = join(import.meta.dir, "../../../../..")
 
-// The codes a sessions read's failure took in #1440, and the two they replaced, which only a stored Inbox row may still carry (a migration of real rows waits for the owner).
+// The codes a sessions read's failure took in #1440, and the two they replaced, which only a stored Inbox row may still carry.
 const CODES = ["SESSIONS_FAILED", "SESSIONS_UNAVAILABLE"]
 const OLD_CODES = ["CMUX_FAILED", "CMUX_UNAVAILABLE"]
 const DOCS = [
