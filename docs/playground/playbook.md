@@ -71,7 +71,7 @@ it counts no sessions, so Ops watches the live board, since cmux once stopped an
 A heavy run, such as a suite, takes one of a few run slots and gives it back when it ends, so nothing long-lived holds one.
 Nobody builds a demo stack for the owner: he tries changes on the live dashboard alone.
 A runner hosts long-running jobs and closes when none is left; the ops jobs Ops runs are scripts with no session and show on the Dashboard under Runners from the heartbeat each writes.
-One of them, ops-unstick, reads every session's screen every 2 minutes, clears a usage-limit dialog when there is room, takes one with no room to the builder and the dispatcher (a probe's to its spawner), and takes any other block no hook recorded to the session's manager,
+One of them, ops-unstick, reads every session's screen every 2 minutes, clears a usage-limit dialog when there is room, takes one with no room on a probe to its spawner, names each capped account's live sessions to the builder and ops once a reset, and takes any other block no hook recorded to the session's manager,
 as the session-state hook does for one it did,
 and the Dashboard shows each one it finds as Stuck, with a red alarm, or as Paused · usage limit, with gray pause bars, when the usage limit alone holds it.
 Another, ops-loom-relay, passes Claude Code's usage on to the org's Loom as counts alone once the usage export points at it rather than straight at Loom, so no skill, agent, tool or subagent name leaves the Mac, with no prompt, summary or other text, and every login's usage on the Mac under the one login its settings name,
