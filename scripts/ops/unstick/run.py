@@ -611,9 +611,17 @@ def dialog_room(name, lines):
     return has_room, why
 
 
-# autoMemoryEnabled is false and the memory folders were archived (8 Oct): any file under ~/.claude/projects/*/memory/ other than the one-line
-# MEMORY.md pointer is new memory a session wrote anyway; name it, its originSessionId and that session's name (builder, 9 Oct)
+# A file under ~/.claude/projects/*/memory/ other than the one-line MEMORY.md pointer and a note of a session the roster marks memory=on (ADR 0022) is memory a session wrote anyway: name it, its originSessionId and that session's name.
 POINTER = "Learnings live in the playground repo; see AGENTS.md."
+
+
+def memory_on():
+    """The roster names whose row the memory trial put on (spawn.sh's memory=on); empty when the roster does not read."""
+    try:
+        agents = json.load(open(os.path.join(LW, "roster.json"))).get("agents") or []
+        return {a["name"] for a in agents if isinstance(a, dict) and isinstance(a.get("name"), str) and a.get("memory") == "on"}
+    except (AttributeError, OSError, ValueError):
+        return set()
 
 
 def memory_files():
@@ -626,6 +634,7 @@ def memory_files():
             names[d.get("sessionId")] = d.get("name")
         except (OSError, ValueError):
             pass
+    trial = memory_on()
     found = []
     for path in _glob.glob(os.path.join(cfg, "projects", "*", "memory", "*")):
         if not os.path.isfile(path):
@@ -638,6 +647,8 @@ def memory_files():
             continue
         m = re.search(r"originSessionId:\s*([0-9a-f-]{36})", text)
         sid = m.group(1) if m else None
+        if sid and names.get(sid) in trial:
+            continue
         rel = os.path.relpath(path, os.path.join(cfg, "projects"))
         found.append({"at": now(), "kind": "memory-file", "line": f"{rel} (originSessionId {sid or 'unknown'})", "name": names.get(sid) or (sid[:8] if sid else "unknown session"),
                       "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(os.path.getmtime(path)))})
@@ -1140,9 +1151,11 @@ def cycle(state):
         stuck = slot_stuck(state, now_t)
         if stuck:
             alerts.append(stuck)
-            if not state["slot_free"].get("told"):
-                state["slot_free"]["told"] = True
-                subprocess.run([os.path.join(CODE, "notify.sh"), "unstick", stuck["line"]], env=os.environ | {"NOTIFY_TO": "builder"}, capture_output=True, timeout=30)
+            # one send per line kind in an episode, the no-fit and could-take lines each once, a kind change sending again
+            told = state["slot_free"].setdefault("told_cases", [])
+            if stuck["case"] not in told:
+                told.append(stuck["case"])
+                notify(stuck["line"], to="builder")
     except Exception as e:
         log(f"slot-stuck check failed: {type(e).__name__}: {e}")
     # ops-sweep's PR stalls (idle 30 minutes or 4 verdicts at one sub-5 score, not held), while its file is fresh (written within 15 minutes)
@@ -1237,9 +1250,32 @@ def slot_stuck(state, now_t):
         return None
     can = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "can-take", "run-slot", head], env=env, capture_output=True, timeout=30)
     if can.returncode != 0:
-        return None
+        # issue 1416: the units rule beside a free slot is as designed, so the alert only names it: the slot, the head's units, each holder's
+        try:
+            t = open(os.path.join(OPS, "run-slot.waiters", head)).read().split()
+            units = t[2] if len(t) > 2 and t[2] in ("1", "2", "3") else ""
+        except OSError:
+            units = ""
+        holds = []
+        for f in sorted(os.listdir(OPS)):
+            if not (f.startswith("run-slot") and f.endswith(".holder")):
+                continue
+            if not os.path.isdir(os.path.join(OPS, f[: -len(".holder")])):
+                continue
+            try:
+                u = open(os.path.join(OPS, f)).read().split(" ", 4)[3].strip()
+            except (OSError, IndexError, ValueError):
+                continue
+            if u in ("1", "2", "3"):
+                holds.append(f"{f[: -len('.holder')]} holds {u} unit{'s' if u != '1' else ''}")
+        line = (
+            f"run-slot free for {int(now_t - sf['since'])}s while {first[2]} (pid {first[1]}) heads the queue, "
+            + (f"its {units} units fit no open slot" if units else "its units fit no open slot")
+            + (f", {', '.join(holds)}" if holds else ", no units held")
+        )
+        return {"at": now(), "kind": "slot-stuck", "case": "no-fit", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
     line = f"run-slot free for {int(now_t - sf['since'])}s while {first[2]} (pid {first[1]}) heads the queue, could take it and takes nothing"
-    return {"at": now(), "kind": "slot-stuck", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
+    return {"at": now(), "kind": "slot-stuck", "case": "could-take", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
 
 
 # whether run-slot.runs.log shows run-slot taken at or after since, a sample of the window that found it held between this job's own reads, 2 minutes apart
