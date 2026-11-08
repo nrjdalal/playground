@@ -423,3 +423,158 @@ test.each([
   expect(readFileSync(join(cache, "weekly_retail"), "utf8")).toBe("41.5")
   expect(readFileSync(join(cache, "daily24_retail"), "utf8")).toBe("7.25")
 })
+
+// #1587: a full week's reading (week 100) stays fresh until its weekReset, so a probe that answers nothing for a full account cannot fail the cycle. Every time is an offset the Python side adds to its own time.time(), so the clock-ahead pass's moved clock cannot split the two; the probe answers None, as it does for a full account whose answer holds no 7d-utilization header
+const fullWeekHarness = `
+import json, os, sys, time, types
+spec = json.loads(sys.argv[2])
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+now = time.time()
+calls = []
+def probe(email):
+    calls.append(email)
+    return None
+ns["probe"] = probe
+s = {"at": now + spec["seenAt"], "week": spec["week"]}
+if spec.get("weekReset") is not None:
+    s["weekReset"] = now + spec["weekReset"]
+if spec.get("limitedUntil") is not None:
+    s["limitedUntil"] = now + spec["limitedUntil"]
+flip = {"accounts": spec.get("accounts") or [], "factory": spec.get("factory"), "seen": {spec["email"]: s}}
+ns["write"](ns["FLIP"], flip)
+out = {}
+try:
+    data = ns["factory_reading"]({"account": "mine@example.org", "rate_limits": {}}, flip)
+    if data:
+        out["factory"] = {"readAt": data["readAt"], "week": data["rate_limits"]["seven_day"]["used_percentage"]}
+except Exception as e:
+    out["factoryError"] = f"{type(e).__name__}: {e}"
+if spec.get("accounts"):
+    out["accounts"] = sorted(ns["accounts_reading"]())
+out["probes"] = calls
+print(json.dumps(out))
+`
+
+const fullWeek = (name: string, spec: Record<string, unknown>) => {
+  const home = join(scratch, name)
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(
+    ["python3", "-I", "-c", fullWeekHarness, script, JSON.stringify(spec)],
+    { env },
+  )
+  expect(child.stderr.toString()).toBe("")
+  return JSON.parse(child.stdout.toString())
+}
+
+test("a full week's reading counts as fresh until its weekReset, so a probe that answers nothing cannot fail the cycle (#1587)", () => {
+  expect(
+    fullWeek("full-week-fresh", {
+      email: "main@example.org",
+      factory: "main@example.org",
+      seenAt: -3000,
+      week: 100,
+      weekReset: 2.5 * 86400,
+    }),
+  ).toEqual({
+    factory: { readAt: expect.any(String), week: 100 },
+    probes: ["main@example.org"],
+  })
+})
+
+test("a full week's reading goes stale again once its weekReset has passed (#1587)", () => {
+  expect(
+    fullWeek("full-week-stale", {
+      email: "main@example.org",
+      factory: "main@example.org",
+      seenAt: -60,
+      week: 100,
+      weekReset: -3600,
+    }),
+  ).toEqual({
+    factoryError: "RuntimeError: no reading of main@example.org under 30 minutes old",
+    probes: [],
+  })
+})
+
+test("a reading marked limitedUntil is served without probing again until the limit lifts (#1587)", () => {
+  expect(
+    fullWeek("full-week-limited", {
+      email: "main@example.org",
+      factory: "main@example.org",
+      limitedUntil: 7200,
+      seenAt: -3000,
+      week: 100,
+      weekReset: 2.5 * 86400,
+    }),
+  ).toEqual({
+    factory: { readAt: expect.any(String), week: 100 },
+    probes: [],
+  })
+})
+
+test("accounts_reading keeps a full week's account in the accounts map until its weekReset (#1587)", () => {
+  expect(
+    fullWeek("full-week-accounts", {
+      accounts: ["spare@example.org"],
+      email: "spare@example.org",
+      seenAt: -3000,
+      week: 100,
+      weekReset: 2.5 * 86400,
+    }),
+  ).toEqual({
+    accounts: ["spare@example.org"],
+    probes: ["spare@example.org"],
+  })
+})
+
+// run.py's own probe(), with urlopen raising the made-up 429 and its headers holding no status header, so a full week is marked limited until its reset whatever the status header says (#1587)
+const probeHarness = `
+import io, json, sys, time, types, urllib.error, urllib.request
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+spec = json.loads(sys.argv[2])
+ns["subprocess"] = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(returncode=0, stdout="made-up-token\\n", stderr=""))
+def urlopen(req, timeout=None):
+    raise urllib.error.HTTPError(req.full_url, 429, "rate limited", spec["headers"], io.BytesIO(b"{}"))
+urllib.request.urlopen = urlopen
+print(json.dumps(ns["probe"](spec["email"])))
+`
+
+test("run.py's probe marks a full week limited until its weekReset, with no status header in the answer (#1587)", () => {
+  const home = join(scratch, "probe-limited")
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(
+    [
+      "python3",
+      "-I",
+      "-c",
+      probeHarness,
+      script,
+      JSON.stringify({
+        email: "full@example.org",
+        headers: {
+          "anthropic-ratelimit-unified-7d-reset": "4102444800",
+          "anthropic-ratelimit-unified-7d-utilization": "1.0",
+        },
+      }),
+    ],
+    { env },
+  )
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString())).toEqual({
+    five: null,
+    fiveReset: null,
+    limitedUntil: 4102444800,
+    week: 100,
+    weekReset: 4102444800,
+  })
+})

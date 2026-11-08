@@ -448,3 +448,71 @@ test("a reading with a week and no 5-hour window is an account with no 5-hour li
   })
   expect(seenFive.ND).toBeNull()
 })
+
+// #1587: probe() marks a full week limited until its weekReset, whatever anthropic-ratelimit-unified-status says. The harness execs the script up to its analysis, subprocess answers the Keychain read and urllib.request's urlopen raises the made-up 429, so no request leaves the Mac; the header times are fixed values, so the clock-ahead pass cannot move them
+const probeHarness = `
+import json, os, sys, types
+spec = json.loads(sys.argv[2])
+sys.modules["beat"] = types.SimpleNamespace(OPS=os.path.expanduser("~/.playground/ops"), checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+class Refused(Exception):
+    def __init__(self, headers):
+        self.headers = headers
+def urlopen(req, timeout=None):
+    raise Refused(spec["headers"])
+import urllib
+urllib.request = types.SimpleNamespace(Request=lambda *a, **k: None, urlopen=urlopen)
+sys.modules["urllib.request"] = urllib.request
+sys.modules["subprocess"] = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(returncode=0, stdout="made-up-token\\n", stderr=""))
+src = open(sys.argv[1]).read()
+ns = {"__name__": "login_flip_under_test"}
+exec(compile(src[: src.index("\\ndef dashboard_ask")], sys.argv[1], "exec"), ns)
+print(json.dumps(ns["probe"]("spare@example.test")))
+`
+
+const FAR = 4102444800
+
+test.each([
+  { name: "no status header", status: undefined, week: "1.0", limited: true },
+  { name: "status allowed", status: "allowed", week: "1.0", limited: true },
+  { name: "status rejected", status: "rejected", week: "1.0", limited: true },
+  {
+    name: "no status header and a week under 100",
+    status: undefined,
+    week: "0.3",
+    limited: false,
+  },
+])(
+  "probe() marks a full week limited until its weekReset whatever the status header says, and leaves a week under 100 alone: $name",
+  ({ status, week, limited }) => {
+    const home = mkdtempSync(join(scratch, "home-probe-"))
+    const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+    delete env.CLAUDE_CONFIG_DIR
+    const headers: Record<string, string> = {
+      "anthropic-ratelimit-unified-5h-reset": String(FAR),
+      "anthropic-ratelimit-unified-5h-utilization": "0.5",
+      "anthropic-ratelimit-unified-7d-reset": String(FAR),
+      "anthropic-ratelimit-unified-7d-utilization": week,
+    }
+    if (status) headers["anthropic-ratelimit-unified-status"] = status
+    const child = Bun.spawnSync(
+      [
+        "python3",
+        "-I",
+        "-c",
+        probeHarness,
+        script,
+        JSON.stringify({ email: "spare@example.test", headers }),
+      ],
+      { env },
+    )
+    expect(child.stderr.toString()).toBe("")
+    const expected: Record<string, unknown> = {
+      five: 50,
+      fiveReset: FAR,
+      week: Number(week) * 100,
+      weekReset: FAR,
+    }
+    if (limited) expected.limitedUntil = FAR
+    expect(JSON.parse(child.stdout.toString())).toEqual(expected)
+  },
+)
