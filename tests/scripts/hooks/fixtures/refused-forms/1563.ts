@@ -1,6 +1,6 @@
 import { type Group } from "./_shared"
 
-// A reviewer of an outside author's PR running a skill's script by its path whose shebang runs bun, which reads files from the folder it runs in before the script: from any folder but the main checkout's own tree (the PR's clone at any depth, with or without a bunfig.toml or an env file, a scratch folder outside every work tree, a folder the hook cannot read), for both skill roots, the data folder's installed skills and the main checkout's extensions.
+// A reviewer of an outside author's PR running a skill's script by its path whose shebang runs bun (or any runner but one that reads no folder's files, such as bun-canary or an env -S line read as another word), which reads files from the folder it runs in before the script: from any folder but the main checkout's own tree (the PR's clone at any depth, with or without a bunfig.toml or an env file, a scratch folder outside every work tree, a folder the hook cannot read), for both skill roots, the data folder's installed skills and the main checkout's extensions.
 const STATE = "code-review-loop/scripts/state"
 const scripts = (data: string, main: string) => ({
   core: `${main}/extensions/core/skills/${STATE}`,
@@ -28,6 +28,19 @@ export const groups: Group[] = [
           `${installed}.ts pr acme-owner/widgets 501`,
         ],
         ["a core skill's bun script by its path", `${core}.ts pr acme-owner/widgets 501`],
+      ]
+    },
+  },
+  {
+    folders: ["outside clone", "scratch folder"],
+    guards: ["no-outside-pr-code"],
+    rows: ({ DATA, MAIN }) => {
+      const { core, installed } = scripts(DATA, MAIN)
+      const folder = (script: string) => script.slice(0, script.lastIndexOf("/"))
+      return [
+        ["a bun-canary skill script by its path", `${folder(installed)}/canary.ts`],
+        ["a skill script whose env -S glues an assignment before bun", `${folder(core)}/glued.ts`],
+        ["a skill script whose env -S glues a quoted bun", `${folder(installed)}/quoted.ts`],
       ]
     },
   },

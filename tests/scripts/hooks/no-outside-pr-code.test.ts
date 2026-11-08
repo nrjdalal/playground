@@ -49,6 +49,17 @@ const HELD: Record<string, string[]> = {
 }
 
 const RUNNERS: Record<string, string> = { ".mjs": "node", ".py": "python3", ".ts": "bun" }
+// made-up skill scripts whose first line is read by runnerOf itself, for the env shapes it reads as a word other than the program
+const SHAPES = `${SKILLS}/shapes/scripts`
+const SHEBANGS: Record<string, string> = {
+  [`${SHAPES}/canary`]: "#!/usr/bin/env bun-canary",
+  [`${SHAPES}/double-quoted`]: '#!/usr/bin/env -S "bun" --smol',
+  [`${SHAPES}/glued-assignment`]: "#!/usr/bin/env -SFOO=1 bun",
+  [`${SHAPES}/glued-option`]: "#!/usr/bin/env -S-i bun",
+  [`${SHAPES}/glued-quoted`]: "#!/usr/bin/env -S'bun'",
+  [`${SHAPES}/no-shebang`]: "console.log(1)",
+  [`${SHAPES}/shell`]: "#!/bin/sh",
+}
 
 const lookup: Lookup = {
   author: async (repo, pr) => PRS[`${repo}#${pr}`],
@@ -56,7 +67,10 @@ const lookup: Lookup = {
   main: MAIN,
   prsOf: async (sessionId) => SESSIONS[String(sessionId)] ?? [],
   // each made-up script's shebang by its extension, as a skill's scripts name theirs
-  runner: (script) => RUNNERS[script.slice(script.lastIndexOf("."))],
+  runner: (script) =>
+    script in SHEBANGS
+      ? runnerOf(SHEBANGS[script])
+      : RUNNERS[script.slice(script.lastIndexOf("."))],
 }
 
 const call = (
@@ -142,6 +156,20 @@ describe("no-outside-pr-code keeps a checker of an outside author's PR in read m
     [
       "a bun skill script by its path from a clone inside the main checkout",
       call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, INSTALLED),
+    ],
+    ["a bun-canary skill script by its path in a clone", call(`${SHAPES}/canary`, OUTSIDE)],
+    ["a skill script whose env -S quotes bun in a clone", call(`${SHAPES}/double-quoted`, OUTSIDE)],
+    [
+      "a skill script whose env -S glues an assignment before bun in a clone",
+      call(`${SHAPES}/glued-assignment`, OUTSIDE),
+    ],
+    [
+      "a skill script whose env -S glues an option before bun in a clone",
+      call(`${SHAPES}/glued-option`, OUTSIDE),
+    ],
+    [
+      "a skill script whose env -S glues a quoted bun in a clone",
+      call(`${SHAPES}/glued-quoted`, OUTSIDE),
     ],
     [
       "the playground command in a folder with the PR's bunfig.toml",
@@ -285,6 +313,9 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
       "a python skill script by its path in a clone with a bunfig.toml",
       call(`${STATE} pr 501`, OUTSIDE),
     ],
+    ["a sh skill script by its path in a clone", call(`${SHAPES}/shell`, OUTSIDE)],
+    ["a skill script with no shebang in a clone", call(`${SHAPES}/no-shebang`, OUTSIDE)],
+    ["a glued -S skill script from the main checkout", call(`${SHAPES}/glued-assignment`)],
     ["that state.py by its path", call(`${CORE_STATE} wait acme-owner/widgets 501 abc`)],
     ["a quiet fetch of two refs", call(`git -C ${OUTSIDE} fetch -q origin pr-501 canary`)],
     ["a quiet detached checkout", call(`git -C ${OUTSIDE} checkout -q --detach abc`)],

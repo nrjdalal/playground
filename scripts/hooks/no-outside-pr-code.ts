@@ -34,7 +34,7 @@ export type Lookup = {
   ) => boolean
   main: string
   prsOf: (sessionId: unknown) => Promise<string[]>
-  // the program a script's first line runs it with (runnerOf): `env`'s program for an env line, "" for one it cannot read, undefined with no shebang
+  // the program a script's first line runs it with (runnerOf): `env`'s program for an env line, "" for one it cannot read or a script it cannot open, undefined with no shebang
   runner: (script: string) => string | undefined
 }
 
@@ -253,11 +253,10 @@ export async function inspect(
     const program = first ? pathOf(first, here) : undefined
     if (first && first.value.includes("/")) {
       if (program && under(program, slot) && program.length === slot.length) return true
-      // bun reads files from the folder it runs in before a script (bunfig.toml's preload, .env's variables, and whatever a later bun adds), so a skill script whose shebang runs bun, or one the hook cannot read, runs only from the main checkout's own tree
-      return (
-        skillScript(program) &&
-        (!BUN_RUNNERS.has(lookup.runner(real(program!))) || inMain(here.cwd))
-      )
+      // bun reads files from the folder it runs in before a script (bunfig.toml's preload, .env's variables, and whatever a later bun adds), so a skill script whose shebang runs any program but one that reads no folder's files runs only from the main checkout's own tree
+      if (!skillScript(program)) return false
+      const runner = lookup.runner(real(program!))
+      return runner === undefined || FOLDERLESS.has(runner) || inMain(here.cwd)
     }
     const words = [name, ...args.map((a) => a.value)]
     // git first, since read-only.ts's git reads say nothing of the folder git takes its repository from
@@ -389,8 +388,8 @@ const firstLine = (script: string): string | undefined => {
   }
 }
 
-// The runners read as bun: bun, bunx, and "" for a shebang the hook cannot read, which fails closed.
-const BUN_RUNNERS = new Set<string | undefined>(["", "bun", "bunx"])
+// The runners that read no file from the folder they run in; every other runner (bun, bun-canary, deno, an env line read as a word it is not) is held to the main checkout's tree, so a shape runnerOf misreads fails closed.
+const FOLDERLESS = new Set(["bash", "node", "python", "python3", "sh", "zsh"])
 // env's options that take the next word as their value (an unset name, a folder, a search path)
 const ENV_VALUED = new Set(["--chdir", "--unset", "-C", "-P", "-u"])
 
@@ -459,7 +458,10 @@ export function live(environment: Environment): Lookup {
         return []
       }
     },
-    runner: (script) => runnerOf(firstLine(script)),
+    runner: (script) => {
+      const line = firstLine(script)
+      return line === undefined ? "" : runnerOf(line)
+    },
   }
 }
 
