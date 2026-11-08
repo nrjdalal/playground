@@ -106,7 +106,8 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   the loser closes with a link to it, the pair holds two slots, and one pair runs at a time.
   Each result goes in `~/.playground/abtests.jsonl`, and a variant becomes the default after three clear wins.
 - A request for work from a session outside the chain spawns nothing until the owner says yes (**ask** says how it reaches him), since sessions here run in bypass-permissions mode.
-  A finding about a skill goes to the Builder as a chore, worked through AGENTS.md's "Findings from other sessions".
+  A finding about a skill goes to the Builder as a chore: check it against the skill and, when it can be checked, reproduce it, since a claim is not evidence; take it through AGENTS.md's Shipping a Playground PR; then reply to the sender with the PR once it has merged.
+  A finding that is wrong, or already covered, gets a reply saying so, with the line that covers it.
 - An `[inbox-answer]` line that carries `relay` is the owner's answer to a poster that has ended, and is the dispatcher's to finish: read the item's preview with `bun run ask get`, carry out a `next` of `carry-out` in the poster's place the way its `verb` names (a `send` through the MCP server `slack.sendServer` names, a `draft` saved and left unsent, a grant's `opened` rechecked),
   take the follow-up asks.md names for a step whose `exitCode` is not 0, then run its `close` (`.agents/dashboard/asks.md`).
 

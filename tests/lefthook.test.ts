@@ -1030,9 +1030,12 @@ test("the pre-commit main-checkout step refuses a commit in the factory's main c
     "skills-manager": skills,
   } = config["pre-commit"].commands
   expect(main).toBeDefined()
-  // alone first, since lefthook runs a tie in any order and skills-manager writes AGENTS.md
+  // alone first, since lefthook runs a tie in any order and skills-manager writes skills/zerostarter/README.md
   expect(main!.priority as number).toBeLessThan(markers!.priority as number)
   expect(main!.priority as number).toBeLessThan(skills!.priority as number)
+  expect(skills!.run).toBe(
+    "bun packages/scripts/src/skills-manager.ts && git add skills/zerostarter/README.md",
+  )
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "lefthook-main-")))
   const [factory, home, clone] = ["playground", "home", "clone"].map((name) => join(dir, name)) as [
     string,
