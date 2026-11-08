@@ -449,7 +449,7 @@ export function PeerStep({
 const Step = memo(StepRow, sameStep)
 
 // a row draws again only when what it reads moved, so a board frame or a keystroke leaves the stream's rows alone
-function sameStep(a: Parameters<typeof StepRow>[0], b: Parameters<typeof StepRow>[0]) {
+export function sameStep(a: Parameters<typeof StepRow>[0], b: Parameters<typeof StepRow>[0]) {
   return (
     a.composer === b.composer &&
     a.marker === b.marker &&

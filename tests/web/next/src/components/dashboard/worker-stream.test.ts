@@ -9,6 +9,7 @@ import {
   OlderSteps,
   PeerStep,
   ReasoningStep,
+  sameStep,
   sameTool,
   StepRow,
   ToolStep,
@@ -180,6 +181,81 @@ describe("ToolStep's redraw", () => {
     ).toBe(false)
     expect(compare(base, props("output-error", { errorText: "denied" }))).toBe(false)
     expect(compare(base, props("output-available", { ...done, title: "Read" }))).toBe(false)
+  })
+})
+
+// the stream's now moves on every inbox read, every 5s, so a row compares what the clock shows in it (its time's day, the owner's Undo), not the moment; a row it leaves keeps its render count
+describe("StepRow's redraw on a tick", () => {
+  const compare = sameStep as (a: unknown, b: unknown) => boolean
+  // local times, so the day a time names is the same in every zone the suite runs in
+  const AT = new Date(2026, 9, 6, 12, 0, 0)
+  const later = (ms: number) => new Date(AT.getTime() + ms)
+  const at = AT.toISOString()
+  const outbox = {}
+  const worker = { name: "dispatcher", sessionId: "s1", tasks: [] }
+  const assistant = {
+    id: "a1",
+    metadata: { at, from: null, kind: "assistant" },
+    parts: [{ text: "done", type: "text" }],
+    role: "assistant",
+  }
+  const human = {
+    id: "e1",
+    metadata: { at, from: null, kind: "human" },
+    parts: [{ text: "hello", type: "text" }],
+    role: "user",
+  }
+  const sent = {
+    at,
+    attachments: [],
+    attempts: 1,
+    code: null,
+    deliveredAt: at,
+    entryId: "e1",
+    id: "m1",
+    reason: null,
+    retryAt: null,
+    sawPicker: false,
+    sessionId: "s1",
+    state: "delivered",
+    text: "hello",
+    to: "dispatcher",
+    typedAt: at,
+    unanswered: false,
+    unreached: 0,
+  }
+  const props = (message: unknown, now: Date, more: Record<string, unknown> = {}) => ({
+    composer: "composer",
+    marker: null,
+    message,
+    newest: true,
+    now,
+    outbox,
+    sent: null,
+    waiting: false,
+    worker,
+    ...more,
+  })
+
+  test("a tick that moves no row's shown time draws no row again", () => {
+    for (const message of [assistant, human]) {
+      expect(compare(props(message, later(5_000)), props(message, later(10_000)))).toBe(true)
+    }
+    expect(
+      compare(props(human, later(30_000), { sent }), props(human, later(35_000), { sent })),
+    ).toBe(true)
+  })
+
+  test("a tick into the next day draws the row again, since its time then names its day", () => {
+    const night = new Date(2026, 9, 6, 23, 59, 58)
+    const morning = new Date(2026, 9, 7, 0, 0, 3)
+    expect(compare(props(assistant, night), props(assistant, morning))).toBe(false)
+  })
+
+  test("a tick that closes the owner's newest message's Undo draws it again", () => {
+    expect(
+      compare(props(human, later(119_000), { sent }), props(human, later(121_000), { sent })),
+    ).toBe(false)
   })
 })
 
