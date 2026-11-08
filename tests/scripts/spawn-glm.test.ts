@@ -154,10 +154,19 @@ describe("--backend glm runs the session on Z.ai's GLM through Claude Code", () 
   })
 
   test.each([
-    ["column reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"]],
-    ["column tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"]],
-    ["resume reviewer-x", ["resume", "reviewer-x", root, "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"]],
-    ["resume tester-x", ["resume", "tester-x", root, "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"]],
+    [
+      "column reviewer",
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
+    ],
+    ["column tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1"]],
+    [
+      "resume reviewer-x",
+      ["resume", "reviewer-x", root, "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27", "--pr", "1"],
+    ],
+    [
+      "resume tester-x",
+      ["resume", "tester-x", root, "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27", "--pr", "1"],
+    ],
   ])("a %s stays on Claude: --backend glm is refused before herdr runs", async (_, args) => {
     const r = await spawn([...args, "--backend", "glm"], [])
     expect(r.code).toBe(1)

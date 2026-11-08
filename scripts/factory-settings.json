@@ -1,6 +1,7 @@
 {
   "autoCompactWindow": 400000,
   "autoMemoryEnabled": false,
+  "enableArtifact": false,
   "env": {
     "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
     "DISABLE_AUTOUPDATER": "1",
@@ -403,9 +404,6 @@
         ]
       }
     ]
-  },
-  "permissions": {
-    "deny": ["Artifact"]
   },
   "promptSuggestionEnabled": false,
   "skipDangerousModePermissionPrompt": true

@@ -399,6 +399,49 @@ describe("restore resumes the herdr sessions its resume files list", () => {
     )
   })
 
+  test("a checker's resume carries the PRs its roster row serves, its pr first, and one whose row names none is not restored (#1400)", async () => {
+    const [pr1, pr2] = [1, 2].map((n) => `https://github.com/acme/factory/pull/${n}`)
+    const rows = [
+      {
+        kind: "reviewer",
+        name: "reviewer-a",
+        pr: pr2,
+        prs: [pr1, pr2],
+        status: "working",
+        task: "t",
+      },
+      { kind: "tester", name: "tester-b", status: "working", task: "t" },
+    ]
+    const r = await spawn(
+      ["restore"],
+      [],
+      { ROSTER_JSON: JSON.stringify({ agents: rows }) },
+      undefined,
+      undefined,
+      (home) => {
+        herdrPin()(home)
+        for (const dir of ["resume", "runtimes", "backends"])
+          mkdirSync(lw(home, dir), { recursive: true })
+        for (const [name, sid] of [
+          ["reviewer-a", ids.a],
+          ["tester-b", ids.b],
+        ]) {
+          writeFileSync(
+            lw(home, "resume", `${name}.sh`),
+            `#!/bin/bash\nexec /x/scripts/spawn.sh resume ${name} ${root} ${sid}\n`,
+          )
+          writeFileSync(lw(home, "runtimes", name), "herdr\n")
+          writeFileSync(lw(home, "backends", name), "claude\n")
+          transcript(home, sid)
+        }
+      },
+    )
+    expect(r.out).toContain("restored reviewer-a\n")
+    expect(r.out).toContain("not restored tester-b: a tester starts with --pr <pull url>")
+    expect(r.roster).toContain(`prs+=${pr2},${pr1}`)
+    expect(r.code).toBe(1)
+  })
+
   test("a session whose roster row reads done stays down, as an ended one does", async () => {
     const r = await spawn(
       ["restore"],
@@ -918,7 +961,7 @@ describe("a resume of a checker whose roster worker has ended", () => {
   ])("a checker with %s resumes as before", async (_, agents) => {
     const name = "k3m9px-reviewer"
     const env = { NO_SESSION_TRANSCRIPT: "1", ROSTER_JSON: JSON.stringify({ agents }) }
-    const r = await spawn(["resume", name, root, SESSION], [], env, undefined, {
+    const r = await spawn(["resume", name, root, SESSION, "--pr", "1"], [], env, undefined, {
       name,
       backend: "claude",
     })
@@ -929,7 +972,7 @@ describe("a resume of a checker whose roster worker has ended", () => {
   test("a checker whose worker is live resumes as before", async () => {
     const name = "k3m9px-reviewer"
     const r = await spawn(
-      ["resume", name, root, SESSION],
+      ["resume", name, root, SESSION, "--pr", "1"],
       [],
       roster(name, "reviewer", "working"),
       undefined,
