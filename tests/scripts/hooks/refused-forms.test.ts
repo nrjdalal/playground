@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -43,7 +44,8 @@ import { storeWith } from "./render-set"
 import { git } from "./scratch-git"
 
 const CHECKOUT = join(import.meta.dir, "..", "..", "..")
-const SCRATCH = mkdtempSync(join(tmpdir(), "refused-forms-"))
+// where it lands, since no-outside-pr-code judges a skill script's path past this Mac's /var link
+const SCRATCH = realpathSync(mkdtempSync(join(tmpdir(), "refused-forms-")))
 afterAll(() => rmSync(SCRATCH, { force: true, recursive: true }))
 
 // A home whose data folder holds an extensions root, its links and files, as the guards' own tests build it.

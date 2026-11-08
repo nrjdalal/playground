@@ -224,8 +224,7 @@ export async function inspect(
   lookup: Lookup,
 ): Promise<boolean> {
   const data = dataDirOf(environment)
-  // each root where it lands, as each script's path is judged
-  const skills = [join(data, "orgs"), join(lookup.main, "extensions")].map(real)
+  const skills = [join(data, "orgs"), join(lookup.main, "extensions")]
   const slot = join(data, "ops", "run-slot.sh")
   let allowed = true
   // A script of a skill installed in the data folder or kept in the main checkout's extensions, run as a program or by an interpreter with no option of its own.
