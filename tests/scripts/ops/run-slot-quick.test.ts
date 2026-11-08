@@ -483,6 +483,53 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(true)
   })
 
+  // issue 1507: 3 big heavy runs that name a slow file pushed its long quick run out of the file history, and the file returned to the one quick slot (measured: run-slot-commit-lane.test.ts's quick runs at 766, 864 and 1046 s, 1227 s of quick-lane waits behind them)
+  test("a file whose last quick run was long stays out of quick after 3 big heavy runs that name it", async () => {
+    const log = history([
+      ["bun run test:file tests/slow.test.ts", "run-slot-quick", 400],
+      [
+        "bun run test:file tests/slow.test.ts tests/a.test.ts tests/b.test.ts tests/c.test.ts",
+        "run-slot-2",
+        30,
+      ],
+      [
+        "bun run test:file tests/slow.test.ts tests/a.test.ts tests/b.test.ts tests/c.test.ts",
+        "run-slot-2",
+        30,
+      ],
+      [
+        "bun run test:file tests/slow.test.ts tests/a.test.ts tests/b.test.ts tests/c.test.ts",
+        "run-slot-2",
+        30,
+      ],
+    ])
+    expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(false)
+  })
+
+  test("and a file that ran long alone in run-slot-2 stays out of quick", async () => {
+    const log = history([["bun run test:file tests/slow.test.ts", "run-slot-2", 400]])
+    expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(false)
+  })
+
+  // round 1, nit 2: the boundaries of the skip, a run outside quick naming exactly 3 files still counts, and a quick run naming any number counts
+  test("and a file that ran long in a 3-file run outside quick still stays out of quick", async () => {
+    const log = history([
+      ["bun run test:file tests/slow.test.ts tests/a.test.ts tests/b.test.ts", "run-slot-2", 400],
+    ])
+    expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(false)
+  })
+
+  test("and a file named by a quick run of 4 files stays out of quick", async () => {
+    const log = history([
+      [
+        "bun run test:file tests/slow.test.ts tests/a.test.ts tests/b.test.ts tests/c.test.ts",
+        "run-slot-quick",
+        400,
+      ],
+    ])
+    expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(false)
+  })
+
   test("and so does a docs:wrap that ran long", async () => {
     expect(await quick(["bun", "run", "docs:wrap"], [61, 70, 80])).toBe(false)
   })
