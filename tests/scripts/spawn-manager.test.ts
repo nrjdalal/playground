@@ -568,7 +568,16 @@ describe("the typed launch line stays under the 1,024-byte typed-line limit", ()
     { label: "an account worker", args: ["worker", NAME, BRIEF, "--account", email] },
     {
       label: "a checker column",
-      args: ["column", "reviewer", "reviewer-long-name-of-many-words", "worker-x", "w1:p2", BRIEF],
+      args: [
+        "column",
+        "reviewer",
+        "reviewer-long-name-of-many-words",
+        "worker-x",
+        "w1:p2",
+        BRIEF,
+        "--pr",
+        "1",
+      ],
     },
     {
       label: "a resume with a brief",
