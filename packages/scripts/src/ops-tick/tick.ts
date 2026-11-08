@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync, statfsSync } from "node:fs"
+import { readFileSync, realpathSync, statfsSync, statSync } from "node:fs"
 import { appendFile, mkdir, stat, unlink } from "node:fs/promises"
 import { loadavg } from "node:os"
 import { basename, dirname, join } from "node:path"
@@ -636,16 +636,20 @@ const freeBytes = (dir: string): number => {
   return fs.bavail * fs.bsize
 }
 
-// The load cap the single-slot switch holds (scripts/ops/README.md): the ops switch run-slot.load5-cap's value while it stands, 22 at most, else 22.
-export const loadCapOf = (ops: string): number => {
+// The load5 cap as run-slot.sh's load_line reads it (scripts/ops/README.md): run-slot.load5-cap's last line, a whole number, while the switch stands (its expiry on the first line, else 4 hours from its mtime), 22 at most, else 22.
+export const loadCapOf = (ops: string, now: Date): number => {
   try {
-    const cap = Number(readFileSync(join(ops, "run-slot.load5-cap"), "utf8").split("\n")[1]?.trim())
-    if (Number.isFinite(cap) && cap > 0) return Math.min(cap, 22)
+    const path = join(ops, "run-slot.load5-cap")
+    const lines = readFileSync(path, "utf8").trimEnd().split("\n")
+    const ends = /^\S+ [\d-]{10}T[\d:]{8}Z ([\d-]{10}T[\d:]{8}Z) /.exec(lines[0] ?? "")?.[1]
+    const until = ends ? Date.parse(ends) : statSync(path).mtimeMs + 4 * 3_600_000
+    const cap = lines.at(-1) ?? ""
+    if (until > now.getTime() && /^\d{1,3}$/.test(cap)) return Math.min(Number(cap), 22)
   } catch {}
   return 22
 }
 
-// The trash playground rm fills, beside ops in the data folder, emptied hourly by purgeTrash (@packages/safe-delete): each batch over 7 days old, then the oldest while its disk has under 50 GB free, every batch taken only while the load is under the cap the single-slot switch holds, or at any load once the disk is under the 5 GB floor; one line in ops/log/trash-purge.log, naming the batches the load held.
+// The trash playground rm fills, beside ops in the data folder, emptied hourly by purgeTrash (@packages/safe-delete): each batch over 7 days old, then the oldest while its disk has under 50 GB free, every batch taken only while load5 is under run-slot.load5-cap's cap (22 while it is off), or at any load once the disk is under the 5 GB floor; one line in ops/log/trash-purge.log, naming the batches the load held.
 export const trashPurge =
   (trash?: string, free = freeBytes, load: () => number = () => loadavg()[1] ?? 0) =>
   async (ctx: Context) => {
@@ -653,7 +657,7 @@ export const trashPurge =
     const { removed, skipped, leftForLoad } = purgeTrash(root, {
       free: () => free(root),
       load,
-      loadCap: loadCapOf(ctx.ops),
+      loadCap: loadCapOf(ctx.ops, ctx.now),
       now: ctx.now,
     })
     const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}${leftForLoad.length ? `, left for load (${leftForLoad.join(", ")})` : ""}`

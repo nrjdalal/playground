@@ -873,19 +873,23 @@ describe("the beats that send no line", () => {
     )
   })
 
-  test("loadCapOf reads the switch's value while it stands and defaults to 22", () => {
+  test("loadCapOf reads the switch's last line as run-slot.sh does, while it stands, and defaults to 22", () => {
     const ops = scratch()
-    expect(loadCapOf(ops)).toBe(22)
-    writeFileSync(
-      join(ops, "run-slot.load5-cap"),
-      "builder 2026-11-08T00:00:00Z 2026-11-09T00:00:00Z a low cap\n15\n",
-    )
-    expect(loadCapOf(ops)).toBe(15)
-    writeFileSync(
-      join(ops, "run-slot.load5-cap"),
-      "builder 2026-11-08T00:00:00Z 2026-11-09T00:00:00Z over the line\n30\n",
-    )
-    expect(loadCapOf(ops)).toBe(22)
+    const now = new Date("2026-11-08T12:00:00Z")
+    const cap = join(ops, "run-slot.load5-cap")
+    expect(loadCapOf(ops, now)).toBe(22)
+    writeFileSync(cap, "builder 2026-11-08T00:00:00Z 2026-11-09T00:00:00Z a low cap\n15\n")
+    expect(loadCapOf(ops, now)).toBe(15)
+    writeFileSync(cap, "builder 2026-11-08T00:00:00Z 2026-11-09T00:00:00Z over the line\n30\n")
+    expect(loadCapOf(ops, now)).toBe(22)
+    writeFileSync(cap, "builder 2026-11-08T00:00:00Z 2026-11-08T04:00:00Z expired\n15\n")
+    expect(loadCapOf(ops, now)).toBe(22)
+    writeFileSync(cap, "builder 2026-11-08T00:00:00Z 2026-11-09T00:00:00Z no whole number\n15.5\n")
+    expect(loadCapOf(ops, now)).toBe(22)
+    writeFileSync(cap, "12\n")
+    utimesSync(cap, now, now)
+    expect(loadCapOf(ops, now)).toBe(12)
+    expect(loadCapOf(ops, new Date("2026-11-08T16:00:01Z"))).toBe(22)
   })
 
   test("the idle compact runs the Dashboard checkout's idle-compact bin straight every 5 minutes and logs each line it prints", async () => {

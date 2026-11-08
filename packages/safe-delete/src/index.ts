@@ -554,7 +554,7 @@ export function removeScratch(dir: string, tmp = tmpdir()): string | null {
   return null
 }
 
-// The one recursive delete of the trash: each batch over 7 days old, then the oldest while free space is under 50 GB, every batch taken only while the load is under the cap the single-slot switch holds, or while the disk is under the floor (5 GB, about two trashed worktrees), where space wins over load; a batch whose real path is not a folder directly in the trash root is skipped, and one the load held comes back in leftForLoad so the log can name it.
+// The one recursive delete of the trash: each batch over 7 days old, then the oldest while free space is under 50 GB, every batch taken only while load5 is under run-slot.load5-cap's cap (22 while it is off), or while the disk is under the floor (5 GB, about two trashed worktrees), where space wins over load; a batch whose real path is not a folder directly in the trash root is skipped, and one the load held comes back in leftForLoad so the log can name it.
 export function purgeTrash(
   trash: string,
   io: { free: () => number; load?: () => number; loadCap?: number; now: Date },
