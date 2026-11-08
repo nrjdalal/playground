@@ -256,6 +256,14 @@ describe("the capacity gate refuses and spawns nothing", () => {
       )
     })
 
+    test("gates.glmSwapinsMax moves a fresh Claude worker's swap-in line", async () => {
+      const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], {
+        ...withGates({ "gates.glmSwapinsMax": 200 }),
+        FAKE_SWAPINS: "150",
+      })
+      expect(r.code, r.err).toBe(0)
+    })
+
     test("gates.smallReserve moves the share kept for small items", async () => {
       const env = withGates({ "gates.smallReserve": 0.5 })
       const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], {

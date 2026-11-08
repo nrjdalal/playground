@@ -37,7 +37,6 @@
     "linear:read": "bun --no-env-file packages/scripts/src/linear-read/cli.ts",
     "lint": "oxlint",
     "lock": "bun packages/scripts/src/lock/cli.ts",
-    "loom-relay": "bun --no-env-file packages/scripts/src/loom-relay/cli.ts",
     "name": "bun packages/scripts/src/name/index.ts",
     "ops:ext-sync": "bun packages/scripts/src/ops-ext-sync/cli.ts",
     "ops:flow": "bun packages/scripts/src/ops-flow/cli.ts",

@@ -18,6 +18,7 @@ import {
   type TypeSteps,
 } from "../../../../../packages/scripts/src/pr-merge/types"
 import "./scratch-config"
+import { PR_TEMPLATE } from "./bodies"
 import { greenChecks } from "./suite"
 
 // The repo's own tsc, run on a three-file project, so the gate's run stays fast.
@@ -59,6 +60,8 @@ async function world(name: string, { merged = false } = {}) {
     "main.ts": 'import { add } from "./lib"\nexport const one = add(1)\n',
     "tsconfig.json": JSON.stringify({ compilerOptions: { noEmit: true, strict: true } }),
   })
+  mkdirSync(join(work, "extensions/core/skills/pr"), { recursive: true })
+  write(work, { "extensions/core/skills/pr/SKILL.md": PR_TEMPLATE })
   await commit(work, "base")
   await sh(work, "switch", "-qc", "pr")
   write(work, { "extra.ts": 'import { add } from "./lib"\nexport const two = add(2)\n' })
@@ -110,6 +113,8 @@ async function repo(name: string) {
     "patches/a.patch": "\n",
     "tsconfig.json": JSON.stringify({ compilerOptions: { noEmit: true, strict: true } }),
   })
+  mkdirSync(join(work, "extensions/core/skills/pr"), { recursive: true })
+  write(work, { "extensions/core/skills/pr/SKILL.md": PR_TEMPLATE })
   await commit(work, "base")
   await sh(work, "switch", "-qc", "pr")
   write(work, { "extra.ts": 'import { add } from "./lib"\nexport const two = add(2)\n' })

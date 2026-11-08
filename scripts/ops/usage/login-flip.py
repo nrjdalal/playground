@@ -5,7 +5,7 @@ account in ACCOUNTS that has a long-lived token in the Keychain (service usage.k
 headers, at most every 14 minutes. The current account is login-flip.json's `factory`, else the stored login. Ending accounts (ENDS) come first: the first usable one in ending_order() is the target whenever
 the factory is on another account; with none usable, once the current login reaches its line, the renewing account with MIN_ROOM
 whose week resets soonest. It names the target once ("switch due to ..."), or says once that no account has room. Prints nothing otherwise.
-It also writes the split, each account's share of new sessions (week left per hour to its deadline, a fifth of that for an own account while that deadline is over a day away), which spawn.sh's no-account default follows. --dry-run reads no token and changes nothing. State in login-flip.json in the state folder, the data folder's ops/usage."""
+It also writes the split, each account's share of new sessions (week left per hour to its deadline, a fifth of that for an own account while that deadline is over a day away, none for one parked until a later time), which spawn.sh's no-account default follows. --dry-run reads no token and changes nothing. State in login-flip.json in the state folder, the data folder's ops/usage."""
 import datetime, json, os, shutil, subprocess, sys, time
 
 HERE = os.path.join(os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state
@@ -33,6 +33,8 @@ ENDING_FIRST, ENDS_LEAD = [a["email"] for a in ROWS if a.get("endsFirst")], 2 * 
 RENEWS = {a["email"]: a["renews"] for a in ROWS if "renews" in a}  # each renewing account's billing day of the month (None until known), for the dashboard's Renews lines
 # the owner, 3 Nov: the accounts the owner pays for personally (own) are spent less, a fifth of their weight, unless their deadline is within a day, so their week left is still spent before it resets
 OWN, OWN_SHARE, OWN_SOON = {a["email"] for a in ROWS if a.get("own")}, 0.2, 24 * 3600
+# an account parked until a time (parkedUntil) takes no new session before it, so its week is kept, e.g. for the owner until its reset
+PARKED = {a["email"]: datetime.datetime.fromisoformat(a["parkedUntil"].replace("Z", "+00:00")).timestamp() for a in ROWS if a.get("parkedUntil")}
 PROBE_MODEL = setting("models.probe")
 
 
@@ -145,9 +147,9 @@ def ends_at(a):
 
 
 def usable(a):
-    """An account: not within ENDS_LEAD of its end, not refused, its week under 100% and its 5-hour window under FIVE_H_AT or reset."""
+    """An account: not parked, not within ENDS_LEAD of its end, not refused, its week under 100% and its 5-hour window under FIVE_H_AT or reset."""
     s, end = seen.get(a) or {}, ends_at(a)
-    if (end is not None and now >= end - ENDS_LEAD) or now < s.get("limitedUntil", 0):
+    if now < PARKED.get(a, 0) or (end is not None and now >= end - ENDS_LEAD) or now < s.get("limitedUntil", 0):
         return False
     if s.get("weekReset") and now >= s["weekReset"]:
         week = 0
@@ -159,7 +161,7 @@ def usable(a):
 
 
 def weight(a):
-    """Week points left per hour to the account's deadline: its week reset or, for an ending account, ENDS_LEAD before its end, whichever comes first, an own account's OWN_SHARE of that while its deadline is over OWN_SOON away; 0 when it is not usable or its deadline is unknown or past."""
+    """Week points left per hour to the account's deadline: its week reset or, for an ending account, ENDS_LEAD before its end, whichever comes first, an own account's OWN_SHARE of that while its deadline is over OWN_SOON away; 0 when it is not usable (a parked one included) or its deadline is unknown or past."""
     end, reset = ends_at(a), resets(a)
     deadline = min(reset, end - ENDS_LEAD) if end is not None else reset
     if not usable(a) or not now < deadline < float("inf"):

@@ -5941,6 +5941,7 @@ var claudeAccount = strictObject({
   label: label.optional(),
   nearLimit: boolean2().optional(),
   own: boolean2().optional(),
+  parkedUntil: string2().datetime({ offset: true }).optional(),
   provider: literal("claude").optional(),
   renews: number2().int().min(1).max(31).nullable().optional(),
   weekReset: strictObject({ hour: number2().min(0).lt(24), weekday: number2().int().min(0).max(6) }).optional()
@@ -5958,7 +5959,7 @@ var accountSettings = defineSettings({
   },
   "usage.accounts": {
     default: [],
-    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
+    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), the time until which no new session starts on it (parkedUntil), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
     schema: array(account).refine((rows) => new Set(rows.map((row) => `${providerOf(row)}:${accountKey(row)}`)).size === rows.length, "each account is listed once")
   },
   "usage.keychainService": {
@@ -6108,7 +6109,7 @@ var JOBS = {
     schedule: { every: 86400 }
   }),
   "ops-flow": launchd("ops-flow", {
-    description: "Tells the leads when a ready PR's checks stall or a run slot is held too long.",
+    description: "Tells the leads when a session holds a run slot over 15 minutes, or a model slot over 120.",
     schedule: { every: 60 }
   }),
   "ops-herdr": launchd("ops-herdr", {
@@ -6207,7 +6208,7 @@ var gateSettings = defineSettings({
   },
   "gates.glmSwapinsMax": {
     default: 100,
-    description: "The swap-ins a second a GLM session starts under.",
+    description: "The swap-ins a second a GLM session, and a fresh Claude worker, starts under.",
     schema: number2().int().positive()
   },
   "gates.memoryFreeMin": {

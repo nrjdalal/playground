@@ -21,8 +21,8 @@ const INSTALLED = `${TREES}/review-505`
 // a folder the PR ships with a bare repository's shape, whose config git would read
 const EMBEDDED = `${OUTSIDE}/emb`
 const SKILLS = `${HOME}/.playground/orgs/home/abc123/skills`
-const STATE = `${SKILLS}/code-review-loop/scripts/state.py`
-const CORE_STATE = `${MAIN}/extensions/core/skills/code-review-loop/scripts/state.py`
+const STATE = `${SKILLS}/code-review-loop/scripts/state.ts`
+const CORE_STATE = `${MAIN}/extensions/core/skills/code-review-loop/scripts/state.ts`
 const SLOT = `${HOME}/.playground/ops/run-slot.sh`
 
 const pull = (repo: string, n: number) => `https://github.com/${repo}/pull/${n}`
@@ -58,6 +58,7 @@ const SHEBANGS: Record<string, string> = {
   [`${SHAPES}/glued-option`]: "#!/usr/bin/env -S-i bun",
   [`${SHAPES}/glued-quoted`]: "#!/usr/bin/env -S'bun'",
   [`${SHAPES}/no-shebang`]: "console.log(1)",
+  [`${SHAPES}/python`]: "#!/usr/bin/env python3",
   [`${SHAPES}/shell`]: "#!/bin/sh",
 }
 
@@ -289,8 +290,7 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
       call(`git clone https://github.com/acme-owner/widgets.git ${TREES}/review-widgets-503`),
     ],
     ["gh's clone", call(`gh repo clone acme-owner/widgets ${TREES}/review-widgets-503`)],
-    ["the review skill's state.py", call(`python3 ${STATE} pr 501`)],
-    ["the review skill's state.py by its path", call(`${STATE} pr 501`)],
+    ["the review skill's state.ts run by its path, shebang and all", call(`${STATE} pr 501`)],
     ["a read through run-slot", call(`${SLOT} m4k7pq-reviewer -- git -C ${OUTSIDE} diff`)],
     [
       "a read through run-slot by ~",
@@ -300,7 +300,6 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
     ["grep over the clone", call(`grep -rn foo ${OUTSIDE}/src`)],
     ["a variable of the line's own", call(`S=${OUTSIDE}; cat $S/x`)],
     ["the clock", call("date -u +%FT%TZ")],
-    ["the review skill's state.py from the main checkout", call(`python3 ${CORE_STATE} pr 501`)],
     [
       "a bun skill script by its path from the main checkout",
       call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`),
@@ -311,12 +310,15 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
     ],
     [
       "a python skill script by its path in a clone with a bunfig.toml",
-      call(`${STATE} pr 501`, OUTSIDE),
+      call(`${SHAPES}/python`, OUTSIDE),
     ],
     ["a sh skill script by its path in a clone", call(`${SHAPES}/shell`, OUTSIDE)],
     ["a skill script with no shebang in a clone", call(`${SHAPES}/no-shebang`, OUTSIDE)],
     ["a glued -S skill script from the main checkout", call(`${SHAPES}/glued-assignment`)],
-    ["that state.py by its path", call(`${CORE_STATE} wait acme-owner/widgets 501 abc`)],
+    [
+      "the review skill's state.ts from the main checkout, run by its path",
+      call(`${CORE_STATE} wait acme-owner/widgets 501 abc`),
+    ],
     ["a quiet fetch of two refs", call(`git -C ${OUTSIDE} fetch -q origin pr-501 canary`)],
     ["a quiet detached checkout", call(`git -C ${OUTSIDE} checkout -q --detach abc`)],
     ["sed printing a line range", call(`sed -n 222,300p ${OUTSIDE}/a.ts`)],

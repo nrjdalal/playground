@@ -2,7 +2,7 @@
 
 A sweep over many PRs (an inventory, a recovery scan, an org-wide check) reads through one batched GraphQL query, not paced REST: 50 PRs a query, each node carrying its files, reviews and dates, cost one point a query measured (a dry run gave `cost: 1` for 50 PRs with files and reviews), and 996 PRs took 20 queries, estimated from that cost,
 where the same sweep through paced REST spent about 2,000 calls, estimated, and the shared 5,000/h quota at 04:31Z on 26 Oct ([rules/github.md](../../rules/github.md), the **github** rule).
-code-review-loop's `state.py scan` batches its PR reads too (`SCAN_QUERY`), and names the shape to copy.
+code-review-loop's `state.ts scan` batches its PR reads too (`SCAN_QUERY`), and names the shape to copy.
 A single PR's read stays REST.
 
 1. Probe the budget before the first batch.
@@ -96,7 +96,7 @@ On a refused call, wait for the reset the rule names and retry nothing before it
 ## On a rate limit
 
 Wait until the reset the failing call's own `X-RateLimit-Reset` header gives (`gh api -i` prints it), or, when no header came back, each quota's `reset` from `gh api rate_limit`, though that can disagree, and retry nothing before then.
-code-review-loop's `state.py wait` does both.
+code-review-loop's `state.ts wait` does both.
 Done when the reset has passed and the retried call answers.
 
 ## Reading canary's own checks

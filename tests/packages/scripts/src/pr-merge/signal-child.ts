@@ -6,6 +6,7 @@ import { prMerge, takeLock, type Run } from "../../../../../packages/scripts/src
 import { onStop } from "../../../../../packages/scripts/src/pr-merge/stop"
 import { typesGate } from "../../../../../packages/scripts/src/pr-merge/types"
 import { storeWith } from "../../../../scripts/hooks/render-set"
+import { PR_TEMPLATE } from "./bodies"
 import { greenChecks } from "./suite"
 
 const [mode, root = "", phase = ""] = process.argv.slice(2)
@@ -19,6 +20,7 @@ const git: Run = async (args) => {
   if (args.includes("--show-toplevel")) return ok(root)
   if (args.includes("add")) mkdirSync(args.at(-2) ?? "", { recursive: true })
   if (args[0] === "rev-list") return ok("")
+  if (args[0] === "show") return ok(PR_TEMPLATE)
   if (args[0] === "merge-tree") return ok(`${"1".repeat(40)}\n`)
   return ok("c0ffee")
 }
