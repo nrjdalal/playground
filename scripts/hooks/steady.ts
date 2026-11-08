@@ -180,12 +180,12 @@ export function namings(command: string): Namings {
   // a name indirection sets or evaluates a variable whose name the hook cannot read: an assignment sets it, and a read evaluates any subscript the name's value holds (`N=a; N+=[V]; : ${!N}`), so zsh's P flag holds nothing, nor does a flag with a delimited argument (`${(j:…:)…}`), since its argument can hide a `)` and a P, nor do the e, % and # flags, which evaluate a value as shell text, a prompt or arithmetic
   const text = quotedBodiesOut(command)
   // a single-quoted span is text no command evaluates, but a setter's or a test's name, which steadyNames reads word by word
-  const unquotedSpans = singleQuotesOut(text)
+  const singleQuotedOut = singleQuotesOut(text)
   let blind =
     EVALUATES.some((evaluates) => evaluates.test(text)) ||
-    SUBSCRIPT.test(unquotedSpans) ||
-    SUBSCRIPT.test(unquoted(unquotedSpans)) ||
-    QUALIFIER.test(singleQuotesOut(text)) ||
+    SUBSCRIPT.test(singleQuotedOut) ||
+    SUBSCRIPT.test(unquoted(singleQuotedOut)) ||
+    QUALIFIER.test(singleQuotedOut) ||
     INDIRECTS.test(text)
   for (const [, flags, closed] of text.matchAll(/\$\{\(([^)]*)(\)?)/g))
     if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags)) blind = true
