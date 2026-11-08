@@ -95,6 +95,9 @@ case "$2" in
   hw.ncpu) echo "\${FAKE_NCPU:-15}" ;;
   kern.memorystatus_vm_pressure_level) echo "\${FAKE_PRESSURE:-1}" ;;
   kern.memorystatus_level) echo "\${FAKE_FREE:-50}" ;;
+  vm.swapusage)
+    [ -n "$FAKE_SWAPUSAGE_BROKEN" ] && { echo "total = x"; exit 0; }
+    echo "total = \${FAKE_SWAP_TOTAL:-2048.00}M  used = \${FAKE_SWAP_USED:-0.00}M  free = 0.00M  (encrypted)" ;;
   *) exit 1 ;;
 esac`,
 )
