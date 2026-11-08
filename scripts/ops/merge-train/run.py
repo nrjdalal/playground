@@ -8,7 +8,7 @@ Single instance (flock); the heartbeat (ops-merge-train.json) beats from a threa
 """
 import fcntl, json, os, subprocess, sys, threading, time
 
-HERE = os.path.expanduser("~/.playground/ops/merge-train")  # the state folder by name, so a run by its repo path still reads the live state
+HERE = os.path.join(os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")), "ops", "merge-train")  # the state folder by name, so a run by its repo path still reads the live state
 OPS = os.path.dirname(HERE)
 sys.path.insert(0, OPS)
 from beat import beat, checkout  # noqa: E402

@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, relative } from "node:path"
 
 import { onGlm } from "../../scripts/hooks/no-glm-heavy-path"
 import { check as headless } from "../../scripts/hooks/no-headless-login"
@@ -95,5 +95,48 @@ describe("PLAYGROUND_DATA_DIR is the one data folder spawn.sh and its hooks read
     expect(await headless(raw, { CLAUDE_CONFIG_DIR: config, PLAYGROUND_DATA_DIR: data })).toContain(
       "-a picked@example.com -w",
     )
+  })
+})
+
+// A fixture stack's hosted session ran a factory script with the machine's real HOME, and one that names the data folder by HOME alone wrote into the machine's own (#1564): each script a session can run reads it through PLAYGROUND_DATA_DIR, the machine's ~/.playground only as its default.
+describe("every script a session can run reaches the data folder through PLAYGROUND_DATA_DIR", () => {
+  const REPO = join(import.meta.dir, "..", "..")
+  // a code line that builds the data folder from HOME alone: a shell's $HOME/.playground, Python's expanduser and a join of the home folder
+  const BY_HOME =
+    /"?\$\{?HOME\}?\/\.playground|expanduser\("~\/\.playground|(homedir\(\)|home), "\.playground"/
+  const COMMENT = /^\s*(#|\/\/|\*)/
+  const byHome = (file: string) =>
+    readFileSync(join(REPO, file), "utf8")
+      .split("\n")
+      .flatMap((line, i) =>
+        BY_HOME.test(line) && !COMMENT.test(line) && !line.includes("PLAYGROUND_DATA_DIR")
+          ? [`${file}:${i + 1}`]
+          : [],
+      )
+  // the files that held such a line before #1564
+  test.each([
+    "packages/scripts/src/playground/cli.ts",
+    "scripts/link-skills.sh",
+    "scripts/ops/merge-train/run.py",
+    "scripts/ops/unstick/run.py",
+    "scripts/ops/up.py",
+    "scripts/ops/usage/account-watch.py",
+    "scripts/ops/usage/glm-credits.py",
+    "scripts/ops/usage/login-flip.py",
+    "scripts/ops/usage/near-limit.py",
+    "scripts/ops/usage/run.py",
+    "scripts/ops/usage/week-marks.py",
+    "scripts/shell-pane.ts",
+  ])("%s", (file) => {
+    expect(byHome(file)).toEqual([])
+  })
+
+  test("and no other script under scripts/ or the playground command does", () => {
+    const files = [
+      ...new Bun.Glob("scripts/**/*.{py,sh,ts}").scanSync(REPO),
+      ...new Bun.Glob("packages/scripts/src/playground/**/*.ts").scanSync(REPO),
+    ].filter((file) => !file.startsWith("scripts/hooks/bundled/"))
+    expect(files.length).toBeGreaterThan(50)
+    expect(files.flatMap((file) => byHome(relative(REPO, join(REPO, file))))).toEqual([])
   })
 })
