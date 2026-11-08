@@ -1779,7 +1779,7 @@ oldest_asked() {
     p=${t##*/} p=${p#*-} p=${p%%-*}
     case "$p" in '' | *[!0-9]*) continue ;; esac
     alive "$p" || continue
-    a=; read -r _ _ _ _ _ a _ < "$t" 2>/dev/null
+    a=; read -r _ _ _ _ _ a _ 2>/dev/null < "$t"
     case "$a" in '' | *[!0-9]*) a=${t##*/} a=${a%%-*} a=${a:0:10} ;; esac
     case "$a" in '' | *[!0-9]*) continue ;; esac
     { [ -z "$OLDEST" ] || [ "$a" -lt "$OLDEST" ]; } && OLDEST=$a

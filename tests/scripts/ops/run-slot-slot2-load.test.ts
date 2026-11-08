@@ -73,6 +73,12 @@ describe("slots 2 to 4 with single-slot mode off", () => {
     expect(slots(m)).toBe("4\n")
   })
 
+  test("and one whose line's first ask is no number, by its name", () => {
+    const m = loaded(18, 15, [])
+    m.ticket(Math.floor(Date.now() / 1000 - 301) * 1e9, "worker-odd", "s2 22 2 medium - abc")
+    expect(slots(m)).toBe("4\n")
+  })
+
   test("but a dead waiter's old ticket times no hold", async () => {
     const m = loaded(18, 15, [])
     const gone = Bun.spawn(["true"])
