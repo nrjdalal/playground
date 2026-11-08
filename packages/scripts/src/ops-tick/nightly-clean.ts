@@ -13,7 +13,7 @@ import {
 import { writeAtomic } from "../write-atomic"
 import type { Context } from "./tick"
 
-// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), branches (each head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, an Inbox update when 1 GB or more was freed, and one delete decision for the containers and volumes only the owner's Approve may remove.
+// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), branches (each head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, and an Inbox update when 1 GB or more was freed. It asks no decision: each container or volume no rule removes is kept and named as kept.
 
 const GB = 1024 ** 3
 // The freed-space finding's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
@@ -24,11 +24,6 @@ export type Pr = { headRefOid: string; state: "CLOSED" | "MERGED" | "OPEN"; url:
 // repo is the repository's https URL, which the branch step's archive tags are pushed through.
 export type Prs = { byBranch: Map<string, Pr>; byNumber: Map<number, Pr>; repo?: string }
 export type Ref = { name: string; sha: string }
-// A leftover the decision list names: the containers and volumes only the owner's Approve removes.
-export type Target = {
-  kind: "branch" | "container" | "volume" | "worktree"
-  name: string
-}
 export type Worktree = { branch: string | null; path: string }
 
 // What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers (null when GitHub cannot be read), the turbo cache's folder, the clock the cap's pacing reads, and the sleep it waits on.
@@ -41,9 +36,9 @@ export type NightDeps = {
   turbo: string
 }
 
-type State = { at?: string; decision?: { id: string; targets: Target[] }; denied?: string[] }
+// The beat's own record: the last run's time alone; a decision or denied key an older run wrote is read past and dropped on the next write.
+type State = { at?: string }
 
-const keyOf = (t: Target): string => `${t.kind} ${t.name}`
 const lines = (out: string): string[] => out.split("\n").filter((l) => l.trim())
 const gbOf = (bytes: number): string => (bytes / GB).toFixed(1)
 
@@ -106,25 +101,25 @@ export const staleBranches = (input: {
   return out
 }
 
-// Pure: what the docker step removes and asks. An exited playground-<worktree>-db or -redis container whose worktree folder is gone is removed; the live dashboard's database (and pglaunch's beside it), a Vibeground copy and a running container stay, and any other container over 1 GB goes to the decision list.
+// Pure: what the docker step removes and names as kept. An exited playground-<worktree>-db or -redis container whose worktree folder is gone is removed; the live dashboard's database (and pglaunch's beside it), a Vibeground copy, a running container and any other name stay, and one over 1 GB is named as kept, but the live dashboard's, pglaunch's and a Vibeground copy, which stay unnamed.
 export const staleContainers = (
   listed: { name: string; size: number; state: string }[],
   folders: string[],
   live: (container: string) => boolean,
-): { decide: string[]; remove: string[] } => {
+): { keep: string[]; remove: string[] } => {
   const here = new Set(folders.map((f) => f.replace(/[^a-zA-Z0-9_.-]/g, "-").toLowerCase()))
-  const out = { decide: [] as string[], remove: [] as string[] }
+  const out = { keep: [] as string[], remove: [] as string[] }
   for (const c of listed) {
     if (live(c.name) || c.name.startsWith("playground-vibe-")) continue
     const worktree = /^playground-(.+)-(?:db|redis)$/.exec(c.name)?.[1]
     if (worktree && c.state === "exited" && !here.has(worktree.toLowerCase()))
       out.remove.push(c.name)
-    else if (c.size > GB) out.decide.push(c.name)
+    else if (c.size > GB) out.keep.push(c.name)
   }
   return out
 }
 
-// Pure: docker system df -v's volumes no container uses (its Links a string, "0") that hold over 1 GB, for the decision list.
+// Pure: docker system df -v's volumes no container uses (its Links a string, "0") that hold over 1 GB, each kept and named as kept.
 export const staleVolumes = (df: string): string[] => {
   try {
     const volumes = (
@@ -177,41 +172,10 @@ export async function pruneTurbo(dir: string, now: Date, days = 2): Promise<stri
   return `removed ${removed}, kept ${kept}, freed ${Math.round(freed / 1_048_576)} MB`
 }
 
-const WHY =
-  "The nightly cleanup found these left over: a container or unused volume over 1 GB that no rule removes. Approve removes each on the next night's run; Deny keeps them, and they are not asked again."
-
 // rm quarantines at most 3 paths a session per minute; the beat paces its own moves under that cap, waiting before a 4th inside the minute so rm's tripwire stays quiet, retries a refused move once the minute is out, and names what a bound on the total wait leaves for the next run. Other beats run beside this one (tick.ts starts each due beat on its own), so the wait holds up nothing.
 const RM_CAP = /quarantined \d+ paths in the last minute/
 const CAP_WAIT_MS = 60_000
 const CAP_WAIT_BOUND_MS = 600_000
-
-// Pure: the night's delete decision for the containers and volumes, each named whole, as many as fit the Inbox's 4,000 characters, the rest waiting for the next night; the worktrees and branches the run removed go to the log and the outbox line, not here.
-export const decisionOf = (
-  from: string,
-  targets: Target[],
-): { item: object; targets: Target[] } => {
-  const named: Target[] = []
-  let what = ""
-  for (const t of targets) {
-    const line = `- ${t.kind} \`${t.name}\`\n`
-    if (what.length + line.length > 3800) break
-    named.push({ kind: t.kind, name: t.name })
-    what += line
-  }
-  return {
-    item: {
-      from,
-      kind: "decision",
-      preview: {
-        type: "delete",
-        what: what.trimEnd(),
-        why: WHY,
-      },
-      title: `Delete ${named.length} leftover${named.length === 1 ? "" : "s"} the nightly cleanup found`,
-    },
-    targets: named,
-  }
-}
 
 // Pure: whether a cleanWorktree line kept work the standing approval may trash: uncommitted or unpushed work, or rm's unlanded-work refusal that names --discard.
 export const discardable = (line: string): boolean =>
@@ -239,76 +203,9 @@ const trashWorktree = (ctx: Context, path: string) =>
     "nightly-clean",
   ])
 
-const idOf = (out: string): string | undefined =>
-  lines(out)
-    .map((l) => l.trim())
-    .find((l) => /^[0-9a-f-]{36}$/.test(l))
-
 // Pure: the trash id a playground rm trash move printed, the one playground rm --restore takes.
 export const trashIdOf = (out: string): string | undefined =>
   /\d{8}T\d{6}Z-[A-Za-z0-9][A-Za-z0-9-]*\/\d+/.exec(out)?.[0]
-
-// Carries out last night's approved targets, closes a denied or set-aside one (a denied one's targets kept out of later asks, a set-aside one's asked again), and answers whether it is still open.
-async function settleLast(
-  ctx: Context,
-  state: State,
-  main: string,
-  done: string[],
-): Promise<boolean> {
-  const last = state.decision
-  if (!last) return false
-  const got = await ask(ctx, ["get", last.id])
-  const status = (() => {
-    try {
-      return (JSON.parse(got.out) as { status?: string }).status
-    } catch {
-      return undefined
-    }
-  })()
-  if (got.code !== 0 || !status) {
-    done.push(`decision ${last.id} unreadable, dropped`)
-    state.decision = undefined
-    return false
-  }
-  if (status === "open") return true
-  if (status === "approved") {
-    const cli = cliOf(ctx)
-    const runs: Record<Target["kind"], (name: string) => string[]> = {
-      branch: (name) => ["git", "-C", main, "branch", "-D", name],
-      container: (name) => ["docker", "rm", "-fv", name],
-      volume: (name) => ["docker", "volume", "rm", name],
-      worktree: (name) => [
-        "bun",
-        "--no-env-file",
-        cli,
-        "rm",
-        "--worktree",
-        name,
-        "--discard",
-        "--decision",
-        last.id,
-        "--reason",
-        "nightly-clean, approved",
-      ],
-    }
-    let gone = 0
-    for (const t of last.targets) if ((await ctx.run(runs[t.kind](t.name))).code === 0) gone++
-    await ask(ctx, [
-      "ack",
-      last.id,
-      "--no-link",
-      `nightly-clean removed ${gone} of ${last.targets.length}`,
-    ])
-    done.push(`decision ${last.id} approved: removed ${gone} of ${last.targets.length}`)
-  } else {
-    await ask(ctx, ["get", last.id, "--ack"])
-    if (status === "denied")
-      state.denied = [...new Set([...(state.denied ?? []), ...last.targets.map(keyOf)])]
-    done.push(`decision ${last.id} ${status}: its ${last.targets.length} kept`)
-  }
-  state.decision = undefined
-  return false
-}
 
 // One night's run: each step logged, a failed step named and the rest run on.
 export const nightlyClean =
@@ -321,7 +218,6 @@ export const nightlyClean =
     const data = dirname(ctx.ops)
     const before = deps.free(data)
     const said: string[] = []
-    const decide: Target[] = []
     // Each removal and each kept leftover, named for the outbox line to ops: a removal with its trash id or archive tag, a keep with why.
     const removed: string[] = []
     const kept: string[] = []
@@ -335,10 +231,6 @@ export const nightlyClean =
     const cleanup = await deps.cleanup()
     const main = cleanup?.main ?? ctx.repo
     const git = (args: string[]) => ctx.run(["git", "-C", main, ...args])
-    const open = await settleLast(ctx, state, main, said).catch((err: Error) => {
-      said.push(`last decision: failed: ${err.message}`)
-      return false
-    })
     const fetched = await ctx.run(
       [
         join(ctx.ops, "run-slot.sh"),
@@ -523,17 +415,24 @@ export const nightlyClean =
         folders,
         cleanup?.live ?? (() => true),
       )
-      let removed = 0
+      const gone: string[] = []
+      const left: string[] = []
       for (const name of plan.remove)
-        if ((await ctx.run(["docker", "rm", "-fv", name])).code === 0) removed++
-      for (const name of plan.decide) decide.push({ kind: "container", name })
+        if ((await ctx.run(["docker", "rm", "-fv", name])).code === 0)
+          gone.push(`container ${name}`)
+        else left.push(`container ${name} kept: its removal failed`)
+      for (const name of plan.keep)
+        left.push(`container ${name} kept: over 1 GB, no rule removes it`)
       const df = await ctx.run(["docker", "system", "df", "-v", "--format", "{{json .}}"])
-      for (const name of staleVolumes(df.out)) decide.push({ kind: "volume", name })
+      for (const name of staleVolumes(df.out))
+        left.push(`volume ${name} kept: unused and over 1 GB, no rule removes it`)
+      removed.push(...gone)
+      kept.push(...left)
       const slot = (argv: string[]) =>
         ctx.run([join(ctx.ops, "run-slot.sh"), "ops-tick", "--", ...argv], 30 * 60_000)
       const images = await slot(["docker", "image", "prune", "-f"])
       const cache = await slot(["docker", "builder", "prune", "-f"])
-      return `removed ${removed} containers; image prune ${images.code === 0 ? "ran" : "failed"}, build cache prune ${cache.code === 0 ? "ran" : "failed"}`
+      return `removed ${gone.length} containers${gone.length ? ` (${gone.join(", ")})` : ""}; ${left.length ? left.join("; ") : "none kept"}; image prune ${images.code === 0 ? "ran" : "failed"}, build cache prune ${cache.code === 0 ? "ran" : "failed"}`
     })
     await step("turbo", () => pruneTurbo(deps.turbo, ctx.now))
     const purged = trashSince(
@@ -554,26 +453,6 @@ export const nightlyClean =
       .json()
       .catch(() => null)
     const from = managerOf((roster as { agents?: unknown } | null)?.agents, "ops")
-    const asked = decide.filter((t) => !(state.denied ?? []).includes(keyOf(t)))
-    if (asked.length) {
-      const { item, targets } = decisionOf(from, asked)
-      const posted = await ask(ctx, ["new"], JSON.stringify(item))
-      const id = idOf(posted.out)
-      if (id) {
-        if (open && state.decision)
-          await ask(ctx, [
-            "settle",
-            state.decision.id,
-            "--note",
-            `Carried into the next night's decision, ${id}`,
-          ])
-        state.decision = { id, targets }
-        said.push(`decision ${id}: ${targets.length} targets`)
-      } else said.push(`decision: not posted: ${lines(posted.out).at(-1) ?? ""}`)
-    } else if (open && state.decision) {
-      await ask(ctx, ["settle", state.decision.id, "--note", "Its targets are gone"])
-      state.decision = undefined
-    }
     if (after - before >= GB)
       await ask(
         ctx,
@@ -585,9 +464,8 @@ export const nightlyClean =
           title: `The nightly cleanup freed ${gbOf(after - before)} GB: free disk ${gbOf(before)} GB, now ${gbOf(after)} GB`,
         }),
       )
-    state.at = ctx.now.toISOString()
     await mkdir(join(ctx.ops, "tick"), { recursive: true })
-    await writeAtomic(statePath, JSON.stringify(state))
+    await writeAtomic(statePath, JSON.stringify({ at: ctx.now.toISOString() } satisfies State))
     await mkdir(join(ctx.ops, "log"), { recursive: true })
     await appendFile(
       join(ctx.ops, "log", "nightly-clean.log"),
