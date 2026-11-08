@@ -8,6 +8,7 @@
 # pid has died is reclaimed; a slot whose holder line has no pid, or has no holder line, is held until it is 2 hours old, or while its age reads back empty. It prints the slot
 # it took to stderr and exits with the command's code.
 set -u
+case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "run-slot.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 OPS=${RUN_SLOT_OPS:-${PLAYGROUND_DATA_DIR:-$HOME/.playground}/ops}
 # this copy's path and arguments, so a waiter can run a newer copy in its place (reread, below)
 SELF=$0

@@ -4,7 +4,7 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 // scripts/hooks/no-glm-heavy-path.ts
 import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, readlinkSync, realpathSync } from "fs";
 import { loadavg } from "os";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join5, resolve as resolve3 } from "path";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join5, resolve as resolve3 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -50,8 +50,15 @@ applyEnvAliases();
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
-import { join, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
+import { isAbsolute, join, resolve } from "path";
+var dataDirOf = (env, home = env.HOME || homedir()) => {
+  const named = env.PLAYGROUND_DATA_DIR;
+  if (!named)
+    return join(home, ".playground");
+  if (!isAbsolute(named))
+    throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
+  return resolve(named);
+};
 var dataDir = (env = process.env) => dataDirOf(env);
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
@@ -5370,7 +5377,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { homedir as homedir3 } from "os";
-import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
+import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var MAX_BYTES = 1048576;
@@ -7225,7 +7232,7 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
-  if (isAbsolute(text.value))
+  if (isAbsolute2(text.value))
     return text.value;
   return env.cwd ? resolve2(env.cwd, text.value) : undefined;
 }
@@ -7882,7 +7889,7 @@ function globRegex(segment) {
 function globbed(value, cwd) {
   const out = [];
   for (const pattern of braces(value)) {
-    const root = isAbsolute2(pattern) ? "/" : cwd;
+    const root = isAbsolute3(pattern) ? "/" : cwd;
     if (!root)
       continue;
     let candidates = [root];
@@ -8176,7 +8183,7 @@ async function inspect(raw, environment, load5, limit) {
     if (!Array.isArray(orgs))
       return;
     const given = toolInput?.[READ_TOOLS[tool]];
-    const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join5(environment.HOME, given.slice(2)) : isAbsolute2(given) ? given : directory && resolve3(directory, given);
+    const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join5(environment.HOME, given.slice(2)) : isAbsolute3(given) ? given : directory && resolve3(directory, given);
     const repo = orgs.length > 0 ? checkoutOf(path, orgs, new Map) : undefined;
     return repo ? checkoutRefusal(`this ${tool} call`, repo) : undefined;
   }
