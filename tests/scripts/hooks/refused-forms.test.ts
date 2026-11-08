@@ -250,7 +250,13 @@ const REVIEW = join(SCRATCH, "review")
 const CLONE = join(REVIEW, "outside")
 const UNDER_BUNFIG = join(REVIEW, "under-bunfig")
 const PLAIN = join(REVIEW, "plain")
+const ENV_CLONE = join(REVIEW, "env-file")
+const LOOSE = join(REVIEW, "loose")
 for (const dir of [
+  join(ENV_CLONE, ".git"),
+  join(LOOSE, "sub"),
+  join(PATHS.MAIN, ".git"),
+  join(PATHS.MAIN, "docs"),
   join(CLONE, ".git"),
   join(CLONE, "sub"),
   join(CLONE, "own"),
@@ -260,6 +266,8 @@ for (const dir of [
   mkdirSync(dir, { recursive: true })
 for (const folder of [CLONE, join(CLONE, "own"), UNDER_BUNFIG, PATHS.MAIN])
   writeFileSync(join(folder, "bunfig.toml"), 'preload = ["./pre.ts"]\n')
+// an env file bun loads into the script's variables, a harmless one: the hook judges the folder, never the file's lines
+for (const folder of [ENV_CLONE, PATHS.MAIN]) writeFileSync(join(folder, ".env"), "MADE_UP=1\n")
 for (const skills of [
   join(DATA, "orgs", "home", "abc123", "skills"),
   join(PATHS.MAIN, "extensions", "core", "skills"),
@@ -359,11 +367,14 @@ const guardsOf = (
   "no-outside-pr-code": {
     folders: {
       "main checkout": [PATHS.MAIN, HOME],
+      "main checkout subfolder": [join(PATHS.MAIN, "docs"), HOME],
       "outside clone": [CLONE, HOME],
       "outside clone subfolder": [join(CLONE, "sub"), HOME],
       "outside clone subfolder with bunfig": [join(CLONE, "own"), HOME],
       "outside clone under a bunfig": [join(UNDER_BUNFIG, "clone"), HOME],
+      "outside clone with an env file": [ENV_CLONE, HOME],
       "plain clone": [PLAIN, HOME],
+      "scratch folder": [join(LOOSE, "sub"), HOME],
       "unknown folder": ["outside", HOME],
     },
     run: (raw, home) => {

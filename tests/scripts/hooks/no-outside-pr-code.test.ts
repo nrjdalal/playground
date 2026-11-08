@@ -42,6 +42,7 @@ const SESSIONS: Record<string, string[]> = {
 }
 
 const HELD: Record<string, string[]> = {
+  [MAIN]: [".git"],
   [EMBEDDED]: ["HEAD", "objects", "refs"],
   [INSTALLED]: [".git", "node_modules"],
   [OUTSIDE]: [".git", "bunfig.toml"],
@@ -133,6 +134,14 @@ describe("no-outside-pr-code keeps a checker of an outside author's PR in read m
     [
       "a bun skill script by its path from a folder the hook cannot read",
       call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, "review-501"),
+    ],
+    [
+      "a bun skill script by its path from a scratch folder outside every work tree",
+      call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, "/s/scratch"),
+    ],
+    [
+      "a bun skill script by its path from a clone inside the main checkout",
+      call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, INSTALLED),
     ],
     [
       "the playground command in a folder with the PR's bunfig.toml",
@@ -267,6 +276,10 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
     [
       "a bun skill script by its path from the main checkout",
       call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`),
+    ],
+    [
+      "a bun skill script by its path from a folder in the main checkout's tree",
+      call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, `${MAIN}/docs`),
     ],
     [
       "a python skill script by its path in a clone with a bunfig.toml",
@@ -484,6 +497,15 @@ describe("runnerOf names the program a shebang line runs", () => {
     ["#! /usr/bin/env python3", "python3"],
     ["#!/usr/bin/env node", "node"],
     ["#!/bin/sh", "sh"],
+    ["#!/usr/bin/env -u NODE_ENV bun", "bun"],
+    ["#!/usr/bin/env -C /tmp bun", "bun"],
+    ["#!/usr/bin/env -P /usr/local/bin bun", "bun"],
+    ["#!/usr/bin/env --unset=NODE_ENV --chdir=/tmp bun", "bun"],
+    ["#!/usr/bin/env -i bunx", "bunx"],
+    ["#!/usr/bin/env -S bun --no-env-file", "bun"],
+    ["#!/usr/bin/env --made-up bun", ""],
+    ["#!/usr/bin/env ${RUNNER}", ""],
+    ["#!/usr/bin/env FORCE_COLOR=0", ""],
     ["console.log(1)", undefined],
     ["#!", undefined],
     [undefined, undefined],

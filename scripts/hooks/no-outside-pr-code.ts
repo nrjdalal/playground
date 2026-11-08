@@ -34,7 +34,7 @@ export type Lookup = {
   ) => boolean
   main: string
   prsOf: (sessionId: unknown) => Promise<string[]>
-  // the program a script's first line runs it with, `env`'s program for an env line, or undefined with no readable shebang
+  // the program a script's first line runs it with (runnerOf): `env`'s program for an env line, "" for one it cannot read, undefined with no shebang
   runner: (script: string) => string | undefined
 }
 
@@ -235,13 +235,13 @@ export async function inspect(
       (root) => under(path, root) && path.slice(root.length).toLowerCase().includes("/skills/"),
     )
   }
-  // Whether bun, run from a folder, could read a bunfig.toml the main checkout does not own: the folder or one above it up to its work tree's root, walked though bun 1.4.4 reads the folder's own alone, and an unknown folder counts as one.
-  const foreignBunfig = (folder: string | undefined): boolean => {
-    if (folder === undefined) return true
+  // Whether a folder sits in the main checkout's own work tree: the first folder up from it that holds .git is the main checkout, so another clone or worktree inside it, a folder outside any, and an unknown one are not.
+  const inMain = (folder: string | undefined): boolean => {
+    if (folder === undefined) return false
     const main = real(lookup.main)
     for (let at = real(folder); ; at = dirname(at)) {
-      if (at !== main && lookup.holds(at, "bunfig.toml")) return true
-      if (lookup.holds(at, ".git") || dirname(at) === at) return false
+      if (lookup.holds(at, ".git")) return at === main
+      if (dirname(at) === at) return false
     }
   }
   const permitted = (cmd: Command, parsed: Parsed, here: Env): boolean => {
@@ -253,10 +253,10 @@ export async function inspect(
     const program = first ? pathOf(first, here) : undefined
     if (first && first.value.includes("/")) {
       if (program && under(program, slot) && program.length === slot.length) return true
-      // a skill script whose shebang runs bun reads the folder's bunfig.toml first, as the playground command does
+      // bun reads files from the folder it runs in before a script (bunfig.toml's preload, .env's variables, and whatever a later bun adds), so a skill script whose shebang runs bun, or one the hook cannot read, runs only from the main checkout's own tree
       return (
         skillScript(program) &&
-        !(lookup.runner(real(program!)) === "bun" && foreignBunfig(here.cwd))
+        (!BUN_RUNNERS.has(lookup.runner(real(program!))) || inMain(here.cwd))
       )
     }
     const words = [name, ...args.map((a) => a.value)]
@@ -389,14 +389,28 @@ const firstLine = (script: string): string | undefined => {
   }
 }
 
-// Pure: the program a shebang line runs, by its name: the interpreter's own, or the first word after env and its options (`#!/usr/bin/env -S bun --flag`).
+// The runners read as bun: bun, bunx, and "" for a shebang the hook cannot read, which fails closed.
+const BUN_RUNNERS = new Set<string | undefined>(["", "bun", "bunx"])
+// env's options that take the next word as their value (an unset name, a folder, a search path)
+const ENV_VALUED = new Set(["--chdir", "--unset", "-C", "-P", "-u"])
+
+// Pure: the program a shebang line runs, by its name: the interpreter's own, or the word env runs after its options, assignments and -S's split (`#!/usr/bin/env -S bun --flag`, `env -u NAME bun`); undefined with no shebang, and "" for an env line it cannot read (an unknown option, a program built from a variable, no program at all).
 export const runnerOf = (line: string | undefined): string | undefined => {
   if (!line?.startsWith("#!")) return undefined
   const [interpreter, ...rest] = line.slice(2).trim().split(/\s+/)
   if (!interpreter) return undefined
   if (basename(interpreter) !== "env") return basename(interpreter)
-  const program = rest.find((word) => !word.startsWith("-") && !word.includes("="))
-  return program && basename(program)
+  for (let i = 0; i < rest.length; i++) {
+    const word = rest[i]!
+    if (ENV_VALUED.has(word)) i++
+    else if (word === "-S" || word === "--split-string" || /^-[iv0]+$/.test(word)) continue
+    else if (/^(?:--(?:chdir|unset)=|-[CPu].)/.test(word) || word === "--ignore-environment")
+      continue
+    else if (word.startsWith("-S")) return /[$\\]/.test(word) ? "" : basename(word.slice(2))
+    else if (word.startsWith("-")) return ""
+    else if (!word.includes("=")) return /[$\\]/.test(word) ? "" : basename(word)
+  }
+  return ""
 }
 
 // The machine's own lookup: the session's roster row by its registry name, and a PR's author by gh, kept in the data folder since it never changes; a read that fails is kept for an hour, so a PR GitHub cannot answer costs one call an hour.
