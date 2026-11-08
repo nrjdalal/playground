@@ -9,6 +9,7 @@ import type { LockStore } from "@packages/redis"
 import { endMergedLive } from "../../../../scripts/ops/optimizer/auto_end"
 import { sendAs } from "../ops-job/job"
 import { factoryRepoOf } from "../playground/setting"
+import { bareTokens, templatePlaceholders } from "./body"
 import {
   BASE,
   gatesOf,
@@ -119,6 +120,26 @@ async function mergeOf(
     mergeTree: merged?.clean ? merged.tree : null,
   }
 }
+
+// The gate's own folders, whose code, docs and tests name sample tokens (SUITE_LINE), so the grep leaves them out and a sample stays unfound.
+export const GATE_OWN = ["packages/scripts/src/pr-merge", "tests/packages/scripts/src/pr-merge"]
+
+// The tokens no file at the head holds outside GATE_OWN, by one git grep -w -F a token in this checkout, after mergeOf fetched the head; a grep that cannot run throws, as a failed fetch does.
+export async function unfoundTokens(git: Run, head: string, tokens: string[]): Promise<string[]> {
+  const outside = GATE_OWN.map((folder) => `:(exclude)${folder}`)
+  const found = await Promise.all(
+    tokens.map(async (token) => {
+      const grep = await git(["grep", "-q", "-w", "-F", "-e", token, head, "--", ".", ...outside])
+      if (grep.code !== 0 && grep.code !== 1)
+        throw new Error(`git grep exited ${grep.code}: ${grep.stderr.trim()}`)
+      return grep.code === 0
+    }),
+  )
+  return tokens.filter((_, i) => !found[i])
+}
+
+// The pr skill's file whose template the body gate reads its placeholders from.
+const PR_TEMPLATE = "extensions/core/skills/pr/SKILL.md"
 
 // Pure: git merge-tree --write-tree --name-only's answer: whether it merged clean (exit 0), the tree it wrote, and the files that conflict; null when it did not run.
 export function parseMergeTree(
@@ -233,6 +254,13 @@ export async function factsOf(
   )
   const { canary, conflicts, mergeTree } = await mergeOf(git, n, view.headRefOid)
   const lost = await lostLines(git, `origin/${BASE}`, view.headRefOid, mergeTree)
+  const template = await git(["show", `${view.headRefOid}:${PR_TEMPLATE}`])
+  const placeholders = template.code === 0 ? templatePlaceholders(template.stdout) : []
+  if (placeholders.length === 0)
+    throw new Error(
+      `the body gate cannot read the pr template's placeholders at ${view.headRefOid.slice(0, 7)} (${PR_TEMPLATE}): ${template.code === 0 ? "its first markdown fence holds none" : `git show exited ${template.code}: ${template.stderr.trim()}`}`,
+    )
+  const unfound = await unfoundTokens(git, view.headRefOid, bareTokens(view.body ?? ""))
   return {
     aheadBy: /^\d+$/.test(ahead) ? Number(ahead) : Number.NaN,
     author: view.author?.login ?? "",
@@ -251,7 +279,9 @@ export async function factsOf(
     n,
     owner,
     parents,
+    placeholders,
     state: view.state,
+    unfound,
   }
 }
 
