@@ -22,7 +22,7 @@ When the stop at a conflict fired, run `git merge-tree --write-tree origin/canar
 ## Starts and ends
 
 The factory's sessions start and end as its work needs them; none of that waits on the owner (a request from outside the chain is the one exception, under [DISPATCH.md](DISPATCH.md)).
-Sessions that work together share a workspace as full-height columns ([SESSIONS.md](SESSIONS.md#spawn)): the managers one (the dispatcher, the Planner, the Builder, Ops), and each worker its own, with its checkers and probes beside it.
+Sessions that work together share a workspace as full-height columns ([SPAWN.md](SPAWN.md#layout)): the managers one (the dispatcher, the Planner, the Builder, Ops), and each worker its own, with its checkers and probes beside it.
 
 - **Workers** are spawned by the Builder, one per chore, and close with their checkers once their chore is done.
   A worker ends when its chore is done: its PR merged (or dropped with the Builder's ok), its branch pushed (`git push origin <branch>`), so its commits show on origin even with no PR,
@@ -190,8 +190,7 @@ Ops runs an update when the owner asks for one:
    **Done when** `claude --version` prints a newer version than the one you noted.
 3. Resume each named session on the list onto the new binary, one at a time: close it by [SESSIONS.md](SESSIONS.md#end), then run its resume record, `bash ~/.playground/resume/<name>.sh`, which resumes it with the `--account` its start was given, the model it started with and an effort other than high ([SESSIONS.md](SESSIONS.md#spawn) says how a resume picks a login).
    A session with no record resumes with `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <folder> <session-id>`, adding the `--model` and the `--effort` its line shows when it runs on Claude, and `--account` with the account it started on when that is a second account ([SESSIONS.md](SESSIONS.md#spawn)).
-   A reviewer or tester resumes by running its record's `exec` line by hand (the record forwards no arguments) with `--pr <its PRs, comma-separated>` appended: its roster row's `pr` first, then the rest of its `prs`, read before the close, since spawn.sh sets the ended row's `pr` to the first named.
-   spawn.sh refuses every checker start that names no PR.
+   A reviewer or tester resumes by running its record's `exec` line by hand (the record forwards no arguments) with `--pr <its PRs, comma-separated>` appended: its roster row's `pr` first, then the rest of its `prs`, read before the close, since spawn.sh sets the ended row's `pr` to the first named ([SPAWN.md](SPAWN.md#modes) holds the `--pr` rule).
    A resume within 15 minutes of its close passes spawn.sh's load gate, since the close keeps when it ended a row that read live and that session already counts in the load, so run each resume right after its close; one later meets the gate as a new start does.
    The managers go in [Starts and ends](#starts-and-ends)'s order, Ops first: Ops sends the dispatcher the list's path and asks for its own resume, and once Ops runs again the dispatcher tells it to carry on at step 3.
    Ops also does dispatcher-2, when one runs, and optimizer; the Builder does its workers, Ops its runners, each worker its checkers, each spawner its probes, and the owner his own; Ops sends `$LIST`'s path to each session that resumes others.
