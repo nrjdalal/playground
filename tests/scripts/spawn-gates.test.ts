@@ -204,8 +204,16 @@ describe("the memory gate holds a fresh worker start while the machine pages", (
   })
 
   test.each([
-    ["a reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"], undefined],
-    ["a tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"], undefined],
+    [
+      "a reviewer",
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
+      undefined,
+    ],
+    [
+      "a tester",
+      ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1"],
+      undefined,
+    ],
     ["a runner", ["runner", "runner-calm-heron", "b.md"], undefined],
     ["a manager", ["manager", "optimizer", "b.md"], undefined],
     ["a resume", ["resume", "worker-brave-otter", root, ID], "worker-brave-otter"],
