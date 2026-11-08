@@ -39,6 +39,9 @@ export type Forwarded = RelayResponse | { type: "offline" } | { type: "timeout" 
 // How long an instance waits, from when its message reaches the bus, for the one holding the Mac's socket to say it took a request or a ping, before it reads the Mac as offline.
 export const RELAY_ACK_MS = 2000
 
+// The request ids the subscriber remembers, oldest dropped first, so a request on the bus twice (a publish whose first try landed and then reported closed) still reaches the Mac once.
+const SEEN_MAX = 500
+
 // What the instances tell each other over Redis, in transit alone: a request, a pair request or a signed write for the instance holding the Mac's socket, its ack, the Mac's answer, a status ping and its pong, and a socket gone.
 const busSchema = z.discriminatedUnion("kind", [
   z.object({ id: z.string(), kind: z.literal("ack") }),
@@ -74,6 +77,7 @@ export function createHub({
   silentMs?: number
   timeoutMs?: number
 } = {}) {
+  const delivered = new Set<string>()
   const macs = new Map<string, Held>()
   const offlineSince = new Map<string, string>()
   const waiting = new Map<string, Waiting>()
@@ -189,7 +193,14 @@ export function createHub({
       if (live(data.userId)) void send({ id: data.id, kind: "pong" })
     } else if (data.kind === "pong") pings.get(data.id)?.()
     else if (data.kind === "request") {
-      if (deliver(data.userId, data.request)) void send({ id: data.request.id, kind: "ack" })
+      // A repeat is dropped before the Mac sees it, so it answers once and its refusal for the copy never races the real answer; one no live socket took is left unseen, so a retry after the Mac moved still delivers.
+      const key = `request:${data.request.id}`
+      if (delivered.has(key)) return
+      if (deliver(data.userId, data.request)) {
+        delivered.add(key)
+        if (delivered.size > SEEN_MAX) delivered.delete(delivered.keys().next().value!)
+        void send({ id: data.request.id, kind: "ack" })
+      }
     } else if (waiting.get(data.response.id)?.userId === data.userId)
       settle(data.response.id, data.response)
   }

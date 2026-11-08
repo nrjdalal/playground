@@ -3,7 +3,11 @@ import { join, resolve } from "node:path"
 
 // The in-process cases run on one instance with no Redis, whatever KV_URL the runner's .env sets.
 process.env.KV_URL = ""
-const { join: hold, publish } = await import("../../../../../../api/hono/src/lib/yard/socket")
+const {
+  deliveryKey,
+  join: hold,
+  publish,
+} = await import("../../../../../../api/hono/src/lib/yard/socket")
 
 const API = resolve(import.meta.dir, "../../../../../../api/hono")
 const SOCKET = join(API, "src/lib/yard/socket.ts")
@@ -43,6 +47,27 @@ describe("Yard's socket on one instance", () => {
     leaveBroken()
     leave()
     expect(got).toHaveLength(1)
+  })
+})
+
+describe("the key a delivery reads once by", () => {
+  const raw = (status?: "denied" | "pending" | "sent") =>
+    JSON.stringify({ frame: { message: { id: "m-1", status }, type: "message" }, userIds: ["u1"] })
+
+  test("a pending message's send and deny each keep a key of their own, so neither drops as a copy", () => {
+    expect(deliveryKey(raw("pending"))).not.toBe(deliveryKey(raw("sent")))
+    expect(deliveryKey(raw("pending"))).not.toBe(deliveryKey(raw("denied")))
+  })
+
+  test("the same message frame twice shares one key, and a message with no status reads as sent", () => {
+    expect(deliveryKey(raw("sent"))).toBe(deliveryKey(raw("sent")))
+    expect(deliveryKey(raw())).toBe(deliveryKey(raw("sent")))
+  })
+
+  test("a read frame and an unreadable raw never dedupe", () => {
+    const read = { channel: "c1", lastReadAt: "2026-10-31T00:00:00.000Z", type: "read" }
+    expect(deliveryKey(JSON.stringify({ frame: read, userIds: ["u1"] }))).toBeUndefined()
+    expect(deliveryKey("not json")).toBeUndefined()
   })
 })
 
