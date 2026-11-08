@@ -245,7 +245,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - A page for the owner (a report, a comparison, a mock, a diagram) is a local HTML file in the session's scratchpad, kept with `playground page` and posted as an Inbox card's `html` attachment, so the Inbox's viewer shows it and nothing opens on the owner's screen (the **local page** rule), since a claude.ai artifact publishes under whichever account the session holds.
   The page then stays on the Pages tab of the session's view, of the one it was made for and of the dispatcher's.
   Every page's header shows its version, "Version N · <date> · <kind>", always, and a copy made to share outside drops the label.
-  The factory's settings deny the `Artifact` tool, and a test fails without the deny.
+  The factory's settings turn the `Artifact` tool off with `enableArtifact: false`, and a test fails without it.
 
 ## Where it fits
 
