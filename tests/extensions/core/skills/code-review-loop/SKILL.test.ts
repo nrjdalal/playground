@@ -4,6 +4,14 @@ import { join } from "node:path"
 const root = join(import.meta.dir, "../../../../..")
 const skill = () => Bun.file(join(root, "extensions/core/skills/code-review-loop/SKILL.md")).text()
 const page = () => Bun.file(join(root, "docs/playground/code-review-loop.md")).text()
+// step 4 is a block: its opening line, then one line a part, each with its own Done when
+const stepFour = async () =>
+  (await skill()).split(/^4\. \*\*Review on two axes\.\*\*/m)[1]?.split(/^5\. /m)[0] ?? ""
+// the line of step 4's part labelled `label`, split at its Done when
+const part = async (label: string) =>
+  ((await stepFour()).split("\n").find((l) => l.includes(`**${label}:**`)) ?? "").split(
+    "**Done when**",
+  )
 
 describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
   test("after a 5/5 the reviewer stays up until the PR merges", async () => {
@@ -93,10 +101,12 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
   })
 
   test("a dependency bump's pinned advisory stands only after the audit skill's parent read (#1950)", async () => {
-    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    const step = await stepFour()
     expect(step).toContain("the audit skill's rung 2")
     expect(step).toContain("`npm view <parent> version dependencies`")
-    expect(step.split("**Done when**")[1] ?? "").toContain("for a dependency bump, the parent read")
+    expect((await part("Dependency bump"))[1] ?? "").toContain(
+      "for a dependency bump, the parent read",
+    )
     expect(await page()).toContain("the audit skill's rung 2")
   })
 
@@ -199,8 +209,8 @@ describe("the Review label carries its score's color (PG-157)", () => {
 
 describe("a diff holding a long-lived connection is reviewed by a lifecycle table", () => {
   test("step 4 asks for the table in the PR's Evidence, one row per path, and scores blocking until it is there", async () => {
-    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
-    const line = step.split("**Lifecycle table:**")[1]?.split("**Done when**")[0] ?? ""
+    const step = await stepFour()
+    const [line = "", done = ""] = await part("Lifecycle table")
     expect(line).toContain("a socket, a pub/sub subscriber, a retrying client")
     expect(line).toContain("in the PR's Evidence")
     expect(line).toContain(
@@ -208,7 +218,7 @@ describe("a diff holding a long-lived connection is reviewed by a lifecycle tabl
     )
     expect(line).toContain("the test that proves it, or the reason the path cannot happen")
     expect(line).toContain("blocking finding")
-    expect(step.split("**Done when**")[1] ?? "").toContain("lifecycle table")
+    expect(done).toContain("lifecycle table")
   })
 
   test("the docs page says a long-lived connection's lifecycle table holds the score down", async () => {
@@ -220,8 +230,8 @@ describe("a diff holding a long-lived connection is reviewed by a lifecycle tabl
 
 describe("a diff that loosens a guard is reviewed by a refusal table (PG-439)", () => {
   test("step 4 asks for a canary | head table from round 1, holds each canary refusal at the head, and its Done when checks it", async () => {
-    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
-    const line = step.split("**Refusal table:**")[1]?.split("**Done when**")[0] ?? ""
+    const step = await stepFour()
+    const [line = "", done = ""] = await part("Refusal table")
     expect(line).toContain("ask from round 1 for a `canary | head` table of refusal rows")
     expect(line).toContain("`tests/scripts/hooks/fixtures/refused-forms/`")
     expect(line).toContain(
@@ -232,7 +242,7 @@ describe("a diff that loosens a guard is reviewed by a refusal table (PG-439)", 
     )
     expect(line).toContain("each bypass the review finds that canary refuses")
     expect(line).toContain("blocking finding")
-    expect(step.split("**Done when**")[1] ?? "").toContain("refusal table")
+    expect(done).toContain("refusal table")
   })
 
   test("the docs page says a loosened guard's refusal table holds the score down", async () => {
@@ -262,7 +272,7 @@ describe("code-review-loop runs its newest text every round (PG-213)", () => {
 
 describe("code-review-loop's round 1 greps each changed term", () => {
   test("step 4 runs the changed-term grep in round 1, names its finding's shape and its Done when, with its measured case", async () => {
-    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    const step = await stepFour()
     expect(step).toContain(
       "the changed-term grep (`git grep -l <term>` over the agent-facing and web docs) for each term whose meaning the diff changes",
     )
@@ -270,7 +280,7 @@ describe("code-review-loop's round 1 greps each changed term", () => {
       "file every list or doc either leaves behind as one such finding, each as `file:line`",
     )
     expect(step).toContain("7 rounds")
-    expect(step.split("**Done when**")[1] ?? "").toContain(
+    expect((await part("Round 1 greps"))[1] ?? "").toContain(
       "its changed-term grep for each term whose meaning it changes",
     )
     expect(await page()).toContain("each term whose meaning the diff changes")
