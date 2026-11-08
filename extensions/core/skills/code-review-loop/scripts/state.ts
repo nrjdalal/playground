@@ -478,7 +478,7 @@ export const bodyDigest = (body: string | null | undefined): string =>
     .digest("hex")
     .slice(0, 12)
 
-// Exit 1 naming each change since pr's read line (the body, or a comment or thread reply posted or edited after it), else FRESH: chained before the verdict's post.
+// Exit 1 naming each change since pr's read line (the body, or a comment, thread reply or review posted or edited after it), else FRESH: chained before the verdict's post.
 export const cmdFresh = (repo: string, n: string, readAt: string, digest: string): void => {
   splitRepo(repo)
   number(n)
@@ -499,6 +499,11 @@ export const cmdFresh = (repo: string, n: string, readAt: string, digest: string
     for (const c of rest(`${path}?since=${readAt}&per_page=100`).filter(after))
       changed.push(
         `CHANGED ${kind} ${c.html_url} by ${(c.user || {}).login} at ${c.updated_at}: ${firstLine(c.body)}`,
+      )
+  for (const r of rest(`${base}/pulls/${n}/reviews?per_page=100`))
+    if (r.submitted_at && Date.parse(r.submitted_at) > Date.parse(readAt) && (r.body || "").trim())
+      changed.push(
+        `CHANGED review ${r.html_url} by ${(r.user || {}).login} at ${r.submitted_at}: ${firstLine(r.body)}`,
       )
   if (!changed.length) {
     console.log(`FRESH since ${readAt}`)
@@ -875,7 +880,7 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts pr <owner/repo> <n>                          one PR: head, newest verdict, open (over REST, unknown) threads, what was said since
   state.ts scan <owner/repo>                            every open PR: is its head scored, and who holds it? (the recovery scan)
   state.ts delta <worktree> <base> <old head> <new head>  did a push change the PR's own work, or only merge the base?
-  state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment or thread reply since pr's read line, else FRESH; chain it before the verdict's post
+  state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
   state.ts checks <owner/repo> <n> <sha>                as wait, and also return once Audit, Lint, and Build and test each conclude at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules

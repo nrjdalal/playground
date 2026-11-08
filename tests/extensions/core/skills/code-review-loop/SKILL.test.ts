@@ -60,6 +60,7 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
       "`${CLAUDE_SKILL_DIR}/scripts/state.ts fresh <repo> <n> <read-at> <digest>`",
     )
     expect(step7).toContain("drop each finding they now answer")
+    expect(step7).toContain("post the verdict first, then the inline review")
     expect(step7.split("**Done when**")[1] ?? "").toContain("behind a `fresh` that printed `FRESH`")
     const comments = await Bun.file(
       join(root, "extensions/core/skills/code-review-loop/references/COMMENTS.md"),
