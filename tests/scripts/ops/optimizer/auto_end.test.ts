@@ -3,9 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import type { RmDeps } from "../../../../packages/scripts/src/playground/rm"
 import {
   type CleanupDeps,
   cleanWorktree,
+  cleanupHeld,
   containersFor,
   type EndDeps,
   endMerged,
@@ -71,11 +73,11 @@ const input = (over: Partial<CollectInput> = {}): CollectInput => ({
   ...over,
 })
 
-// PG-1419: rm's reader returns a PR (its number beside its state) or none, and the cleanup's finished reads its state alone
-test("finishedOf reads rm's reader shape, a PR beside its state or none: merged and closed are done, open and none are not", () => {
-  expect(finishedOf({ number: 7, state: "MERGED" })).toBe(true)
-  expect(finishedOf({ number: 7, state: "CLOSED" })).toBe(true)
-  expect(finishedOf({ number: 7, state: "OPEN" })).toBe(false)
+// PG-1419: rm's reader returns a PR (its head beside its number and state) or none, and the cleanup's finished reads rm's freed off it
+test("finishedOf reads rm's reader shape, a PR beside its head, number and state or none: merged and closed are done, open and none are not", () => {
+  expect(finishedOf({ head: "h", number: 7, state: "MERGED" })).toBe(true)
+  expect(finishedOf({ head: "h", number: 7, state: "CLOSED" })).toBe(true)
+  expect(finishedOf({ head: "h", number: 7, state: "OPEN" })).toBe(false)
   expect(finishedOf(null)).toBe(false)
 })
 
@@ -923,6 +925,62 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(calls).toEqual([])
     expect(existsSync(theirs.wt)).toBe(false)
     expect(branches(theirs.main)).not.toContain("PG-1-thing")
+  })
+
+  // PG-1419: the cleanup's held check carries the worktree's own PR freed, so a merged PR's worktree goes under a stale working row naming its branch, and one with commits past the merged head stays, its commit named
+  test("a stale working row naming the branch no longer keeps a merged PR's worktree, and one with a commit past the merged head stays, its commit named", async () => {
+    const url = "https://github.com/o/r/pull/1"
+    const rmOf = (data: string, main: string, prHead: string): RmDeps => ({
+      caller: async () => undefined,
+      clones: () => [],
+      data,
+      decision: async () => null,
+      home: data,
+      main,
+      merged: () => null,
+      notify: () => {},
+      places: () => [],
+      prState: async () => ({ head: prHead, number: 1, state: "MERGED" }),
+      procs: () => [],
+      session: async () => "t",
+    })
+    const { main, root, wt } = machine()
+    recorded(wt)
+    const full = (rev: string) =>
+      Bun.spawnSync(["git", "-C", wt, "rev-parse", rev]).stdout.toString().trim()
+    writeFileSync(
+      join(root, "roster.json"),
+      JSON.stringify({
+        agents: [{ branch: "PG-1-thing", name: "abc123-worker", status: "working" }],
+      }),
+    )
+    const route = fakes(main, [], undefined, {
+      held: (path, pr) => cleanupHeld(path, pr, rmOf(root, main, full("HEAD"))),
+    })
+    expect(await cleanWorktree(wt, "r ended", route.deps, { pr: url })).toContain(`removed ${wt}`)
+
+    const over = machine()
+    const overShort = (rev: string) =>
+      Bun.spawnSync(["git", "-C", over.wt, "rev-parse", "--short", rev]).stdout.toString().trim()
+    const overFull = (rev: string) =>
+      Bun.spawnSync(["git", "-C", over.wt, "rev-parse", rev]).stdout.toString().trim()
+    writeFileSync(join(over.wt, "b.txt"), "b\n")
+    run(over.wt, "git", "add", "b.txt")
+    run(over.wt, "git", "commit", "-qm", "b")
+    writeFileSync(
+      join(over.root, "roster.json"),
+      JSON.stringify({
+        agents: [{ branch: "PG-1-thing", name: "abc123-worker", status: "working" }],
+      }),
+    )
+    const stalled = fakes(over.main, [], undefined, {
+      finished: async () => true,
+      held: (path, pr) => cleanupHeld(path, pr, rmOf(over.root, over.main, overFull("HEAD~1"))),
+    })
+    expect(await cleanWorktree(over.wt, "r ended", stalled.deps, { pr: url })).toBe(
+      `kept ${over.wt}: ${over.wt} is held by abc123-worker, which the roster lists as working, and its commits past merged PR #1's head stay: ${overShort("HEAD")}`,
+    )
+    expect(existsSync(over.wt)).toBe(true)
   })
 
   test("the container names are the worktree's own, whole, and never the live dashboard's or first run's", () => {

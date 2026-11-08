@@ -83,8 +83,12 @@ export type Decision = {
 }
 
 export type PrState = "CLOSED" | "MERGED" | "OPEN"
-// A worktree's own PR: its number and its state.
-export type Pr = { number: number; state: PrState }
+export type Pr = { head: string; number: number; state: PrState }
+// A worktree's PR once it reads MERGED or CLOSED, as the hold check's freed: its head beside its number and state, or undefined while it reads OPEN or GitHub cannot read it. The hold check frees a row naming the worktree by its branch or by this PR's number only when the PR's head is the worktree's HEAD; commits past it keep the hold, named with them.
+export const freedOf = (
+  pr: Pr | null,
+): { head: string; number: number; state: "CLOSED" | "MERGED" } | undefined =>
+  pr && pr.state !== "OPEN" ? { head: pr.head, number: pr.number, state: pr.state } : undefined
 
 // What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR state by its --pr or else its branch (null when none reads), the session the caller is (callerOf), and the session's name.
 export type RmDeps = {
@@ -216,7 +220,7 @@ export const prStateOf = (
   const only = prs?.length === 1 ? prs[0]! : null
   if (!only || (only.headRefName !== at.branch && only.headRefOid !== at.head)) return null
   return only.headRefOid === at.head || holds(only.headRefOid)
-    ? { number: only.number, state: only.state }
+    ? { head: only.headRefOid, number: only.number, state: only.state }
     : null
 }
 
@@ -413,8 +417,10 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   const session = "restore" in args ? "" : await deps.session()
   const git = "worktree" in args && args.worktree ? worktreeGit(args.path) : undefined
   // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold
-  const own = "worktree" in args && args.worktree ? await read.prState(args.path, args.pr) : null
-  const freed = own && own.state !== "OPEN" ? { number: own.number, state: own.state } : undefined
+  const freed =
+    "worktree" in args && args.worktree
+      ? freedOf(await read.prState(args.path, args.pr))
+      : undefined
   const done =
     "restore" in args
       ? restore(args.restore, roots)
