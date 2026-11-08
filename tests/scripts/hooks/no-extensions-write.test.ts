@@ -581,7 +581,7 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
   })
 })
 
-// A quoted argument with a space is read as a command line unless every command on the line is on a closed list of readers (awk with a program that runs nothing, cat, grep, head, tail, wc, sort, uniq, cut), with no redirect that writes a file; an awk program that runs a command has its literals read wherever it stands, and sed keeps canary's reading.
+// A quoted argument with a space is read as a command line unless every command on the line is on a closed list of readers (awk with a program that runs nothing, cat, grep, head, tail, wc, sort, uniq, cut, echo, lsof), with no redirect that writes a file; an awk program that runs a command has its literals read wherever it stands, and sed keeps canary's reading.
 describe("a quoted argument is read as a command line only where a program runs it", () => {
   // #1455: a quiet commit's message is text git never runs, so a gated call it names runs, in any case of git, while a gated call beside it stays refused
   test.each([
@@ -1567,6 +1567,34 @@ describe("a quoted argument is read as a command line only where a program runs 
   ])("%s stays refused", async (_, command) => {
     for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")])
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
+  })
+
+  // #1599: a refusal of a command that shows no write routes to the lead as a likely false positive, while one that writes keeps the owner's route
+  test("a refusal of a command that shows no write asks for a false-positive report", async () => {
+    const reason = await at("lsof -nP | awk 'NR>1 {print $2}'", homedir())
+    expect(reason).toContain(
+      "If this command writes nothing, report it to your lead as a false positive.",
+    )
+    expect(reason).not.toContain("the dispatcher hands the owner the command")
+  })
+
+  // a program that writes as called keeps the owner's route, whether or not the hook lists it as a writer
+  test.each([
+    ["touch on a file in the root", "touch ~/.playground/extensions/login/x"],
+    [
+      "an in-place sed on a file in the root",
+      "sed -i '' 's/a/b/' ~/.playground/extensions/login/x.json",
+    ],
+    [
+      "an in-place perl on a file in the root",
+      "perl -pi -e 's/a/b/' ~/.playground/extensions/login/x.json",
+    ],
+    ["a chmod on a file in the root", "chmod 644 ~/.playground/extensions/login/x.json"],
+    ["a chmod on a glob above the root", "chmod 644 ~/.playground/e*"],
+  ])("%s keeps the owner's route", async (_, command) => {
+    const reason = await at(command, homedir())
+    expect(reason).toContain("the dispatcher hands the owner the command")
+    expect(reason).not.toContain("report it to your lead as a false positive")
   })
 
   test("a refusal names a program it cannot read as such", async () => {
