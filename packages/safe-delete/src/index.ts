@@ -69,7 +69,7 @@ export const MARKER = ".safe-delete-scratch"
 
 export const LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 }
 
-export const PURGE = { days: 7, minFree: 50e9 }
+export const PURGE = { days: 7, floor: 5e9, minFree: 50e9 }
 
 // One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), each at most its files and bytes; the folder itself, its parent, a sibling and anything deeper stay protected.
 export type CarveOut = { bytes: number; files: number; folder: string }
@@ -554,14 +554,15 @@ export function removeScratch(dir: string, tmp = tmpdir()): string | null {
   return null
 }
 
-// The one recursive delete of the trash: each batch over 7 days old, then the oldest while free space is under 50 GB; a batch whose real path is not a folder directly in the trash root is skipped.
+// The one recursive delete of the trash: each batch over 7 days old, then the oldest while free space is under 50 GB, every batch taken only while load5 is under run-slot.load5-cap's cap (22 while it is off), or while the disk is under the floor (5 GB, about two trashed worktrees), where space wins over load; a batch whose real path is not a folder directly in the trash root is skipped, and one the load held comes back in leftForLoad so the log can name it.
 export function purgeTrash(
   trash: string,
-  io: { free: () => number; now: Date },
-): { removed: string[]; skipped: string[] } {
+  io: { free: () => number; load?: () => number; loadCap?: number; now: Date },
+): { removed: string[]; skipped: string[]; leftForLoad: string[] } {
   const root = real(trash)
   const removed: string[] = []
   const skipped: string[] = []
+  const leftForLoad: string[] = []
   const remove = (batch: string) => {
     const at = join(root, batch)
     if (!lstat(at)?.isDirectory() || dirname(real(at)) !== root) {
@@ -571,11 +572,21 @@ export function purgeTrash(
     rmSync(at, { force: true, recursive: true })
     removed.push(batch)
   }
+  const mayGo = () =>
+    io.free() < PURGE.floor || io.loadCap === undefined || (io.load?.() ?? 0) < io.loadCap
   const cutoff = io.now.getTime() - PURGE.days * 86_400_000
   const left: string[] = []
   for (const batch of batches(root))
-    if (stampMs(BATCH.exec(batch)![1]!) < cutoff) remove(batch)
-    else left.push(batch)
-  while (left.length && io.free() < PURGE.minFree) remove(left.shift()!)
-  return { removed, skipped }
+    if (stampMs(BATCH.exec(batch)![1]!) < cutoff) {
+      if (mayGo()) remove(batch)
+      else leftForLoad.push(batch)
+    } else left.push(batch)
+  while (left.length && io.free() < PURGE.minFree) {
+    if (!mayGo()) {
+      leftForLoad.push(...left)
+      break
+    }
+    remove(left.shift()!)
+  }
+  return { removed, skipped, leftForLoad }
 }

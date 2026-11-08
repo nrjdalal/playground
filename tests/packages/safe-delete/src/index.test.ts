@@ -910,4 +910,52 @@ describe("purgeTrash", () => {
     const { trash } = machine()
     expect(purgeTrash(trash, { free: () => 0, now: NOW }).removed).toEqual([])
   })
+
+  // the load cap (#1413): free between the floor and 50 GB, so only the cap decides; at or over it nothing goes, and the batches it left come back named
+  test("removes no batch at or over the load cap, and names what it left", () => {
+    const { trash } = machine()
+    const old = batchAt(trash, new Date(NOW.getTime() - 8 * DAY))
+    const done = purgeTrash(trash, {
+      free: () => 20 * GB,
+      load: () => 15,
+      loadCap: 15,
+      now: NOW,
+    })
+    expect(done.removed).toEqual([])
+    expect(done.leftForLoad).toEqual([old])
+    expect(existsSync(join(trash, old))).toBe(true)
+  })
+
+  test("stops between batches when the load reaches the cap mid-purge", () => {
+    const { trash } = machine()
+    const first = batchAt(trash, new Date(NOW.getTime() - 9 * DAY), "a")
+    const second = batchAt(trash, new Date(NOW.getTime() - 8 * DAY), "b")
+    const third = batchAt(trash, new Date(NOW.getTime() - 8 * DAY), "c")
+    let reads = 0
+    const load = () => (reads++ < 2 ? 10 : 15)
+    const done = purgeTrash(trash, {
+      free: () => 20 * GB,
+      load,
+      loadCap: 15,
+      now: NOW,
+    })
+    expect(done.removed).toEqual([first, second])
+    expect(done.leftForLoad).toEqual([third])
+    expect(existsSync(join(trash, third))).toBe(true)
+  })
+
+  test("removes batches at any load when the disk is under the hard floor", () => {
+    const { trash } = machine()
+    const old = batchAt(trash, new Date(NOW.getTime() - 8 * DAY))
+    const young = batchAt(trash, new Date(NOW.getTime() - 2 * DAY))
+    const done = purgeTrash(trash, {
+      free: () => 4 * GB,
+      load: () => 20,
+      loadCap: 15,
+      now: NOW,
+    })
+    expect(done.removed).toEqual([old, young])
+    expect(done.leftForLoad).toEqual([])
+    expect(existsSync(join(trash, young))).toBe(false)
+  })
 })
