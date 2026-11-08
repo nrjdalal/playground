@@ -50,14 +50,19 @@ export function treeAt(root: string, oid: string): Tree {
 const SOURCE = /\.[cm]?[jt]sx?$/
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")
 
-// The sources a tree holds that the working copy lacks: Bun resolves every import from the working files, so a build of the tree that reaches one fails.
-export const lacking = (root: string, tree: Tree): string[] =>
-  tree
+// The sources a tree holds that neither HEAD nor the working copy holds, the ones a merge brings in: Bun resolves every import from the working files, so a build of the tree that reaches one fails.
+export const lacking = (root: string, tree: Tree): string[] => {
+  const head = new Set(treeAt(root, "HEAD").paths())
+  return tree
     .paths()
     .filter(
       (path) =>
-        SOURCE.test(path) && !path.includes("node_modules/") && !existsSync(join(root, path)),
+        SOURCE.test(path) &&
+        !path.includes("node_modules/") &&
+        !head.has(path) &&
+        !existsSync(join(root, path)),
     )
+}
 
 // no-extensions-write runs its check in this Worker, which it starts by URL beside its own file.
 const WORKERS = ["no-extensions-write-worker"]
@@ -164,7 +169,7 @@ export function checkedTree(root: string, ref?: string): { note?: string; tree?:
 
 // `--check --merged`'s fix: the bundles go stale only once merged, so the rebuild runs on the merged tree.
 export const MERGED_FIX = (ref: string) =>
-  `merge ${ref} into the branch plainly, taking its side in ${BUNDLED}, commit the merge, then run \`bun run hooks:bundle\` and commit the rebuild on its own`
+  `merge ${ref} into the branch plainly, taking its side in ${BUNDLED}, commit the merge, then run \`bun run hooks:bundle\` and commit the rebuild on its own (\`bun run hooks:merge-canary\` does all of it for origin/canary)`
 
 // The head of `--check`'s line for a stale bundle, which pr:merge's types gate reads as the merged tree's own fault.
 export const STALE = `hooks-bundle: stale in ${BUNDLED}:`
@@ -197,8 +202,11 @@ if (import.meta.main) {
           const named =
             absent.slice(0, 5).join(", ") +
             (absent.length > 5 ? ` and ${absent.length - 5} more` : "")
+          const why = (error instanceof AggregateError ? error.errors[0] : error) as {
+            message?: string
+          }
           console.error(
-            `hooks-bundle: the head merged with ${ref} holds sources this checkout lacks (${named}) and fails to build here, so its bundles go unchecked; merge ${ref} in first, then push again`,
+            `hooks-bundle: the head merged with ${ref} holds sources this checkout lacks (${named}) and fails to build here (${why?.message ?? error}), so its bundles go unchecked; merge ${ref} in first, then push again`,
           )
           process.exit(1)
         })
