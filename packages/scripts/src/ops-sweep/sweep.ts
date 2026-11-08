@@ -1,8 +1,9 @@
-import { appendFile, readdir } from "node:fs/promises"
+import { appendFile, readdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 
 import { kindOf, placedKindOf } from "@packages/config/kinds"
 import { verdictOf } from "@packages/config/verdicts"
+import { accountKey, accountSettings, accountsOf, readPolicy } from "@packages/settings"
 
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { leadName } from "../ops-session-resume/resume"
@@ -34,6 +35,7 @@ export const HEADROOM = 85
 export const IDLE_DB_AFTER = 7200
 export const IDLE_DB_GAP = 900
 export const NO_PR_AFTER = 900
+export const PACE_OFF_FOR = 3600
 export const PRUNE_EVERY = 21600
 export const REPEATS = 4
 export const REVIEWER_LATE = 1200
@@ -46,6 +48,8 @@ const PRUNES = [
   ["docker", "volume", "prune", "-f"],
   ["docker", "builder", "prune", "-f", "--filter", "until=24h"],
 ]
+// The usage rule's least span of an account's week readings for a forecast, since each is a whole percent.
+const WEEK_SPAN = 10800
 const WINDOWS = [
   ["5h", "f5", "r5", 3600, 1200],
   ["7d", "s7", "r7", 10800, 3600],
@@ -144,6 +148,105 @@ export async function forecast(ctx: Context): Promise<Record<string, number>> {
     out[key] = Math.round((used + rate * (reset - t)) * 10) / 10
   }
   return out
+}
+
+// The accounts login-flip.py's split gives a share of new sessions while it is under 30 minutes old, as spawn.sh reads it, else usage.json's account; each by its usage.accounts label, else `account <n>` by its row, else `unlisted <n>` in the order met, never its address.
+const pickable = async (ctx: Context): Promise<Map<string, string>> => {
+  const policy = await readPolicy(ctx.data)
+  const rows =
+    policy.refusal === undefined
+      ? accountsOf(accountSettings.get(policy.settings, "usage.accounts"), "claude")
+      : []
+  let unlisted = 0
+  const labelOf = (account: string) => {
+    const at = rows.findIndex((row) => accountKey(row).toLowerCase() === account)
+    return at === -1 ? `unlisted ${++unlisted}` : (rows[at]!.label ?? `account ${at + 1}`)
+  }
+  const split = (await readJson<Json>(join(ctx.ops, "usage", "login-flip.json"), {})).split as Json
+  const shares =
+    typeof split?.at === "number" && seconds(ctx) - split.at < 1800 ? split.shares : null
+  const picked =
+    shares && typeof shares === "object"
+      ? Object.entries(shares).flatMap(([a, share]) => (Number(share) > 0 ? [a] : []))
+      : [(await readJson<Json>(join(ctx.data, "usage.json"), {})).account].filter(
+          (a): a is string => typeof a === "string",
+        )
+  return new Map(picked.map((a) => [a.toLowerCase(), labelOf(a.toLowerCase())]))
+}
+
+type Sample = { account: string; reset: number; t: number; week: number }
+
+// week-marks.py's samples in one file of ops/usage, each row's account lowercased, a row that does not read left out.
+const samplesOf = async (ctx: Context, file: string): Promise<Sample[]> =>
+  (
+    await Bun.file(join(ctx.ops, "usage", file))
+      .text()
+      .catch(() => "")
+  )
+    .split("\n")
+    .flatMap((l) => {
+      try {
+        const r = JSON.parse(l) as Json
+        return typeof r.account === "string" &&
+          [r.reset, r.t, r.week].every((v) => typeof v === "number")
+          ? [{ ...(r as Sample), account: r.account.toLowerCase() }]
+          : []
+      } catch {
+        return []
+      }
+    })
+
+// One account's week projected to its reset by the usage rule's forecast (scripts/ops/README.md's Usage forecasts): its pace from the first reading of this week after the last move of sessions onto it, the row where week-samples.jsonl turns to it from another account, to a reading under 30 minutes old, once the two span 3 hours.
+const weekOf = (factory: Sample[], others: Sample[], account: string, t: number) => {
+  const mine = [...factory, ...others].filter((r) => r.account === account)
+  const last = mine.reduce<Sample | undefined>((a, r) => (a && a.t >= r.t ? a : r), undefined)
+  if (!last || t - last.t >= 1800 || last.reset - t < 600) return undefined
+  const away = Math.max(...factory.filter((r) => r.account !== account).map((r) => r.t))
+  const onto = factory.filter((r) => r.account === account && r.t > away).map((r) => r.t)
+  const moved = onto.length ? Math.min(...onto) : -Infinity
+  const first = mine
+    .filter((r) => Math.abs(r.reset - last.reset) < 300 && r.t >= moved)
+    .reduce((a, r) => (a.t <= r.t ? a : r))
+  if (last.t - first.t < WEEK_SPAN) return undefined
+  const rate = (last.week - first.week) / (last.t - first.t)
+  return {
+    reset: last.reset,
+    week: Math.round((last.week + rate * (last.reset - last.t)) * 10) / 10,
+  }
+}
+
+// The week pace's off switch spawn.sh reads: while an account the split can pick projects under 100% at its own reset, the sweep writes a time PACE_OFF_FOR on, never past that reset, and records the forecast it used in pace-off.json; once none does, it removes the time it wrote. A future time it did not write, one written by hand, stays as it is.
+export async function paceOff(ctx: Context): Promise<void> {
+  const file = join(ctx.data, "usage-pace-off-until")
+  const recordPath = join(here(ctx), "pace-off.json")
+  const record = await readJson<Json>(recordPath, {})
+  const held = (
+    await Bun.file(file)
+      .text()
+      .catch(() => "")
+  ).trim()
+  const handSet = held !== "" && held !== record.until
+  if (handSet && /(Z|[+-]\d\d:?\d\d)$/.test(held) && Date.parse(held) > ctx.now()) return
+  const t = seconds(ctx)
+  const factory = await samplesOf(ctx, "week-samples.jsonl")
+  const others = await samplesOf(ctx, "account-samples.jsonl")
+  const projected: Record<string, number> = {}
+  let until: number | undefined
+  for (const [account, label] of await pickable(ctx)) {
+    const week = weekOf(factory, others, account, t)
+    if (!week) continue
+    projected[label] = week.week
+    if (week.week < 100) until = Math.min(until ?? t + PACE_OFF_FOR, week.reset)
+  }
+  const at = stamp(ctx)
+  if (until === undefined) {
+    if (held && !handSet) await rm(file, { force: true })
+    await writeAtomic(recordPath, JSON.stringify({ at, forecast: projected, until: null }))
+    return
+  }
+  const iso = `${new Date(Math.floor(until) * 1000).toISOString().slice(0, 19)}Z`
+  await writeAtomic(file, `${iso}\n`)
+  await writeAtomic(recordPath, JSON.stringify({ at, forecast: projected, until: iso }))
 }
 
 // The ops jobs by reading ps alone: each job's script must be running, and each heartbeat ok and fresh.
@@ -621,6 +724,11 @@ export async function check(ctx: Context): Promise<string[]> {
   found.push(...(await stalledPrs(ctx, agents)))
   const projected = Object.values(await forecast(ctx))
   if (projected.length) found.push(projected.some((v) => v > HEADROOM) ? "no-headroom" : "headroom")
+  try {
+    await paceOff(ctx)
+  } catch (err) {
+    found.push(`pace-off-unwritten:${(err as { code?: string }).code ?? "Error"}`)
+  }
   return found
 }
 

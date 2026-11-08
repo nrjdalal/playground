@@ -504,6 +504,9 @@ test("a pass moves a turned-off job's plist from ops/launch-agents to the data f
   expect(log).not.toContain("jobs.json kept: ")
 })
 
+const PR_1 = "https://github.com/o/r/pull/1"
+const PR_2 = "https://github.com/o/r/pull/2"
+
 // Loads up.py and prints --sessions' resume lines, with no session running, no factory session unguarded and no checkout around a cwd.
 const RESUMES = `${LOAD}up.unguarded = lambda: []
 up.run = lambda argv, timeout=60: (1, "")
@@ -520,14 +523,16 @@ test("a resume reads the roster and its backend pin from the data folder spawn.s
       agents: [
         { name: "p1-worker", status: "working" },
         { name: "p2-worker", status: "working" },
+        { kind: "reviewer", name: "p3-reviewer", pr: PR_2, prs: [PR_1, PR_2], status: "working" },
       ],
     }),
   )
-  for (const name of ["p1-worker", "p2-worker"]) {
+  for (const name of ["p1-worker", "p2-worker", "p3-reviewer"]) {
     mkdirSync(join(config, "projects", name), { recursive: true })
+    const model = name === "p3-reviewer" ? "claude-opus-5-5" : "glm-5.3-flash"
     writeFileSync(
       join(config, "projects", name, `s-${name}.jsonl`),
-      `${JSON.stringify({ agentName: name, cwd: "/nowhere", model: "glm-5.3-flash" })}\n`,
+      `${JSON.stringify({ agentName: name, cwd: "/nowhere", model })}\n`,
     )
   }
   writeFileSync(join(data, "backends", "p1-worker"), "glm\n")
@@ -546,6 +551,9 @@ test("a resume reads the roster and its backend pin from the data folder spawn.s
   expect(lines.find((line) => line.includes(" resume p1-worker "))).toEndWith(" s-p1-worker")
   expect(lines.find((line) => line.includes(" resume p2-worker "))).toEndWith(
     " s-p2-worker --backend glm",
+  )
+  expect(lines.find((line) => line.includes(" resume p3-reviewer "))).toEndWith(
+    ` s-p3-reviewer --backend claude --pr ${PR_2},${PR_1}`,
   )
 })
 

@@ -56,7 +56,7 @@ set -euo pipefail
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
@@ -69,7 +69,7 @@ set -euo pipefail
 #   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
 #   --effort <level>   with any mode but restore or close, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
-#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PR the checker serves, by its URL or its number alone, or its issue's URL while the PR is not yet opened; on an ended roster row it replaces the row's prs, and its pr with the first pull request named (none for an issue alone), and a checker's start there is refused without it; on a live row, or none, it joins them and gives a row with no pr the first pull request named
+#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PRs the checker serves, each by its URL or its number alone, with an issue's URL beside a pull request for a PR not yet opened; a reviewer's or tester's start is refused unless it names a pull request, and its roster row records it before the pane opens; on an ended roster row it replaces the row's prs, and its pr with the first pull request named; on a live row, or none, it joins them and gives a row with no pr the first pull request named
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
 #   --memory <dir>     with any mode but restore or close, anywhere among its words: the launch runs with Claude Code's auto-memory on, writing to <dir>, an absolute folder: its built settings file, one of its own (factory-settings-...-memory-<name>.json), sets autoMemoryEnabled and autoMemoryDirectory, while every other launch's file stays as it is, for the auto-memory trial; --memory off launches with memory off on the shared file, whatever arm the role or the row would take
@@ -863,7 +863,7 @@ while [ $# -gt 0 ]; do
     pr_form='^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(pull|issues)/[1-9][0-9]*)$'
     IFS=, read -ra prs_named <<<"$2"
     for one in "${prs_named[@]}"; do
-      [[ $one =~ $pr_form ]] || usage "--pr takes a PR's URL or its number alone, or its issue's URL while the PR is not yet opened, comma-separated, not \"$2\""
+      [[ $one =~ $pr_form ]] || usage "--pr takes a PR's URL or its number alone, comma-separated, or an issue's URL beside one for a PR not yet opened, not \"$2\""
     done
     PR_ARG=$2
     shift 2
@@ -989,6 +989,12 @@ roster = os.path.join(lw, "roster.json")
 try:
     agents = json.load(open(roster)).get("agents", []) if os.path.exists(roster) else []
     down = {a.get("name"): a.get("status") for a in agents if isinstance(a, dict) and a.get("status") in ("done", "ended", "parked", "paused")}
+    # a checker's resume names the PRs its row serves, which every reviewer or tester start takes as --pr
+    served = {}
+    for a in agents:
+        if isinstance(a, dict) and a.get("kind") in ("reviewer", "tester") and isinstance(a.get("name"), str):
+            listed = a.get("prs") if isinstance(a.get("prs"), list) else []
+            served[a["name"]] = ",".join(dict.fromkeys(u for u in [a.get("pr"), *listed] if isinstance(u, str) and u))
 except (OSError, ValueError, AttributeError, TypeError):
     sys.exit("it cannot read the roster " + roster)
 
@@ -1029,7 +1035,7 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
         and set(keys) <= {"--account", "--effort", "--model"}
         and not any("\t" in w or "\n" in w for w in words)
     ):
-        print("run\t" + "\t".join(words[3:]))
+        print("run\t" + "\t".join(words[3:] + (["--pr", served[name]] if served.get(name) else [])))
     else:
         skip(name, "its exec line is not a resume restore runs")
 PY
@@ -1277,9 +1283,9 @@ elif [ "$MODE" = column ] && [[ $ROLE =~ ^(reviewer|tester)$ ]] && [ -z "$TITLE_
   if [ "$ROLE" = reviewer ]; then TITLE_ARG="Review: $of"; else TITLE_ARG="Test: $of"; fi
 fi
 [ -z "$PR_ARG" ] || [[ $ROLE =~ ^(reviewer|tester)$ ]] || usage "--pr is for a reviewer's or tester's start, not a $ROLE's"
-# A checker's ended row still lists the PRs it last served, which auto-end and the sweep read as done, so they would end it again unseen: its start names the PR it serves now.
-[[ ! $ROLE =~ ^(reviewer|tester)$ ]] || [ -n "$PR_ARG" ] || [ "$(roster_field "$NAME" status)" != ended ] ||
-  refuse "its roster row reads ended and lists the PRs it last served, which auto-end reads as done: name the PR it serves now with --pr <url>, or its issue's URL while the PR is not yet opened"
+# A checker's row names the pull request it serves, which no-outside-pr-code reads at its first tool call (a row naming none holds it in read mode) and auto-end reads to end it (an ended row's are the PRs it last served), so every reviewer or tester start names one.
+[[ ! $ROLE =~ ^(reviewer|tester)$ ]] || [[ ,$PR_ARG, =~ ,(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*), ]] ||
+  refuse "a $ROLE starts with --pr <pull url>, the pull request it serves now, by its URL or its number, which its roster row records before its pane opens; an issue's URL alone leaves the row with no pr, so open the PR as a draft first"
 if [ "$MODE" != resume ] || [ -n "$BRIEF" ]; then
   # The brief's path under ~/.playground names the same file as its bare name.
   BRIEF=${BRIEF#"$DATA/"}
@@ -1556,7 +1562,7 @@ PY
 SETTINGS=$BUILT
 # The factory's sessions run in bypass mode, passed here so it never rests on the machine's own settings: a session in another mode holds every cross-session message for approval.
 FLAGS="--model $MODEL --effort ${EFFORT:-high} --settings $SETTINGS --dangerously-skip-permissions"
-# The skills: one merged plugin per session, from the login's scope, its repo's org, core, then each always org's new names, loaded in place by --plugin-dir, from the data folder this launch reads (under inscope ~/.claude's, not the workspace's); the resolver writes it fresh on every spawn, so a skill `playground ext add` puts in an extension reaches the next session with no install. A column runs in this checkout.
+# The skills: one merged plugin per session, from the login's scope, its repo's org, core, then each always org's new names, less each skill whose SKILL.md its checkout's .claude/skills already holds byte for byte, loaded in place by --plugin-dir, from the data folder this launch reads (under inscope ~/.claude's, not the workspace's); the resolver writes it fresh on every spawn, so a skill `playground ext add` puts in an extension reaches the next session with no install. A column runs in this checkout.
 SKILLS_REPO=$OWN
 PLUGIN=$(PLAYGROUND_DATA_DIR="$DATA" "$BUN" --no-env-file "$REPO/packages/scripts/src/playground/orgs.ts" resolve --repo "$SKILLS_REPO") && [ -d "$PLUGIN" ] || refuse "playground orgs resolve gave no skill plugin for $SKILLS_REPO"
 FLAGS+=" --plugin-dir $(printf %q "$PLUGIN")"
@@ -1662,6 +1668,80 @@ herdr_answer() {
   done
 }
 
+# The roster row: a checker's is written before its pane opens, since no-outside-pr-code reads the PR it names at the session's first tool call, and every other row once its session has started.
+write_row() {
+  set -- set "$NAME" "kind=$KIND"
+  # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status.
+  [ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "status=starting"
+  # A checker's --pr replaces an ended row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named; on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
+  if [ -n "$PR_ARG" ]; then
+    first_pull=
+    IFS=, read -ra prs_named <<<"$PR_ARG"
+    for one in "${prs_named[@]}"; do
+      if [[ $one =~ ^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*)$ ]]; then
+        first_pull=$one
+        break
+      fi
+    done
+    if [ "$(roster_field "$NAME" status)" = ended ]; then
+      set -- "$@" "prs=$PR_ARG" "pr=$first_pull"
+    else
+      set -- "$@" "prs+=$PR_ARG"
+      [ -n "$(roster_field "$NAME" pr)" ] || set -- "$@" "pr=$first_pull"
+    fi
+  fi
+  # A second dispatcher started under an <id>-dispatcher name records its slot, which roster.ts who dispatcher 2 reads; a dispatcher's name with -2 holds slot 2 by its name.
+  [ "$MODE" = manager ] && [ "$KIND" = dispatcher ] && [ -z "$FIRST" ] && ! second_dispatcher "$NAME" && set -- "$@" "slot=2"
+  if [ "$MODE" = column ]; then
+    [[ $ROLE =~ ^(reviewer|tester)$ ]] && { [ "$(kind_of_name "$TO")" = worker ] || [ "$(roster_kind "$TO")" = worker ]; } && set -- "$@" "worker=$TO"
+  else
+    # A worker or runner records whom it reports to, --reports-to's session or its lead's seat, which the Dashboard's tree and every escalation read; a resume keeps the row's.
+    [[ $MODE =~ ^(worker|runner)$ ]] && set -- "$@" "reportsTo=$TO"
+    # A session in a workspace of its own clears the roster surface a column's anchor left; its pane's label carries its name.
+    set -- "$@" "surface="
+  fi
+  # set keeps an entry's work for a respawned session, and creates a new one.
+  roster() { said=$(env $UNSET "$BUN" "$ROSTER" "$@" 2>&1 >/dev/null); }
+  # An entry with no title shows its first ask as its sidebar row, so a new probe takes a words-only default, a new runner its name, and a respawned one keeps the title its entry already holds; a worker's or checker's title is TITLE_ARG, above.
+  TITLE=
+  if [ "$ROLE" = probe ]; then
+    [[ $NAME == probe-* ]] && TITLE="Probe: ${NAME#probe-}" || TITLE="Probe of $TO"
+  elif [ "$ROLE" = runner ]; then
+    TITLE=$NAME
+  fi
+  # The dashboard drops an entry with no task, so a new one takes its brief's name, else its role and name; a respawned one keeps its own.
+  if [ -n "$BRIEF" ]; then TASK=$BRIEF; else TASK="$ROLE $NAME"; fi
+  held=$(python3 -I - "$NAME" "$ROSTER_JSON" <<'PY'
+import json, sys
+name, path = sys.argv[1], sys.argv[2]
+filled = lambda entry, key: isinstance(entry.get(key), str) and entry[key] != ""
+try:
+    entry = next((a for a in json.load(open(path)).get("agents", []) if isinstance(a, dict) and a.get("name") == name), None)
+    if not isinstance(entry, dict):
+        print("00")
+    else:
+        print(("1" if entry.get("pr") or filled(entry, "title") else "0") + ("1" if entry.get("pr") or filled(entry, "task") else "0"))
+except (OSError, ValueError):
+    print("00")
+PY
+  ) || held=00
+  [ -z "$TITLE" ] || [ "${held:0:1}" = 1 ] || set -- "$@" "title=$TITLE"
+  [ -z "$TITLE_ARG" ] || set -- "$@" "title=$TITLE_ARG"
+  [ "${held:1:1}" = 1 ] || set -- "$@" "task=$TASK"
+  set -- "$@" "memory=$MEMORY"
+  [ -z "${ARM:-}" ] || { mkdir -p "$DATA/memory" && printf '%s\n' "$MEMORY" > "$ARM"; } || echo "spawn.sh: $NAME $WHEN, but the memory trial's turn could not be written to $ARM" >&2
+  said=
+  if ! roster "$@"; then
+    [ -n "$said" ] && echo "roster.ts says: $said" >&2
+    # A checker's row is written before its pane opens, so a failed write refuses the start, its launch file removed as every later refusal removes it, since a row naming no PR would hold the checker in read mode.
+    [ -z "$ROW_FIRST" ] || { rm -f -- "$LAUNCH_FILE"; refuse "its roster write failed before its pane opened, so its row may name no PR; record it with $BUN $ROSTER $*, then start it again"; }
+    echo "spawn.sh: $NAME $WHEN, but its roster write failed; record it with $BUN $ROSTER $*" >&2
+  fi
+}
+ROW_FIRST=
+[[ $ROLE =~ ^(reviewer|tester)$ ]] && ROW_FIRST=1
+[ -z "$ROW_FIRST" ] || WHEN="is starting" write_row
+
 if [ "$RUNTIME" = herdr ]; then
   # A restarted server brings each pane back as a shell under its label, so a resume reopens the session in the pane that held it, while it holds no agent; the live-name check above has already refused a live session.
   placed=
@@ -1737,68 +1817,4 @@ if ! { mkdir -p "$RUNTIMES" && printf '%s\n' "$RUNTIME" > "$RUNTIMES/$NAME"; }; 
   echo "spawn.sh: $NAME started, but its runtime pin write failed; its next resume opens in herdr all the same" >&2
 fi
 
-set -- set "$NAME" "kind=$KIND"
-# A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status.
-[ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "status=starting"
-# A checker's --pr replaces an ended row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named (none when it names only an issue); on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
-if [ -n "$PR_ARG" ]; then
-  first_pull=
-  IFS=, read -ra prs_named <<<"$PR_ARG"
-  for one in "${prs_named[@]}"; do
-    if [[ $one =~ ^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*)$ ]]; then
-      first_pull=$one
-      break
-    fi
-  done
-  if [ "$(roster_field "$NAME" status)" = ended ]; then
-    set -- "$@" "prs=$PR_ARG" "pr=$first_pull"
-  else
-    set -- "$@" "prs+=$PR_ARG"
-    [ -n "$(roster_field "$NAME" pr)" ] || [ -z "$first_pull" ] || set -- "$@" "pr=$first_pull"
-  fi
-fi
-# A second dispatcher started under an <id>-dispatcher name records its slot, which roster.ts who dispatcher 2 reads; a dispatcher's name with -2 holds slot 2 by its name.
-[ "$MODE" = manager ] && [ "$KIND" = dispatcher ] && [ -z "$FIRST" ] && ! second_dispatcher "$NAME" && set -- "$@" "slot=2"
-if [ "$MODE" = column ]; then
-  [[ $ROLE =~ ^(reviewer|tester)$ ]] && { [ "$(kind_of_name "$TO")" = worker ] || [ "$(roster_kind "$TO")" = worker ]; } && set -- "$@" "worker=$TO"
-else
-  # A worker or runner records whom it reports to, --reports-to's session or its lead's seat, which the Dashboard's tree and every escalation read; a resume keeps the row's.
-  [[ $MODE =~ ^(worker|runner)$ ]] && set -- "$@" "reportsTo=$TO"
-  # A session in a workspace of its own clears the roster surface a column's anchor left; its pane's label carries its name.
-  set -- "$@" "surface="
-fi
-# set keeps an entry's work for a respawned session, and creates a new one.
-roster() { said=$(env $UNSET "$BUN" "$ROSTER" "$@" 2>&1 >/dev/null); }
-# An entry with no title shows its first ask as its sidebar row, so a new probe takes a words-only default, a new runner its name, and a respawned one keeps the title its entry already holds; a worker's or checker's title is TITLE_ARG, above.
-TITLE=
-if [ "$ROLE" = probe ]; then
-  [[ $NAME == probe-* ]] && TITLE="Probe: ${NAME#probe-}" || TITLE="Probe of $TO"
-elif [ "$ROLE" = runner ]; then
-  TITLE=$NAME
-fi
-# The dashboard drops an entry with no task, so a new one takes its brief's name, else its role and name; a respawned one keeps its own.
-if [ -n "$BRIEF" ]; then TASK=$BRIEF; else TASK="$ROLE $NAME"; fi
-held=$(python3 -I - "$NAME" "$ROSTER_JSON" <<'PY'
-import json, sys
-name, path = sys.argv[1], sys.argv[2]
-filled = lambda entry, key: isinstance(entry.get(key), str) and entry[key] != ""
-try:
-    entry = next((a for a in json.load(open(path)).get("agents", []) if isinstance(a, dict) and a.get("name") == name), None)
-    if not isinstance(entry, dict):
-        print("00")
-    else:
-        print(("1" if entry.get("pr") or filled(entry, "title") else "0") + ("1" if entry.get("pr") or filled(entry, "task") else "0"))
-except (OSError, ValueError):
-    print("00")
-PY
-) || held=00
-[ -z "$TITLE" ] || [ "${held:0:1}" = 1 ] || set -- "$@" "title=$TITLE"
-[ -z "$TITLE_ARG" ] || set -- "$@" "title=$TITLE_ARG"
-[ "${held:1:1}" = 1 ] || set -- "$@" "task=$TASK"
-set -- "$@" "memory=$MEMORY"
-[ -z "${ARM:-}" ] || { mkdir -p "$DATA/memory" && printf '%s\n' "$MEMORY" > "$ARM"; } || echo "spawn.sh: $NAME started, but the memory trial's turn could not be written to $ARM" >&2
-said=
-if ! roster "$@"; then
-  [ -n "$said" ] && echo "roster.ts says: $said" >&2
-  echo "spawn.sh: $NAME started, but its roster write failed; record it with $BUN $ROSTER $*" >&2
-fi
+[ -n "$ROW_FIRST" ] || WHEN=started write_row
