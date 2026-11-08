@@ -359,6 +359,7 @@ describe("one night's run against a fixture data folder", () => {
     const deps: NightDeps = {
       cleanup: async () => cleanup,
       free: () => (free += grow * 1024 ** 3),
+      now: () => Date.now(),
       prs: async () => ({
         ...prsOf({
           "PG-1-a": pr("MERGED"),
@@ -453,15 +454,18 @@ describe("one night's run against a fixture data folder", () => {
     }
     const base = fakeRun(answers)
     const accepted: number[] = []
+    let refusals = 0
     let t = 0
     const waits: number[] = []
     const run: Context["run"] = async (argv, timeoutMs, stdin) => {
       if (argv.join(" ").includes("rm --worktree")) {
-        if (accepted.filter((at) => t - at < 60_000).length >= 3)
+        if (accepted.filter((at) => t - at < 60_000).length >= 3) {
+          refusals++
           return {
             code: 1,
             out: "nightly-clean quarantined 3 paths in the last minute, the most one session may\n",
           }
+        }
         accepted.push(t)
       }
       return base.run(argv, timeoutMs, stdin)
@@ -481,7 +485,7 @@ describe("one night's run against a fixture data folder", () => {
         return true
       },
     }
-    const deps = {
+    const deps: NightDeps = {
       cleanup: async () => ({
         containers: async () => [],
         devStop: async () => ({ ok: true, out: "" }),
@@ -500,6 +504,7 @@ describe("one night's run against a fixture data folder", () => {
         rm: async () => ({ ok: true, out: "" }),
       }),
       free: () => 100 * 1024 ** 3,
+      now: () => t,
       prs: async () => ({
         ...prsOf(
           Object.fromEntries(
@@ -510,12 +515,14 @@ describe("one night's run against a fixture data folder", () => {
       }),
       sleep,
       turbo: join(root, "turbo"),
-    } as NightDeps
+    }
     await nightlyClean(deps)(ctx)
     const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
     expect(log.match(/trashed /g)).toHaveLength(10)
+    expect(refusals).toBe(0)
+    expect(waits).toEqual([60_000, 60_000, 60_000])
     expect(log).not.toContain("its trash move failed")
-    expect(log).not.toContain("left for the next run")
+    expect(log).not.toMatch(/left .*? for the next run/)
     expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(600_000)
   })
 
@@ -583,6 +590,7 @@ describe("one night's run against a fixture data folder", () => {
         rm: async () => ({ ok: true, out: "" }),
       }),
       free: () => 100 * 1024 ** 3,
+      now: () => 0,
       prs: async () => ({
         ...prsOf(
           Object.fromEntries(
