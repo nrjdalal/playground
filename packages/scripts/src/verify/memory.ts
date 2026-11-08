@@ -45,14 +45,27 @@ const SECRETS: [string, RegExp][] = [
   ["databasePassword", /\b[a-z][a-z0-9+]*:\/\/[^\s:@/]+:[^\s@/]+@/gi],
 ]
 
-// Each hit in the files: a secret's shape, a private kind, and an org's own terms when an org is linked.
+// Prod data by its shape: a production host (a dotted name with a prod or production label) and a public IPv4 address, loopback, private and link-local ones left out; a production figure has no shape, so the optimizer's review reads each note for one (ADR 0022).
+const PROD: [string, RegExp][] = [
+  ["prodHost", /\b(?:[a-z0-9-]+[.-])*prod(?:uction)?(?:-[a-z0-9-]+)?(?:\.[a-z0-9-]+)+\b/gi],
+  [
+    "publicAddress",
+    /\b(?!(?:0|10|127)\.)(?!169\.254\.)(?!192\.168\.)(?!172\.(?:1[6-9]|2\d|3[01])\.)(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g,
+  ],
+]
+
+// Each hit in the files: a secret's shape, prod data's shape, a private kind, and an org's own terms when an org is linked.
 export function memoryHits(
   files: File[],
   privateList: PublicList,
   repos: Repos,
   orgFiles: (files: File[]) => MemoryHit[] = () => [],
 ): MemoryHit[] {
-  const kinds = [...SECRETS, ...patterns(privateList, repos).filter(([kind]) => PRIVATE.has(kind))]
+  const kinds = [
+    ...SECRETS,
+    ...PROD,
+    ...patterns(privateList, repos).filter(([kind]) => PRIVATE.has(kind)),
+  ]
   const hits = files.flatMap(({ path, text }) =>
     text.split("\n").flatMap((raw, i) => {
       const line = readable(raw, repos)
@@ -76,7 +89,13 @@ export const indexHits = (files: File[]): MemoryHit[] =>
         ? [{ kind: `index over ${INDEX_LINES} lines (${lines})`, line: 0, path }]
         : []),
       ...(Buffer.byteLength(text) > INDEX_BYTES
-        ? [{ kind: `index over 18 KB (${Buffer.byteLength(text)} bytes)`, line: 0, path }]
+        ? [
+            {
+              kind: `index over ${INDEX_BYTES / 1024} KB (${Buffer.byteLength(text)} bytes)`,
+              line: 0,
+              path,
+            },
+          ]
         : []),
     ]
   })
@@ -118,7 +137,7 @@ export async function memoryReport(env: Environment = process.env): Promise<Memo
   const home = env.HOME || homedir()
   const hits = [
     ...memoryHits(files, read.list, reposOf(policy.settings), (all) =>
-      terms ? leg1(all, terms).map(({ kind, line, path }) => ({ kind, line, path })) : [],
+      terms ? leg1(all, terms) : [],
     ),
     ...indexHits(files),
   ]

@@ -611,9 +611,7 @@ def dialog_room(name, lines):
     return has_room, why
 
 
-# autoMemoryEnabled is false but for the auto-memory trial's sessions (ADR 0022), whose notes go to the data folder's memory/ through autoMemoryDirectory:
-# any file under ~/.claude/projects/*/memory/ other than the one-line MEMORY.md pointer and a note of a session the roster marks memory=on is new memory
-# a session wrote anyway; name it, its originSessionId and that session's name (builder, 9 Oct)
+# A file under ~/.claude/projects/*/memory/ other than the one-line MEMORY.md pointer and a note of a session the roster marks memory=on (ADR 0022) is memory a session wrote anyway: name it, its originSessionId and that session's name.
 POINTER = "Learnings live in the playground repo; see AGENTS.md."
 
 

@@ -23,6 +23,9 @@ describe("bun run verify memory names each private trace in a note (#1484)", () 
     ["a person's name", "Pat Example owns the deploy", "names"],
     ["a company's name", "Quillco's repo is read-only", "companies"],
     ["an email address", "mail ops@example.com for it", "emails"],
+    ["a production host", "deploy reads db.prod.example.com", "prodHost"],
+    ["a production host by its full word", "production.example.com went down", "prodHost"],
+    ["a public address", "the box at 203.0.113.7 serves it", "publicAddress"],
   ])("%s", (_, text, kind) => {
     expect(kinds(text)).toContain(kind)
   })
@@ -30,6 +33,14 @@ describe("bun run verify memory names each private trace in a note (#1484)", () 
   test("a verified rule with an issue number and a repo path is a fair note", () => {
     expect(
       kinds("run-slot queues a heavy run; #1484 records the trial, scripts/spawn.sh:71"),
+    ).toEqual([])
+  })
+
+  test("a loopback, private or link-local address, a version and the words prod data are a fair note", () => {
+    expect(
+      kinds(
+        "the API binds 127.0.0.1, the box 10.0.0.2, 192.168.1.4, 172.16.0.9 and 169.254.1.1; bun 1.4.4 reads prod data and prod-data",
+      ),
     ).toEqual([])
   })
 

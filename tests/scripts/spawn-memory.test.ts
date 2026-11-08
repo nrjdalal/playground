@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { FACTORY_SETTINGS, launchAfterRm, lw, root, spawn, unplugged } from "./spawn-fake"
+import { FACTORY_SETTINGS, herdrPin, launchAfterRm, lw, root, spawn, unplugged } from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them, so each gets the sandbox tests' allowance.
 setDefaultTimeout(40_000)
@@ -175,6 +175,23 @@ describe("each start takes the memory trial's arm by its role (#1484)", () => {
       expect(readFileSync(lw(r.home, "memory", "worker-arm"), "utf8")).toBe("off\n")
     },
   )
+
+  test("a worker start refused after the arm pick takes no turn", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md", "--runtime", "herdr"],
+      [],
+      { FAKE_HERDR_RUN_FAIL: "1" },
+      undefined,
+      undefined,
+      (home) => {
+        herdrPin()(home)
+        turnWas("off")(home)
+      },
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain("herdr opened no session for worker-brave-otter")
+    expect(readFileSync(lw(r.home, "memory", "worker-arm"), "utf8")).toBe("off\n")
+  })
 
   test("a resumed worker keeps its row's arm and leaves the turn as it is", async () => {
     const env = {

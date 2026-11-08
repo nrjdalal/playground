@@ -1431,8 +1431,9 @@ if [ -n "$CHECK" ]; then
   echo "ok: $NAME can start"
   exit 0
 fi
-# The auto-memory trial (ADR 0022): the dispatcher and the builder, ops and planner leads start with memory on, each in its kind's folder under the data folder's memory/, and fresh worker starts take turns, every second one on in memory/worker-b (the B arm), the one before off (the A arm), memory/worker-arm keeping the last turn; a resume keeps its row's arm, and every other session (a probe, a GLM session, the optimizer, an orchestrator, a runner, a reviewer or tester) stays off; a start --memory names a folder for takes that folder, whatever its role, and a start --memory off stays off and leaves the turn as it is.
+# The auto-memory trial's arm, by role, as ADR 0022 holds; a fresh worker's turn is written once its roster write runs, so a refused start takes no turn.
 MEMORY=off
+ARM=
 if [ -n "$MEMORY_DIR" ]; then
   MEMORY=on
 elif [ -z "$MEMORY_OFF" ] && [ "$BACKEND" != glm ]; then
@@ -1442,9 +1443,8 @@ elif [ -z "$MEMORY_OFF" ] && [ "$BACKEND" != glm ]; then
       if [ "$MODE" = resume ]; then
         [ "$(roster_field "$NAME" memory)" = on ] && MEMORY=on
       else
-        arm="$DATA/memory/worker-arm"
-        [ "$(cat "$arm" 2>/dev/null)" = off ] && MEMORY=on
-        mkdir -p "$DATA/memory" && printf '%s\n' "$MEMORY" > "$arm" || refuse "it cannot write the memory trial's turn to $arm"
+        ARM="$DATA/memory/worker-arm"
+        [ "$(cat "$ARM" 2>/dev/null)" = off ] && MEMORY=on
       fi
       [ "$MEMORY" = on ] && MEMORY_DIR="$DATA/memory/worker-b"
       ;;
@@ -1768,6 +1768,7 @@ PY
 [ -z "$TITLE_ARG" ] || set -- "$@" "title=$TITLE_ARG"
 [ "${held:1:1}" = 1 ] || set -- "$@" "task=$TASK"
 set -- "$@" "memory=$MEMORY"
+[ -z "${ARM:-}" ] || { mkdir -p "$DATA/memory" && printf '%s\n' "$MEMORY" > "$ARM"; } || echo "spawn.sh: $NAME started, but the memory trial's turn could not be written to $ARM" >&2
 said=
 if ! roster "$@"; then
   [ -n "$said" ] && echo "roster.ts says: $said" >&2

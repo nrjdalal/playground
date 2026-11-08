@@ -138,8 +138,9 @@ Checks (default: all)
   map           the dashboard map matches the code: its pages, sidebar groups and API routes, and
                 each page's shows is a list with no empty entry, sorted A to Z
   memory        every auto-memory file on this machine (the data folder's memory/ and each
-                project's) holds no secret, person's or org's name or private record, and each
-                MEMORY.md index stays within 200 lines and 18 KB; needs no stack, and is not in all
+                project's) holds no secret, person's or org's name, private record, production
+                host or public IP address, and each MEMORY.md index stays within 200 lines and
+                18 KB; needs no stack, and is not in all
   cursor        on /dashboard at 1280, Send and Attach show the pointer, a plain disabled button
                 not-allowed, and the sidebar rail keeps its resize cursor; with no live
                 dispatcher it skips Send and Attach and says so
