@@ -129,7 +129,11 @@ def probe(email):
     f = lambda k: float(h.get(f"anthropic-ratelimit-unified-{k}") or 0)
     # no 5-hour headers: an account with no 5-hour limit, so none, never 0%
     five = h.get("anthropic-ratelimit-unified-5h-utilization") is not None
-    return {"five": round(f("5h-utilization") * 100) if five else None, "fiveReset": f("5h-reset") if five else None, "week": round(f("7d-utilization") * 100), "weekReset": f("7d-reset")}
+    got = {"five": round(f("5h-utilization") * 100) if five else None, "fiveReset": f("5h-reset") if five else None, "week": round(f("7d-utilization") * 100), "weekReset": f("7d-reset")}
+    # a full week is limited until its reset, whatever the status header says, the same marking login-flip.py's probe sets
+    if got["week"] >= 100:
+        got["limitedUntil"] = got["weekReset"]
+    return got
 
 
 def flip_file():
@@ -140,9 +144,9 @@ def flip_file():
 
 
 def seen(flip, email, now):
-    """login-flip.json's reading of one account, probed again when it is PROBE_EVERY old, so login-flip.py and this job share one probe."""
+    """login-flip.json's reading of one account, probed again when it is PROBE_EVERY old and past its limitedUntil, so login-flip.py and this job share one probe."""
     s = (flip.get("seen") or {}).get(email) or {}
-    if now - s.get("at", 0) >= PROBE_EVERY:
+    if now - s.get("at", 0) >= PROBE_EVERY and now >= s.get("limitedUntil", 0):
         got = probe(email)
         if got:
             s = dict(got, at=now, via="token")
@@ -157,7 +161,7 @@ def accounts_reading():
     flip, now, out = flip_file() or {}, time.time(), {}
     for email in flip.get("accounts") or []:
         s = seen(flip, email, now)
-        if now - s.get("at", 0) < FRESH_FOR and s.get("week") is not None and s.get("weekReset"):
+        if fresh(s, now) and s.get("weekReset"):
             out[email] = {"readAt": iso(s["at"]), "week": s["week"], "weekReset": int(s["weekReset"])}
     return out
 
@@ -195,6 +199,9 @@ def factory_reading(stored, flip):
 
 
 def fresh(s, now):
+    # a full week cannot change before its weekReset, so its last reading stays fresh until then and goes stale again after
+    if s.get("week") is not None and s["week"] >= 100 and s.get("weekReset"):
+        return now < s["weekReset"]
     return now - s.get("at", 0) < FRESH_FOR and s.get("week") is not None
 
 
