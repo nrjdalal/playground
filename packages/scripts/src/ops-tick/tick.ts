@@ -865,7 +865,7 @@ export const BEATS: Beat[] = [
     cron: "0 3 * * *",
     name: "nightly-clean",
     run: nightlyClean(),
-    to: "ops/log/nightly-clean.log, and the Inbox",
+    to: "ops/log/nightly-clean.log, the outbox line to ops, and the Inbox",
   },
   { cron: "17 * * * *", name: "trash-purge", run: trashPurge(), to: "ops/log/trash-purge.log" },
   { cron: "*/5 * * * *", name: "idle-compact", run: idleCompact, to: "ops/log/idle-compact.log" },

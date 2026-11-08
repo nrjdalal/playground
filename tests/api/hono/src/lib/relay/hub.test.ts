@@ -18,12 +18,12 @@ const mac = () => {
   return { send: (data: string) => void sent.push(data), sent }
 }
 
-const answer = (id: string, body = "ok") =>
+const answer = (id: string, body = "ok", status = 200) =>
   JSON.stringify({
     body: Buffer.from(body).toString("base64"),
     headers: { "content-type": "text/plain" },
     id,
-    status: 200,
+    status,
     type: "response",
   })
 
@@ -98,10 +98,12 @@ describe("the relay's hub", () => {
 // Two instances on one fake bus, which hands each published message to every instance, the publisher's included, on a later tick, as Redis does.
 const instances = (options: { ackMs?: number; now?: () => Date } = {}) => {
   const hubs: Hub[] = []
+  const published: string[] = []
   let listening = 0
   const bus: Bus = {
     listen: () => void listening++,
     publish: async (data) => {
+      published.push(data)
       await Bun.sleep(0)
       for (const one of hubs) one.receive(data)
     },
@@ -109,7 +111,14 @@ const instances = (options: { ackMs?: number; now?: () => Date } = {}) => {
   let n = 0
   const id = () => `00000000-0000-4000-8000-00000000000${n++}`
   hubs.push(createHub({ ...options, bus, id }), createHub({ ...options, bus, id }))
-  return { holder: hubs[0]!, listening: () => listening, other: hubs[1]! }
+  return {
+    holder: hubs[0]!,
+    listening: () => listening,
+    other: hubs[1]!,
+    published,
+    // puts bytes already on the bus on it again, as a publish whose first try landed and then reported closed re-sends them
+    republish: (data: string) => bus.publish(data),
+  }
 }
 
 // Two instances on one bus, the second cold: its first publish waits coldMs for its subscriber and sender to connect before the message reaches the bus, as a fresh instance's first Redis connect does.
@@ -180,6 +189,35 @@ describe("the relay's hub across instances", () => {
     expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
     expect(await other.status("u1")).toEqual({ online: true, since: null })
     expect(other.busy()).toBe(false)
+  })
+
+  // a publish whose first try landed and then reported closed puts the same request on the bus twice; the Mac refuses an id it answered already, and that refusal would settle the wait before the real answer, so the hub must drop the repeat before the Mac sees it
+  test("a request the bus carries twice reaches the Mac once, and the wait settles on the real answer", async () => {
+    const { holder, other, published, republish } = instances({ now: () => AT })
+    const answered: string[] = []
+    let received = 0
+    holder.attach("u1", {
+      send: (data: string) => {
+        received++
+        const { id } = JSON.parse(data) as { id: string }
+        // the Mac answers a request it has answered already at once with the seen-id refusal, and the first copy's real answer takes longer than this test's whole retry window
+        if (answered.includes(id))
+          setTimeout(() => holder.answer("u1", answer(id, "answered already", 409)), 0)
+        else {
+          answered.push(id)
+          setTimeout(() => holder.answer("u1", answer(id, "workers")), 30)
+        }
+      },
+    })
+    const forwarded = other.forward("u1", "owner", "/api/v1/workers")
+    await Bun.sleep(10)
+    expect(received).toBe(1)
+    await republish(published[0]!)
+    const got = await forwarded
+    expect(got.type).toBe("response")
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
+    expect(got.type === "response" && got.status).toBe(200)
+    expect(received).toBe(1)
   })
 
   // a cold instance spent its whole ack wait connecting to Redis, so a read and the status read offline while the Mac held its socket on another instance

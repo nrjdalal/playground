@@ -2335,7 +2335,7 @@ export function DashboardNav() {
             />
           )
         ) : label === "Yard" ? (
-          <YardGroups key={label} />
+          <YardGroups key={label} shell="dashboard" />
         ) : label === "Scripts" ? (
           <ScriptsGroup
             key={label}
