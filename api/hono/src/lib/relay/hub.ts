@@ -232,7 +232,7 @@ export function createHub({
   }
 
   return {
-    // Holds the owner's Mac socket, a newer one replacing the old, and returns what lets it go, given the socket's close code; a socket that goes fails what still waits on it, on every instance, while one the Mac closed as replaced, its next one holding the relay, goes from this instance alone.
+    // Holds the owner's Mac socket, a newer one replacing the old, and returns what lets it go by its close code: a socket that goes fails what waits on it on every instance, one closed as replaced goes from here alone.
     attach(userId: string, socket: MacSocket): (code?: number) => void {
       const held: Held = { heard: now().getTime(), socket }
       macs.set(userId, held)

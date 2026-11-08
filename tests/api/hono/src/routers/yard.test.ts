@@ -196,6 +196,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       requests: [{ login: "ow", method: "GET", path: "/api/v1/workers?x=1" }],
       status: { online: true, since: null },
       statusAfter: { online: false, since: "string" },
+      statusReplaced: { online: false, since: null },
       signedWrite: [201, { sent: true }],
       write: 404,
       writeMember: 403,
