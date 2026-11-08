@@ -227,8 +227,7 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
       call(`git clone https://github.com/acme-owner/widgets.git ${TREES}/review-widgets-503`),
     ],
     ["gh's clone", call(`gh repo clone acme-owner/widgets ${TREES}/review-widgets-503`)],
-    ["the review skill's state.ts", call(`python3 ${STATE} pr 501`)],
-    ["the review skill's state.ts by its path", call(`${STATE} pr 501`)],
+    ["the review skill's state.ts run by its path, shebang and all", call(`${STATE} pr 501`)],
     ["a read through run-slot", call(`${SLOT} m4k7pq-reviewer -- git -C ${OUTSIDE} diff`)],
     [
       "a read through run-slot by ~",
@@ -238,8 +237,10 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
     ["grep over the clone", call(`grep -rn foo ${OUTSIDE}/src`)],
     ["a variable of the line's own", call(`S=${OUTSIDE}; cat $S/x`)],
     ["the clock", call("date -u +%FT%TZ")],
-    ["the review skill's state.ts from the main checkout", call(`python3 ${CORE_STATE} pr 501`)],
-    ["that state.ts by its path", call(`${CORE_STATE} wait acme-owner/widgets 501 abc`)],
+    [
+      "the review skill's state.ts from the main checkout, run by its path",
+      call(`${CORE_STATE} wait acme-owner/widgets 501 abc`),
+    ],
     ["a quiet fetch of two refs", call(`git -C ${OUTSIDE} fetch -q origin pr-501 canary`)],
     ["a quiet detached checkout", call(`git -C ${OUTSIDE} checkout -q --detach abc`)],
     ["sed printing a line range", call(`sed -n 222,300p ${OUTSIDE}/a.ts`)],
