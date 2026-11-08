@@ -30,6 +30,7 @@ import {
   runsForDelete,
   stalledPrs,
 } from "../../../../../packages/scripts/src/ops-sweep/sweep"
+import { storeWith } from "../../../../scripts/hooks/render-set"
 
 const dirs: string[] = []
 afterAll(() => {
@@ -1011,6 +1012,114 @@ describe("forecast", () => {
       `${JSON.stringify({ r7, s7: 39, t: t - 3600 })}\n`,
     )
     expect(await forecast(ctx)).toEqual({ "7d": 64 })
+  })
+})
+
+describe("pace off", () => {
+  const T = NOW / 1000
+  const A = "one@example.com"
+  const B = "two@example.com"
+  // week-marks.py's samples of one account, `before`% an hour back and `now`% now, its week resetting `reset` seconds on; the other accounts' go to account-samples.jsonl.
+  const week = (ctx: Context, account: string, before: number, now: number, reset: number) =>
+    writeFileSync(
+      join(ctx.ops, "usage", account === A ? "week-samples.jsonl" : "account-samples.jsonl"),
+      [before, now]
+        .map(
+          (w, i) =>
+            `${JSON.stringify({ account, reset: T + reset, t: T - 3600 + i * 3600, week: w })}\n`,
+        )
+        .join(""),
+    )
+  // login-flip.py's split of new sessions, written now.
+  const split = (ctx: Context, shares: Record<string, number>) =>
+    write(join(ctx.ops, "usage", "login-flip.json"), { split: { at: T, shares } })
+  const machine = () => {
+    const made = setup()
+    roster(made.ctx, [])
+    mkdirSync(join(made.ops, "usage"), { recursive: true })
+    storeWith(made.ctx.data, {}, { "usage.accounts": [{ email: A, label: "main" }, { email: B }] })
+    split(made.ctx, { [A]: 1, [B]: 0 })
+    return made
+  }
+  const paceFile = (ctx: Context) => join(ctx.data, "usage-pace-off-until")
+  const text = (path: string) => readFileSync(path, "utf8").trim()
+
+  test("a week forecast under 100% at its reset turns the pace off for an hour and records the forecast by label", async () => {
+    const { ctx, sweep } = machine()
+    week(ctx, A, 39, 40, 86400)
+    await check(ctx)
+    expect(text(paceFile(ctx))).toBe("2026-10-20T13:00:00Z")
+    expect(read(join(sweep, "pace-off.json"))).toEqual({
+      at: "2026-10-20T12:00:00Z",
+      forecast: { main: 64 },
+      until: "2026-10-20T13:00:00Z",
+    })
+  })
+
+  test("the pace-off time is never later than the week's reset", async () => {
+    const { ctx } = machine()
+    week(ctx, A, 39, 40, 1800)
+    await check(ctx)
+    expect(text(paceFile(ctx))).toBe("2026-10-20T12:30:00Z")
+  })
+
+  test("a week forecast at 100% or more writes nothing and removes the time the sweep wrote", async () => {
+    const { ctx, sweep } = machine()
+    week(ctx, A, 80, 90, 86400)
+    await check(ctx)
+    expect(await Bun.file(paceFile(ctx)).exists()).toBe(false)
+    writeFileSync(paceFile(ctx), "2026-10-20T12:55:00Z\n")
+    write(join(sweep, "pace-off.json"), { until: "2026-10-20T12:55:00Z" })
+    await check(ctx)
+    expect(await Bun.file(paceFile(ctx)).exists()).toBe(false)
+    expect(read(join(sweep, "pace-off.json"))).toEqual({
+      at: "2026-10-20T12:00:00Z",
+      forecast: { main: 330 },
+      until: null,
+    })
+  })
+
+  test("headroom on an account the split gives no share to turns nothing off, and on one it picks does", async () => {
+    const { ctx, sweep } = machine()
+    week(ctx, A, 80, 90, 86400)
+    week(ctx, B, 39, 40, 86400)
+    await check(ctx)
+    expect(await Bun.file(paceFile(ctx)).exists()).toBe(false)
+    split(ctx, { [A]: 0.5, [B]: 0.5 })
+    await check(ctx)
+    expect(text(paceFile(ctx))).toBe("2026-10-20T13:00:00Z")
+    expect(read(join(sweep, "pace-off.json")).forecast).toEqual({ "account 2": 64, main: 330 })
+  })
+
+  test("with no fresh split, usage.json's account is the one forecast", async () => {
+    const { ctx } = machine()
+    write(join(ctx.ops, "usage", "login-flip.json"), {
+      split: { at: T - 3600, shares: { [B]: 1 } },
+    })
+    write(join(ctx.data, "usage.json"), { account: A })
+    week(ctx, A, 39, 40, 86400)
+    week(ctx, B, 80, 90, 86400)
+    await check(ctx)
+    expect(text(paceFile(ctx))).toBe("2026-10-20T13:00:00Z")
+  })
+
+  test("a future time written by hand is left as it is, headroom or none", async () => {
+    const { ctx } = machine()
+    writeFileSync(paceFile(ctx), "2026-10-22T09:00:00+05:30\n")
+    week(ctx, A, 39, 40, 86400)
+    await check(ctx)
+    expect(text(paceFile(ctx))).toBe("2026-10-22T09:00:00+05:30")
+    week(ctx, A, 80, 90, 86400)
+    await check(ctx)
+    expect(text(paceFile(ctx))).toBe("2026-10-22T09:00:00+05:30")
+  })
+
+  test("a past time written by hand no longer holds the file", async () => {
+    const { ctx } = machine()
+    writeFileSync(paceFile(ctx), "2026-10-19T09:00:00Z\n")
+    week(ctx, A, 39, 40, 86400)
+    await check(ctx)
+    expect(text(paceFile(ctx))).toBe("2026-10-20T13:00:00Z")
   })
 })
 
