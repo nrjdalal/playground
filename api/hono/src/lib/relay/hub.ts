@@ -3,6 +3,7 @@ import type { PairKey } from "@packages/message"
 import { z } from "zod"
 
 import {
+  RELAY_REPLACED_CLOSE,
   RELAY_SILENT_MS,
   RELAY_TIMEOUT_MS,
   relayHeartbeatSchema,
@@ -231,13 +232,16 @@ export function createHub({
   }
 
   return {
-    // Holds the owner's Mac socket, a newer one replacing the old, and returns what lets it go; a socket that goes fails what still waits on it, on every instance.
-    attach(userId: string, socket: MacSocket): () => void {
+    // Holds the owner's Mac socket, a newer one replacing the old, and returns what lets it go by its close code: a socket that goes fails what waits on it on every instance, one closed as replaced goes from here alone.
+    attach(userId: string, socket: MacSocket): (code?: number) => void {
       const held: Held = { heard: now().getTime(), socket }
       macs.set(userId, held)
       offlineSince.delete(userId)
       bus?.listen()
-      return () => drop(userId, held, now().toISOString())
+      return (code) => {
+        if (code !== RELAY_REPLACED_CLOSE) return drop(userId, held, now().toISOString())
+        if (macs.get(userId) === held) macs.delete(userId)
+      }
     },
 
     // Takes a frame the owner's Mac sent on socket, which says it is there: a heartbeat is answered with one, so the Mac hears the hub too, an answer settles its own request, here or on the instance that waits on it, and anything else is dropped.

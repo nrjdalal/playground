@@ -257,8 +257,10 @@ test("run-slot.sh kind prints the lane a command takes and runs nothing", async 
   expect(await kind(["touch", join(m.root, "made")])).toBe("")
   // review round 1: a run run-slot refuses reads as refuse, a dev stack's among them
   expect(await kind(["bun", "run", "dev"])).toBe("refuse")
-  // a chain's git steps take the commit lane only in a repo, so these name this checkout, which kind never runs them in
-  const repo = join(import.meta.dir, "../../..")
+  // a chain's git steps take the commit lane only in a repo, so these name a throwaway one: kind runs nothing, but the lane decision reads the named repo's index and lefthook.yml, and naming this checkout let a staged packages/ file answer for it (issue 1487)
+  const repo = join(m.root, "repo")
+  mkdirSync(repo)
+  expect(Bun.spawnSync(["git", "-C", repo, "init"]).exitCode).toBe(0)
   for (const shell of ["sh", "dash", "ksh"])
     expect([
       shell,
