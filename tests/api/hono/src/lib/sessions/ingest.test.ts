@@ -24,6 +24,7 @@ import {
 } from "../../../../../../api/hono/src/lib/sessions/ingest"
 import { emptyFacts } from "../../../../../../api/hono/src/lib/sessions/lines"
 import { listSessions } from "../../../../../../api/hono/src/lib/sessions/read"
+import { testContainerName } from "../../../../../container"
 
 // Runs the importer against a throwaway Postgres in Docker, published on 127.0.0.1 only, with the repo's own migrations applied; skipped where Docker is not running.
 const IMAGE = "postgres:18-alpine"
@@ -87,6 +88,8 @@ describe.skipIf(!dockerUp())("ingest", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("sessions-ingest"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",

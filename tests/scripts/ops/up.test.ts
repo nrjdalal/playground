@@ -12,6 +12,9 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
+// the render_jobs harness runs jobs.ts through python, whose import graph (probe.ts's @packages/config/kinds among them) resolves through the built dists no import here reached, so a fresh checkout's render died on "Cannot find module" and its failure log then raised on the ops folder it never made (issue 1496); importing jobs.ts selects those builds
+import "../../../packages/scripts/src/playground/jobs"
+
 const upPy = join(import.meta.dir, "..", "..", "..", "scripts", "ops", "up.py")
 const scratch = mkdtempSync(join(tmpdir(), "ops-up-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -417,6 +420,37 @@ test("a pass renders jobs.json from the store, keeps it when the store has no po
   expect(pass().stderr.toString()).toBe("")
   expect(readFileSync(join(ops, "jobs.json"), "utf8")).toBe(rendered)
   expect(readFileSync(join(ops, "up.log"), "utf8")).toContain("jobs.json kept: ")
+})
+
+// issue 1538: a dead render's own error must reach up.log, so a pass makes the ops folder before its lock; on a fresh data dir the folder is missing, and the lock's open, then log()'s append, raised FileNotFoundError, hiding the render's error behind it; the pass runs main() with up() cut to its render
+test("a dead render with no ops folder shows the render's own error in up.log, not a missing-folder raise", () => {
+  const config = join(scratch, "config-dead-render")
+  mkdirSync(dataOf(config), { recursive: true })
+  const dead = join(scratch, "dead-render.ts")
+  writeFileSync(dead, `console.error("the render died here"); process.exit(2)\n`)
+  const pass = Bun.spawnSync(
+    [
+      "python3",
+      "-I",
+      "-c",
+      `${LOAD}up.JOBS_RENDER = sys.argv[2]\nup.up = lambda quiet: up.render_jobs()\nsys.argv = sys.argv[:1]\nup.main()`,
+      upPy,
+      dead,
+    ],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        HOME: scratch,
+        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      },
+      stderr: "pipe",
+    },
+  )
+  expect(pass.stderr.toString()).not.toContain("FileNotFoundError")
+  expect(readFileSync(join(dataOf(config), "ops", "up.log"), "utf8")).toContain(
+    "the render died here",
+  )
 })
 
 test("a pass writes jobs.json into the data folder dataDir() resolves, playground over an old dispatcher beside it", () => {

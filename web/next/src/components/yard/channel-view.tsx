@@ -7,6 +7,7 @@ import { cn } from "cn"
 import Link from "next/link"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 
+import { STREAM_ROW } from "@/components/dashboard/chat-scroll"
 import { sendsOnEnter } from "@/components/dashboard/composer"
 import { Hint } from "@/components/hint"
 import { TranscriptMessage } from "@/components/transcript-message"
@@ -17,6 +18,13 @@ import {
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group"
+import {
+  MessageScroller,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { CenterSpinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
@@ -86,21 +94,30 @@ export function ChannelView({
         <h1 className="text-sm font-medium">{channelTitle(channel)}</h1>
         {channel.topic && <p className="text-muted-foreground text-xs">{channel.topic}</p>}
       </header>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
-        {messages?.length === 0 && (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>No messages yet</EmptyTitle>
-              <EmptyDescription>Messages stay for {RETENTION_DAYS} days.</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        )}
-        {messages?.map((message) => (
-          <YardMessageView key={message.id} message={message} now={now}>
-            <Status message={message} />
-          </YardMessageView>
-        ))}
-      </div>
+      {/* opens at the newest message and follows a new one only while the reader is at the end; each row at its real height (STREAM_ROW), so the stock 10rem guess for a row off screen never moves the view */}
+      <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+        <MessageScroller className="min-h-0 flex-1">
+          <MessageScrollerViewport aria-label={`${channelTitle(channel)}'s messages`}>
+            <MessageScrollerContent className="gap-3 px-4 py-3">
+              {messages?.length === 0 && (
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyTitle>No messages yet</EmptyTitle>
+                    <EmptyDescription>Messages stay for {RETENTION_DAYS} days.</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
+              {messages?.map((message) => (
+                <MessageScrollerItem key={message.id} className={STREAM_ROW} messageId={message.id}>
+                  <YardMessageView message={message} now={now}>
+                    <Status message={message} />
+                  </YardMessageView>
+                </MessageScrollerItem>
+              ))}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+        </MessageScroller>
+      </MessageScrollerProvider>
       {/* on a phone Yard's own shell's floating Menu sits 64 to 96px up the right edge (SidebarFloatingTrigger), so the composer rests 8px above it; the dashboard's tab bar holds its Menu instead */}
       <div className={cn("px-4 pb-4", shell === "yard" && "max-md:pb-26")}>
         {canPost(channel, role) ? (

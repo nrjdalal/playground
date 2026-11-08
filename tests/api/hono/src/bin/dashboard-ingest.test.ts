@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { SQL } from "bun"
 
+import { testContainerName } from "../../../../container"
 import { liveReadsEnv } from "../../../../live-reads"
 
 // The CLI is driven as the runner hosting the dashboard runs it, as its own process, against a throwaway Postgres in Docker published on 127.0.0.1 only, with CLAUDE_CONFIG_DIR pointing at scratch transcripts. Skipped where Docker is not running.
@@ -40,6 +41,8 @@ describe.skipIf(!dockerUp())("the bun run ingest CLI", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("dashboard-ingest"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",

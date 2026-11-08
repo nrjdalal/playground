@@ -45,6 +45,7 @@ import {
   type Located,
   prove,
 } from "../../../../../../api/hono/src/lib/sessions/guard"
+import { testContainerName } from "../../../../../container"
 import { envLines, REQUIRED } from "./env-fixtures"
 
 const LIVE_DASHBOARD = livePair()
@@ -1145,7 +1146,7 @@ const dockerUp = (): boolean =>
 
 // The real guard, against a throwaway container on 127.0.0.1 standing in for the live dashboard's database.
 describe.skipIf(!dockerUp())("preflight against a real container", () => {
-  const name = `dispatcher-test-preflight-${process.pid}`
+  const name = testContainerName("launch")
   const liveDashboard = { branch: LIVE_DASHBOARD.branch, database: name }
   let url = ""
 
@@ -1156,7 +1157,7 @@ describe.skipIf(!dockerUp())("preflight against a real container", () => {
       "-d",
       "--rm",
       "--name",
-      name,
+      testContainerName("launch"),
       "-e",
       "POSTGRES_PASSWORD=preflight-test",
       "-p",

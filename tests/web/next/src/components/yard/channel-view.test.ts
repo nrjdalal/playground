@@ -35,3 +35,25 @@ describe("Yard's composer", () => {
     expect(composer).toMatch(/<form\s+\{\.\.\.\{ \[HOLDS_RELOAD\]: "" \}\}/)
   })
 })
+
+// #1527: a channel opened at its oldest message, so the newest sat below the screen on both shells
+describe("A channel's messages", () => {
+  // whitespace collapsed, so a reformat that wraps a line keeps the match
+  const list = async () => (await read("yard/channel-view.tsx")).replace(/\s+/g, " ")
+
+  test("open at the newest, and follow a new one only while the reader is at the end", async () => {
+    const source = await list()
+    expect(source).toContain('<MessageScrollerProvider autoScroll defaultScrollPosition="end">')
+    expect(source).toContain("<MessageScrollerViewport")
+    expect(source).not.toContain("overflow-y-auto px-4 py-3")
+  })
+
+  // the stock item guesses 10rem for a row off screen, and the view moved when the guess met the real height
+  test("each sit in the scroller at its real height, keyed by its id", async () => {
+    const source = await list()
+    expect(source).toContain('import { STREAM_ROW } from "@/components/dashboard/chat-scroll"')
+    expect(source).toContain(
+      "<MessageScrollerItem key={message.id} className={STREAM_ROW} messageId={message.id}>",
+    )
+  })
+})
