@@ -471,7 +471,10 @@ def sessions():
         # a session comes back in its repo's main worktree, the checkout Claude Code starts sessions in: a worktree session skips the worktree the trust dialog stops a session in, and a worker started --in another folder stays in that repository; --resume finds the session from any folder (measured), and a cwd of no checkout falls back to itself, named below
         code, common = run(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"])
         main = os.path.dirname(common.strip()) if code == 0 and common.strip() else ""
-        print(f"{SPAWN} resume {n} {main or cwd} {sid}{backend}")
+        # a reviewer's or tester's start is refused without --pr, so its line carries its row's PRs, pr first, as spawn.sh restore passes them
+        prs = [p for p in [a.get("pr")] + list(a.get("prs") or []) if isinstance(p, str) and p] if a.get("kind") in ("reviewer", "tester") else []
+        pr = f" --pr {','.join(dict.fromkeys(prs))}" if prs else ""
+        print(f"{SPAWN} resume {n} {main or cwd} {sid}{backend}{pr}")
         if not main:
             print(f"  ({cwd} is no git checkout; it resumes there as it is)")
         print(f'  then SendMessage {n}: "your terminal restarted; you were resumed from your transcript. Re-read your roster task and continue."')

@@ -160,6 +160,33 @@ test("an extension linked to * reaches every repo, and takes a name over core's"
   expect(session.plugin).toContain(join("orgs", "home"))
 })
 
+// A session's checkout whose .claude/skills holds the dev given, as Playground's own links its folder to skills/zerostarter.
+const checkoutWithDev = (name: string, dev: (path: string) => void) => {
+  const repo = join(scratch, name)
+  mkdirSync(join(repo, ".claude", "skills"), { recursive: true })
+  dev(join(repo, ".claude", "skills", "dev"))
+  return repo
+}
+const playgroundOrigin = { origin: () => "https://github.com/someone/playground.git" }
+
+test("a session in Playground's own checkout loads no plugin copy of a skill its .claude/skills already lists", async () => {
+  const data = extensionsWith("own-checkout", policy)
+  const repo = checkoutWithDev("own", (path) =>
+    symlinkSync(join(checkout, "skills", "zerostarter", "dev"), path),
+  )
+  const session = await resolve(data, repo, playgroundOrigin)
+  expect(session.code).toBe(0)
+  expect(session.skills).toEqual(["ask", "corp-only", "grill-me", "tdd", "xyz"])
+})
+
+test("a session in an org's checkout keeps the full set, its own skill of the same name beside the plugin's", async () => {
+  const data = extensionsWith("org-checkout", policy)
+  const repo = checkoutWithDev("org", (path) => put(join(path, "SKILL.md"), "ORG-DEV"))
+  const session = await resolve(data, repo, { origin: () => origins["/repos/acme"]! })
+  expect(session.skills).toEqual(acmeSet)
+  expect(session.body("dev")).toBe("ZS-DEV")
+})
+
 test("the order decides which of two linked extensions keeps a name, and one linked twice loads once", async () => {
   const data = extensionsWith("both", {
     "ext.links": { acme: ["*", "acme-inc"], corp: ["*"] },
