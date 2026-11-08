@@ -12,6 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check, INSPECT_TIMEOUT_MS } from "../../../scripts/hooks/no-mac-web-build"
+import { runs } from "./registered"
 
 const root = join(import.meta.dir, "..", "..", "..")
 const dirs: string[] = []
@@ -248,12 +249,15 @@ describe("the dashboard's container decides", () => {
   // The hook's timeout in each settings file Claude Code reads, in ms.
   const registered = ["scripts/factory-settings.json", ".claude/settings.json"].map((settings) => {
     const { hooks } = JSON.parse(readFileSync(join(root, settings), "utf8")) as {
-      hooks: { PreToolUse: { hooks: { command: string; timeout: number }[] }[] }
+      hooks: {
+        PreToolUse: {
+          hooks: { args?: string[]; command: string; timeout: number; type: string }[]
+        }[]
+      }
     }
     const timeout =
-      hooks.PreToolUse.flatMap((e) => e.hooks).find((h) =>
-        h.command.includes("scripts/hooks/bundled/no-mac-web-build.js"),
-      )?.timeout ?? NaN
+      hooks.PreToolUse.flatMap((e) => e.hooks).find((h) => runs(h, "no-mac-web-build"))?.timeout ??
+      NaN
     return [settings, timeout * 1000] as const
   })
 

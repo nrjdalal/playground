@@ -40,7 +40,7 @@ test("each guard bundle runs one main block, its own, and the worker bundle none
   }
 })
 
-// Each call goes in as stdin to the bundle as its wrapper runs it and to its source, which judge it as data; the forms are this test's own, none from the refused-forms fixture.
+// Each call goes in as stdin to guards.js, the bundle that runs every Bash guard, and to its source, which judge it as data; the forms are this test's own, none from the refused-forms fixture.
 describe("a bundle run as its wrapper runs it gives its source's verdict", () => {
   const worktree = join(ROOT, ".claude", "worktrees", "a")
   const call = (cwd: string, command: string) =>
@@ -58,7 +58,7 @@ describe("a bundle run as its wrapper runs it gives its source's verdict", () =>
       2,
       "no-ours-merge hook refuses",
     ],
-    ["no-ours-merge", "a stash, which no-stash judges", call(ROOT, "git stash"), 0, ""],
+    ["no guard", "a listing", call(ROOT, "ls"), 0, ""],
     [
       "no-unslotted-run",
       "a worktree's suite with no slot",
@@ -66,8 +66,8 @@ describe("a bundle run as its wrapper runs it gives its source's verdict", () =>
       2,
       "no-unslotted-run hook refuses",
     ],
-  ])("%s on %s", async (name, _, raw, code, says) => {
-    for (const file of [join(BUNDLED, `${name}.js`), join(HOOKS, `${name}.ts`)]) {
+  ])("guards.js, as %s, on %s", async (_name, _, raw, code, says) => {
+    for (const file of [join(BUNDLED, "guards.js"), join(HOOKS, "guards.ts")]) {
       const proc = Bun.spawn(["bun", "--no-env-file", file], {
         cwd: ROOT,
         env: { ...process.env, PLAYGROUND_REPO: "", PLAYGROUND_ROLE: "worker" },
@@ -88,7 +88,7 @@ describe("a bundle run as its wrapper runs it gives its source's verdict", () =>
 })
 
 // A main checkout made in a scratch folder outside any repo, as the factory's sits, holding the bundle: with PLAYGROUND_REPO unset, as cmux restores a session, the bundle finds that checkout from its own folder, as the source does from its own, so an ask note there runs and the same note from another folder is refused.
-test("no-desktop-owner-app's bundle finds the main checkout it sits in, with PLAYGROUND_REPO unset", async () => {
+test("no-desktop-owner-app, in guards.js's bundle, finds the main checkout it sits in, with PLAYGROUND_REPO unset", async () => {
   const main = realpathSync(mkdtempSync(join(tmpdir(), "hooks-bundle-main-")))
   expect(Bun.spawnSync(["git", "-C", main, "init", "-q"]).exitCode).toBe(0)
   mkdirSync(join(main, BUNDLED), { recursive: true })
@@ -100,10 +100,8 @@ test("no-desktop-owner-app's bundle finds the main checkout it sits in, with PLA
     join(main, "package.json"),
     `${JSON.stringify({ scripts: { ask: JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).scripts.ask } })}\n`,
   )
-  copyFileSync(
-    join(ROOT, BUNDLED, "no-desktop-owner-app.js"),
-    join(main, BUNDLED, "no-desktop-owner-app.js"),
-  )
+  for (const file of ["guards.js", "no-extensions-write-worker.js"])
+    copyFileSync(join(ROOT, BUNDLED, file), join(main, BUNDLED, file))
   const note = (cwd: string) =>
     JSON.stringify({
       cwd,
@@ -112,16 +110,13 @@ test("no-desktop-owner-app's bundle finds the main checkout it sits in, with PLA
       tool_name: "Bash",
     })
   const run = async (cwd: string) => {
-    const proc = Bun.spawn(
-      ["bun", "--no-env-file", join(main, BUNDLED, "no-desktop-owner-app.js")],
-      {
-        cwd: main,
-        env: { ...process.env, PLAYGROUND_REPO: "", PLAYGROUND_ROLE: "worker" },
-        stderr: "pipe",
-        stdin: new Blob([note(cwd)]),
-        stdout: "pipe",
-      },
-    )
+    const proc = Bun.spawn(["bun", "--no-env-file", join(main, BUNDLED, "guards.js")], {
+      cwd: main,
+      env: { ...process.env, PLAYGROUND_REPO: "", PLAYGROUND_ROLE: "worker" },
+      stderr: "pipe",
+      stdin: new Blob([note(cwd)]),
+      stdout: "pipe",
+    })
     return { code: await proc.exited, stderr: await new Response(proc.stderr).text() }
   }
   expect(await run(main)).toEqual({ code: 0, stderr: "" })

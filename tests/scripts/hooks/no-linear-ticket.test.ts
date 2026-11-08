@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-linear-ticket"
 import { OLD_NAMES } from "../../session-names"
+import { hearing } from "./registered"
 import { storeWith } from "./render-set"
 
 const root = join(import.meta.dir, "..", "..", "..")
@@ -485,7 +486,7 @@ describe("as Claude Code runs it", () => {
   }
 
   test("the matcher takes Bash, the file tools and every tool that can create an issue, and nothing else", async () => {
-    const matcher = new RegExp((await entry()).matcher)
+    const matcher = await hearing(".claude/settings.json", "no-linear-ticket")
     for (const tool of [
       "Bash",
       "Edit",
@@ -519,7 +520,12 @@ describe("as Claude Code runs it", () => {
     "the %s skill registers the same hook for sessions outside dispatcher",
     async (skill) => {
       const [found, project] = [await skillEntry(skill), await entry()]
-      expect(found.matcher).toBe(project.matcher)
+      const heard = await hearing(".claude/settings.json", "no-linear-ticket")
+      for (const tool of ["Bash", "Edit", "Write", "mcp__linear-shared__save_issue", "Read"])
+        expect({ heard: new RegExp(found.matcher).test(tool), tool }).toEqual({
+          heard: heard.test(tool),
+          tool,
+        })
       expect(found.hooks[0].timeout).toBe(project.hooks[0].timeout)
     },
   )

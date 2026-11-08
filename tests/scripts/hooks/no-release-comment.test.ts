@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check as hookCheck } from "../../../scripts/hooks/no-release-comment"
+import { hearing } from "./registered"
 import { storeWith } from "./render-set"
 
 const root = join(import.meta.dir, "..", "..", "..")
@@ -803,7 +804,7 @@ describe("as Claude Code runs it", () => {
   }
 
   test("the matcher takes Bash and every GitHub MCP comment tool, and nothing else", async () => {
-    const matcher = new RegExp((await entry()).matcher)
+    const matcher = await hearing(".claude/settings.json", "no-release-comment")
     for (const tool of [
       "Bash",
       "mcp__github-shared__add_comment_to_pending_review",

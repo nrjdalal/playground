@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { check, skillNames } from "../../../scripts/hooks/no-playground-leak"
 import { OLD } from "../../session-names"
+import { hearing } from "./registered"
 import { storeWith } from "./render-set"
 
 const root = join(import.meta.dir, "..", "..", "..")
@@ -1163,7 +1164,7 @@ describe("as Claude Code runs it", () => {
   }
 
   test("the factory settings' matcher takes Bash and the Linear, Slack and GitHub tools", async () => {
-    const matcher = new RegExp((await entry()).matcher)
+    const matcher = await hearing("scripts/factory-settings.json", "no-playground-leak")
     for (const tool of [
       "Bash",
       "mcp__linear-shared__save_issue",

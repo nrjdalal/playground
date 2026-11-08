@@ -4,15 +4,20 @@ import { join } from "node:path"
 import { writeAtomic } from "../write-atomic"
 import type { Context } from "./tick"
 
-type Settings = { hooks: Record<string, { hooks: { command: string }[] }[]> }
+type Settings = { hooks: Record<string, { hooks: { args?: string[]; command: string }[] }[]> }
 
-// The PreToolUse guards the factory's settings register, each by its script's name, once.
+// The PreToolUse guards the factory's settings register, each by its script's name, once: a shell-form hook names its script in its command, the exec-form guards.ts entry in its args.
 export const preToolUseGuards = async (repo: string): Promise<string[]> => {
   const settings = (await Bun.file(
     join(repo, "scripts", "factory-settings.json"),
   ).json()) as Settings
   const names = (settings.hooks.PreToolUse ?? []).flatMap((entry) =>
-    entry.hooks.map((hook) => hook.command.match(/scripts\/hooks\/bundled\/([\w-]+)\.js/)?.[1]),
+    entry.hooks.map(
+      (hook) =>
+        [hook.command, ...(hook.args ?? [])]
+          .join(" ")
+          .match(/scripts\/hooks\/bundled\/([\w-]+)\.js/)?.[1],
+    ),
   )
   return [...new Set(names.filter((name): name is string => !!name))]
 }

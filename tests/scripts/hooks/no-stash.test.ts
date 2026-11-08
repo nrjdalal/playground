@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-stash"
 import { overBaseline, stepsOf } from "./pace"
+import { type Entry, registered, runs } from "./registered"
 
 const root = join(import.meta.dir, "..", "..", "..")
 const script = join(root, "scripts", "hooks", "no-stash.ts")
@@ -217,17 +218,12 @@ describe("it fails closed only on a call that reads as a stash", () => {
 })
 
 describe("the factory settings run it", () => {
-  type Entry = { hooks: { command: string; timeout?: number; type: string }[]; matcher: string }
-
+  // The one entry that runs it, guards.ts's exec form.
   const entry = async (): Promise<Entry> => {
-    const settings = (await Bun.file(join(root, "scripts", "factory-settings.json")).json()) as {
-      hooks: { PreToolUse: Entry[] }
-    }
-    const found = settings.hooks.PreToolUse.find((e) =>
-      e.hooks.some((h) => h.command.includes("scripts/hooks/bundled/no-stash.js")),
-    )
-    if (!found) throw new Error("scripts/factory-settings.json registers no no-stash hook")
-    return found
+    const found = await registered("scripts/factory-settings.json", "no-stash")
+    if (found.length !== 1)
+      throw new Error(`scripts/factory-settings.json runs no-stash in ${found.length} entries`)
+    return found[0]!
   }
 
   test("its matcher takes Bash alone", async () => {
@@ -239,7 +235,8 @@ describe("the factory settings run it", () => {
 
   // CLAUDE_PROJECT_DIR is a folder in no repository, so only PLAYGROUND_REPO can name the checkout
   const hook = async (home: string, command: string, repo: string, role = "worker") => {
-    const proc = Bun.spawn(["bash", "-c", (await entry()).hooks[0].command], {
+    const run = (await entry()).hooks.find((h) => runs(h, "no-stash"))!
+    const proc = Bun.spawn(run.args ? [run.command, ...run.args] : ["bash", "-c", run.command], {
       cwd: tmpdir(),
       env: {
         ...process.env,

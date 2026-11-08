@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-raw-spawn"
+import { hearing } from "./registered"
 
 const root = join(import.meta.dir, "..", "..", "..")
 const script = join(root, "scripts", "hooks", "no-raw-spawn.ts")
@@ -667,11 +668,5 @@ describe("it fails open", () => {
 })
 
 test("the factory settings register it for Bash", async () => {
-  const settings = (await Bun.file(join(root, "scripts", "factory-settings.json")).json()) as {
-    hooks: { PreToolUse: { hooks: { command: string }[]; matcher: string }[] }
-  }
-  const entry = settings.hooks.PreToolUse.find((e) =>
-    e.hooks.some((h) => h.command.includes("scripts/hooks/bundled/no-raw-spawn.js")),
-  )
-  expect(entry?.matcher).toBe("^Bash$")
+  expect((await hearing("scripts/factory-settings.json", "no-raw-spawn")).test("Bash")).toBe(true)
 })

@@ -14,6 +14,7 @@ import {
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { check as dispatch, GUARDS as DISPATCHED } from "../../../scripts/hooks/guards"
 import { check as desktopOwnerApp } from "../../../scripts/hooks/no-desktop-owner-app"
 import { check as envDump } from "../../../scripts/hooks/no-env-dump"
 import { check as extensionRepoWrite } from "../../../scripts/hooks/no-extension-repo-write"
@@ -223,7 +224,7 @@ const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
   unslottedRun: "no-unslotted-run",
 }
 
-// Each guard's bundle, copied into a scratch checkout with no node_modules above it, as a damaged install leaves one; the folders the bundles read beside them (extensions' lists, the settings reader role.ts runs in its own process) link to this checkout's.
+// Each guard's bundle, or guards.js for a guard that only it runs, copied into a scratch checkout with no node_modules above it, as a damaged install leaves one; the folders the bundles read beside them (extensions' lists, the settings reader role.ts runs in its own process) link to this checkout's.
 const BUNDLED_ROOT = join(SCRATCH, "bundled-checkout")
 const BUNDLED_DIR = join(BUNDLED_ROOT, "scripts", "hooks", "bundled")
 mkdirSync(BUNDLED_DIR, { recursive: true })
@@ -236,11 +237,13 @@ for (const path of [
   join("scripts", "spawn.sh"),
 ])
   symlinkSync(join(CHECKOUT, path), join(BUNDLED_ROOT, path))
+const own = (name: (typeof CHECK_NAMES)[number]) => join(BUNDLED_DIR, `${GUARD_OF[name]}.js`)
+const GUARDS_BUNDLE = await import(join(BUNDLED_DIR, "guards.js"))
 const BUNDLED: Checks = Object.fromEntries(
   await Promise.all(
     CHECK_NAMES.map(async (name) => [
       name,
-      (await import(join(BUNDLED_DIR, `${GUARD_OF[name]}.js`))).check,
+      existsSync(own(name)) ? (await import(own(name))).check : GUARDS_BUNDLE[name],
     ]),
   ),
 ) as Checks
@@ -501,13 +504,23 @@ describe("each no-extensions-write refusal of a #1428 row names the call as one 
   })
 })
 
+// A Bash row of a guard guards.ts runs reaches it through guards.ts's check(), gated as a factory session's call, with the guard set up as its own test sets it up.
+const dispatched = (guard: Guard) => DISPATCHED.find((g) => g.name === guard)
+const verdict = (c: (typeof CASES)[number], cwd: string, home: string) => {
+  const entry = dispatched(c.guard)
+  if (typeof c.call !== "string" || !entry) return GUARDS[c.guard].run(input(c.call, cwd), home)
+  return dispatch(input(c.call, cwd), { PLAYGROUND_ROLE: "worker" }, [
+    { ...entry, run: (raw) => GUARDS[c.guard].run(raw, home) },
+  ])
+}
+
 describe("every refused form stays refused unless the allow list names it", () => {
   test.each(CASES.map((c) => [c.key, c] as const))(
     "%s",
     async (_, c) => {
       const at = GUARDS[c.guard].folders[c.folder]
       if (!at) throw new Error(`${c.guard} has no ${c.folder} folder`)
-      const reason = await GUARDS[c.guard].run(input(c.call, at[0]), at[1])
+      const reason = await verdict(c, at[0], at[1])
       if (allowed(c)) expect(reason).toBeUndefined()
       else expect(reason).toContain(`${c.guard} hook `)
     },
@@ -656,10 +669,14 @@ describe("each bundled guard gives its source's verdict with no node_modules rea
     expect(() => Bun.resolveSync("zod", BUNDLED_DIR)).toThrow()
   })
 
-  // A guard with a bundle goes through its bundle's check(), so registering one with no entry in GUARD_OF fails here rather than comparing its source with itself.
+  // A guard with a bundle, its own or guards.js, goes through the bundle's check(), so registering one with no entry in GUARD_OF fails here rather than comparing its source with itself.
   test("every guard here has a bundle exactly when GUARD_OF names its check", () => {
     for (const guard of Object.keys(GUARDS))
-      expect({ bundled: existsSync(join(BUNDLED_DIR, `${guard}.js`)), guard }).toEqual({
+      expect({
+        bundled:
+          existsSync(join(BUNDLED_DIR, `${guard}.js`)) || dispatched(guard as Guard) !== undefined,
+        guard,
+      }).toEqual({
         bundled: BUNDLED_PASS.has(guard as Guard),
         guard,
       })

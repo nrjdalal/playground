@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { statSync } from "node:fs"
 import { join } from "node:path"
 
+import { hears, registered } from "./hooks/registered"
+
 const root = join(import.meta.dir, "..", "..")
 
 // The shared files keep it off for every session spawn.sh did not start; the trial's own built files turn it on, as tests/scripts/spawn-memory.test.ts holds (ADR 0022)
@@ -61,10 +63,9 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
     "no-stash",
     "no-unslotted-run",
   ])("%s is a factory hook", async (name) => {
-    const commands = (await preToolUse(join("scripts", "factory-settings.json"))).flatMap((h) =>
-      h.hooks.map((x) => x.command),
-    )
-    expect(commands.some((c) => c.includes(`scripts/hooks/bundled/${name}.js`))).toBe(true)
+    expect(
+      (await registered(join("scripts", "factory-settings.json"), name)).length,
+    ).toBeGreaterThan(0)
   })
 
   // a Write into the main checkout passed while no-main-checkout heard only Bash
@@ -73,10 +74,7 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
       ["Bash", "Edit", "MultiEdit", "NotebookEdit", "Write"].map((tool) => [name, tool]),
     ),
   )("%s hears %s", async (name, tool) => {
-    const hook = (await preToolUse(join("scripts", "factory-settings.json"))).find((h) =>
-      h.hooks.some((x) => x.command.includes(`scripts/hooks/bundled/${name}.js`)),
-    )
-    expect(new RegExp(hook?.matcher ?? "^$").test(tool)).toBe(true)
+    expect(await hears(join("scripts", "factory-settings.json"), name, tool)).toBe(true)
   })
 })
 

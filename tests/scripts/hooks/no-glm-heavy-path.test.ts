@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { writeRoot } from "../../../packages/settings/src/folder"
 import { extensionsDir } from "../../../packages/settings/src/rendered"
 import { check, heavy, onGlm, refusal } from "../../../scripts/hooks/no-glm-heavy-path"
+import { hearing } from "./registered"
 import { storeWith } from "./render-set"
 
 const root = join(import.meta.dir, "..", "..", "..")
@@ -1191,15 +1192,10 @@ describe("its registration", () => {
   // the matcher each settings file registers the hook under, read from the file a session loads
   const matchers = async () =>
     Promise.all(
-      [".claude/settings.json", "scripts/factory-settings.json"].map(async (file) => {
-        const { hooks } = (await Bun.file(join(root, file)).json()) as {
-          hooks: { PreToolUse: { hooks: { command: string }[]; matcher: string }[] }
-        }
-        const entry = hooks.PreToolUse.find((e) =>
-          e.hooks.some((h) => h.command.includes("no-glm-heavy-path")),
-        )
-        return { file, matcher: new RegExp(entry?.matcher ?? "(?!)") }
-      }),
+      [".claude/settings.json", "scripts/factory-settings.json"].map(async (file) => ({
+        file,
+        matcher: await hearing(file, "no-glm-heavy-path"),
+      })),
     )
 
   test("both settings files send it every Bash call, every MCP tool and Claude Code's three MCP resource tools, and no other tool", async () => {
