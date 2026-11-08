@@ -138,7 +138,7 @@ How to read an account's week for the factory's **usage** rule (`extensions/core
 - ops-sweep turns spawn.sh's week pace off by itself from its own week forecast: each pass (`paceOff()` in `packages/scripts/src/ops-sweep/sweep.ts`) projects the week of each account `login-flip.json`'s split gives a share of new sessions (usage.json's account while the split is 30 minutes old or more) by the pace above, to a reading under 30 minutes old, taking the move as the first row where `week-samples.jsonl` turns to that account from another, and no forecast until its readings since then span 3 hours.
   While one projects under 100% at its own week reset, it writes `usage-pace-off-until` an hour on, never past that account's reset, renewed each pass, so the pace comes back within the hour of a stopped sweep; once none does, it removes the time it wrote.
   `ops/sweep/pace-off.json` records each pass's forecast, `{at, forecast, until}`, each account by its `usage.accounts` label, else `account <n>` by its row, else `unlisted <n>` for one `usage.accounts` does not list, and `until` null while the pace stays on.
-  A future time in the file that `until` does not name is a person's, written by hand, and stands as it is; a floor kept for one account is outside this forecast.
+  A future time in the file that `until` does not name is a person's, written by hand, and stands as it is; the forecast takes no account floor: no code holds an account floor today, and Ops' usage watch holds any floor the owner sets.
 
 ## Ops switches
 
