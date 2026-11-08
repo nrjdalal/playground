@@ -37,7 +37,7 @@ So a session that restarts, or a new reviewer taking over, picks up exactly wher
 When the shared GraphQL budget is spent it reads the same facts over REST and says so, marking each review thread's resolution unknown rather than reading it as settled.
 The same script tells a base merge apart from new work: any commit of the PR's own in the push is new work, and otherwise it compares the PR's own changed lines on each side of the push, because a range diff across a merge of `canary` shows `canary`'s work as the PR's; a conflict resolved by hand that kept both sides reads as a base merge too.
 Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all afternoon spends none of the GraphQL budget every session shares.
-While the head's `Audit, Lint, and Build` and `test` checks still run, its `checks` waiter takes the next push's waiter's place: it also ends once both conclude at the head, so a check that goes red and clears on a re-run, which moves no head, is still seen.
+While the head's `Audit, Lint, and Build` and `test` checks are not both green, its `checks` waiter takes the next push's waiter's place: it also ends once both conclude at the head, and started again after a red it waits for that check's re-run, so a red that clears on a re-run, which moves no head, is still seen.
 
 ## It's working if
 
@@ -83,7 +83,7 @@ While the head's `Audit, Lint, and Build` and `test` checks still run, its `chec
   Each patched test file outside `CLOCK_EXEMPT` also runs once under `CLOCK_AHEAD_DAYS=30`, since a file's mtime and a child process stay on the real clock, and an exempt file's run counts as a no-op, not a pass.
   A patch to a promoted skill's `SKILL.md` also greps each changed term over that skill's docs page and every README that lists it, and patches every hit.
 - When a round leaves only fixes the next push can close, the reviewer asks the worker to merge canary in with that push, so the 5/5 candidate scores a head canary has not moved past.
-- After a compaction, a resume, or a notice that background tasks did not finish before the previous session ended, the reviewer runs `state.ts pr` for each PR it holds and re-arms every `state.ts wait` with none running, since an account flip kills the waiters with no notice.
+- After a compaction, a resume, or a notice that background tasks did not finish before the previous session ended, the reviewer runs `state.ts pr` for each PR it holds and re-arms a waiter wherever none is running, `state.ts checks` on a head whose two gate checks are not both green and `state.ts wait` on the rest, since an account flip kills the waiters with no notice.
 - A finding that asks for a behaviour states the behaviour wanted, not only the defect.
 - On a collaborator's org PR whose review ask came to you, the session that posts your review turns at once to the work org's extension (triage-and-implement's PR.md) for what follows a review you were asked for.
 - A reviewer agrees with an author's reply only once it has reproduced the author's reason with one command, named in its reply.

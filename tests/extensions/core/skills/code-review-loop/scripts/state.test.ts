@@ -489,7 +489,14 @@ test("05o a second close after a reopen is read once more too", async () => {
   expect(reads).toBe(4)
 })
 
-const run = (name: string, conclusion: string | null, id = 1) => ({ conclusion, id, name })
+// A concluded run completes at 1000100 s by default, after the waiter's start at 1000000 s.
+const at = (s: number): string => new Date(s * 1000).toISOString()
+const run = (name: string, conclusion: string | null, id = 1, done = 1000100) => ({
+  completed_at: conclusion ? at(done) : null,
+  conclusion,
+  id,
+  name,
+})
 const runs = (...list: object[]): string => JSON.stringify(list)
 const AUDIT = "Audit, Lint, and Build"
 
@@ -497,6 +504,7 @@ const AUDIT = "Audit, Lint, and Build"
 const checksThrough = async (
   pulls: (string | state.Called)[],
   checkRuns: (string | state.Called)[],
+  now = 1000000,
 ): Promise<[string, number[], string[]]> => {
   const naps: number[] = []
   const paths: string[] = []
@@ -521,7 +529,7 @@ const checksThrough = async (
         if (naps.length > 20) throw new Error("the wait never returned")
         return Promise.resolve()
       }
-      state.io.time = () => 1000000
+      state.io.time = () => now
       const lines: string[] = []
       const realLog = console.log
       const realWrite = process.stderr.write.bind(process.stderr)
@@ -566,6 +574,39 @@ test("05q checks: both checks concluded, one red, end the wait at once, since re
   )
   expect(out).toBe(`CHECK success ${AUDIT}\nCHECK failure test`)
   expect(naps).toEqual([])
+})
+
+test("05w checks: a red that concludes after the other check is reported, and the next waiter sees its re-run clear (#1410)", async () => {
+  const red = runs(run("test", "success", 1, 1000100), run(AUDIT, "failure", 1, 1000400))
+  const [first, firstNaps] = await checksThrough(
+    [still],
+    [runs(run("test", "success"), run(AUDIT, null)), red],
+  )
+  expect(first).toBe(`CHECK failure ${AUDIT}\nCHECK success test`)
+  expect(firstNaps).toEqual([300])
+  const [next, naps] = await checksThrough(
+    [still],
+    [
+      red,
+      runs(run("test", "success"), run(AUDIT, null, 2)),
+      runs(run("test", "success"), run(AUDIT, "success", 2, 1002000)),
+    ],
+    1000500,
+  )
+  expect(next).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+  expect(naps).toEqual([300, 300])
+})
+
+test("05x checks: a cancelled run from before the waiter started is waited past too (#1410)", async () => {
+  const [out, naps] = await checksThrough(
+    [still],
+    [
+      runs(run("test", "cancelled", 1, 999000), run(AUDIT, "success")),
+      runs(run("test", "success", 2), run(AUDIT, "success")),
+    ],
+  )
+  expect(out).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+  expect(naps).toEqual([300])
 })
 
 test("05r checks: a gate check with no run yet, or two runs of one name, waits on the newest (#1410)", async () => {
