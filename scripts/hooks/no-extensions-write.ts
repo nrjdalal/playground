@@ -68,7 +68,7 @@ const PRIVACY_ROUTE =
 const refuse = (what: string) =>
   `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`
 
-// A refusal of a command that shows no write, no redirect on the typed line that writes and no writer or remover, which the reader most often reaches by reading text as a path, so it routes to the lead as a likely false positive
+// A refusal that likely names no write (`unwritten`), which the reader most often reaches by reading text as a path, so it routes to the lead as a likely false positive
 const refuseUnwritten = (what: string) =>
   `no-extensions-write hook refuses ${what}: every guard reads its list and policy.json from there, so a session's write would change what a guard allows. If this command writes nothing, report it to your lead as a false positive.`
 
@@ -1012,6 +1012,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   let rootLine = false
   let patterns = new Set<Command>()
   let lineWrites = false
+  // how deep the walk is in a line read out of a quoted text (runsOf), whose commands no one typed
+  let textDepth = 0
   // where each scope's variables were read to for their lines, and judged to for each cwd and remover, so each variable is read once rather than once a command
   type Cursors = WeakMap<Map<string, Text>, Map<string, number>>
   const varsRead: Cursors = new WeakMap()
@@ -1026,6 +1028,12 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       return vars.get(k) ?? []
     })
   }
+  // a refusal that likely names no write: no writing redirect on the typed line, a word read as a folder above the root or a glob there rather than as the root's own path, and a command read out of a quoted text or a reader that writes nothing as called
+  const unwritten = (named: string, cmd: Command, env: Env) =>
+    !lineWrites &&
+    !named.endsWith(" in its text") &&
+    !inRoot(named) &&
+    (textDepth > 0 || READERS.has(program(parse(cmd).name)) || narrow(cmd, env))
   const visit: Visit = async (cmd: Command, parsed, env) => {
     // a case pattern is matched, never run, so its words are no path and no program; a substitution in it is its own command
     if (patterns.has(cmd)) return
@@ -1138,7 +1146,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
+      textDepth++
+      const verdict = await run(
+        lex(line, env.known),
+        { ...env, vars: new Map() },
+        visit,
+        true,
+      ).finally(() => textDepth--)
       if (verdict) return verdict
     }
     // a quiet commit's message is text git never runs, a gated call it names included, and an in-place sed's script is text sed reads as a program of its own
@@ -1224,9 +1238,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         if (text && !texts(word).some((t) => holds(t.value, here))) continue
         const named = names(word, here, remover, literal)
         if (named)
-          return (lineWrites || remover || WRITERS.has(tool) ? refuse : refuseUnwritten)(
-            `${verb} on ${named}`,
-          )
+          return (unwritten(named, cmd, here) ? refuseUnwritten : refuse)(`${verb} on ${named}`)
       }
       if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`)

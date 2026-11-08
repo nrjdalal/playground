@@ -8247,6 +8247,7 @@ async function inspect(raw, environment, unknown = false) {
   let rootLine = false;
   let patterns = new Set;
   let lineWrites = false;
+  let textDepth = 0;
   const varsRead = new WeakMap;
   const varsJudged = new WeakMap;
   const since = (store, vars, key) => {
@@ -8259,6 +8260,7 @@ async function inspect(raw, environment, unknown = false) {
       return vars.get(k) ?? [];
     });
   };
+  const unwritten = (named, cmd, env) => !lineWrites && !named.endsWith(" in its text") && !inRoot(named) && (textDepth > 0 || READERS.has(program(parse3(cmd).name)) || narrow(cmd, env));
   const visit = async (cmd, parsed, env) => {
     if (patterns.has(cmd))
       return;
@@ -8325,7 +8327,8 @@ async function inspect(raw, environment, unknown = false) {
       if (seen.has(line))
         continue;
       seen.add(line);
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map }, visit, true);
+      textDepth++;
+      const verdict = await run(lex(line, env.known), { ...env, vars: new Map }, visit, true).finally(() => textDepth--);
       if (verdict)
         return verdict;
     }
@@ -8379,7 +8382,7 @@ async function inspect(raw, environment, unknown = false) {
           continue;
         const named = names(word, here, remover, literal);
         if (named)
-          return (lineWrites || remover || WRITERS.has(tool) ? refuse : refuseUnwritten)(`${verb} on ${named}`);
+          return (unwritten(named, cmd, here) ? refuseUnwritten : refuse)(`${verb} on ${named}`);
       }
       if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`);
