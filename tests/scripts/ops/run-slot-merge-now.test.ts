@@ -10,13 +10,13 @@ setDefaultTimeout(60_000)
 const NOTE =
   /^run-slot\.sh: bun run pr:(merge|train) runs at once, outside the queue: a merge carries its own gates/gm
 
-// A machine whose one CPU slot a big run holds at 30% idle, so a medium run waits, and whose bun touches its last word for `bun run pr:merge` and `bun run pr:train`, as a merge that lands
+// A machine whose one CPU slot a big run holds at 30% idle, so a medium run waits, and whose bun touches its last word for `bun run pr:merge` and `bun run pr:train`, as a merge that lands, and for the direct pr-merge/cli.ts form, which the script expands to as its second step
 const busy = () => {
   const m = machine({ idle: 30 })
   renameSync(join(m.bin, "bun"), join(m.bin, "bun-machine"))
   writeFileSync(
     join(m.bin, "bun"),
-    `#!/bin/bash\ncase "$2" in pr:merge|pr:train) touch "\${@: -1}"; exit 0 ;; esac\nexec ${join(m.bin, "bun-machine")} "$@"\n`,
+    `#!/bin/bash\nfor a in "$@"; do case "$a" in pr:merge|pr:train|*pr-merge/cli.ts) touch "\${@: -1}"; exit 0 ;; esac; done\nexec ${join(m.bin, "bun-machine")} "$@"\n`,
   )
   chmodSync(join(m.bin, "bun"), 0o755)
   m.hold("run-slot", 3, "big")
@@ -84,5 +84,68 @@ describe("bun run pr:merge and pr:train through run-slot", () => {
     expect(await p.exited).toBe(1)
     await read
     expect([err.match(NOTE), existsSync(marker)]).toEqual([null, false])
+  })
+})
+
+// 7 Nov: env NODE_ENV=production SKIP_ENV_VALIDATION=true bun run pr:merge 1418 asked at 14:35:13Z and again 15:13:13Z, no start line either time, so the first waited at least the 38 minutes between the asks; the script words are the merge, only prefixed
+describe("a merge behind an env prefix or bun's own flags runs at once beside a held slot", () => {
+  for (const command of [
+    ["env", "NODE_ENV=production", "SKIP_ENV_VALIDATION=true", "bun", "run", "pr:merge", "5"],
+    ["env", "bun", "run", "pr:train", "ready"],
+    ["bun", "--no-env-file", "packages/scripts/src/pr-merge/cli.ts", "5"],
+    ["bun", "--cwd", "/tmp/x", "run", "pr:merge", "5"],
+    ["bun", "--cwd=/tmp/x", "--silent", "run", "pr:merge", "5"],
+  ])
+    test(`${command.join(" ")} runs at once, with the one-line note`, async () => {
+      const m = busy()
+      const run = m.start("worker-x", { RUN_SLOT_SIZE: "medium" }, undefined, command)
+      const said = await run.saw(new RegExp(`${NOTE.source}|${WAITING.source}`, "gm"))
+      const queued = await run.saw(WAITING)
+      if (queued) await stop(run.p)
+      expect([said, queued]).toEqual([true, false])
+      expect(await run.saw(NOTE)).toBe(true)
+      expect(await run.ran()).toBe(true)
+    })
+
+  test("a piped call with the pipe outside run-slot runs at once", async () => {
+    const m = busy()
+    const marker = join(m.root, "piped-merge")
+    const p = Bun.spawn(
+      ["bash", "-c", `bash ${SCRIPT} worker-x -- bun run pr:merge 5 ${marker} | tail -1`],
+      { cwd: m.root, env: m.env(), stderr: "pipe" },
+    )
+    let err = ""
+    const read = (async () => {
+      const text = new TextDecoder()
+      for await (const chunk of p.stderr) err += text.decode(chunk, { stream: true })
+    })()
+    while (!existsSync(marker) && p.exitCode === null) await Bun.sleep(20)
+    expect(existsSync(marker)).toBe(true)
+    expect(err.match(WAITING)).toBe(null)
+    expect(err.match(NOTE)).not.toBe(null)
+    await p.exited
+    await read
+  })
+
+  test("env FOO=1 bun run test still queues", async () => {
+    const m = busy()
+    const run = m.start("worker-x", { RUN_SLOT_SIZE: "medium" }, undefined, [
+      "env",
+      "FOO=1",
+      "bun",
+      "run",
+      "test",
+    ])
+    expect(await run.waits()).toBe(true)
+  })
+
+  test("the inline chain 7 Nov queued, bash -lc with pr:merge inside, still queues", async () => {
+    const m = busy()
+    const run = m.start("worker-x", { RUN_SLOT_SIZE: "medium" }, undefined, [
+      "bash",
+      "-lc",
+      `cd ${m.root} && bun run pr:merge 5 2>&1 | tail -30`,
+    ])
+    expect(await run.waits()).toBe(true)
   })
 })
