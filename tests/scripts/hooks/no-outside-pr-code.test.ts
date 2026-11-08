@@ -517,6 +517,13 @@ describe("no-outside-pr-code's live lookup", () => {
     expect(await live(environment).author("acme-owner/widgets", 501)).toEqual(pr)
     expect(await live(environment).author("acme-owner/widgets", 509)).toBeUndefined()
   })
+
+  test('a script\'s runner is read from its first line, and one it cannot open reads as "", held to the main checkout', async () => {
+    const script = join(scratch, "state.ts")
+    await Bun.write(script, "#!/usr/bin/env bun\nconsole.log(1)\n")
+    expect(live(environment).runner(script)).toBe("bun")
+    expect(live(environment).runner(join(scratch, "no-such-script"))).toBe("")
+  })
 })
 
 describe("runnerOf names the program a shebang line runs", () => {
