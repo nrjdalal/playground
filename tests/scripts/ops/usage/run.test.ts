@@ -578,3 +578,34 @@ test("run.py's probe marks a full week limited until its weekReset, with no stat
     weekReset: 4102444800,
   })
 })
+
+// #1587: factory_reading returns none, and does not raise, when the factory names an account usage.accounts no longer lists. The accounts list, the reading, the probe and the Keychain are all fake, so no request leaves the Mac
+const unlistedHarness = `
+import json, os, sys, time, types
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+now = time.time()
+ns["probe"] = lambda e: None
+ns["subprocess"] = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
+flip = {"factory": "gone@example.test", "seen": {"gone@example.test": {"at": now, "week": 100, "weekReset": now + 2 * 86400}}}
+out = {}
+try:
+    data = ns["factory_reading"]({"account": "mine@example.test", "rate_limits": {}}, flip, ["mine@example.test"])
+    if data:
+        out["factory"] = data["account"]
+except Exception as e:
+    out["error"] = f"{type(e).__name__}: {e}"
+print(json.dumps(out))
+`
+
+test("factory_reading returns none, and does not raise, when the factory names an account usage.accounts no longer lists (#1587)", () => {
+  const home = join(scratch, "factory-unlisted")
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(["python3", "-I", "-c", unlistedHarness, script], { env })
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString())).toEqual({})
+})
