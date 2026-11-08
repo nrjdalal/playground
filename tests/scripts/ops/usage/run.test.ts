@@ -634,6 +634,31 @@ test("run.py's probe marks a full week limited until its weekReset, with no stat
   })
 })
 
+// #1587: a full-week reading freezes its 5-hour figure, so one whose window has reset counts as none in use and no slow-spawns alert rides it
+const fiveHarness = `
+import json, os, sys, time, types
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+now = time.time()
+s = {"at": now - 3000, "five": 95, "fiveReset": now - 7200, "week": 100, "weekReset": now + 2 * 86400, "limitedUntil": now + 2 * 86400}
+print(json.dumps(ns["probed"]("full@example.org", s, {"account": "mine@example.org", "rate_limits": {}}, now)))
+`
+
+test("a frozen 5-hour figure past its reset counts as none in use, so no slow-spawns alert rides it (#1587)", () => {
+  const home = join(scratch, "five-past-reset")
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(["python3", "-I", "-c", fiveHarness, script], { env })
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString()).rate_limits.five_hour).toEqual({
+    resets_at: expect.any(Number),
+    used_percentage: 0,
+  })
+})
+
 // #1587: factory_reading against a fake accounts list, its reading 42 minutes old with a week under 100, so a none can only come from the list check and not from freshness. The probe and the Keychain are stubbed, so no request leaves the Mac
 const unlistedHarness = `
 import json, os, sys, time, types
