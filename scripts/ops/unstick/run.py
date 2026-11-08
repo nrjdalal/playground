@@ -1140,8 +1140,10 @@ def cycle(state):
         stuck = slot_stuck(state, now_t)
         if stuck:
             alerts.append(stuck)
-            if not state["slot_free"].get("told"):
-                state["slot_free"]["told"] = True
+            # one send per line kind in an episode, the no-fit and could-take lines each once, a kind change sending again
+            told = state["slot_free"].setdefault("told_cases", [])
+            if stuck["case"] not in told:
+                told.append(stuck["case"])
                 notify(stuck["line"], to="builder")
     except Exception as e:
         log(f"slot-stuck check failed: {type(e).__name__}: {e}")
@@ -1237,8 +1239,7 @@ def slot_stuck(state, now_t):
         return None
     can = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "can-take", "run-slot", head], env=env, capture_output=True, timeout=30)
     if can.returncode != 0:
-        # issue 1416: the units rule holding the queue beside a free slot is as designed, but the 7 Nov window (13:03 to 13:10Z) sat
-        # unreported, so the alert names the free slot no waiter fits, with the head's own ticket units and the units each holder keeps
+        # issue 1416: the units rule beside a free slot is as designed, so the alert only names it: the slot, the head's units, each holder's
         try:
             t = open(os.path.join(OPS, "run-slot.waiters", head)).read().split()
             units = t[2] if len(t) > 2 and t[2] in ("1", "2", "3") else ""
@@ -1261,9 +1262,9 @@ def slot_stuck(state, now_t):
             + (f"its {units} units fit no open slot" if units else "its units fit no open slot")
             + (f", {', '.join(holds)}" if holds else ", no units held")
         )
-        return {"at": now(), "kind": "slot-stuck", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
+        return {"at": now(), "kind": "slot-stuck", "case": "no-fit", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
     line = f"run-slot free for {int(now_t - sf['since'])}s while {first[2]} (pid {first[1]}) heads the queue, could take it and takes nothing"
-    return {"at": now(), "kind": "slot-stuck", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
+    return {"at": now(), "kind": "slot-stuck", "case": "could-take", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
 
 
 # whether run-slot.runs.log shows run-slot taken at or after since, a sample of the window that found it held between this job's own reads, 2 minutes apart
