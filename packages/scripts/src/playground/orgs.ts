@@ -227,6 +227,17 @@ export const resolveFor = async (
   return { plan, ...resolved }
 }
 
+// Whether the session's checkout already lists this very skill in its own .claude/skills, which Claude Code shows by its bare name, so the plugin's copy would list it a second time.
+const listedBy = (repo: string, winner: Winner): boolean => {
+  try {
+    return readFileSync(join(repo, ".claude", "skills", winner.name, "SKILL.md")).equals(
+      readFileSync(join(winner.dir, "SKILL.md")),
+    )
+  } catch {
+    return false
+  }
+}
+
 const resolveSet = async (
   io: OrgsIo,
   repo?: string,
@@ -234,7 +245,8 @@ const resolveSet = async (
   const resolved = await resolveFor(io, repo)
   if (resolved.refusal !== undefined) return { refusal: resolved.refusal }
   for (const line of resolved.left) io.err(line)
-  return { plugin: writePlugin(io.data, resolved.plan.own ?? "home", resolved.winners) }
+  const winners = repo ? resolved.winners.filter((w) => !listedBy(repo, w)) : resolved.winners
+  return { plugin: writePlugin(io.data, resolved.plan.own ?? "home", winners) }
 }
 
 // A path as written and as resolved, so a checkout reached through a symlinked folder (/tmp, /private/tmp) still matches.

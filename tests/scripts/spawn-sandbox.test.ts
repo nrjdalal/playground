@@ -145,12 +145,12 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
     ["a runner", ["runner", "runner-calm-heron", "b.md"], "factory-settings-400k.json"],
     [
       "a reviewer",
-      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"],
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
       "factory-settings-400k.json",
     ],
     [
       "a tester",
-      ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"],
+      ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1"],
       "factory-settings-400k.json",
     ],
     [

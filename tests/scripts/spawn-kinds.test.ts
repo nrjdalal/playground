@@ -38,13 +38,13 @@ describe("every session compacts in one 400k window (#1805)", () => {
     ["a runner", ["runner", "runner-calm-heron", "b.md"], "runner-calm-heron", undefined],
     [
       "a reviewer",
-      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"],
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
       "reviewer-x",
       undefined,
     ],
     [
       "a tester",
-      ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"],
+      ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1"],
       "tester-x",
       undefined,
     ],
@@ -98,10 +98,17 @@ describe("every session compacts in one 400k window (#1805)", () => {
     ["a lead by its roster kind", "x7mh4d-builder", "builder"],
     ["the dispatcher", "dispatcher", "dispatcher"],
   ])("%s resumes with the 400k window", async (_, name, kind) => {
-    const r = await spawn(["resume", name, root, id], [], { ROSTER_JSON: roster }, undefined, {
-      name,
-      backend: "claude",
-    })
+    const pr = /^(reviewer|tester)-/.test(name) ? ["--pr", "1"] : []
+    const r = await spawn(
+      ["resume", name, root, id, ...pr],
+      [],
+      { ROSTER_JSON: roster },
+      undefined,
+      {
+        name,
+        backend: "claude",
+      },
+    )
     expect(r.code).toBe(0)
     expect(launchAfterRm(r)).toContain(` --resume ${id} `)
     expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, fileOf(name, kind))} `)
@@ -228,20 +235,23 @@ describe("the backend pin carries a start onto its resume", () => {
   })
 
   test("a checker with no pin resumes on --backend claude and heals the record", async () => {
-    const r = await spawn(["resume", "reviewer-nopin", root, "--backend", "claude"], [])
+    const r = await spawn(
+      ["resume", "reviewer-nopin", root, "--backend", "claude", "--pr", "1"],
+      [],
+    )
     expect(r.code).toBe(0)
     expect(pinOf(r, "reviewer-nopin")).toBe("claude")
   })
 
   test("a checker takes no --backend glm", async () => {
-    const r = await spawn(["resume", "reviewer-nopin", root, "--backend", "glm"], [])
+    const r = await spawn(["resume", "reviewer-nopin", root, "--backend", "glm", "--pr", "1"], [])
     expect(r.code).not.toBe(0)
     expect(placing(r)).toEqual([])
     expect(r.err).toContain("a reviewer runs on Claude, so it takes no --backend glm")
   })
 
   test("a checker's no-pin refusal names --backend claude alone", async () => {
-    const r = await spawn(["resume", "reviewer-nopin", root], [])
+    const r = await spawn(["resume", "reviewer-nopin", root, "--pr", "1"], [])
     expect(r.code).not.toBe(0)
     expect(placing(r)).toEqual([])
     expect(r.err).toContain("Resume it with --backend claude")
