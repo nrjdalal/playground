@@ -1129,6 +1129,20 @@ function heredocs(lx: Lexer, pending: Pending[], nested: boolean): void {
     }
     const body = lines.map((line) => `${line}\n`).join("")
     doc.redirect.body = doc.quoted ? { value: body } : expandHeredoc(body)
+    if (!doc.quoted) expansions(lx, body)
+  }
+}
+
+// Lexes the commands the shell runs while it reads an unquoted heredoc body: each `$(…)`, backquoted command and `${…}` or `$((…))` holding one, through the word lexer's own dollar() and backtick(), so they join the line's commands as a word's substitution does, whatever the heredoc strips or feeds; a backslash keeps the character after it (a `\`, `$`, backquote or line break) as text, and a quote is text in a body.
+function expansions(lx: Lexer, body: string): void {
+  const sub = { ...lx, i: 0, src: body }
+  while (sub.i < body.length) {
+    tick()
+    const c = body[sub.i]
+    if (c === "\\") sub.i += 2
+    else if (c === "$") dollar(sub)
+    else if (c === "`") backtick(sub)
+    else sub.i++
   }
 }
 

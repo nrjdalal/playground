@@ -1094,6 +1094,23 @@ function heredocs(lx, pending, nested) {
     const body = lines.map((line) => `${line}
 `).join("");
     doc.redirect.body = doc.quoted ? { value: body } : expandHeredoc(body);
+    if (!doc.quoted)
+      expansions(lx, body);
+  }
+}
+function expansions(lx, body) {
+  const sub = { ...lx, i: 0, src: body };
+  while (sub.i < body.length) {
+    tick();
+    const c = body[sub.i];
+    if (c === "\\")
+      sub.i += 2;
+    else if (c === "$")
+      dollar(sub);
+    else if (c === "`")
+      backtick(sub);
+    else
+      sub.i++;
   }
 }
 function expandHeredoc(body) {

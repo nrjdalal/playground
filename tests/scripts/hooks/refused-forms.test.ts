@@ -418,7 +418,7 @@ describe("each refusal of a #1198 row names the eval and its fix", () => {
   )
 })
 
-// a call the shell runs when it reads an unquoted heredoc's body is judged as one typed on the line, so its refusal names the call itself: the settings set of a guard key, or the rm on the root
+// a call the shell runs when it reads an unquoted heredoc's body is judged as one typed on the line, so its refusal names the call itself: the settings set of a guard key, or the rm on the root, which from a folder above the root reads as the root in its text, as a typed rm does
 describe("each no-extensions-write refusal of a #1428 row names the call as one typed on the line does", () => {
   test.each(
     CASES.filter(
@@ -427,7 +427,7 @@ describe("each no-extensions-write refusal of a #1428 row names the call as one 
   )("%s", async (_, c) => {
     const at = GUARDS[c.guard].folders[c.folder] as [string, string]
     expect(await GUARDS[c.guard].run(input(c.call, at[0]), at[1])).toMatch(
-      /playground settings set of live\.branch, a key a guard reads|refuses rm on \S+\/extensions:/,
+      /playground settings set of live\.branch, a key a guard reads|refuses rm on \S+\/extensions( in its text)?:/,
     )
   })
 })
