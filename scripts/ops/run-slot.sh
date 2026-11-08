@@ -2205,11 +2205,14 @@ while :; do
     [ "$fw2" = "${TICKET##*/}" ] || S2=0
   fi
   # the oldest waiter names who goes next, "<first_waiter> <first_waiter s2> <prio_first>", under the priority pick too, so a waiter its look passed over, the
-  # pick's next ticket included once its first has gone, looks again at once (its poll reads run-slot.next)
+  # pick's next ticket included once its first has gone, looks again at once (its poll reads run-slot.next); each write is a `next` line in run-slot.runs.log,
+  # so a window where head named a waiter the line passed over reads back who the oldest named and when (issue 1477)
   if [ -n "$TICKET" ] && oldest_is_me; then
     pf=; [ -e "$OPS/run-slot.priority" ] || [ -e "$OPS/run-slot.focus" ] && pf=$(prio_first)
     nx=; read -r nx 2>/dev/null < "$NEXTF"
-    [ "$nx" = "${fw:--} ${fw2:--} ${pf:--}" ] || printf '%s\n' "${fw:--} ${fw2:--} ${pf:--}" > "$NEXTF" 2>/dev/null
+    if [ "$nx" != "${fw:--} ${fw2:--} ${pf:--}" ]; then
+      printf '%s\n' "${fw:--} ${fw2:--} ${pf:--}" > "$NEXTF" 2>/dev/null && rlog next "${fw:--} ${fw2:--} ${pf:--}"
+    fi
   fi
   # a waiter that comes to the head keeps its look's marks, which look_mark took before the look's reads
   LOOKER=0

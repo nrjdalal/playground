@@ -544,11 +544,11 @@ describe("the runner host", () => {
 test("run-slot.runs.log has a Mac run's ask, start and end", async () => {
   const m = machine()
   expect(await m.runs("worker-x")).toBe(true)
-  // a lanes line records the gauges as the run first reads them, beside its own three
+  // a lanes line records the gauges as the run first reads them, and a next line the oldest waiter's run-slot.next write, beside the run's own three
   const log = readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
     .trim()
     .split("\n")
-    .filter((line) => !/^\S+ lanes /.test(line))
+    .filter((line) => !/^\S+ (lanes|next) /.test(line))
   expect(log).toHaveLength(3)
   expect(log[0]).toMatch(/Z ask worker-x \d+ touch /)
   expect(log[1]).toMatch(/Z start worker-x \d+ run-slot waited=\d+s$/)
