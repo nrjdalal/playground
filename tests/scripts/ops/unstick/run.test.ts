@@ -29,6 +29,8 @@ spec = importlib.util.spec_from_file_location("run", sys.argv[1])
 run = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(run)
 call = json.loads(sys.stdin.read())
+if "at" in call:
+    run.time.time = lambda: call["at"]
 notified = []
 run.notify = lambda text, to="dispatcher": notified.append([to, text])
 paths = [run.CODE, run.LW, run.OPS, run.HERE]
@@ -52,7 +54,7 @@ const scratch = (): string => {
 const drive = async (
   env: Record<string, string>,
   config: string,
-  body: { args: unknown[]; fn: string; notified?: true; state?: true },
+  body: { args: unknown[]; at?: number; fn: string; notified?: true; state?: true },
 ): Promise<unknown> => {
   const proc = Bun.spawn([...PYTHON, "-I", "-c", DRIVER, RUN_PY], {
     env: {
@@ -1782,10 +1784,18 @@ describe("the capped and ending account lines (#1457)", () => {
 
   test("an ending account's line goes once per end: the next tick and the next hour send nothing, a new end sends again (#1457)", async () => {
     const config = machine(40, 55, new Date(Date.now() + 12 * 3_600_000).toISOString())
-    const sends = async () => (await notified(config, "ending_alert")).notified.length
+    const sends = async (hours = 0) =>
+      (
+        (await drive({}, config, {
+          args: [],
+          at: Date.now() / 1000 + hours * 3600,
+          fn: "ending_alert",
+          notified: true,
+        })) as { notified: unknown[] }
+      ).notified.length
     expect(await sends()).toBe(1)
     expect(await sends()).toBe(0)
-    expect(await sends()).toBe(0)
+    expect(await sends(1)).toBe(0)
     storeWith(join(config, "playground"), {}, {
       "usage.accounts": [
         {

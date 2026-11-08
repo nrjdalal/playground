@@ -1040,7 +1040,7 @@ def cycle(state):
                                "since": prev.get("since", now_t), "alerted": prev.get("alerted", 0), "surface": s["surface_id"], "workspace": s["workspace_id"]}
                 if not blocks[key]["alerted"] and not held_for_move("usage-limit-stuck", mover):
                     blocks[key]["alerted"] = now_t
-                    limit_alert(name, blocks[key]["line"], s.get("transcript_path"))
+                    notify(f"{name} is blocked on a usage-limit-stuck prompt: {blocks[key]['line']}", to=alert_to(name, s.get("transcript_path")))
             continue
         key = f"{s['surface_id']}:{kind}"
         prev = state["blocks"].get(key, {})
@@ -1109,7 +1109,7 @@ def cycle(state):
     try:
         alerts += capped_alert(
             [name_of(s) for s in live],
-            limited={b.get("account") for b in blocks.values() if b["kind"] in LIMIT_KINDS} - {None},
+            limited={b.get("account") for b in blocks.values() if b["kind"] == "usage-limit"} - {None},
         )
     except Exception as e:
         log(f"capped account check failed: {type(e).__name__}: {e}")
