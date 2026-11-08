@@ -1554,12 +1554,14 @@ run.manager_kind_of_name = lambda name: None
 run.named_kind = lambda name: None
 run.quiet_for = lambda path, now_t: 3600
 run.screen = lambda s: ["You've hit your weekly limit"]
-run.read_block = lambda lines, s: (sys.argv[2], "You've hit your weekly limit", None)
+stuck = sys.argv[2] == "usage-limit-stuck"
+run.read_block = lambda lines, s: (None, None, ("You've hit your weekly limit", 1800)) if stuck else (sys.argv[2], "You've hit your weekly limit", None)
 run.session_account = lambda name: "acct-spent"
 run.moving = lambda now_t=None: None
 for fn in ("stall",):
     setattr(run, fn, lambda *a, **k: None)
-for fn in ("capped_alert", "ending_alert", "api_stop_alerts", "slot_idle_alerts", "docker_check", "memory_files", "heavy_jobs", "slot_alerts"):
+run.capped_alert = lambda names, limited=None: sent.append(["limited", ",".join(sorted(limited or []))]) or []
+for fn in ("ending_alert", "api_stop_alerts", "slot_idle_alerts", "docker_check", "memory_files", "heavy_jobs", "slot_alerts"):
     setattr(run, fn, lambda *a, **k: [])
 run.heavy_cap = lambda: 1
 run.slot_stuck = lambda *a, **k: None
@@ -1618,6 +1620,19 @@ print(json.dumps(sent))
         "1 session blocked on the usage limit. Nothing blocked for another reason. On the limit: worker-a",
       )
     }
+  })
+
+  test("a limit dialog still showing past its reset tells its manager once and never caps its account; a live one caps it (#1457)", async () => {
+    const accounts = { "acct-spent": { week: 3 } }
+    const limitedBy = (sent: [string, string][]) => [
+      ...new Set(sent.filter(([who]) => who === "limited").map(([, accts]) => accts)),
+    ]
+    const stuck = await replay(accounts, "usage-limit-stuck")
+    expect(limitedBy(stuck)).toEqual([""])
+    const told = stuck.filter(([who]) => who === "lead").map(([, text]) => text)
+    expect(told).toHaveLength(1)
+    expect(told[0]).toContain("nudge it")
+    expect(limitedBy(await replay(accounts))).toEqual(["acct-spent"])
   })
 
   test("most_room reads usage.json's accounts map: a week past its reset as 0, never the skipped account", async () => {
