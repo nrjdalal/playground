@@ -33,5 +33,6 @@ describe(".agents/decisions.md, the decisions register", () => {
     expect(linkHolds(".agents/dashboard/messages.md")).toBe(true)
     expect(linkHolds("extensions/core/rules/no-such-rule.md")).toBe(false)
     expect(linkHolds("../outside.md")).toBe(false)
+    expect(linkHolds("/AGENTS.md")).toBe(false)
   })
 })
