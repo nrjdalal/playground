@@ -1112,3 +1112,16 @@ test("07z a file that was last in the old diff and is not last in the new one re
     state.deltaKind(file("a.ts", "x") + file("b.ts", "y"), file("b.ts", "y") + file("c.ts", "z")),
   ).toEqual(["OWN", ["a.ts", "c.ts"]])
 })
+
+test("10r a dotfile or a dotted folder keeps its whole name as its stem, so its spelling is never empty", () => {
+  expect(state.stemOf(".gitignore")).toBe(".gitignore")
+  expect(state.stemOf(".github/CODEOWNERS")).toBe(".github/CODEOWNERS")
+  expect(state.stemOf("packages/x.y/README")).toBe("packages/x.y/README")
+  expect(state.stemOf(".env.example")).toBe(".env")
+  expect(state.stemOf("scripts/spawn.sh")).toBe("scripts/spawn")
+  expect(state.spellings(".gitignore")).toEqual([".gitignore"])
+  expect([...state.mirrors(".gitignore")]).toEqual([
+    "tests/.gitignore.test.ts",
+    "tests/.gitignore.test.tsx",
+  ])
+})

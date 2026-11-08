@@ -547,15 +547,22 @@ export const isTest = (path: string, python: boolean): boolean => {
   )
 }
 
+// A path with its last name's extension cut, so a dotfile (.gitignore) or a dotted folder keeps its whole name
+export const stemOf = (path: string): string => {
+  const start = path.lastIndexOf("/") + 1
+  const dot = path.lastIndexOf(".")
+  return dot > start && /[^.]/.test(path.slice(start, dot)) ? path.slice(0, dot) : path
+}
+
 export const mirrors = (path: string): Set<string> => {
-  const stem = path.replace(/\.[^.]*$/, "")
+  const stem = stemOf(path)
   return new Set([`tests/${stem}.test.ts`, `tests/${stem}.test.tsx`])
 }
 
 const QUOTES = ['"', "'", "`"]
 
 export const spellings = (path: string): string[] => {
-  const stem = path.replace(/\.[^.]*$/, "")
+  const stem = stemOf(path)
   const ext = path.slice(stem.length)
   const out = [stem]
   for (const pkg of ["api/hono/", "web/next/"]) {
@@ -573,7 +580,7 @@ export const spellings = (path: string): string[] => {
 }
 
 export const spelledNear = (text: string, path: string, test: string): boolean => {
-  const stem = path.replace(/\.[^.]*$/, "")
+  const stem = stemOf(path)
   const folder = dirname(test)
   const rel = relative(folder, stem)
   const names = [rel.startsWith("../") ? rel : `./${rel}`]
@@ -678,7 +685,7 @@ export const cmdTouchedTests = (clone: string, base: string, head: string): void
         clone,
         head,
         "-F",
-        changed.map((f) => basename(f.replace(/\.[^.]*$/, ""))),
+        changed.map((f) => basename(stemOf(f))),
       ),
     ].filter((t) => tests.has(t)),
   )
