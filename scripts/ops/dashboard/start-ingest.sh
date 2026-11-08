@@ -5,6 +5,7 @@
 # It runs in the dashboard's checkout, the supervisor's working directory.
 unset NODE_ENV SKIP_ENV_VALIDATION
 # The data folder, as packages/env/src/data-dir.ts resolves it: PLAYGROUND_DATA_DIR, else ~/.playground
+case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "start-ingest.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 DATA=${PLAYGROUND_DATA_DIR:-$HOME/.playground}
 L="$DATA/dashboard-ingest.log"; mkdir -p "$(dirname "$L")"
 bun run ingest --follow >> "$L" 2>&1; code=$?
