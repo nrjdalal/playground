@@ -112,8 +112,15 @@ var SEATLESS = new Set(["ended", "parked"]);
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
-import { join, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
+import { isAbsolute, join, resolve } from "path";
+var dataDirOf = (env, home = env.HOME || homedir()) => {
+  const named = env.PLAYGROUND_DATA_DIR;
+  if (!named)
+    return join(home, ".playground");
+  if (!isAbsolute(named))
+    throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
+  return resolve(named);
+};
 
 // scripts/hooks/role.ts
 var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
@@ -188,7 +195,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { homedir as homedir3 } from "os";
-import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
+import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var MAX_BYTES = 1048576;
@@ -2029,7 +2036,7 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
-  if (isAbsolute(text.value))
+  if (isAbsolute2(text.value))
     return text.value;
   return env.cwd ? resolve2(env.cwd, text.value) : undefined;
 }
