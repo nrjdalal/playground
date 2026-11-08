@@ -21,6 +21,7 @@ import {
   IDLE_DB_GAP,
   idleDbs,
   lateReviewers,
+  leakedTests,
   maybePrune,
   opsDown,
   pass,
@@ -35,6 +36,17 @@ afterAll(() => {
 })
 
 const DEAD = Bun.spawnSync(["true"]).pid
+// A pid that reads gone now, verified before use, so a test holds however the machine reuses pids under load.
+const gonePid = (): number => {
+  for (;;) {
+    const pid = Bun.spawnSync(["true"]).pid
+    try {
+      process.kill(pid, 0)
+    } catch {
+      return pid
+    }
+  }
+}
 const NOW = Date.parse("2026-10-20T12:00:00Z")
 
 type Call = { argv: string[]; cwd?: string; env?: Record<string, string | undefined> }
@@ -87,6 +99,7 @@ const roster = (ctx: Context, agents: Record<string, unknown>[]) =>
   write(join(ctx.data, "roster.json"), { agents })
 
 const DOCKER_PS = "docker ps --filter name=^playground-"
+const TEST_PS = "docker ps --filter name=^playground-test-"
 const DASHBOARD_DB = "bun /repo/api/hono/src/bin/dashboard-db.ts"
 const psql = (name: string) => `docker exec ${name} psql`
 
@@ -163,6 +176,50 @@ describe("idleDbs", () => {
     expect(await idleDbs(ctx)).toEqual(["dashboard-db-unknown"])
     expect(calls.some((c) => c.argv[0] === "docker" && c.argv[1] === "exec")).toBe(false)
     expect(read(join(sweep, "idle-db.json"))).toEqual({ "playground-dispatcher-db": 0 })
+  })
+})
+
+describe("leakedTests", () => {
+  test("removes a playground-test-<suite>-<pid> container whose pid is gone, with its volumes", async () => {
+    const { calls, ctx } = setup({ [TEST_PS]: { out: "playground-test-ask-4242\n" } })
+    expect(await leakedTests(ctx, (pid) => pid !== 4242)).toEqual(["playground-test-ask-4242"])
+    expect(calls.some((c) => c.argv.join(" ") === "docker rm -fv playground-test-ask-4242")).toBe(
+      true,
+    )
+  })
+
+  test("leaves a playground-test- container whose pid still runs alone", async () => {
+    const { calls, ctx } = setup({ [TEST_PS]: { out: "playground-test-inbox-4243\n" } })
+    expect(await leakedTests(ctx, (pid) => pid === 4243)).toEqual([])
+    expect(calls.some((c) => c.argv[0] === "docker" && c.argv[1] === "rm")).toBe(false)
+  })
+
+  test("leaves a name whose last field is not a pid alone: a worktree named test-x reads playground-test-x-db", async () => {
+    const { calls, ctx } = setup({
+      [TEST_PS]: { out: "playground-test-x-db\nplayground-test-worktree-db\n" },
+    })
+    expect(await leakedTests(ctx, () => false)).toEqual([])
+    expect(calls.some((c) => c.argv[0] === "docker" && c.argv[1] === "rm")).toBe(false)
+  })
+
+  test("reads nothing when docker does not answer", async () => {
+    const { calls, ctx } = setup({ [TEST_PS]: { code: 1 } })
+    expect(await leakedTests(ctx)).toEqual([])
+    expect(calls.some((c) => c.argv[0] === "docker" && c.argv[1] === "rm")).toBe(false)
+  })
+
+  test("pass removes a dead-pid test container and logs the removal to the ops log", async () => {
+    const dead = gonePid()
+    const { calls, ctx, ops } = setup({ [TEST_PS]: { out: `playground-test-ask-${dead}\n` } })
+    roster(ctx, [])
+    const { result } = await pass(ctx, new Set(), new Set())
+    expect(result).toBe("ok")
+    expect(
+      calls.some((c) => c.argv.join(" ") === `docker rm -fv playground-test-ask-${dead}`),
+    ).toBe(true)
+    expect(readFileSync(join(ops, "ops-log.md"), "utf8")).toContain(
+      `leaked test containers removed (ops-sweep): playground-test-ask-${dead}`,
+    )
   })
 })
 
