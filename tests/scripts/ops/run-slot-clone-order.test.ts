@@ -106,8 +106,12 @@ describe("the clone lane", () => {
     const run = cloning(m, "worker-listed")
     expect(await run.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
     const listed = readdirSync(join(m.ops, "run-slot.clone-waiters"))
+    const heavy = join(m.ops, "run-slot.waiters")
+    const queued = existsSync(heavy) ? readdirSync(heavy) : []
     await stop(run.p)
     expect(listed.map((n) => n.split("-").slice(3).join("-"))).toEqual(["worker-listed"])
+    // the heavy queue, which room and spawn.sh's gate count, holds no clone
+    expect(queued.filter((n) => n.endsWith("-worker-listed"))).toEqual([])
   })
 
   // the lead's check on the round 1 fix: a waiter no gate holds keeps its place across a reread
@@ -145,13 +149,19 @@ describe("the clone lane", () => {
     utimesSync(`${copy}.new`, new Date(), new Date())
     renameSync(`${copy}.new`, copy)
     expect(await parked.saw(/running the new copy/g)).toBe(true)
+    const queue = join(m.ops, "run-slot.clone-waiters")
+    const parkedListed = () => readdirSync(queue).some((n) => n.endsWith("-worker-parked"))
+    // the new copy drops its place in clone-off's loop; the old one held it there for good
+    let deadline = Date.now() + 20_000
+    while (parkedListed() && Date.now() < deadline) await Bun.sleep(50)
+    const dropped = !parkedListed()
     m.release("run-slot-clone")
     const allowed = cloning(m, "worker-allowed", copy)
-    // it takes the lane, or says whom it waits behind
-    await allowed.saw(
-      /^run-slot\.sh: (this clone waits behind \S+|worker-allowed holds run-slot-clone)/gm,
-    )
+    // its start line follows its holds line, so the check reads the runs log
+    deadline = Date.now() + 20_000
+    while (started(m).length === 0 && Date.now() < deadline) await Bun.sleep(50)
     await Promise.all([stop(parked.p), stop(allowed.p)])
+    expect(dropped).toBe(true)
     expect(started(m)).toEqual(["worker-allowed"])
   })
 
