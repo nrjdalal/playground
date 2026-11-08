@@ -58,6 +58,18 @@ export const groups: Group[] = [
         `case "$P" in /*) echo y ;; esac > ${LIST}`,
       ],
       [
+        "a read-only awk that prints a conflict's lines, its regex holding a >",
+        "awk '/^<<<<<<< /{p=1} p {print} /^>>>>>>> /{p=0}' a.ts",
+      ],
+      [
+        "an awk program that prints into the root after a regex holding a >",
+        `awk '/^>>>>>>> / {print > "${LIST}"}' a.ts`,
+      ],
+      [
+        "an awk program that calls system after a regex holding a >",
+        `awk '/^>>>>>>> / {system("rm -rf ${NEVER_MADE}")}' a.ts`,
+      ],
+      [
         "a read-only awk program whose output a shell runs",
         `echo x | awk '{print "rm -rf ${NEVER_MADE}"}' | sh`,
       ],
@@ -70,4 +82,5 @@ export const allowed: string[] = [
   "a read-only awk print on a piped line",
   "a case that only echoes, its pattern a path's glob",
   "a case whose alternatives are paths' globs",
+  "a read-only awk that prints a conflict's lines, its regex holding a >",
 ]
