@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { readdir, unlink } from "node:fs/promises"
 import { dirname, join, relative } from "node:path"
 
@@ -34,9 +34,15 @@ const sourceDirs = (root: string): BunPlugin => ({
   },
 })
 
+// guards.ts runs every Bash guard in one process, bundled wherever its source is before the settings register it, so its bundle reaches main a ship before its registration.
+const ALWAYS = ["guards"]
+
 export const entries = async (root: string): Promise<string[]> => [
-  ...(await preToolUseGuards(root)),
-  ...WORKERS,
+  ...new Set([
+    ...(await preToolUseGuards(root)),
+    ...ALWAYS.filter((name) => existsSync(join(root, HOOKS, `${name}.ts`))),
+    ...WORKERS,
+  ]),
 ]
 
 // Each bundle's file name and text, built from root's sources, one build per entry point: Bun compiles an imported module's `if (import.meta.main)` to `if (false)` only when that module is no entry point of the same build, and a guard imports other guards.

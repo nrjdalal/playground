@@ -156,6 +156,15 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   On 25 Oct an account switch restarted every session: two reviewers lost their workers' round requests, and the ops lead's watches and the dispatcher's login-flip loop died, each found by hand later.
   It says nothing to the owner's own sessions here, fails open, and its tests are in `bun run test:file tests/scripts/hooks`.
 
+## guards
+
+- Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names with the gate and the entry its own main block runs (`fromFactory` or none; `check`, or `guarded` for no-extensions-write's Worker and `refusal` for no-glm-heavy-path), all at once.
+  It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
+  A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
+  `bun run hooks:bundle` builds it as `scripts/hooks/bundled/guards.js` whether or not the settings register it yet (`ALWAYS` in `packages/scripts/src/hooks-bundle.ts`), so its bundle reaches `main` a ship before its registration.
+  Its registration in both settings files, in place of each Bash guard's own Bash entry, lands in a later ship than its script, as [Registered in both settings files](#registered-in-both-settings-files) says.
+  Its tests are `bun run test:file tests/scripts/hooks/guards.test.ts tests/scripts/hooks/refused-forms.test.ts`, the second feeding each Bash row of a guard it runs through its `check()`.
+
 ## no-bare-slack-link
 
 - ALWAYS: Send every link in a Slack post as a link chip, since a raw URL reads as a mistake in a review ask and a chip is the format the owner reads.
