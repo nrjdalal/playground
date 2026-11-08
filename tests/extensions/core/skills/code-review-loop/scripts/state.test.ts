@@ -62,6 +62,10 @@ test("01 the verdict line", () => {
   expect(state.verdictOf("ReviewBot round 2 inline findings at 69a6a4c")).toBeNull()
 })
 
+test("01a the shebang keeps bun from loading the working folder's env file", () => {
+  expect(readFileSync(STATE_TS, "utf8").split("\n")[0]).toContain("--no-env-file")
+})
+
 test("02 COMMENTS.md gives the verdict line, and pr:merge reads the same header", () => {
   const commentsMd = readFileSync(
     join(ROOT, "extensions/core/skills/code-review-loop/references/COMMENTS.md"),

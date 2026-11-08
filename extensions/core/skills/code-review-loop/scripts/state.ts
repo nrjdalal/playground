@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S bun --no-env-file
 import { spawnSync } from "node:child_process"
 /** A PR's review state, read from GitHub and git each time, with no memory of its own.
 
