@@ -112,8 +112,15 @@ var SEATLESS = new Set(["ended", "parked"]);
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
-import { join, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
+import { isAbsolute, join, resolve } from "path";
+var dataDirOf = (env, home = env.HOME || homedir()) => {
+  const named = env.PLAYGROUND_DATA_DIR;
+  if (!named)
+    return join(home, ".playground");
+  if (!isAbsolute(named))
+    throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
+  return resolve(named);
+};
 
 // scripts/hooks/role.ts
 var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
