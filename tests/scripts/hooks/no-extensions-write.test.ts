@@ -581,7 +581,7 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
   })
 })
 
-// A quoted argument with a space is read as a command line unless every command on the line is on a closed list of readers (awk with a program that runs nothing, cat, grep, head, tail, wc, sort, uniq, cut), with no redirect that writes a file; an awk program that runs a command has its literals read wherever it stands, and sed keeps canary's reading.
+// A quoted argument with a space is read as a command line unless every command on the line is on a closed list of readers (awk with a program that runs nothing, cat, grep, head, tail, wc, sort, uniq, cut, echo, lsof), with no redirect that writes a file; an awk program that runs a command has its literals read wherever it stands, and sed keeps canary's reading.
 describe("a quoted argument is read as a command line only where a program runs it", () => {
   // #1455: a quiet commit's message is text git never runs, so a gated call it names runs, in any case of git, while a gated call beside it stays refused
   test.each([
