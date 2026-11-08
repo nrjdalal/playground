@@ -4,6 +4,6 @@ A start before the move counts hours the account sat idle and reads slow, and an
 The account runs out early when the time its pace reaches 90% comes before its week reset.
 From 90% on the last Claude account with room, the reviewer reserve holds only while built PRs wait for review: new Claude builds wait while one does, and with none waiting, Claude work carries on to 97%.
 A usage report lists every account the factory holds, the stored login included, and keeps an account with no fresh reading as stale with its age, so no account drops out of view.
-While an account the split can pick projects under 100% at its own week reset, the week has headroom, and ops-sweep turns the week pace off an hour at a time; once none does, the pace comes back.
+While an account the split can pick projects under 100% at its own week reset, ops-sweep turns the week pace off an hour at a time; once none does, the pace comes back.
 A forecast is labelled estimated and its readings measured (**verify**).
 scripts/ops/README.md's Usage forecasts section holds where the readings live and how to print the table.
