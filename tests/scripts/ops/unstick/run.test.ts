@@ -319,7 +319,7 @@ describe("a session's account, for the capped account line and the dialog's room
       new Date(Date.now() - 3_600_000),
     )
     expect(await call(config, "room", "worker-plain")).toEqual([
-      true,
+      false,
       "stored@example.org: 7d 100%",
     ])
     const { notified: sent } = await notified(config, "capped_alert", ["worker-plain"])
@@ -1597,7 +1597,7 @@ print(json.dumps(sent))
     return JSON.parse(out)
   }
 
-  test("alerts each recipient once, then one summary an hour, and the alert names the account with the most room", async () => {
+  test("a worker's limit line goes nowhere; the summary an hour stays", async () => {
     const sent = await replay({
       "acct-half": { week: 60 },
       "acct-roomy": { week: 20 },
@@ -1605,40 +1605,76 @@ print(json.dumps(sent))
     })
     for (const to of ["builder", "dispatcher"]) {
       const lines = sent.filter(([who]) => who === to).map(([, text]) => text)
-      const alerts = lines.filter((text) => text.includes("is at its usage limit"))
+      expect(
+        lines.filter((text) => text.includes("is at its usage limit")),
+        to,
+      ).toHaveLength(0)
       const summaries = lines.filter((text) => text.includes("blocked on the usage limit"))
-      expect(alerts, to).toHaveLength(1)
       expect(summaries, to).toHaveLength(8)
-      expect(lines, to).toHaveLength(9)
-      expect(alerts[0]).toContain("Most room: acct-roomy (week 20%)")
+      expect(lines, to).toHaveLength(8)
       expect(summaries[0]).toBe(
         "1 session blocked on the usage limit. Nothing blocked for another reason. On the limit: worker-a",
       )
     }
   })
 
-  test("says so when no account has room", async () => {
-    const sent = await replay({
-      "acct-also": { week: 100 },
-      "acct-spent": { week: 100 },
-    })
-    expect(sent.find(([, text]) => text.includes("is at its usage limit"))?.[1]).toContain(
-      "No account in usage.json's accounts has room",
-    )
-  })
-  test("names a week past its reset as 0 and never the session's own account", async () => {
-    const most = async (accounts: object) =>
-      (await replay(accounts)).find(([, text]) => text.includes("is at its usage limit"))?.[1]
-    expect(await most({ "acct-roomy": { week: 20 }, "acct-spent": { week: 5 } })).toContain(
-      "Most room: acct-roomy (week 20%)",
-    )
+  test("most_room reads usage.json's accounts map: a week past its reset as 0, never the skipped account", async () => {
+    const most = async (accounts: object, skip = "acct-spent") => {
+      const config = scratch()
+      writeFileSync(
+        join(config, "playground", "usage.json"),
+        JSON.stringify({ account: "acct-spent", accounts, writtenAt: "2027-01-15T08:00:00Z" }),
+      )
+      return call(config, "most_room", skip)
+    }
+    expect(await most({ "acct-roomy": { week: 20 }, "acct-spent": { week: 5 } })).toEqual([
+      "acct-roomy",
+      20,
+    ])
     expect(
       await most({
         "acct-reset": { week: 100, weekReset: 1_700_000_000 },
         "acct-roomy": { week: 20 },
         "acct-spent": { week: 100 },
       }),
-    ).toContain("Most room: acct-reset (week 0%)")
+    ).toEqual(["acct-reset", 0])
+    expect(await most({ "acct-spent": { week: 100 } })).toBeNull()
+  })
+
+  test("a probe's limit line names the account with the most room, and says so when none has room", async () => {
+    const probeLine = async (accounts: object) => {
+      const config = scratch()
+      writeFileSync(
+        join(config, "playground", "usage.json"),
+        JSON.stringify({ account: "acct-spent", accounts, writtenAt: "2027-01-15T08:00:00Z" }),
+      )
+      const transcript = join(config, "probe.jsonl")
+      writeFileSync(
+        transcript,
+        `${JSON.stringify({
+          message: {
+            content:
+              "You are probe-herdr-answer, a probe in the Playground factory; you report to worker-mild-lark. Report to worker-mild-lark with SendMessage (to: worker-mild-lark).",
+            role: "user",
+          },
+          type: "user",
+        })}\n`,
+      )
+      const { notified: sent } = await notified(
+        config,
+        "limit_alert",
+        "probe-herdr-answer",
+        "You've hit your weekly limit",
+        transcript,
+      )
+      return sent[0]?.[1]
+    }
+    expect(await probeLine({ "acct-roomy": { week: 20 }, "acct-spent": { week: 100 } })).toContain(
+      "Most room: acct-roomy (week 20%)",
+    )
+    expect(await probeLine({ "acct-spent": { week: 100 } })).toContain(
+      "No account in usage.json's accounts has room",
+    )
   })
 
   test("any other block still alerts every 10 minutes", async () => {
@@ -1680,6 +1716,15 @@ describe("the capped and ending account lines (#1457)", () => {
     mkdirSync(join(config, "playground", "ops", "unstick"), { recursive: true })
     usage(config, "usage.json", "own@example.net", ownPct)
     usage(config, "usage-two.json", "two@example.com", twoPct)
+    write(
+      join(config, "playground", "usage.json"),
+      JSON.stringify({
+        account: "own@example.net",
+        accounts: { "own@example.net": { week: ownPct }, "two@example.com": { week: twoPct } },
+        rate_limits: { seven_day: { resets_at: RESET, used_percentage: ownPct } },
+        writtenAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      }),
+    )
     record(config, "worker-on-two", "--account two@example.com --model claude-opus-5-5")
     record(config, "worker-plain", "")
     record(config, "worker-two-b", "--account two@example.com")

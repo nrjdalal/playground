@@ -940,8 +940,8 @@ def capped_alert(names, limited=None):
     for name in names:
         by_acct.setdefault(session_account(name), []).append(name)
     alerts = []
-    for acct in sorted(a for a in by_acct if a in limited or (weeks.get(a) or (0, None))[0] >= 100):
-        pct, reset = weeks.get(acct, (0, None))
+    for acct in sorted(a for a in by_acct if a in weeks and (weeks[a][0] >= 100 or a in limited)):
+        pct, reset = weeks[acct]
         timed = isinstance(reset, (int, float))
         key = round(reset / 3600) if timed else time.strftime("%G-W%V", time.gmtime())
         when = time.strftime("%a %d %b %H:%MZ", time.gmtime(reset)) if timed else "unknown"
