@@ -12,6 +12,9 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
+// the render_jobs harness runs jobs.ts through python, whose import graph (probe.ts's @packages/config/kinds among them) resolves through the built dists no import here reached, so a fresh checkout's render died on "Cannot find module" and its failure log then raised on the ops folder it never made (issue 1496); importing jobs.ts selects those builds
+import "../../../packages/scripts/src/playground/jobs"
+
 const upPy = join(import.meta.dir, "..", "..", "..", "scripts", "ops", "up.py")
 const scratch = mkdtempSync(join(tmpdir(), "ops-up-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
