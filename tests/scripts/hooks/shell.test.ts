@@ -295,6 +295,21 @@ describe("an unquoted heredoc body's substitutions are lexed as the commands the
       'while read l; do echo "$l"; done <<EOF\n$(probe a)\nEOF',
       ["while read l", `do echo ${UNKNOWN}`, "probe a", "done"],
     ],
+    [
+      "a command substitution past a quote inside a parameter expansion",
+      "true <<EOF\nA ${X:-'$(probe a)'} B\nEOF",
+      ["probe a", "true"],
+    ],
+    [
+      "a command substitution on the line after a parameter expansion's quote",
+      "true <<EOF\n${X:-'}\n$(probe a)\n'\nEOF",
+      ["probe a", "true"],
+    ],
+    [
+      "a command substitution inside an arithmetic expansion",
+      "true <<EOF\n$(( $(probe a) + 1 ))\nEOF",
+      ["probe a", "true"],
+    ],
     ["a quoted delimiter's body", "true <<'EOF'\n$(probe a)\nEOF", ["true"]],
     ["a double-quoted delimiter's body", 'true <<"EOF"\n$(probe a)\nEOF', ["true"]],
     ["an escaped dollar in an unquoted body", "true <<EOF\n\\$(probe a)\nEOF", ["true"]],
@@ -303,6 +318,27 @@ describe("an unquoted heredoc body's substitutions are lexed as the commands the
       "a substitution in an unquoted body inside a command substitution, whose own value stays unread",
       "x=$(cat <<EOF\n$(probe a)\nEOF\n); true",
       ["probe a", "cat", `x=${UNKNOWN}`, "true"],
+    ],
+  ])("%s", (_, line, expected) => {
+    expect(programs(line)).toEqual(expected)
+  })
+
+  // inside double quotes a quote is a plain character too, so the substitution past one in a parameter expansion runs (PG-1571), while an unquoted word's quote still quotes it
+  test.each<[string, string, string[]]>([
+    [
+      "a double-quoted parameter expansion with a substitution past a quote",
+      `echo "\${X:-'$(probe a)'}"`,
+      ["probe a", `echo ${UNKNOWN}`],
+    ],
+    [
+      "a double-quoted arithmetic expansion with a substitution",
+      'echo "$(( $(probe a) + 1 ))"',
+      ["probe a", `echo ${UNKNOWN}`],
+    ],
+    [
+      "an unquoted parameter expansion's single-quoted default",
+      "echo ${X:-'$(probe a)'}",
+      [`echo ${UNKNOWN}`],
     ],
   ])("%s", (_, line, expected) => {
     expect(programs(line)).toEqual(expected)

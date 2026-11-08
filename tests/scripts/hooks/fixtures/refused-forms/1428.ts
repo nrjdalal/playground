@@ -11,6 +11,31 @@ const shapes = (what: string, call: string): Row[] => [
     `${what} in a heredoc feeding a loop`,
     `while read l; do echo "$l"; done <<EOF\n$(${call})\nEOF`,
   ],
+  // round 1: a quote inside a parameter expansion is text in a body, so the substitution past it runs
+  [
+    `${what} past a quote inside an unquoted heredoc's parameter expansion`,
+    `cat <<EOF\nA \${X:-'$(${call})'} B\nEOF`,
+  ],
+  [
+    `${what} on the line after a parameter expansion whose quote a heredoc keeps as text`,
+    `cat <<EOF\n\${X:-'}\n$(${call})\n'\nEOF`,
+  ],
+  [
+    `${what} in an unquoted heredoc's arithmetic expansion`,
+    `cat <<EOF\n$(( $(${call}) + 1 ))\nEOF`,
+  ],
+]
+
+// The call behind a backslash, which keeps a dollar or a backquote literal in an unquoted body, so the line runs.
+const escaped = (what: string, call: string): Row[] => [
+  [
+    `${what} behind an escaped dollar in an unquoted heredoc, which the shell leaves as text`,
+    `cat <<EOF\n\\$(${call})\nEOF`,
+  ],
+  [
+    `${what} between escaped backquotes in an unquoted heredoc, which the shell leaves as text`,
+    `cat <<EOF\n\\\`${call}\\\`\nEOF`,
+  ],
 ]
 
 // The same call under a quoted delimiter, which the shell expands nothing in, so the call stays text and the line runs.
@@ -28,6 +53,7 @@ export const groups: Group[] = [
     rows: () => [
       ...shapes("a recursive delete", `rm -rf ${NEVER_MADE}`),
       quoted("the same recursive delete", `rm -rf ${NEVER_MADE}`),
+      ...escaped("the same recursive delete", `rm -rf ${NEVER_MADE}`),
     ],
   },
   {
@@ -36,6 +62,7 @@ export const groups: Group[] = [
     rows: () => [
       ...shapes("a stash pop", "git stash pop"),
       quoted("the same stash pop", "git stash pop"),
+      ...escaped("the same stash pop", "git stash pop"),
     ],
   },
   {
@@ -44,6 +71,7 @@ export const groups: Group[] = [
     rows: () => [
       ...shapes("a kill by pattern", "pkill -f watcher"),
       quoted("the same kill by pattern", "pkill -f watcher"),
+      ...escaped("the same kill by pattern", "pkill -f watcher"),
     ],
   },
   {
@@ -56,24 +84,19 @@ export const groups: Group[] = [
         `cat <<EOF\n$(rm ${ROOT})\nEOF`,
       ],
       quoted("the same settings set", SETTINGS),
-      [
-        "the same settings set behind an escaped dollar in an unquoted heredoc, which the shell leaves as text",
-        `cat <<EOF\n\\$(${SETTINGS})\nEOF`,
-      ],
-      [
-        "the same settings set between escaped backquotes in an unquoted heredoc, which the shell leaves as text",
-        `cat <<EOF\n\\\`${SETTINGS}\\\`\nEOF`,
-      ],
+      ...escaped("the same settings set", SETTINGS),
     ],
   },
 ]
 
 // The forms the shell leaves as text, so no call runs: a quoted delimiter expands nothing in the body, and a backslash before a dollar or a backquote keeps that character literal.
 export const allowed: string[] = [
-  "the same recursive delete under a quoted heredoc delimiter, which the shell leaves unexpanded",
-  "the same stash pop under a quoted heredoc delimiter, which the shell leaves unexpanded",
-  "the same kill by pattern under a quoted heredoc delimiter, which the shell leaves unexpanded",
-  "the same settings set under a quoted heredoc delimiter, which the shell leaves unexpanded",
-  "the same settings set behind an escaped dollar in an unquoted heredoc, which the shell leaves as text",
-  "the same settings set between escaped backquotes in an unquoted heredoc, which the shell leaves as text",
-]
+  "the same recursive delete",
+  "the same stash pop",
+  "the same kill by pattern",
+  "the same settings set",
+].flatMap((what) => [
+  `${what} under a quoted heredoc delimiter, which the shell leaves unexpanded`,
+  `${what} behind an escaped dollar in an unquoted heredoc, which the shell leaves as text`,
+  `${what} between escaped backquotes in an unquoted heredoc, which the shell leaves as text`,
+])
