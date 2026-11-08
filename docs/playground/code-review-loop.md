@@ -37,6 +37,7 @@ So a session that restarts, or a new reviewer taking over, picks up exactly wher
 When the shared GraphQL budget is spent it reads the same facts over REST and says so, marking each review thread's resolution unknown rather than reading it as settled.
 The same script tells a base merge apart from new work: any commit of the PR's own in the push is new work, and otherwise it compares the PR's own changed lines on each side of the push, because a range diff across a merge of `canary` shows `canary`'s work as the PR's; a conflict resolved by hand that kept both sides reads as a base merge too.
 Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all afternoon spends none of the GraphQL budget every session shares.
+While the head's `Audit, Lint, and Build` and `test` checks still run, its `checks` waiter takes the next push's waiter's place: it also ends once both conclude at the head, so a check that goes red and clears on a re-run, which moves no head, is still seen.
 
 ## It's working if
 
@@ -62,7 +63,7 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
   `state.ts touched-tests` lists them, and in a Python repo it adds each test that scans a folder holding a changed file and, when a prompt template changes, each test that pins a built prompt's digest.
 - When GitHub's `test` and `Audit, Lint, and Build` checks are green at the exact head, and canary has changed none of the PR's files since the base that run merged, the last 5/5 cites that run's link in place of a local run of the touched tests, since CI already ran the whole suite there.
   It fetches canary again once both checks are green and reads those conditions against it, since canary can move while CI runs.
-  While those checks still run at the head, with canary unchanged on the PR's files, the reviewer waits for CI still running at the head and cites it, queueing a local run only when a condition fails or a check goes red.
+  While those checks still run at the head, with canary unchanged on the PR's files, the reviewer waits for CI still running at the head with its `checks` waiter and cites it, queueing a local run only when a condition fails or a check goes red.
 - On a large app repo, when the touched tests run past about 100 files, green PR CI at the exact head stands as the merge evidence, and the reviewer runs the changed modules' own tests locally.
 - When canary has moved and changed a file the PR changes, or the PR adds or changes a repo scanner, unless CI stands in, the 5/5 verdict names the touched tests it ran on a local merge with canary, since a merge git calls clean can still break; a red run or a conflict there blocks the 5/5.
   It names that canary from the merge commit itself, since a fetch after the merge would name one the run never merged.
