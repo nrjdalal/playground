@@ -68,7 +68,7 @@ set -euo pipefail
 #   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PR the checker serves, by its URL or its number alone, or its issue's URL while the PR is not yet opened; on an ended roster row it replaces the row's prs, and its pr with the first pull request named (none for an issue alone), and a checker's start there is refused without it; on a live row, or none, it joins them and gives a row with no pr the first pull request named
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
-#   --memory <dir>     with any mode but restore or close, anywhere among its words: the launch runs with Claude Code's auto-memory on, writing to <dir>, an absolute folder: its built settings file, one of its own (factory-settings-...-memory-<name>.json), sets autoMemoryEnabled and autoMemoryDirectory, while every other launch's file stays as it is, for the auto-memory trial
+#   --memory <dir>     with any mode but restore or close, anywhere among its words: the launch runs with Claude Code's auto-memory on, writing to <dir>, an absolute folder: its built settings file, one of its own (factory-settings-...-memory-<name>.json), sets autoMemoryEnabled and autoMemoryDirectory, while every other launch's file stays as it is, for the auto-memory trial; --memory off launches with memory off on the shared file, whatever arm the role or the row would take
 #   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
 #     With no --runtime, every start and resume opens in herdr, whatever terminal its spawner runs in.
 #     The runtime is recorded at every start and resume in ~/.playground/runtimes/<name>, a resume rewriting whatever word the pin held.
@@ -807,6 +807,7 @@ REPORTS_TO=
 TITLE_ARG=
 IN_DIR=
 MEMORY_DIR=
+MEMORY_OFF=
 CHECK=
 PRIORITY=
 NAME_PROJECT=
@@ -859,8 +860,8 @@ while [ $# -gt 0 ]; do
     IN_DIR=$2
     shift 2
   elif [ "$1" = --memory ]; then
-    [ $# -ge 2 ] && [ -z "$MEMORY_DIR" ] && [[ $2 == /* ]] || usage "--memory takes an absolute folder, once"
-    MEMORY_DIR=$2
+    [ $# -ge 2 ] && [ -z "$MEMORY_DIR$MEMORY_OFF" ] && [[ $2 == /* || $2 == off ]] || usage "--memory takes an absolute folder or off, once"
+    if [ "$2" = off ]; then MEMORY_OFF=1; else MEMORY_DIR=$2; fi
     shift 2
   elif [ "$1" = --runtime ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RUNTIME" ] || usage
@@ -936,7 +937,7 @@ MODE=${1:-}
 # herdr 0.9.5 keeps a resume command only from a source that holds the pane through report-agent, and then shows that source's state in place of its own (measured: a 14s turn read idle throughout), so restore reruns the sessions spawn.sh itself listed, with ops-herdr's resume_agents_on_restore off. Each goes through resume, so the gate and the live-name check judge it, and a live one is left as it is.
 if [ "$MODE" = restore ]; then
   NAME=restore
-  [ $# -eq 0 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "restore takes no other words"
+  [ $# -eq 0 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "restore takes no other words"
   # One restore at a time: ops-herdr's start and its job's next cycle can both run one, and two resumes of a name both pass the live-name check until its claude writes its registry file, so it would start twice. The lock is a symlink naming its holder's pid and start time, so a holder that died, or a pid macOS handed on, frees it.
   LOCK="$RESUME_DIR/.restore.lock"
   ME=$(started $$)
@@ -1035,7 +1036,7 @@ fi
 # A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row once the pane closes, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
 if [ "$MODE" = close ]; then
   NAME=${1:-close}
-  [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
+  [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
   word "$NAME" || refuse "a name is lowercase words joined by hyphens"
   [ "$(cat "$DATA/runtimes/$NAME" 2>/dev/null)" = herdr ] ||
     refuse "its runtime pin ($SHOWN/runtimes/$NAME) does not read herdr, so spawn.sh did not open it in herdr"
@@ -1430,6 +1431,30 @@ if [ -n "$CHECK" ]; then
   echo "ok: $NAME can start"
   exit 0
 fi
+# The auto-memory trial's arm, by role, as ADR 0022 holds; a fresh worker's turn is written once its roster write runs, so a refused start takes no turn.
+MEMORY=off
+ARM=
+if [ -n "$MEMORY_DIR" ]; then
+  MEMORY=on
+elif [ -z "$MEMORY_OFF" ] && [ "$BACKEND" != glm ]; then
+  case "$ROLE:$KIND" in
+    dispatcher:* | lead:builder | lead:ops | lead:planner)
+      # a resume keeps a row --memory off left off, as a worker's keeps its arm
+      if [ "$MODE" != resume ] || [ "$(roster_field "$NAME" memory)" != off ]; then
+        MEMORY=on MEMORY_DIR="$DATA/memory/$KIND"
+      fi
+      ;;
+    worker:*)
+      if [ "$MODE" = resume ]; then
+        [ "$(roster_field "$NAME" memory)" = on ] && MEMORY=on
+      else
+        ARM="$DATA/memory/worker-arm"
+        [ "$(cat "$ARM" 2>/dev/null)" = off ] && MEMORY=on
+      fi
+      [ "$MEMORY" = on ] && MEMORY_DIR="$DATA/memory/worker-b"
+      ;;
+  esac
+fi
 # A session moved off the Desktop folder keeps its transcript in that folder's project, so it is copied to the new folder's, where --resume looks.
 if [ -n "${FROM:-}" ] && [[ $SESSION =~ ^[0-9a-f-]{36}$ ]]; then
   old="$(project_of "$FROM")/$SESSION.jsonl"
@@ -1747,6 +1772,8 @@ PY
 [ -z "$TITLE" ] || [ "${held:0:1}" = 1 ] || set -- "$@" "title=$TITLE"
 [ -z "$TITLE_ARG" ] || set -- "$@" "title=$TITLE_ARG"
 [ "${held:1:1}" = 1 ] || set -- "$@" "task=$TASK"
+set -- "$@" "memory=$MEMORY"
+[ -z "${ARM:-}" ] || { mkdir -p "$DATA/memory" && printf '%s\n' "$MEMORY" > "$ARM"; } || echo "spawn.sh: $NAME started, but the memory trial's turn could not be written to $ARM" >&2
 said=
 if ! roster "$@"; then
   [ -n "$said" ] && echo "roster.ts says: $said" >&2
