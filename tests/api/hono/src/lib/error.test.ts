@@ -8,8 +8,6 @@ const ROOT = join(import.meta.dir, "../../../../..")
 // The codes a sessions read's failure took in #1440, and the two they replaced, which a stored Inbox item may still carry for one ship.
 const CODES = ["SESSIONS_FAILED", "SESSIONS_UNAVAILABLE"]
 const OLD_CODES = ["CMUX_FAILED", "CMUX_UNAVAILABLE"]
-// The one read of a stored item's delivery, whose alias reads an old code as its new one (ADR 0015).
-const ALIAS = "api/hono/src/lib/dashboard/inbox.ts"
 const DOCS = [
   ".agents/dashboard/asks.md",
   ".agents/dashboard/herdr.md",
@@ -23,7 +21,7 @@ test("a sessions read that fails, or finds no herdr, has a sessions-named code, 
   expect([...codes]).toEqual([...codes].sort())
 })
 
-test("no non-test line names an old code but the alias (#1440)", () => {
+test("no non-test line names an old code (#1447)", () => {
   const hits = Bun.spawnSync(
     ["git", "-C", ROOT, "grep", "-n", "-E", OLD_CODES.join("|"), "--", ".", ":!tests"],
     { stdout: "pipe" },
@@ -31,9 +29,7 @@ test("no non-test line names an old code but the alias (#1440)", () => {
     .stdout.toString()
     .split("\n")
     .filter(Boolean)
-  const alias = new RegExp(`^${ALIAS}:\\d+:.*"SESSIONS_`)
-  expect(hits.filter((hit) => !alias.test(hit))).toEqual([])
-  expect(hits).toHaveLength(OLD_CODES.length)
+  expect(hits).toEqual([])
 })
 
 test("the dashboard docs name the sessions-named code", async () => {
