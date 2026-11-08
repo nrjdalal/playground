@@ -119,7 +119,7 @@ describe("the clone lane", () => {
     const older = cloning(m, "worker-older", copy)
     expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
     const newer = cloning(m, "worker-newer")
-    expect(await newer.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
+    expect(await newer.saw(/^run-slot\.sh: this clone waits behind worker-older/gm)).toBe(true)
     copyFileSync(SCRIPT, `${copy}.new`)
     utimesSync(`${copy}.new`, new Date(), new Date())
     renameSync(`${copy}.new`, copy)
