@@ -340,6 +340,29 @@ test("an own account takes about a fifth of an equal account's share while its r
   expect(unmarked.OWN / unmarked.PRIDE).toBeCloseTo(1, 2)
 })
 
+// #1560: a row parked until a time keeps new sessions off its account until then: own@ and pride@ alike, every other account spent.
+test("a row parked until a future time takes a share of 0, and its normal share once that time has passed", () => {
+  const split = (parkedUntil: string) => {
+    const reading = { five: 0, week: 40, weekReset: TONIGHT + 48 * 3600 }
+    const rows = ACCOUNTS.map((row) => (row.email === "OWN" ? { ...row, parkedUntil } : row))
+    return flip(
+      "OWN",
+      { ...spentLater, OWN: reading, PRIDE: reading },
+      TONIGHT,
+      undefined,
+      undefined,
+      false,
+      false,
+      { accounts: rows },
+    ).split
+  }
+  const parked = split("2026-10-26T18:30:00+00:00")
+  expect(parked.OWN).toBe(0)
+  expect(parked.PRIDE).toBe(1)
+  const past = split("2026-10-25T18:00:00Z")
+  expect(past.OWN / past.PRIDE).toBeCloseTo(1, 2)
+})
+
 // Settings > Accounts' Own account switch: markOwn writes usage.accounts to a real settings folder, the flip reads the stored list back, and the row it marked takes a fifth of an equal account's share until it is switched off.
 test("a row the Settings switch marks own takes a fifth of an equal account's share, and its full share once switched off", async () => {
   const login = process.env.PLAYGROUND_LOGIN

@@ -5941,6 +5941,7 @@ var claudeAccount = strictObject({
   label: label.optional(),
   nearLimit: boolean2().optional(),
   own: boolean2().optional(),
+  parkedUntil: string2().datetime({ offset: true }).optional(),
   provider: literal("claude").optional(),
   renews: number2().int().min(1).max(31).nullable().optional(),
   weekReset: strictObject({ hour: number2().min(0).lt(24), weekday: number2().int().min(0).max(6) }).optional()
@@ -5958,7 +5959,7 @@ var accountSettings = defineSettings({
   },
   "usage.accounts": {
     default: [],
-    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
+    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), the time until which no new session starts on it (parkedUntil), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
     schema: array(account).refine((rows) => new Set(rows.map((row) => `${providerOf(row)}:${accountKey(row)}`)).size === rows.length, "each account is listed once")
   },
   "usage.keychainService": {
