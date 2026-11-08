@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { check, live, type Lookup, readMode } from "../../../scripts/hooks/no-outside-pr-code"
+import {
+  check,
+  live,
+  type Lookup,
+  readMode,
+  runnerOf,
+} from "../../../scripts/hooks/no-outside-pr-code"
 
 // A made-up machine: every repo, login, session and folder here is invented, and only the live lookup's rows touch a scratch folder.
 // HOME is this machine's own, since the shell reader expands a ~ by it
@@ -36,9 +42,23 @@ const SESSIONS: Record<string, string[]> = {
 }
 
 const HELD: Record<string, string[]> = {
+  [MAIN]: [".git"],
   [EMBEDDED]: ["HEAD", "objects", "refs"],
   [INSTALLED]: [".git", "node_modules"],
   [OUTSIDE]: [".git", "bunfig.toml"],
+}
+
+const RUNNERS: Record<string, string> = { ".mjs": "node", ".py": "python3", ".ts": "bun" }
+// made-up skill scripts whose first line is read by runnerOf itself, for the env shapes it reads as a word other than the program
+const SHAPES = `${SKILLS}/shapes/scripts`
+const SHEBANGS: Record<string, string> = {
+  [`${SHAPES}/canary`]: "#!/usr/bin/env bun-canary",
+  [`${SHAPES}/double-quoted`]: '#!/usr/bin/env -S "bun" --smol',
+  [`${SHAPES}/glued-assignment`]: "#!/usr/bin/env -SFOO=1 bun",
+  [`${SHAPES}/glued-option`]: "#!/usr/bin/env -S-i bun",
+  [`${SHAPES}/glued-quoted`]: "#!/usr/bin/env -S'bun'",
+  [`${SHAPES}/no-shebang`]: "console.log(1)",
+  [`${SHAPES}/shell`]: "#!/bin/sh",
 }
 
 const lookup: Lookup = {
@@ -46,6 +66,11 @@ const lookup: Lookup = {
   holds: (folder, entry) => HELD[folder]?.includes(entry) ?? false,
   main: MAIN,
   prsOf: async (sessionId) => SESSIONS[String(sessionId)] ?? [],
+  // each made-up script's shebang by its extension, as a skill's scripts name theirs
+  runner: (script) =>
+    script in SHEBANGS
+      ? runnerOf(SHEBANGS[script])
+      : RUNNERS[script.slice(script.lastIndexOf("."))],
 }
 
 const call = (
@@ -108,6 +133,43 @@ describe("no-outside-pr-code keeps a checker of an outside author's PR in read m
     [
       "bun on a skill's script, since bun reads the folder's bunfig.toml",
       call(`bun ${SKILLS}/x/y.ts`),
+    ],
+    [
+      "a bun skill script by its path in a clone that holds a bunfig.toml",
+      call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, OUTSIDE),
+    ],
+    [
+      "a bun core skill script by its path in a subfolder of that clone",
+      call(
+        `${MAIN}/extensions/core/skills/code-review-loop/scripts/state.ts pr 501`,
+        `${OUTSIDE}/src`,
+      ),
+    ],
+    [
+      "a bun skill script by its path from a folder the hook cannot read",
+      call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, "review-501"),
+    ],
+    [
+      "a bun skill script by its path from a scratch folder outside every work tree",
+      call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, "/s/scratch"),
+    ],
+    [
+      "a bun skill script by its path from a clone inside the main checkout",
+      call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, INSTALLED),
+    ],
+    ["a bun-canary skill script by its path in a clone", call(`${SHAPES}/canary`, OUTSIDE)],
+    ["a skill script whose env -S quotes bun in a clone", call(`${SHAPES}/double-quoted`, OUTSIDE)],
+    [
+      "a skill script whose env -S glues an assignment before bun in a clone",
+      call(`${SHAPES}/glued-assignment`, OUTSIDE),
+    ],
+    [
+      "a skill script whose env -S glues an option before bun in a clone",
+      call(`${SHAPES}/glued-option`, OUTSIDE),
+    ],
+    [
+      "a skill script whose env -S glues a quoted bun in a clone",
+      call(`${SHAPES}/glued-quoted`, OUTSIDE),
     ],
     [
       "the playground command in a folder with the PR's bunfig.toml",
@@ -239,6 +301,21 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
     ["a variable of the line's own", call(`S=${OUTSIDE}; cat $S/x`)],
     ["the clock", call("date -u +%FT%TZ")],
     ["the review skill's state.py from the main checkout", call(`python3 ${CORE_STATE} pr 501`)],
+    [
+      "a bun skill script by its path from the main checkout",
+      call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`),
+    ],
+    [
+      "a bun skill script by its path from a folder in the main checkout's tree",
+      call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, `${MAIN}/docs`),
+    ],
+    [
+      "a python skill script by its path in a clone with a bunfig.toml",
+      call(`${STATE} pr 501`, OUTSIDE),
+    ],
+    ["a sh skill script by its path in a clone", call(`${SHAPES}/shell`, OUTSIDE)],
+    ["a skill script with no shebang in a clone", call(`${SHAPES}/no-shebang`, OUTSIDE)],
+    ["a glued -S skill script from the main checkout", call(`${SHAPES}/glued-assignment`)],
     ["that state.py by its path", call(`${CORE_STATE} wait acme-owner/widgets 501 abc`)],
     ["a quiet fetch of two refs", call(`git -C ${OUTSIDE} fetch -q origin pr-501 canary`)],
     ["a quiet detached checkout", call(`git -C ${OUTSIDE} checkout -q --detach abc`)],
@@ -439,5 +516,38 @@ describe("no-outside-pr-code's live lookup", () => {
     )
     expect(await live(environment).author("acme-owner/widgets", 501)).toEqual(pr)
     expect(await live(environment).author("acme-owner/widgets", 509)).toBeUndefined()
+  })
+
+  test('a script\'s runner is read from its first line, and one it cannot open reads as "", held to the main checkout', async () => {
+    const script = join(scratch, "state.ts")
+    await Bun.write(script, "#!/usr/bin/env bun\nconsole.log(1)\n")
+    expect(live(environment).runner(script)).toBe("bun")
+    expect(live(environment).runner(join(scratch, "no-such-script"))).toBe("")
+  })
+})
+
+describe("runnerOf names the program a shebang line runs", () => {
+  test.each([
+    ["#!/usr/bin/env bun", "bun"],
+    ["#!/usr/bin/env -S bun --smol", "bun"],
+    ["#!/usr/bin/env FORCE_COLOR=0 bun", "bun"],
+    ["#!/opt/homebrew/bin/bun", "bun"],
+    ["#! /usr/bin/env python3", "python3"],
+    ["#!/usr/bin/env node", "node"],
+    ["#!/bin/sh", "sh"],
+    ["#!/usr/bin/env -u NODE_ENV bun", "bun"],
+    ["#!/usr/bin/env -C /tmp bun", "bun"],
+    ["#!/usr/bin/env -P /usr/local/bin bun", "bun"],
+    ["#!/usr/bin/env --unset=NODE_ENV --chdir=/tmp bun", "bun"],
+    ["#!/usr/bin/env -i bunx", "bunx"],
+    ["#!/usr/bin/env -S bun --no-env-file", "bun"],
+    ["#!/usr/bin/env --made-up bun", ""],
+    ["#!/usr/bin/env ${RUNNER}", ""],
+    ["#!/usr/bin/env FORCE_COLOR=0", ""],
+    ["console.log(1)", undefined],
+    ["#!", undefined],
+    [undefined, undefined],
+  ])("%p runs %p", (line, runner) => {
+    expect(runnerOf(line)).toBe(runner)
   })
 })
