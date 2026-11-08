@@ -186,10 +186,10 @@ def rotation(flip):
     return {"pool": [{"account": e["account"], "ending": e["ending"], "endsAt": e.get("endsAt"), "renewsOn": e.get("renewsOn")} for e in pool]} if isinstance(pool, list) and all(map(entry, pool)) else None
 
 
-def factory_reading(stored, flip):
-    """usage.json's data for login-flip.json's `factory` account, when that is not the stored login; else None."""
+def factory_reading(stored, flip, accounts):
+    """usage.json's data for login-flip.json's `factory` account, when that is not the stored login and usage.accounts still lists it; else None."""
     factory = flip.get("factory")
-    if not factory or (stored and factory == stored["account"]):
+    if not factory or (stored and factory == stored["account"]) or factory not in accounts:
         return None
     now = time.time()
     s = seen(flip, factory, now)
@@ -257,7 +257,7 @@ while True:
         problems.append(f"stored login: {type(e).__name__}: {e}")
     flip = flip_file() or {}
     try:
-        data = factory_reading(stored, flip)
+        data = factory_reading(stored, flip, FACTORY)
     except Exception as e:
         problems.append(f"factory account: {type(e).__name__}: {e}")
     # a factory login-flip names, the stored login included, is the account the sessions run on, so the added ones are read only while it names none

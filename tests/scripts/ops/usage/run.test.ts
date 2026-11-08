@@ -25,7 +25,7 @@ ns = {"__name__": "run_under_test"}
 exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
 calls = []
 ns["probe"] = lambda e: calls.append(e) or {"five": 10, "fiveReset": time.time() + 3600, "week": 40 if e == "spare@example.org" else 50, "weekReset": time.time() + 86400}
-factory = ns["factory_reading"]({"account": "mine@example.org", "rate_limits": {}}, ns["flip_file"]())
+factory = ns["factory_reading"]({"account": "mine@example.org", "rate_limits": {}}, ns["flip_file"](), ["main@example.org", "spare@example.org"])
 accounts = ns["accounts_reading"]()
 print(json.dumps({"accounts": {k: v["week"] for k, v in accounts.items()}, "factory": factory and factory["account"], "keys": sorted(json.load(open(ns["FLIP"]))), "probes": calls, "rotation": ns["rotation"](ns["flip_file"]())}))
 line = {}
@@ -447,7 +447,7 @@ flip = {"accounts": spec.get("accounts") or [], "factory": spec.get("factory"), 
 ns["write"](ns["FLIP"], flip)
 out = {}
 try:
-    data = ns["factory_reading"]({"account": "mine@example.org", "rate_limits": {}}, flip)
+    data = ns["factory_reading"]({"account": "mine@example.org", "rate_limits": {}}, flip, (spec.get("accountsList") or [spec["email"]]))
     if data:
         out["factory"] = {"readAt": data["readAt"], "week": data["rate_limits"]["seven_day"]["used_percentage"]}
 except Exception as e:
