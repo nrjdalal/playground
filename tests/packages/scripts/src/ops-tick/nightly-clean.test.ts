@@ -368,6 +368,7 @@ describe("one night's run against a fixture data folder", () => {
         }),
         repo: "https://github.com/acme/app",
       }),
+      sleep: async () => {},
       turbo: join(root, "turbo"),
     }
     return { ctx, deps, inputs, ops, runs, sent, wt }
@@ -459,8 +460,7 @@ describe("one night's run against a fixture data folder", () => {
         if (accepted.filter((at) => t - at < 60_000).length >= 3)
           return {
             code: 1,
-            out: "",
-            err: "nightly-clean quarantined 3 paths in the last minute, the most one session may\n",
+            out: "nightly-clean quarantined 3 paths in the last minute, the most one session may\n",
           }
         accepted.push(t)
       }
@@ -517,6 +517,88 @@ describe("one night's run against a fixture data folder", () => {
     expect(log).not.toContain("its trash move failed")
     expect(log).not.toContain("left for the next run")
     expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(600_000)
+  })
+
+  // the bound: with rm refusing forever, the beat still ends inside its 10-minute wait budget, and each worktree it leaves is named for the next run
+  test("the beat ends within its wait bound when rm refuses every move, naming each one left", async () => {
+    const root = scratch()
+    const data = join(root, "data")
+    const ops = join(data, "ops")
+    const main = join(root, "main")
+    const names = Array.from({ length: 10 }, (_, i) => `pg-${i + 1}`)
+    for (const name of names)
+      mkdirSync(join(main, ".claude", "worktrees", name), { recursive: true })
+    mkdirSync(join(ops, "log"), { recursive: true })
+    writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
+    const wt = (name: string) => join(main, ".claude", "worktrees", name)
+    const porcelain = [
+      `worktree ${main}\nHEAD a\nbranch refs/heads/main`,
+      ...names.map(
+        (name, i) =>
+          `worktree ${wt(name)}\nHEAD ${"abcdefghij"[i]}\nbranch refs/heads/PG-${i + 1}-x`,
+      ),
+    ].join("\n\n")
+    const answers: Answers = {
+      "docker ps": "playground-dashboard-db\trunning\t10B",
+      "docker system df": JSON.stringify({ Volumes: [] }),
+      "for-each-ref refs/heads": [...names.map((_, i) => `PG-${i + 1}-x h${i + 1}`), "main m"].join(
+        "\n",
+      ),
+      "for-each-ref refs/remotes/origin": "HEAD x",
+      "branch --merged": names.map((_, i) => `PG-${i + 1}-x`).join("\n"),
+      "worktree list": porcelain,
+      "--reason nightly-clean": {
+        code: 1,
+        err: "nightly-clean quarantined 3 paths in the last minute, the most one session may\n",
+      },
+    }
+    const { run } = fakeRun(answers)
+    const waits: number[] = []
+    const sleep = async (ms: number) => {
+      waits.push(ms)
+    }
+    const ctx: Context = {
+      now: new Date("2026-11-05T03:00:00Z"),
+      ops,
+      repo: main,
+      run,
+      send: async () => true,
+    }
+    const deps: NightDeps = {
+      cleanup: async () => ({
+        containers: async () => [],
+        devStop: async () => ({ ok: true, out: "" }),
+        finished: async () => false,
+        git: async (dir, args) =>
+          args[0] === "rev-parse"
+            ? `${dir}/.git\n${main}/.git`
+            : args[0] === "status"
+              ? " M wip.ts"
+              : "",
+        held: async () => null,
+        live,
+        liveBranch: "live/dashboard",
+        main,
+        removeContainer: async () => true,
+        rm: async () => ({ ok: true, out: "" }),
+      }),
+      free: () => 100 * 1024 ** 3,
+      prs: async () => ({
+        ...prsOf(
+          Object.fromEntries(
+            names.map((_, i) => [`PG-${i + 1}-x`, pr("MERGED", `h${i + 1}`, i + 1)]),
+          ),
+        ),
+        repo: "https://github.com/acme/app",
+      }),
+      sleep,
+      turbo: join(root, "turbo"),
+    }
+    await nightlyClean(deps)(ctx)
+    expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(600_000)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log.match(/left .*? for the next run/g)).toHaveLength(10)
+    expect(log).not.toContain("trashed ")
   })
 
   // #1515
