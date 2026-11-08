@@ -362,8 +362,47 @@ if [ -n "$AFTER" ] && [ -z "$REREAD" ]; then
   ASKED=$(date +%s)
 fi
 # bun run pr:merge or pr:train, as the whole command, runs at once outside the queue once any --after wait ends, since a merge carries its own gates and its type steps take their own slots (5 Nov: three wrapped merges in an hour each waited behind the heavy queue, and each inner type step queued again)
-if [ -z "$KIND_ONLY" ] && [ "${1:-}" = bun ] && [ "${2:-}" = run ] && { [ "${3:-}" = pr:merge ] || [ "${3:-}" = pr:train ]; }; then
-  echo "run-slot.sh: bun run $3 runs at once, outside the queue: a merge carries its own gates, and its type steps take their own slots (packages/scripts/src/pr-merge/README.md)" >&2
+# the same words behind leading env and VAR=x words, bun's --cwd <dir>, --cwd=<dir>, --silent and --no-env-file flags and a bun run --silent pass too, exec'd whole so the merge's env rides along (7 Nov: env NODE_ENV=production SKIP_ENV_VALIDATION=true bun run pr:merge 1418 asked at 14:35:13Z and again at 15:13:13Z with no start line either time, so it waited at least the 38 minutes between the asks), and so does the direct bun [--no-env-file] packages/scripts/src/pr-merge/{cli,train-cli}.ts call, the step bun run pr:merge and pr:train expand to; no caller wraps it in run-slot, since the train and merge-on-ready merge through pr:merge's own modules
+# every other form keeps its place in the queue as any run does: the inline bash -c chain holding the merge that day queued 6 s (7 Nov, 05:39:56Z), and a chain script keeps the pin run-slot-merge-now.test.ts holds; matching inside shell text would be a bypass treadmill
+merge_pass() {
+  local i=1 n=$# w
+  while [ $i -le $n ]; do
+    w=${!i}
+    case "$w" in
+      env | [A-Za-z_]*=*) i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  [ "${!i:-}" = bun ] || return 1
+  i=$((i + 1))
+  while [ $i -le $n ]; do
+    case "${!i}" in
+      --cwd) i=$((i + 2)) ;;
+      --cwd=* | --no-env-file | --silent) i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  # the direct cli call, the step bun run pr:merge and pr:train expand to, names its file in place of run
+  case "${!i:-}" in
+    pr:merge | pr:train) MERGE_NAME=${!i}; return 0 ;;
+    *pr-merge/cli.ts) MERGE_NAME=pr:merge; return 0 ;;
+    *pr-merge/train-cli.ts) MERGE_NAME=pr:train; return 0 ;;
+  esac
+  [ "${!i:-}" = run ] || return 1
+  i=$((i + 1))
+  while [ $i -le $n ]; do
+    case "${!i}" in
+      --silent) i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  case "${!i:-}" in
+    pr:merge | pr:train) MERGE_NAME=${!i}; return 0 ;;
+  esac
+  return 1
+}
+if [ -z "$KIND_ONLY" ] && merge_pass "$@"; then
+  echo "run-slot.sh: bun run $MERGE_NAME runs at once, outside the queue: a merge carries its own gates, and its type steps take their own slots (packages/scripts/src/pr-merge/README.md)" >&2
   exec "$@" 3<&-
 fi
 # dispatcher, 18 Oct: a test, type check (from the checkout's root), lint or format check runs on the runner host, taking no slot here. ci.sh exec
@@ -2209,11 +2248,14 @@ while :; do
     [ "$fw2" = "${TICKET##*/}" ] || S2=0
   fi
   # the oldest waiter names who goes next, "<first_waiter> <first_waiter s2> <prio_first>", under the priority pick too, so a waiter its look passed over, the
-  # pick's next ticket included once its first has gone, looks again at once (its poll reads run-slot.next)
+  # pick's next ticket included once its first has gone, looks again at once (its poll reads run-slot.next); each write is a `next` line in run-slot.runs.log,
+  # so a window where head named a waiter the line passed over reads back who the oldest named and when (issue 1477)
   if [ -n "$TICKET" ] && oldest_is_me; then
     pf=; [ -e "$OPS/run-slot.priority" ] || [ -e "$OPS/run-slot.focus" ] && pf=$(prio_first)
     nx=; read -r nx 2>/dev/null < "$NEXTF"
-    [ "$nx" = "${fw:--} ${fw2:--} ${pf:--}" ] || printf '%s\n' "${fw:--} ${fw2:--} ${pf:--}" > "$NEXTF" 2>/dev/null
+    if [ "$nx" != "${fw:--} ${fw2:--} ${pf:--}" ]; then
+      printf '%s\n' "${fw:--} ${fw2:--} ${pf:--}" > "$NEXTF" 2>/dev/null && rlog next "${fw:--} ${fw2:--} ${pf:--}"
+    fi
   fi
   # a waiter that comes to the head keeps its look's marks, which look_mark took before the look's reads
   LOOKER=0

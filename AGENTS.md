@@ -298,8 +298,8 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
    Done when the body's Evidence names each touched doc and skill with its check, doc-sync's result and each list grep and changed-term grep with its hits, before the review's round 1 opens.
 2. Have a reviewer agent other than its author (a session started for the review, working in its own scratch clone, whose brief carries the signal rule from The factory, above) score it out of 5 through the [code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md) skill, and fix what it finds, until it scores 5/5 on the latest head,
    GitHub Actions' `Audit, Lint, and Build` and `test` are green there, and nothing is left you would change.
-3. Mark it ready at 5/5 and merge it with `bun run pr:merge <n>`, or let merge-on-ready land it (`bun run pr:train ready`): the only ways a Playground PR reaches `canary`.
-   Their gates, the merge lock and the merge queue are written in [packages/scripts/src/pr-merge/README.md](./packages/scripts/src/pr-merge/README.md); read it before a merge or a ruling on a gate.
+3. Mark it ready at 5/5 and merge it with `bun run pr:merge <n>` bare and unpiped, or let merge-on-ready land it (`bun run pr:train ready`): the only ways a Playground PR reaches `canary`.
+   Their gates, the merge lock and the merge queue are written in [packages/scripts/src/pr-merge/README.md](./packages/scripts/src/pr-merge/README.md); read it before a merge or gate ruling.
 4. `main`, which the main checkout and so every installed skill follows, moves only through the `release` skill, run by Ops on the owner's standing go-ahead (playbook's **release** rule).
    Once a release lands, bring the main checkout up to it by the skill's step 5 (pull, install, build, restart each ops job whose source changed, `scripts/link-skills.sh`), and say what landed.
 
