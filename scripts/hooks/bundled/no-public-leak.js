@@ -6109,7 +6109,7 @@ var JOBS = {
     schedule: { every: 86400 }
   }),
   "ops-flow": launchd("ops-flow", {
-    description: "Tells the leads when a ready PR's checks stall or a run slot is held too long.",
+    description: "Tells the leads when a session holds a run slot over 15 minutes, or a model slot over 120.",
     schedule: { every: 60 }
   }),
   "ops-herdr": launchd("ops-herdr", {
