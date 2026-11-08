@@ -270,6 +270,40 @@ describe("a burst of starts", () => {
   })
 })
 
+// 7 Nov 13:10 to 13:15Z: a released backlog started 12 runs on run-slot and run-slot-2, small ones included, and load5 crossed the 15 cap at 13:16:08Z, since neither reading shows a start until about a minute after it; a small run whose waiter has waited past the backlog line also waits for the burst to clear, while a fresh small run in a queue with no backlog starts at once and the dashboard's and the merge train's runs keep their exemption
+describe("a small run in a draining backlog", () => {
+  const backlog = { RUN_SLOT_SIZE: "small", RUN_SLOT_BACKLOG_WAIT: "1" }
+  const NOW = Math.floor(Date.now() / 1000)
+  const iso = (ago: number) => new Date((NOW - ago) * 1000).toISOString().replace(/\.\d+Z$/, "Z")
+  const ran = (ops: string, pid: number, slot: string, ago: number) =>
+    appendFileSync(
+      join(ops, "run-slot.runs.log"),
+      `${iso(ago)} start worker-r ${pid} ${slot} waited=0s\n`,
+    )
+
+  test("in a backlog a small run waits for the burst to clear, and starts once the minute shows no new runs", async () => {
+    const m = machine({ load1: 2, now: NOW })
+    ran(m.ops, 101, "run-slot", 10)
+    const run = m.start("worker-s", backlog)
+    expect(await run.waits()).toBe(true)
+    appendFileSync(join(m.ops, "run-slot.runs.log"), `${iso(30)} end worker-r 101 rc=0 ran=20s\n`)
+    expect(await run.ran()).toBe(true)
+    await stop(run.p)
+  })
+
+  test("with no backlog a small run starts at once", async () => {
+    const m = machine({ load1: 2, now: NOW })
+    expect(await m.runs("worker-s", backlog)).toBe(true)
+  })
+
+  test("the dashboard's and the merge train's runs still start in a backlog", async () => {
+    const m = machine({ load1: 2, now: NOW })
+    ran(m.ops, 101, "run-slot", 10)
+    expect(await m.runs("ops-dashboard", { RUN_SLOT_BACKLOG_WAIT: "1" })).toBe(true)
+    expect(await m.runs("ops-merge-train", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+  })
+})
+
 describe("the queue's order", () => {
   test("a small waiter goes before an older medium one", async () => {
     const m = machine()
