@@ -1311,6 +1311,8 @@ CLONE_POLL=${RUN_SLOT_POLL:-5}
 # the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake (clone_brake) it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
 CLONE_GAP=180
 CLONE_MARGIN=4
+# a clone that has waited this long passes the big-run hold, so back-to-back big runs cannot starve the lane (issue 1317, 7 Nov 10:24 to 11:55Z: about 11 clones asked and none started while a big run held a slot); 10 minutes is past a cold install's 353 s (issue 1344)
+CLONE_WAIT_MAX=${RUN_SLOT_CLONE_WAIT_MAX:-600}
 # the clones' brake, the owner's load rule of 5 Nov (load5 under 15, the owner's Mac's core count), one per core: sysctl's hw.ncpu, the count spawn.sh's load gate starts from, else 15; never load_line, whose cap shuts run-slot-2 (6 Nov, 06:52Z to 07:03Z: a cap of 1 held every clone)
 clone_brake() {
   local n
@@ -1324,6 +1326,7 @@ clone_brake() {
 QUEUE="$OPS/run-slot.waiters"
 NEXTF="$OPS/run-slot.next"
 TICKET=""
+CLONE_TICKET=""
 ticket() {
   [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] || return 0
   mkdir -p "$QUEUE"
@@ -1613,6 +1616,7 @@ free() {
   fi
   DOCKER_SLOT=""
   [ -n "$TICKET" ] && rm -f "$TICKET"
+  [ -n "$CLONE_TICKET" ] && rm -f "$CLONE_TICKET"
   [ -e "$REF" ] && rm -f "$REF"
   [ -n "${MEM_TOLD:-}" ] && rm -f "$MEM_TOLD-suite" "$MEM_TOLD-clone" "$MEM_TOLD-idle" "$MEM_TOLD-swap" "$MEM_TOLD-busy"
 }
@@ -2083,8 +2087,17 @@ if [ -n "$KIND" ]; then
     [ -n "$(memstat level)" ] || { mem_unread clone "run-slot.clone-off holds this clone until it expires or run-slot.clone-allow names $WHO"; return 0; }
     ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
   }
-  while clone_held; do reread; sleep "$CLONE_POLL"; done
-  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within CLONE_MARGIN of the brake, one per core, or at half the cores or more where that line sits lower (under 8 cores; on 4 or fewer the brake less the margin is 0 or less and would hold every clone), and while a big run holds a CPU slot, whatever clone-allow names; an unread load5 holds no clone (only where sysctl and uptime are both refused), while the gap and the big-run hold still stand (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
+  # a clone waiter's place, run-slot.clone-waiters/<class>-<asked>-<pid>-<who> (below), keeps its name across a reread's exec, so a new copy a gate holds drops it until the gates pass (review round 1: it held back every clone clone-allow let through), and one no gate holds keeps its place
+  CLONE_QUEUE="$OPS/run-slot.clone-waiters"
+  if [ "$KIND" = clone ]; then
+    CLONE_TICKET="$CLONE_QUEUE/$CLASS-$ASKED-$$-$WHO"
+    # the second, on this image's clock, past which this clone passes the big-run hold (CLONE_WAIT_MAX)
+    CLONE_PASS_AT=$((SECONDS + ASKED + CLONE_WAIT_MAX - $(date +%s)))
+  fi
+  while clone_held; do rm -f "$CLONE_TICKET"; reread; sleep "$CLONE_POLL"; done
+  # whether this clone passes the big-run hold: the Dashboard roll's, so a ship reaches the live Dashboard (issue 1314, 7 Nov: a roll waited about 13 minutes behind a worker's test run), or one that has waited CLONE_WAIT_MAX s
+  clone_passes_big() { [ "$WHO" = ops-dashboard ] || [ "$SECONDS" -ge "$CLONE_PASS_AT" ]; }
+  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within CLONE_MARGIN of the brake, one per core, or at half the cores or more where that line sits lower (under 8 cores; on 4 or fewer the brake less the margin is 0 or less and would hold every clone), and while a big run holds a CPU slot, whatever clone-allow names, but for a clone clone_passes_big lets by; an unread load5 holds no clone (only where sysctl and uptime are both refused), while the gap and the big-run hold still stand (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
   clone_spaced() {
     local brake line l s last
     brake=$(clone_brake)
@@ -2092,7 +2105,7 @@ if [ -n "$KIND" ]; then
     [ "$line" -lt $(((brake + 1) / 2)) ] && line=$(((brake + 1) / 2))
     l=$(load5)
     [ -n "$l" ] && [ "$l" -ge "$line" ] && { echo "for load5 under $line, the brake's $brake less $CLONE_MARGIN and never under half of it"; return; }
-    for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
+    clone_passes_big || for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
       reclaim "$OPS/$s"
       [ -d "$OPS/$s" ] && [ "$(cut -d' ' -f5 "$OPS/$s.holder" 2>/dev/null)" = big ] && { echo "while a big run holds $s"; return; }
     done
@@ -2103,7 +2116,7 @@ if [ -n "$KIND" ]; then
     [ -n "$last" ] && echo "${CLONE_GAP}s past the last clone's end at $last"
   }
   # a commit's build, a merge or a clone is heavy, so it waits under focus; the quick slot's short runs go on
-  while [ "$KIND" != quick ] && focus_holds; do reread; focus_wait; done
+  while [ "$KIND" != quick ] && focus_holds; do [ -z "$CLONE_TICKET" ] || rm -f "$CLONE_TICKET"; reread; focus_wait; done
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:
   # the waiter ran its command with no slot), so each wait checks it ended as it should, and the waiter stops when it did not
   clone_held && { echo "run-slot.sh: run-slot.clone-off holds this clone, so $WHO stops" >&2; exit 143; }
@@ -2132,27 +2145,53 @@ if [ -n "$KIND" ]; then
     # a loop bash dropped mid-expansion (the rule above) set no flag, so the waiter stops rather than run
     [ -n "$LDONE" ] || exit 143
   fi
+  # clone waiters take the lane in the heavy queue's order, class then ask time (issue 1317, 7 Nov: the first mkdir won, and a clone waited 13385 s while five asked after it passed): each leaves its place in CLONE_QUEUE holding its start time
+  # pid $1's start time, from ps, else from the kernel's process table, since Claude Code's sandbox refuses the setuid ps
+  started_at() {
+    local s
+    s=$(LC_ALL=C TZ=UTC ps -o lstart= -p "$1" 2>/dev/null) || s=$(python3 -I "$(dirname "$(realpath "$SELF")")/ptable.py" started "$1" 2>/dev/null | cut -d' ' -f2-)
+    echo $s
+  }
+  # FIRST: the entry of the clone waiter that goes next, by the glob's order (a 1-digit class, then a 10-digit ask time), dropping each one before it whose pid is gone, or every 12th poll, the full reread's beat, whose pid shows another start time, since a waiter can die without its exit (issue 1316) and a read of the start time starts ps (issue 1338)
+  clone_first() {
+    local t n pid st c
+    FIRST=
+    for t in "$CLONE_QUEUE"/[0-9]*; do
+      [ -e "$t" ] || continue
+      n=${t##*/} pid=${n#*-*-} pid=${pid%%-*} st=
+      [ "$t" = "$CLONE_TICKET" ] && { FIRST=$n; return; }
+      # a start time either side could not read keeps the entry, since an empty read is no proof the pid was taken
+      alive "$pid" && { [ $((polls % 12)) -ne 0 ] || { { read -r st < "$t"; } 2>/dev/null; c=$(started_at "$pid"); [ -z "$st" ] || [ -z "$c" ] || [ "$c" = "$st" ]; }; } && { FIRST=$n; return; }
+      rm -f "$t"
+    done
+  }
+  if [ "$KIND" = clone ]; then
+    mkdir -p "$CLONE_QUEUE"
+    started_at $$ > "$CLONE_QUEUE/.$$" && mv "$CLONE_QUEUE/.$$" "$CLONE_TICKET"
+  fi
   # the clone's spacing is shared, so one waiter works it out about every 15 to 24 s for all of them (issue 1338): run-slot.clone-verdict holds the CPU slots' and
   # the clone lane's holder lines it was worked out under, then its verdict, and a waiter takes one written no earlier than its own last tick under the same lines, so a verdict serves up to 48 s
   CLONE_VERDICT="$OPS/run-slot.clone-verdict"
   clone_holders() { local s l; HL=; for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-clone; do l=; [ -d "$OPS/$s" ] && { read -r l 2>/dev/null < "$OPS/$s.holder"; l="held $l"; }; HL="$HL|$l"; done; }
   clone_verdict() {
-    local h v
+    local h v f=$CLONE_VERDICT
+    # a clone that passes the big-run hold shares a verdict file of its own, on the same tick, and a waiter crossing CLONE_WAIT_MAX works it out at once
+    clone_passes_big && f="$CLONE_VERDICT-nobig"
     clone_holders
-    if [ -n "$CT0" ] && [ $((SECONDS - CT0)) -lt "$CTICK" ] && [ "$HL" = "$CHL" ]; then spaced=$CSP; return; fi
+    if [ -n "$CT0" ] && [ $((SECONDS - CT0)) -lt "$CTICK" ] && [ "$HL" = "$CHL" ] && [ "$f" = "$CVF" ]; then spaced=$CSP; return; fi
     h= v=
-    { read -r h; read -r v; } 2>/dev/null < "$CLONE_VERDICT"
-    if [ -n "$CT0" ] && [ -e "$CLONE_VERDICT" ] && ! [ "$REF" -nt "$CLONE_VERDICT" ] && [ "$h" = "$HL" ]; then
+    { read -r h; read -r v; } 2>/dev/null < "$f"
+    if [ -n "$CT0" ] && [ -e "$f" ] && ! [ "$REF" -nt "$f" ] && [ "$h" = "$HL" ]; then
       CSP=$v
     else
       CSP=$(clone_spaced)
-      printf '%s\n%s\n' "$HL" "$CSP" > "$CLONE_VERDICT" 2>/dev/null
+      printf '%s\n%s\n' "$HL" "$CSP" > "$f" 2>/dev/null
     fi
     : > "$REF" 2>/dev/null
-    CT0=$SECONDS CHL=$HL spaced=$CSP
+    CT0=$SECONDS CHL=$HL CVF=$f spaced=$CSP
   }
   # each waiter ticks every 15 to 24 s, its own length, so waiters that started together do not all find the verdict stale in the same second
-  CT0= CHL= CSP= CTICK=$((15 + RANDOM % 10))
+  CT0= CHL= CSP= CVF= CTICK=$((15 + RANDOM % 10))
   : > "$REF" 2>/dev/null
   GOT=
   polls=0
@@ -2160,6 +2199,10 @@ if [ -n "$KIND" ]; then
     spaced=
     self_changed && reread
     [ "$KIND" = clone ] && clone_verdict
+    if [ "$KIND" = clone ] && [ -z "$spaced" ]; then
+      clone_first
+      [ -n "$FIRST" ] && [ "$FIRST" != "${CLONE_TICKET##*/}" ] && spaced="behind ${FIRST#*-*-*-}, who asked first"
+    fi
     if [ -z "$spaced" ]; then
       if ! [ -d "$OPS/run-slot-$KIND" ]; then
         mkdir "$OPS/run-slot-$KIND" 2>/dev/null && { GOT=1; break; }
@@ -2176,6 +2219,7 @@ if [ -n "$KIND" ]; then
     waited=$((waited + 5))
   done
   [ -n "$GOT" ] || exit 143
+  [ -n "$CLONE_TICKET" ] && rm -f "$CLONE_TICKET" && CLONE_TICKET=""
   SLOT="$OPS/run-slot-$KIND"
   ends=""
   [ "$KIND" = clone ] && ends=$(clone_ends "$@")

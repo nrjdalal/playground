@@ -739,34 +739,34 @@ export const pauseAfter = (error: Called): number => {
   return WAIT_SECONDS
 }
 
-export const cmdWait = async (repo: string, n: string, sha: string): Promise<void> => {
+// One REST read through `gh api -i`, or null once a failed read has waited out its pause.
+const readRest = async (path: string, jq: string): Promise<Json | null> => {
+  try {
+    return JSON.parse(splitResponse(io.run("gh", "api", "-i", path, "--jq", jq))[1])
+  } catch (e) {
+    const pause = pauseAfter(e as Called)
+    process.stderr.write(
+      `gh api failed, trying again in ${pause}s: ${(e as Called).stderr || e}\n`.trimEnd() + "\n",
+    )
+    await io.sleep(pause)
+    return null
+  }
+}
+
+// Polls the PR until its head moves off <sha> or it closes; atHeadDone(), given the open PR's full head, ends it with true, or reads again at once with null after its own pause.
+const watch = async (
+  repo: string,
+  n: string,
+  sha: string,
+  atHeadDone: (head: string) => Promise<boolean | null>,
+): Promise<void> => {
   splitRepo(repo)
   number(n)
   if (!/^[0-9a-f]{7,40}$/.test(sha)) exitWith(`not a commit SHA: ${sha}`)
   let closed = false
   for (;;) {
-    let view: Json
-    try {
-      view = JSON.parse(
-        splitResponse(
-          io.run(
-            "gh",
-            "api",
-            "-i",
-            `repos/${repo}/pulls/${n}`,
-            "--jq",
-            "{merged, sha: .head.sha, state}",
-          ),
-        )[1],
-      )
-    } catch (e) {
-      const pause = pauseAfter(e as Called)
-      process.stderr.write(
-        `gh api failed, trying again in ${pause}s: ${(e as Called).stderr || e}\n`.trimEnd() + "\n",
-      )
-      await io.sleep(pause)
-      continue
-    }
+    const view = await readRest(`repos/${repo}/pulls/${n}`, "{merged, sha: .head.sha, state}")
+    if (!view) continue
     // a PR closed unmerged is read once more a poll later, since Checks closes and reopens a PR to rebuild its merge commit (PG-1701)
     if (view.state !== "open" && (view.merged || closed)) {
       console.log(`CLOSED ${view.merged ? "MERGED" : "CLOSED"}`)
@@ -777,12 +777,48 @@ export const cmdWait = async (repo: string, n: string, sha: string): Promise<voi
       console.log(`MOVED ${view.sha}`)
       return
     }
+    if (!closed) {
+      const done = await atHeadDone(view.sha as string)
+      if (done) return
+      if (done === null) continue
+    }
     await io.sleep(WAIT_SECONDS)
   }
 }
 
+export const cmdWait = (repo: string, n: string, sha: string): Promise<void> =>
+  watch(repo, n, sha, async () => false)
+
+// The ci rule's checks, pr:merge's REQUIRED_CHECKS (packages/scripts/src/pr-merge/gates.ts), which a test holds equal.
+export const GATE_CHECKS = ["Audit, Lint, and Build", "test"]
+
+// Of two runs one name lists (filter=latest lists a re-run in place of its first), the higher id is the newer; a red that concluded before the waiter started is waited past until a newer run concludes, so a re-run after a reported red is seen.
+export const cmdChecks = (repo: string, n: string, sha: string): Promise<void> => {
+  const started = io.time()
+  return watch(repo, n, sha, async (head) => {
+    const runs = await readRest(
+      `repos/${repo}/commits/${head}/check-runs?per_page=100`,
+      "[.check_runs[] | {completed_at, conclusion, id, name}]",
+    )
+    if (!runs) return null
+    const newest = GATE_CHECKS.map((name) =>
+      (runs as Json[])
+        .filter((r) => r.name === name)
+        .reduce<Json | undefined>((a, r) => (a && a.id > r.id ? a : r), undefined),
+    )
+    const counts = (r: Json | undefined): boolean =>
+      !!r?.conclusion &&
+      (r.conclusion === "success" || Date.parse(r.completed_at) / 1000 >= started)
+    if (!newest.every(counts)) return false
+    for (const [i, name] of GATE_CHECKS.entries())
+      console.log(`CHECK ${newest[i]!.conclusion} ${name}`)
+    return true
+  })
+}
+
 const COMMANDS: Record<string, { argc: number; run: (...args: string[]) => void | Promise<void> }> =
   {
+    checks: { argc: 3, run: cmdChecks },
     delta: { argc: 4, run: cmdDelta },
     pr: { argc: 2, run: cmdPr },
     scan: { argc: 1, run: cmdScan },
@@ -796,6 +832,7 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts scan <owner/repo>                            every open PR: is its head scored, and who holds it? (the recovery scan)
   state.ts delta <worktree> <base> <old head> <new head>  did a push change the PR's own work, or only merge the base?
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
+  state.ts checks <owner/repo> <n> <sha>                as wait, and also return once Audit, Lint, and Build and test each conclude at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules
 
 A verdict is a comment by this gh account whose first line is
