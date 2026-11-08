@@ -14,7 +14,6 @@ import { join } from "node:path"
 
 import {
   bytesOf,
-  decisionOf,
   discardable,
   nightlyClean,
   type NightDeps,
@@ -117,7 +116,7 @@ describe("worktrees", () => {
     ).toEqual([at("review-19")])
   })
 
-  test("a kept line goes to the decision list only for work the owner's Approve may drop", () => {
+  test("a kept line is trashed under the standing approval only for work it may drop", () => {
     expect(discardable("kept /w: uncommitted work")).toBe(true)
     expect(discardable("kept /w: unpushed commits")).toBe(true)
     expect(discardable("kept /w: could not count its unpushed commits")).toBe(false)
@@ -188,12 +187,12 @@ test("containers: an exited worktree container whose folder is gone goes; the li
     live,
   )
   expect(plan).toEqual({
-    decide: ["someone-else", "playground-dashboard-db-big"],
+    keep: ["someone-else", "playground-dashboard-db-big"],
     remove: ["playground-pg-9-db", "playground-pg-9-redis"],
   })
 })
 
-test("volumes no container uses that hold over 1 GB are asked, and an unreadable df asks none", () => {
+test("volumes no container uses that hold over 1 GB are named as kept, and an unreadable df names none", () => {
   const df = JSON.stringify({
     Volumes: [
       { Links: "0", Name: "big-unused", Size: "2.5GB" },
@@ -274,26 +273,6 @@ describe("the turbo cache", () => {
       `unreadable ${join(root, "file")}: ENOTDIR`,
     )
   })
-})
-
-test("the decision names each container or volume whole, and holds no more than fits", () => {
-  const { item, targets } = decisionOf("ops", [
-    { kind: "container", name: "someone-else" },
-    { kind: "volume", name: "big-unused" },
-  ])
-  expect(targets).toEqual([
-    { kind: "container", name: "someone-else" },
-    { kind: "volume", name: "big-unused" },
-  ])
-  expect(JSON.stringify(item)).toContain("container `someone-else`")
-  expect(item).toMatchObject({ kind: "decision", preview: { type: "delete" } })
-  const many = Array.from({ length: 200 }, (_, i) => ({
-    kind: "volume" as const,
-    name: `a-long-volume-name-${i}`,
-  }))
-  const capped = decisionOf("ops", many)
-  expect(capped.targets.length).toBeLessThan(200)
-  expect((capped.item as { preview: { what: string } }).preview.what.length).toBeLessThan(4000)
 })
 
 describe("one night's run against a fixture data folder", () => {
@@ -390,12 +369,6 @@ describe("one night's run against a fixture data folder", () => {
     }
     return { ctx, deps, inputs, ops, runs, sent, wt }
   }
-
-  // docker ps with a container over 1 GB that no rule takes, so the delete decision has a target
-  const bigContainer = (): Record<string, string> => ({
-    "docker ps":
-      "playground-gone-db\texited\t10B\nplayground-dashboard-db\trunning\t10B\nsomeone-else\texited\t2GB",
-  })
 
   // #1515 items 3 to 5: one fixture container per kept class, two orphans, and an unused volume over 1 GB
   const leftovers = (more: Answers = {}): Answers => ({
@@ -918,7 +891,7 @@ describe("one night's run against a fixture data folder", () => {
     expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
     const line = sent.find((s) => s.to === "ops")
     expect(line?.text).toContain(`worktree ${wt("pg-2")} kept: its trash move failed`)
-    expect(line?.text).toContain("removed 0, kept 1")
+    expect(line?.text).toContain("removed 1, kept 1: container playground-gone-db; ")
   })
 
   // PG-1165
@@ -936,69 +909,8 @@ describe("one night's run against a fixture data folder", () => {
   })
 
   test("a night that frees under 1 GB posts no update", async () => {
-    const { ctx, deps, inputs } = night(bigContainer(), undefined, 0.01)
+    const { ctx, deps, inputs } = night(leftovers(), undefined, 0.01)
     await nightlyClean(deps)(ctx)
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["decision"])
-  })
-
-  test("last night's open decision is settled into the new one", async () => {
-    const { ctx, deps, runs } = night(
-      { "ask get": JSON.stringify({ status: "open" }), ...bigContainer() },
-      () => ({ decision: { id: OLD, targets: [] } }),
-    )
-    await nightlyClean(deps)(ctx)
-    expect(runs.map((r) => r.slice(5).join(" "))).toContain(
-      `ask settle ${OLD} --note Carried into the next night's decision, ${ID}`,
-    )
-  })
-
-  test("last night's approved decision is carried out and acked; a denied one's targets are not asked again", async () => {
-    const approved = night({ "ask get": JSON.stringify({ status: "approved" }) }, (wt) => ({
-      decision: {
-        id: OLD,
-        targets: [
-          { kind: "branch", name: "PG-7-old" },
-          { kind: "container", name: "playground-x-db" },
-          { kind: "volume", name: "big-unused" },
-          { kind: "worktree", name: wt("pg-2") },
-        ],
-      },
-    }))
-    await nightlyClean(approved.deps)(approved.ctx)
-    const ran = approved.runs.map((r) => r.join(" "))
-    const repo = approved.ctx.repo
-    expect(ran).toContain(`git -C ${repo} branch -D PG-7-old`)
-    expect(ran).toContain("docker rm -fv playground-x-db")
-    expect(ran).toContain("docker volume rm big-unused")
-    expect(ran).toContain(
-      `bun --no-env-file ${join(repo, "packages", "scripts", "src", "playground", "cli.ts")} rm --worktree ${approved.wt("pg-2")} --discard --decision ${OLD} --reason nightly-clean, approved`,
-    )
-    expect(ran.some((r) => r.includes(`ask ack ${OLD} --no-link`))).toBe(true)
-    const denied = night(
-      { "ask get": JSON.stringify({ status: "denied" }), ...bigContainer() },
-      () => ({ decision: { id: OLD, targets: [{ kind: "container", name: "someone-else" }] } }),
-    )
-    await nightlyClean(denied.deps)(denied.ctx)
-    const asked = denied.runs.map((r) => r.join(" "))
-    expect(asked).toContain(`bun run --silent --cwd ${denied.ctx.repo} ask get ${OLD} --ack`)
-    expect(denied.inputs.some((i) => JSON.parse(i).kind === "decision")).toBe(false)
-    const kept = JSON.parse(readFileSync(join(denied.ops, "tick", "nightly-clean.json"), "utf8"))
-    expect(kept.denied).toEqual(["container someone-else"])
-    expect(kept.decision).toBeUndefined()
-  })
-
-  test("a dismissed decision is closed, and its targets still standing are asked again", async () => {
-    const { ctx, deps, inputs, ops, runs } = night(
-      { "ask get": JSON.stringify({ status: "cleared" }), ...bigContainer() },
-      () => ({ decision: { id: OLD, targets: [{ kind: "container", name: "someone-else" }] } }),
-    )
-    await nightlyClean(deps)(ctx)
-    expect(runs.map((r) => r.join(" "))).toContain(
-      `bun run --silent --cwd ${ctx.repo} ask get ${OLD} --ack`,
-    )
-    const decision = inputs.map((i) => JSON.parse(i)).find((i) => i.kind === "decision")
-    expect(decision.preview.what).toBe("- container `someone-else`")
-    const kept = JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))
-    expect(kept.denied).toBeUndefined()
+    expect(inputs).toEqual([])
   })
 })
