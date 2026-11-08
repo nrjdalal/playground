@@ -635,6 +635,7 @@ import importlib.util, json, os, sys, time
 spec = importlib.util.spec_from_file_location("run", sys.argv[1])
 run = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(run)
+real_time = time.time
 clock = [1_800_000_000.0]
 run.time.time = lambda: clock[0]
 sent = []
@@ -650,7 +651,7 @@ run.cycle(state)
 clock[0] += 200
 run.cycle(state)
 run.cycle(state)
-aged = time.time() - 1300
+aged = real_time() - 1300
 new = os.path.join(run.OPS, "run-slot.waiters", "2-%d-worker-big2" % os.getpid())
 with open(new, "w") as f:
     f.write("s2 23 3 big\\n")

@@ -1764,8 +1764,9 @@ slot_open() {
   # #i162: in single-slot mode run-slot-2 still opens for a second suite; since 13 Oct (dispatcher, so work runs while the
   # machine allows) it opens on memory: free share 40% or more (ops, 19 Oct 01:16Z, from the optimizer: 9 Mac-only waiters at
   # pressure 1 with 43% free), pressure normal and swap-ins under SWAPINS_MAX (mem_ok), and the 5-minute load under 22 as a backstop
+  # issue 1416: run-slot-2 stays shut to a big run while single is on (a big took slot 2 before the switch went on, held 3 of the 4 units, and run-slot sat empty 13:03 to 13:10Z on 7 Nov), so slot 1 stays the big lane, the spare unit beside a big goes to a small run, and the state cannot come back while the switch stands; a big already holding slot 2 keeps its units until it ends, and ops-unstick names that window
   if [ "$s" != run-slot ] && switch_on run-slot.single && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ]; then
-    if [ "$s" = run-slot-2 ] && [ "$(load5)" -lt "$(load_line)" ] && mem_ok; then :; else return 1; fi
+    if [ "$s" = run-slot-2 ] && [ "${SIZE:-}" != big ] && [ "$(load5)" -lt "$(load_line)" ] && mem_ok; then :; else return 1; fi
   elif [ "$s" = run-slot-2 ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && ! lanes_now; then
     return 1
   fi
