@@ -397,6 +397,76 @@ describe("one night's run against a fixture data folder", () => {
       "playground-gone-db\texited\t10B\nplayground-dashboard-db\trunning\t10B\nsomeone-else\texited\t2GB",
   })
 
+  // #1515 items 3 to 5: one fixture container per kept class, two orphans, and an unused volume over 1 GB
+  const leftovers = (more: Answers = {}): Answers => ({
+    "docker ps": [
+      "playground-gone-db\texited\t10B",
+      "playground-gone-redis\texited\t10B",
+      "playground-dashboard-db\trunning\t10B",
+      "playground-dashboard-db-sY08\texited\t10B",
+      "playground-vibe-pg-9-ab12cd34-db\texited\t10B",
+      "playground-pg-1-db\texited\t10B",
+      "playground-lost-db\trunning\t10B",
+      "someone-else\texited\t2GB",
+    ].join("\n"),
+    "docker system df": JSON.stringify({
+      Volumes: [{ Links: "0", Name: "big-unused", Size: "2.5GB" }],
+    }),
+    ...more,
+  })
+
+  test("the two orphans go with -fv and are named, every other container and the volume stay and are named, and no decision is asked", async () => {
+    const { ctx, deps, inputs, ops, runs, sent } = night(leftovers())
+    await nightlyClean(deps)(ctx)
+    const removals = runs
+      .map((r) => r.join(" "))
+      .filter((r) => r.startsWith("docker rm") || r.startsWith("docker volume rm"))
+    expect(removals).toEqual([
+      "docker rm -fv playground-gone-db",
+      "docker rm -fv playground-gone-redis",
+    ])
+    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    const line = sent.find((s) => s.to === "ops")?.text ?? ""
+    for (const text of [log, line]) {
+      expect(text).toContain("container playground-gone-db")
+      expect(text).toContain("container playground-gone-redis")
+      expect(text).toContain("container someone-else kept: over 1 GB, no rule removes it")
+      expect(text).toContain("volume big-unused kept: unused and over 1 GB, no rule removes it")
+    }
+    expect(line).not.toContain("playground-dashboard-db")
+    expect(line).not.toContain("playground-lost-db")
+  })
+
+  test("a docker rm that fails is named as kept", async () => {
+    const { ctx, deps, ops, sent } = night(
+      leftovers({
+        "docker rm -fv playground-gone-db": { code: 1, err: "Error response from daemon\n" },
+      }),
+    )
+    await nightlyClean(deps)(ctx)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    const line = sent.find((s) => s.to === "ops")?.text ?? ""
+    for (const text of [log, line]) {
+      expect(text).toContain("container playground-gone-db kept: its docker rm failed")
+      expect(text).toContain("container playground-gone-redis")
+    }
+  })
+
+  test("a state file an older run left with a decision and denied keys loads, and nothing reads or asks them", async () => {
+    const { ctx, deps, inputs, ops, runs } = night(leftovers(), () => ({
+      at: "2026-11-04T03:00:00.000Z",
+      decision: { id: OLD, targets: [{ kind: "container", name: "someone-else" }] },
+      denied: ["volume big-unused"],
+    }))
+    await nightlyClean(deps)(ctx)
+    expect(runs.some((r) => r.includes("ask") && r.includes(OLD))).toBe(false)
+    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))).toEqual({
+      at: "2026-11-05T03:00:00.000Z",
+    })
+  })
+
   test("a live session's worktree stays, the gone worktree's container goes, and the log line is written", async () => {
     const { ctx, deps, inputs, ops, runs, wt } = night()
     await nightlyClean(deps)(ctx)
