@@ -58,6 +58,7 @@ const SHEBANGS: Record<string, string> = {
   [`${SHAPES}/glued-option`]: "#!/usr/bin/env -S-i bun",
   [`${SHAPES}/glued-quoted`]: "#!/usr/bin/env -S'bun'",
   [`${SHAPES}/no-shebang`]: "console.log(1)",
+  [`${SHAPES}/python`]: "#!/usr/bin/env python3",
   [`${SHAPES}/shell`]: "#!/bin/sh",
 }
 
@@ -306,6 +307,10 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
     [
       "a bun skill script by its path from a folder in the main checkout's tree",
       call(`${SKILLS}/code-review-loop/scripts/state.ts pr 501`, `${MAIN}/docs`),
+    ],
+    [
+      "a python skill script by its path in a clone with a bunfig.toml",
+      call(`${SHAPES}/python`, OUTSIDE),
     ],
     ["a sh skill script by its path in a clone", call(`${SHAPES}/shell`, OUTSIDE)],
     ["a skill script with no shebang in a clone", call(`${SHAPES}/no-shebang`, OUTSIDE)],
