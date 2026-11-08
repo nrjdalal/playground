@@ -16,6 +16,8 @@ A single PR's read stays REST.
    Ask only the fields the sweep reads; every extra field spends points.
    `states` takes `OPEN`, `CLOSED` and `MERGED`, so an inventory passes all three; `files(first: 50)` cuts a PR with more files, so the query asks the connection's `pageInfo`, and step 3 reads the rest of each PR whose files say `hasNextPage`; a sweep that raises the count raises its cost with it.
    Carry `rateLimit { cost remaining }` in the query, so each page reports what it spent.
+   Write the query inline in the command, so `no-release-comment` can read it before the command runs: a query held in a shell variable is refused, since a GraphQL call names no repository to narrow the read by (measured: the inline form and the file form below pass, the variable form refuses).
+   A long query keeps the file form, made before the call.
    Done when the page returns and `rateLimit` shows what it spent.
 
    ```graphql
