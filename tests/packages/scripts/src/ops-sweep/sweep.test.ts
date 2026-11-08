@@ -393,7 +393,7 @@ describe("boxRoute", () => {
 describe("lateReviewers", () => {
   const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString()
   // one PR as GitHub's GraphQL answers it: open, its head's checks in the rollup state given, the last finishing `ready` minutes ago, and the comments given
-  const answer = (ready: number, comments: string[] = [], state = "SUCCESS") =>
+  const answer = (ready: number, comments: string[] = [], state = "SUCCESS", isDraft = false) =>
     JSON.stringify({
       data: {
         repository: {
@@ -417,6 +417,7 @@ describe("lateReviewers", () => {
               ],
             },
             headRefOid: "b9861d6aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            isDraft,
             state: "OPEN",
           },
         },
@@ -470,6 +471,13 @@ describe("lateReviewers", () => {
     expect((await late(answer(30, ["## ReviewBot · round 1: 3/5 at 1234567"]))).told).toEqual([])
     expect((await late(answer(30), [["ghjkmn-reviewer", "busy"]])).told).toEqual([])
     expect((await late(answer(30, [], "PENDING"))).told).toEqual([])
+  })
+
+  test("a green draft with no reviewer row sends nothing, and a ready non-draft still alerts (#1565)", async () => {
+    expect((await late(answer(30, [], "SUCCESS", true), [], false)).told).toEqual([])
+    const nonDraft = await late(answer(30, [], "SUCCESS", false), [], false)
+    expect(nonDraft.told).toHaveLength(1)
+    expect(nonDraft.told[0]!.argv[3]).toContain("no reviewer on the roster")
   })
 
   test("a parked worker's ready head sends nothing, while a working one's still alerts (#175)", async () => {
