@@ -7977,9 +7977,7 @@ function narrow(cmd, env) {
     return sedReads(args);
   if (base === "perl")
     return perlReads(parsed, env);
-  if (base === "cut")
-    return true;
-  if (base === "echo" || base === "lsof")
+  if (base === "cut" || base === "echo" || base === "lsof")
     return true;
   if (base === "gh") {
     const filters = ghFilters(parsed);

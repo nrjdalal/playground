@@ -659,7 +659,7 @@ function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
   )
 }
 
-// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, git, grep, head, perl, sed, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
   const { args, first } = parsed
@@ -684,9 +684,7 @@ function narrow(cmd: Command, env: Env): boolean {
   if (base === "git") return reads(parsed, env) && !args.some(({ value }) => marked(value))
   if (SEDS.has(base)) return sedReads(args)
   if (base === "perl") return perlReads(parsed, env)
-  if (base === "cut") return true
-  // echo prints its words and lsof lists open files, and neither runs or writes anything, so the filter they feed keeps its reading
-  if (base === "echo" || base === "lsof") return true
+  if (base === "cut" || base === "echo" || base === "lsof") return true
   // a read-only gh call is narrow when its jq filter is the only word that holds a space
   if (base === "gh") {
     const filters = ghFilters(parsed)
