@@ -1265,6 +1265,8 @@ CHILD=""
 POLL=${RUN_SLOT_POLL:-15}
 # the longest a commit or quick start waits on load5 (issue 1385)
 LOAD_WAIT=${RUN_SLOT_LOAD_WAIT:-300}
+# the wait past which a waiter counts as a backlog the burst hold keeps spaced, small runs included (issue 1417): a queue that releases starts its small runs all at once, and load5 reads them only about a minute later (7 Nov 13:10 to 13:15Z: 12 queued runs started on run-slot and run-slot-2, and load5 crossed 15 at 13:16:08Z), so a small run that has waited this long also waits for burst_held to clear; a fresh small run starts at once (the tests shorten it)
+BACKLOG_WAIT=${RUN_SLOT_BACKLOG_WAIT:-300}
 CLONE_POLL=${RUN_SLOT_POLL:-5}
 # the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake (clone_brake) it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
 CLONE_GAP=180
@@ -1813,12 +1815,12 @@ iso_ago() {
 # A burst of starts outruns the reading the slots open on, since load1 shows a run's load about a minute after it starts (issue 610, 2 Nov:
 # five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while run-slot.runs.log shows more runs started on
 # run-slot to run-slot-4 or the clone slot in the last minute than ended there, so the held runs grew, a medium or big run waits for the
-# reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, as does a small run,
-# and the dashboard's and the merge train's runs go on too, as they skip slot 2's lanes_open; prints how many runs the last
+# reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, and the dashboard's
+# and the merge train's runs go on too, as they skip slot 2's lanes_open; prints how many runs the last
 # minute added when it holds
 burst_held() {
   local cutoff
-  [ "$SIZE" != small ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
+  { [ "$SIZE" != small ] || [ "${waited:-0}" -ge "$BACKLOG_WAIT" ]; } && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
   cutoff=$(iso_ago 60) || return 1
   tail -n 3000 "$OPS/run-slot.runs.log" 2>/dev/null | CUTOFF=$cutoff awk '
     $2 == "start" && $5 ~ /^run-slot(-[234]|-clone)?$/ { run[$3 " " $4] = 1; if ($1 > ENVIRON["CUTOFF"]) n++ }

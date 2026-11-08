@@ -253,7 +253,7 @@ describe("a burst of starts", () => {
     expect(await run.ran()).toBe(true)
   })
 
-  test("a small run and the merge train's go on beside a fresh start", async () => {
+  test("a fresh small run and the merge train's go on beside a fresh start", async () => {
     const m = machine({ load1: 2, now: NOW })
     ran(m.ops, 101, "run-slot", 5)
     expect(await m.runs("worker-s", { RUN_SLOT_SIZE: "small" })).toBe(true)
@@ -272,7 +272,7 @@ describe("a burst of starts", () => {
 
 // 7 Nov 13:10 to 13:15Z: a released backlog started 12 runs on run-slot and run-slot-2, small ones included, and load5 crossed the 15 cap at 13:16:08Z, since neither reading shows a start until about a minute after it; a small run whose waiter has waited past the backlog line also waits for the burst to clear, while a fresh small run in a queue with no backlog starts at once and the dashboard's and the merge train's runs keep their exemption
 describe("a small run in a draining backlog", () => {
-  const backlog = { RUN_SLOT_SIZE: "small", RUN_SLOT_BACKLOG_WAIT: "1" }
+  const backlog = { RUN_SLOT_SIZE: "small", RUN_SLOT_BACKLOG_WAIT: "1", RUN_SLOT_POLL: "0.2" }
   const NOW = Math.floor(Date.now() / 1000)
   const iso = (ago: number) => new Date((NOW - ago) * 1000).toISOString().replace(/\.\d+Z$/, "Z")
   const ran = (ops: string, pid: number, slot: string, ago: number) =>
@@ -281,14 +281,17 @@ describe("a small run in a draining backlog", () => {
       `${iso(ago)} start worker-r ${pid} ${slot} waited=0s\n`,
     )
 
-  test("in a backlog a small run waits for the burst to clear, and starts once the minute shows no new runs", async () => {
-    const m = machine({ load1: 2, now: NOW })
+  test("in a backlog a small run waits for the burst to clear once it has waited, and starts when the minute shows no new runs and a slot is free", async () => {
+    const m = machine({ load1: 2, now: NOW, off: ["run-slot.3-off", "run-slot.4-off"] })
+    m.hold("run-slot", 3, "big")
+    m.hold("run-slot-2", 3, "big")
     ran(m.ops, 101, "run-slot", 10)
     const run = m.start("worker-s", backlog)
-    expect(await run.waits()).toBe(true)
-    appendFileSync(join(m.ops, "run-slot.runs.log"), `${iso(30)} end worker-r 101 rc=0 ran=20s\n`)
+    // saw, not waits: waits stops the run, and this one must go on to start once the minute clears
+    expect(await run.saw(WAITING)).toBe(true)
+    appendFileSync(join(m.ops, "run-slot.runs.log"), `${iso(5)} end worker-r 101 rc=0 ran=5s\n`)
+    m.release("run-slot-2")
     expect(await run.ran()).toBe(true)
-    await stop(run.p)
   })
 
   test("with no backlog a small run starts at once", async () => {

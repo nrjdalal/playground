@@ -192,6 +192,13 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - A worker, reviewer or tester that ends automatically takes its worktrees with it, one at a time: dev stack, worktree, `playground-<worktree>-db` and `-redis` containers and branch (`cleanWorktree` in `scripts/ops/optimizer/auto_end.ts`; the factory's SESSIONS.md End holds the rules).
 - After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.
 
+## Run slots
+
+- Heavy runs go through `~/.playground/ops/run-slot.sh <name> -- <command>`; the load rules, the lanes and the switches are written in [ops/README.md](ops/README.md#run-slot).
+- A backlog drains spaced, not as one burst: while the last minute started more runs on the slots than ended there (`burst_held` in run-slot.sh), a medium or big run waits for the readings to catch up, since load1 and load5 show a run's load about a minute after it starts, and a small run joins the hold once its waiter has waited past the backlog line (`BACKLOG_WAIT`, 300 s, in run-slot.sh).
+  Without the small-run hold a released queue started 12 runs in five minutes and load5 crossed the 15 cap three minutes later (7 Nov, 13:10 to 13:15Z), which is why the spacing covers small runs too.
+- A small run whose waiter is fresh still starts at once, so a queue with no backlog behaves as it did before, and the dashboard's and the merge train's runs keep their exemption, since they skip the lanes gate.
+
 ## bun run test:skills
 
 - `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
