@@ -1146,7 +1146,7 @@ const dockerUp = (): boolean =>
 
 // The real guard, against a throwaway container on 127.0.0.1 standing in for the live dashboard's database.
 describe.skipIf(!dockerUp())("preflight against a real container", () => {
-  const name = `dispatcher-test-preflight-${process.pid}`
+  const name = testContainerName("launch")
   const liveDashboard = { branch: LIVE_DASHBOARD.branch, database: name }
   let url = ""
 
@@ -1158,8 +1158,6 @@ describe.skipIf(!dockerUp())("preflight against a real container", () => {
       "--rm",
       "--name",
       testContainerName("launch"),
-      "--name",
-      name,
       "-e",
       "POSTGRES_PASSWORD=preflight-test",
       "-p",

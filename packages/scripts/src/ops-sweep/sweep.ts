@@ -526,10 +526,20 @@ export async function idleDbs(ctx: Context): Promise<string[]> {
   return out
 }
 
+// Whether a pid runs, read for a removal: a refused signal (another user's process, or one outside a sandbox the sweep runs in) counts as running, so a removal never rests on a pid the sweep cannot see.
+export const runsForDelete = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
 // A test container named playground-test-<suite>-<pid> whose runner pid no longer runs is a killed test run's leftover (the kill never reaches the suite's cleanup): removed with its volumes, so a killed run leaks nothing. Every other container stays: the live dashboard's database, pglaunch's, a Vibeground copy, a worktree's, any running stack's, and any test container whose pid still runs; a name whose last field is not a pid, such as a worktree named test-x's playground-test-x-db, is never one. runs says whether a pid has a process, a test's table in its place.
 export async function leakedTests(
   ctx: Context,
-  runs: (pid: number) => boolean = alive,
+  runs: (pid: number) => boolean = runsForDelete,
 ): Promise<string[]> {
   const ps = await ctx.run(
     ["docker", "ps", "--filter", "name=^playground-test-", "--format", "{{.Names}}"],

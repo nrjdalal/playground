@@ -42,9 +42,11 @@ test("every docker run a test starts names its container playground-test-<suite>
       const raw = text.slice(m.index!, m.index! + 2000).split(/\]\s*[),]/)[0] ?? ""
       const argv: string[] = raw.match(/"([^"\\]|\\.)*"/g) ?? []
       const at = argv.indexOf(`"${"--name"}"`)
-      // the name arrives as the helper's call or as the literal it returns
+      // the name arrives as the helper's call or as the literal it returns, and only once, since docker keeps a start's last --name
+      const names = argv.filter((word) => word.startsWith(`"${"--name"}`)).length
       const named =
         at !== -1 &&
+        names === 1 &&
         (/^"playground-test-[a-z0-9-]+-\d+"$/.test(argv[at + 1] ?? "") ||
           new RegExp(`${"testContainerName"}\\("[a-z0-9-]+"\\)`).test(raw))
       if (!named) unnamed.push(`${relative(ROOT, file)}:${lines.length}`)

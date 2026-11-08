@@ -27,6 +27,7 @@ import {
   pass,
   prlessBranches,
   type Run,
+  runsForDelete,
   stalledPrs,
 } from "../../../../../packages/scripts/src/ops-sweep/sweep"
 
@@ -199,6 +200,14 @@ describe("leakedTests", () => {
       [TEST_PS]: { out: "playground-test-x-db\nplayground-test-worktree-db\n" },
     })
     expect(await leakedTests(ctx, () => false)).toEqual([])
+    expect(calls.some((c) => c.argv[0] === "docker" && c.argv[1] === "rm")).toBe(false)
+  })
+
+  test("counts a pid whose signal is refused as running, so pid 1's container stays", async () => {
+    expect(runsForDelete(process.pid)).toBe(true)
+    expect(runsForDelete(gonePid())).toBe(false)
+    const { calls, ctx } = setup({ [TEST_PS]: { out: "playground-test-ask-1\n" } })
+    expect(await leakedTests(ctx)).toEqual([])
     expect(calls.some((c) => c.argv[0] === "docker" && c.argv[1] === "rm")).toBe(false)
   })
 
