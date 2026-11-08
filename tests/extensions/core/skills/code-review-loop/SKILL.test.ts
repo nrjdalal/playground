@@ -49,11 +49,22 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(stand).toContain(
       "While those checks still run at `<head>` and canary has changed none of the PR's files",
     )
-    expect(stand).toContain(
-      "`gh api repos/<owner>/<repo>/commits/<head>/check-runs` at playbook's **github** rule's pace (`github.pollMinutes`)",
-    )
+    expect(stand).toContain("wait on them with step 8's `state.ts checks` and cite the run")
     expect(stand).toContain("queue them only when a stand-in condition fails or a check goes red")
     expect(await page()).toContain("waits for CI still running at the head")
+  })
+
+  test("step 8 names the one waiter on the head's checks, which a re-run at the same head ends (#1410)", async () => {
+    const step8 = (await skill()).split("8. **Report and wait.**")[1]?.split("\n")[0] ?? ""
+    expect(step8).toContain("`${CLAUDE_SKILL_DIR}/scripts/state.ts checks <repo> <n> <head>`")
+    expect(step8).toContain(
+      "start `checks` again at once, which waits past a red that concluded before it started",
+    )
+    expect(step8).toContain("`state.ts checks` on a head whose two gate checks are not both green")
+    expect(await page()).toContain("started again after a red it waits for that check's re-run")
+    expect(await page()).toContain(
+      "`state.ts checks` on a head whose two gate checks are not both green",
+    )
   })
 
   test("green CI at the head stands in for check-types, but not for a file packages/scripts imports from outside it (#166)", async () => {
