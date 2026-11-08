@@ -609,6 +609,97 @@ describe("one night's run against a fixture data folder", () => {
     expect(log).not.toContain("trashed ")
   })
 
+  // the bound on the pace itself: with 40 stale worktrees the pre-call pauses would spend 780s, so the bound stops them at 600s and each worktree past it is named for the next run without rm being called
+  test("the pace itself ends at the bound, naming the rest for the next run without calling rm", async () => {
+    const root = scratch()
+    const data = join(root, "data")
+    const ops = join(data, "ops")
+    const main = join(root, "main")
+    const names = Array.from({ length: 40 }, (_, i) => `pg-${i + 1}`)
+    for (const name of names)
+      mkdirSync(join(main, ".claude", "worktrees", name), { recursive: true })
+    mkdirSync(join(ops, "log"), { recursive: true })
+    writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
+    const wt = (name: string) => join(main, ".claude", "worktrees", name)
+    const porcelain = [
+      `worktree ${main}\nHEAD a\nbranch refs/heads/main`,
+      ...names.map(
+        (name, i) =>
+          `worktree ${wt(name)}\nHEAD ${"abcdefghijklmnopqrstuvwxyz0123"[i]}\nbranch refs/heads/PG-${i + 1}-x`,
+      ),
+    ].join("\n\n")
+    const answers: Answers = {
+      "docker ps": "playground-dashboard-db\trunning\t10B",
+      "docker system df": JSON.stringify({ Volumes: [] }),
+      "for-each-ref refs/heads": [...names.map((_, i) => `PG-${i + 1}-x h${i + 1}`), "main m"].join(
+        "\n",
+      ),
+      "for-each-ref refs/remotes/origin": "HEAD x",
+      "branch --merged": names.map((_, i) => `PG-${i + 1}-x`).join("\n"),
+      "worktree list": porcelain,
+      "--reason nightly-clean":
+        "Moved to the trash as 20261108T030000Z-shell/1 (3 files); playground rm --restore 20261108T030000Z-shell/1 brings it back",
+    }
+    const base = fakeRun(answers)
+    const rmCalls: string[] = []
+    let t = 0
+    const waits: number[] = []
+    const run: Context["run"] = async (argv, timeoutMs, stdin) => {
+      const line = argv.join(" ")
+      if (line.includes("rm --worktree")) rmCalls.push(line.split(" ").at(-4) ?? "")
+      return base.run(argv, timeoutMs, stdin)
+    }
+    const sleep = async (ms: number) => {
+      waits.push(ms)
+      t += ms
+    }
+    const ctx: Context = {
+      now: new Date("2026-11-05T03:00:00Z"),
+      ops,
+      repo: main,
+      run,
+      send: async () => true,
+    }
+    const deps: NightDeps = {
+      cleanup: async () => ({
+        containers: async () => [],
+        devStop: async () => ({ ok: true, out: "" }),
+        finished: async () => false,
+        git: async (dir, args) =>
+          args[0] === "rev-parse"
+            ? `${dir}/.git\n${main}/.git`
+            : args[0] === "status"
+              ? " M wip.ts"
+              : "",
+        held: async () => null,
+        live,
+        liveBranch: "live/dashboard",
+        main,
+        removeContainer: async () => true,
+        rm: async () => ({ ok: true, out: "" }),
+      }),
+      free: () => 100 * 1024 ** 3,
+      now: () => t,
+      prs: async () => ({
+        ...prsOf(
+          Object.fromEntries(
+            names.map((_, i) => [`PG-${i + 1}-x`, pr("MERGED", `h${i + 1}`, i + 1)]),
+          ),
+        ),
+        repo: "https://github.com/acme/app",
+      }),
+      sleep,
+      turbo: join(root, "turbo"),
+    }
+    await nightlyClean(deps)(ctx)
+    expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(600_000)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log.match(/trashed /g)).toHaveLength(33)
+    expect(log.match(/left .*? for the next run/g)).toHaveLength(7)
+    for (const name of names.slice(33))
+      expect(rmCalls.some((called) => called.endsWith(wt(name)))).toBe(false)
+  })
+
   // #1515
   test("an unmerged branch on origin is archived as a tag before any delete, then deleted on origin and locally, and no ask new names a decision", async () => {
     const { ctx, deps, inputs, ops, runs, sent } = night({

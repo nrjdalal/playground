@@ -382,8 +382,15 @@ export const nightlyClean =
         out.push(line)
         if (!discardable(line)) continue
         // The owner's standing approval: trashed with no decision, the 7-day trash holds it and playground rm --restore brings it back.
-        // The pace goes before the call, so a 4th move inside the minute never lands and rm's tripwire pages no one; the retry below stays for the callers this session shares with.
+        // The pace goes before the call, so a 4th move inside the minute never lands and rm's tripwire pages no one, under the same bound as the retry; past the bound the worktree is named for the next run and rm is not called. The retry below stays for the callers this session shares with.
         const recent = moves.filter((at) => deps.now() - at < CAP_WAIT_MS)
+        if (recent.length >= 3 && waited + CAP_WAIT_MS > CAP_WAIT_BOUND_MS) {
+          out.push(
+            `left ${w.path} for the next run: rm's cap held past the ${CAP_WAIT_BOUND_MS / 60_000}-minute wait`,
+          )
+          kept.push(`worktree ${w.path} left for the next run: rm's cap held past the wait bound`)
+          continue
+        }
         if (recent.length >= 3) {
           const pause = CAP_WAIT_MS - (deps.now() - recent[0]!)
           if (pause > 0) {
