@@ -160,12 +160,12 @@ Start with `codebase-map` to orient, then load the task skill that fits.
 
 ## Playground
 
-This repo is also Playground, whose own skills live under `skills/`.
+This repo is also Playground, whose own skills live in `extensions/core/skills/`.
 The repo is public: write every file in it by the Commits section's people rule, naming no person, handle or internal repo, as `no-public-leak` (below) holds its pull requests, issues and comments to.
 ZeroStarter's rules above govern Playground too; this section adds its own.
 
-- Skills live under `skills/`: `zerostarter/` the starter's, which `.agents/skills` links to, and `playground/` an index alone: the factory's own skills are core's (`extensions/core/skills/`).
-- Every skill of Playground's own has an entry in the top-level `README.md` and in `extensions/core/README.md` (the name linked to its `SKILL.md`), plus a docs page at `docs/playground/<name>.md` written per [.agents/writing-docs.md](./.agents/writing-docs.md).
+- Skills live under `skills/` too: `zerostarter/` the starter's, which `.agents/skills` links to, and `playground/` an index alone.
+- Every promoted skill (one of Playground's own) has an entry in the top-level `README.md` and in `extensions/core/README.md` (the name linked to its `SKILL.md`, grouped into **User-invoked** and **Model-invoked**), plus a docs page at `docs/playground/<name>.md` written per [.agents/writing-docs.md](./.agents/writing-docs.md).
   Adding, renaming or changing a skill re-syncs all three.
   An internal worker (called only by another skill or an ops job) gets a docs page linked from its caller's and no README entry; one an ops job types keeps the default `user-invocable` (`.agents/invocation.md`).
 - Invocation rules are in [.agents/invocation.md](./.agents/invocation.md).
