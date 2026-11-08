@@ -31,6 +31,7 @@ for link in "$DEST"/*; do
 done
 
 # A link into this checkout whose file a pull removed goes, in the folders doctor reads (linksInto in packages/scripts/src/playground/links.ts); a live one, and every link elsewhere, stays
+case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "link-skills.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 DATA="${PLAYGROUND_DATA_DIR:-$HOME/.playground}"
 for dir in "$HOME/.bun/bin" "$DATA" "$DATA/handoffs" "$DATA/ops" "$DATA"/ops/*/; do
   dir="${dir%/}"

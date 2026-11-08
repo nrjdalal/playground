@@ -11,6 +11,7 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 KEY=${RUNNER_HOST_KEY:-$HOME/.ssh/playground_runner}
+case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "ci.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 IP=${RUNNER_HOST:-$(cat "${PLAYGROUND_DATA_DIR:-$HOME/.playground}/ops/runner-host/ip" 2> /dev/null)}
 POLL=${RUNNER_HOST_POLL:-20}
 PROGRESS=${RUNNER_HOST_PROGRESS:-300}
