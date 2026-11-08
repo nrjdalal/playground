@@ -641,7 +641,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 
 ## no-mac-web-build
 
-- A factory session builds the web image on the box: `scripts/hooks/no-mac-web-build.ts`, registered beside no-glm-heavy-path, refuses a factory session's web image build on the Mac while the live dashboard's Postgres runs in the same Docker VM.
+- A factory session builds the web image on the box: `scripts/hooks/no-mac-web-build.ts`, registered after no-raw-delete, five entries past no-glm-heavy-path, refuses a factory session's web image build on the Mac while the live dashboard's Postgres runs in the same Docker VM.
   On 21 Oct a tester's web build took the 3.1 GB VM's out-of-memory killer to every Postgres in it, the dashboard's included, and the build peaks at about 4 GB over baseline (measured on the box), so no memory cap makes it safe here.
   It reads each docker call through `scripts/hooks/docker-build.ts`, which no-unslotted-run and run-slot read too.
   A web image build is `docker compose build` (or `docker-compose build`) with no service named, `web` among them or a service it cannot read, `docker compose up`, `create` or `run` on the same terms unless given `--no-build` (compose builds a missing image, and docker-compose.yml names none), and `docker build`, `buildx build`,
@@ -743,7 +743,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   git takes no option that starts a program or writes a file (`GIT_RUN_NAMES`), by its full name or any start of it, since git takes an unambiguous start (`--open=` for `--open-files-in-pager`).
   It holds git's literal moves, each with `-q` allowed: `clone <github url> <dir>`, `worktree add [--detach] <path> <rev>` and `worktree list`, and `checkout` or `switch --detach <rev>` where neither the folder nor one above it up to its work tree's root holds `node_modules` for a git hook's lefthook to load.
   `fetch` takes a remote's name or a GitHub URL, never a path, which names a repository the PR can ship, and only options that name no program or source (`FETCH_OPTIONS`, `--depth=<n>`), and `remote` takes no verb but `get-url` and `show`.
-  It holds a skill's script under the data folder's `orgs/*/skills/` or the main checkout's `extensions/*/skills/` (code-review-loop's `state.py`, and `state.ts`, its bun port), run by its path or by node, python or python3, judged where the path resolves, so a `..` climb out of those folders is refused; bun by name is left out, since it reads the folder's `bunfig.toml`, whose preload runs first.
+  It holds a skill's script under the data folder's `orgs/*/skills/` or the main checkout's `extensions/*/skills/` (code-review-loop's `state.ts`), run by its path or by node, python or python3, judged where the path resolves, so a `..` climb out of those folders is refused; bun by name is left out, since it reads the folder's `bunfig.toml`, whose preload runs first.
   A script run by its path is judged by the runner its first line names (`runnerOf`, which reads `env`'s options, assignments and `-S` as env does).
   One whose runner reads no folder's files (bash, node, python, python3, sh or zsh), or that has no shebang, passes anywhere.
   Any other (bun, bun-canary, an `env` line read as another word, a script the hook cannot open) passes only where the working folder sits in the main checkout's own tree, the first folder up from it holding `.git` being the main checkout.
