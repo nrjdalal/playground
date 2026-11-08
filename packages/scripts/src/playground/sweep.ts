@@ -16,6 +16,7 @@ export const SWITCHES = [
   "run-slot.clone-off",
   "run-slot.focus",
   "run-slot.idle-min",
+  "run-slot.load1-max",
   "run-slot.load5-cap",
   "run-slot.single",
   "runner-host/off",

@@ -60,7 +60,7 @@ describe("run-slot.idle-min sets the CPU idle bar for slots 2 to 4", () => {
     const r = await set(m, "ops", "idle-max", "--reason", "x")
     expect(r.code).toBe(2)
     expect(r.err).toContain(
-      "no switch idle-max (3-off, 4-off, clone-off, focus, idle-min, load5-cap, single, off, slot-off)",
+      "no switch idle-max (3-off, 4-off, clone-off, focus, idle-min, load1-max, load5-cap, single, off, slot-off)",
     )
   })
 })
