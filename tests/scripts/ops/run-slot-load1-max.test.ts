@@ -7,9 +7,10 @@ import { machine, set, slots } from "./run-slot-fake"
 // a check waits on its run's exit, so the timeout only catches a hang
 setDefaultTimeout(60_000)
 
+// each row's load5 is 2, under load_line's cap, so it reads the load1 stop alone and slots 2 to 4's load5 wait (issue 1403) stays open
 // a machine at 80% idle under `load1` with run-slot.load1-max holding `value` on its last line, below the line a set writes
 const withStop = (value: string, load1: number) => {
-  const m = machine({ idle: 80, load1 })
+  const m = machine({ idle: 80, load5: 2, load1 })
   writeFileSync(
     join(m.ops, "run-slot.load1-max"),
     `ops 2026-11-08T00:00:00Z 2099-01-01T00:00:00Z room for the evening batch\n${value}\n`,
@@ -20,8 +21,8 @@ const withStop = (value: string, load1: number) => {
 // issue 1442: the load1 stop was a constant 45, so the lanes shut while the CPU sat over half idle and 15 runs waited on one lane, with no lever on the stop short of a code change
 describe("run-slot.load1-max sets the load1 stop for slots 2 to 4", () => {
   test("with the switch absent the stop is 45: load1 44.9 opens slots 2 to 4 and 45 shuts them", () => {
-    expect(slots(machine({ idle: 80, load1: 44.9 }))).toBe("4\n")
-    expect(slots(machine({ idle: 80, load1: 45 }))).toBe("1\n")
+    expect(slots(machine({ idle: 80, load5: 2, load1: 44.9 }))).toBe("4\n")
+    expect(slots(machine({ idle: 80, load5: 2, load1: 45 }))).toBe("1\n")
   })
 
   test("set to 60, a load1 of 50 opens them and 60 shuts them", () => {
@@ -38,7 +39,7 @@ describe("run-slot.load1-max sets the load1 stop for slots 2 to 4", () => {
   )
 
   test("past its expiry a switch set to 60 keeps the stop at 45: a load1 of 50 shuts them", () => {
-    const m = machine({ idle: 80, load1: 50 })
+    const m = machine({ idle: 80, load5: 2, load1: 50 })
     writeFileSync(
       join(m.ops, "run-slot.load1-max"),
       "ops 2026-10-22T08:10:00Z 2026-10-22T12:10:00Z room for the evening batch\n60\n",
@@ -47,7 +48,7 @@ describe("run-slot.load1-max sets the load1 stop for slots 2 to 4", () => {
   })
 
   test("run-slot.sh set writes the value on the line below, and a load1 of 50 then opens them", async () => {
-    const m = machine({ idle: 80, load1: 50 })
+    const m = machine({ idle: 80, load5: 2, load1: 50 })
     expect(
       (await set(m, "ops", "load1-max", "60", "--reason", "room for the evening batch")).code,
     ).toBe(0)
