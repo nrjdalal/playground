@@ -8,7 +8,6 @@ import {
   check,
   type Deps,
   DASHBOARD_DEADLINE_MS,
-  DRAFT_REASON,
   readStatus,
   LEAD_REASON,
   REASON,
@@ -541,13 +540,33 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
     },
   )
 
-  test("a lead's steps go to the dispatcher as a draft, so the card is posted once", async () => {
-    expect(DRAFT_REASON).toBe(
-      "send these steps to the dispatcher as a draft for one Inbox card rather than posting it, so the card is posted once, send each step's progress to the dispatcher as an edit to that draft, then say in chat in one line that the dispatcher has the draft",
-    )
-    expect(await stop(STEPS, { role: "lead" })).toBe(DRAFT_REASON)
-    expect(await stop(STEPS, { role: "manager" })).toBe(DRAFT_REASON)
-    expect(await stop(STEPS, { name: "x7mh4d-builder", role: "" })).toBe(DRAFT_REASON)
+  // a lead's or another manager's reply in its pane is its report to its manager, which folds its lines into the owner's one card, so steps or a table there are no card of their own (#1522)
+  test.each([
+    [
+      "a report table whose rows name no issue",
+      "| Run | Result |\n|---|---|\n| canary | 3 refused |\n| branch | 0 refused |",
+    ],
+    [
+      "a 3-item numbered report",
+      "Done:\n1. Rebased onto canary.\n2. Fixed the stale doc line.\n3. Ran the touched tests: 12 pass.",
+    ],
+    [
+      "a 5-item list of what a self-review fixed",
+      "The self-review fixed:\n1. A stale doc line.\n2. A missing test case.\n3. A typo in the reason.\n4. The README's order.\n5. A wrapped sentence.",
+    ],
+    [
+      "a table of two commands with their results",
+      "| Command | Result |\n|---|---|\n| `bun run test:file a.test.ts` | 12 pass, 0 fail |\n| `bun run check-types` | clean |",
+    ],
+  ])("passed: a lead's report, %s", async (_name, last) => {
+    expect(await stop(last, { role: "lead" })).toBeUndefined()
+    expect(await stop(last, { role: "manager" })).toBeUndefined()
+    expect(await stop(last, { name: "x7mh4d-builder", role: "" })).toBeUndefined()
+  })
+
+  test("a lead's steps pass, while the dispatcher's own steps still refuse", async () => {
+    expect(await stop(STEPS, { role: "lead" })).toBeUndefined()
+    expect(await stop(STEPS, { role: "dispatcher" })).toBe(STEPS_REASON)
   })
 
   test("the dispatcher's own steps keep the Inbox reason, a draft line included", async () => {
@@ -558,45 +577,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
     )
   })
 
-  test.each([
-    ["sent", "Sent these steps to the dispatcher as a draft."],
-    ["handed", "I handed the card to the dispatcher as a draft."],
-    ["went", "They went to the dispatcher as a draft for one card."],
-    ["says the reason's own words for", "The dispatcher has the draft."],
-    ["says it has been sent", "These have been sent to the dispatcher as a draft."],
-    ["says it has sent", "I've sent these to the dispatcher as a draft."],
-    ["says it passed", "These were passed to the dispatcher as a draft."],
-  ])("passed: a lead's steps it %s to the dispatcher as a draft", async (_name, line) => {
-    expect(await stop(`${STEPS}\n${line}`, { role: "lead" })).toBeUndefined()
-  })
-
-  test.each([
-    ["a hand-off not made yet", "I haven't sent the dispatcher the draft yet."],
-    ["a hand-off denied", "I have not sent these to the dispatcher as a draft."],
-    [
-      "a hand-off denied with a word between",
-      "I haven't yet sent these to the dispatcher as a draft.",
-    ],
-    ["a draft line inside a fence", "```\nsent dispatcher draft\n```"],
-    ["a draft line in a blockquote", "> Sent these steps to the dispatcher as a draft."],
-    ["a draft PR in a status line", "All checks passed; the dispatcher reviews the draft PR next."],
-    ["a draft PR beside the dispatcher", "PR #859 went up as a draft; the dispatcher has it."],
-    ["a note on a draft PR", "Sent the dispatcher a note on the draft PR."],
-    [
-      "a hand-off once a PR lands",
-      "These will be sent to the dispatcher as a draft once #500 lands.",
-    ],
-    [
-      "a hand-off after the merge",
-      "They're to be sent to the dispatcher as a draft after the merge.",
-    ],
-    ["a hand-off it will get done", "I'll get these sent to the dispatcher as a draft next."],
-    ["a hand-off still to come", "Will be sent to the dispatcher as a draft."],
-  ])("refused: a lead's steps beside %s", async (_name, line) => {
-    expect(await stop(`${STEPS}\n${line}`, { role: "lead" })).toBe(DRAFT_REASON)
-  })
-
-  test("a lead's draft line passes its steps, never a decision it asks", async () => {
+  test("a lead's steps pass, never a decision it asks", async () => {
     expect(
       await stop(`${STEPS}\nSent these steps to the dispatcher as a draft. Should I start?`, {
         role: "lead",
@@ -640,7 +621,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
   ])("refused: steps that are not all tracked work, %s", async (_name, last) => {
     const statuses = { "#i40": "approved", "#i41": "approved", "#i42": "approved" }
     expect(await stop(last, { statuses })).toStartWith(STEPS_REASON)
-    expect(await stop(last, { role: "lead", statuses })).toStartWith(DRAFT_REASON)
+    expect(await stop(last, { role: "lead", statuses })).toBeUndefined()
   })
 
   test("passed: a worker's steps, which go to its lead", async () => {

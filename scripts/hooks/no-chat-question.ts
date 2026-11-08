@@ -1,4 +1,4 @@
-// Stop hook, the inbox gate: refuses a manager's stop while its final reply asks the owner for a decision or for their own action in chat, or keeps steps or a table the owner comes back to (keepsForOwner), until it is an item in the owner's Inbox (playbook's ask rule), so nothing the owner needs scrolls away in chat; every manager but the dispatcher sends steps to the dispatcher as a draft instead. It acts for the dispatcher and the leads (PLAYGROUND_ROLE lead, dispatcher or manager, else the roster's kind for the session's registry name, else that name), judges the hook input's `last_assistant_message` (the transcript can lag the turn's last message, ADR 0001), and refuses every stop that still asks, a lead's with the route up to the dispatcher, who posts it, `stop_hook_active` included, Claude Code's own cap on continuations in a row with no tool call between them bounding it. A reply naming an #iN passes once one of them reads open (or, for steps, is listed in the Inbox, as a progress card is) through bun run ask in the live dashboard's checkout; when none does, one it cannot read included, it fails closed for that reply. Anything else it cannot read lets the stop through.
+// Stop hook, the inbox gate: refuses a manager's stop while its final reply asks the owner for a decision or for their own action in chat, or keeps steps or a table the owner comes back to (keepsForOwner), until it is an item in the owner's Inbox (playbook's ask rule), so nothing the owner needs scrolls away in chat; steps or a table refuse the dispatcher's stop alone, since every other manager's reply is its report up the chain, which the dispatcher folds into the owner's card. It acts for the dispatcher and the leads (PLAYGROUND_ROLE lead, dispatcher or manager, else the roster's kind for the session's registry name, else that name), judges the hook input's `last_assistant_message` (the transcript can lag the turn's last message, ADR 0001), and refuses every stop that still asks, a lead's with the route up to the dispatcher, who posts it, `stop_hook_active` included, Claude Code's own cap on continuations in a row with no tool call between them bounding it. A reply naming an #iN passes once one of them reads open (or, for steps, is listed in the Inbox, as a progress card is) through bun run ask in the live dashboard's checkout; when none does, one it cannot read included, it fails closed for that reply. Anything else it cannot read lets the stop through.
 
 import "../../packages/env/src/aliases"
 import { join } from "node:path"
@@ -23,10 +23,6 @@ export const LEAD_REASON =
 // Chat scrolls, so steps the owner comes back to go in one card whose progress is edited in place.
 export const STEPS_REASON =
   "put these steps in one Inbox card (bun run ask new; the open #iN on the same thing if one exists, bun run ask open lists them), edit each step's progress into that card, then name it in chat as #iN in one line"
-// Every manager but the dispatcher hands the card to the dispatcher, since a lead that also posts it races the dispatcher's post into a duplicate.
-export const DRAFT_REASON =
-  "send these steps to the dispatcher as a draft for one Inbox card rather than posting it, so the card is posted once, send each step's progress to the dispatcher as an edit to that draft, then say in chat in one line that the dispatcher has the draft"
-
 // git worktree list, then each bun run ask get (all at once), is killed past its limit; one bun run ask get took 5.9s under load.
 const GIT_TIMEOUT_MS = 3000
 const READ_TIMEOUT_MS = 10_000
@@ -171,10 +167,6 @@ function answeredRow(line: string, next: string | undefined): boolean {
       !QUESTION.test(cell) || cells.slice(n + 1).some((later) => later && !QUESTION.test(later)),
   )
 }
-// A sentence saying the steps went to the dispatcher as a draft, never one that says they did not or will later (not, never, n't, be, get, gets, to or will before the verb): a past-tense hand-off verb, then the dispatcher, then "as a draft", or the reason's own "the dispatcher has the draft".
-const DRAFT_HANDED =
-  /(?<!(?:\bnot|\bnever|n't|\bbe|\bget|\bgets|\bto|\bwill)\s+(?:\w+\s+)?)\b(?:(?:forwarded|gave|handed|passed|sent)\b[^.;!?\n]*?\bdispatcher\b[^.;!?\n]*?\bas a draft\b|went to the dispatcher as a draft\b|the dispatcher has the draft\b)/i
-
 // Pure: the reply's lines with fenced code and blockquotes left out.
 const ownLines = (reply: string) =>
   reply
@@ -385,10 +377,8 @@ async function inspect(raw: string, env: Record<string, string | undefined>, dep
   if (!role) return
   if (asks && asksDecision(reply, await rosterNames(env), owner))
     return gate(reply, deps, role === "lead" ? LEAD_REASON : REASON, ASK_COUNTS)
-  if (!keeps) return
-  if (role === "dispatcher") return gate(reply, deps, STEPS_REASON, STEPS_COUNTS)
-  if (DRAFT_HANDED.test(ownLines(reply).join("\n"))) return
-  return gate(reply, deps, DRAFT_REASON, STEPS_COUNTS)
+  if (!keeps || role !== "dispatcher") return
+  return gate(reply, deps, STEPS_REASON, STEPS_COUNTS)
 }
 
 // Fails open: an input the hook cannot read, or a session it cannot place, lets the session stop.
