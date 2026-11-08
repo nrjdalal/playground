@@ -20,7 +20,7 @@ def ops_dir():
     except Exception:
         pass
     # the data folder's rule without bun: each ops script that finds this file writes the same expression inline, since it has no import to share until it has found it
-    return os.path.join(os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")), "ops")
+    return os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path")), "ops")
 
 
 OPS = ops_dir()
