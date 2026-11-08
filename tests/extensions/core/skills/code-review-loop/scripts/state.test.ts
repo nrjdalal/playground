@@ -1306,6 +1306,7 @@ const freshThrough = async (
   body: string,
   comments: object[],
   reviewComments: object[] = [],
+  reviews: object[] = [],
 ): Promise<[string, number, string[]]> => {
   const paths: string[] = []
   const lines: string[] = []
@@ -1320,6 +1321,7 @@ const freshThrough = async (
         return JSON.stringify([comments])
       if (path.startsWith("repos/acme/archive/pulls/160/comments"))
         return JSON.stringify([reviewComments])
+      if (path.startsWith("repos/acme/archive/pulls/160/reviews")) return JSON.stringify([reviews])
       throw new Error(path)
     },
     async () => {
@@ -1387,6 +1389,32 @@ test("10d fresh passes an unchanged body with no comment after the read, one at 
   const [out, code] = await freshThrough(BODY, [posted("at the read", READ_AT)])
   expect(code).toBe(0)
   expect(out).toBe(`FRESH since ${READ_AT}`)
+})
+
+test("10g fresh refuses a review submitted with a body after the read, naming it (#1359)", async () => {
+  const review = (body: string, at: string | null, id: number) => ({
+    body,
+    html_url: `https://github.com/acme/archive/pull/160#pullrequestreview-${id}`,
+    id,
+    submitted_at: at,
+    user: { login: "acme-owner" },
+  })
+  const [out, code, paths] = await freshThrough(
+    BODY,
+    [],
+    [],
+    [
+      review("an old summary", "2026-11-08T18:00:00Z", 1),
+      review("", "2026-11-08T19:06:00Z", 2),
+      review("a pending draft", null, 3),
+      review("Replies to round 1\n\nmore", "2026-11-08T19:07:00Z", 4),
+    ],
+  )
+  expect(code).toBe(1)
+  expect(out).toBe(
+    "CHANGED review https://github.com/acme/archive/pull/160#pullrequestreview-4 by acme-owner at 2026-11-08T19:07:00Z: Replies to round 1",
+  )
+  expect(paths).toContain("repos/acme/archive/pulls/160/reviews?per_page=100")
 })
 
 test("10e pr prints the read line fresh takes: its start time and the body's digest (#1359)", async () => {
