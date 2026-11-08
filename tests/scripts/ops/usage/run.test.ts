@@ -453,7 +453,7 @@ try:
 except Exception as e:
     out["factoryError"] = f"{type(e).__name__}: {e}"
 if spec.get("accounts"):
-    out["accounts"] = sorted(ns["accounts_reading"]())
+    out["accounts"] = ns["accounts_reading"]()
 out["probes"] = calls
 print(json.dumps(out))
 `
@@ -527,7 +527,32 @@ test("accounts_reading keeps a full week's account in the accounts map until its
       weekReset: 2.5 * 86400,
     }),
   ).toEqual({
-    accounts: ["spare@example.org"],
+    accounts: {
+      "spare@example.org": { readAt: expect.any(String), week: 100, weekReset: expect.any(Number) },
+    },
+    probes: ["spare@example.org"],
+  })
+})
+
+test("accounts_reading writes a limited account's mark into its map entry (#1587)", () => {
+  expect(
+    fullWeek("limited-map-mark", {
+      accounts: ["spare@example.org"],
+      email: "spare@example.org",
+      limitedUntil: 7200,
+      seenAt: -1980,
+      week: 40,
+      weekReset: 2.5 * 86400,
+    }),
+  ).toEqual({
+    accounts: {
+      "spare@example.org": {
+        limitedUntil: expect.any(Number),
+        readAt: expect.any(String),
+        week: 40,
+        weekReset: expect.any(Number),
+      },
+    },
     probes: ["spare@example.org"],
   })
 })

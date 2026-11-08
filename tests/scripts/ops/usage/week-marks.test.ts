@@ -34,7 +34,15 @@ const setup = (
   name: string,
   week: number,
   fiveHour: number,
-  accounts?: Record<string, { readAt: string; week: number; weekReset: number }>,
+  accounts?: Record<
+    string,
+    {
+      limitedUntil?: number
+      readAt: string
+      week: number
+      weekReset: number
+    }
+  >,
   zone = "UTC",
 ) => {
   const home = join(scratch, name)
@@ -211,6 +219,21 @@ test("a full-week account counts 0%/h, so the combined figure stays a number (#1
   const now = Date.now() / 1000
   const home = setup("full-week-spare", 50, 20, {
     "spare@example.test": { readAt: iso(now - 7200), week: 100, weekReset: now + 172800 },
+  })
+  history(home, [["login@example.test", 50, now + 86400]])
+  expect(status(home)).toContain("; combined 1.0%/h across 2 accounts")
+})
+
+// #1587: an account limited below 100% parks the same way through fresh()'s limitedUntil line, so it counts 0%/h while its limit stands
+test("an account limited below 100 counts 0%/h while its limit stands (#1587)", () => {
+  const now = Date.now() / 1000
+  const home = setup("limited-spare", 50, 20, {
+    "spare@example.test": {
+      limitedUntil: now + 7200,
+      readAt: iso(now - 7200),
+      week: 40,
+      weekReset: now + 172800,
+    },
   })
   history(home, [["login@example.test", 50, now + 86400]])
   expect(status(home)).toContain("; combined 1.0%/h across 2 accounts")
