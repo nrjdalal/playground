@@ -1,8 +1,8 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { launchAfterRm, lw, root, spawn } from "./spawn-fake"
+import { FACTORY_SETTINGS, launchAfterRm, lw, root, spawn, unplugged } from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them, so each gets the sandbox tests' allowance.
 setDefaultTimeout(40_000)
@@ -35,7 +35,7 @@ describe("--memory <dir> turns auto-memory on for one launch (#1484)", () => {
     expect(existsSync(settingsOf(r, SHARED))).toBe(false)
   })
 
-  test("it takes an absolute folder, once", async () => {
+  test("it takes an absolute folder or off, once", async () => {
     const relative = await spawn(["probe", "probe-x", "ops", "p.md", "--memory", "made-up"], [])
     expect(relative.code).not.toBe(0)
     expect(relative.err).toContain("--memory takes an absolute folder")
@@ -45,6 +45,12 @@ describe("--memory <dir> turns auto-memory on for one launch (#1484)", () => {
     )
     expect(twice.code).not.toBe(0)
     expect(twice.err).toContain("--memory takes an absolute folder")
+    const both = await spawn(
+      ["probe", "probe-x", "ops", "p.md", "--memory", "off", "--memory", "/tmp/a"],
+      [],
+    )
+    expect(both.code).not.toBe(0)
+    expect(both.err).toContain("--memory takes an absolute folder or off, once")
     const close = await spawn(["close", "probe-x", "--memory", "/tmp/a"], [])
     expect(close.code).not.toBe(0)
     expect(close.err).toContain("close takes a session's name alone")
@@ -115,6 +121,60 @@ describe("each start takes the memory trial's arm by its role (#1484)", () => {
     expect(r.roster).toContain("memory=off")
     expect(readFileSync(lw(r.home, "memory", "worker-arm"), "utf8")).toBe("off\n")
   })
+
+  test("an A-arm start launches as it did before the trial: the shared file, its content and the flags unchanged, and memory=off its one roster addition", async () => {
+    const r = await spawn(["worker", "worker-brave-otter", "b.md"], [])
+    expect(r.code, r.err).toBe(0)
+    expect(unplugged(launchAfterRm(r))).toBe(
+      `(env PLAYGROUND_ROLE=worker claude -n worker-brave-otter --model claude-opus-5-5 --effort high --settings ${settingsOf(r, "factory-settings-400k.json")} --dangerously-skip-permissions "You are worker-brave-otter, a worker in the Playground factory; you report to builder. Load the playbook skill first. Your brief is in ~/.playground/b.md: read it in full and follow it. Report to builder with SendMessage (to: builder).")`,
+    )
+    expect(builtOf(r, "factory-settings-400k.json")).toEqual({
+      ...FACTORY_SETTINGS,
+      autoCompactWindow: 400000,
+      enabledPlugins: { "ws-home@ws": false },
+    })
+    expect(readdirSync(lw(r.home)).filter((file) => file.includes("-memory-"))).toEqual([])
+    expect(r.roster).toEqual([
+      "set",
+      "worker-brave-otter",
+      "kind=worker",
+      "reportsTo=builder",
+      "surface=",
+      "title=Plain test work",
+      "task=b.md",
+      "memory=off",
+    ])
+  })
+
+  test.each([
+    ["the dispatcher's start", ["manager", "dispatcher", "b.md", "--memory", "off"], undefined],
+    ["a lead's resume", ["resume", "builder", root, ID, "--memory", "off"], "builder"],
+    [
+      "a B-arm worker's start",
+      ["worker", "worker-brave-otter", "b.md", "--memory", "off"],
+      undefined,
+    ],
+  ])(
+    "--memory off keeps %s off, on the shared file, and leaves the workers' turn alone",
+    async (_, args, pinned) => {
+      const r = await spawn(
+        args,
+        [],
+        {},
+        undefined,
+        pinned ? claude(pinned) : undefined,
+        turnWas("off"),
+      )
+      expect(r.code, r.err).toBe(0)
+      expect(launchAfterRm(r)).toContain(
+        ` --settings ${settingsOf(r, "factory-settings-400k.json")} `,
+      )
+      expect(builtOf(r, "factory-settings-400k.json").autoMemoryEnabled).toBe(false)
+      expect(readdirSync(lw(r.home)).filter((file) => file.includes("-memory-"))).toEqual([])
+      expect(r.roster).toContain("memory=off")
+      expect(readFileSync(lw(r.home, "memory", "worker-arm"), "utf8")).toBe("off\n")
+    },
+  )
 
   test("a resumed worker keeps its row's arm and leaves the turn as it is", async () => {
     const env = {
