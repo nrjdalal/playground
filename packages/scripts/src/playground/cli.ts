@@ -125,7 +125,7 @@ const LINKED = ["factory-settings.json", "handoffs/new-worker.md", "ops/run-slot
 
 // playground dispatcher's setup, which install and the bare start give a machine and Start <dispatcher> on a fresh install has not: install's linking step when a file it links is missing, the pinned herdr installed as install.sh installs it, which downloads nothing when the copy is already pinned, then one pass of ops-herdr's start, which writes the pin and config and brings the servers up, since spawn.sh starts none; null once each is in place, else the line that says why not.
 const setUp = async (): Promise<string | null> => {
-  const state = join(process.env.HOME || homedir(), ".playground")
+  const state = dataDir()
   if (!LINKED.every((file) => existsSync(join(state, file)))) {
     const failed = await stepFailed(["bash", join(REPO, "scripts", "link-skills.sh")], "stderr")
     if (failed) return failed

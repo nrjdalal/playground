@@ -19,6 +19,7 @@ def ops_dir():
             return os.path.join(r.stdout.strip(), "ops")
     except Exception:
         pass
+    # the data folder's rule without bun: each ops script that finds this file writes the same expression inline, since it has no import to share until it has found it
     return os.path.join(os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")), "ops")
 
 
