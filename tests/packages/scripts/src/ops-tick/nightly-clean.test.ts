@@ -101,6 +101,22 @@ describe("worktrees", () => {
     ])
   })
 
+  // A reviewer reuses a free review clone by moving it to review-<n> before it checks out PR n, since a detached clone's PR is read from its folder's name alone.
+  test("a reused clone moved to review-<n> stays while PR n is open, and goes once PR n merges", () => {
+    const moved = worktreesIn(`worktree ${at("review-20")}\nHEAD h\ndetached`, main)
+    expect(staleWorktrees(moved, prsOf({}, { 19: pr("MERGED"), 20: pr("OPEN") }))).toEqual([])
+    expect(
+      staleWorktrees(moved, prsOf({}, { 19: pr("MERGED"), 20: pr("MERGED") })).map((w) => w.path),
+    ).toEqual([at("review-20")])
+  })
+
+  test("a reused clone left at its old, merged number goes, though it serves an open PR", () => {
+    const unmoved = worktreesIn(`worktree ${at("review-19")}\nHEAD h\ndetached`, main)
+    expect(
+      staleWorktrees(unmoved, prsOf({}, { 19: pr("MERGED"), 20: pr("OPEN") })).map((w) => w.path),
+    ).toEqual([at("review-19")])
+  })
+
   test("a kept line goes to the decision list only for work the owner's Approve may drop", () => {
     expect(discardable("kept /w: uncommitted work")).toBe(true)
     expect(discardable("kept /w: unpushed commits")).toBe(true)
