@@ -1780,6 +1780,24 @@ describe("the capped and ending account lines (#1457)", () => {
     expect(sent[0]![1]).toContain("points left")
   })
 
+  test("an ending account's line goes once per end: the next tick and the next hour send nothing, a new end sends again (#1457)", async () => {
+    const config = machine(40, 55, new Date(Date.now() + 12 * 3_600_000).toISOString())
+    const sends = async () => (await notified(config, "ending_alert")).notified.length
+    expect(await sends()).toBe(1)
+    expect(await sends()).toBe(0)
+    expect(await sends()).toBe(0)
+    storeWith(join(config, "playground"), {}, {
+      "usage.accounts": [
+        {
+          email: "two@example.com",
+          provider: "claude",
+          ends: new Date(Date.now() + 10 * 3_600_000).toISOString(),
+        },
+      ],
+    } as never)
+    expect(await sends()).toBe(1)
+  })
+
   test("an ending account at 100% sends nothing (#1457)", async () => {
     const config = machine(40, 100, new Date(Date.now() + 12 * 3_600_000).toISOString())
     const { notified: sent } = await notified(config, "ending_alert")

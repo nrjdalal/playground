@@ -863,7 +863,7 @@ def slot_idle_alerts(state, now_t):
 
 # A capped or ending account moves, it does not shut anything down: the owner's rule is to use a week to 100%, never to shut down at 98%.
 # Once a reset per capped account, one line names every live session on it and the account with the most room, to the builder and ops;
-# an account that ends within a day with room left sends ops one line an hour, so its weeks are spent, not dropped (issue 1457).
+# an account that ends within a day with room left sends ops one line per plan end, so its weeks are spent, not dropped (issue 1457).
 CAPPED_SENT = os.path.join(HERE, "capped-sent.json")
 ENDING_SENT = os.path.join(HERE, "ending-sent.json")
 RECORD_ACCOUNT = (re.compile(r"^# account: (\S+)", re.M), re.compile(r"--account (\S+)"))
@@ -961,8 +961,9 @@ def capped_alert(names, limited=None):
 
 
 def ending_alert():
-    """One line an hour to ops for each Claude account that ends within a day with its week under 100, naming the account, its end and the
-    points left, so the weeks the factory paid for are spent, not dropped (issue 1457)."""
+    """One line per plan end to ops for each Claude account that ends within a day with its week under 100, naming the account, its end and
+    the points left, so the weeks the factory paid for are spent, not dropped; its sent key is the row's ends value, so a new end sends
+    again (issue 1457)."""
     rows = setting("usage.accounts")
     if not isinstance(rows, list):
         return []
@@ -990,7 +991,7 @@ def ending_alert():
         pct = weeks.get(acct)
         if t - time.time() >= 86_400 or pct is None or pct >= 100:
             continue
-        key = round(time.time() / 3600)
+        key = ends
         line = f"ENDING: {acct}'s plan ends {time.strftime('%a %d %b %H:%MZ', time.gmtime(t))} with {100 - pct:g} points left; spend them (a week's use does not carry over)."
         if sent.get(acct) != key:
             notify(line, to="ops")
