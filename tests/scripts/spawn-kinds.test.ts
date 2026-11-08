@@ -23,8 +23,13 @@ describe("every session compacts in one 400k window (#1805)", () => {
   const builtOf = (r: { home: string }, file: string) =>
     JSON.parse(readFileSync(settingsOf(r, file), "utf8"))
   // a session the memory trial starts on (ADR 0022) reads a file of its own, the shared file's settings plus its memory folder
-  const fileOf = (name: string, kind?: string) =>
-    kind ? `factory-settings-400k-memory-${name}.json` : "factory-settings-400k.json"
+  const fileOf = (name: string, kind?: string, manager?: boolean) =>
+    kind
+      ? `factory-settings-400k-memory-${name}.json`
+      : `factory-settings-${manager ? "manager-" : ""}400k.json`
+  // a dispatcher or a lead denies the Agent and Workflow tools (spawn-manager-deny.test.ts)
+  const managerOf = (args: string[]) =>
+    args[0] === "manager" || (args[0] === "column" && ["dispatcher", "lead"].includes(args[1]))
   const memoryOf = (r: { home: string }, kind?: string) =>
     kind ? { autoMemoryDirectory: lw(r.home, "memory", kind), autoMemoryEnabled: true } : {}
   const roster = JSON.stringify({
@@ -65,7 +70,7 @@ describe("every session compacts in one 400k window (#1805)", () => {
   ])("%s starts with the 400k window", async (_, args, name, kind) => {
     const r = await spawn(args, [], { ROSTER_JSON: roster })
     expect(r.code).toBe(0)
-    const file = fileOf(name, kind)
+    const file = fileOf(name, kind, managerOf(args))
     expect(launchAfterRm(r).split(" --settings ")).toHaveLength(2)
     expect(launchAfterRm(r)).toContain(
       ` --settings ${settingsOf(r, file)} --dangerously-skip-permissions`,
@@ -75,6 +80,7 @@ describe("every session compacts in one 400k window (#1805)", () => {
       autoCompactWindow: 400000,
       enabledPlugins: { "ws-home@ws": false },
       ...memoryOf(r, kind),
+      ...(managerOf(args) ? { permissions: { deny: ["Agent", "Workflow"] } } : {}),
     })
   })
 
@@ -124,7 +130,8 @@ describe("every session compacts in one 400k window (#1805)", () => {
     const pin = pinned ? { name: pinned, backend: "glm" } : undefined
     const r = await spawn(args, [], {}, undefined, pin)
     expect(r.code).toBe(0)
-    const file = "factory-settings-glm-400k.json"
+    const manager = args[0] === "manager" || pinned === "builder"
+    const file = `factory-settings-glm-${manager ? "manager-" : ""}400k.json`
     expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, file)} `)
     expect(builtOf(r, file).autoCompactWindow).toBe(400000)
     expect(builtOf(r, file).env.CLAUDE_CODE_ENABLE_TELEMETRY).toBe("0")

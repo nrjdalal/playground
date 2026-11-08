@@ -23,17 +23,17 @@ describe("a manager's settings deny the Agent and Workflow tools", () => {
     [
       "a lead",
       ["column", "lead", "planner", "dispatcher", "w1:p2", "h.md"],
-      "factory-settings-manager-400k-memory-planner.json",
+      "factory-settings-400k-memory-planner.json",
     ],
     [
       "a lead by its roster kind",
       ["column", "lead", "x7mh4d-builder", "dispatcher", "w1:p2", "l.md"],
-      "factory-settings-manager-400k-memory-x7mh4d-builder.json",
+      "factory-settings-400k-memory-x7mh4d-builder.json",
     ],
     [
       "the dispatcher",
       ["column", "dispatcher", "dispatcher", "ops", "w1:p2", "h.md"],
-      "factory-settings-manager-400k-memory-dispatcher.json",
+      "factory-settings-400k-memory-dispatcher.json",
     ],
     ["an optimizer", ["manager", "optimizer", "b.md"], "factory-settings-manager-400k.json"],
     [
@@ -54,7 +54,7 @@ describe("a manager's settings deny the Agent and Workflow tools", () => {
       backend: "claude",
     })
     expect(r.code, r.err).toBe(0)
-    const file = "factory-settings-manager-400k-memory-builder.json"
+    const file = "factory-settings-400k-memory-builder.json"
     expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, file)} `)
     expect(builtOf(r, file).permissions?.deny).toEqual(["Agent", "Workflow"])
   })

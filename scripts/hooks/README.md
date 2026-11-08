@@ -33,6 +33,8 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   since Claude Code runs a handler defined in both files once only when the two commands match byte for byte (measured on Claude Code 2.1.302: one space apart, it runs twice; `tests/scripts/hooks-abs-path.test.ts` holds every hook in both files to it).
   That one command finds the checkout with no `$HOME` in it: `$PLAYGROUND_REPO`, which spawn.sh's launch exports as its main checkout, else the main checkout git names for `$CLAUDE_PROJECT_DIR` (`--git-common-dir`, so a session in a worktree runs the main checkout's guards); when neither names a folder holding the hook's script, it runs nothing and exits 0.
 - A hook's script lands on `main` in one ship and its registration in a later one, since every wrapper runs its script from the main checkout, which follows `main`, and a factory session on `canary` loses the hook's tool the moment `canary` registers a script `main` lacks.
+  A hook leaves in the reverse order: its registration in one ship and its script in a later one, since a worktree branched before the first still registers the hook in its `.claude/settings.json`, and its wrapper refuses every call the hook guards once the main checkout lacks the script.
+  Its bundle goes with its registration, since `bun run hooks:bundle` builds only the guards `scripts/factory-settings.json` registers, and the wrapper runs the script in the bundle's place.
   `bun run test:skills`'s hooks-on-main step (`packages/scripts/src/hooks-on-main.ts`, CI's `test` check) holds every tracked `*.json` file and `SKILL.md` frontmatter outside `tests/` that runs a hook script to it: it fails naming each wrapper none of whose scripts (both of a bundle-then-source wrapper's) `origin/main` holds, and fails when `origin/main` does not read, after fetching it.
 - A PreToolUse guard fails closed, since Claude Code blocks a call only on exit 2: its wrapper turns any other exit but 0 (a crash, a damaged bundle, Bun missing) into exit 2, its refusal naming the hook, the code and `bun install` in the checkout,
   and under `PLAYGROUND_ROLE` a missing script or an unresolved checkout refuses too, naming the restore route (ops-restore puts the checkout back, else Ops by playbook's LIFECYCLE.md, Restoring the main checkout); with no role it runs nothing and exits 0, as above.
@@ -698,11 +700,9 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 
 ## no-manager-subagent
 
-- A manager hands every build, read or research to a worker session the owner can see, so no helper works out of sight: `scripts/hooks/no-manager-subagent.ts`, registered beside no-stash, refuses the Agent tool and the Workflow tool, which starts agents, to a session role.ts places as a manager,
-  `PLAYGROUND_ROLE` `dispatcher`, `lead` or `manager`, or else a registry name whose roster kind or name reads as one (a manager's name in `sessions.names`, or an old name `sessions.aliases` maps to a manager's kind).
-  Its reason names the fix: start a worker through `scripts/spawn.sh`, which writes its roster row, and brief it with the task.
-  Workers, checkers and the owner's own sessions keep both tools, so a reviewer's `code-review` sub-agents run, and a manager's forked skill runs through the Skill tool, which the hook leaves alone.
-  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
+- Leaving: a dispatcher's and a lead's settings deny the Agent and Workflow tools, which spawn.sh builds into their own file (scripts/README.md's spawn.sh section), so neither settings file registers this hook.
+  Its script, `scripts/hooks/no-manager-subagent.ts`, stays until the ship after the one that drops its registration, by [Registered in both settings files](#registered-in-both-settings-files), and its tests stay with it in `bun run test:file tests/scripts/hooks/no-manager-subagent.test.ts`.
+  Until then it refuses the Agent tool and the Workflow tool to a session role.ts places as a manager, in a worktree whose `.claude/settings.json` still registers it, and lets every other session's call run.
 
 ## no-off-palette-label
 
