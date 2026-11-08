@@ -25,7 +25,7 @@ ns = {"__name__": "run_under_test"}
 exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
 calls = []
 ns["probe"] = lambda e: calls.append(e) or {"five": 10, "fiveReset": time.time() + 3600, "week": 40 if e == "spare@example.org" else 50, "weekReset": time.time() + 86400}
-factory = ns["factory_reading"]({"account": "mine@example.org", "rate_limits": {}}, ns["flip_file"]())
+factory = ns["factory_reading"]({"account": "mine@example.org", "rate_limits": {}}, ns["flip_file"](), ["main@example.org", "spare@example.org"])
 accounts = ns["accounts_reading"]()
 print(json.dumps({"accounts": {k: v["week"] for k, v in accounts.items()}, "factory": factory and factory["account"], "keys": sorted(json.load(open(ns["FLIP"]))), "probes": calls, "rotation": ns["rotation"](ns["flip_file"]())}))
 line = {}
@@ -422,4 +422,290 @@ test.each([
   expect(JSON.parse(child.stdout.toString())).toBe(problem)
   expect(readFileSync(join(cache, "weekly_retail"), "utf8")).toBe("41.5")
   expect(readFileSync(join(cache, "daily24_retail"), "utf8")).toBe("7.25")
+})
+
+// #1587: a full week's reading (week 100) stays fresh until its weekReset, so a probe that answers nothing for a full account cannot fail the cycle. Every time is an offset the Python side adds to its own time.time(), so the clock-ahead pass's moved clock cannot split the two; the probe answers None, as it does for a full account whose answer holds no 7d-utilization header
+const fullWeekHarness = `
+import json, os, sys, time, types
+spec = json.loads(sys.argv[2])
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+now = time.time()
+calls = []
+def probe(email):
+    calls.append(email)
+    return None if spec.get("probe") is None else dict(spec["probe"], at=now)
+ns["probe"] = probe
+s = {"at": now + spec["seenAt"], "week": spec["week"]}
+if spec.get("weekReset") is not None:
+    s["weekReset"] = now + spec["weekReset"]
+if spec.get("limitedUntil") is not None:
+    s["limitedUntil"] = now + spec["limitedUntil"]
+flip = {"accounts": spec.get("accounts") or [], "factory": spec.get("factory"), "seen": {spec["email"]: s}}
+ns["write"](ns["FLIP"], flip)
+out = {}
+try:
+    data = ns["factory_reading"]({"account": "mine@example.org", "rate_limits": {}}, flip, (spec.get("accountsList") or [spec["email"]]))
+    if data:
+        out["factory"] = {"readAt": data["readAt"], "week": data["rate_limits"]["seven_day"]["used_percentage"]}
+except Exception as e:
+    out["factoryError"] = f"{type(e).__name__}: {e}"
+if spec.get("accounts"):
+    out["accounts"] = ns["accounts_reading"]()
+out["probes"] = calls
+print(json.dumps(out))
+`
+
+const fullWeek = (name: string, spec: Record<string, unknown>) => {
+  const home = join(scratch, name)
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(
+    ["python3", "-I", "-c", fullWeekHarness, script, JSON.stringify(spec)],
+    { env },
+  )
+  expect(child.stderr.toString()).toBe("")
+  return JSON.parse(child.stdout.toString())
+}
+
+test("a full week's reading counts as fresh until its weekReset, so a probe that answers nothing cannot fail the cycle (#1587)", () => {
+  expect(
+    fullWeek("full-week-fresh", {
+      email: "main@example.org",
+      factory: "main@example.org",
+      seenAt: -3000,
+      week: 100,
+      weekReset: 2.5 * 86400,
+    }),
+  ).toEqual({
+    factory: { readAt: expect.any(String), week: 100 },
+    probes: ["main@example.org"],
+  })
+})
+
+test("a full week's reading goes stale again once its weekReset has passed (#1587)", () => {
+  expect(
+    fullWeek("full-week-stale", {
+      email: "main@example.org",
+      factory: "main@example.org",
+      seenAt: -60,
+      week: 100,
+      weekReset: -3600,
+    }),
+  ).toEqual({
+    factoryError: "RuntimeError: no reading of main@example.org under 30 minutes old",
+    probes: [],
+  })
+})
+
+test("a reading marked limitedUntil is served without probing again until the limit lifts (#1587)", () => {
+  expect(
+    fullWeek("full-week-limited", {
+      email: "main@example.org",
+      factory: "main@example.org",
+      limitedUntil: 7200,
+      seenAt: -3000,
+      week: 100,
+      weekReset: 2.5 * 86400,
+    }),
+  ).toEqual({
+    factory: { readAt: expect.any(String), week: 100 },
+    probes: [],
+  })
+})
+
+test("accounts_reading keeps a full week's account in the accounts map until its weekReset (#1587)", () => {
+  expect(
+    fullWeek("full-week-accounts", {
+      accounts: ["spare@example.org"],
+      email: "spare@example.org",
+      seenAt: -3000,
+      week: 100,
+      weekReset: 2.5 * 86400,
+    }),
+  ).toEqual({
+    accounts: {
+      "spare@example.org": { readAt: expect.any(String), week: 100, weekReset: expect.any(Number) },
+    },
+    probes: ["spare@example.org"],
+  })
+})
+
+test("accounts_reading writes a limited account's mark into its map entry (#1587)", () => {
+  expect(
+    fullWeek("limited-map-mark", {
+      accounts: ["spare@example.org"],
+      email: "spare@example.org",
+      limitedUntil: 7200,
+      seenAt: -1980,
+      week: 40,
+      weekReset: 2.5 * 86400,
+    }),
+  ).toEqual({
+    accounts: {
+      "spare@example.org": {
+        limitedUntil: expect.any(Number),
+        readAt: expect.any(String),
+        week: 40,
+        weekReset: expect.any(Number),
+      },
+    },
+    probes: [],
+  })
+})
+
+test("a reading limited below 100 is served until its limitedUntil with no probe, and goes stale once the limit passes (#1587)", () => {
+  // a full 5-hour window marked limitedUntil hours ahead: seen() holds the probe, so the reading stays fresh that long
+  expect(
+    fullWeek("limited-below-100-fresh", {
+      email: "main@example.org",
+      factory: "main@example.org",
+      limitedUntil: 7200,
+      seenAt: -1980,
+      week: 40,
+    }),
+  ).toEqual({
+    factory: { readAt: expect.any(String), week: 40 },
+    probes: [],
+  })
+  // the limit has passed: the probe runs again and its fresh reading is served
+  expect(
+    fullWeek("limited-below-100-stale", {
+      email: "main@example.org",
+      factory: "main@example.org",
+      limitedUntil: -60,
+      probe: { five: 20, fiveReset: 4102444800, week: 41, weekReset: 4102444800 },
+      seenAt: -1980,
+      week: 40,
+    }),
+  ).toEqual({
+    factory: { readAt: expect.any(String), week: 41 },
+    probes: ["main@example.org"],
+  })
+})
+
+// run.py's own probe(), with urlopen raising the made-up 429 and its headers holding no status header, so a full week is marked limited until its reset whatever the status header says (#1587)
+const probeHarness = `
+import io, json, sys, time, types, urllib.error, urllib.request
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+spec = json.loads(sys.argv[2])
+ns["subprocess"] = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(returncode=0, stdout="made-up-token\\n", stderr=""))
+def urlopen(req, timeout=None):
+    raise urllib.error.HTTPError(req.full_url, 429, "rate limited", spec["headers"], io.BytesIO(b"{}"))
+urllib.request.urlopen = urlopen
+print(json.dumps(ns["probe"](spec["email"])))
+`
+
+test("run.py's probe marks a full week limited until its weekReset, with no status header in the answer (#1587)", () => {
+  const home = join(scratch, "probe-limited")
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(
+    [
+      "python3",
+      "-I",
+      "-c",
+      probeHarness,
+      script,
+      JSON.stringify({
+        email: "full@example.org",
+        headers: {
+          "anthropic-ratelimit-unified-7d-reset": "4102444800",
+          "anthropic-ratelimit-unified-7d-utilization": "1.0",
+        },
+      }),
+    ],
+    { env },
+  )
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString())).toEqual({
+    five: null,
+    fiveReset: null,
+    limitedUntil: 4102444800,
+    week: 100,
+    weekReset: 4102444800,
+  })
+})
+
+// #1587: a full-week reading freezes its 5-hour figure, so one whose window has reset counts as none in use and no slow-spawns alert rides it
+const fiveHarness = `
+import json, os, sys, time, types
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+now = time.time()
+s = {"at": now - 3000, "five": 95, "fiveReset": now - 7200, "week": 100, "weekReset": now + 2 * 86400, "limitedUntil": now + 2 * 86400}
+print(json.dumps(ns["probed"]("full@example.org", s, {"account": "mine@example.org", "rate_limits": {}}, now)))
+`
+
+test("a frozen 5-hour figure past its reset counts as none in use, so no slow-spawns alert rides it (#1587)", () => {
+  const home = join(scratch, "five-past-reset")
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(["python3", "-I", "-c", fiveHarness, script], { env })
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString()).rate_limits.five_hour).toEqual({
+    resets_at: expect.any(Number),
+    used_percentage: 0,
+  })
+})
+
+// #1587: factory_reading against a fake accounts list, its reading 42 minutes old with a week under 100, so a none can only come from the list check and not from freshness. The probe and the Keychain are stubbed, so no request leaves the Mac
+const unlistedHarness = `
+import json, os, sys, time, types
+spec = json.loads(sys.argv[2])
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+now = time.time()
+ns["probe"] = lambda e: None
+ns["subprocess"] = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
+flip = {"factory": "gone@example.test", "seen": {"gone@example.test": {"at": now + spec["seenAt"], "week": spec["week"], "weekReset": now + 2 * 86400}}}
+out = {}
+try:
+    data = ns["factory_reading"]({"account": "mine@example.test", "rate_limits": {}}, flip, spec["accounts"])
+    if data:
+        out["factory"] = data["account"]
+except Exception as e:
+    out["error"] = f"{type(e).__name__}: {e}"
+print(json.dumps(out))
+`
+
+const runUnlisted = (name: string, spec: Record<string, unknown>) => {
+  const home = join(scratch, name)
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(
+    ["python3", "-I", "-c", unlistedHarness, script, JSON.stringify(spec)],
+    { env },
+  )
+  expect(child.stderr.toString()).toBe("")
+  return JSON.parse(child.stdout.toString())
+}
+
+test("factory_reading returns none, and does not raise, when the factory names an account usage.accounts no longer lists (#1587)", () => {
+  expect(
+    runUnlisted("factory-unlisted", {
+      accounts: ["mine@example.test"],
+      seenAt: -2520,
+      week: 40,
+    }),
+  ).toEqual({})
+})
+
+test("a settings read that fails keeps the factory's reading, since no account is known to be removed (#1587)", () => {
+  expect(runUnlisted("factory-unknown-list", { accounts: null, seenAt: -60, week: 40 })).toEqual({
+    factory: "gone@example.test",
+  })
 })
