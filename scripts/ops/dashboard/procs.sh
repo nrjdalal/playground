@@ -8,6 +8,7 @@
 #   procs.sh left <job>     list recorded processes still alive (no signals)
 set -u
 # The data folder, as packages/env/src/data-dir.ts resolves it: PLAYGROUND_DATA_DIR, else ~/.playground
+case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "procs.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 DATA=${PLAYGROUND_DATA_DIR:-$HOME/.playground}
 DIR=$DATA/ops/dashboard
 job=${2:?job name}

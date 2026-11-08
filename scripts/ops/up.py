@@ -36,7 +36,7 @@ REGISTRY = (
     else CFG
 )
 # spawn.sh's data folder, as dataDir() reads it: PLAYGROUND_DATA_DIR when set, else .playground in the home folder; it keeps the backend pins and the roster there
-DATA = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
+DATA = (os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path"))
 GRACE = 600  # a job started this recently has not had time to write its first heartbeat, so it is left alone
 SPAWN = os.path.join(os.path.dirname(HERE), "spawn.sh")  # the one way a session comes back, through the factory's capacity gate
 ONCE = os.path.join(HERE, "once.py")  # every job starts through it: one copy per job, held by its recorded pid

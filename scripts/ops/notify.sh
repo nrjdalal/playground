@@ -4,6 +4,7 @@
 # A manager kind (builder, ops, planner, optimizer) or dispatcher, the primary, names whoever holds its seat, by roster.ts who, which falls back to sessions.names; the kind word itself when roster.ts fails.
 # The line goes to alerts.log and to ops/outbox/ops-<job>.jsonl as {at, job, to, text}; the relay, runner-plain-relay, sends each
 # queued line with SendMessage, so it arrives as a cross-session message from the relay.
+case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "notify.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 OPS=${PLAYGROUND_DATA_DIR:-$HOME/.playground}/ops
 to="${NOTIFY_TO:-ops}"
 case "$to" in

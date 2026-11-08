@@ -2105,7 +2105,7 @@ function portlessCompose(name, args) {
 
 // scripts/hooks/no-main-checkout.ts
 import { readdirSync, readFileSync, realpathSync } from "fs";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join4, normalize, resolve as resolve3, sep } from "path";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join4, normalize, resolve as resolve3, sep } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -2151,8 +2151,15 @@ applyEnvAliases();
 
 // packages/env/src/data-dir.ts
 import { homedir as homedir2 } from "os";
-import { join as join2, resolve as resolve2 } from "path";
-var dataDirOf = (env, home = env.HOME || homedir2()) => env.PLAYGROUND_DATA_DIR ? resolve2(env.PLAYGROUND_DATA_DIR) : join2(home, ".playground");
+import { isAbsolute as isAbsolute2, join as join2, resolve as resolve2 } from "path";
+var dataDirOf = (env, home = env.HOME || homedir2()) => {
+  const named = env.PLAYGROUND_DATA_DIR;
+  if (!named)
+    return join2(home, ".playground");
+  if (!isAbsolute2(named))
+    throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
+  return resolve2(named);
+};
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function joinValues(array, separator = "|") {

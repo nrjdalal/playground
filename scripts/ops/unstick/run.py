@@ -20,7 +20,7 @@ import calendar, datetime, fcntl, glob, json, os, re, shutil, subprocess, sys, t
 
 # Code beside beat.py and notify.sh in the repo's scripts/ops; LW, OPS and HERE are in the data folder, $PLAYGROUND_DATA_DIR, else ~/.playground.
 CODE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LW = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
+LW = (os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path"))
 OPS = os.path.join(LW, "ops")
 HERE = os.path.join(OPS, "unstick")
 # read budget (dispatcher, 13 Oct, after the terminal app reached 155% CPU with ~50 sessions): a pass every 120s (planner), under the Dashboard's 3-minute

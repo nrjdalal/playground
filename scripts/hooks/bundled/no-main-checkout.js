@@ -3,7 +3,7 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 
 // scripts/hooks/no-main-checkout.ts
 import { readdirSync, readFileSync as readFileSync2, realpathSync } from "fs";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join5, normalize, resolve as resolve3, sep } from "path";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join5, normalize, resolve as resolve3, sep } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -49,8 +49,15 @@ applyEnvAliases();
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
-import { join, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
+import { isAbsolute, join, resolve } from "path";
+var dataDirOf = (env, home = env.HOME || homedir()) => {
+  const named = env.PLAYGROUND_DATA_DIR;
+  if (!named)
+    return join(home, ".playground");
+  if (!isAbsolute(named))
+    throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
+  return resolve(named);
+};
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function joinValues(array, separator = "|") {
@@ -4833,7 +4840,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { homedir as homedir3 } from "os";
-import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
+import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var MAX_BYTES = 1048576;
@@ -6697,7 +6704,7 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
-  if (isAbsolute(text.value))
+  if (isAbsolute2(text.value))
     return text.value;
   return env.cwd ? resolve2(env.cwd, text.value) : undefined;
 }
@@ -7367,7 +7374,7 @@ function liveCheckout(main, environment) {
 }
 function real(path) {
   const found = resolved(path);
-  if (found !== undefined || !isAbsolute2(path))
+  if (found !== undefined || !isAbsolute3(path))
     return found ?? nearest(path);
   const parts = normalize(path).split(sep).filter(Boolean);
   let low = 0;

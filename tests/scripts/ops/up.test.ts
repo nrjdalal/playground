@@ -556,3 +556,25 @@ test("a resume reads the roster and its backend pin from the data folder spawn.s
     ` s-p3-reviewer --backend claude --pr ${PR_2},${PR_1}`,
   )
 })
+
+// #1296: up.py read a relative value against its own folder, as every Python reader of PLAYGROUND_DATA_DIR did
+test("a relative PLAYGROUND_DATA_DIR is refused from any folder, and an absolute one names one folder", () => {
+  const at = mkdtempSync(join(scratch, "relative-"))
+  for (const dir of ["a", "b"]) mkdirSync(join(at, dir))
+  const read = (value: string, cwd: string) => {
+    const r = Bun.spawnSync(["python3", "-I", "-c", `${LOAD}\nprint(up.DATA)`, upPy], {
+      cwd,
+      env: { HOME: at, PATH: process.env.PATH, PLAYGROUND_DATA_DIR: value },
+    })
+    return { code: r.exitCode, err: r.stderr.toString(), out: r.stdout.toString().trim() }
+  }
+  expect([read(join(at, "d"), join(at, "a")).out, read(join(at, "d"), join(at, "b")).out]).toEqual([
+    join(at, "d"),
+    join(at, "d"),
+  ])
+  for (const r of [read("d", join(at, "a")), read("d", join(at, "b"))]) {
+    expect(r.code).not.toBe(0)
+    expect(r.out).toBe("")
+    expect(r.err).toContain("PLAYGROUND_DATA_DIR is relative (d)")
+  }
+})
