@@ -553,7 +553,7 @@ test("accounts_reading writes a limited account's mark into its map entry (#1587
         weekReset: expect.any(Number),
       },
     },
-    probes: ["spare@example.org"],
+    probes: [],
   })
 })
 

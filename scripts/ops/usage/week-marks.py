@@ -52,9 +52,9 @@ rows, rate = sample(samples, now, account, used, reset) if counted else ([], Non
 # the pace across every account ops-usage reads (login-flip.json's `accounts`), since the spares' budget is one %/h for all of them
 spares = {a: r for a, r in (u.get("accounts") or {}).items() if a != account}
 def spare_pace(a, r):
-    """The account's %/h over the last hour; a full week cannot spend before its reset, so its pace counts as 0 and the combined figure stays a number."""
+    """The account's %/h over the last hour; a week that cannot spend before its reset, or one parked by its limitedUntil, counts as 0 and the combined figure stays a number."""
     pace = sample(others_samples, calendar.timegm(time.strptime(r["readAt"], "%Y-%m-%dT%H:%M:%SZ")), a, r["week"], r["weekReset"])[1]
-    return 0.0 if pace is None and r["week"] >= 100 else pace
+    return 0.0 if pace is None and (r["week"] >= 100 or (r.get("limitedUntil") or 0) > now) else pace
 others = {a: spare_pace(a, r) for a, r in spares.items()}
 pace = [rate, *others.values()]
 combined = f"; combined {'?' if None in pace else f'{sum(pace):.1f}'}%/h across {len(pace)} accounts" if others else ""

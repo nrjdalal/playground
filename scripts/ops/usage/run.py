@@ -162,7 +162,10 @@ def accounts_reading():
     for email in flip.get("accounts") or []:
         s = seen(flip, email, now)
         if fresh(s, now) and s.get("weekReset"):
-            out[email] = {"readAt": iso(s["at"]), "week": s["week"], "weekReset": int(s["weekReset"])}
+            row = {"readAt": iso(s["at"]), "week": s["week"], "weekReset": int(s["weekReset"])}
+            if s.get("limitedUntil"):
+                row = {"limitedUntil": int(s["limitedUntil"]), **row}
+            out[email] = row
     return out
 
 
