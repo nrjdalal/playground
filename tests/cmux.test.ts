@@ -4,7 +4,6 @@ import { join } from "node:path"
 const ROOT = join(import.meta.dir, "..")
 
 const HISTORY = "dated history"
-const ALIAS = "the one-ship alias of the sessions read's old codes, which #1447 drops"
 const GUARD =
   "one of the three guards against the cmux app (no-raw-spawn's cmux branch, the PATH shim filter, the CMUX_* env strip), or a doc stating it, live while cmux.app is installed (#1478)"
 const PROOF =
@@ -18,7 +17,6 @@ const ALLOWED: Record<string, [number, string]> = {
   ".agents/dashboard/stack.md": [1, PROOF],
   "AGENTS.md": [1, GUARD],
   "api/hono/src/lib/claude-binary.ts": [2, GUARD],
-  "api/hono/src/lib/dashboard/inbox.ts": [2, ALIAS],
   "api/hono/src/plugins/changelog/seed.json": [2, HISTORY],
   "docs/playground/playbook.md": [2, HISTORY],
   "extensions/core/skills/code-review-loop/SKILL.md": [1, HISTORY],
@@ -32,7 +30,7 @@ const ALLOWED: Record<string, [number, string]> = {
   "scripts/ops/README.md": [2, PROOF],
 }
 
-test("no line outside tests/ names cmux but dated history, the alias and the guards against the installed app (#414)", () => {
+test("no line outside tests/ names cmux but dated history and the guards against the installed app (#414)", () => {
   const out = Bun.spawnSync(["git", "-C", ROOT, "grep", "-c", "-i", "cmux", "--", ".", ":!tests"], {
     stdout: "pipe",
   })

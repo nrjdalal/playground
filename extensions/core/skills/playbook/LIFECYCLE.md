@@ -29,6 +29,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   its probes cleaned up, and its final report sent, naming the pushed head.
   Its worktrees, their containers and its branches go when it ends ([SESSIONS.md](SESSIONS.md#end)'s cleanup), as its reviewer's and tester's do; one the cleanup keeps, named in its lead's line, the nightly clean (below) tries again once its PR is merged or closed, discarding what it holds then, or the lead removes it by hand from the main checkout with `playground rm --worktree <path>`.
   Remove a worktree another session holds only once that session is closed or off the roster and no live session's cwd is inside it: a clean tree is not a free tree, since a reviewer keeps its worktree across PRs (**rounds**).
+  `playground rm --worktree` frees one from a roster row naming it by its branch or its own PR's number once that PR has merged or closed and the worktree sits at that PR's head (commits past it keep the hold, named with them), and keeps it held by a row naming it by session name, id or another PR, as a reused review clone's row does.
   The Builder then closes its workspace, which takes any split still open in it, and its slot returns to the pool.
   Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead.
   The Builder closes a session by hand only on a `Not ended` line, whose reason names what to fix first.
@@ -38,7 +39,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   A long-running job joins an open runner; Ops spawns a runner when none is open, or another one for isolation or load.
   Each job runs as its own background task with its own log and health check, all listed in that runner's roster task.
   Ops closes a runner once it holds no job that is still needed.
-- **Ops jobs** Ops runs as scripts with no session (ops-awake, ops-changelog, ops-dashboard, ops-dm-watch, ops-flow, ops-herdr, ops-channel-watch, ops-loom-relay, ops-machine, ops-merge-train, ops-report, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-unstick, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
+- **Ops jobs** Ops runs as scripts with no session (ops-awake, ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-unstick, ops-usage, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
   named `ops-*.json` so the Dashboard finds a new job by its file alone,
   in the shape `heartbeatSchema` in `api/hono/src/lib/dashboard/ops.ts` reads (`job`, `pid`, `startedAt`, `lastBeatAt`, `lastResult`, `cycleSeconds`), written atomically each beat by a loop that does not wait on the work.
   The Dashboard lists each under Scripts, by its plain name and its `jobs.json` `schedule`: Running while `lastResult` is `ok` and the beat is within three cycles, Waiting while it starts `waiting: ` (a job with nothing to read yet, muted and not broken), Failing on any other result, Down once the beat goes stale, the pid goes or the loop writes `loop exited <code>` or `supervisor exited`.

@@ -495,6 +495,46 @@ describe("worktreeRefusal", () => {
     expect(worktreeRefusal(join(roots.home, "x"), roots, holders)).toContain(".claude/worktrees")
   })
 
+  // PG-1419: a merged or closed PR frees its worktree from a row naming its branch or that PR's own number, and says so
+  test("a freed worktree passes a live row naming it by branch or by the freed PR, and a row by name or by another PR still holds it", () => {
+    const { holders, roots, wt } = withWorktree()
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    const rosterOf = (agents: object[]) => writeFileSync(holders.roster, JSON.stringify({ agents }))
+    const said: string[] = []
+    const freedBy = (number: number, head = git(wt, "rev-parse", "HEAD")) => ({
+      ...holders,
+      freed: { head, number, state: "MERGED" as const },
+      note: (line: string) => void said.push(line.slice(line.indexOf(" is freed"))),
+    })
+    rosterOf([{ branch: "PG-1-thing", name: "abc123-worker", status: "working" }])
+    expect(worktreeRefusal(wt, roots, freedBy(1))).toBeNull()
+    rosterOf([{ name: "x9y8z7-reviewer", pr: "https://github.com/o/r/pull/1", status: "working" }])
+    expect(worktreeRefusal(wt, roots, freedBy(1))).toBeNull()
+    expect(said).toEqual([
+      " is freed by #1, which reads MERGED, past abc123-worker's roster row (working)",
+      " is freed by #1, which reads MERGED, past x9y8z7-reviewer's roster row (working)",
+    ])
+    expect(worktreeRefusal(wt, roots, freedBy(2))).toContain("x9y8z7-reviewer")
+    rosterOf([{ name: "pg-1", status: "working" }])
+    expect(worktreeRefusal(wt, roots, freedBy(1))).toContain("pg-1")
+  })
+
+  // PG-1419: commits past the merged PR's head keep the row's hold, named with them, so a discard cannot take unmerged work
+  test("a freed PR whose head the worktree has moved past keeps a row naming its branch, its commit named, and a row by name still holds it plainly", () => {
+    const { holders, roots, wt } = withWorktree()
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    const freed = { head: git(wt, "rev-parse", "HEAD~1"), number: 1, state: "MERGED" as const }
+    const rosterOf = (agents: object[]) => writeFileSync(holders.roster, JSON.stringify({ agents }))
+    rosterOf([{ branch: "PG-1-thing", name: "abc123-worker", status: "working" }])
+    expect(worktreeRefusal(wt, roots, { ...holders, freed })).toBe(
+      `${wt} is held by abc123-worker, which the roster lists as working, and its commits past merged PR #1's head stay: ${git(wt, "rev-parse", "--short", "HEAD")}`,
+    )
+    rosterOf([{ name: "pg-1", status: "working" }])
+    expect(worktreeRefusal(wt, roots, { ...holders, freed })).toBe(
+      `${wt} is held by pg-1, which the roster lists as working`,
+    )
+  })
+
   test("refuses a worktree a live session holds by branch, by name, or by a process's folder", () => {
     const { holders, roots, wt } = withWorktree()
     git(wt, "push", "-q", "origin", "PG-1-thing")

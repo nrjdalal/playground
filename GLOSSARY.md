@@ -28,7 +28,7 @@ ZeroStarter's integration branch: every PR squash-merges into `canary`, and a re
 _Avoid_: canary, alone (that is the red-first test)
 
 **Promoted**:
-A skill in `skills/playground/`: it gets README entries and a docs page.
+A skill of Playground's own in `extensions/core/skills/`, where core's vendored upstream skills sit beside it: it gets README entries and a docs page.
 
 **Sidebar**:
 The dashboard's left column: the session groups, the dispatchers' first, the system icons in its header and the usage line in its footer.
