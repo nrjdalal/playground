@@ -428,12 +428,12 @@ describe("--check reads a tree git holds, never the working files", () => {
     expect(merged.stderr).toContain("git merge-tree HEAD no-such-ref")
   })
 
-  // canary adds a source the head's checkout lacks, reached by a tsconfig alias as packages/settings reaches its own, or by a relative path: the merged tree cannot be built from this checkout, so the check refuses, naming the merge that lets it build, rather than pass a bundle it never read
+  // canary adds a source the head's checkout lacks, reached by a tsconfig alias as packages/settings reaches its own, or by a relative path: the merged tree cannot be built from this checkout, so the check refuses, naming the source, Bun's own error and the merge that lets it build, rather than pass a bundle it never read
   test.each([
     ["a tsconfig alias", "@/more"],
     ["a relative path", "./more"],
   ])(
-    "--merged refuses a head whose merged tree holds a source canary adds, reached by %s, naming it and the merge",
+    "--merged refuses a head whose merged tree holds a source canary adds, reached by %s, naming it, the build's error and the merge",
     (_, specifier) => {
       const { root, run, side, write } = checkout()
       side("canary", () => {
@@ -449,6 +449,7 @@ describe("--check reads a tree git holds, never the working files", () => {
       expect(merged.code).toBe(1)
       expect(merged.stderr).toContain("this checkout lacks")
       expect(merged.stderr).toContain(join(HOOKS, "more.ts"))
+      expect(merged.stderr).toContain(`Could not resolve: "${specifier}"`)
       expect(merged.stderr).toContain("merge canary in first")
     },
   )

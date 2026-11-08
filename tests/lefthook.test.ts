@@ -1273,50 +1273,56 @@ test("the hooks-bundle job's glob holds every folder a committed bundle imports"
   expect([...inputs].filter((input) => !glob.includes(input)).sort()).toEqual([])
 })
 
-// lefthook on the job as lefthook.yml holds it, in a scratch repo holding hooks-bundle.ts and one guard, role.ts, with its bundle committed
-describe("the pre-commit hooks-bundle job", () => {
-  const checkout = async () => {
-    const dir = realpathSync(mkdtempSync(join(tmpdir(), "lefthook-bundle-")))
-    const run = (argv: string[]) => {
-      const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
-      return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
-    }
-    const git = (...args: string[]) =>
-      expect(run(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args])).toMatchObject({
-        code: 0,
-      })
-    for (const file of ["hooks-bundle.ts", "ops-tick/guard-probe.ts", "write-atomic.ts"]) {
-      const to = join(dir, "packages", "scripts", "src", file)
-      mkdirSync(join(to, ".."), { recursive: true })
-      copyFileSync(join(ROOT, "packages", "scripts", "src", file), to)
-    }
-    mkdirSync(join(dir, "scripts", "hooks"), { recursive: true })
-    writeFileSync(
-      join(dir, "scripts", "factory-settings.json"),
-      `${JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: "bun scripts/hooks/bundled/role.js" }] }] } })}\n`,
-    )
-    writeFileSync(join(dir, "scripts", "hooks", "role.ts"), 'console.log("a")\n')
-    writeFileSync(join(dir, "scripts", "hooks", "no-extensions-write-worker.ts"), "export {}\n")
-    // JSON is YAML, so the job goes in as lefthook read it
-    writeFileSync(
-      join(dir, "lefthook.yml"),
-      JSON.stringify({ "pre-commit": { commands: { "hooks-bundle": await hooksBundleJob() } } }),
-    )
-    const bundle = () =>
-      expect(
-        run(["bun", "--no-env-file", join(dir, "packages", "scripts", "src", "hooks-bundle.ts")]),
-      ).toMatchObject({ code: 0 })
-    bundle()
-    git("init", "-q", "-b", "main")
-    git("add", "-A")
-    git("commit", "-q", "--no-verify", "-m", "start")
-    const hook = () => run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
-    const edit = () => writeFileSync(join(dir, "scripts", "hooks", "role.ts"), 'console.log("b")\n')
-    return { bundle, dir, edit, git, hook }
+// A scratch repo for lefthook's hooks-bundle job at a stage, as lefthook.yml holds it: this checkout's hooks-bundle.ts and what it imports, one guard, role.ts, importing lib.ts beside it, its bundle committed; a mkdtemp root the test removes
+const scratch = async (stage: "pre-commit" | "pre-push") => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), `lefthook-${stage}-`)))
+  const run = (argv: string[]) => {
+    const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
   }
+  const git = (...args: string[]) =>
+    expect(run(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args])).toMatchObject({
+      code: 0,
+    })
+  for (const file of ["hooks-bundle.ts", "ops-tick/guard-probe.ts", "write-atomic.ts"]) {
+    const to = join(dir, "packages", "scripts", "src", file)
+    mkdirSync(join(to, ".."), { recursive: true })
+    copyFileSync(join(ROOT, "packages", "scripts", "src", file), to)
+  }
+  const hooks = join(dir, "scripts", "hooks")
+  mkdirSync(hooks, { recursive: true })
+  writeFileSync(
+    join(dir, "scripts", "factory-settings.json"),
+    `${JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: "bun scripts/hooks/bundled/role.js" }] }] } })}\n`,
+  )
+  writeFileSync(join(hooks, "role.ts"), 'import { lib } from "./lib"\n\nconsole.log("a", lib)\n')
+  writeFileSync(join(hooks, "lib.ts"), 'export const lib = "one"\n')
+  writeFileSync(join(hooks, "no-extensions-write-worker.ts"), "export {}\n")
+  // JSON is YAML, so the job goes in as lefthook read it
+  writeFileSync(
+    join(dir, "lefthook.yml"),
+    JSON.stringify({ [stage]: { commands: { "hooks-bundle": await hooksBundleJob(stage) } } }),
+  )
+  const bundle = () =>
+    expect(
+      run(["bun", "--no-env-file", join(dir, "packages", "scripts", "src", "hooks-bundle.ts")]),
+    ).toMatchObject({ code: 0 })
+  const commit = (message: string) => {
+    git("add", "-A")
+    git("commit", "-q", "--no-verify", "-m", message)
+  }
+  bundle()
+  git("init", "-q", "-b", "main")
+  commit("start")
+  const hook = () => run(["bun", join(ROOT, LEFTHOOK_BIN), "run", stage])
+  const edit = () =>
+    writeFileSync(join(hooks, "role.ts"), 'import { lib } from "./lib"\n\nconsole.log("b", lib)\n')
+  return { bundle, commit, dir, edit, git, hook, hooks, run }
+}
 
+describe("the pre-commit hooks-bundle job", () => {
   test("refuses a commit of a guard whose bundle is stale or left unstaged, naming the fix, and skips one that touches no input", async () => {
-    const { bundle, dir, edit, git, hook } = await checkout()
+    const { bundle, dir, edit, git, hook } = await scratch("pre-commit")
     try {
       edit()
       writeFileSync(join(dir, "README.md"), "docs\n")
@@ -1340,7 +1346,7 @@ describe("the pre-commit hooks-bundle job", () => {
   }, 60_000)
 
   test("leaves a commit that stages no input alone while a bundle change sits unstaged, and refuses one that stages a guard", async () => {
-    const { dir, git, hook } = await checkout()
+    const { dir, git, hook } = await scratch("pre-commit")
     try {
       writeFileSync(join(dir, "scripts", "hooks", "bundled", "role.js"), "edited\n")
       writeFileSync(join(dir, "README.md"), "docs\n")
@@ -1366,8 +1372,23 @@ describe("the pre-commit hooks-bundle job", () => {
     }
   }, 60_000)
 
+  test("runs the job on a commit staging a glob input beside an unstaged guard edit, and passes it, since the index holds no edit", async () => {
+    const { dir, edit, git, hook, hooks } = await scratch("pre-commit")
+    try {
+      edit()
+      writeFileSync(join(hooks, "notes.ts"), "export const notes = 1\n")
+      git("add", "scripts/hooks/notes.ts")
+      const ran = hook()
+      expect(ran).toMatchObject({ code: 0 })
+      expect(ran.out).toContain("hooks-bundle")
+      expect(ran.out).not.toContain("hooks-bundle (skip)")
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  }, 60_000)
+
   test("passes a merge commit with a stale bundle, which hooks-merge-canary rebuilds in a commit of its own", async () => {
-    const { dir, edit, git, hook } = await checkout()
+    const { dir, edit, git, hook } = await scratch("pre-commit")
     try {
       git("checkout", "-q", "-b", "side")
       writeFileSync(join(dir, "side.txt"), "side\n")
@@ -1389,56 +1410,14 @@ describe("the pre-commit hooks-bundle job", () => {
   }, 60_000)
 })
 
-// lefthook on the pre-push job as lefthook.yml holds it, in a scratch repo whose guard imports a module beside it, pushed to a bare scratch remote that holds canary; both roots are mkdtemp folders
+// the pre-push job, in a scratch repo pushed to a bare scratch remote that holds canary, both roots mkdtemp folders
 describe("the pre-push hooks-bundle job", () => {
   test("runs on a docs-only push of a branch that changed a guard once canary moves that guard's input, and names the stale bundle (#1365)", async () => {
-    const dir = realpathSync(mkdtempSync(join(tmpdir(), "lefthook-push-")))
+    const { bundle, commit, dir, git, hooks, run } = await scratch("pre-push")
     const remote = realpathSync(mkdtempSync(join(tmpdir(), "lefthook-push-remote-")))
-    const run = (argv: string[]) => {
-      const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
-      return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
-    }
-    const git = (...args: string[]) =>
-      expect(run(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args])).toMatchObject({
-        code: 0,
-      })
-    const bundle = () =>
-      expect(
-        run(["bun", "--no-env-file", join(dir, "packages", "scripts", "src", "hooks-bundle.ts")]),
-      ).toMatchObject({ code: 0 })
-    const commit = (message: string) => {
-      git("add", "-A")
-      git("commit", "-q", "--no-verify", "-m", message)
-    }
-    const hooks = join(dir, "scripts", "hooks")
     try {
-      for (const file of ["hooks-bundle.ts", "ops-tick/guard-probe.ts", "write-atomic.ts"]) {
-        const to = join(dir, "packages", "scripts", "src", file)
-        mkdirSync(join(to, ".."), { recursive: true })
-        copyFileSync(join(ROOT, "packages", "scripts", "src", file), to)
-      }
-      mkdirSync(hooks, { recursive: true })
-      writeFileSync(
-        join(dir, "scripts", "factory-settings.json"),
-        `${JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: "bun scripts/hooks/bundled/role.js" }] }] } })}\n`,
-      )
-      writeFileSync(
-        join(hooks, "role.ts"),
-        'import { lib } from "./lib"\n\nconsole.log("a", lib)\n',
-      )
-      writeFileSync(join(hooks, "lib.ts"), 'export const lib = "one"\n')
-      writeFileSync(join(hooks, "no-extensions-write-worker.ts"), "export {}\n")
-      writeFileSync(
-        join(dir, "lefthook.yml"),
-        JSON.stringify({
-          "pre-push": { commands: { "hooks-bundle": await hooksBundleJob("pre-push") } },
-        }),
-      )
-      bundle()
       expect(run(["git", "init", "-q", "--bare", remote]).code).toBe(0)
-      git("init", "-q", "-b", "main")
       git("remote", "add", "origin", remote)
-      commit("start")
       git("push", "-q", "--no-verify", "origin", "main:canary")
       // the branch's first push changed the guard, its bundle rebuilt
       git("checkout", "-q", "-b", "work")
