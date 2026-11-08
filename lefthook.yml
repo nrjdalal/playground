@@ -66,7 +66,7 @@ pre-commit:
         - "web/next/content/docs/dashboard.mdx"
       run: bun --no-env-file packages/scripts/src/docs-wrap/cli.ts --check
     hooks-bundle:
-      # a stale guard bundle turns CI red, so a commit touching a bundle's inputs (the guards, the package folders the bundles import, which tests/lefthook.test.ts derives from the bundles, and bun.lock for the packages they inline) checks them first; after lint-staged, whose formatter can rewrite a guard, and skipped in a merge, whose bundles hooks-merge-canary rebuilds in a commit of their own; --check reads the index, what the commit carries, so an unstaged edit beside it decides nothing
+      # a stale guard bundle turns CI red, so a commit touching a bundle's inputs (the guards, the package folders the bundles import, which tests/lefthook.test.ts derives from the bundles, and bun.lock for the packages they inline) checks them first; after lint-staged, whose formatter can rewrite a guard, and skipped in a merge, whose bundles hooks-merge-canary rebuilds in a commit of their own; --check reads the index, what the commit carries, so an unstaged edit to a file's text beside it decides nothing
       priority: 4
       skip:
         - merge
