@@ -7643,7 +7643,8 @@ function scoreAsOther(words, cmd, parsed, env) {
 }
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
 var AWK_RUNS = /system|getline|[>@]/;
-var awkRuns = (program) => AWK_RUNS.test(program) || awkPipe(program);
+var AWK_PATTERN = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.)*\//g;
+var awkRuns = (program) => AWK_RUNS.test(program.replace(AWK_PATTERN, "$1$2RE")) || awkPipe(program);
 var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
 var AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g;
 function awkPipe(program) {
