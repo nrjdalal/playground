@@ -313,3 +313,35 @@ describe("the ops switches work as before", () => {
     expect(capped(12)).toBe("1\n")
   })
 })
+
+// issue 1416: a big run holding 3 of single mode's 4 units left run-slot empty for the whole switch window (7 Nov, 13:03 to 13:10Z),
+// so while single is on a big keeps to run-slot, run-slot-2 goes to the smaller runs that fit, and the spare unit beside a big goes to a small run
+describe("a big run in single-slot mode", () => {
+  const single = () => machine({ off: ["run-slot.3-off", "run-slot.4-off", "run-slot.single"] })
+
+  test("does not take run-slot-2", async () => {
+    const m = single()
+    m.ticket(2, "worker-b", "s2 23 3 big")
+    expect(await m.canTake("run-slot-2", `2-${process.pid}-worker-b`)).toBe(false)
+  })
+
+  test("takes run-slot-1", async () => {
+    const m = single()
+    m.ticket(2, "worker-b", "s2 23 3 big")
+    expect(await m.canTake("run-slot", `2-${process.pid}-worker-b`)).toBe(true)
+  })
+
+  test("a medium run still takes run-slot-2", async () => {
+    const m = single()
+    m.ticket(2, "worker-m", "s2 22 2 medium")
+    expect(await m.canTake("run-slot-2", `2-${process.pid}-worker-m`)).toBe(true)
+  })
+
+  test("the dashboard's and the merge train's big runs still take run-slot-2", async () => {
+    for (const who of ["ops-dashboard", "ops-merge-train"]) {
+      const m = single()
+      m.ticket(2, who, "s2 01 3 big")
+      expect(await m.canTake("run-slot-2", `2-${process.pid}-${who}`)).toBe(true)
+    }
+  })
+})
