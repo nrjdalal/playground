@@ -9,6 +9,7 @@ import type { LockStore } from "@packages/redis"
 import { endMergedLive } from "../../../../scripts/ops/optimizer/auto_end"
 import { sendAs } from "../ops-job/job"
 import { factoryRepoOf } from "../playground/setting"
+import { bareTokens, templatePlaceholders } from "./body"
 import {
   BASE,
   gatesOf,
@@ -118,6 +119,19 @@ async function mergeOf(
     conflicts: merged && !merged.clean ? [...new Set(merged.files)] : null,
     mergeTree: merged?.clean ? merged.tree : null,
   }
+}
+
+// The tokens no file at the head holds, by one git grep -w -F a token in this checkout, after mergeOf fetched the head; a grep that cannot run throws, as a failed fetch does.
+export async function unfoundTokens(git: Run, head: string, tokens: string[]): Promise<string[]> {
+  const found = await Promise.all(
+    tokens.map(async (token) => {
+      const grep = await git(["grep", "-q", "-w", "-F", "-e", token, head, "--"])
+      if (grep.code !== 0 && grep.code !== 1)
+        throw new Error(`git grep exited ${grep.code}: ${grep.stderr.trim()}`)
+      return grep.code === 0
+    }),
+  )
+  return tokens.filter((_, i) => !found[i])
 }
 
 // Pure: git merge-tree --write-tree --name-only's answer: whether it merged clean (exit 0), the tree it wrote, and the files that conflict; null when it did not run.
@@ -233,6 +247,8 @@ export async function factsOf(
   )
   const { canary, conflicts, mergeTree } = await mergeOf(git, n, view.headRefOid)
   const lost = await lostLines(git, `origin/${BASE}`, view.headRefOid, mergeTree)
+  const template = await git(["show", `${view.headRefOid}:extensions/core/skills/pr/SKILL.md`])
+  const unfound = await unfoundTokens(git, view.headRefOid, bareTokens(view.body ?? ""))
   return {
     aheadBy: /^\d+$/.test(ahead) ? Number(ahead) : Number.NaN,
     author: view.author?.login ?? "",
@@ -251,7 +267,9 @@ export async function factsOf(
     n,
     owner,
     parents,
+    placeholders: template.code === 0 ? templatePlaceholders(template.stdout) : [],
     state: view.state,
+    unfound,
   }
 }
 

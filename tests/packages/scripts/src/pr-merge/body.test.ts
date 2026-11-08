@@ -1,5 +1,9 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
+import * as bodyGate from "../../../../../packages/scripts/src/pr-merge/body"
 import { bodyRefusal, templateBody } from "../../../../../packages/scripts/src/pr-merge/body"
 import { SKILL_BODY } from "./bodies"
 
@@ -196,5 +200,60 @@ describe("bodyRefusal, reading the Evidence's A/B line", () => {
     expect(bodyRefusal(without.replace("**After:** one.", "**After:** one, A/B: none."))).toContain(
       "A/B:",
     )
+  })
+})
+
+describe("bodyRefusal, reading an unfilled placeholder", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "pr-merge-body-"))
+  afterAll(() => rmSync(scratch, { force: true, recursive: true }))
+  const git = (...args: string[]) => Bun.spawnSync(["git", "-C", scratch, ...args])
+  git("init", "-q")
+  writeFileSync(join(scratch, "clock.ts"), "export const CLOCK_EXEMPT = []\n")
+  git("add", "clock.ts")
+  git("-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "-m", "a")
+  // Whether the scratch repo's head holds the word, as git grep -w reads the PR's head.
+  const known = (token: string) => git("grep", "-q", "-w", "-F", token, "HEAD").exitCode === 0
+  const check = { known, placeholders: ["<one-way or two-way>"] }
+  const withLine = (line: string) =>
+    SKILL_BODY.replace("- **Before:** two rows.", `- ${line}\n- **Before:** two rows.`)
+
+  test("the pr template's placeholders are read from its file, inside its markdown fence alone", async () => {
+    const skill = await Bun.file(
+      join(
+        import.meta.dir,
+        "..",
+        "..",
+        "..",
+        "..",
+        "..",
+        "extensions",
+        "core",
+        "skills",
+        "pr",
+        "SKILL.md",
+      ),
+    ).text()
+    const read = bodyGate.templatePlaceholders?.(skill) ?? []
+    expect(read).toContain("<one-way or two-way>")
+    expect(read).toContain("<diagram, diff-sketch, or tree>")
+    expect(read.every((p: string) => /^<[^<>]+>$/.test(p))).toBe(true)
+  })
+
+  test("a body holding the pr template's own placeholder is refused, naming it", () => {
+    const body = SKILL_BODY.replace("**Door:** two-way", "**Door:** <one-way or two-way>")
+    expect(bodyRefusal(body, [], check)).toContain("<one-way or two-way>")
+  })
+
+  test("a body holding a bare all-caps token that no file at the head holds is refused, naming it", () => {
+    expect(bodyRefusal(withLine("**Green:** SUITE_LINE"), [], check)).toContain("SUITE_LINE")
+  })
+
+  test("a bare all-caps token that a file at the head holds passes", () => {
+    expect(bodyRefusal(withLine("The pass leaves out CLOCK_EXEMPT's files."), [], check)).toBeNull()
+  })
+
+  test("an all-caps token in inline code or a fence passes", () => {
+    expect(bodyRefusal(withLine("Fill `SUITE_LINE` later."), [], check)).toBeNull()
+    expect(bodyRefusal(withLine("Sample:\n\n```\nSUITE_LINE\n```\n"), [], check)).toBeNull()
   })
 })

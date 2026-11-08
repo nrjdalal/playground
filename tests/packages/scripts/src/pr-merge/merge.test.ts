@@ -21,6 +21,7 @@ import {
   realLockRoot,
   prMerge,
   takeLock,
+  unfoundTokens,
   type Run,
   type RunResult,
 } from "../../../../../packages/scripts/src/pr-merge/merge"
@@ -897,6 +898,26 @@ describe("a stacked PR (PG-1274)", () => {
     })
     expect(plain.calls.some((args) => args.join(" ").endsWith("--json state --jq .state"))).toBe(
       false,
+    )
+  })
+})
+
+describe("the body gate's token grep at the head", () => {
+  test("names the tokens no file at the head holds, and throws when git grep cannot run", async () => {
+    const repo = mkdtempSync(join(scratch, "grep-"))
+    const inRepo = (...args: string[]) => Bun.spawnSync(["git", "-C", repo, ...args])
+    inRepo("init", "-q")
+    writeFileSync(join(repo, "clock.ts"), "export const CLOCK_EXEMPT = []\n")
+    inRepo("add", "clock.ts")
+    inRepo("-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "-m", "a")
+    const git: Run = async (args) => {
+      const proc = Bun.spawnSync(["git", "-C", repo, ...args])
+      return { code: proc.exitCode, stderr: proc.stderr.toString(), stdout: proc.stdout.toString() }
+    }
+    expect(await unfoundTokens(git, "HEAD", ["CLOCK_EXEMPT", "SUITE_LINE"])).toEqual(["SUITE_LINE"])
+    expect(await unfoundTokens(git, "HEAD", [])).toEqual([])
+    await expect(unfoundTokens(git, "no-such-ref", ["SUITE_LINE"])).rejects.toThrow(
+      "git grep exited",
     )
   })
 })
