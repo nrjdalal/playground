@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test"
 
 import { type Bus, createHub, type Hub } from "../../../../../../api/hono/src/lib/relay/hub"
+import { RELAY_REPLACED_CLOSE } from "../../../../../../api/hono/src/lib/relay/protocol"
 
 const ID = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
 // a made-up public key, the shape the browser's P-256 key exports to
@@ -301,6 +302,45 @@ describe("the relay's hub across instances", () => {
     expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
     expect(await holder.status("u1")).toEqual({ online: true, since: null })
     expect(await other.status("u1")).toEqual({ online: true, since: null })
+  })
+
+  // on each recycle the old socket's close put a ping, then gone, on the bus as its invocation ended, so both failed at the frozen instance's next thaw (#1537)
+  test("a socket the Mac closes as replaced is let go with nothing on the bus, and the Mac stays online through its next one", async () => {
+    const { holder, other, published } = instances({ ackMs: 50 })
+    const release = holder.attach("u1", mac())
+    other.attach("u1", mac())
+    release(RELAY_REPLACED_CLOSE)
+    await Bun.sleep(80)
+    expect(published).toEqual([])
+    expect(await holder.status("u1")).toEqual({ online: true, since: null })
+  })
+
+  test("a socket closed as replaced on a frozen instance's bus leaves no failed publish", async () => {
+    const frozen: Bus = {
+      listen() {},
+      publish: async () => {
+        throw new Error("Connection closed")
+      },
+    }
+    const { lines } = await logged(async () => {
+      const release = createHub({ ackMs: 50, bus: frozen }).attach("u1", mac())
+      release(RELAY_REPLACED_CLOSE)
+      await Bun.sleep(80)
+    })
+    expect(lines).toEqual([])
+  })
+
+  test("a close with no code, or any other, still asks the bus and then says gone, as an older Mac's does", async () => {
+    for (const code of [undefined, 1000, 1006, 4401]) {
+      const { holder, published } = instances({ ackMs: 20 })
+      const release = holder.attach("u1", mac())
+      release(code)
+      await Bun.sleep(60)
+      expect(published.map((one) => (JSON.parse(one) as { kind: string }).kind)).toEqual([
+        "ping",
+        "gone",
+      ])
+    }
   })
 
   test("an answer settles only a request its own owner's Mac was sent", async () => {

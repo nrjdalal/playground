@@ -31,11 +31,13 @@ export type Target = {
 }
 export type Worktree = { branch: string | null; path: string }
 
-// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers (null when GitHub cannot be read), and the turbo cache's folder.
+// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers (null when GitHub cannot be read), the turbo cache's folder, the clock the cap's pacing reads, and the sleep it waits on.
 export type NightDeps = {
   cleanup: () => Promise<CleanupDeps | null>
   free: (dir: string) => number
+  now: () => number
   prs: (ctx: Context, branches: string[], numbers: number[]) => Promise<Prs | null>
+  sleep: (ms: number) => Promise<void>
   turbo: string
 }
 
@@ -177,6 +179,11 @@ export async function pruneTurbo(dir: string, now: Date, days = 2): Promise<stri
 
 const WHY =
   "The nightly cleanup found these left over: a container or unused volume over 1 GB that no rule removes. Approve removes each on the next night's run; Deny keeps them, and they are not asked again."
+
+// rm quarantines at most 3 paths a session per minute; the beat paces its own moves under that cap, waiting before a 4th inside the minute so rm's tripwire stays quiet, retries a refused move once the minute is out, and names what a bound on the total wait leaves for the next run. Other beats run beside this one (tick.ts starts each due beat on its own), so the wait holds up nothing.
+const RM_CAP = /quarantined \d+ paths in the last minute/
+const CAP_WAIT_MS = 60_000
+const CAP_WAIT_BOUND_MS = 600_000
 
 // Pure: the night's delete decision for the containers and volumes, each named whole, as many as fit the Inbox's 4,000 characters, the rest waiting for the next night; the worktrees and branches the run removed go to the log and the outbox line, not here.
 export const decisionOf = (
@@ -365,6 +372,8 @@ export const nightlyClean =
       if (!cleanup) return "no main checkout found, none read"
       if (!prs) return "GitHub unreadable, none read"
       const out: string[] = []
+      let waited = 0
+      const moves: number[] = []
       for (const w of staleWorktrees(worktrees, prs)) {
         const line = await cleanWorktree(w.path, "nightly-clean", cleanup, {
           pr: w.pr.url,
@@ -373,11 +382,41 @@ export const nightlyClean =
         out.push(line)
         if (!discardable(line)) continue
         // The owner's standing approval: trashed with no decision, the 7-day trash holds it and playground rm --restore brings it back.
-        const moved = await trashWorktree(ctx, w.path)
+        // The pace goes before the call, so a 4th move inside the minute never lands and rm's tripwire pages no one, under the same bound as the retry; past the bound the worktree is named for the next run and rm is not called. The retry below stays for the callers this session shares with.
+        const recent = moves.filter((at) => deps.now() - at < CAP_WAIT_MS)
+        if (recent.length >= 3 && waited + CAP_WAIT_MS > CAP_WAIT_BOUND_MS) {
+          out.push(
+            `left ${w.path} for the next run: rm's cap held past the ${CAP_WAIT_BOUND_MS / 60_000}-minute wait`,
+          )
+          kept.push(`worktree ${w.path} left for the next run: rm's cap held past the wait bound`)
+          continue
+        }
+        if (recent.length >= 3) {
+          const pause = CAP_WAIT_MS - (deps.now() - recent[0]!)
+          if (pause > 0) {
+            await deps.sleep(pause)
+            waited += pause
+          }
+        }
+        let moved = await trashWorktree(ctx, w.path)
+        if (moved.code === 0) moves.push(deps.now())
+        let capped = moved.code !== 0 && RM_CAP.test(moved.out)
+        while (capped && waited + CAP_WAIT_MS <= CAP_WAIT_BOUND_MS) {
+          await deps.sleep(CAP_WAIT_MS)
+          waited += CAP_WAIT_MS
+          moved = await trashWorktree(ctx, w.path)
+          if (moved.code === 0) moves.push(deps.now())
+          capped = moved.code !== 0 && RM_CAP.test(moved.out)
+        }
         const id = trashIdOf(moved.out)
         if (moved.code === 0 && id) {
           out.push(`trashed ${w.path} as ${id}, restorable with playground rm --restore ${id}`)
           removed.push(`worktree ${w.path} as trash ${id} (playground rm --restore ${id})`)
+        } else if (capped) {
+          out.push(
+            `left ${w.path} for the next run: rm's cap held past the ${CAP_WAIT_BOUND_MS / 60_000}-minute wait`,
+          )
+          kept.push(`worktree ${w.path} left for the next run: rm's cap held past the wait bound`)
         } else {
           out.push(`kept ${w.path}: its trash move failed: ${lines(moved.out).at(-1) ?? ""}`)
           kept.push(`worktree ${w.path} kept: its trash move failed`)
@@ -579,13 +618,14 @@ export const readPrs = (out: string, branches: string[], numbers: number[], prs:
   return true
 }
 
-// This machine's: auto_end's cleanup deps, statfs, GitHub's PRs in batched GraphQL reads through gh, and the shared turbo cache.
+// This machine's: auto_end's cleanup deps, statfs, GitHub's PRs in batched GraphQL reads through gh, the shared turbo cache, and a real sleep.
 const liveNight: NightDeps = {
   cleanup: cleanupDeps,
   free: (dir) => {
     const fs = statfsSync(dir)
     return fs.bavail * fs.bsize
   },
+  now: () => Date.now(),
   prs: async (ctx, branches, numbers) => {
     const url = (await ctx.run(["git", "-C", ctx.repo, "remote", "get-url", "origin"])).out.trim()
     const repo = /github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/.exec(url)
@@ -611,5 +651,6 @@ const liveNight: NightDeps = {
     }
     return prs
   },
+  sleep: (ms) => Bun.sleep(ms),
   turbo: TURBO_CACHE,
 }
