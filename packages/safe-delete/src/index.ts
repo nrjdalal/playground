@@ -29,12 +29,14 @@ export type Proc = { command: string; cwd: string; pid: number; sockets: string[
 // A running node_modules clone, from run-slot's clone holder record: the session that runs it, its pid, the checkout it copies from and the one it copies into.
 export type Clone = { destination: string; pid: number; source: string; who: string }
 
-// What tells a worktree is held: the running clones, a reader quarantine calls again right before its move, the roster's live statuses, the folders beyond the other worktrees read for links into it (linkPlaces), every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that.
+// What tells a worktree is held: the running clones, a reader quarantine calls again right before its move, the roster's live statuses, the folders beyond the other worktrees read for links into it (linkPlaces), every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that; the worktree's own PR once it reads MERGED or CLOSED (freed, at its head), which no roster row naming its branch or its number holds while the worktree sits at that PR's head, and where a pass past such a row is told (note).
 export type Holders = {
   clones: () => Clone[]
   discard: boolean
+  freed?: { head: string; number: number; state: "CLOSED" | "MERGED" }
   live: string[]
   merged: (sha: string, at: string) => boolean | null
+  note?: (line: string) => void
   places: () => string[]
   pr?: string
   procs: Proc[] | null
@@ -444,6 +446,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   const top = git("rev-parse", "--show-toplevel")
   if (!top.ok || real(top.out) !== at) return `${at} is not a git worktree`
   const branch = git("symbolic-ref", "--quiet", "--short", "HEAD").out
+  const head = git("rev-parse", "HEAD").out
   const folder = basename(at).toLowerCase()
   const where = `${folder} ${branch.toLowerCase()}`
   // Each name's slug, after its PG-<n>- prefix: ops holds PG-12-ops-job, not PG-5-stops.
@@ -462,8 +465,24 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
         ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1]
         : undefined
     const byPr = pr !== undefined && new RegExp(`(^|\\D)${pr}(\\D|$)`).test(where)
-    if (byBranch || byPr || byName || byId)
-      return `${at} is held by ${agent.name}, which the roster lists as ${agent.status}`
+    if (!byBranch && !byPr && !byName && !byId) continue
+    // a finished PR frees its worktree from a row that names it by its branch or by that PR's own number alone, so a row naming another PR, or the session by name or id, still holds it; commits past the freed PR's head keep the hold, named with them, so --discard cannot take unmerged work
+    const freed = holders.freed
+    const ownRow =
+      !byName && !byId && (!byPr || (freed !== undefined && pr === String(freed.number)))
+    if (freed && ownRow && freed.head === head) {
+      holders.note?.(
+        `${at} is freed by #${freed.number}, which reads ${freed.state}, past ${agent.name}'s roster row (${agent.status})`,
+      )
+      continue
+    }
+    if (freed && ownRow) {
+      const past = git("log", "--format=%h", `${freed.head}..HEAD`)
+      const shas = past.ok ? past.out.split("\n").filter(Boolean).slice(0, 5) : []
+      const named = shas.length ? `: ${shas.join(", ")}` : ""
+      return `${at} is held by ${agent.name}, which the roster lists as ${agent.status}, and its commits past merged PR #${freed.number}'s head stay${named}`
+    }
+    return `${at} is held by ${agent.name}, which the roster lists as ${agent.status}`
   }
   const cloned = cloneHolder(at, holders.clones())
   if (cloned) return cloned
