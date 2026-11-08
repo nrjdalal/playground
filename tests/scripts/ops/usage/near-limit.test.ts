@@ -7,10 +7,11 @@ const script = join(import.meta.dir, "../../../../scripts/ops/usage/near-limit.p
 const scratch = mkdtempSync(join(tmpdir(), "near-limit-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-// near-limit.py whole, under a scratch HOME: a stand-in beat module gives its settings and swaps urllib's urlopen for an answer with a week and no 5-hour headers, so no call leaves the Mac; a stand-in `security` holds the Keychain
-test("a probe answered with no 5-hour headers writes the account's five as none in login-flip.json, never 0%", async () => {
-  const ops = join(scratch, ".playground", "ops")
-  const stubs = join(scratch, "stubs")
+// near-limit.py whole, under its own scratch HOME per run: a stand-in beat module gives its settings and swaps urllib's urlopen for the headers given, so no call leaves the Mac; a stand-in `security` holds the Keychain. Answers with the seen entry it wrote for the watched account
+const runWhole = async (headers: Record<string, string>) => {
+  const home = mkdtempSync(join(scratch, "home-"))
+  const ops = join(home, ".playground", "ops")
+  const stubs = join(home, "stubs")
   mkdirSync(join(ops, "usage"), { recursive: true })
   mkdirSync(stubs, { recursive: true })
   const settings = {
@@ -24,26 +25,42 @@ test("a probe answered with no 5-hour headers writes the account's five as none 
 import io, json, os, urllib.error, urllib.request
 OPS = os.path.dirname(os.path.abspath(__file__))
 def urlopen(req, timeout=None):
-    raise urllib.error.HTTPError(req.full_url, 200, "ok", {"anthropic-ratelimit-unified-7d-utilization": "0.3", "anthropic-ratelimit-unified-7d-reset": "4000000000"}, io.BytesIO(b"{}"))
+    raise urllib.error.HTTPError(req.full_url, 200, "ok", json.loads('${JSON.stringify(headers)}'), io.BytesIO(b"{}"))
 urllib.request.urlopen = urlopen
 def setting(key):
     return json.loads(${JSON.stringify(JSON.stringify(settings))})[key]
 `,
   )
   writeFileSync(
-    join(scratch, ".playground", "usage.json"),
+    join(home, ".playground", "usage.json"),
     JSON.stringify({ account: "stored@example.org", rate_limits: {} }),
   )
   writeFileSync(join(stubs, "security"), "#!/bin/sh\necho made-up-token\n", { mode: 0o755 })
   const env: Record<string, string | undefined> = {
     ...process.env,
-    HOME: scratch,
+    HOME: home,
     PATH: `${stubs}:${process.env.PATH}`,
   }
   delete env.CLAUDE_CONFIG_DIR
   const child = Bun.spawn(["python3", "-I", script], { env, stderr: "pipe", stdout: "pipe" })
   const [err] = await Promise.all([new Response(child.stderr).text(), child.exited])
   expect(err).toBe("")
-  const seen = JSON.parse(readFileSync(join(ops, "usage", "login-flip.json"), "utf8")).seen
+  return JSON.parse(readFileSync(join(ops, "usage", "login-flip.json"), "utf8")).seen
+}
+
+test("a probe answered with no 5-hour headers writes the account's five as none in login-flip.json, never 0%", async () => {
+  const seen = await runWhole({
+    "anthropic-ratelimit-unified-7d-utilization": "0.3",
+    "anthropic-ratelimit-unified-7d-reset": "4000000000",
+  })
   expect(seen["watched@example.org"]).toMatchObject({ five: null, fiveReset: null, week: 30 })
+})
+
+// #1587: a full week is limited until its reset whatever the status header says, so an answer with no status header marks it too
+test("a probe answered with a full week and no status header marks the account limited until its reset (#1587)", async () => {
+  const seen = await runWhole({
+    "anthropic-ratelimit-unified-7d-utilization": "1.0",
+    "anthropic-ratelimit-unified-7d-reset": "4000000000",
+  })
+  expect(seen["watched@example.org"]).toMatchObject({ week: 100, limitedUntil: 4000000000 })
 })

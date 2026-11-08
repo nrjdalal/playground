@@ -436,7 +436,7 @@ now = time.time()
 calls = []
 def probe(email):
     calls.append(email)
-    return None
+    return None if spec.get("probe") is None else dict(spec["probe"], at=now)
 ns["probe"] = probe
 s = {"at": now + spec["seenAt"], "week": spec["week"]}
 if spec.get("weekReset") is not None:
@@ -532,6 +532,36 @@ test("accounts_reading keeps a full week's account in the accounts map until its
   })
 })
 
+test("a reading limited below 100 is served until its limitedUntil with no probe, and goes stale once the limit passes (#1587)", () => {
+  // a full 5-hour window marked limitedUntil hours ahead: seen() holds the probe, so the reading stays fresh that long
+  expect(
+    fullWeek("limited-below-100-fresh", {
+      email: "main@example.org",
+      factory: "main@example.org",
+      limitedUntil: 7200,
+      seenAt: -1980,
+      week: 40,
+    }),
+  ).toEqual({
+    factory: { readAt: expect.any(String), week: 40 },
+    probes: [],
+  })
+  // the limit has passed: the probe runs again and its fresh reading is served
+  expect(
+    fullWeek("limited-below-100-stale", {
+      email: "main@example.org",
+      factory: "main@example.org",
+      limitedUntil: -60,
+      probe: { five: 20, fiveReset: 4102444800, week: 41, weekReset: 4102444800 },
+      seenAt: -1980,
+      week: 40,
+    }),
+  ).toEqual({
+    factory: { readAt: expect.any(String), week: 41 },
+    probes: ["main@example.org"],
+  })
+})
+
 // run.py's own probe(), with urlopen raising the made-up 429 and its headers holding no status header, so a full week is marked limited until its reset whatever the status header says (#1587)
 const probeHarness = `
 import io, json, sys, time, types, urllib.error, urllib.request
@@ -579,9 +609,10 @@ test("run.py's probe marks a full week limited until its weekReset, with no stat
   })
 })
 
-// #1587: factory_reading returns none, and does not raise, when the factory names an account usage.accounts no longer lists. The accounts list, the reading, the probe and the Keychain are all fake, so no request leaves the Mac
+// #1587: factory_reading against a fake accounts list, its reading 42 minutes old with a week under 100, so a none can only come from the list check and not from freshness. The probe and the Keychain are stubbed, so no request leaves the Mac
 const unlistedHarness = `
 import json, os, sys, time, types
+spec = json.loads(sys.argv[2])
 sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
 src = open(sys.argv[1]).read()
 ns = {"__name__": "run_under_test"}
@@ -589,10 +620,10 @@ exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
 now = time.time()
 ns["probe"] = lambda e: None
 ns["subprocess"] = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
-flip = {"factory": "gone@example.test", "seen": {"gone@example.test": {"at": now, "week": 100, "weekReset": now + 2 * 86400}}}
+flip = {"factory": "gone@example.test", "seen": {"gone@example.test": {"at": now + spec["seenAt"], "week": spec["week"], "weekReset": now + 2 * 86400}}}
 out = {}
 try:
-    data = ns["factory_reading"]({"account": "mine@example.test", "rate_limits": {}}, flip, ["mine@example.test"])
+    data = ns["factory_reading"]({"account": "mine@example.test", "rate_limits": {}}, flip, spec["accounts"])
     if data:
         out["factory"] = data["account"]
 except Exception as e:
@@ -600,12 +631,31 @@ except Exception as e:
 print(json.dumps(out))
 `
 
-test("factory_reading returns none, and does not raise, when the factory names an account usage.accounts no longer lists (#1587)", () => {
-  const home = join(scratch, "factory-unlisted")
+const runUnlisted = (name: string, spec: Record<string, unknown>) => {
+  const home = join(scratch, name)
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
   const env: Record<string, string | undefined> = { ...process.env, HOME: home }
   delete env.CLAUDE_CONFIG_DIR
-  const child = Bun.spawnSync(["python3", "-I", "-c", unlistedHarness, script], { env })
+  const child = Bun.spawnSync(
+    ["python3", "-I", "-c", unlistedHarness, script, JSON.stringify(spec)],
+    { env },
+  )
   expect(child.stderr.toString()).toBe("")
-  expect(JSON.parse(child.stdout.toString())).toEqual({})
+  return JSON.parse(child.stdout.toString())
+}
+
+test("factory_reading returns none, and does not raise, when the factory names an account usage.accounts no longer lists (#1587)", () => {
+  expect(
+    runUnlisted("factory-unlisted", {
+      accounts: ["mine@example.test"],
+      seenAt: -2520,
+      week: 40,
+    }),
+  ).toEqual({})
+})
+
+test("a settings read that fails keeps the factory's reading, since no account is known to be removed (#1587)", () => {
+  expect(runUnlisted("factory-unknown-list", { accounts: null, seenAt: -2520, week: 40 })).toEqual({
+    factory: "gone@example.test",
+  })
 })

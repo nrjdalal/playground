@@ -206,6 +206,16 @@ test("the factory's accounts at 1%/h each read 2%/h combined", () => {
   expect(new Set(accounts("account-samples.jsonl"))).toEqual(new Set(["spare@example.test"]))
 })
 
+// #1587: a full week's reading parks in the map until its reset with a readAt that stops moving, so it counts 0%/h and the combined figure stays a number
+test("a full-week account counts 0%/h, so the combined figure stays a number (#1587)", () => {
+  const now = Date.now() / 1000
+  const home = setup("full-week-spare", 50, 20, {
+    "spare@example.test": { readAt: iso(now - 7200), week: 100, weekReset: now + 172800 },
+  })
+  history(home, [["login@example.test", 50, now + 86400]])
+  expect(status(home)).toContain("; combined 1.0%/h across 2 accounts")
+})
+
 test("the spare account logged in counts as a factory account", () => {
   const home = setup("nd941z", 50, 20)
   const usage = join(home, ".playground", "usage.json")
