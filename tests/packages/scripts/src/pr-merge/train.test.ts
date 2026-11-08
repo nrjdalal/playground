@@ -208,7 +208,6 @@ describe("pr:train", () => {
     expect(held).toEqual([{ n: 3, why: "not gated: parent" }])
   })
 
-  // one PR whose facts cannot be read (a failed fetch, a pr template the head cannot show) holds that PR alone, so the pass goes on (#1581)
   test("a PR whose facts cannot be read is held with why, and the others are gated as before", async () => {
     const w = world({
       3: { "a.txt": edit("3") },

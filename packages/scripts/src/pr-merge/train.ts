@@ -210,7 +210,7 @@ export async function gatedOf(
     } catch (error) {
       held.push({
         n,
-        why: `not gated: facts unreadable (${error instanceof Error ? error.message : String(error)})`,
+        why: `not gated: facts unreadable (${(error as Error).message})`,
       })
       continue
     }
