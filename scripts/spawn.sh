@@ -19,7 +19,10 @@ set -euo pipefail
 #      and a resume within 15 minutes of close ending a row that read live (JUST_CLOSED), logged as
 #      readings.just_closed
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
-#      free at 8% or more (kern.memorystatus_level)
+#      free at 8% or more (kern.memorystatus_level); a fresh worker start also needs swap-ins
+#      under 100/s (vm_stat -c 2 1, gates.glmSwapinsMax), since free memory counts compressible
+#      pages and read 62% on 7 Nov while 150 pages swapped in a second; every other start keeps
+#      its pass, as at the slots gate
 #   A GLM session takes its own load and memory gate in place of both:
 #   load5 under 30, pressure level 1 and swap-ins under 100/s (vm_stat -c 2 1)
 #   Under Claude Code's sandbox the load comes from uptime, and a refused pressure level leaves the swap-ins to decide (scripts/README.md)
@@ -482,6 +485,14 @@ else:
                 refuse("memory", "it cannot read the free share (sysctl kern.memorystatus_level)")
             if readings["free"] < gates["memoryFreeMin"]:
                 refuse("memory", f"free is {readings['free']}% (sysctl kern.memorystatus_level), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
+        # paging, for a fresh worker start alone (room is read for one), since free memory counts compressible pages
+        if room and "swapins" not in readings:
+            readings["swapins"] = swapins()
+            if readings["swapins"] is None:
+                refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1)")
+            if readings["swapins"] >= gates["glmSwapinsMax"]:
+                free = f", while free reads {readings['free']}% (sysctl kern.memorystatus_level), which counts compressible pages" if "free" in readings else ""
+                refuse("memory", f"swap-ins are {readings['swapins']}/s (vm_stat), {fmt(gates['glmSwapinsMax'])}/s is the line{free}. Close a session or wait for the paging to pass, and run it again.")
     except Skip:
         pass
 

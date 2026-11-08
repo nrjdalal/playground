@@ -6207,7 +6207,7 @@ var gateSettings = defineSettings({
   },
   "gates.glmSwapinsMax": {
     default: 100,
-    description: "The swap-ins a second a GLM session starts under.",
+    description: "The swap-ins a second a GLM session, and a fresh Claude worker, starts under.",
     schema: number2().int().positive()
   },
   "gates.memoryFreeMin": {

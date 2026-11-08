@@ -18,7 +18,9 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores so a worker or two can be closed to make room, the refusal naming the load, the starts and the line,
   while a `--priority` start passes it with a priority file standing (above, any of them), its row's `readings.priority` naming the file, since priority work comes first,
   and a resume within 15 minutes of `spawn.sh close` ending a row that read live (not `ended`, `parked`, `paused` or `done`) passes it too, its row's `readings.just_closed` naming the close, since that session already counts in the load it comes back into (the close keeps its time and the row's status in the data folder's `closes/<name>`);
-  memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, room for its runs:
+  memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`),
+  and for a fresh worker start alone swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), refusing when vm_stat gives no reading, since free memory counts compressible pages and read 62% on 7 Nov while 150 pages swapped in a second; every other start keeps its pass, as at the slots gate;
+  for a fresh worker start alone, room for its runs:
   `scripts/ops/run-slot.sh room`'s lanes, held lanes, free lanes (open and unheld while the queue's next run fits its load units by run-slot's one gate, `unit_fits`, or a medium run with no waiter, `slots.peers`' holders counted) and live waiters, refusing while no lane is free and a run waits in the queue, or when room gives no reading, so a new worker never joins a queue it has no room in,
   while a `--priority` start passes a full queue with a priority file standing, as it passes the load gate, its row's `readings.priority` naming the file, and a reviewer, tester
   or resume skips it and work already admitted finishes; and the launching backend's usage:
