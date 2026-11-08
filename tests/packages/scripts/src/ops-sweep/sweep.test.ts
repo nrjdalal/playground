@@ -1019,14 +1019,14 @@ describe("pace off", () => {
   const T = NOW / 1000
   const A = "one@example.com"
   const B = "two@example.com"
-  // week-marks.py's samples of one account, `before`% an hour back and `now`% now, its week resetting `reset` seconds on; the other accounts' go to account-samples.jsonl.
+  // week-marks.py's samples of one account, `before`% 3 hours back and `now`% now, its week resetting `reset` seconds on; the other accounts' go to account-samples.jsonl.
   const week = (ctx: Context, account: string, before: number, now: number, reset: number) =>
     writeFileSync(
       join(ctx.ops, "usage", account === A ? "week-samples.jsonl" : "account-samples.jsonl"),
       [before, now]
         .map(
           (w, i) =>
-            `${JSON.stringify({ account, reset: T + reset, t: T - 3600 + i * 3600, week: w })}\n`,
+            `${JSON.stringify({ account, reset: T + reset, t: T - 10800 + i * 10800, week: w })}\n`,
         )
         .join(""),
     )
@@ -1051,7 +1051,7 @@ describe("pace off", () => {
     expect(text(paceFile(ctx))).toBe("2026-10-20T13:00:00Z")
     expect(read(join(sweep, "pace-off.json"))).toEqual({
       at: "2026-10-20T12:00:00Z",
-      forecast: { main: 64 },
+      forecast: { main: 48 },
       until: "2026-10-20T13:00:00Z",
     })
   })
@@ -1074,7 +1074,7 @@ describe("pace off", () => {
     expect(await Bun.file(paceFile(ctx)).exists()).toBe(false)
     expect(read(join(sweep, "pace-off.json"))).toEqual({
       at: "2026-10-20T12:00:00Z",
-      forecast: { main: 330 },
+      forecast: { main: 170 },
       until: null,
     })
   })
@@ -1088,7 +1088,37 @@ describe("pace off", () => {
     split(ctx, { [A]: 0.5, [B]: 0.5 })
     await check(ctx)
     expect(text(paceFile(ctx))).toBe("2026-10-20T13:00:00Z")
-    expect(read(join(sweep, "pace-off.json")).forecast).toEqual({ "account 2": 64, main: 330 })
+    expect(read(join(sweep, "pace-off.json")).forecast).toEqual({ "account 2": 48, main: 170 })
+  })
+
+  test("the pace runs from the move onto the account, so idle hours before it never read as room", async () => {
+    const { ctx, sweep } = machine()
+    const row = (account: string, t: number, week: number) =>
+      `${JSON.stringify({ account, reset: T + 14400, t: T - t, week })}\n`
+    writeFileSync(join(ctx.ops, "usage", "account-samples.jsonl"), row(A, 10800, 50))
+    writeFileSync(
+      join(ctx.ops, "usage", "week-samples.jsonl"),
+      row(B, 7201, 20) + row(A, 7200, 50) + row(A, 0, 70),
+    )
+    await check(ctx)
+    expect(await Bun.file(paceFile(ctx)).exists()).toBe(false)
+    expect(read(join(sweep, "pace-off.json")).forecast).toEqual({})
+  })
+
+  test("readings that span under 3 hours forecast nothing, so the pace stays on", async () => {
+    const { ctx, sweep } = machine()
+    writeFileSync(
+      join(ctx.ops, "usage", "week-samples.jsonl"),
+      [39, 40]
+        .map(
+          (w, i) =>
+            `${JSON.stringify({ account: A, reset: T + 86400, t: T - 3600 + i * 3600, week: w })}\n`,
+        )
+        .join(""),
+    )
+    await check(ctx)
+    expect(await Bun.file(paceFile(ctx)).exists()).toBe(false)
+    expect(read(join(sweep, "pace-off.json")).forecast).toEqual({})
   })
 
   test("with no fresh split, usage.json's account is the one forecast", async () => {
