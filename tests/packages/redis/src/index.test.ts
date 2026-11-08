@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 
+import { testContainerName } from "../../../container"
+
 // The lock store against a throwaway Redis in Docker published on 127.0.0.1 only. Skipped where Docker is not running; the unreachable cases need no server.
 const { lockStore } = await import("../../../../packages/redis/dist/index.mjs")
 
@@ -46,6 +48,8 @@ describe.skipIf(!dockerUp())("the lock store", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("redis-lock"),
       "-p",
       "127.0.0.1::6379",
       "redis:alpine",

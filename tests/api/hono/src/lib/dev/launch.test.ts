@@ -45,6 +45,7 @@ import {
   type Located,
   prove,
 } from "../../../../../../api/hono/src/lib/sessions/guard"
+import { testContainerName } from "../../../../../container"
 import { envLines, REQUIRED } from "./env-fixtures"
 
 const LIVE_DASHBOARD = livePair()
@@ -1155,6 +1156,8 @@ describe.skipIf(!dockerUp())("preflight against a real container", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("launch"),
       "--name",
       name,
       "-e",

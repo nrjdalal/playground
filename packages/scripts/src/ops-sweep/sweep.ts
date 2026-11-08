@@ -526,6 +526,28 @@ export async function idleDbs(ctx: Context): Promise<string[]> {
   return out
 }
 
+// A test container named playground-test-<suite>-<pid> whose runner pid no longer runs is a killed test run's leftover (the kill never reaches the suite's docker rm): removed with its volumes, so a killed run leaks nothing. Every other container stays: the live dashboard's database, pglaunch's, a Vibeground copy, a worktree's, any running stack's, and any test container whose pid still runs; a name whose last field is not a pid, such as a worktree named test-x's playground-test-x-db, is never one. runs says whether a pid has a process, a test's table in its place.
+export async function leakedTests(
+  ctx: Context,
+  runs: (pid: number) => boolean = alive,
+): Promise<string[]> {
+  const ps = await ctx.run(
+    ["docker", "ps", "--filter", "name=^playground-test-", "--format", "{{.Names}}"],
+    {
+      timeoutMs: 60_000,
+    },
+  )
+  if (ps.code) return []
+  const removed: string[] = []
+  for (const name of ps.out.split("\n").filter(Boolean)) {
+    const pid = Number(/^playground-test-[a-z0-9-]+-(\d+)$/.exec(name)?.[1])
+    if (!Number.isInteger(pid) || pid <= 0 || runs(pid)) continue
+    if ((await ctx.run(["docker", "rm", "-fv", name], { timeoutMs: 60_000 })).code === 0)
+      removed.push(name)
+  }
+  return removed
+}
+
 // One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases, the runner-box route, late reviewers, branches with no PR, stalled PRs and the usage forecast.
 export async function check(ctx: Context): Promise<string[]> {
   let roster: Json
@@ -659,6 +681,16 @@ export async function pass(
     }
   } catch (err) {
     result = `error: ${err instanceof Error ? err.message : String(err)}`
+  }
+  try {
+    const removed = await leakedTests(ctx)
+    if (removed.length)
+      await appendFile(
+        join(ctx.ops, "ops-log.md"),
+        `- ${stamp(ctx)} leaked test containers removed (ops-sweep): ${removed.join(", ")}.\n`,
+      )
+  } catch (err) {
+    result = `error: leaked test containers: ${err instanceof Error ? err.message : String(err)}`
   }
   try {
     await maybePrune(ctx)
