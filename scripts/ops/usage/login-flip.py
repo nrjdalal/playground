@@ -5,7 +5,7 @@ account in ACCOUNTS that has a long-lived token in the Keychain (service usage.k
 headers, at most every 14 minutes. The current account is login-flip.json's `factory`, else the stored login. Ending accounts (ENDS) come first: the first usable one in ending_order() is the target whenever
 the factory is on another account; with none usable, once the current login reaches its line, the renewing account with MIN_ROOM
 whose week resets soonest. It names the target once ("switch due to ..."), or says once that no account has room. Prints nothing otherwise.
-It also writes the split, each account's share of new sessions (week left per hour to its deadline, a fifth of that for an own account while that deadline is over a day away), which spawn.sh's no-account default follows. --dry-run reads no token and changes nothing. State in login-flip.json in the state folder, ~/.playground/ops/usage."""
+It also writes the split, each account's share of new sessions (week left per hour to its deadline, a fifth of that for an own account while that deadline is over a day away), which spawn.sh's no-account default follows. --dry-run reads no token and changes nothing. State in login-flip.json in the state folder, the data folder's ops/usage."""
 import datetime, json, os, shutil, subprocess, sys, time
 
 HERE = os.path.join(os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state

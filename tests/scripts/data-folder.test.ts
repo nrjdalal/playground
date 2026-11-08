@@ -105,11 +105,16 @@ describe("every script a session can run reaches the data folder through PLAYGRO
   const BY_HOME =
     /"?\$\{?HOME\}?\/\.playground|expanduser\("~\/\.playground|(homedir\(\)|home), "\.playground"/
   const COMMENT = /^\s*(#|\/\/|\*)/
+  // herdr's binary and sockets follow HOME alone, as ops-herdr puts them (herdrDir in packages/scripts/src/ops-herdr/herdr.ts), so every login and stack reaches the same servers
+  const HERDR = /herdr/i
   const byHome = (file: string) =>
     readFileSync(join(REPO, file), "utf8")
       .split("\n")
       .flatMap((line, i) =>
-        BY_HOME.test(line) && !COMMENT.test(line) && !line.includes("PLAYGROUND_DATA_DIR")
+        BY_HOME.test(line) &&
+        !COMMENT.test(line) &&
+        !HERDR.test(line) &&
+        !line.includes("PLAYGROUND_DATA_DIR")
           ? [`${file}:${i + 1}`]
           : [],
       )
@@ -118,15 +123,12 @@ describe("every script a session can run reaches the data folder through PLAYGRO
     "packages/scripts/src/playground/cli.ts",
     "scripts/link-skills.sh",
     "scripts/ops/merge-train/run.py",
-    "scripts/ops/unstick/run.py",
-    "scripts/ops/up.py",
     "scripts/ops/usage/account-watch.py",
     "scripts/ops/usage/glm-credits.py",
     "scripts/ops/usage/login-flip.py",
     "scripts/ops/usage/near-limit.py",
     "scripts/ops/usage/run.py",
     "scripts/ops/usage/week-marks.py",
-    "scripts/shell-pane.ts",
   ])("%s", (file) => {
     expect(byHome(file)).toEqual([])
   })

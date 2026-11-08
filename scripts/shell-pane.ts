@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 // A plain shell pane a session drives (extensions/core/skills/shell-pane): a workspace on the playground-probes herdr server, which takes a command only after every registered Bash guard passes it, since a pane has no PreToolUse hook of its own.
+import { homedir } from "node:os"
 import { join } from "node:path"
 
-import { dataDir } from "../packages/env/src/data-dir"
 import { mainCheckout } from "../packages/scripts/src/main-checkout"
 import { callerRefusal } from "./hooks/session-state"
 
@@ -29,12 +29,12 @@ export type Herdr = (args: string[]) => Promise<{ code: number; out: string }>
 export class Refusal extends Error {}
 
 const herdrCli: Herdr = async (args) => {
-  const data = dataDir(process.env)
-  const child = Bun.spawn([join(data, "bin", "herdr"), ...args], {
+  const home = process.env.HOME || homedir()
+  const child = Bun.spawn([join(home, ".playground", "bin", "herdr"), ...args], {
     env: {
       ...process.env,
       HERDR_SESSION: SERVER,
-      HERDR_SOCKET_PATH: join(data, "herdr", `${SERVER}.sock`),
+      HERDR_SOCKET_PATH: join(home, ".playground", "herdr", `${SERVER}.sock`),
     },
     stderr: "pipe",
     stdout: "pipe",

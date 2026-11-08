@@ -95,8 +95,8 @@ DIALOG_HINT = re.compile(r"Enter to confirm · Esc|Space to select · Esc|Esc to
 # --session ignores it). A refused or missing socket is that server down, not a fault; `pane list` starts no server. The sockets follow HOME, never
 # CLAUDE_CONFIG_DIR, as ops-herdr puts them (herdrDir in packages/scripts/src/ops-herdr/herdr.ts), so every Claude login reads the same servers.
 # herdr runs by the copy ops-herdr installs and pins, under the data folder of HOME alone (herdrPath in packages/scripts/src/ops-herdr/pin.ts).
-HERDR = os.environ.get("HERDR_BIN_PATH") or os.path.join(LW, "bin", "herdr")
-HERDR_DIR = os.environ.get("PLAYGROUND_HERDR_DIR") or os.environ.get("DESK_HERDR_DIR") or os.path.join(LW, "herdr")
+HERDR = os.environ.get("HERDR_BIN_PATH") or os.path.expanduser("~/.playground/bin/herdr")
+HERDR_DIR = os.environ.get("PLAYGROUND_HERDR_DIR") or os.environ.get("DESK_HERDR_DIR") or os.path.expanduser("~/.playground/herdr")
 HERDR_SESSIONS = [n for n in (os.environ.get("PLAYGROUND_HERDR_SESSIONS") or os.environ.get("DESK_HERDR_SESSIONS") or "playground,playground-probes").split(",") if n]
 
 
