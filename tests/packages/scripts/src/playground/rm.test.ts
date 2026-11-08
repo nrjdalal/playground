@@ -411,6 +411,26 @@ test("a worktree whose PR merged or closed passes a working roster row naming it
   }
 })
 
+// PG-1419: the freed removal goes through the 7-day trash like any other, and --restore brings the worktree back, the work --discard let go with it
+test("a freed worktree's removal is restorable: --restore brings it back on its branch, at its commit, listed, its discarded work back as untracked", async () => {
+  const { deps, main } = machine()
+  const { wt } = dirtyWorktree(main)
+  const sha = git(wt, "rev-parse", "HEAD")
+  const row = { branch: "PG-1-thing", name: "abc123-worker", status: "working" }
+  const words = ["--worktree", wt, "--discard", "--decision", "#i9"]
+  const { out } = await heldRun(deps, words, "MERGED", row, 7)
+  const [batch] = readdirSync(join(deps.data, "trash"))
+  const id = `${batch}/1`
+  expect(out[1]).toContain(`playground rm --restore ${id} brings it back`)
+  expect(await runRm(["--restore", id], deps)).toBe(0)
+  expect(gitSees(main, wt)).toEqual({
+    branch: "PG-1-thing",
+    head: sha,
+    listed: true,
+    status: "?? wip.txt",
+  })
+})
+
 test("a working roster row naming the branch still holds a worktree whose PR is open or reads as none (no PR, or GitHub unreadable)", async () => {
   for (const state of ["OPEN", null] as const) {
     const { deps, main } = machine()
