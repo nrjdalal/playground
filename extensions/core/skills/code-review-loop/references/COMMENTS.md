@@ -12,7 +12,7 @@ Done when each bypass's mechanism is in the verdict, its forms are in the worker
 
 ## The verdict comment
 
-One new comment per round, never an edit of an earlier one: the record of what was said at which SHA is the point. Post it over REST, which spends no GraphQL (playbook's **github** rule): `gh api repos/<repo>/issues/<n>/comments -F body=@<file> --jq .html_url`. Its first line is the gate's, exactly:
+One new comment per round, never an edit of an earlier one: the record of what was said at which SHA is the point. Post it over REST, which spends no GraphQL (playbook's **github** rule), behind SKILL.md step 7's `fresh` check: `${CLAUDE_SKILL_DIR}/scripts/state.ts fresh <repo> <n> <read-at> <digest> && gh api repos/<repo>/issues/<n>/comments -F body=@<file> --jq .html_url`. Its first line is the gate's, exactly:
 
 ```
 ## ReviewBot · round <r>: <s>/5 at <sha7> · <b> blocking, <f> should-fix, <k> nits

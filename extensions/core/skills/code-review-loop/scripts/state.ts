@@ -7,7 +7,7 @@ export const VERDICT = /^##\s*ReviewBot\s*·\s*round\s+(\d+):\s*(\d)\/5\s+at\s+`
 export const WAIT_SECONDS = 300
 
 export const PR_QUERY = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){
-number state isDraft headRefOid
+number state isDraft headRefOid body
 comments(last:100){pageInfo{hasPreviousPage} nodes{author{login} body createdAt url}}
 reviews(last:50){pageInfo{hasPreviousPage} nodes{author{login} body submittedAt state}}
 reviewThreads(first:100){pageInfo{hasNextPage} nodes{id isResolved path line originalLine
@@ -337,6 +337,7 @@ export const restPr = (
   reviews: Json[],
   reviewComments: Json[],
 ): Json => ({
+  body: view.body,
   comments: {
     nodes: comments.map((c) => ({
       author: author(c),
@@ -418,6 +419,7 @@ const exitWith = (message: string): never => {
 
 export const cmdPr = async (repo: string, n: string): Promise<void> => {
   const [owner, name] = splitRepo(repo)
+  const readAt = isoSeconds(io.time())
   let pr: Json
   try {
     pr = graphql(PR_QUERY, { name, n: number(n), owner }).pullRequest as Json
@@ -463,6 +465,47 @@ export const cmdPr = async (repo: string, n: string): Promise<void> => {
   const others = saidSince(comments, pr.reviews.nodes as Json[], since)
   console.log(`said since the verdict: ${others.length}`)
   for (const [at, who, line] of others) console.log(`  ${at} ${who}: ${line}`)
+  console.log(`read: ${readAt} ${bodyDigest(pr.body)}`)
+}
+
+const isoSeconds = (s: number): string =>
+  new Date(Math.floor(s) * 1000).toISOString().replace(".000Z", "Z")
+
+// The body as read, by its first 12 hex of sha256: REST gives no body-edit time, and its updated_at also moves on every comment and label.
+export const bodyDigest = (body: string | null | undefined): string =>
+  new Bun.CryptoHasher("sha256")
+    .update(body ?? "")
+    .digest("hex")
+    .slice(0, 12)
+
+// Exit 1 naming each change since pr's read line (the body, or a comment or thread reply posted or edited after it), else FRESH: chained before the verdict's post.
+export const cmdFresh = (repo: string, n: string, readAt: string, digest: string): void => {
+  splitRepo(repo)
+  number(n)
+  if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(readAt) || Number.isNaN(Date.parse(readAt)))
+    exitWith(`not a read time (state.ts pr's read line): ${readAt}`)
+  if (!/^[0-9a-f]{12}$/.test(digest))
+    exitWith(`not a body digest (state.ts pr's read line): ${digest}`)
+  const base = `repos/${repo}`
+  const view = JSON.parse(io.run("gh", "api", `${base}/pulls/${n}`)) as Json
+  const changed: string[] = []
+  const now = bodyDigest(view.body)
+  if (now !== digest) changed.push(`CHANGED body: ${digest} at the read, ${now} now`)
+  const after = (c: Json): boolean => Date.parse(c.updated_at) > Date.parse(readAt)
+  for (const [kind, path] of [
+    ["comment", `${base}/issues/${n}/comments`],
+    ["review comment", `${base}/pulls/${n}/comments`],
+  ] as const)
+    for (const c of rest(`${path}?since=${readAt}&per_page=100`).filter(after))
+      changed.push(
+        `CHANGED ${kind} ${c.html_url} by ${(c.user || {}).login} at ${c.updated_at}: ${firstLine(c.body)}`,
+      )
+  if (!changed.length) {
+    console.log(`FRESH since ${readAt}`)
+    return
+  }
+  for (const line of changed) console.log(line)
+  process.exitCode = 1
 }
 
 export const cmdScan = async (repo: string): Promise<void> => {
@@ -820,6 +863,7 @@ const COMMANDS: Record<string, { argc: number; run: (...args: string[]) => void 
   {
     checks: { argc: 3, run: cmdChecks },
     delta: { argc: 4, run: cmdDelta },
+    fresh: { argc: 4, run: cmdFresh },
     pr: { argc: 2, run: cmdPr },
     scan: { argc: 1, run: cmdScan },
     "touched-tests": { argc: 3, run: cmdTouchedTests },
@@ -831,6 +875,7 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts pr <owner/repo> <n>                          one PR: head, newest verdict, open (over REST, unknown) threads, what was said since
   state.ts scan <owner/repo>                            every open PR: is its head scored, and who holds it? (the recovery scan)
   state.ts delta <worktree> <base> <old head> <new head>  did a push change the PR's own work, or only merge the base?
+  state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment or thread reply since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
   state.ts checks <owner/repo> <n> <sha>                as wait, and also return once Audit, Lint, and Build and test each conclude at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules

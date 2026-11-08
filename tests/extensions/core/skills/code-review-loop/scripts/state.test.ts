@@ -1328,12 +1328,13 @@ const freshThrough = async (
       console.log = (line?: unknown) => {
         lines.push(String(line))
       }
+      process.exitCode = 0
       try {
         await state.cmdFresh("acme/archive", "160", READ_AT, state.bodyDigest(BODY))
         code = Number(process.exitCode ?? 0)
       } finally {
         console.log = realLog
-        process.exitCode = realCode
+        process.exitCode = realCode ?? 0
       }
     },
   )

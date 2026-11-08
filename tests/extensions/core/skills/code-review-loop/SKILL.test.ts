@@ -54,6 +54,22 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(await page()).toContain("waits for CI still running at the head")
   })
 
+  test("step 7 posts the verdict behind fresh, which a body edit or a new comment stops (#1359)", async () => {
+    const step7 = (await skill()).split("7. **Post**")[1]?.split("\n")[0] ?? ""
+    expect(step7).toContain(
+      "`${CLAUDE_SKILL_DIR}/scripts/state.ts fresh <repo> <n> <read-at> <digest>`",
+    )
+    expect(step7).toContain("drop each finding they now answer")
+    expect(step7.split("**Done when**")[1] ?? "").toContain("behind a `fresh` that printed `FRESH`")
+    const comments = await Bun.file(
+      join(root, "extensions/core/skills/code-review-loop/references/COMMENTS.md"),
+    ).text()
+    expect(comments).toContain(
+      "state.ts fresh <repo> <n> <read-at> <digest> && gh api repos/<repo>/issues/<n>/comments",
+    )
+    expect(await page()).toContain("its post runs behind `state.ts fresh`")
+  })
+
   test("step 8 names the one waiter on the head's checks, which a re-run at the same head ends (#1410)", async () => {
     const step8 = (await skill()).split("8. **Report and wait.**")[1]?.split("\n")[0] ?? ""
     expect(step8).toContain("`${CLAUDE_SKILL_DIR}/scripts/state.ts checks <repo> <n> <head>`")
