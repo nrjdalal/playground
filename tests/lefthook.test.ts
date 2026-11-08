@@ -605,6 +605,24 @@ test("pre-push reads a pushed branch while the checked-out one has nothing new",
   }
 }, 60_000)
 
+// two tests read every tracked file's text, so a commit anywhere can break them, and with no hook to run them a break went red in CI minutes after its push
+const TREE_TEXT_TESTS = ["tests/cmux.test.ts", "tests/shell-read-redirect.test.ts"]
+
+test("one pre-commit job runs both whole-tree text tests, beside trace-count", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, { priority?: number; run: string }> }
+  }
+  const { commands } = config["pre-commit"]
+  const running = Object.entries(commands).filter(([, job]) =>
+    TREE_TEXT_TESTS.some((file) => job.run.includes(file)),
+  )
+  expect(running.map(([name]) => name)).toEqual(["text-tests"])
+  const job = running[0]![1]
+  expect(job.run).toStartWith("bun run test:file ")
+  for (const file of TREE_TEXT_TESTS) expect(job.run.split(/\s+/)).toContain(file)
+  expect(job.priority).toBe(commands["trace-count"]!.priority)
+})
+
 // every worktree of a checkout shares one stash list, so the pre-commit's lint-staged keeps no backup there (PG-715)
 test("the pre-commit's lint-staged runs with --no-stash", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
