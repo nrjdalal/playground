@@ -3,15 +3,15 @@ import path from "node:path"
 
 import { $, Glob } from "bun"
 
-// Skill maintainer: the AGENTS.md skills tables duplicate each skill's own description, so they are GENERATED from skills/zerostarter/*/SKILL.md frontmatter (.agents/skills links there, the path ZeroStarter's CLI writes) instead of hand-kept.
-//   bun packages/scripts/src/skills-manager.ts            rewrite the AGENTS.md tables from the skills (default)
+// Skill maintainer: the skills tables in skills/zerostarter/README.md duplicate each skill's own description, so they are GENERATED from skills/zerostarter/*/SKILL.md frontmatter (.agents/skills links there, the path ZeroStarter's CLI writes) instead of hand-kept.
+//   bun packages/scripts/src/skills-manager.ts            rewrite the README's tables from the skills (default)
 //   bun packages/scripts/src/skills-manager.ts --check    fail on drift instead of writing (the pre-commit gate)
 //   bun packages/scripts/src/skills-manager.ts --outdated fetch each skill's source upstream and report drift
 // A skill's source is its provenance: a full github link it was inherited from (checked by --outdated), a bare tool name (vendored, re-run the tool), or local (authored here).
 
 const ROOT = path.resolve(import.meta.dir, "../../..")
 const SKILLS_DIR = path.join(ROOT, "skills/zerostarter")
-const AGENTS = path.join(ROOT, "AGENTS.md")
+const TABLES = path.join(SKILLS_DIR, "README.md")
 const UPSTREAM_REF = "main" // the branch the CLI scaffolds and syncs a fork from; a ledger entry may name its own
 
 type Skill = {
@@ -74,19 +74,20 @@ const table = (skills: Skill[]) =>
   [
     "| Skill | Description |",
     "| --- | --- |",
-    ...skills.map((s) => `| [${s.name}](skills/zerostarter/${s.dir}/SKILL.md) | ${s.summary} |`),
+    ...skills.map((s) => `| [${s.name}](${s.dir}/SKILL.md) | ${s.summary} |`),
   ].join("\n")
 
 // Replace the body between `<!-- skills:<id> -->` and `<!-- /skills:<id> -->`.
 function replaceRegion(doc: string, id: string, body: string): string {
   const re = new RegExp(`(<!-- skills:${id} -->)[\\s\\S]*?(<!-- /skills:${id} -->)`)
-  if (!re.test(doc)) throw new Error(`AGENTS.md is missing the skills:${id} markers`)
+  if (!re.test(doc))
+    throw new Error(`skills/zerostarter/README.md is missing the skills:${id} markers`)
   return doc.replace(re, `$1\n\n${body}\n\n$2`)
 }
 
 async function render(): Promise<string> {
   const skills = await readSkills()
-  let doc = await Bun.file(AGENTS).text()
+  let doc = await Bun.file(TABLES).text()
   doc = replaceRegion(doc, "custom", table(skills.filter((s) => !isVendored(s.source))))
   doc = replaceRegion(doc, "vendored", table(skills.filter((s) => isVendored(s.source))))
   return format(doc)
@@ -94,7 +95,7 @@ async function render(): Promise<string> {
 
 // oxfmt owns the table-column alignment, so run the render through it, otherwise the compact output drifts from what lint-staged commits and the --check gate flip-flops.
 async function format(doc: string): Promise<string> {
-  const tmp = path.join(ROOT, ".skills.agents.tmp.md")
+  const tmp = path.join(ROOT, ".skills.tables.tmp.md")
   try {
     await Bun.write(tmp, doc)
     await $`bunx oxfmt --write ${tmp}`.quiet()
@@ -164,14 +165,14 @@ if (arg === "--outdated") {
   await outdated()
 } else if (arg === "--check") {
   const want = await render()
-  if ((await Bun.file(AGENTS).text()) !== want) {
+  if ((await Bun.file(TABLES).text()) !== want) {
     console.error(
-      "AGENTS.md skills tables are stale. Run: bun packages/scripts/src/skills-manager.ts",
+      "skills/zerostarter/README.md skills tables are stale. Run: bun packages/scripts/src/skills-manager.ts",
     )
     process.exit(1)
   }
-  console.log("AGENTS.md skills tables are up to date.")
+  console.log("skills/zerostarter/README.md skills tables are up to date.")
 } else {
-  await Bun.write(AGENTS, await render())
-  console.log("Wrote AGENTS.md skills tables.")
+  await Bun.write(TABLES, await render())
+  console.log("Wrote skills/zerostarter/README.md skills tables.")
 }
