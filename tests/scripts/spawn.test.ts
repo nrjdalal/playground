@@ -48,6 +48,7 @@ describe("under the gates it spawns", () => {
       "surface=",
       "title=Plain test work",
       "task=brief-x.md",
+      "memory=off",
     ])
   })
 
@@ -300,6 +301,7 @@ describe("under the gates it spawns", () => {
       "worker=worker-brave-otter",
       "title=Plain test work",
       "task=brief-reviewer.md",
+      "memory=off",
     ])
   })
 
@@ -360,7 +362,13 @@ describe("under the gates it spawns", () => {
       reviewerOf,
       { NO_TITLE: "1", ROSTER_JSON: JSON.stringify(triage) },
       (triaged) =>
-        expect(triaged.roster).toEqual(["set", "reviewer-x", "kind=reviewer", "worker=worker-x"]),
+        expect(triaged.roster).toEqual([
+          "set",
+          "reviewer-x",
+          "kind=reviewer",
+          "worker=worker-x",
+          "memory=off",
+        ]),
     ],
   ])(
     "a checker with no title takes Review: or Test: before its worker's, keeps its own, and is refused with neither; a probe keeps its words-only default: %s",
@@ -421,7 +429,13 @@ describe("under the gates it spawns", () => {
       }),
     })
     expect(r.code).toBe(0)
-    expect(r.roster).toEqual(["set", "reviewer-x", "kind=reviewer", "worker=worker-x"])
+    expect(r.roster).toEqual([
+      "set",
+      "reviewer-x",
+      "kind=reviewer",
+      "worker=worker-x",
+      "memory=off",
+    ])
   })
 
   // a column opens beside a herdr pane id alone, so an old cmux surface:N is refused as any other anchor is, before any cmux or herdr call.
