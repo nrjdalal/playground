@@ -18,7 +18,7 @@ The metric is review rounds to 5/5 per merged PR, and tokens per merged PR, both
 
 ## Revert
 
-One session goes back to off at its next start or resume with spawn.sh's `--memory off`, which launches it on the shared settings file and records `memory=off`. When B misses the bar, spawn.sh's arm pick goes, so every start is off again. The memory folders are archived, moved and never deleted, after the optimizer's review has read them.
+One session goes back to off at its next start or resume with spawn.sh's `--memory off`, which launches it on the shared settings file and records `memory=off`, so its later resumes stay off. When B misses the bar, spawn.sh's arm pick goes, so every start is off again. The memory folders are archived, moved and never deleted, after the optimizer's review has read them.
 
 ## Consequences
 

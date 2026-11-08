@@ -45,12 +45,15 @@ const SECRETS: [string, RegExp][] = [
   ["databasePassword", /\b[a-z][a-z0-9+]*:\/\/[^\s:@/]+:[^\s@/]+@/gi],
 ]
 
-// Prod data by its shape: a production host (a dotted name with a prod or production label) and a public IPv4 address, loopback, private and link-local ones left out; a production figure has no shape, so the optimizer's review reads each note for one (ADR 0022).
+// Prod data by its shape: a production host (a dotted name with a prod or production label, a file name ending in a code or config extension left out) and a public IPv4 address (loopback, private, link-local, shared CGNAT, multicast and netmask ones left out); a production figure has no shape, so the optimizer's review reads each note for one (ADR 0022).
 const PROD: [string, RegExp][] = [
-  ["prodHost", /\b(?:[a-z0-9-]+[.-])*prod(?:uction)?(?:-[a-z0-9-]+)?(?:\.[a-z0-9-]+)+\b/gi],
+  [
+    "prodHost",
+    /\b(?:[a-z0-9-]+[.-])*prod(?:uction)?(?:-[a-z0-9-]+)?(?:\.[a-z0-9-]+)+(?<!\.(?:c?js|env|json|jsx|local|lock|log|md|mjs|py|sh|toml|tsx?|txt|ya?ml))\b/gi,
+  ],
   [
     "publicAddress",
-    /\b(?!(?:0|10|127)\.)(?!169\.254\.)(?!192\.168\.)(?!172\.(?:1[6-9]|2\d|3[01])\.)(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g,
+    /\b(?!(?:0|10|127)\.)(?!2(?:2[4-9]|[3-5]\d)\.)(?!100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)(?!169\.254\.)(?!192\.168\.)(?!172\.(?:1[6-9]|2\d|3[01])\.)(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g,
   ],
 ]
 

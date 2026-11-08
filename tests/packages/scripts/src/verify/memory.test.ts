@@ -36,10 +36,15 @@ describe("bun run verify memory names each private trace in a note (#1484)", () 
     ).toEqual([])
   })
 
-  test("a loopback, private or link-local address, a version and the words prod data are a fair note", () => {
+  test("a loopback, private, link-local, CGNAT, multicast or netmask address, a file name, a version and the words prod data are a fair note", () => {
     expect(
       kinds(
         "the API binds 127.0.0.1, the box 10.0.0.2, 192.168.1.4, 172.16.0.9 and 169.254.1.1; bun 1.4.4 reads prod data and prod-data",
+      ),
+    ).toEqual([])
+    expect(
+      kinds(
+        "mask 255.255.255.0, group 239.1.2.3, CGNAT 100.64.0.1; .env.production.local, prod.ts and next.config.prod.js are files",
       ),
     ).toEqual([])
   })

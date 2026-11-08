@@ -620,7 +620,7 @@ def memory_on():
     try:
         agents = json.load(open(os.path.join(LW, "roster.json"))).get("agents") or []
         return {a["name"] for a in agents if isinstance(a, dict) and isinstance(a.get("name"), str) and a.get("memory") == "on"}
-    except Exception:
+    except (AttributeError, OSError, ValueError):
         return set()
 
 

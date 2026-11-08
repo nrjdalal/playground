@@ -193,6 +193,34 @@ describe("each start takes the memory trial's arm by its role (#1484)", () => {
     expect(readFileSync(lw(r.home, "memory", "worker-arm"), "utf8")).toBe("off\n")
   })
 
+  test.each([
+    ["off", "off", "factory-settings-400k.json"],
+    ["on", "on", "factory-settings-400k-memory-builder.json"],
+    [undefined, "on", "factory-settings-400k-memory-builder.json"],
+  ])(
+    "a lead's resume of a row whose memory is %p starts %p, so --memory off holds past one launch",
+    async (row, arm, file) => {
+      const env = {
+        ROSTER_JSON: JSON.stringify({
+          agents: [
+            {
+              kind: "builder",
+              ...(row ? { memory: row } : {}),
+              name: "builder",
+              role: "manager",
+              status: "working",
+              task: "t",
+            },
+          ],
+        }),
+      }
+      const r = await spawn(["resume", "builder", root, ID], [], env, undefined, claude("builder"))
+      expect(r.code, r.err).toBe(0)
+      expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, file)} `)
+      expect(r.roster).toContain(`memory=${arm}`)
+    },
+  )
+
   test("a resumed worker keeps its row's arm and leaves the turn as it is", async () => {
     const env = {
       ROSTER_JSON: JSON.stringify({

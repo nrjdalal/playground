@@ -1438,7 +1438,12 @@ if [ -n "$MEMORY_DIR" ]; then
   MEMORY=on
 elif [ -z "$MEMORY_OFF" ] && [ "$BACKEND" != glm ]; then
   case "$ROLE:$KIND" in
-    dispatcher:* | lead:builder | lead:ops | lead:planner) MEMORY=on MEMORY_DIR="$DATA/memory/$KIND" ;;
+    dispatcher:* | lead:builder | lead:ops | lead:planner)
+      # a resume keeps a row --memory off left off, as a worker's keeps its arm
+      if [ "$MODE" != resume ] || [ "$(roster_field "$NAME" memory)" != off ]; then
+        MEMORY=on MEMORY_DIR="$DATA/memory/$KIND"
+      fi
+      ;;
     worker:*)
       if [ "$MODE" = resume ]; then
         [ "$(roster_field "$NAME" memory)" = on ] && MEMORY=on
