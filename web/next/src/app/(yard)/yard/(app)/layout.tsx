@@ -12,7 +12,7 @@ import { auth } from "@/lib/auth"
 import { sessionOrUnavailable, UNAVAILABLE } from "@/lib/auth/session"
 import { yardGate } from "@/lib/yard"
 
-// The hosted app's session gate: a signed-out visit goes home to Sign in with GitHub, a user without an invite to the invite page, and a member gets the sidebar's Channels and Direct messages beside the page, with no Inbox aside, and the page in the dashboard's own page box, one screen tall, so a channel keeps its header and composer in view as it does locally.
+// The hosted app's session gate: a signed-out visit goes home to Sign in with GitHub, a user without an invite to the invite page, and a member gets the sidebar's Channels and Direct messages beside the page, with no Inbox aside, and the page in the dashboard's own page box, one screen tall, so a channel keeps its header and composer in view as it does in the dashboard.
 export default async function YardAppLayout({ children }: { children: React.ReactNode }) {
   const session = await sessionOrUnavailable(() =>
     auth.api.getSession({ disableCookieCache: true }),
