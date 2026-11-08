@@ -72,7 +72,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
      "${PLAYGROUND_REPO:?}/scripts/spawn.sh" column <reviewer|tester|probe> <name> <reports-to> <the newest member's herdr pane id> <brief>
      ```
 
-     A reviewer or tester adds `--pr <url>`, the PR it serves (its issue's URL while the PR is not yet opened): spawn.sh refuses its start without it, and writes it to the checker's roster row before the pane opens, since no-outside-pr-code reads that row at the checker's first tool call.
+     A reviewer or tester adds `--pr <pull url>`, the pull request it serves, so open the PR as a draft before its checkers ([scripts/README.md](../../../../scripts/README.md#spawnsh) holds the refusal and the row it writes).
 
    - **A manager** opens the same way as a column in the `Managers` workspace, to the right of the newest manager, named once: `column <name> <pane> <brief>`.
      A name whose roster kind, else its name (an `<id>-<kind>`, a `sessions.names` name or a `sessions.aliases` one), is builder, ops or planner opens as a lead reporting to the first dispatcher (a new name gets its kind first, `scripts/roster.ts set <name> kind=builder task=<what it does>`, which writes a `starting` entry that `managerOf` keeps behind the live one until it answers);

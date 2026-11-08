@@ -437,7 +437,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       },
     )
     expect(r.out).toContain("restored reviewer-a\n")
-    expect(r.out).toContain("not restored tester-b: a tester starts with --pr <url>")
+    expect(r.out).toContain("not restored tester-b: a tester starts with --pr <pull url>")
     expect(r.roster).toContain(`prs+=${pr2},${pr1}`)
     expect(r.code).toBe(1)
   })

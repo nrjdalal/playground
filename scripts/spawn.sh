@@ -56,7 +56,7 @@ set -euo pipefail
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
@@ -69,7 +69,7 @@ set -euo pipefail
 #   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
 #   --effort <level>   with any mode but restore or close, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
-#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PR the checker serves, by its URL or its number alone, or its issue's URL while the PR is not yet opened; a reviewer's or tester's start is refused without it, and its roster row records it before the pane opens; on an ended roster row it replaces the row's prs, and its pr with the first pull request named (none for an issue alone); on a live row, or none, it joins them and gives a row with no pr the first pull request named
+#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PRs the checker serves, each by its URL or its number alone, or an issue's URL for a PR not yet opened; a reviewer's or tester's start is refused unless it names a pull request, and its roster row records it before the pane opens; on an ended roster row it replaces the row's prs, and its pr with the first pull request named (none for an issue alone); on a live row, or none, it joins them and gives a row with no pr the first pull request named
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
 #   --memory <dir>     with any mode but restore or close, anywhere among its words: the launch runs with Claude Code's auto-memory on, writing to <dir>, an absolute folder: its built settings file, one of its own (factory-settings-...-memory-<name>.json), sets autoMemoryEnabled and autoMemoryDirectory, while every other launch's file stays as it is, for the auto-memory trial; --memory off launches with memory off on the shared file, whatever arm the role or the row would take
@@ -863,7 +863,7 @@ while [ $# -gt 0 ]; do
     pr_form='^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(pull|issues)/[1-9][0-9]*)$'
     IFS=, read -ra prs_named <<<"$2"
     for one in "${prs_named[@]}"; do
-      [[ $one =~ $pr_form ]] || usage "--pr takes a PR's URL or its number alone, or its issue's URL while the PR is not yet opened, comma-separated, not \"$2\""
+      [[ $one =~ $pr_form ]] || usage "--pr takes a PR's URL or its number alone, comma-separated, or an issue's URL beside one for a PR not yet opened, not \"$2\""
     done
     PR_ARG=$2
     shift 2
@@ -1283,9 +1283,9 @@ elif [ "$MODE" = column ] && [[ $ROLE =~ ^(reviewer|tester)$ ]] && [ -z "$TITLE_
   if [ "$ROLE" = reviewer ]; then TITLE_ARG="Review: $of"; else TITLE_ARG="Test: $of"; fi
 fi
 [ -z "$PR_ARG" ] || [[ $ROLE =~ ^(reviewer|tester)$ ]] || usage "--pr is for a reviewer's or tester's start, not a $ROLE's"
-# A checker's row names the PR it serves, which no-outside-pr-code reads at its first tool call and auto-end reads to end it (an ended row's are the PRs it last served), so every reviewer or tester start names it.
-[[ ! $ROLE =~ ^(reviewer|tester)$ ]] || [ -n "$PR_ARG" ] ||
-  refuse "a $ROLE starts with --pr <url>, the PR it serves now, which its roster row records before its pane opens; name its issue's URL while the PR is not yet opened"
+# A checker's row names the pull request it serves, which no-outside-pr-code reads at its first tool call (a row naming none holds it in read mode) and auto-end reads to end it (an ended row's are the PRs it last served), so every reviewer or tester start names one.
+[[ ! $ROLE =~ ^(reviewer|tester)$ ]] || [[ ,$PR_ARG, =~ ,(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*), ]] ||
+  refuse "a $ROLE starts with --pr <pull url>, the pull request it serves now, by its URL or its number, which its roster row records before its pane opens; an issue's URL alone leaves the row with no pr, so open the PR as a draft first"
 if [ "$MODE" != resume ] || [ -n "$BRIEF" ]; then
   # The brief's path under ~/.playground names the same file as its bare name.
   BRIEF=${BRIEF#"$DATA/"}
@@ -1733,6 +1733,8 @@ PY
   said=
   if ! roster "$@"; then
     [ -n "$said" ] && echo "roster.ts says: $said" >&2
+    # A checker's row is written before its pane opens, so a failed write refuses the start, since a row naming no PR would hold the checker in read mode.
+    [ "$WHEN" != "is starting" ] || refuse "its roster write failed before its pane opened, so its row may name no PR; record it with $BUN $ROSTER $*, then start it again"
     echo "spawn.sh: $NAME $WHEN, but its roster write failed; record it with $BUN $ROSTER $*" >&2
   fi
 }

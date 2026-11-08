@@ -252,14 +252,14 @@ describe("under the gates it spawns", () => {
     },
   )
 
-  test("a checker's resume on an ended row naming only an issue clears its pr, since no pull request is named yet (#1135)", async () => {
+  test("a checker's resume on an ended row naming an issue beside its pull request keeps both in prs, its pr the pull request (#1135)", async () => {
     const issue = "https://github.com/acme/factory/issues/5"
     const r = await checkerStart("resume", { pr: PR_A, prs: [PR_A], status: "ended" }, [
       "--pr",
-      issue,
+      `${issue},${PR_B}`,
     ])
     expect(r.code).toBe(0)
-    expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${issue}`, "pr="])
+    expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${issue},${PR_B}`, `pr=${PR_B}`])
   })
 
   test.each([
@@ -273,7 +273,7 @@ describe("under the gates it spawns", () => {
     async (mode, row) => {
       const r = await checkerStart(mode, row)
       expect(r.code).not.toBe(0)
-      expect(r.err).toContain("--pr <url>")
+      expect(r.err).toContain("--pr <pull url>")
       expect(r.roster).toBeUndefined()
       expect(placing(r)).toEqual([])
     },
@@ -310,11 +310,29 @@ describe("under the gates it spawns", () => {
     },
   )
 
-  test("a checker's column on no row naming only an issue adds it to prs with no pr, since no pull request is named yet (#1135)", async () => {
-    const issue = "https://github.com/acme/factory/issues/5"
-    const r = await checkerStart("column", null, ["--pr", issue])
-    expect(r.code).toBe(0)
-    expect(statusAndPrs(r)).toEqual([`prs+=${issue}`])
+  test.each([
+    ["resume", { pr: PR_A, prs: [PR_A], status: "ended" }],
+    ["column", null],
+  ] as [string, object | null][])(
+    "a checker's %s naming only an issue is refused before any pane opens, since its row would name no pr: %p (#1400)",
+    async (mode, row) => {
+      const r = await checkerStart(mode, row, ["--pr", "https://github.com/acme/factory/issues/5"])
+      expect(r.code).not.toBe(0)
+      expect(r.err).toContain("--pr <pull url>")
+      expect(r.roster).toBeUndefined()
+      expect(placing(r)).toEqual([])
+    },
+  )
+
+  test("a checker's failed roster write refuses its start before its pane opens (#1400)", async () => {
+    const r = await spawn(
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", PR_B],
+      [],
+      { FAKE_ROSTER_BROKEN: "1" },
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("its roster write failed before its pane opened")
+    expect(placing(r)).toEqual([])
   })
 
   test.each([
