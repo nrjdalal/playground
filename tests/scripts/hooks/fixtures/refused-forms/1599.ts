@@ -54,6 +54,10 @@ export const groups: Group[] = [
         `case "$P" in $(rm -rf ${NEVER_MADE})) echo y ;; esac`,
       ],
       [
+        "a case whose subject holds a removal in a substitution",
+        `case "$(rm -rf ${NEVER_MADE})" in /*) echo y ;; esac`,
+      ],
+      [
         "a case whose output is redirected into the root",
         `case "$P" in /*) echo y ;; esac > ${LIST}`,
       ],

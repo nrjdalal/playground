@@ -382,7 +382,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   Each of its file operands is a plain name (`PERL_FILE`), since `-n` and `-p` open a name that starts or ends with `|` as a command.
   Each command on the closed list is its own first word as a reader is, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call and a reader behind a wrapper (`time cut …`) keep canary's reading.
   An awk program runs something when it holds `system`, `getline`, `>` or `@`, or comes from `-f` or an option the hook does not know.
-  A regex literal where awk reads only a pattern (`AWK_PATTERN`: at the program's start or after `{`, `}`, `;`, `!`, `(`, `,`, `~`, `&&` or `||`) is cut out first, so `awk '/^>>>>>>> /{p=0}' f` runs, while a `>` comparison such as `NR>1` still counts as a redirect.
+  A regex literal where awk reads only a pattern (`AWK_PATTERN`: at the program's start or after `{`, `}`, `;`, `!`, `(`, `,`, `~`, `&&`, `||` or a newline) is cut out first, so `awk '/^>>>>>>> /{p=0}' f` runs, while a `>` comparison such as `NR>1` still counts as a redirect.
   It runs something too when it holds a `|` anywhere but two places: a regex that is the whole leading pattern (`/a|b/`, `/a|b/ {print $2}`) and a regex or a string right after `~` (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, `[` or newline.
   Once those are cut out, any `|`, quote, `/`, `#` or backslash left counts as a pipe, as canary counted every `|`, so `awk '!/a|b/' f` and `awk '/[ab]|c/' f` keep canary's reading.
   Each string literal of such a program is judged as a command line wherever it stands (`awk 'BEGIN{system("…")}'`).

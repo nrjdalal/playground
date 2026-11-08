@@ -56,8 +56,11 @@ type Environment = Record<string, string | undefined>
 const shown = (word: Word): string =>
   (word.raw ?? word.value).replaceAll(UNKNOWN, () => "$…").replaceAll(READ, () => "$…")
 
-const ROUTE =
-  "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand."
+// Why a write under the root is refused, which both routes below open with
+const WHY_ROOT =
+  "every guard reads its list and policy.json from there, so a session's write would change what a guard allows."
+
+const ROUTE = `${WHY_ROOT} A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand.`
 
 // The guard keys Privacy on the Dashboard's Settings page saves at your login's scope, so a write there names that page as its route.
 const PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"])
@@ -70,7 +73,7 @@ const refuse = (what: string) =>
 
 // A refusal that likely names no write (`unwritten`), which the reader most often reaches by reading text as a path, so it routes to the lead as a likely false positive
 const refuseUnwritten = (what: string) =>
-  `no-extensions-write hook refuses ${what}: every guard reads its list and policy.json from there, so a session's write would change what a guard allows. If this command writes nothing, report it to your lead as a false positive.`
+  `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`
 
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
