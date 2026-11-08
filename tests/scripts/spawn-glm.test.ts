@@ -58,7 +58,9 @@ describe("--backend glm runs the session on Z.ai's GLM through Claude Code", () 
     expect(command(r)).not.toContain("--backend")
     // A probe runs in the sandbox, from a file of its own (spawn-sandbox.test.ts holds the block).
     const sandbox = /PLAYGROUND_ROLE=probe /.test(command(r)) ? "sandbox-" : ""
-    const glm = join(r.home, ".playground", `factory-settings-glm-${sandbox}400k.json`)
+    // A dispatcher or a lead reads the managers' file, which denies the Agent and Workflow tools (spawn-manager-deny.test.ts).
+    const manager = /PLAYGROUND_ROLE=(dispatcher|lead) /.test(command(r)) ? "manager-" : ""
+    const glm = join(r.home, ".playground", `factory-settings-glm-${manager}${sandbox}400k.json`)
     expect(command(r).split(" --settings ")).toHaveLength(2)
     expect(command(r)).toContain(` --settings ${glm} --dangerously-skip-permissions`)
     const built = JSON.parse(readFileSync(glm, "utf8"))
@@ -73,6 +75,7 @@ describe("--backend glm runs the session on Z.ai's GLM through Claude Code", () 
         CLAUDE_CODE_ENABLE_TELEMETRY: "0",
         OTEL_METRICS_EXPORTER: "none",
       },
+      ...(manager ? { permissions: { deny: ["Agent", "Workflow"] } } : {}),
     })
     const seen = [...placing(r).flat(), ...(r.roster ?? []), r.out, r.err].join("\n")
     expect(seen).not.toContain(TOKEN)

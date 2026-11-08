@@ -58,7 +58,7 @@ const appDevHost = (() => {
 })()
 
 const nextConfig: NextConfig = {
-  // Off because this repo writes its own agent guides: the root AGENTS.md is generated (skills-manager owns its skills tables) and CLAUDE.md is a symlink to it, so a second writer would fight both. Left on, `next dev` upserts a managed block whenever it detects an AI agent, and its own text says removing it from a diff only re-creates it. The Next 16.3 docs it points at are worth reading; see the AI agents note in web/next/content/docs/getting-started/working-with-agents.mdx.
+  // Off because this repo writes its own agent guides: the root AGENTS.md is kept here and CLAUDE.md is a symlink to it, so a second writer would fight both. Left on, `next dev` upserts a managed block whenever it detects an AI agent, and its own text says removing it from a diff only re-creates it. The Next 16.3 docs it points at are worth reading; see the AI agents note in web/next/content/docs/getting-started/working-with-agents.mdx.
   agentRules: false,
   devIndicators: false,
   env: { NEXT_PUBLIC_IS_PRIVATE: String(isPrivate) },

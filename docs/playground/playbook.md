@@ -157,7 +157,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - No session waits on a prompt for a delete Claude Code stops on: an `rm` or `rmdir` whose target has two or more parts that start with an unguarded variable, or a name directly in `/`, is turned back with a fix (the `no-prompt-stop` hook), and the session runs it again as a literal path (`playground rm <literal path>` for anything outside its worktree and scratchpad),
   an `rmdir` with each variable guarded too,
   or in its own scratchpad.
-- A manager starts no hidden helper: the `no-manager-subagent` hook refuses it the Agent and Workflow tools, so every build, read or research it hands off shows as a worker in the sidebar.
+- A manager starts no hidden helper: its settings deny it the Agent and Workflow tools, so every build, read or research it hands off shows as a worker in the sidebar.
 - A heavy run in a worktree (an install, a `node_modules` copy, a build, a type check or the whole test suite) waits for a free run slot, so the machine runs a few at a time: the `no-unslotted-run` hook refuses one typed without `run-slot.sh`, naming the form to use.
   A docker image build waits too, from any folder, one at a time in a builder capped at half the Docker VM's memory, so a build that grows too big fails alone and the live dashboard's database keeps running.
 - No factory session starts unless the machine has room: `scripts/spawn.sh` refuses while the load is at or over the core count, while memory pressure is critical or free memory is under 8%, for a new worker while no run slot can take a run and other runs wait for one, or while the model's usage window is near its cap, naming what it read,

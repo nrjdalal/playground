@@ -44,9 +44,12 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   Its one row reads `skipped`, naming each gate it went past with the words a refusal would print, which the load check counts as a start; every other manager start takes the gate as a worker's does.
   It also refuses while a live session already holds the name, naming its pid (Claude Code would give the new one a generated name); a `claude -p` run, whose registry file reads `entrypoint` `sdk-cli`, holds no name, and a Mac with no `~/.claude/sessions` folder (Claude Code makes it with its first session) holds none.
   It launches every session with `--dangerously-skip-permissions`, beside `scripts/factory-settings.json`'s `skipDangerousModePermissionPrompt`, and, where inscope exports its own `CLAUDE_CONFIG_DIR`, with `env -u CLAUDE_CONFIG_DIR -u INSCOPE_CCD`.
-  Each start and resume compacts in one window for every kind, GLM's included, the `context.window` setting's (400,000 tokens by default), set in the one `--settings` file it rebuilds from `scripts/factory-settings.json` on every launch (`~/.playground/factory-settings-<k>k.json`, `factory-settings-400k.json` by default, and `factory-settings-sandbox-<k>k.json` for a probe),
+  Each start and resume compacts in one window for every kind, GLM's included, the `context.window` setting's (400,000 tokens by default), set in the one `--settings` file it rebuilds from `scripts/factory-settings.json` on every launch,
+  `~/.playground/factory-settings-<k>k.json` (`factory-settings-400k.json` by default, `factory-settings-manager-<k>k.json` for a dispatcher or a lead, and `factory-settings-sandbox-<k>k.json` for a probe),
   the same window that file gives a session spawn.sh did not start.
-  A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its file is `factory-settings-sandbox-400k.json` (`factory-settings-glm-sandbox-400k.json` on GLM), and every other kind keeps the plain one.
+  A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its file is `factory-settings-sandbox-400k.json` (`factory-settings-glm-sandbox-400k.json` on GLM).
+  A dispatcher's or a lead's file, `factory-settings-manager-400k.json` (`factory-settings-glm-manager-400k.json` on GLM), adds `permissions.deny: ["Agent", "Workflow"]`, which takes both tools out of its session, so a manager hands every build, read or research to a worker (**workers**).
+  A worker, a runner and a checker keep the plain file, and both tools with it, a reviewer's `code-review` sub-agents among them.
   `run-slot.sh` and `spawn.sh` run inside it, each refused read on its stand-in (above, and `scripts/ops/README.md`); workers and testers join once the worker git flow writes neither `.git/config` nor `.git/hooks`, which the sandbox keeps write-denied whatever `allowWrite` says.
   The sandbox block holds: no unsandboxed retry (`allowUnsandboxedCommands` false, since bypass mode would run one with no prompt) and no unsandboxed fallback (`failIfUnavailable`);
   writes in the session's folder and Claude Code's per-user temp folder by default, and in `~/.agent-browser`, `~/.bun/install/cache`, `~/.cache/turbo`, the data folder, `~/.portless` and macOS's user temp folder (`getconf DARWIN_USER_TEMP_DIR`),
@@ -55,7 +58,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `--account <email>` logs the session in as that Claude account: spawn.sh refuses an email that is not a plain `local@domain` or that is this machine's own login (Claude Code's `oauthAccount.emailAddress` in `.claude.json`, matched in any case), and checks only that the Keychain holds an item for it under the `usage.keychainService` setting's service (`playground-claude-oauth` by default),
   and the launch carries `CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password ... -w)"` as text for the new pane's shell to expand, so the token reaches no argv, output or log, and that shell stops there on an empty token or key, before claude runs.
   `--backend glm` runs the session on Z.ai's GLM through Claude Code (`ANTHROPIC_BASE_URL` its Anthropic-compatible endpoint, Opus and Sonnet mapped to `models.glm` with `[1m]` and Haiku to `models.glm`, 3x the plan's quota, the suffix gives Claude Code GLM's 1M window, compacting in the same 400k window as a Claude session does, with `ENABLE_TOOL_SEARCH=true`,
-  since Claude Code loads every MCP tool's schema at start on a base URL that is not Anthropic's, and one `--settings`, the factory's rebuilt into `factory-settings-glm-400k.json` (`factory-settings-glm-sandbox-400k.json` for a probe) with telemetry off, so a GLM session exports no usage and keeps every factory hook),
+  since Claude Code loads every MCP tool's schema at start on a base URL that is not Anthropic's, and one `--settings`, the factory's rebuilt into `factory-settings-glm-400k.json` (`factory-settings-glm-manager-400k.json` for a dispatcher or a lead, `factory-settings-glm-sandbox-400k.json` for a probe) with telemetry off, so a GLM session exports no usage and keeps every factory hook),
   its key read the same way from the Keychain item, under the service `models.glmKeychainService` names (`playground-glm` by default), for a `usage.accounts` GLM row's label: the one `--account <label>` names, else the first GLM row's.
   It is refused for an `--account` that labels no GLM row, with no GLM row, with no such item, or for a reviewer or tester, which runs on Claude alone, since no reviewer or tester runs on GLM.
   It is also refused in a checkout of an org `ext.links` guards (a folder on the session's path named for one), and on a brief naming a word of the `glm-refused-sources` guard list (`packages/scripts/src/playground/guard-list.ts` reads it, empty in the checkout), since no guarded org's data reaches GLM.
@@ -73,7 +76,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `--reports-to <session>` names the session a `worker` reports to, in both places its first prompt names it and as the row's `reportsTo`, in place of the builder, whose seat a worker's row records without it, as a runner's records ops'; it is refused for a value that is not a session name and with every other mode.
   `--in <dir>` starts a `worker` in that folder in place of this checkout: an existing folder under the code root (`paths.codeRoot`) or under `~/<org>` for an org `ext.links` guards, the folders whose trust prompt spawn.sh answers; any other folder, and every other mode, is refused.
   `--memory <dir>` turns Claude Code's auto-memory on for that one start or resume, writing to `<dir>`, whatever the session's role.
-  Its launch reads a built settings file of its own, `factory-settings-<...>k-memory-<name>.json`, which adds `autoMemoryEnabled: true` and `autoMemoryDirectory: <dir>`, so the shared file every other launch reads stays as it is.
+  Its launch reads a built settings file of its own, `factory-settings-<...>k-memory-<name>.json`, which adds `autoMemoryEnabled: true` and `autoMemoryDirectory: <dir>` (beside the Agent and Workflow deny, for a dispatcher or a lead), so the shared file every other launch reads stays as it is.
   `--memory off` keeps it off for that one start or resume, on the shared settings file, whatever arm the role or the row would take.
   It is refused for a value that is neither an absolute folder nor `off`, given twice, and with restore or close.
   Without either, each start takes the auto-memory trial's arm by its role ([ADR 0022](../.agents/adr/0022-auto-memory-runs-as-a-reviewed-trial.md)): on for the dispatcher and the builder, ops and planner leads in the data folder's `memory/<kind>/`, on for every second fresh worker start in `memory/worker-b/`, and off for every other session.
@@ -200,6 +203,22 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
 - A worker, reviewer or tester that ends automatically takes its worktrees with it, one at a time: dev stack, worktree, `playground-<worktree>-db` and `-redis` containers and branch (`cleanWorktree` in `scripts/ops/optimizer/auto_end.ts`; the factory's SESSIONS.md End holds the rules).
 - After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.
+
+## Shared git hooks and the turbo cache
+
+- Every worktree shares one `.git/hooks`, and lefthook.yml's `lefthook: bun node_modules/.bin/lefthook` makes each hook run the committing worktree's own lefthook, never the binary of whichever worktree last ran `bun install` (which goes when that worktree is removed).
+  So a worktree commits, pushes or merges once it has run `bun install`; one that stops on `error: Script not found "node_modules/.bin/lefthook"` needs it.
+  lefthook rewrites the shared hooks whenever the committing worktree's config differs from the last install's, so a worktree branched before this setting puts the old hook back on its next commit until it rebases onto `canary`.
+- turbo.json's `cacheDir` keeps each worktree's turbo cache inside that worktree (turbo would otherwise share the main checkout's `.turbo/cache`), so no build, dev stack or pre-commit hook in a worktree leaves files in the main checkout.
+  The pre-commit hook sets `TURBO_CACHE_DIR` to `~/.cache/turbo/playground`, one folder outside every checkout, so worktrees share entries keyed by their inputs and the main checkout stays clean.
+
+## A ZeroStarter sync
+
+- A ZeroStarter sync overlays `lefthook.yml` and `packages/scripts/src/skills-manager.ts` with the starter's and drops the docs this repo adds to the docs-wrap job's glob, so after one, restore each until `tests/lefthook.test.ts` and `tests/packages/scripts/src/skills-manager.test.ts` pass, then run `bun node_modules/.bin/lefthook install`,
+  since the sync's own install rewrote the shared `.git/hooks` outside run-slot.
+- The sync also asks for the skills-table markers back in `AGENTS.md`: leave `AGENTS.md` as it is, since this repo's `skills-manager.ts` writes the tables to `skills/zerostarter/README.md`.
+- Its publish-step files (`auto-release.yml`, `changelog.config.json`, `release-version.ts`, `changelog-manager.ts`, the `changelogen` catalog entry) stay out, since they commit and tag on `canary`; a ship's GitHub release notes still take their shape, rendered at the ship by `bun run release:notes` with no commit (the `release` skill's step 4).
+- In `skills/zerostarter/.sync.json`, each skill that takes the update keeps the entry the sync wrote, so `skills-manager.ts --outdated` reads it as synced rather than edited here.
 
 ## Run slots
 

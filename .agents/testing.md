@@ -51,6 +51,7 @@ Any other red in the pass is a real clock mix: fix it so the code takes one cloc
 
 ## Traps
 
+Commit before a red-first swap, so the file's edits sit in a commit, and restore it with `git checkout HEAD -- <file>`, which brings back that commit, where `git checkout -- <file>` brings back the index, which holds the swap once it is staged: on 1 Nov a worker's restore after a red-first swap took the file's uncommitted edits with it, and the work was redone.
 A test file is the smallest piece a shard takes, and its cases run one after another, so a file whose every case starts a subprocess (`spawn.sh` under `tests/scripts/spawn-fake.ts` or `run-slot.sh` under `tests/scripts/ops/run-slot-fake.ts`, spawn.sh's about 0.5s a case, measured) grows by that much with every case it gains.
 Keep each such file under 60s on GitHub, since a file is the floor under its shard's time, by splitting it by `describe` into files of their own (`tests/scripts/spawn-*.test.ts`, `tests/scripts/ops/run-slot-*.test.ts`), with their shared helpers in their script's fake.
 `bun test` also loads the working directory's `.env` into `process.env`, so a test that hands `...process.env` to a child and writes a scratch `.env` for it drops each key that file sets, since the inherited value wins over the file.
