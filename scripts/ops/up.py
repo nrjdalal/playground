@@ -55,7 +55,6 @@ HERDR_SESSION = os.environ.get("PLAYGROUND_HERDR_SESSION") or os.environ.get("DE
 
 
 def log(msg):
-    os.makedirs(os.path.dirname(LOG), exist_ok=True)
     with open(LOG, "a") as f:
         f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {msg}\n")
 
@@ -489,6 +488,7 @@ def main():
     if args and not restarted:
         print("usage: up.py [--restarted <a,b> | --sessions]", file=sys.stderr)
         sys.exit(1)
+    os.makedirs(OPS, exist_ok=True)
     lock = open(os.path.join(OPS, "up.lock"), "w")
     try:
         # a restart waits for a running pass, whose own write of STARTS would put back the starts it drops

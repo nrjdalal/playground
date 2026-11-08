@@ -422,14 +422,21 @@ test("a pass renders jobs.json from the store, keeps it when the store has no po
   expect(readFileSync(join(ops, "up.log"), "utf8")).toContain("jobs.json kept: ")
 })
 
-// issue 1538: a dead render's own error must reach up.log, so log() makes the ops folder it appends into; on a fresh data dir the folder is missing and the append raised FileNotFoundError, hiding the render's error behind it
+// issue 1538: a dead render's own error must reach up.log, so a pass makes the ops folder before its lock; on a fresh data dir the folder is missing, and the lock's open, then log()'s append, raised FileNotFoundError, hiding the render's error behind it; the pass runs main() with up() cut to its render
 test("a dead render with no ops folder shows the render's own error in up.log, not a missing-folder raise", () => {
   const config = join(scratch, "config-dead-render")
   mkdirSync(dataOf(config), { recursive: true })
   const dead = join(scratch, "dead-render.ts")
   writeFileSync(dead, `console.error("the render died here"); process.exit(2)\n`)
   const pass = Bun.spawnSync(
-    ["python3", "-I", "-c", `${LOAD}up.JOBS_RENDER = sys.argv[2]\nup.render_jobs()`, upPy, dead],
+    [
+      "python3",
+      "-I",
+      "-c",
+      `${LOAD}up.JOBS_RENDER = sys.argv[2]\nup.up = lambda quiet: up.render_jobs()\nsys.argv = sys.argv[:1]\nup.main()`,
+      upPy,
+      dead,
+    ],
     {
       env: {
         CLAUDE_CONFIG_DIR: config,
