@@ -26,7 +26,12 @@ describe("the oldest waiter's run-slot.next write leaves one line in run-slot.ru
     while (!existsSync(join(m.ops, "run-slot.next"))) await Bun.sleep(20)
     const next = readFileSync(join(m.ops, "run-slot.next"), "utf8").trim()
     expect(next).not.toBe("")
-    const logged = logLines(m).filter((l) => l.split(" ")[1] === "next")
+    // the log line lands a few ms behind the file write (rlog's date substitution), so poll for it rather than read once
+    let logged: string[] = []
+    for (let i = 0; i < 250 && logged.length === 0; i++) {
+      await Bun.sleep(20)
+      logged = logLines(m).filter((l) => l.split(" ")[1] === "next")
+    }
     expect(logged).toHaveLength(1)
     const [time, event, who, pid, ...rest] = logged[0].split(" ")
     expect(time).toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$/)
