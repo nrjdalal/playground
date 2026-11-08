@@ -1,6 +1,6 @@
 import { type Group, NEVER_MADE } from "./_shared"
 
-// #1599: an awk program that runs no command and writes no file, on a line a command the hook does not know makes it read whole, which no-extensions-write read as a shell line, beside the four forms that let a program write or run, which it still refuses; rows are data, as refused-forms.ts says.
+// #1599: an awk program that runs no command and writes no file, on a line a command the hook does not know makes it read whole, which no-extensions-write read as a shell line, and a case whose patterns are paths' globs, which it read as paths, beside the forms that let either write or run, which it still refuses; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
   {
     folders: ["home", "tmp"],
@@ -38,6 +38,26 @@ export const groups: Group[] = [
         `echo x | awk -f ${SCOPE}/x.awk`,
       ],
       [
+        "a case that only echoes, its pattern a path's glob",
+        `case "$P" in /*) echo abs ;; *) echo rel ;; esac`,
+      ],
+      [
+        "a case whose alternatives are paths' globs",
+        `case "$P" in /a*|/b*) echo y ;; /c*) : ;; esac`,
+      ],
+      [
+        "a case whose branch touches a file in the root",
+        `case "$P" in /*) touch ${SCOPE}/x ;; esac`,
+      ],
+      [
+        "a case whose pattern holds a removal in a substitution",
+        `case "$P" in $(rm -rf ${NEVER_MADE})) echo y ;; esac`,
+      ],
+      [
+        "a case whose output is redirected into the root",
+        `case "$P" in /*) echo y ;; esac > ${LIST}`,
+      ],
+      [
         "a read-only awk program whose output a shell runs",
         `echo x | awk '{print "rm -rf ${NEVER_MADE}"}' | sh`,
       ],
@@ -48,4 +68,6 @@ export const groups: Group[] = [
 export const allowed: string[] = [
   "a read-only awk filter on a piped line",
   "a read-only awk print on a piped line",
+  "a case that only echoes, its pattern a path's glob",
+  "a case whose alternatives are paths' globs",
 ]

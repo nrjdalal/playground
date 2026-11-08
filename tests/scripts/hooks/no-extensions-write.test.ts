@@ -1569,6 +1569,18 @@ describe("a quoted argument is read as a command line only where a program runs 
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
   })
 
+  // #1599: a refusal of a command that shows no write routes to the lead as a likely false positive, while one that writes keeps the owner's route
+  test("a refusal of a command that shows no write asks for a false-positive report", async () => {
+    const reason = await at("lsof -nP | awk 'NR>1 {print $2}'", homedir())
+    expect(reason).toContain(
+      "If this command writes nothing, report it to your lead as a false positive.",
+    )
+    expect(reason).not.toContain("the dispatcher hands the owner the command")
+    expect(await at("touch ~/.playground/extensions/login/x", homedir())).toContain(
+      "the dispatcher hands the owner the command",
+    )
+  })
+
   test("a refusal names a program it cannot read as such", async () => {
     expect(await at("git -c alias.x='!$1 ~' x rm", homedir())).toContain(
       "refuses a program it cannot read on",
