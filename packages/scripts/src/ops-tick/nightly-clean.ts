@@ -420,7 +420,7 @@ export const nightlyClean =
       for (const name of plan.remove)
         if ((await ctx.run(["docker", "rm", "-fv", name])).code === 0)
           gone.push(`container ${name}`)
-        else left.push(`container ${name} kept: its docker rm failed`)
+        else left.push(`container ${name} kept: its removal failed`)
       for (const name of plan.keep)
         left.push(`container ${name} kept: over 1 GB, no rule removes it`)
       const df = await ctx.run(["docker", "system", "df", "-v", "--format", "{{json .}}"])

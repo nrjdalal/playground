@@ -79,7 +79,7 @@ It keeps a worktree that another worktree or a scratch folder still links into, 
 A merged or closed PR's worktree goes to the trash whatever it holds, and one whose merge or close `playground rm` cannot confirm goes there too under the owner's standing approval, each move restorable with `playground rm --restore`.
 An unmerged branch's head is tagged `archive/<branch>` on origin before any delete, so the tag holds it and `git branch <name> archive/<branch>` brings the branch back; one whose tag cannot be made, or whose origin head is not the local head the tag would hold, stays, named in the log.
 Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch.
-It posts an Inbox update when it freed 1 GB or more, and asks no decision: a container or unused volume over 1 GB that no rule takes is kept, and named as kept in the same log and outbox line, as is a container whose `docker rm` failed.
+It posts an Inbox update when it freed 1 GB or more, and asks no decision: a container or unused volume over 1 GB that no rule takes is kept, and named as kept in the same log and outbox line, as is a container whose removal failed.
 A worker spawns its own reviewer and tester, each briefed from a template it fills in, and the Dashboard nests them under it; the reviewer scores the PR through [code-review-loop](./code-review-loop.md).
 A probe lives for one test and never waits on the owner.
 The dispatcher, the Planner and the two leads never close, except to be started again with their settings after a restore or from a handoff once their guidance changes; they compact their own context in one 400k window (`autoCompactWindow` 400000) and keep their pane and name.

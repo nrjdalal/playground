@@ -392,8 +392,8 @@ describe("one night's run against a fixture data folder", () => {
     const { ctx, deps, inputs, ops, runs, sent } = night(leftovers())
     await nightlyClean(deps)(ctx)
     const removals = runs
+      .filter((r) => r[0] === "docker" && (r[1] === "rm" || r[1] === "volume"))
       .map((r) => r.join(" "))
-      .filter((r) => r.startsWith("docker rm") || r.startsWith("docker volume rm"))
     expect(removals).toEqual([
       "docker rm -fv playground-gone-db",
       "docker rm -fv playground-gone-redis",
@@ -411,7 +411,7 @@ describe("one night's run against a fixture data folder", () => {
     expect(line).not.toContain("playground-lost-db")
   })
 
-  test("a docker rm that fails is named as kept", async () => {
+  test("a container removal that fails is named as kept", async () => {
     const { ctx, deps, ops, sent } = night(
       leftovers({
         "docker rm -fv playground-gone-db": { code: 1, err: "Error response from daemon\n" },
@@ -421,7 +421,7 @@ describe("one night's run against a fixture data folder", () => {
     const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
     const line = sent.find((s) => s.to === "ops")?.text ?? ""
     for (const text of [log, line]) {
-      expect(text).toContain("container playground-gone-db kept: its docker rm failed")
+      expect(text).toContain("container playground-gone-db kept: its removal failed")
       expect(text).toContain("container playground-gone-redis")
     }
   })
