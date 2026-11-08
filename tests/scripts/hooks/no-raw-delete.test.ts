@@ -57,7 +57,7 @@ describe("a delete the hook lets run", () => {
     "while gh pr checks 1 >/dev/null 2>&1; [ $? -eq 8 ]; do sleep 120; done",
     '[ -n "$R" ] && [ -f $R/x ] && echo ok',
     "$T git clone -q $S/mirror.git $S/home",
-    "$R/scripts/spawn.sh column reviewer $W",
+    "$R/scripts/spawn.sh column reviewer $W --pr 1",
     "gh pr checks $N -R owner/repo",
     "'/bin/r?' -rf sub",
     'rmdir "${S:?}/${m:?}"',

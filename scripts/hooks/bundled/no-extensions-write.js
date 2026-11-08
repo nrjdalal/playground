@@ -50,8 +50,15 @@ applyEnvAliases();
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
-import { join, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
+import { isAbsolute, join, resolve } from "path";
+var dataDirOf = (env, home = env.HOME || homedir()) => {
+  const named = env.PLAYGROUND_DATA_DIR;
+  if (!named)
+    return join(home, ".playground");
+  if (!isAbsolute(named))
+    throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
+  return resolve(named);
+};
 var dataDir = (env = process.env) => dataDirOf(env);
 
 // packages/settings/src/rendered.ts
@@ -61,7 +68,7 @@ var extensionsDir = (data) => join2(data, "extensions");
 
 // scripts/hooks/no-main-checkout.ts
 import { readdirSync, readFileSync, realpathSync } from "fs";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join5, normalize, resolve as resolve3, sep } from "path";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join5, normalize, resolve as resolve3, sep } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function joinValues(array, separator = "|") {
@@ -4799,7 +4806,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { homedir as homedir3 } from "os";
-import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
+import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var MAX_BYTES = 1048576;
@@ -5716,6 +5723,23 @@ function heredocs(lx, pending, nested) {
     const body = lines.map((line) => `${line}
 `).join("");
     doc.redirect.body = doc.quoted ? { value: body } : expandHeredoc(body);
+    if (!doc.quoted)
+      textCommands(lx, body);
+  }
+}
+function textCommands(lx, text) {
+  const sub = { ...lx, i: 0, src: text };
+  while (sub.i < text.length) {
+    tick();
+    const c = text[sub.i];
+    if (c === "\\")
+      sub.i += 2;
+    else if (c === "$")
+      dollar(sub, true);
+    else if (c === "`")
+      backtick(sub);
+    else
+      sub.i++;
   }
 }
 function expandHeredoc(body) {
@@ -5804,7 +5828,7 @@ function double(lx) {
       lx.i += 2;
     } else if (c === "$" || c === "`") {
       const from = lx.i;
-      const text = c === "$" ? dollar(lx) : backtick(lx);
+      const text = c === "$" ? dollar(lx, true) : backtick(lx);
       merge(out, text);
       if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
         out.splits = true;
@@ -5825,14 +5849,15 @@ function ansi(lx) {
   lx.i = i + 1;
   return { value: decode2(raw) };
 }
-function dollar(lx) {
+function dollar(lx, plain = false) {
   tick();
   const { src } = lx;
+  const readText = plain ? textCommands : inner;
   const next = src[lx.i + 1] ?? "";
   const variable = (name) => name !== undefined && lx.known[name] !== undefined ? { value: lx.known[name], variable: name } : { ...unknown("a shell variable"), variable: name };
   if (src.startsWith("$((", lx.i)) {
-    const end = balanced(src, lx.i + 1, "(", ")");
-    inner(lx, src.slice(lx.i + 3, end - 2));
+    const end = balanced(src, lx.i + 1, "(", ")", plain);
+    readText(lx, src.slice(lx.i + 3, end - 2));
     lx.i = end;
     return unknown("an arithmetic expansion");
   }
@@ -5843,9 +5868,9 @@ function dollar(lx) {
     return substituted(lx.commands.slice(from), lx.known);
   }
   if (next === "{") {
-    const end = balanced(src, lx.i + 1, "{", "}");
+    const end = balanced(src, lx.i + 1, "{", "}", plain);
     const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1];
-    inner(lx, src.slice(lx.i + 2, end - 1));
+    readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
   }
@@ -5881,14 +5906,14 @@ function inner(lx, src) {
       sub.i++;
   }
 }
-function balanced(src, from, open, close) {
+function balanced(src, from, open, close, plain = false) {
   let depth = 0;
   for (let i = from;i < src.length; i++) {
     tick();
     const c = src[i];
     if (c === "\\")
       i++;
-    else if (c === "'") {
+    else if (c === "'" && !plain) {
       const end = src.indexOf("'", i + 1);
       i = end === -1 ? src.length : end;
     } else if (c === open)
@@ -6237,7 +6262,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     if (builtins)
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
-    verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
+    verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
   else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
@@ -6659,7 +6684,7 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
-  if (isAbsolute(text.value))
+  if (isAbsolute2(text.value))
     return text.value;
   return env.cwd ? resolve2(env.cwd, text.value) : undefined;
 }
@@ -6706,7 +6731,7 @@ var READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/;
 var EVALUATES = [
   /\(\([^)]*[A-Za-z_]/,
   /\$\[[^\]]*[A-Za-z_]/,
-  /\[\[.*\s-(?:eq|ge|gt|le|lt|ne)\s/s,
+  /\[\[[\s\S]*\s-(?:eq|ge|gt|le|lt|ne)\s/,
   /\$\{[#!]?\w+:(?![-+=?:])[^}]*[A-Za-z_]/,
   /@P\}/
 ];
@@ -7317,7 +7342,7 @@ var held3 = (word, env, steady) => !marked(word.value) || !!heldWord(word, env, 
 // scripts/hooks/no-main-checkout.ts
 function real(path) {
   const found = resolved(path);
-  if (found !== undefined || !isAbsolute2(path))
+  if (found !== undefined || !isAbsolute3(path))
     return found ?? nearest(path);
   const parts = normalize(path).split(sep).filter(Boolean);
   let low = 0;
@@ -7852,6 +7877,48 @@ function sedReads(args) {
   const read = scripts.length ? scripts : operands.slice(0, 1);
   return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value));
 }
+var SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/;
+var SED_SUFFIX = /^(?:\.[\w.~-]*)?$/;
+var SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
+var SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}${SED_TEXT}[gpI0-9]*)[ \t]*`;
+var SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`);
+function sedInPlace(cmd, parsed) {
+  const { args, local, name } = parsed;
+  if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed))
+    return;
+  const scripts = [];
+  const operands = [];
+  let inPlace = false;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    const suffix = SED_IN_PLACE.exec(value);
+    if (value === "-e") {
+      if (!args[k + 1])
+        return;
+      scripts.push(args[++k]);
+    } else if (value === "--") {
+      operands.push(...args.slice(k + 1));
+      break;
+    } else if (suffix) {
+      inPlace = true;
+      if (suffix[1])
+        continue;
+      const word = args[++k];
+      if (!word || !literal(word) || !SED_SUFFIX.test(word.value))
+        return;
+    } else if (value.startsWith("-") && value !== "-") {
+      if (!/^-[Enrsuz]+$/.test(value))
+        return;
+    } else
+      operands.push(args[k]);
+  }
+  const read = scripts.length ? scripts : operands.slice(0, 1);
+  if (!inPlace || read.length === 0)
+    return;
+  if (!read.every((w) => literal(w) && SED_EDIT.test(w.value)))
+    return;
+  return new Set(read);
+}
 var PERL_FLAG = /^-[alnpw]*[eE]?$/;
 var PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
 var PERL_RE = `/${PERL_BODY}`;
@@ -7945,7 +8012,8 @@ function wholeLine(commands, env) {
     if (words.some((word) => word.procs && wholeLine(word.procs, env)))
       return true;
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
-    return writes || !(narrow(cmd, env) || quietCommit(cmd, parse3(cmd), env));
+    const parsed = parse3(cmd);
+    return writes || !(narrow(cmd, env) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed));
   });
 }
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
@@ -8057,9 +8125,10 @@ function cliWrite(words) {
     const key = positional[0];
     if (unread || key === undefined)
       return `playground settings ${verb} with a word it cannot read`;
-    if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX))
+    const job = key.startsWith(JOB_PREFIX);
+    if (!GUARD_KEYS.has(key) && !job)
       return;
-    return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : key.startsWith(JOB_PREFIX) ? `playground settings ${verb} of ${key}, ${BY_APPROVE}` : `playground settings ${verb} of ${key}, a key a guard reads`;
+    return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : job ? `playground settings ${verb} of ${key}, ${BY_APPROVE}` : `playground settings ${verb} of ${key}, a key a guard reads`;
   }
   if (verb === "accept")
     return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set";
@@ -8229,13 +8298,7 @@ async function inspect(raw, environment, unknown = false) {
         return verdict;
     }
     const quiet = !whole && quietCommit(cmd, parsed, env);
-    for (const word of quiet ? args : []) {
-      if (!/\s/.test(word.value))
-        continue;
-      const named = lex(word.value.replace(/^--message=/, ""), env.known).commands.flatMap((c) => cliCalls(parse3(c), env)).map((words) => cliWrite(words)).find(Boolean);
-      if (named)
-        return refuse(named);
-    }
+    const sedScripts = whole ? undefined : sedInPlace(cmd, parsed);
     if (!first || EXPORTS3.has(name) || reader)
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
@@ -8279,7 +8342,7 @@ async function inspect(raw, environment, unknown = false) {
       }
       const literal = !whole && narrow(cmd, here);
       for (const word of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word))) {
-        const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
+        const text = quiet && /\s/.test(word.value) || !!sedScripts?.has(word) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;
         const named = names(word, here, remover, literal);

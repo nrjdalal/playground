@@ -22,7 +22,7 @@ describe("the checker brief templates fill two-underscore slots alone (#1664)", 
   test("new-reviewer.md has the reviewer read its own name and the PR's current head (#1648)", async () => {
     const text = await read(join("scripts/briefs", "new-reviewer.md"))
     expect(text).toContain("first prompt names you")
-    expect(text).toContain("`state.py pr`")
+    expect(text).toContain("`state.ts pr`")
     expect(text).not.toContain("__NAME__")
     expect(text).not.toContain("__SHA7__")
     expect(text.match(/__(LEAD|ETA)__/g)).toBeNull()

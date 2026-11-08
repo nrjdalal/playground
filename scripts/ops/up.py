@@ -2,8 +2,8 @@
 """ops-up: start every ops job in jobs.json that is not healthy, and leave healthy ones alone.
 
 A job ops starts in a terminal (one whose `runtime` names one, or that names none and has a command and no launchd label) runs as a pane of the Ops
-workspace on the factory herdr server (the binary pin.json names, as spawn.sh reaches it). An old `runtime` of cmux or auto reads
-as herdr.
+workspace on the factory herdr server (the binary pin.json names, as spawn.sh reaches it). A `runtime`, whatever word an older
+install stored, reads as herdr, the one runtime.
 
   up.py                      check every job once; start each unhealthy terminal job as a pane of herdr's Ops workspace
   up.py --restarted <a,b>    a plain pass, once any running pass ends, with those jobs' starts dropped first, so GRACE holds
@@ -36,7 +36,7 @@ REGISTRY = (
     else CFG
 )
 # spawn.sh's data folder, as dataDir() reads it: PLAYGROUND_DATA_DIR when set, else .playground in the home folder; it keeps the backend pins and the roster there
-DATA = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
+DATA = (os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path"))
 GRACE = 600  # a job started this recently has not had time to write its first heartbeat, so it is left alone
 SPAWN = os.path.join(os.path.dirname(HERE), "spawn.sh")  # the one way a session comes back, through the factory's capacity gate
 ONCE = os.path.join(HERE, "once.py")  # every job starts through it: one copy per job, held by its recorded pid
@@ -91,10 +91,8 @@ def healthy(job):
 
 
 def is_herdr(job):
-    """Whether ops starts the job in a terminal, which is herdr: its runtime names one, an old row's cmux or auto included, or it names none and has a command and no launchd label (a hand-kept jobs.json row the render never parsed)."""
-    if "runtime" not in job:
-        return bool(job.get("command")) and not job.get("launchd")
-    return job["runtime"] in ("auto", "cmux", "herdr")
+    """Whether ops starts the job in a terminal, which is herdr: its runtime names one, whatever word an older install stored, or it names none and has a command and no launchd label (a hand-kept jobs.json row the render never parsed)."""
+    return job.get("runtime") is not None or (bool(job.get("command")) and not job.get("launchd"))
 
 
 def is_dashboard(job):
@@ -473,7 +471,10 @@ def sessions():
         # a session comes back in its repo's main worktree, the checkout Claude Code starts sessions in: a worktree session skips the worktree the trust dialog stops a session in, and a worker started --in another folder stays in that repository; --resume finds the session from any folder (measured), and a cwd of no checkout falls back to itself, named below
         code, common = run(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"])
         main = os.path.dirname(common.strip()) if code == 0 and common.strip() else ""
-        print(f"{SPAWN} resume {n} {main or cwd} {sid}{backend}")
+        # a reviewer's or tester's start is refused without --pr, so its line carries its row's PRs, pr first, as spawn.sh restore passes them
+        prs = [p for p in [a.get("pr")] + list(a.get("prs") or []) if isinstance(p, str) and p] if a.get("kind") in ("reviewer", "tester") else []
+        pr = f" --pr {','.join(dict.fromkeys(prs))}" if prs else ""
+        print(f"{SPAWN} resume {n} {main or cwd} {sid}{backend}{pr}")
         if not main:
             print(f"  ({cwd} is no git checkout; it resumes there as it is)")
         print(f'  then SendMessage {n}: "your terminal restarted; you were resumed from your transcript. Re-read your roster task and continue."')
@@ -490,6 +491,7 @@ def main():
     if args and not restarted:
         print("usage: up.py [--restarted <a,b> | --sessions]", file=sys.stderr)
         sys.exit(1)
+    os.makedirs(OPS, exist_ok=True)
     lock = open(os.path.join(OPS, "up.lock"), "w")
     try:
         # a restart waits for a running pass, whose own write of STARTS would put back the starts it drops

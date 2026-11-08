@@ -237,7 +237,7 @@ esac
       while (!ended && existsSync(path)) await Bun.sleep(20)
       return !ended && !existsSync(marker)
     }
-    return { marker, p, ran, saw, waits }
+    return { marker, p, ran, saw, stderr: () => err, waits }
   }
   const canTake = async (slot: string, who: string, extra: Record<string, string> = {}) => {
     const p = Bun.spawn(["bash", SCRIPT, "can-take", slot, who], { cwd: root, env: env(extra) })
@@ -294,4 +294,17 @@ esac
     tickets,
     waits,
   }
+}
+
+// what `run-slot.sh slots` prints on the machine: the count of run-slot to run-slot-4 held or open now, "4\n" with all four open and "1\n" with slots 2 to 4 shut
+export const slots = (m: ReturnType<typeof machine>) =>
+  Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() }).stdout.toString()
+// run-slot.sh set's exit code and stderr on the machine
+export const set = async (m: ReturnType<typeof machine>, ...args: string[]) => {
+  const p = Bun.spawn(["bash", SCRIPT, "set", ...args], {
+    cwd: m.root,
+    env: m.env(),
+    stderr: "pipe",
+  })
+  return { code: await p.exited, err: await new Response(p.stderr).text() }
 }

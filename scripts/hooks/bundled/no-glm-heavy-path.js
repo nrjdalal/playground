@@ -2,9 +2,9 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-glm-heavy-path.ts
-import { readFileSync as readFileSync2 } from "fs";
+import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, readlinkSync, realpathSync } from "fs";
 import { loadavg } from "os";
-import { dirname as dirname2, join as join5, resolve as resolve3 } from "path";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join5, resolve as resolve3 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -50,8 +50,15 @@ applyEnvAliases();
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
-import { join, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
+import { isAbsolute, join, resolve } from "path";
+var dataDirOf = (env, home = env.HOME || homedir()) => {
+  const named = env.PLAYGROUND_DATA_DIR;
+  if (!named)
+    return join(home, ".playground");
+  if (!isAbsolute(named))
+    throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
+  return resolve(named);
+};
 var dataDir = (env = process.env) => dataDirOf(env);
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
@@ -5370,7 +5377,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { homedir as homedir3 } from "os";
-import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
+import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var MAX_BYTES = 1048576;
@@ -6281,6 +6288,23 @@ function heredocs(lx, pending, nested) {
     const body = lines.map((line) => `${line}
 `).join("");
     doc.redirect.body = doc.quoted ? { value: body } : expandHeredoc(body);
+    if (!doc.quoted)
+      textCommands(lx, body);
+  }
+}
+function textCommands(lx, text) {
+  const sub = { ...lx, i: 0, src: text };
+  while (sub.i < text.length) {
+    tick();
+    const c = text[sub.i];
+    if (c === "\\")
+      sub.i += 2;
+    else if (c === "$")
+      dollar(sub, true);
+    else if (c === "`")
+      backtick(sub);
+    else
+      sub.i++;
   }
 }
 function expandHeredoc(body) {
@@ -6369,7 +6393,7 @@ function double(lx) {
       lx.i += 2;
     } else if (c === "$" || c === "`") {
       const from = lx.i;
-      const text = c === "$" ? dollar(lx) : backtick(lx);
+      const text = c === "$" ? dollar(lx, true) : backtick(lx);
       merge(out, text);
       if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
         out.splits = true;
@@ -6390,14 +6414,15 @@ function ansi(lx) {
   lx.i = i + 1;
   return { value: decode2(raw) };
 }
-function dollar(lx) {
+function dollar(lx, plain = false) {
   tick();
   const { src } = lx;
+  const readText = plain ? textCommands : inner;
   const next = src[lx.i + 1] ?? "";
   const variable = (name) => name !== undefined && lx.known[name] !== undefined ? { value: lx.known[name], variable: name } : { ...unknown("a shell variable"), variable: name };
   if (src.startsWith("$((", lx.i)) {
-    const end = balanced(src, lx.i + 1, "(", ")");
-    inner(lx, src.slice(lx.i + 3, end - 2));
+    const end = balanced(src, lx.i + 1, "(", ")", plain);
+    readText(lx, src.slice(lx.i + 3, end - 2));
     lx.i = end;
     return unknown("an arithmetic expansion");
   }
@@ -6408,9 +6433,9 @@ function dollar(lx) {
     return substituted(lx.commands.slice(from), lx.known);
   }
   if (next === "{") {
-    const end = balanced(src, lx.i + 1, "{", "}");
+    const end = balanced(src, lx.i + 1, "{", "}", plain);
     const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1];
-    inner(lx, src.slice(lx.i + 2, end - 1));
+    readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
   }
@@ -6446,14 +6471,14 @@ function inner(lx, src) {
       sub.i++;
   }
 }
-function balanced(src, from, open, close) {
+function balanced(src, from, open, close, plain = false) {
   let depth = 0;
   for (let i = from;i < src.length; i++) {
     tick();
     const c = src[i];
     if (c === "\\")
       i++;
-    else if (c === "'") {
+    else if (c === "'" && !plain) {
       const end = src.indexOf("'", i + 1);
       i = end === -1 ? src.length : end;
     } else if (c === open)
@@ -6802,7 +6827,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     if (builtins)
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
-    verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
+    verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
   else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
@@ -7207,7 +7232,7 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
-  if (isAbsolute(text.value))
+  if (isAbsolute2(text.value))
     return text.value;
   return env.cwd ? resolve2(env.cwd, text.value) : undefined;
 }
@@ -7359,7 +7384,6 @@ var MCP_RESOURCE_TOOLS = new Set([
   "ReadMcpResourceTool"
 ]);
 var ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i;
-var RUNNER_CALL = /\b(?:bash|bun|bunx|deno|node|npm|npx|pnpm|sh|tsx|yarn|zsh)\b|\//i;
 var heavy = (path) => OPUS_PATHS.some((p) => p.endsWith("/") ? path.startsWith(p) : path === p);
 async function onGlm(raw, environment = process.env) {
   if (/(?:^|\/\/|\.)api\.z\.ai(?:[:/]|$)/.test(environment.ANTHROPIC_BASE_URL ?? ""))
@@ -7577,7 +7601,7 @@ var guardedOf = async (environment) => {
   }
 };
 var LEAD = "Stop, report to your lead with this call, and the lead moves the task to a Claude worker.";
-var orgRefusal = (what, why, fix = LEAD) => `no-glm-heavy-path hook refuses ${what}: ${why}, and this session runs on GLM, which the glm rule (playground rules glm) keeps off every org's tracker, chat, docs and repos and off a headless Claude run. ${fix}`;
+var orgRefusal = (what, why, fix = LEAD) => `no-glm-heavy-path hook refuses ${what}: ${why}, and this session runs on GLM, which the glm rule (playground rules glm) keeps off every org's tracker, chat, docs, repos, checkouts and databases, and off a headless Claude run. ${fix}`;
 var PLACE_FIX = `Name the repository literally (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api) in a call of its own, or report to your lead.`;
 var ORG_HOSTS = [
   [/(?:^|[/@.])(linear\.app)(?=[:/?#]|$)/i, "tracker"],
@@ -7792,6 +7816,266 @@ function gitOrg(parsed, env, dir, sub, orgs) {
   const remote = places.flatMap((place) => remotes(place)).find((r) => isGuarded(orgs, r.owner));
   return remote ? orgRefusal(what, `it runs in a checkout of ${label(remote.owner, remote.repo)}, a guarded org's repository`) : undefined;
 }
+var realOf = (path, depth = 0) => {
+  try {
+    return realpathSync(path);
+  } catch {}
+  if (depth > 40)
+    return path;
+  try {
+    return realOf(resolve3(dirname2(path), readlinkSync(path)), depth + 1);
+  } catch {}
+  const parent = dirname2(path);
+  return parent === path ? path : join5(realOf(parent, depth + 1), basename2(path));
+};
+function checkoutOf(path, orgs, roots) {
+  if (!path)
+    return;
+  const walked = [];
+  let found;
+  for (let at = realOf(resolve3(path));; at = dirname2(at)) {
+    if (roots.has(at)) {
+      found = roots.get(at);
+      break;
+    }
+    walked.push(at);
+    if (existsSync2(join5(at, ".git"))) {
+      found = remotes(at).find((r) => isGuarded(orgs, r.owner));
+      break;
+    }
+    if (dirname2(at) === at)
+      break;
+  }
+  for (const at of walked)
+    roots.set(at, found);
+  return found;
+}
+var checkoutRefusal = (what, repo) => orgRefusal(what, `it reads the checkout of ${label(repo.owner, repo.repo)}, a guarded org's repository`);
+var READ_TOOLS = { Glob: "path", Grep: "path", Read: "file_path" };
+var READS_NOTHING = new Set(["date", "echo", "printf", "pwd", "true"]);
+var PATH_LIKE = /[/~]/;
+var GLOB_CHARS2 = /[*?[]/;
+var namesFile = (r) => r.target !== undefined && !r.body && (r.op === "<" || r.op === "<>" || r.op.startsWith(">") && !r.op.startsWith(">&"));
+function braces(value, depth = 0) {
+  const m = /\{([^{}]*,[^{}]*)\}/.exec(value);
+  if (!m || depth > 8)
+    return [value];
+  const out = [];
+  for (const part of m[1].split(","))
+    out.push(...braces(value.slice(0, m.index) + part + value.slice(m.index + m[0].length), depth + 1));
+  return out.slice(0, 64);
+}
+function globRegex(segment) {
+  let re = "^";
+  for (let i = 0;i < segment.length; i++) {
+    const c = segment[i];
+    if (c === "*")
+      re += "[^/]*";
+    else if (c === "?")
+      re += "[^/]";
+    else if (c === "[") {
+      const end = segment.indexOf("]", i + 2);
+      if (end < 0)
+        re += "\\[";
+      else {
+        re += `[${segment.slice(i + 1, end).replace(/^!/, "^").replace(/\\/g, "\\\\")}]`;
+        i = end;
+      }
+    } else
+      re += c.replace(/[.+^${}()|\\]/g, "\\$&");
+  }
+  return new RegExp(`${re}$`);
+}
+function globbed(value, cwd) {
+  const out = [];
+  for (const pattern of braces(value)) {
+    const root = isAbsolute3(pattern) ? "/" : cwd;
+    if (!root)
+      continue;
+    let candidates = [root];
+    for (const segment of pattern.split("/").filter((part) => part !== "")) {
+      if (!GLOB_CHARS2.test(segment)) {
+        candidates = candidates.map((at) => join5(at, segment));
+        continue;
+      }
+      const re = globRegex(segment.replaceAll("**", "*"));
+      const hidden = segment.startsWith(".");
+      const next = [];
+      for (const at of candidates) {
+        let entries;
+        try {
+          entries = readdirSync(at);
+        } catch {
+          continue;
+        }
+        for (const entry of entries)
+          if ((hidden || !entry.startsWith(".")) && re.test(entry))
+            next.push(join5(at, entry));
+        if (next.length >= 200)
+          break;
+      }
+      candidates = next.slice(0, 200);
+      if (candidates.length === 0)
+        break;
+    }
+    out.push(...candidates);
+  }
+  return out;
+}
+function opened(cmd, parsed, env) {
+  const { args, name } = parsed;
+  const plain = READS_NOTHING.has(name);
+  const places = plain ? [] : [env.cwd];
+  const open = (w, argument) => {
+    for (const read of w.reads ?? [])
+      if (!read.unknown && !marked(read.value))
+        places.push(pathOf(read, env));
+    if (unreadValue(w) || plain && argument && !PATH_LIKE.test(w.value))
+      return;
+    places.push(pathOf(w, env));
+    if (w.glob)
+      places.push(...globbed(w.value, env.cwd));
+  };
+  for (const a of args)
+    open(a, true);
+  for (const r of cmd.redirects)
+    if (namesFile(r))
+      open(r.target, false);
+  return places;
+}
+var DB_CLIENTS = new Set([
+  "mongo",
+  "mongosh",
+  "mycli",
+  "mysql",
+  "mysqldump",
+  "pgbench",
+  "pgcli",
+  "psql",
+  "redis-cli"
+]);
+var dbClient = (name) => DB_CLIENTS.has(name) || /^pg_\w+$/.test(name);
+var RUNNER_CALL = new RegExp(`\\b(?:${["bash", "bun", "bunx", "cd", "deno", "node", "npm", "npx", "pnpm", "pushd", "sh", "tsx", "yarn", "zsh", ...DB_CLIENTS, "pg_\\w+"].join("|")})\\b|/`, "i");
+var pgClient = (name) => name === "pgbench" || name === "pgcli" || name === "psql" || name.startsWith("pg_");
+var mysqlClient = (name) => name === "mycli" || name === "mysql" || name === "mysqldump";
+var mongoClient = (name) => name === "mongo" || name === "mongosh";
+var MONGO_FLAGS = new Set([
+  "--json",
+  "--nodb",
+  "--norc",
+  "--quiet",
+  "--retryWrites",
+  "--shell",
+  "--ssl",
+  "--tls",
+  "--verbose"
+]);
+var CONTAINER_RUNNERS = new Set(["docker", "nerdctl", "podman"]);
+var DB_URL = /\b(?:mariadb|mongodb(?:\+srv)?|mysql|postgres(?:ql)?|rediss?):\/\/(?:[^@\s/?#]*@)?([^/?#\s]*)[^?#\s]*(?:\?([^#\s]*))?/gi;
+var CONNINFO = /(?:^|\s)(host|hostaddr|service)=('[^']*'|"[^"]*"|\S+)/g;
+var hostOf = (raw) => {
+  let host = raw.replace(/^['"]|['"]$/g, "");
+  try {
+    host = decodeURIComponent(host);
+  } catch {}
+  const bracket = /^\[([^\]]*)\](?::\d*)?$/.exec(host);
+  if (bracket)
+    return bracket[1];
+  const parts = host.split(":");
+  return parts.length === 2 ? parts[0] : host;
+};
+var onThisMachine = (host) => host === "" || host.startsWith("/") || /^(?:localhost|127(?:\.\d{1,3}){3}|::1)$/i.test(host);
+var DB_FIX = "Name a database on this machine literally (127.0.0.1, or the worktree's own container), in a call of its own, or report to your lead.";
+function containedClient(parsed) {
+  const { args, local } = parsed;
+  const words = args.map((a) => unreadValue(a) ? "" : a.value);
+  const start = words[0] === "compose" ? 2 : 1;
+  if (words[start - 1] !== "exec" && words[start - 1] !== "run")
+    return;
+  const at = words.findIndex((w, i) => i >= start && dbClient(w));
+  if (at < 0)
+    return;
+  const given = new Map(local);
+  for (let i = start;i < at; i++) {
+    const w = words[i];
+    const pair = w === "-e" || w === "--env" ? args[++i] : w.startsWith("--env=") ? { ...args[i], value: args[i].value.slice(6) } : /^-e./.test(w) ? { ...args[i], value: args[i].value.slice(2) } : undefined;
+    const eq = pair?.value.indexOf("=") ?? -1;
+    if (pair && eq > 0)
+      given.set(pair.value.slice(0, eq), { ...pair, value: pair.value.slice(eq + 1) });
+  }
+  return { ...parsed, args: args.slice(at + 1), local: given, name: words[at] };
+}
+function dbCall(parsed, env) {
+  const inner = CONTAINER_RUNNERS.has(parsed.name) ? containedClient(parsed) : undefined;
+  if (inner)
+    return dbCall(inner, env);
+  const { args, local, name } = parsed;
+  const client = dbClient(name);
+  const hosts = [];
+  const named = (value, service = false) => {
+    if (service)
+      hosts.push(undefined);
+    else
+      for (const host of value.split(","))
+        hosts.push(hostOf(host));
+  };
+  const queried = (query) => {
+    for (const pair of query.split("&")) {
+      const eq = pair.indexOf("=");
+      const key = eq < 0 ? pair : pair.slice(0, eq);
+      if (key === "host" || key === "hostaddr")
+        named(pair.slice(eq + 1));
+      else if (key === "service")
+        named("", true);
+    }
+  };
+  for (let i = 0;i < args.length; i++) {
+    const a = args[i];
+    if (unreadValue(a)) {
+      if (client)
+        hosts.push(undefined);
+      continue;
+    }
+    const v = a.value;
+    for (const m of v.matchAll(DB_URL)) {
+      named(m[1]);
+      if (m[2])
+        queried(m[2]);
+    }
+    if (!client)
+      continue;
+    for (const m of v.matchAll(CONNINFO))
+      named(m[2], m[1] === "service");
+    const mongo = mongoClient(name);
+    if (v === "--host" || v === "-h" && !mongo) {
+      const next = args[++i];
+      if (next && !unreadValue(next))
+        named(next.value);
+      else
+        hosts.push(undefined);
+    } else if (v.startsWith("--host="))
+      named(v.slice(7));
+    else if (/^-h[^-]/.test(v) && !mongo)
+      named(v.slice(2));
+    else if (mongo && !v.startsWith("-") && !v.includes("://") && !/\.[cm]?[jt]s$/.test(v) && /^[A-Za-z0-9][A-Za-z0-9.-]*[:/]/.test(v) && (i === 0 || !args[i - 1].value.startsWith("-") || MONGO_FLAGS.has(args[i - 1].value)))
+      named(v.split(/[:/]/)[0]);
+  }
+  const keys = pgClient(name) ? ["PGHOST", "PGHOSTADDR", "PGSERVICE"] : mysqlClient(name) ? ["MYSQL_HOST"] : [];
+  for (const key of keys) {
+    const set = local.get(key) ?? env.vars.get(key) ?? (env.process[key] ? { value: env.process[key] } : undefined);
+    if (!set)
+      continue;
+    if (unreadValue(set) || key === "PGSERVICE")
+      hosts.push(undefined);
+    else
+      named(set.value);
+  }
+  const at = hosts.findIndex((h) => h === undefined || !onThisMachine(h));
+  if (at < 0)
+    return;
+  const host = hosts[at];
+  return host === undefined ? orgRefusal(`this ${name} call`, "the hook cannot tell which database it reaches, since a value it cannot read names it", DB_FIX) : orgRefusal(`this ${name} call`, `it reaches ${host}, a database off this machine, which may be an org's`);
+}
 function orgCall(parsed, env, dir, sub, orgs) {
   const { args, name } = parsed;
   const runs = args.findIndex((a) => CLAUDE_PACKAGE.test(a.value.replace(/^--package=/, "")));
@@ -7823,7 +8107,7 @@ function orgCall(parsed, env, dir, sub, orgs) {
       return orgRefusal(`this ${name} call`, `it reaches ${hit}, a guarded org's repository`);
   }
 }
-var visitor = (load5, limit, orgs) => {
+var visitor = (load5, limit, orgs, roots) => {
   const busy = load5 > limit;
   let earlier = "none";
   const forced = [];
@@ -7833,6 +8117,12 @@ var visitor = (load5, limit, orgs) => {
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
     const { args, name } = parsed;
+    if (Array.isArray(orgs) && orgs.length > 0)
+      for (const place of opened(cmd, parsed, env)) {
+        const repo = checkoutOf(place, orgs, roots);
+        if (repo)
+          return checkoutRefusal(`this ${name} call`, repo);
+      }
     const reads = branchReads;
     branchReads = [];
     const busyRun = busy ? installOrClone(name, args) : undefined;
@@ -7855,7 +8145,7 @@ var visitor = (load5, limit, orgs) => {
         break;
     }
     const sub = isGit ? args[k]?.value : undefined;
-    const org = orgCall(parsed, env, dir, sub, orgs);
+    const org = orgCall(parsed, env, dir, sub, orgs) ?? dbCall(parsed, env);
     if (org)
       return org;
     if (isGit && !writes(cmd) && BRANCH_READS.has(args.slice(k).map((a) => a.value).join(" "))) {
@@ -7887,21 +8177,41 @@ async function inspect(raw, environment, load5, limit) {
   } = JSON.parse(raw);
   if (typeof tool === "string" && (tool.startsWith("mcp__") || MCP_RESOURCE_TOOLS.has(tool)))
     return orgRefusal(`this ${tool} call`, "an MCP tool reaches an org's or an outside service's data");
+  const directory = typeof cwd === "string" ? cwd : undefined;
+  if (typeof tool === "string" && tool in READ_TOOLS) {
+    const orgs = await guardedOf(environment);
+    if (!Array.isArray(orgs))
+      return;
+    const given = toolInput?.[READ_TOOLS[tool]];
+    const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join5(environment.HOME, given.slice(2)) : isAbsolute3(given) ? given : directory && resolve3(directory, given);
+    const repo = orgs.length > 0 ? checkoutOf(path, orgs, new Map) : undefined;
+    return repo ? checkoutRefusal(`this ${tool} call`, repo) : undefined;
+  }
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
   const command = toolInput.command;
+  const orgs = await guardedOf(environment);
+  const roots = new Map;
+  const guarding = Array.isArray(orgs) && orgs.length > 0;
   const text = command.replace(/["'\\]/g, "");
-  if (!mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text))
+  if (!guarding && !mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text))
     return;
-  const directory = typeof cwd === "string" ? cwd : undefined;
   const env = {
     cwd: directory,
     files: new Map,
     known: knownVariables(command, environment, directory),
+    old: { dir: directory },
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visitor(load5, limit, await guardedOf(environment)));
+  const home = guarding ? checkoutOf(directory, orgs, roots) : undefined;
+  try {
+    return await run(lex(command, env.known), env, visitor(load5, limit, orgs, roots));
+  } catch (error) {
+    if (home)
+      return checkoutRefusal("this call, which the hook could not read,", home);
+    throw error;
+  }
 }
 var mayRefuse = (text, load5, limit) => GIT_CALL.test(text) || ORG_CALL.test(text) || load5 > limit && BUSY_RUN.test(text);
 async function check(raw, environment = process.env, load5 = currentLoad5()) {

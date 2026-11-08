@@ -35,7 +35,7 @@ describe("--brief gives a resumed session its first prompt", () => {
     expect(r.code).toBe(0)
     const home = join(scratch, `home-${homes}`)
     expect(unplugged(command(r))).toBe(
-      `(env PLAYGROUND_ROLE=dispatcher claude --resume ${id} -n dispatcher --model claude-opus-5-5 --effort high --settings ${home}/.playground/factory-settings-400k.json --dangerously-skip-permissions "You are dispatcher, resumed. Load the playbook skill first. Your brief is in ~/.playground/${brief}: read it in full and follow it.")`,
+      `(env PLAYGROUND_ROLE=dispatcher claude --resume ${id} -n dispatcher --model claude-opus-5-5 --effort high --settings ${home}/.playground/factory-settings-400k-memory-dispatcher.json --dangerously-skip-permissions "You are dispatcher, resumed. Load the playbook skill first. Your brief is in ~/.playground/${brief}: read it in full and follow it.")`,
     )
     expect(command(r)).not.toContain("--brief")
     const seen = [...placing(r).flat(), ...(r.roster ?? []), r.out, r.err].join("\n")
@@ -56,7 +56,7 @@ describe("--brief gives a resumed session its first prompt", () => {
     )
     const home = join(scratch, `home-${homes}`)
     expect(unplugged(command(r))).toBe(
-      `(env PLAYGROUND_ROLE=dispatcher claude --resume ${id} -n dispatcher --model claude-opus-5-5 --effort high --settings ${home}/.playground/factory-settings-400k.json --dangerously-skip-permissions "You are dispatcher, resumed after a restart. Act on the after-resume instruction in your context first, then carry on.")`,
+      `(env PLAYGROUND_ROLE=dispatcher claude --resume ${id} -n dispatcher --model claude-opus-5-5 --effort high --settings ${home}/.playground/factory-settings-400k-memory-dispatcher.json --dangerously-skip-permissions "You are dispatcher, resumed after a restart. Act on the after-resume instruction in your context first, then carry on.")`,
     )
   })
 
@@ -144,7 +144,10 @@ describe("--reports-to names the session a worker reports to (#1727)", () => {
 
   test.each([
     ["runner", ["runner", "runner-calm-heron", "b.md"]],
-    ["column", ["column", "reviewer", "reviewer-brave-otter", "builder", "w1:p2", "b.md"]],
+    [
+      "column",
+      ["column", "reviewer", "reviewer-brave-otter", "builder", "w1:p2", "b.md", "--pr", "1"],
+    ],
     ["probe", ["probe", "probe-x", "ops", "b.md", "--runtime", "herdr"]],
     ["manager", ["manager", "dispatcher-2", "b.md"]],
     ["resume", ["resume", "worker-brave-otter", "/tmp"]],
@@ -187,14 +190,14 @@ describe("--check runs the gates and starts nothing", () => {
     expect(placing(r)).toEqual([])
   })
 
-  test("a column beside a cmux surface:1 refuses, naming #2076", async () => {
+  test("a column beside an old cmux surface:1 refuses as no herdr pane id", async () => {
     const r = await spawn(
       ["column", "lead", "planner", "dispatcher", "surface:1", "handoff.md", "--check"],
       [],
     )
     expect(r.code).toBe(1)
     expect(r.out).not.toContain("can start")
-    expect(r.err).toContain("surface:1 is a cmux surface, and spawn.sh starts nothing in cmux")
+    expect(r.err).toContain("surface:1 is not a herdr pane id (w1:p2)")
     expect(r.cmux).toBeUndefined()
   })
 
@@ -213,6 +216,8 @@ describe("a brief still holding its role's template slot is refused before herdr
     readFileSync(join(root, "scripts", "briefs", `new-${role}.md`), "utf8")
   const slotsOf = (role: string) => [...new Set(template(role).match(/__[A-Z0-9]+__/g))].sort()
   const column = (role: string) => [
+    "--pr",
+    "1",
     "column",
     role,
     `${role}-brave-otter`,
@@ -292,7 +297,7 @@ describe("a brief still holding its role's template slot is refused before herdr
   test("a reviewer's resume with a --brief holding its slot is refused", async () => {
     const id = "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"
     const r = await spawn(
-      ["resume", "reviewer-brave-otter", root, id, "--brief", "r.md"],
+      ["resume", "reviewer-brave-otter", root, id, "--brief", "r.md", "--pr", "1"],
       [],
       { BRIEF_FILE: "r.md" },
       undefined,

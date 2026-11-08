@@ -4,11 +4,11 @@
 Marks: the 5-hour window at 70, 80 and 90%, the week at 15, 80 and 90% (dispatcher: "alert me when the 5h window passes 70% and when the week passes 15%").
 Reads usage.json in the data folder for the stored login, and login-flip.json's token readings for the other accounts: one of those
 older than 14 minutes is read again here with one 1-token Haiku call (dispatcher, 16 Oct, "Pick (a)"), and a limited account is not read
-again until its reset. Remembers what it printed in near-limit.json in the state folder, ~/.playground/ops/usage.
+again until its reset. Remembers what it printed in near-limit.json in the state folder, the data folder's ops/usage.
 """
 import json, os, subprocess, sys, time, urllib.request
 
-HERE = os.path.expanduser("~/.playground/ops/usage")  # the state folder by name, so a run by its repo path still reads the live state
+HERE = os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state
 sys.path.insert(0, os.path.dirname(HERE))
 from beat import OPS, setting  # noqa: E402
 
@@ -45,8 +45,10 @@ def probe(email):
     # no 5-hour headers: an account with no 5-hour window, so none, never 0%, as login-flip.py's probe reads it
     five = h.get("anthropic-ratelimit-unified-5h-utilization") is not None
     got = {"five": round(f("5h-utilization") * 100) if five else None, "fiveReset": f("5h-reset") if five else None, "week": round(f("7d-utilization") * 100), "weekReset": f("7d-reset")}
-    if h.get("anthropic-ratelimit-unified-status") == "rejected":
-        got["limitedUntil"] = got["weekReset"] if got["week"] >= 100 or (got["five"] or 0) < 100 else got["fiveReset"]
+    if got["week"] >= 100:
+        got["limitedUntil"] = got["weekReset"]  # a full week is limited until its reset, whatever the status header says
+    elif h.get("anthropic-ratelimit-unified-status") == "rejected":
+        got["limitedUntil"] = got["weekReset"] if (got["five"] or 0) < 100 else got["fiveReset"]
     return got
 
 

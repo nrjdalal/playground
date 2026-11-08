@@ -7,6 +7,7 @@ import { SQL } from "bun"
 
 import { attachmentsDir } from "../../../../../../api/hono/src/lib/dashboard/attachments"
 import { ensureFixture } from "../../../../../../api/hono/src/lib/dashboard/fixture"
+import { testContainerName } from "../../../../../container"
 
 // The store against a throwaway Postgres in Docker published on 127.0.0.1 only, migrated as the dashboard's is, so the table's own rules hold. Skipped where Docker is not running.
 const MIGRATIONS = join(import.meta.dir, "../../../../../../packages/db/drizzle")
@@ -30,6 +31,8 @@ describe.skipIf(!dockerUp())("the thread store", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("threads"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",

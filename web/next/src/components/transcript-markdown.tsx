@@ -26,7 +26,7 @@ import {
   Streamdown,
 } from "streamdown"
 
-import { DashboardContext, useMentions } from "@/components/dashboard/dashboard"
+import { SessionsContext } from "@/components/dashboard/dashboard"
 import { Hint } from "@/components/hint"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
@@ -91,10 +91,9 @@ const FOOTNOTE_PROPS = [
 
 // Markdown links, autolinks and raw <a> tags alike arrive here, after transcriptUrlTransform: an http or https link opens at once, another site's in a new tab with no opener or referrer, our own in this one, and any other href shows as its text. target and rel are set here last, so a raw tag's own cannot change them. A link to a live agent's view (an @Name) keeps the agent's raw session name on hover, as the sender label does.
 function TranscriptLink({ children, href, ...props }: ComponentProps<"a">) {
-  const context = use(DashboardContext)
+  const { sessions } = use(SessionsContext)
   const link = typeof href === "string" ? transcriptLink(href, config.app.url) : null
-  const worker =
-    context && link && !link.external ? viewWorker(link.href, context.workers ?? []) : null
+  const worker = sessions && link && !link.external ? viewWorker(link.href, sessions) : null
   if (!link) return <span>{children}</span>
   const kept = Object.fromEntries(
     FOOTNOTE_PROPS.flatMap((name) =>
@@ -366,7 +365,7 @@ export function TranscriptMarkdown({
   on?: TranscriptSurface
 }) {
   // an @Name that names a live agent links to its view, as the sender label does
-  const mentions = useMentions()
+  const { mentions } = use(SessionsContext)
   const plugins = useMemo(
     () => (mentions ? [...REMARK_PLUGINS, remarkMentions(mentions)] : REMARK_PLUGINS),
     [mentions],

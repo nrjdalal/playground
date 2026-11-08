@@ -142,10 +142,10 @@ const accountIn = (text: string): string | null => {
   }
 }
 
-// ops-usage keeps a map entry while its reading is under FRESH_FOR (scripts/ops/usage/run.py) and probes each account again only every PROBE_EVERY (840 s), so an entry the job still writes is up to this old.
+// ops-usage keeps a map entry while its reading is under FRESH_FOR (scripts/ops/usage/run.py) and probes each account again only every PROBE_EVERY (840 s), so an entry the job still writes is up to this old; a full week's entry stays past that, and one with a limitedUntil ahead too, since run.py's fresh() serves both fresh that long.
 const MAP_FRESH_MS = 30 * 60 * 1000
 
-// Pure: usage.json's accounts map, which ops-usage's accounts_reading() writes for each account the factory spends into, as one reading per account: its week share and reset and no 5-hour reading, read when readAt says. It is stale when usage.json itself is (the job stopped writing the map) or its reading is past MAP_FRESH_MS; an entry off that shape is left out.
+// Pure: usage.json's accounts map, which ops-usage's accounts_reading() writes for each account the factory spends into, as one reading per account: its week share and reset and no 5-hour reading, read when readAt says. It is stale when usage.json itself is (the job stopped writing the map) or its reading is past MAP_FRESH_MS, a full week's entry until its reset or one with a limitedUntil ahead excepted; an entry off that shape is left out.
 const mapAccountsOf = (text: string, now: Date): AccountUsage[] => {
   let file: unknown
   try {
@@ -162,13 +162,18 @@ const mapAccountsOf = (text: string, now: Date): AccountUsage[] => {
     const read = Date.parse(entry.readAt)
     const sevenDay = windowOf({ resets_at: entry.weekReset, used_percentage: entry.week })
     if (Number.isNaN(read) || !sevenDay?.resetsAt) return []
+    // a week that cannot change before its reset, or one parked by its limitedUntil, reads fresh however old the reading is
+    const parkedUntil =
+      typeof entry.limitedUntil === "number" && entry.limitedUntil > now.getTime() / 1000
+    const fullWeek =
+      sevenDay.usedPercent >= 100 && new Date(sevenDay.resetsAt).getTime() > now.getTime()
     return [
       {
         account: account.trim(),
         usage: {
           fiveHour: null,
           sevenDay,
-          stale: fileStale || now.getTime() - read > MAP_FRESH_MS,
+          stale: fileStale || (!(fullWeek || parkedUntil) && now.getTime() - read > MAP_FRESH_MS),
           writtenAt: new Date(read).toISOString(),
         },
       },

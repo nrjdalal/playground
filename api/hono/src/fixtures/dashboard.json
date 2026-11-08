@@ -3712,15 +3712,6 @@
           }
         },
         {
-          "disabled": true,
-          "disabledWhy": "Fixture: paused on purpose",
-          "heartbeat": "ops-loom-relay",
-          "name": "ops-loom-relay",
-          "schedule": {
-            "cron": "0 5 * * *"
-          }
-        },
-        {
           "heartbeat": "ops-machine",
           "name": "ops-machine",
           "schedule": {

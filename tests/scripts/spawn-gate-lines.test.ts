@@ -25,16 +25,16 @@ describe("the capacity gate refuses and spawns nothing", () => {
       expect(existsSync(join(r.home, "top.calls"))).toBe(false)
     })
 
-    test("a --firefighting start passes a load over the cores while a trigger file stands, and the memory gate still holds it", async () => {
-      const args = ["runner", "runner-x", "b.md", "--size", "small", "--firefighting"]
+    test("a --priority start passes a load over the cores while priority.json stands, and the memory gate still holds it", async () => {
+      const args = ["runner", "runner-x", "b.md", "--size", "small", "--priority"]
       const trigger = (home: string) =>
-        writeFileSync(join(home, ".playground", "firefighting-stop.json"), "{}")
+        writeFileSync(join(home, ".playground", "priority.json"), "{}")
       const r = await spawn(args, [], { FAKE_LOAD5: "24.00" }, script, undefined, trigger)
       expect(r.code).toBe(0)
       expect(capacityLog(r)).toEqual([
         expect.objectContaining({
           readings: expect.objectContaining({
-            priority: expect.stringMatching(/\/\.playground\/firefighting-stop\.json$/),
+            priority: expect.stringMatching(/\/\.playground\/priority\.json$/),
           }),
           verdict: "pass",
         }),
@@ -106,8 +106,14 @@ describe("the capacity gate refuses and spawns nothing", () => {
 
     // a PR's first review waited a median 47 minutes, so a checker takes the band a small worker keeps back, and every other small start keeps today's line
     test.each<{ args: string[]; passes: boolean }>([
-      { args: ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"], passes: true },
-      { args: ["column", "tester", "tester-x", "worker-x", "w1:p2", "r.md"], passes: true },
+      {
+        args: ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
+        passes: true,
+      },
+      {
+        args: ["column", "tester", "tester-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
+        passes: true,
+      },
       {
         args: ["column", "probe", "probe-x", "ops", "w1:p2", "p.md", "--size", "small"],
         passes: true,
@@ -143,7 +149,17 @@ describe("the capacity gate refuses and spawns nothing", () => {
     ])(
       "a $role with no --size starts small, and --size still wins: $size",
       async ({ passes, role, size, sizeArgs, units }) => {
-        const column = ["column", role, `${role}-x`, "worker-x", "w1:p2", "r.md", ...sizeArgs]
+        const column = [
+          "column",
+          role,
+          `${role}-x`,
+          "worker-x",
+          "w1:p2",
+          "r.md",
+          "--pr",
+          "1",
+          ...sizeArgs,
+        ]
         const r = await spawn(column, [], { FAKE_LOAD5: "12.00" })
         if (passes) expect(r.code).toBe(0)
         else expect(r.code).not.toBe(0)
@@ -254,6 +270,14 @@ describe("the capacity gate refuses and spawns nothing", () => {
       expect(r.err).toContain(
         "the memory gate holds it: free is 9% (sysctl kern.memorystatus_level), 10% is the floor",
       )
+    })
+
+    test("gates.glmSwapinsMax moves a fresh Claude worker's swap-in line", async () => {
+      const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], {
+        ...withGates({ "gates.glmSwapinsMax": 200 }),
+        FAKE_SWAPINS: "150",
+      })
+      expect(r.code, r.err).toBe(0)
     })
 
     test("gates.smallReserve moves the share kept for small items", async () => {

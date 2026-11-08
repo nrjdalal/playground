@@ -71,7 +71,7 @@ export type OnAnswer = (
 >
 
 // The answer route's refusals after which the answer may already be in the session.
-const MAY_HAVE_GONE = new Set(["CMUX_FAILED", "INTERRUPTED", "UNCONFIRMED"])
+const MAY_HAVE_GONE = new Set(["INTERRUPTED", "SESSIONS_FAILED", "UNCONFIRMED"])
 
 export const mayHaveGone = (feed: unknown): boolean => MAY_HAVE_GONE.has(String(feed))
 
@@ -429,9 +429,21 @@ export function targetNeedsYou(id: string): void {
   window.dispatchEvent(new CustomEvent<string>(TARGET_EVENT, { detail: needsYouAnchor(id) }))
 }
 
+// How a card was asked for: a click (targetNeedsYou, from a row or a chip) or a link (the URL's hash alone, as a page loads with it).
+export type TargetSource = "click" | "link"
+
+export type Target = { anchor: string; source: TargetSource }
+
+// Pure: what a changed URL hash asks for: a card's anchor as a link, but a click's own anchor, which a row's click puts in the hash after its event, stays a click; a hash that names no card keeps what was asked.
+export const hashTarget = (wanted: Target | null, hash: string): Target | null =>
+  isNeedsYouAnchor(hash) && hash !== wanted?.anchor ? { anchor: hash, source: "link" } : wanted
+
 // Brings the card a sidebar row asked for into view once the page is ready (ready: its steps have loaded, so nothing later scrolls it away), by the URL's hash or by targetNeedsYou; any other hash, a footnote's, stays the browser's. scrollTo says whether it reached the card; one that is not on the page yet is tried again on the next render.
-export function useNeedsYouTarget(ready: boolean, scrollTo: (anchor: string) => boolean): void {
-  const wanted = useRef<string | null>(null)
+export function useNeedsYouTarget(
+  ready: boolean,
+  scrollTo: (anchor: string, source: TargetSource) => boolean,
+): void {
+  const wanted = useRef<Target | null>(null)
   const done = useRef<string | null>(null)
   const seen = useRef<string | null>(null)
   const scroll = useEffectEvent(scrollTo)
@@ -439,9 +451,9 @@ export function useNeedsYouTarget(ready: boolean, scrollTo: (anchor: string) => 
     const onTarget = (event: Event) => {
       const anchor = (event as CustomEvent<string>).detail
       if (!isNeedsYouAnchor(anchor)) return
-      wanted.current = anchor
+      wanted.current = { anchor, source: "click" }
       done.current = null
-      if (ready && scroll(wanted.current)) done.current = wanted.current
+      if (ready && scroll(anchor, "click")) done.current = anchor
     }
     window.addEventListener(TARGET_EVENT, onTarget)
     return () => window.removeEventListener(TARGET_EVENT, onTarget)
@@ -451,10 +463,10 @@ export function useNeedsYouTarget(ready: boolean, scrollTo: (anchor: string) => 
     // a link followed since names the place now, over an earlier row's click
     if (hash !== seen.current) {
       seen.current = hash
-      if (hash && isNeedsYouAnchor(hash)) wanted.current = hash
+      wanted.current = hashTarget(wanted.current, hash)
     }
     const target = wanted.current
-    if (!ready || !target || done.current === target) return
-    if (scroll(target)) done.current = target
+    if (!ready || !target || done.current === target.anchor) return
+    if (scroll(target.anchor, target.source)) done.current = target.anchor
   })
 }

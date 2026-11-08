@@ -13,7 +13,7 @@ import { join } from "node:path"
 
 import { settingsFor } from "../../../packages/settings/src/settings"
 import { slotSettings } from "../../../packages/settings/src/slots"
-import { SCRIPT, stop, machine } from "./run-slot-fake"
+import { SCRIPT, machine, set, stop } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang: 60s, twice the slowest case under SLOW_CHILD=1.5 but local CI's, which sets its own
 setDefaultTimeout(60_000)
@@ -56,14 +56,6 @@ describe("run-slot-2 with the lanes shut", () => {
 
 // a hand-set runner-host/slot-off kept the runner box idle for two days, so a switch carries a reason and an expiry, and drops itself past it
 describe("an ops switch carries a reason and an expiry", () => {
-  const set = async (m: ReturnType<typeof machine>, ...args: string[]) => {
-    const p = Bun.spawn(["bash", SCRIPT, "set", ...args], {
-      cwd: m.root,
-      env: m.env(),
-      stderr: "pipe",
-    })
-    return { code: await p.exited, err: await new Response(p.stderr).text() }
-  }
   const aside = (m: ReturnType<typeof machine>) =>
     readdirSync(m.ops).filter((f) => f.startsWith("run-slot.3-off.expired-"))
   const log = (m: ReturnType<typeof machine>) => {

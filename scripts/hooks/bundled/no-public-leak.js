@@ -45,8 +45,15 @@ applyEnvAliases();
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
-import { join, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
+import { isAbsolute, join, resolve } from "path";
+var dataDirOf = (env, home = env.HOME || homedir()) => {
+  const named = env.PLAYGROUND_DATA_DIR;
+  if (!named)
+    return join(home, ".playground");
+  if (!isAbsolute(named))
+    throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
+  return resolve(named);
+};
 var dataDir = (env = process.env) => dataDirOf(env);
 
 // packages/scripts/src/release-notes/notes.ts
@@ -2920,9 +2927,6 @@ function handlePipeResult(left, next, ctx) {
   }
   return next._zod.run({ value: left.value, issues: left.issues }, ctx);
 }
-var $ZodPreprocess = /* @__PURE__ */ $constructor("$ZodPreprocess", (inst, def) => {
-  $ZodPipe.init(inst, def);
-});
 var $ZodReadonly = /* @__PURE__ */ $constructor("$ZodReadonly", (inst, def) => {
   $ZodType.init(inst, def);
   defineLazyInternal(inst, "propValues", (zod) => zod.def.innerType._zod.propValues);
@@ -5313,9 +5317,6 @@ var ZodEmail = /* @__PURE__ */ $constructor("ZodEmail", (inst, def) => {
   $ZodEmail.init(inst, def);
   ZodStringFormat.init(inst, def);
 });
-function email2(params) {
-  return _email(ZodEmail, params);
-}
 var ZodGUID = /* @__PURE__ */ $constructor("ZodGUID", (inst, def) => {
   $ZodGUID.init(inst, def);
   ZodStringFormat.init(inst, def);
@@ -5564,14 +5565,6 @@ var ZodObject = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
     return required(ZodNonOptional, this, args[0]);
   }
 });
-function object(shape, params) {
-  const def = {
-    type: "object",
-    shape: shape ?? {},
-    ...normalizeParams(params)
-  };
-  return new ZodObject(def);
-}
 function strictObject(shape, params) {
   return new ZodObject({
     type: "object",
@@ -5844,10 +5837,6 @@ function pipe(in_, out) {
     out
   });
 }
-var ZodPreprocess = /* @__PURE__ */ $constructor("ZodPreprocess", (inst, def) => {
-  ZodPipe.init(inst, def);
-  $ZodPreprocess.init(inst, def);
-});
 var ZodReadonly = /* @__PURE__ */ $constructor("ZodReadonly", (inst, def) => {
   $ZodReadonly.init(inst, def);
   ZodType.init(inst, def);
@@ -5870,13 +5859,6 @@ function refine(fn, _params = {}) {
 }
 function superRefine(fn, params) {
   return _superRefine(fn, params);
-}
-function preprocess(fn, schema) {
-  return new ZodPreprocess({
-    type: "pipe",
-    in: transform(fn),
-    out: schema
-  });
 }
 // packages/settings/src/rendered.ts
 import { existsSync, readFileSync } from "fs";
@@ -5957,15 +5939,16 @@ var extOrderSchema = array(extScopeSchema).refine((names) => new Set(names).size
 var extLinksSchema = record(extScopeSchema, array(extLinkSchema));
 
 // packages/settings/src/accounts.ts
-var email3 = string2().email();
+var email2 = string2().email();
 var label = string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a label of lowercase letters, digits, dots, dashes and underscores");
 var claudeAccount = strictObject({
-  email: email3,
+  email: email2,
   ends: string2().datetime({ offset: true }).nullable().optional(),
   endsFirst: boolean2().optional(),
   label: label.optional(),
   nearLimit: boolean2().optional(),
   own: boolean2().optional(),
+  parkedUntil: string2().datetime({ offset: true }).optional(),
   provider: literal("claude").optional(),
   renews: number2().int().min(1).max(31).nullable().optional(),
   weekReset: strictObject({ hour: number2().min(0).lt(24), weekday: number2().int().min(0).max(6) }).optional()
@@ -5983,7 +5966,7 @@ var accountSettings = defineSettings({
   },
   "usage.accounts": {
     default: [],
-    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
+    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), the time until which no new session starts on it (parkedUntil), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
     schema: array(account).refine((rows) => new Set(rows.map((row) => `${providerOf(row)}:${accountKey(row)}`)).size === rows.length, "each account is listed once")
   },
   "usage.keychainService": {
@@ -5994,7 +5977,7 @@ var accountSettings = defineSettings({
   "usage.switchAccount": {
     default: "",
     description: "The account whose full week the ops tick tells the dispatchers and leads about, so the factory moves off it; empty for none.",
-    schema: union([email3, literal("")])
+    schema: union([email2, literal("")])
   }
 });
 // packages/settings/src/channel.ts
@@ -6059,13 +6042,7 @@ var STALE_MS = 5 * 60000;
 var ATTACHMENT_LIMIT = 50 * 1024 * 1024;
 
 // packages/settings/src/jobs.ts
-var withoutNeedsCmux = (row) => {
-  if (!row || typeof row !== "object" || !("needsCmux" in row))
-    return row;
-  const { needsCmux, ...rest } = row;
-  return needsCmux === true && rest.runtime === undefined ? { ...rest, runtime: "herdr" } : rest;
-};
-var jobFields = strictObject({
+var jobSchema = strictObject({
   callsModel: boolean2(),
   command: string2().min(1).optional(),
   config: record(string2(), unknown()).optional(),
@@ -6079,15 +6056,20 @@ var jobFields = strictObject({
   neverPause: boolean2().optional(),
   pausedFor: string2().optional(),
   program: array(string2().min(1)).min(1).optional(),
-  runtime: preprocess((runtime) => runtime === "cmux" || runtime === "auto" ? "herdr" : runtime, _enum(["herdr"])).optional(),
+  runtime: _enum(["herdr"]).optional(),
   schedule: union([
     strictObject({ always: literal(true) }),
     strictObject({ every: number2().int().positive() })
   ]),
   stop: string2().min(1).optional()
 });
-var jobSchema = preprocess(withoutNeedsCmux, jobFields);
-var jobRowSchema = preprocess(withoutNeedsCmux, jobFields.partial());
+var fromStored = (row) => {
+  if (!row || typeof row !== "object" || Array.isArray(row))
+    return row;
+  const kept = Object.fromEntries(Object.entries(row).filter(([key]) => Object.hasOwn(jobSchema.shape, key)));
+  return kept.runtime === undefined ? kept : { ...kept, runtime: "herdr" };
+};
+var jobRowSchema = jobSchema.partial();
 var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
 var terminal = (name, command, job) => ({
   callsModel: false,
@@ -6133,12 +6115,8 @@ var JOBS = {
     description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
     schedule: { every: 86400 }
   }),
-  "ops-firefighting-start": terminal("ops-firefighting-start", `${bunJob("ops-firefighting-start")} --data {data}`, {
-    description: "Starts a firefighting worker for each open ticket no session holds, Urgent first, and holds focus for an Urgent one's.",
-    schedule: { every: 60 }
-  }),
   "ops-flow": launchd("ops-flow", {
-    description: "Tells the leads when a ready PR's checks stall or a run slot is held too long.",
+    description: "Tells the leads when a session holds a run slot over 15 minutes, or a model slot over 120.",
     schedule: { every: 60 }
   }),
   "ops-herdr": launchd("ops-herdr", {
@@ -6154,6 +6132,20 @@ var JOBS = {
     neverPause: true,
     schedule: { every: 60 }
   }),
+  "ops-restore": {
+    ...launchd("ops-restore", {
+      description: "Restores a lost main checkout by the playbook's steps once a guard is gone on two looks 5 minutes apart.",
+      schedule: { every: 60 }
+    }),
+    cwd: "{dashboard}",
+    program: [
+      "{bun}",
+      "--no-env-file",
+      "{dashboard}/packages/scripts/src/ops-restore/cli.ts",
+      "--main",
+      "{checkout}"
+    ]
+  },
   "ops-session-resume": launchd("ops-session-resume", {
     description: "Queues a carry-on line for each factory session once its usage limit resets.",
     schedule: { every: 60 }
@@ -6164,10 +6156,6 @@ var JOBS = {
   }),
   "ops-tick": launchd("ops-tick", {
     description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
-    schedule: { every: 60 }
-  }),
-  "ops-ticket-card": terminal("ops-ticket-card", bunJob("ops-ticket-card"), {
-    description: "Keeps one Inbox card of the day's watched tickets, edited in place on every change.",
     schedule: { every: 60 }
   }),
   "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
@@ -6194,7 +6182,8 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     default: job,
     description: `The ${name} ops job: ${job.description}`,
     merge: true,
-    schema: jobRowSchema
+    schema: jobRowSchema,
+    stored: fromStored
   }
 ])));
 var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
@@ -6217,52 +6206,6 @@ var factorySettings = defineSettings({
     schema: repo
   }
 });
-// packages/settings/src/firefighting.ts
-var firefightingSettings = defineSettings({
-  "firefighting.start.account": {
-    default: "",
-    description: "The Claude account a firefighting worker logs in as (spawn.sh's --account), an email whose token the Keychain keeps; empty starts it on spawn.sh's own pick.",
-    schema: union([literal(""), email2()])
-  },
-  "firefighting.start.brief": {
-    default: "brief-ff-ticket-template.md",
-    description: "The standing brief under the data folder that ops-firefighting-start fills for each ticket, its {TICKET} and {NAME} replaced by the ticket's ID and the new worker's name.",
-    schema: string2().regex(/^[A-Za-z0-9._-]+\.md$/, "a brief's file name under the data folder")
-  },
-  "firefighting.start.consultFrom": {
-    default: "",
-    description: 'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts nothing and tells the dispatcher "consult <id>" once per ticket, so the owner decides; empty never consults.',
-    schema: union([literal(""), string2().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM in UTC")])
-  },
-  "firefighting.start.daysOff": {
-    default: [],
-    description: "The UTC dates (YYYY-MM-DD) ops-firefighting-start starts nothing on, as a day off; empty starts on every day.",
-    schema: array(string2().regex(/^\d{4}-\d{2}-\d{2}$/, "a YYYY-MM-DD date"))
-  },
-  "firefighting.start.freshMinutes": {
-    default: 10,
-    description: "How many minutes old firefighting.json's lines may be (its lastTry, else its file time) for a start; older ones are a closed window's or a stopped relay's, so the job starts nothing and tells the Builder once.",
-    schema: number2().int().min(1).max(120)
-  },
-  "firefighting.start.hours": {
-    default: "",
-    description: "The UTC window ops-firefighting-start starts in, HH:MM-HH:MM (one past midnight wraps); outside it the job starts nothing and tells the Builder once; empty starts at any time.",
-    schema: union([
-      literal(""),
-      string2().regex(/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/, "HH:MM-HH:MM in UTC")
-    ])
-  },
-  "firefighting.start.in": {
-    default: "",
-    description: "The folder a firefighting worker opens in (spawn.sh's --in), an absolute path; empty starts none, and the job tells the Builder this key is unset.",
-    schema: union([literal(""), string2().regex(/^\/.+/, "an absolute path")])
-  },
-  "firefighting.start.prefixes": {
-    default: [],
-    description: "The ticket keys the job starts for (MADE for MADE-1), each a tracker team's key; empty starts none.",
-    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "a ticket key, upper case"))
-  }
-});
 // packages/settings/src/gates.ts
 var gateSettings = defineSettings({
   "gates.glmLoad5Max": {
@@ -6272,7 +6215,7 @@ var gateSettings = defineSettings({
   },
   "gates.glmSwapinsMax": {
     default: 100,
-    description: "The swap-ins a second a GLM session starts under.",
+    description: "The swap-ins a second a GLM session, and a fresh Claude worker, starts under.",
     schema: number2().int().positive()
   },
   "gates.memoryFreeMin": {
@@ -6549,66 +6492,6 @@ var slotSettings = defineSettings({
     schema: array(string2().regex(/^\/.+/, "an absolute path"))
   }
 });
-// packages/settings/src/ticket-card.ts
-var file = string2();
-var hhmm = string2().regex(/^(?:[01]\d|2[0-4]):[0-5]\d$/, "a UTC time, HH:MM");
-var ticketCardSettings = defineSettings({
-  "ticketCard.approvals": {
-    default: 2,
-    description: "The approvals a ticket's pull request waits for, which the card counts toward.",
-    schema: number2().int().positive()
-  },
-  "ticketCard.deployedStates": {
-    default: [],
-    description: "The tracker states, by name, that mark a ticket deployed, its last step; a line closed on any other state reads closed, and with none set every closed line does.",
-    schema: array(string2().min(1))
-  },
-  "ticketCard.diaryDir": {
-    default: "diary",
-    description: "The folder, absolute or in the data folder, where the card's job appends each step it first sees to that day's <YYYY-MM-DD>-steps.md.",
-    schema: string2().min(1)
-  },
-  "ticketCard.linesFile": {
-    default: "",
-    description: "The file of the day's watched tickets the card reads, a JSON object whose lines record holds each ticket's line and whose clock record names the tickets the card shows; none until set, so the job keeps no card.",
-    schema: file
-  },
-  "ticketCard.linkBase": {
-    default: "",
-    description: "The URL a ticket's id is appended to for its link on the card; none until set, so the card links pull requests alone.",
-    schema: union([literal(""), string2().url()])
-  },
-  "ticketCard.prefixes": {
-    default: [],
-    description: "The ticket id prefixes the card shows; none means every prefix.",
-    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "an uppercase ticket prefix"))
-  },
-  "ticketCard.reopenedFile": {
-    default: "",
-    description: "The file whose reopened record maps a ticket's id to when it was seen reopened, which the card marks; none until set.",
-    schema: file
-  },
-  "ticketCard.skipsFile": {
-    default: "",
-    description: "The sent record whose <kind>-skip:<ticket>:<area> keys mark a ticket skipped for an area, which the card shows so; none until set.",
-    schema: file
-  },
-  "ticketCard.title": {
-    default: "Tickets today",
-    description: "The card's title.",
-    schema: string2().min(1)
-  },
-  "ticketCard.verdictsFile": {
-    default: "",
-    description: "The file mapping a ticket's id to its triage verdict, { at, kind }, which the card shows as its cause found; none until set.",
-    schema: file
-  },
-  "ticketCard.window": {
-    default: { days: [0, 1, 2, 3, 4, 5, 6], end: "24:00", start: "00:00" },
-    description: "The UTC hours on the weekdays (0 is Sunday) the card's job writes in; outside them it writes nothing.",
-    schema: object({ days: array(number2().int().min(0).max(6)), end: hhmm, start: hhmm })
-  }
-});
 // packages/scripts/src/trace-count/kinds.ts
 var TODAY_PUBLIC = ["nrjdalal/playground", "nrjdalal/playground-yard"];
 var reposOf = (settings) => {
@@ -6747,7 +6630,7 @@ function remotes(cwd) {
 
 // scripts/hooks/shell.ts
 import { homedir as homedir2 } from "os";
-import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
+import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var NOT_RUN = "The refusal stopped this whole Bash call, so none of its commands ran: once it is fixed, run again each one you still need.";
@@ -7656,6 +7539,23 @@ function heredocs(lx, pending, nested) {
     const body = lines.map((line) => `${line}
 `).join("");
     doc.redirect.body = doc.quoted ? { value: body } : expandHeredoc(body);
+    if (!doc.quoted)
+      textCommands(lx, body);
+  }
+}
+function textCommands(lx, text) {
+  const sub = { ...lx, i: 0, src: text };
+  while (sub.i < text.length) {
+    tick();
+    const c = text[sub.i];
+    if (c === "\\")
+      sub.i += 2;
+    else if (c === "$")
+      dollar(sub, true);
+    else if (c === "`")
+      backtick(sub);
+    else
+      sub.i++;
   }
 }
 function expandHeredoc(body) {
@@ -7744,7 +7644,7 @@ function double(lx) {
       lx.i += 2;
     } else if (c === "$" || c === "`") {
       const from = lx.i;
-      const text = c === "$" ? dollar(lx) : backtick(lx);
+      const text = c === "$" ? dollar(lx, true) : backtick(lx);
       merge2(out, text);
       if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
         out.splits = true;
@@ -7765,14 +7665,15 @@ function ansi(lx) {
   lx.i = i + 1;
   return { value: decode2(raw) };
 }
-function dollar(lx) {
+function dollar(lx, plain = false) {
   tick();
   const { src } = lx;
+  const readText = plain ? textCommands : inner;
   const next = src[lx.i + 1] ?? "";
   const variable = (name) => name !== undefined && lx.known[name] !== undefined ? { value: lx.known[name], variable: name } : { ...unknown2("a shell variable"), variable: name };
   if (src.startsWith("$((", lx.i)) {
-    const end = balanced(src, lx.i + 1, "(", ")");
-    inner(lx, src.slice(lx.i + 3, end - 2));
+    const end = balanced(src, lx.i + 1, "(", ")", plain);
+    readText(lx, src.slice(lx.i + 3, end - 2));
     lx.i = end;
     return unknown2("an arithmetic expansion");
   }
@@ -7783,9 +7684,9 @@ function dollar(lx) {
     return substituted(lx.commands.slice(from), lx.known);
   }
   if (next === "{") {
-    const end = balanced(src, lx.i + 1, "{", "}");
+    const end = balanced(src, lx.i + 1, "{", "}", plain);
     const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1];
-    inner(lx, src.slice(lx.i + 2, end - 1));
+    readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
   }
@@ -7821,14 +7722,14 @@ function inner(lx, src) {
       sub.i++;
   }
 }
-function balanced(src, from, open, close) {
+function balanced(src, from, open, close, plain = false) {
   let depth = 0;
   for (let i = from;i < src.length; i++) {
     tick();
     const c = src[i];
     if (c === "\\")
       i++;
-    else if (c === "'") {
+    else if (c === "'" && !plain) {
       const end = src.indexOf("'", i + 1);
       i = end === -1 ? src.length : end;
     } else if (c === open)
@@ -8171,7 +8072,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     if (builtins)
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
-    verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
+    verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
   else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
@@ -8576,7 +8477,7 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
-  if (isAbsolute(text.value))
+  if (isAbsolute2(text.value))
     return text.value;
   return env.cwd ? resolve2(env.cwd, text.value) : undefined;
 }
@@ -8865,10 +8766,9 @@ function commandReads(cmd) {
   if (cmd.redirects.length > 0 || cmd.words.some((w) => /[*?[{()$]/.test(w.value)))
     return false;
   const words = cmd.words.map((w) => w.value);
-  if (words.length === 0)
-    return true;
-  if (words.some(marked))
-    return false;
+  return words.length === 0 || !words.some(marked) && readsWords(words);
+}
+function readsWords(words) {
   const [name, ...args] = words;
   if (name === "git") {
     const k = args[0] === "-C" ? 2 : 0;
@@ -10292,5 +10192,6 @@ if (import.meta.main) {
   }
 }
 export {
+  SAID,
   check
 };
