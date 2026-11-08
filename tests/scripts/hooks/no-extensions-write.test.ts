@@ -1576,9 +1576,25 @@ describe("a quoted argument is read as a command line only where a program runs 
       "If this command writes nothing, report it to your lead as a false positive.",
     )
     expect(reason).not.toContain("the dispatcher hands the owner the command")
-    expect(await at("touch ~/.playground/extensions/login/x", homedir())).toContain(
-      "the dispatcher hands the owner the command",
-    )
+  })
+
+  // a program that writes as called keeps the owner's route, whether or not the hook lists it as a writer
+  test.each([
+    ["touch on a file in the root", "touch ~/.playground/extensions/login/x"],
+    [
+      "an in-place sed on a file in the root",
+      "sed -i '' 's/a/b/' ~/.playground/extensions/login/x.json",
+    ],
+    [
+      "an in-place perl on a file in the root",
+      "perl -pi -e 's/a/b/' ~/.playground/extensions/login/x.json",
+    ],
+    ["a chmod on a file in the root", "chmod 644 ~/.playground/extensions/login/x.json"],
+    ["a chmod on a glob above the root", "chmod 644 ~/.playground/e*"],
+  ])("%s keeps the owner's route", async (_, command) => {
+    const reason = await at(command, homedir())
+    expect(reason).toContain("the dispatcher hands the owner the command")
+    expect(reason).not.toContain("report it to your lead as a false positive")
   })
 
   test("a refusal names a program it cannot read as such", async () => {
