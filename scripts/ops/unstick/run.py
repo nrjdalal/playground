@@ -611,9 +611,19 @@ def dialog_room(name, lines):
     return has_room, why
 
 
-# autoMemoryEnabled is false and the memory folders were archived (8 Oct): any file under ~/.claude/projects/*/memory/ other than the one-line
-# MEMORY.md pointer is new memory a session wrote anyway; name it, its originSessionId and that session's name (builder, 9 Oct)
+# autoMemoryEnabled is false but for the auto-memory trial's sessions (ADR 0022), whose notes go to the data folder's memory/ through autoMemoryDirectory:
+# any file under ~/.claude/projects/*/memory/ other than the one-line MEMORY.md pointer and a note of a session the roster marks memory=on is new memory
+# a session wrote anyway; name it, its originSessionId and that session's name (builder, 9 Oct)
 POINTER = "Learnings live in the playground repo; see AGENTS.md."
+
+
+def memory_on():
+    """The roster names whose row the memory trial put on (spawn.sh's memory=on); empty when the roster does not read."""
+    try:
+        agents = json.load(open(os.path.join(LW, "roster.json"))).get("agents") or []
+        return {a["name"] for a in agents if isinstance(a, dict) and isinstance(a.get("name"), str) and a.get("memory") == "on"}
+    except Exception:
+        return set()
 
 
 def memory_files():
@@ -626,6 +636,7 @@ def memory_files():
             names[d.get("sessionId")] = d.get("name")
         except (OSError, ValueError):
             pass
+    trial = memory_on()
     found = []
     for path in _glob.glob(os.path.join(cfg, "projects", "*", "memory", "*")):
         if not os.path.isfile(path):
@@ -638,6 +649,8 @@ def memory_files():
             continue
         m = re.search(r"originSessionId:\s*([0-9a-f-]{36})", text)
         sid = m.group(1) if m else None
+        if sid and names.get(sid) in trial:
+            continue
         rel = os.path.relpath(path, os.path.join(cfg, "projects"))
         found.append({"at": now(), "kind": "memory-file", "line": f"{rel} (originSessionId {sid or 'unknown'})", "name": names.get(sid) or (sid[:8] if sid else "unknown session"),
                       "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(os.path.getmtime(path)))})

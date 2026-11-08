@@ -1430,6 +1430,25 @@ if [ -n "$CHECK" ]; then
   echo "ok: $NAME can start"
   exit 0
 fi
+# The auto-memory trial (ADR 0022): the dispatcher and the builder, ops and planner leads start with memory on, each in its kind's folder under the data folder's memory/, and fresh worker starts take turns, every second one on in memory/worker-b (the B arm), the one before off (the A arm), memory/worker-arm keeping the last turn; a resume keeps its row's arm, and every other session (a probe, a GLM session, the optimizer, an orchestrator, a runner, a reviewer or tester) stays off, as does any start --memory names a folder for, which takes that folder.
+MEMORY=off
+if [ -n "$MEMORY_DIR" ]; then
+  MEMORY=on
+elif [ "$BACKEND" != glm ]; then
+  case "$ROLE:$KIND" in
+    dispatcher:* | lead:builder | lead:ops | lead:planner) MEMORY=on MEMORY_DIR="$DATA/memory/$KIND" ;;
+    worker:*)
+      if [ "$MODE" = resume ]; then
+        [ "$(roster_field "$NAME" memory)" = on ] && MEMORY=on
+      else
+        arm="$DATA/memory/worker-arm"
+        [ "$(cat "$arm" 2>/dev/null)" = off ] && MEMORY=on
+        mkdir -p "$DATA/memory" && printf '%s\n' "$MEMORY" > "$arm" || refuse "it cannot write the memory trial's turn to $arm"
+      fi
+      [ "$MEMORY" = on ] && MEMORY_DIR="$DATA/memory/worker-b"
+      ;;
+  esac
+fi
 # A session moved off the Desktop folder keeps its transcript in that folder's project, so it is copied to the new folder's, where --resume looks.
 if [ -n "${FROM:-}" ] && [[ $SESSION =~ ^[0-9a-f-]{36}$ ]]; then
   old="$(project_of "$FROM")/$SESSION.jsonl"
@@ -1747,6 +1766,7 @@ PY
 [ -z "$TITLE" ] || [ "${held:0:1}" = 1 ] || set -- "$@" "title=$TITLE"
 [ -z "$TITLE_ARG" ] || set -- "$@" "title=$TITLE_ARG"
 [ "${held:1:1}" = 1 ] || set -- "$@" "task=$TASK"
+set -- "$@" "memory=$MEMORY"
 said=
 if ! roster "$@"; then
   [ -n "$said" ] && echo "roster.ts says: $said" >&2

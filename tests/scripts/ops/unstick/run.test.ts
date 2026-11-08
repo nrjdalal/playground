@@ -1829,3 +1829,40 @@ describe("the capped and ending account lines (#1457)", () => {
     expect(sent).toEqual([])
   })
 })
+
+// The auto-memory trial (#1484) turns memory on for the sessions the roster marks memory=on, so a note one of them leaves in a project folder raises nothing, while another session's still does.
+describe("the memory files alert and the memory trial (#1484)", () => {
+  const ON = "a1b2c3d4-0000-4000-8000-0000000014a1"
+  const OFF = "a1b2c3d4-0000-4000-8000-0000000014a2"
+  const machineWith = () => {
+    const config = scratch()
+    mkdirSync(join(config, "sessions"), { recursive: true })
+    writeFileSync(
+      join(config, "sessions", "1.json"),
+      JSON.stringify({ name: "worker-on", sessionId: ON }),
+    )
+    writeFileSync(
+      join(config, "sessions", "2.json"),
+      JSON.stringify({ name: "worker-off", sessionId: OFF }),
+    )
+    writeFileSync(
+      join(config, "playground", "roster.json"),
+      JSON.stringify({
+        agents: [
+          { kind: "worker", memory: "on", name: "worker-on", status: "working", task: "t" },
+          { kind: "worker", memory: "off", name: "worker-off", status: "working", task: "t" },
+        ],
+      }),
+    )
+    const memory = join(config, "projects", "-made-up-checkout", "memory")
+    mkdirSync(memory, { recursive: true })
+    writeFileSync(join(memory, "on.md"), `---\noriginSessionId: ${ON}\n---\na made-up note\n`)
+    writeFileSync(join(memory, "off.md"), `---\noriginSessionId: ${OFF}\n---\na made-up note\n`)
+    return config
+  }
+
+  test("names the off session's note alone", async () => {
+    const found = (await call(machineWith(), "memory_files")) as { line: string; name: string }[]
+    expect(found.map((f) => f.name)).toEqual(["worker-off"])
+  })
+})
