@@ -194,8 +194,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 ## Run slots
 
-- Heavy runs go through `~/.playground/ops/run-slot.sh <name> -- <command>`; the load rules, the lanes, the switches, and how a draining backlog stays spaced (`burst_held`, with the small runs that join it past `BACKLOG_WAIT`) are written in [ops/README.md](ops/README.md#run-slot).
-- A small run whose waiter is fresh still starts at once, so a queue with no backlog behaves as it did before.
+- Heavy runs go through `~/.playground/ops/run-slot.sh <name> -- <command>`; the load rules, the lanes and the switches are written in [ops/README.md](ops/README.md#run-slot).
+- A backlog drains spaced: a small run that has waited past `BACKLOG_WAIT` waits for `burst_held` as medium and big runs do, since load5 shows a draining queue's starts only about a minute later, while a fresh small run starts at once; the rule and its 7 Nov burst are in [ops/README.md](ops/README.md#run-slot).
 
 ## bun run test:skills
 

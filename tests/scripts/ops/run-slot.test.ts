@@ -183,7 +183,6 @@ describe("load units", () => {
   })
 })
 
-// #610: load1 shows a run's load about a minute after it starts, so a drained queue once started five suites in 70 s at load1 16, and load1 reached 64; while the runs started in the last minute outnumber those that ended in it, the next medium or big run waits, at any load.
 // each machine's clock stands at NOW, so a line `ago` seconds back stays inside or outside the minute however long the looks take
 const NOW = Math.floor(Date.now() / 1000)
 const iso = (ago: number) => new Date((NOW - ago) * 1000).toISOString().replace(/\.\d+Z$/, "Z")
@@ -195,6 +194,7 @@ const ran = (ops: string, pid: number, slot: string, ago: number, ended?: number
       (ended === undefined ? "" : `${iso(ended)} end worker-r ${pid} rc=0 ran=${ago - ended}s\n`),
   )
 
+// #610: load1 shows a run's load about a minute after it starts, so a drained queue once started five suites in 70 s at load1 16, and load1 reached 64; while the runs started in the last minute outnumber those that ended in it, the next medium or big run waits, at any load.
 describe("a burst of starts", () => {
   const medium = { RUN_SLOT_SIZE: "medium" }
 
@@ -306,6 +306,17 @@ describe("a small run in a draining backlog", () => {
     expect(await m.runs("ops-dashboard", { RUN_SLOT_BACKLOG_WAIT: "1" })).toBe(true)
     expect(await m.runs("ops-merge-train", { RUN_SLOT_SIZE: "medium" })).toBe(true)
   })
+
+  for (const [label, ns, want] of [
+    ["an old small ticket", 1, false],
+    ["a fresh small ticket", Date.now() * 1_000_000, true],
+  ] as const)
+    test(`can-take inside a burst answers ${want} for ${label}`, async () => {
+      const m = machine({ load1: 2, now: NOW })
+      ran(m.ops, 101, "run-slot", 10)
+      m.ticket(ns, "worker-s", "s2 22 1 small")
+      expect(await m.canTake("run-slot-2", `${ns}-${process.pid}-worker-s`)).toBe(want)
+    })
 })
 
 describe("the queue's order", () => {
