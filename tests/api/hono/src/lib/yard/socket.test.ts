@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { join, resolve } from "node:path"
 
+import { testContainerName } from "../../../../../container"
+
 // The in-process cases run on one instance with no Redis, whatever KV_URL the runner's .env sets.
 process.env.KV_URL = ""
 const {
@@ -180,6 +182,8 @@ describe.skipIf(!dockerUp())("Yard's socket across instances", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("yard-socket"),
       "-p",
       "127.0.0.1::6379",
       "redis:alpine",

@@ -23,6 +23,7 @@ import {
   cycle,
   idleCompact,
   leadOf,
+  loadCapOf,
   nextDue,
   resultOf,
   runner,
@@ -849,6 +850,46 @@ describe("the beats that send no line", () => {
     expect(await Bun.file(join(ops, "log", "trash-purge.log")).text()).toContain(
       "removed 1 (20261020T000000Z-s)",
     )
+  })
+
+  test("the trash purge waits at the load cap and names the batches it left", async () => {
+    const ops = scratch()
+    const trash = join(ops, "..", "trash")
+    const now = new Date("2026-11-02T12:17:00Z")
+    mkdirSync(join(trash, "20261020T000000Z-s", "1"), { recursive: true })
+    mkdirSync(join(trash, "20261101T000000Z-s", "1"), { recursive: true })
+    const { ctx, runs, sent } = fake(ops, now)
+    await trashPurge(
+      undefined,
+      () => 20e9,
+      () => 22,
+    )(ctx)
+    expect(existsSync(join(trash, "20261020T000000Z-s"))).toBe(true)
+    expect(existsSync(join(trash, "20261101T000000Z-s"))).toBe(true)
+    expect(runs).toEqual([])
+    expect(sent).toEqual([])
+    expect(await Bun.file(join(ops, "log", "trash-purge.log")).text()).toContain(
+      "removed 0, left for load (20261020T000000Z-s, 20261101T000000Z-s)",
+    )
+  })
+
+  test("loadCapOf reads the switch's last line as run-slot.sh does, while it stands, and defaults to 22", () => {
+    const ops = scratch()
+    const now = new Date("2026-11-08T12:00:00Z")
+    const cap = join(ops, "run-slot.load5-cap")
+    expect(loadCapOf(ops, now)).toBe(22)
+    writeFileSync(cap, "builder 2026-11-08T00:00:00Z 2026-11-09T00:00:00Z a low cap\n15\n")
+    expect(loadCapOf(ops, now)).toBe(15)
+    writeFileSync(cap, "builder 2026-11-08T00:00:00Z 2026-11-09T00:00:00Z over the line\n30\n")
+    expect(loadCapOf(ops, now)).toBe(22)
+    writeFileSync(cap, "builder 2026-11-08T00:00:00Z 2026-11-08T04:00:00Z expired\n15\n")
+    expect(loadCapOf(ops, now)).toBe(22)
+    writeFileSync(cap, "builder 2026-11-08T00:00:00Z 2026-11-09T00:00:00Z no whole number\n15.5\n")
+    expect(loadCapOf(ops, now)).toBe(22)
+    writeFileSync(cap, "12\n")
+    utimesSync(cap, now, now)
+    expect(loadCapOf(ops, now)).toBe(12)
+    expect(loadCapOf(ops, new Date("2026-11-08T16:00:01Z"))).toBe(22)
   })
 
   test("the idle compact runs the Dashboard checkout's idle-compact bin straight every 5 minutes and logs each line it prints", async () => {

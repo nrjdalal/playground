@@ -57,6 +57,7 @@ import {
   settingHistory,
   settingRows,
 } from "../../../../../../packages/settings/src/settings-folder"
+import { testContainerName } from "../../../../../container"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
 const SLACK = {
@@ -1743,6 +1744,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("inbox"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",
