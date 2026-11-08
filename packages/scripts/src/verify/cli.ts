@@ -112,7 +112,7 @@ Checks (default: all)
                 on /dashboard at 1280x800, with Playground's turn written past the stream's cap,
                 writes 10 steps into that turn one at a time and counts what each component drew
                 while they landed, failing when a text part's words, a row or a row's name link
-                drew past what a step may draw (its own, plus a clock tick's row each); it writes
+                drew past what a step may draw (its own, a clock tick drawing no row); it writes
                 into the fixture's transcripts, so only on this checkout's own fixture stack
   rows          on /dashboard, at the stock sidebar width and at 11rem, every menu row above
                 the footer is 32px, every row's and member row's words fit its box and none
