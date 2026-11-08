@@ -38,7 +38,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   A long-running job joins an open runner; Ops spawns a runner when none is open, or another one for isolation or load.
   Each job runs as its own background task with its own log and health check, all listed in that runner's roster task.
   Ops closes a runner once it holds no job that is still needed.
-- **Ops jobs** Ops runs as scripts with no session (ops-awake, ops-changelog, ops-dashboard, ops-dm-watch, ops-flow, ops-herdr, ops-channel-watch, ops-loom-relay, ops-machine, ops-merge-train, ops-report, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-unstick, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
+- **Ops jobs** Ops runs as scripts with no session (ops-awake, ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-unstick, ops-usage, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
   named `ops-*.json` so the Dashboard finds a new job by its file alone,
   in the shape `heartbeatSchema` in `api/hono/src/lib/dashboard/ops.ts` reads (`job`, `pid`, `startedAt`, `lastBeatAt`, `lastResult`, `cycleSeconds`), written atomically each beat by a loop that does not wait on the work.
   The Dashboard lists each under Scripts, by its plain name and its `jobs.json` `schedule`: Running while `lastResult` is `ok` and the beat is within three cycles, Waiting while it starts `waiting: ` (a job with nothing to read yet, muted and not broken), Failing on any other result, Down once the beat goes stale, the pid goes or the loop writes `loop exited <code>` or `supervisor exited`.
