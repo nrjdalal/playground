@@ -15,6 +15,7 @@ import {
   STUCK_QUEUED_MS as API_STUCK_QUEUED_MS,
 } from "../../../../../api/hono/src/lib/dashboard/inbox"
 import { CLOCKS_STOPPED_AT } from "../../../../../packages/config/src/inbox"
+import { listedItem } from "../../../../../scripts/hooks/no-chat-question"
 import {
   ACKS_STAMPED_FROM,
   canDraft,
@@ -58,6 +59,7 @@ import {
   sendWhy,
   SHELF_LABELS,
   shelfRow,
+  shelfToOpen,
   STUCK_QUEUED_MS,
   updatedSince,
   upfrontLink,
@@ -68,6 +70,7 @@ import {
 import { QUEUED_POLL_MS } from "../../../../../web/next/src/lib/outbox"
 import { statusIcon } from "../../../../../web/next/src/lib/status-icons"
 import { fullTime } from "../../../../../web/next/src/lib/time"
+import { AFTER, ITEMS } from "../../../../scripts/hooks/inbox-items"
 
 // Remix's icons resolve from the web app's own packages, which this directory cannot see.
 const web = join(import.meta.dir, "../../../../../web/next")
@@ -468,6 +471,18 @@ describe("a link to an item", () => {
     expect(inboxTarget("needs-you-id-41", items)).toBe(true)
     expect(inboxTarget("needs-you-feed-abc", items)).toBe(false)
     expect(inboxTarget("id-41", items)).toBe(false)
+  })
+
+  test("opens the Done shelf only for a click: a page loaded with a Done card's hash starts with it shut", () => {
+    const shelves = [
+      ["progress", null, []],
+      ["done", null, [items[4]!]],
+    ] as const
+    const anchor = `needs-you-${items[4]!.id}`
+    expect(shelfToOpen(anchor, "link", shelves, [])).toBeNull()
+    expect(shelfToOpen(anchor, "click", shelves, [])).toBe("done")
+    expect(shelfToOpen(anchor, "click", shelves, ["done"])).toBeNull()
+    expect(shelfToOpen("needs-you-id-41", "click", shelves, [])).toBeNull()
   })
 })
 
@@ -2127,5 +2142,19 @@ describe("commentRefused", () => {
     expect(commentRefused("Which project is this for?", "sk-made-up-123")).toBeNull()
     expect(commentRefused("sk-made-up-123", "")).toBeNull()
     expect(commentRefused("", "  ")).toBeNull()
+  })
+})
+
+// no-chat-question's Stop gate restates the list's rule as listedItem, since a hook loads no web code; both decide every item the same (PG-1486)
+describe("the Stop gate's listed rule", () => {
+  test.each(ITEMS.filter((c) => !c.hidden))("$name: listed as the Inbox lists it", ({ item }) => {
+    const full = {
+      createdAt: AFTER,
+      delivery: null,
+      id: "x",
+      ref: 1,
+      ...item,
+    } as unknown as InboxItem
+    expect(listedItem(item)).toBe(inboxView([full]).shown.length === 1)
   })
 })

@@ -12,6 +12,9 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
+// the render_jobs harness runs jobs.ts through python, whose import graph (probe.ts's @packages/config/kinds among them) resolves through the built dists no import here reached, so a fresh checkout's render died on "Cannot find module" and its failure log then raised on the ops folder it never made (issue 1496); importing jobs.ts selects those builds
+import "../../../packages/scripts/src/playground/jobs"
+
 const upPy = join(import.meta.dir, "..", "..", "..", "scripts", "ops", "up.py")
 const scratch = mkdtempSync(join(tmpdir(), "ops-up-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -151,10 +154,10 @@ test("a pass exits 0 and starts a down job in herdr whatever runtime word its ro
   })
 })
 
-// an old ~/.zshrc hook still calls up.py --once-per-cmux in each terminal it opens, so an argument up.py does not know starts nothing.
+// an argument up.py does not know starts nothing.
 test("an argument up.py does not know is refused with its usage and runs no pass", () => {
   const job = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "herdr" }
-  for (const args of [["--once-per-cmux"], ["--restarted"], ["--sessions", "x"]])
+  for (const args of [["--once"], ["--restarted"], ["--sessions", "x"]])
     expect(exitOf([job], ...args)).toEqual({
       code: 1,
       started: [],

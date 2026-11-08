@@ -67,13 +67,13 @@ describe("Settings > Jobs (PG-1196)", () => {
 
   test("a toggle stores the job's enabled field alone at your login's scope, so the job still reads the registry's", () => {
     const data = setUp("toggle")
-    const key = jobKey("ops-ticket-card")
+    const key = jobKey("ops-zai-usage")
     const card = jobRows(listSettings(data), ME).find((row) => row.key === key)!
     const write = jobToggleWrite(card, true)
     expect(write).toEqual({
       json: {
         by: "Settings",
-        reason: "Turned ops-ticket-card on in Settings > Jobs",
+        reason: "Turned ops-zai-usage on in Settings > Jobs",
         scope: ME,
         value: { enabled: true },
       },
@@ -82,7 +82,7 @@ describe("Settings > Jobs (PG-1196)", () => {
     expect(save(data, write).ok).toBe(true)
     const read = readSetting(data, key)!
     expect(read.rows).toEqual([{ key, scope: ME, value: { enabled: true } }])
-    expect(read.value).toEqual({ ...JOBS["ops-ticket-card"], enabled: true })
+    expect(read.value).toEqual({ ...JOBS["ops-zai-usage"], enabled: true })
     expect(jobRows(listSettings(data), ME).find((row) => row.key === key)).toMatchObject({
       enabled: true,
       set: true,

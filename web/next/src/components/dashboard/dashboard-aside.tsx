@@ -29,6 +29,7 @@ import { Pages } from "@/components/dashboard/pages"
 import { useDotSources } from "@/components/dashboard/tab-dot"
 import { WorkerStream } from "@/components/dashboard/worker-stream"
 import { Hint } from "@/components/hint"
+import { PAGE_PANE } from "@/components/shell/page-pane"
 import { SidebarFloatingTrigger } from "@/components/shell/sidebar-floating-trigger"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
@@ -282,7 +283,7 @@ export function DashboardAside({ children }: { children: ReactNode }) {
     setTab("inbox")
     setSide("inbox")
   }, [at])
-  // a link to an inbox item (a Waiting on your inbox badge, Playground's row, an answer's chip) opens the Inbox tab, where the list scrolls to it, a shelved one's included
+  // a link to an inbox item (a Waiting on your inbox badge, Playground's row, an answer's chip) opens the Inbox tab, where the list scrolls to it, a click opening a shut shelf's first
   useNeedsYouTarget(Boolean(inbox.data), (anchor) => {
     const { archived = [], items = [], snoozed = [] } = inbox.data ?? {}
     if (inboxTarget(anchor, [...items, ...archived, ...snoozed])) {
@@ -398,7 +399,7 @@ export function DashboardAside({ children }: { children: ReactNode }) {
             keepMounted
             hidden={false}
             data-dashboard-page=""
-            className="col-start-1 row-start-1 flex min-h-0 flex-col overflow-y-auto data-hidden:invisible"
+            className={cn("col-start-1 row-start-1 data-hidden:invisible", PAGE_PANE)}
           >
             {children}
           </TabsContent>
@@ -444,7 +445,7 @@ export function DashboardAside({ children }: { children: ReactNode }) {
         }}
       >
         <ResizablePanel id="page" defaultSize="50%" minSize="30%">
-          <div data-dashboard-page="" className="flex h-full flex-col overflow-y-auto">
+          <div data-dashboard-page="" className={cn("h-full", PAGE_PANE)}>
             {children}
           </div>
         </ResizablePanel>

@@ -191,8 +191,9 @@ fi
 # run-slot.sh preempt: while run-slot.focus stands, TERM the process group of each <slot>.child that focus does not spare, only while it is still its holder's child leading its own group, so an urgent ticket's fix goes first (scripts/ops/README.md)
 if [ "${1:-}" = preempt ]; then
   [ $# -eq 1 ] || { echo "usage: run-slot.sh preempt" >&2; exit 2; }
-  switch_on run-slot.focus || { echo "run-slot.sh: no focus stands (run-slot.focus), so preempt stops nothing" >&2; exit 2; }
-  h=$(cut -d' ' -f1 "$OPS/run-slot.focus")
+  h=
+  switch_on run-slot.focus && read -r h _ 2>/dev/null < "$OPS/run-slot.focus"
+  [ -n "$h" ] || { echo "run-slot.sh: no focus stands (run-slot.focus), so preempt stops nothing" >&2; exit 2; }
   for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone run-slot-quick $(ls "$OPS" 2>/dev/null | sed -n 's/^\(run-slot-model-[0-9]*\)\.holder$/\1/p' | sort -u); do
     [ -f "$OPS/$s.holder" ] && read -r who pid _ < "$OPS/$s.holder" || continue
     child=$(cat "$OPS/$s.child" 2>/dev/null)
@@ -925,8 +926,7 @@ ran_last3() {
 ran_short() { ran_last3 within 10 "$@"; }
 # each of the last 3 ran over 60 s (1 Nov: a two-file test:file line ran 39, 421 and 226 s back to back in the one quick slot, and the quick lane's waiters waited 63 min in the hour from 12:00Z)
 ran_long() { ran_last3 over 60 "$@"; }
-# whether a test file this line names (tests/... or ./tests/..., read as one) ran over 60 s in a quick run within that file's last 3 runs, under any
-# line, so a new line naming a known-slow file beside others reads that file's history (issue 1242: since 5 Nov 19 quick runs of 188 to 857 s did)
+# whether a test file this line names (tests/... or ./tests/..., read as one) ran over 60 s within that file's last 3 runs, under any line, so a new line naming a known-slow file beside others reads that file's history (issue 1242: since 5 Nov 19 quick runs of 188 to 857 s did); a quick run counts, and so does a started run of 1 to 3 test files in any other lane, while a run outside quick naming more than 3 test files adds nothing, so 3 big suite runs cannot push a slow file's long run out of the window (issue 1507)
 file_ran_long() {
   local a files=""
   for a in "$@"; do case "$a" in tests/*.test.ts | tests/*.test.tsx | ./tests/*.test.ts | ./tests/*.test.tsx) files="$files ${a#./}" ;; esac; done
@@ -934,16 +934,18 @@ file_ran_long() {
   tail -n 20000 "$OPS/run-slot.runs.log" 2>/dev/null | FILES="$files" awk '
     $2 == "ask" { c = $0; for (k = 0; k < 4; k++) sub(/^[^ ]+ /, "", c); line[$4] = c; next }
     $2 == "start" { lane[$4] = $5; next }
-    $2 == "end" && ($4 in line) {
+    $2 == "end" && ($4 in line) && ($4 in lane) {
       ran = 0; for (i = 5; i <= NF; i++) if ($i ~ /^ran=[0-9]+s$/) ran = substr($i, 5) + 0
-      long = lane[$4] == "run-slot-quick" && ran > 60
       n = split(line[$4], w, " ")
+      m = 0; for (i = 1; i <= n; i++) { f = w[i]; sub(/^\.\//, "", f); if (f ~ /^tests\/.*\.test\.tsx?$/) m++ }
+      if (lane[$4] != "run-slot-quick" && m > 3) { delete line[$4]; delete lane[$4]; next }
+      long = ran > 60
       for (i = 1; i <= n; i++) { f = w[i]; sub(/^\.\//, "", f); if (f ~ /^tests\/.*\.test\.tsx?$/) h[f] = substr(h[f] long, length(h[f] long) > 3 ? length(h[f] long) - 2 : 1) }
       delete line[$4]; delete lane[$4]
     }
     END { n = split(ENVIRON["FILES"], want, " "); for (i = 1; i <= n; i++) if (index(h[want[i]], "1")) exit 0; exit 1 }'
 }
-# the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue; a line the rule calls quick that ran long its last 3 times goes to the queue, since its file count says nothing of its time, and so does a quick line naming a test file that ran long in a quick run within its own last 3 runs (file_ran_long)
+# the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue; a line the rule calls quick that ran long its last 3 times goes to the queue, since its file count says nothing of its time, and so does a quick line naming a test file that ran long within its own last 3 runs (file_ran_long)
 quick_kind() {
   # a read command takes no slot and runs a bare true, so three short true runs in the log would take can-take and head down the quick lane, past their own exits (issue 285)
   [ -n "$CAN_TAKE" ] && return
@@ -1520,10 +1522,12 @@ prio_holder() {
   case "$m" in '' | *[!0-9]*) return 1 ;; esac
   [ $(( $(date +%s) - m )) -lt 3600 ] && cut -d' ' -f1 "$OPS/run-slot.priority"
 }
-# the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not
+# the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not or goes between the check and the read (issue 1491)
 focus_holder() {
   switch_on run-slot.focus || return 1
-  cut -d' ' -f1 "$OPS/run-slot.focus"
+  local h=
+  read -r h _ 2>/dev/null < "$OPS/run-slot.focus"
+  [ -n "$h" ] && printf '%s\n' "$h"
 }
 # true while focus holds this run: a heavy lane waits for every session but the focus one and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov)
 focus_holds() {

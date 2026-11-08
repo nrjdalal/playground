@@ -170,6 +170,7 @@ import {
   type Shelf,
   SHELF_LABELS,
   shelfRow,
+  shelfToOpen,
   takenBy,
   updatedSince,
   upfrontLink,
@@ -2097,7 +2098,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     taken.current = 0
   })
   // a link to an item (a Waiting on your inbox badge, Playground's row) scrolls the list to it once it is read
-  useNeedsYouTarget(data !== undefined, (anchor) => {
+  useNeedsYouTarget(data !== undefined, (anchor, source) => {
     // one still behind the pill takes what waits, so the next try finds its row
     if (held.some((item) => needsYouAnchor(item.id) === anchor)) {
       take()
@@ -2108,11 +2109,9 @@ export function Inbox({ viewing }: { viewing: boolean }) {
       setListOpen(true)
       return false
     }
-    // a card on a shut shelf (an answer's chip names one) opens its shelf first, so the next try finds its row
-    const shelf = shelves.find(([, , list]) =>
-      list.some((item) => needsYouAnchor(item.id) === anchor),
-    )?.[0]
-    if (shelf && !shelvesOpen.includes(shelf)) {
+    // a click on a card on a shut shelf (an answer's chip names one) opens its shelf first, so the next try finds its row
+    const shelf = shelfToOpen(anchor, source, shelves, shelvesOpen)
+    if (shelf) {
       setShelvesOpen((keys) => [...keys, shelf])
       return false
     }

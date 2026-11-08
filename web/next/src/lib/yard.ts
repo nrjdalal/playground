@@ -37,9 +37,12 @@ export const retryDelay = (tries: number) => Math.min(2_000 * 2 ** tries, 60_000
 export const upsertMessage = (list: Message[], message: Message) =>
   [...list.filter((row) => row.id !== message.id), message].sort((a, b) => a.at.localeCompare(b.at))
 
-// The hosted app opens a channel under /yard; the local dashboard opens it in its own chat pane.
-export const channelHref = (channel: Pick<YardChannel, "id">, hosted: boolean) =>
-  hosted
+// The shell a Yard row is drawn in: the dashboard's, the owner's on both builds, or Yard's own, for the hosted members who are not the owner.
+export type YardShell = "dashboard" | "yard"
+
+// A row opens its channel in the shell it is drawn in, whatever the build: the dashboard's chat pane, beside the sessions, or Yard's own page under /yard.
+export const channelHref = (channel: Pick<YardChannel, "id">, shell: YardShell) =>
+  shell === "yard"
     ? `/yard/c/${encodeURIComponent(channel.id)}`
     : `/dashboard/yard/${encodeURIComponent(channel.id)}`
 
