@@ -9,7 +9,8 @@ const { answerRelay, CONNECT_MS, RECYCLE_MS, requireRelay, requireSignedWrite, s
   await import("../../../../../../api/hono/src/lib/relay/mac")
 const { keyIdOf, pairKeySchema, RELAY_ANSWER_KINDS, signedBytes } =
   await import("../../../../../../packages/message/src/index")
-const { RELAY_MAX_AGE_MS } = await import("../../../../../../api/hono/src/lib/relay/protocol")
+const { RELAY_MAX_AGE_MS, RELAY_REPLACED_CLOSE } =
+  await import("../../../../../../api/hono/src/lib/relay/protocol")
 const { dashboardRouter } = await import("../../../../../../api/hono/src/routers/dashboard")
 const { errorHandler } = await import("../../../../../../api/hono/src/lib/error")
 const { Hono } = await import("../../../../../../api/hono/node_modules/hono")
@@ -750,6 +751,8 @@ type Fake = {
   ) => void
   // a code and reason, as the hub's close of a refused socket carries
   close: (code?: number, reason?: string) => void
+  // the code it was closed with, by either end
+  closedWith?: number
   feed: (data: string) => void
   open: () => void
   readyState: number
@@ -771,6 +774,7 @@ const sockets = () => {
       close: (code, reason) => {
         if (one.readyState === 3) return
         one.readyState = 3
+        one.closedWith = code
         for (const listener of on.close!) listener({ code, reason })
       },
       feed: (data) => {
@@ -872,6 +876,23 @@ describe("startRelay, this Mac's socket to the hub", () => {
     }
   })
 
+  // the hub let a recycled socket go with a ping and then gone on the bus, still in flight when Vercel froze its instance, so each failed at the next thaw (#1537)
+  test("the recycle closes the old socket as replaced once the next one is open, and stop closes with no code", async () => {
+    const { connect, made } = sockets()
+    const stop = relay(connect, { recycleMs: 30 })
+    try {
+      await until("the socket", () => made.length === 1)
+      made[0]!.open()
+      await until("the next socket", () => made.length === 2)
+      expect(made[0]!.readyState).toBe(1)
+      made[1]!.open()
+      expect([made[0]!.readyState, made[0]!.closedWith]).toEqual([3, RELAY_REPLACED_CLOSE])
+    } finally {
+      stop()
+    }
+    expect([made[1]!.readyState, made[1]!.closedWith]).toEqual([3, undefined])
+  })
+
   test("a next socket that never opens leaves the old one holding the relay", async () => {
     const { connect, made } = sockets()
     const stop = relay(connect, { recycleMs: 30 })
@@ -943,6 +964,8 @@ describe("startRelay, this Mac's socket to the hub", () => {
       made[1]!.close()
       held[0]!()
       await until("the old socket closing", () => made[0]!.readyState === 3)
+      // no next socket holds the relay, so the hub asks the bus for the Mac as before
+      expect(made[0]!.closedWith).toBeUndefined()
       await until("a socket after the backoff", () => made.length === 3)
       await Bun.sleep(2500)
       expect(made).toHaveLength(3)

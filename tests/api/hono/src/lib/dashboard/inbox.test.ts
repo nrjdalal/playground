@@ -57,6 +57,7 @@ import {
   settingHistory,
   settingRows,
 } from "../../../../../../packages/settings/src/settings-folder"
+import { testContainerName } from "../../../../../container"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
 const SLACK = {
@@ -1555,18 +1556,18 @@ describe("a guard decision for a job (PG-1196)", () => {
     inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
 
   test("takes a registry job's enabled field alone, or no value", () => {
-    expect(takes({ key: "jobs.opsTicketCard", value: { enabled: true } })).toBe(true)
+    expect(takes({ key: "jobs.opsZaiUsage", value: { enabled: true } })).toBe(true)
     expect(takes({ key: "jobs.opsSweep", value: { enabled: false } })).toBe(true)
-    expect(takes({ key: "jobs.opsTicketCard", value: undefined })).toBe(true)
+    expect(takes({ key: "jobs.opsZaiUsage", value: undefined })).toBe(true)
   })
 
   // #1336: a job the registry does not name is an org's own job, whose enabled field alone is a part Approve writes over the org's row, so only a value that is neither a part nor a whole row is refused
   test("refuses a job decision carrying any field but enabled, and a job the registry does not name with neither a part nor a whole row", () => {
     for (const change of [
-      { key: "jobs.opsTicketCard", value: { command: "made-up", enabled: true } },
-      { key: "jobs.opsTicketCard", value: { enabled: true, schedule: { every: 5 } } },
-      { key: "jobs.opsTicketCard", value: {} },
-      { key: "jobs.opsTicketCard", value: true },
+      { key: "jobs.opsZaiUsage", value: { command: "made-up", enabled: true } },
+      { key: "jobs.opsZaiUsage", value: { enabled: true, schedule: { every: 5 } } },
+      { key: "jobs.opsZaiUsage", value: {} },
+      { key: "jobs.opsZaiUsage", value: true },
       { key: "jobs.opsMadeUp", value: { enabled: true, schedule: { every: 5 } } },
     ]) {
       expect(takes(change), JSON.stringify(change)).toBe(false)
@@ -1743,6 +1744,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("inbox"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",
@@ -3796,43 +3799,6 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect((await store.listItems(db, later)).items.map((i) => i.id)).not.toContain(posted.id)
   })
 
-  // #1440 renamed the sessions read's codes; a row recorded under an old one reads through toItem's alias for one ship (ADR 0015), and the row itself stays as stored
-  test("a delivery stored under an old code reads as its sessions-named code, and a new failure records the new code alone (#1440)", async () => {
-    const posted = await post(decision(PREVIEWS.delete))
-    const answered = await store.answerItem(
-      db,
-      posted.id,
-      { action: "approve" },
-      { actor, deliver: failing },
-    )
-    if (!answered.ok) throw new Error(answered.message)
-    const reader = new SQL(url, { max: 1 })
-    const stored = async (): Promise<string[]> =>
-      (
-        await reader`select delivery ->> 'code' as code from inbox_item where id = ${posted.id}`
-      ).map((row: { code: string }) => row.code)
-    try {
-      expect(await stored()).toEqual(["SESSIONS_FAILED"])
-      for (const [old, now] of [
-        ["CMUX_FAILED", "SESSIONS_FAILED"],
-        ["CMUX_UNAVAILABLE", "SESSIONS_UNAVAILABLE"],
-      ] as const) {
-        await reader`update inbox_item set delivery = jsonb_set(delivery, '{code}', to_jsonb(${old}::text)) where id = ${posted.id}`
-        expect(await stored()).toEqual([old])
-        expect((await store.getItem(db, posted.id))?.delivery).toMatchObject({
-          code: now,
-          status: "failed",
-        })
-        const listed = (await store.listItems(db)).items.find((item) => item.id === posted.id)
-        expect(listed?.delivery).toMatchObject({ code: now, status: "failed" })
-        expect(await stored()).toEqual([old])
-      }
-    } finally {
-      await reader.close()
-    }
-    await store.dismissItems(db, [posted.id])
-  })
-
   test("a set-aside item stays in the list past a week, for the Archive shelf, and never counts", async () => {
     const posted = await post(decision(PREVIEWS.ship))
     const delivered = async () => ({
@@ -5591,7 +5557,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
 
     test("a job's Approve stores its enabled field alone at its scope, so every other field still reads the registry's (PG-1196)", async () => {
       const data = folder()
-      const key = "jobs.opsTicketCard"
+      const key = "jobs.opsZaiUsage"
       const card = { ...GUARD, key, scope: "made-up-me", value: { enabled: true } }
       const posted = await post(decision(card))
       expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
@@ -5689,7 +5655,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
 
     test("a job's Approve keeps the other fields its scope's row holds, and stores no registry field (PG-1196)", async () => {
       const data = folder()
-      const key = "jobs.opsTicketCard"
+      const key = "jobs.opsZaiUsage"
       const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
       const row = { enabled: false, schedule: { every: 7 } }
       expect(setSetting(data, { key, scope: "made-up-me", value: row }, who).ok).toBe(true)

@@ -30,7 +30,7 @@ stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
 # (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
-SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
+SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load1-max run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
 # whether switch $1 (a path under ops) is on; one past its expiry is moved to <name>.expired-<ts> and logged in run-slot.runs.log
 switch_on() {
   local f="$OPS/$1" line ends now m
@@ -191,8 +191,9 @@ fi
 # run-slot.sh preempt: while run-slot.focus stands, TERM the process group of each <slot>.child that focus does not spare, only while it is still its holder's child leading its own group, so an urgent ticket's fix goes first (scripts/ops/README.md)
 if [ "${1:-}" = preempt ]; then
   [ $# -eq 1 ] || { echo "usage: run-slot.sh preempt" >&2; exit 2; }
-  switch_on run-slot.focus || { echo "run-slot.sh: no focus stands (run-slot.focus), so preempt stops nothing" >&2; exit 2; }
-  h=$(cut -d' ' -f1 "$OPS/run-slot.focus")
+  h=
+  switch_on run-slot.focus && read -r h _ 2>/dev/null < "$OPS/run-slot.focus"
+  [ -n "$h" ] || { echo "run-slot.sh: no focus stands (run-slot.focus), so preempt stops nothing" >&2; exit 2; }
   for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone run-slot-quick $(ls "$OPS" 2>/dev/null | sed -n 's/^\(run-slot-model-[0-9]*\)\.holder$/\1/p' | sort -u); do
     [ -f "$OPS/$s.holder" ] && read -r who pid _ < "$OPS/$s.holder" || continue
     child=$(cat "$OPS/$s.child" 2>/dev/null)
@@ -210,8 +211,8 @@ if [ "${1:-}" = size ]; then
   size_of "$2"
   exit
 fi
-# run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]: turn on switch 3-off, 4-off, clone-off, focus, idle-min, load5-cap, single,
-# or the runner host's off or slot-off, for 4 hours unless --for says; a value (idle-min's bar, load5-cap's cap) goes on the line below. A set with no reason is refused
+# run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]: turn on switch 3-off, 4-off, clone-off, focus, idle-min, load1-max, load5-cap, single,
+# or the runner host's off or slot-off, for 4 hours unless --for says; a value (idle-min's bar, load1-max's stop, load5-cap's cap) goes on the line below. A set with no reason is refused
 if [ "${1:-}" = set ]; then
   usage='usage: run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]'
   [ $# -ge 3 ] || { echo "$usage" >&2; exit 2; }
@@ -227,8 +228,8 @@ if [ "${1:-}" = set ]; then
   case "$who" in *[!A-Za-z0-9._#-]*|"") echo "run-slot.sh: <who> is a session name (letters, digits, . _ - #)" >&2; exit 2 ;; esac
   case "$name" in
     off|slot-off) path=runner-host/$name ;;
-    3-off|4-off|clone-off|focus|idle-min|load5-cap|single) path=run-slot.$name ;;
-    *) echo "run-slot.sh: no switch $name (3-off, 4-off, clone-off, focus, idle-min, load5-cap, single, off, slot-off)" >&2; exit 2 ;;
+    3-off|4-off|clone-off|focus|idle-min|load1-max|load5-cap|single) path=run-slot.$name ;;
+    *) echo "run-slot.sh: no switch $name (3-off, 4-off, clone-off, focus, idle-min, load1-max, load5-cap, single, off, slot-off)" >&2; exit 2 ;;
   esac
   [ -n "$reason" ] || { echo "run-slot.sh: a set takes --reason \"<why>\", so whoever finds the switch on knows why it stands" >&2; exit 2; }
   case "$span" in [0-9]*m) unit=60 ;; [0-9]*h) unit=3600 ;; *) unit= ;; esac
@@ -361,8 +362,47 @@ if [ -n "$AFTER" ] && [ -z "$REREAD" ]; then
   ASKED=$(date +%s)
 fi
 # bun run pr:merge or pr:train, as the whole command, runs at once outside the queue once any --after wait ends, since a merge carries its own gates and its type steps take their own slots (5 Nov: three wrapped merges in an hour each waited behind the heavy queue, and each inner type step queued again)
-if [ -z "$KIND_ONLY" ] && [ "${1:-}" = bun ] && [ "${2:-}" = run ] && { [ "${3:-}" = pr:merge ] || [ "${3:-}" = pr:train ]; }; then
-  echo "run-slot.sh: bun run $3 runs at once, outside the queue: a merge carries its own gates, and its type steps take their own slots (packages/scripts/src/pr-merge/README.md)" >&2
+# the same words behind leading env and VAR=x words, bun's --cwd <dir>, --cwd=<dir>, --silent and --no-env-file flags and a bun run --silent pass too, exec'd whole so the merge's env rides along (7 Nov: env NODE_ENV=production SKIP_ENV_VALIDATION=true bun run pr:merge 1418 asked at 14:35:13Z and again at 15:13:13Z with no start line either time, so it waited at least the 38 minutes between the asks), and so does the direct bun [--no-env-file] packages/scripts/src/pr-merge/{cli,train-cli}.ts call, the step bun run pr:merge and pr:train expand to; no caller wraps it in run-slot, since the train and merge-on-ready merge through pr:merge's own modules
+# every other form keeps its place in the queue as any run does: the inline bash -c chain holding the merge that day queued 6 s (7 Nov, 05:39:56Z), and a chain script keeps the pin run-slot-merge-now.test.ts holds; matching inside shell text would be a bypass treadmill
+merge_pass() {
+  local i=1 n=$# w
+  while [ $i -le $n ]; do
+    w=${!i}
+    case "$w" in
+      env | [A-Za-z_]*=*) i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  [ "${!i:-}" = bun ] || return 1
+  i=$((i + 1))
+  while [ $i -le $n ]; do
+    case "${!i}" in
+      --cwd) i=$((i + 2)) ;;
+      --cwd=* | --no-env-file | --silent) i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  # the direct cli call, the step bun run pr:merge and pr:train expand to, names its file in place of run
+  case "${!i:-}" in
+    pr:merge | pr:train) MERGE_NAME=${!i}; return 0 ;;
+    *pr-merge/cli.ts) MERGE_NAME=pr:merge; return 0 ;;
+    *pr-merge/train-cli.ts) MERGE_NAME=pr:train; return 0 ;;
+  esac
+  [ "${!i:-}" = run ] || return 1
+  i=$((i + 1))
+  while [ $i -le $n ]; do
+    case "${!i}" in
+      --silent) i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  case "${!i:-}" in
+    pr:merge | pr:train) MERGE_NAME=${!i}; return 0 ;;
+  esac
+  return 1
+}
+if [ -z "$KIND_ONLY" ] && merge_pass "$@"; then
+  echo "run-slot.sh: bun run $MERGE_NAME runs at once, outside the queue: a merge carries its own gates, and its type steps take their own slots (packages/scripts/src/pr-merge/README.md)" >&2
   exec "$@" 3<&-
 fi
 # dispatcher, 18 Oct: a test, type check (from the checkout's root), lint or format check runs on the runner host, taking no slot here. ci.sh exec
@@ -925,8 +965,7 @@ ran_last3() {
 ran_short() { ran_last3 within 10 "$@"; }
 # each of the last 3 ran over 60 s (1 Nov: a two-file test:file line ran 39, 421 and 226 s back to back in the one quick slot, and the quick lane's waiters waited 63 min in the hour from 12:00Z)
 ran_long() { ran_last3 over 60 "$@"; }
-# whether a test file this line names (tests/... or ./tests/..., read as one) ran over 60 s in a quick run within that file's last 3 runs, under any
-# line, so a new line naming a known-slow file beside others reads that file's history (issue 1242: since 5 Nov 19 quick runs of 188 to 857 s did)
+# whether a test file this line names (tests/... or ./tests/..., read as one) ran over 60 s within that file's last 3 runs, under any line, so a new line naming a known-slow file beside others reads that file's history (issue 1242: since 5 Nov 19 quick runs of 188 to 857 s did); a quick run counts, and so does a started run of 1 to 3 test files in any other lane, while a run outside quick naming more than 3 test files adds nothing, so 3 big suite runs cannot push a slow file's long run out of the window (issue 1507)
 file_ran_long() {
   local a files=""
   for a in "$@"; do case "$a" in tests/*.test.ts | tests/*.test.tsx | ./tests/*.test.ts | ./tests/*.test.tsx) files="$files ${a#./}" ;; esac; done
@@ -934,16 +973,18 @@ file_ran_long() {
   tail -n 20000 "$OPS/run-slot.runs.log" 2>/dev/null | FILES="$files" awk '
     $2 == "ask" { c = $0; for (k = 0; k < 4; k++) sub(/^[^ ]+ /, "", c); line[$4] = c; next }
     $2 == "start" { lane[$4] = $5; next }
-    $2 == "end" && ($4 in line) {
+    $2 == "end" && ($4 in line) && ($4 in lane) {
       ran = 0; for (i = 5; i <= NF; i++) if ($i ~ /^ran=[0-9]+s$/) ran = substr($i, 5) + 0
-      long = lane[$4] == "run-slot-quick" && ran > 60
       n = split(line[$4], w, " ")
+      m = 0; for (i = 1; i <= n; i++) { f = w[i]; sub(/^\.\//, "", f); if (f ~ /^tests\/.*\.test\.tsx?$/) m++ }
+      if (lane[$4] != "run-slot-quick" && m > 3) { delete line[$4]; delete lane[$4]; next }
+      long = ran > 60
       for (i = 1; i <= n; i++) { f = w[i]; sub(/^\.\//, "", f); if (f ~ /^tests\/.*\.test\.tsx?$/) h[f] = substr(h[f] long, length(h[f] long) > 3 ? length(h[f] long) - 2 : 1) }
       delete line[$4]; delete lane[$4]
     }
     END { n = split(ENVIRON["FILES"], want, " "); for (i = 1; i <= n; i++) if (index(h[want[i]], "1")) exit 0; exit 1 }'
 }
-# the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue; a line the rule calls quick that ran long its last 3 times goes to the queue, since its file count says nothing of its time, and so does a quick line naming a test file that ran long in a quick run within its own last 3 runs (file_ran_long)
+# the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue; a line the rule calls quick that ran long its last 3 times goes to the queue, since its file count says nothing of its time, and so does a quick line naming a test file that ran long within its own last 3 runs (file_ran_long)
 quick_kind() {
   # a read command takes no slot and runs a bare true, so three short true runs in the log would take can-take and head down the quick lane, past their own exits (issue 285)
   [ -n "$CAN_TAKE" ] && return
@@ -1263,6 +1304,8 @@ CHILD=""
 POLL=${RUN_SLOT_POLL:-15}
 # the longest a commit or quick start waits on load5 (issue 1385)
 LOAD_WAIT=${RUN_SLOT_LOAD_WAIT:-300}
+# the wait past which a waiter counts as a backlog the burst hold keeps spaced, small runs included (issue 1417): a queue that releases starts its small runs all at once, and load5 reads them only about a minute later (7 Nov 13:10 to 13:15Z: 12 queued runs started on run-slot and run-slot-2, and load5 crossed 15 at 13:16:08Z), so a small run that has waited this long also waits for burst_held to clear; a fresh small run starts at once (the tests shorten it; a poll adds 15 to a waiter's wait whatever POLL is, so with the default 15 s poll the line reads in seconds)
+BACKLOG_WAIT=${RUN_SLOT_BACKLOG_WAIT:-300}
 CLONE_POLL=${RUN_SLOT_POLL:-5}
 # the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake (clone_brake) it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
 CLONE_GAP=180
@@ -1520,10 +1563,12 @@ prio_holder() {
   case "$m" in '' | *[!0-9]*) return 1 ;; esac
   [ $(( $(date +%s) - m )) -lt 3600 ] && cut -d' ' -f1 "$OPS/run-slot.priority"
 }
-# the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not
+# the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not or goes between the check and the read (issue 1491)
 focus_holder() {
   switch_on run-slot.focus || return 1
-  cut -d' ' -f1 "$OPS/run-slot.focus"
+  local h=
+  read -r h _ 2>/dev/null < "$OPS/run-slot.focus"
+  [ -n "$h" ] && printf '%s\n' "$h"
 }
 # true while focus holds this run: a heavy lane waits for every session but the focus one and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov)
 focus_holds() {
@@ -1739,16 +1784,22 @@ slot_open() {
   fi
   return 0
 }
-# the CPU idle share slots 2 to 4 open at under load1 45: 40, or run-slot.idle-min's bar while it stands, a whole number from 0 to 100 on the file's last line as load_line reads its cap (issue 1431: a constant bar left Ops no way to put more of a machine's cores to use short of a code change); any other value keeps 40
+# the CPU idle share slots 2 to 4 open at under the load1 stop: 40, or run-slot.idle-min's bar while it stands, a whole number from 0 to 100 on the file's last line as load_line reads its cap (issue 1431: a constant bar left Ops no way to put more of a machine's cores to use short of a code change); any other value keeps 40
 idle_min() {
   local bar
   bar=$(switch_on run-slot.idle-min && tail -n 1 "$OPS/run-slot.idle-min" | grep -xE '[0-9]{1,3}'); [ -n "$bar" ] && [ "$bar" -le 100 ] || bar=40
   echo "$bar"
 }
-# whether the gauges open slots 2 to 4: mem_ok passing and the CPU idle at idle_min's bar or more, 40% unless run-slot.idle-min says, under load1 45 (5 Nov, 06:19 to 07:45Z: a 50% bar from load1 30
+# the load1 value slots 2 to 4 open under: 45, or run-slot.load1-max's stop while it stands, a whole number from 1 to 999 on the file's last line as idle_min reads its bar (issue 1442: a fixed stop flipped the lanes between why=load1 and why=cpu while the CPU read 55 to 57% idle and 15 runs waited on one lane, with no lever on the stop short of a code change); any other value keeps 45
+load1_max() {
+  local stop
+  stop=$(switch_on run-slot.load1-max && tail -n 1 "$OPS/run-slot.load1-max" | grep -xE '[0-9]{1,3}'); [ -n "$stop" ] && [ "$stop" -ge 1 ] || stop=45
+  echo "$stop"
+}
+# whether the gauges open slots 2 to 4: mem_ok passing and the CPU idle at idle_min's bar or more, 40% unless run-slot.idle-min says, under the load1 stop, 45 unless run-slot.load1-max says (issue 1442) (5 Nov, 06:19 to 07:45Z: a 50% bar from load1 30
 # to 45 left the CPU at a median 48% idle, and 14 of its 30 CPU shuts read 40 to 49% idle) (dispatcher, 3 Nov: the resting sessions held load1 at 14 to 20 on 15 cores while the CPU sat 53 to 67% idle, so the old load1 lines of 12
 # and the cores left one lane open with 24 to 33 runs waiting; retro 36, 4 Nov: at a load1 30 stop the lanes were shut 109 of 120 minutes
-# with the CPU about half idle, and heavy runs waited up to 122 minutes); load1 45 stays a hard stop for the spikes, load1 64 after a burst
+# with the CPU about half idle, and heavy runs waited up to 122 minutes); the load1 stop stays a hard stop for the spikes, load1 64 after a burst
 # of starts and 73 after a clone; a run's verdict that differs from the last, run-slot.lanes, is a lanes line in run-slot.runs.log with the
 # gauges, mem_ok's free share and pressure level and, when shut, why: the first of load1, cpu and mem that shut it (dispatcher, 5 Nov: retro 39
 # counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither
@@ -1762,7 +1813,7 @@ lanes_open() {
     -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut" ;;
     busy) told busy "$BUSY_TOLD" ;;
   esac
-  if [ "${load%.*}" -lt 45 ] 2>/dev/null; then need=$(idle_min); fi
+  if [ "${load%.*}" -lt "$(load1_max)" ] 2>/dev/null; then need=$(idle_min); fi
   if [ -z "$need" ]; then
     why=load1
   elif [ "$idle" = - ] || [ "$idle" = busy ] || ! [ "${idle%.*}" -ge "$need" ] 2>/dev/null; then
@@ -1803,12 +1854,12 @@ iso_ago() {
 # A burst of starts outruns the reading the slots open on, since load1 shows a run's load about a minute after it starts (issue 610, 2 Nov:
 # five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while run-slot.runs.log shows more runs started on
 # run-slot to run-slot-4 or the clone slot in the last minute than ended there, so the held runs grew, a medium or big run waits for the
-# reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, as does a small run,
-# and the dashboard's and the merge train's runs go on too, as they skip slot 2's lanes_open; prints how many runs the last
-# minute added when it holds
+# reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, a small run goes on
+# until its waiter has waited past BACKLOG_WAIT, and the dashboard's and the merge train's runs go on too, as they skip slot 2's
+# lanes_open; prints how many runs the last minute added when it holds
 burst_held() {
   local cutoff
-  [ "$SIZE" != small ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
+  { [ "$SIZE" != small ] || [ "${waited:-0}" -ge "$BACKLOG_WAIT" ]; } && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
   cutoff=$(iso_ago 60) || return 1
   tail -n 3000 "$OPS/run-slot.runs.log" 2>/dev/null | CUTOFF=$cutoff awk '
     $2 == "start" && $5 ~ /^run-slot(-[234]|-clone)?$/ { run[$3 " " $4] = 1; if ($1 > ENVIRON["CUTOFF"]) n++ }
@@ -2164,6 +2215,8 @@ if [ -n "$CAN_TAKE" ]; then
     read -r _ rank UNITS SIZE _ 2>/dev/null < "$QUEUE/$CAN_TICKET"
     case "$rank" in [0-2][1-3]) CLASS=${rank%?} ;; *) CLASS=2 ;; esac
     case "$UNITS" in 1 | 2 | 3) ;; *) UNITS=2 SIZE=medium ;; esac
+    # the ticket's own wait, its ask's time_ns in its name, so a small one past the backlog line answers for the hold the queue holds it under (issue 1417); a session-name ask has no wait to read and reads as fresh
+    waited=$((($(date +%s) - ${CAN_TICKET%%-*} / 1000000000)))
   fi
   reclaim "$OPS/$CAN_TAKE"
   [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" && ! burst_held > /dev/null || exit 1
@@ -2195,11 +2248,14 @@ while :; do
     [ "$fw2" = "${TICKET##*/}" ] || S2=0
   fi
   # the oldest waiter names who goes next, "<first_waiter> <first_waiter s2> <prio_first>", under the priority pick too, so a waiter its look passed over, the
-  # pick's next ticket included once its first has gone, looks again at once (its poll reads run-slot.next)
+  # pick's next ticket included once its first has gone, looks again at once (its poll reads run-slot.next); each write is a `next` line in run-slot.runs.log,
+  # so a window where head named a waiter the line passed over reads back who the oldest named and when (issue 1477)
   if [ -n "$TICKET" ] && oldest_is_me; then
     pf=; [ -e "$OPS/run-slot.priority" ] || [ -e "$OPS/run-slot.focus" ] && pf=$(prio_first)
     nx=; read -r nx 2>/dev/null < "$NEXTF"
-    [ "$nx" = "${fw:--} ${fw2:--} ${pf:--}" ] || printf '%s\n' "${fw:--} ${fw2:--} ${pf:--}" > "$NEXTF" 2>/dev/null
+    if [ "$nx" != "${fw:--} ${fw2:--} ${pf:--}" ]; then
+      printf '%s\n' "${fw:--} ${fw2:--} ${pf:--}" > "$NEXTF" 2>/dev/null && rlog next "${fw:--} ${fw2:--} ${pf:--}"
+    fi
   fi
   # a waiter that comes to the head keeps its look's marks, which look_mark took before the look's reads
   LOOKER=0

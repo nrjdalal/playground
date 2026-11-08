@@ -71,15 +71,15 @@ it counts no sessions, so Ops watches the live board, since cmux once stopped an
 A heavy run, such as a suite, takes one of a few run slots and gives it back when it ends, so nothing long-lived holds one.
 Nobody builds a demo stack for the owner: he tries changes on the live dashboard alone.
 A runner hosts long-running jobs and closes when none is left; the ops jobs Ops runs are scripts with no session and show on the Dashboard under Runners from the heartbeat each writes.
-One of them, ops-unstick, reads every session's screen every 2 minutes, clears a usage-limit dialog when there is room, takes one with no room to the builder and the dispatcher (a probe's to its spawner), and takes any other block no hook recorded to the session's manager,
+One of them, ops-unstick, reads every session's screen every 2 minutes, clears a usage-limit dialog when there is room, takes one with no room on a probe to its spawner, names each capped account's live sessions to the builder and ops once a reset, and takes any other block no hook recorded to the session's manager,
 as the session-state hook does for one it did,
 and the Dashboard shows each one it finds as Stuck, with a red alarm, or as Paused · usage limit, with gray pause bars, when the usage limit alone holds it.
-Another, ops-loom-relay, passes Claude Code's usage on to the org's Loom as counts alone once the usage export points at it rather than straight at Loom, so no skill, agent, tool or subagent name leaves the Mac, with no prompt, summary or other text, and every login's usage on the Mac under the one login its settings name,
-each person's own.
 Each night at 3:00 am, ops-tick's nightly clean removes what no merge's cleanup reached: worktrees and branches of merged or closed PRs, exited containers of worktrees that are gone, Docker's dangling images and build cache, and turbo cache files over 2 days old.
 It keeps a worktree that another worktree or a scratch folder still links into, and names the first three links.
-A merged or closed PR's worktree goes to the trash whatever it holds.
-It posts an Inbox update when it freed 1 GB or more, and asks the owner, in one delete decision, before it removes any other thing that holds work no merge landed.
+A merged or closed PR's worktree goes to the trash whatever it holds, and one whose merge or close `playground rm` cannot confirm goes there too under the owner's standing approval, each move restorable with `playground rm --restore`.
+An unmerged branch's head is tagged `archive/<branch>` on origin before any delete, so the tag holds it and `git branch <name> archive/<branch>` brings the branch back; one whose tag cannot be made, or whose origin head is not the local head the tag would hold, stays, named in the log.
+Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch.
+It posts an Inbox update when it freed 1 GB or more, and asks the owner, in one delete decision, before it removes a container or unused volume over 1 GB that no rule takes.
 A worker spawns its own reviewer and tester, each briefed from a template it fills in, and the Dashboard nests them under it; the reviewer scores the PR through [code-review-loop](./code-review-loop.md).
 A probe lives for one test and never waits on the owner.
 The dispatcher, the Planner and the two leads never close, except to be started again with their settings after a restore or from a handoff once their guidance changes; they compact their own context in one 400k window (`autoCompactWindow` 400000) and keep their pane and name.
@@ -103,8 +103,9 @@ No factory session blocks on him: one that posted a decision carries on or ends 
 For a focused stretch, such as a timed test, a demo or an hour of deep work, `playground focus on --session <name> --reason "<why>"` gives one session the Mac for up to 180 minutes.
 While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep and that session's own reviewer and tester keep running.
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
-A priority start (spawn.sh's `--priority`, or its old name `--firefighting`) passes the load gate and a full run-slot queue at the slots gate while a priority file stands, and the memory gate still applies to it.
-It passes focus too on `priority.json` or an org's own `priority-<name>.json`, while a job's own `priority-start.json` never does (the old `firefighting-*.json` names are aliases), and the job itself holds its High, Medium and Low starts while focus stands.
+A priority start (spawn.sh's `--priority`) passes the load gate and a full run-slot queue at the slots gate while a priority file stands, and the memory gate still applies to it.
+It passes focus too on `priority.json` or an org's own `priority-<name>.json`, while a job's own `priority-start.json` never does.
+A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the load gate as well, as a Claude Code update's close and resume do, and the memory gate still applies to it.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
@@ -170,12 +171,12 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   GLM's unused credits lapse at each reset (`~/.playground/zai-usage.json`, the Usage app), so the lead pulls the next eligible item forward while GLM has room before the reset.
   A GLM session's commit or push that touches the app's pages, the factory's hooks, spawn.sh, the merge and verify scripts, the commit hooks or the CI workflows is refused by the `no-glm-heavy-path` hook, naming the files, so that work goes to a Claude worker.
   While the Mac's 5-minute load is over 15, the same hook also refuses a GLM session's installs, node_modules clones, commits and pushes, so it waits for the load to fall.
-  The same hook refuses a GLM session's headless Claude run and its calls to an org's tracker, chat, docs and repos, and every MCP tool or resource read, so that work goes to a Claude worker.
+  The same hook refuses a GLM session's headless Claude run, its calls to an org's tracker, chat, docs and repos, its shell reads of an org's checkout and its database clients aimed off this machine, every MCP tool or resource read, and a Read, Grep or Glob of an org's checkout once its matcher takes them, so that work goes to a Claude worker.
   A session resumed with `--brief <file>` starts by reading that brief; without one, its first prompt has it act on the after-resume hook's instruction, so it re-arms its background tasks and re-sends its unanswered messages.
   A resumed session restarts any dev stack it served and re-arms its watches, CronList before CronCreate, since the resume kept its crons and dropped its background tasks.
   The factory no longer moves sessions to GLM at 98% usage (retired on Inbox #i827): the account rotation moves it between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
 - A session started with no `--runtime`, from any terminal, or with `--runtime herdr`, opens in herdr, in a pane labelled with its name, and its next resume opens there too.
-  spawn.sh starts nothing in cmux: it refuses `--runtime cmux` and a column started beside a cmux surface, and every resume opens in herdr, whatever word its runtime pin held.
+  spawn.sh opens every session in herdr: it refuses a `--runtime` other than herdr and a column started beside anything but a herdr pane, and every resume opens in herdr, whatever word its runtime pin held.
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused, one that never got its first message included,
@@ -201,7 +202,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   The inbox gate, a hook on Playground and the leads, refuses to end a turn whose last reply asks him to decide (any question mark outside code, quotes and lines to other agents, rhetorical ones and headings included, or words such as "say yes", "your call" or "should I") until that reply names an item open in his Inbox, so the session names the one already open on the same thing,
   or else posts it there and says so, where a lead sends it to the dispatcher, who posts it; a pointer he is free to skip ("if you want to look") is no ask.
   It refuses a request for his own action the same way, such as "you need to", "please", "when you can" or "the owner, plug in the Mac", so a step only he can take goes to his Inbox too.
-  Steps he comes back to (3 or more numbered lines, or a table) go in one Inbox card whose progress is edited in place, since chat scrolls; a lead sends them to the dispatcher as a draft instead, so the card is posted once.
+  Steps he comes back to (3 or more numbered lines, or a table) go in one Inbox card whose progress is edited in place, since chat scrolls; the gate holds the dispatcher alone to it, since a lead's steps or table in its own pane are its report up the chain, which the dispatcher folds into the owner's one card.
   Progress on tracked work, where each numbered line or table row names an issue or PR, stays in chat.
   A question quoted from someone else, or put to another agent, passes.
   Anything promised to him for later, and any later outcome of something he asked, reaches him as an Inbox update; chat answers only what he is asking now.
@@ -239,7 +240,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   CI checks that nothing in the repo kills by name, pattern or port; a command a session types is the rule's to hold.
 - No session builds, tests, commits or writes a file in the main checkout, which every installed skill follows: the **main** rule.
   A hook refuses each of those there, naming the fix, while its upkeep (a pull, a fetch, rebuilding the shared packages with env validation off after a pull that changes them, `git reset --keep origin/main` off a stray local commit, relinking the skills) and reads run.
-- Nothing types into another session's pane in the owner's name: sessions and ops alerts reach a session through `SendMessage` (the **voice** rule), and the dashboard types only for his own clicks.
+- Nothing types into another session's pane in the owner's name: sessions and ops alerts reach a session through `SendMessage` (the **voice** rule), and the dashboard types only for his own clicks, but for the idle compact's `/compact` into an idle worker or runner, which the owner approved (ADR 0020).
   A test fails on any other caller of the dashboard's `deliver()` and on any text in the repo that types into a pane, Escape on the usage-limit dialog and a manager's `playground picker` on a permission prompt aside.
 - A page for the owner (a report, a comparison, a mock, a diagram) is a local HTML file in the session's scratchpad, kept with `playground page` and posted as an Inbox card's `html` attachment, so the Inbox's viewer shows it and nothing opens on the owner's screen (the **local page** rule), since a claude.ai artifact publishes under whichever account the session holds.
   The page then stays on the Pages tab of the session's view, of the one it was made for and of the dispatcher's.

@@ -75,6 +75,27 @@ describe("run-slot.focus", () => {
     expect(existsSync(join(m.ops, "run-slot.focus"))).toBe(false)
   })
 
+  // issue 1491: a second process lifts the focus right after focus_holder's switch_on reads it, the second focus read (the first is the startup sweep's) and the point both sides pass through, so each side's read meets no file
+  test("the focus file going between the presence check and the read reads as no focus, with no cut error", async () => {
+    const m = machine({ idle: 30 })
+    m.hold("run-slot", 2, "medium")
+    await set(m, "worker-f", "focus", "--for", "30m", "--reason", "demo")
+    writeFileSync(
+      join(m.bin, "head"),
+      `#!/bin/bash\nn=$(cat "${m.ops}/head-count" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "${m.ops}/head-count"\nout=$(/usr/bin/head "$@"); rc=$?\ncase "$*" in *run-slot.focus*) [ "$n" -ge 2 ] && rm -f "${m.ops}/run-slot.focus" ;; esac\nprintf '%s' "$out"\nexit $rc\n`,
+    )
+    chmodSync(join(m.bin, "head"), 0o755)
+    const queued = m.start("worker-q", { RUN_SLOT_SIZE: "small" })
+    expect(await queued.saw(WAITING)).toBe(true)
+    // the wait's own lines aside, stderr names no read error: the vanished file reads as no focus (canary fails here on its cut: line)
+    const stray = queued
+      .stderr()
+      .split("\n")
+      .filter((l) => l !== "" && l.search(WAITING) !== 0)
+    expect(stray).toEqual([])
+    await stop(queued.p)
+  })
+
   test("on, the focused session's own reviewer and tester run while another session's run waits", async () => {
     const m = machine()
     await set(m, "abc-worker", "focus", "--for", "30m", "--reason", "an urgent ticket")
@@ -178,6 +199,25 @@ describe("run-slot.sh preempt", () => {
     hang(m)
     const other = m.start("worker-x", { RUN_SLOT_SIZE: "small" }, SCRIPT, ["hang"])
     await started(other)
+    const r = await preempt(m)
+    expect(r.code).toBe(2)
+    expect(r.err).toContain("no focus stands")
+    expect(other.p.exitCode).toBeNull()
+    await stop(other.p)
+  })
+
+  test("a focus that goes between the presence check and the read stops nothing", async () => {
+    const m = machine()
+    hang(m)
+    const other = m.start("worker-x", { RUN_SLOT_SIZE: "small" }, SCRIPT, ["hang"])
+    await started(other)
+    await set(m, "worker-f", "focus", "--for", "30m", "--reason", "an urgent ticket")
+    // the fake head stands in for a second process that lifts the focus right after preempt's switch_on reads it
+    writeFileSync(
+      join(m.bin, "head"),
+      `#!/bin/bash\nout=$(/usr/bin/head "$@"); rc=$?\ncase "$*" in *run-slot.focus*) rm -f "${m.ops}/run-slot.focus" ;; esac\nprintf '%s' "$out"\nexit $rc\n`,
+    )
+    chmodSync(join(m.bin, "head"), 0o755)
     const r = await preempt(m)
     expect(r.code).toBe(2)
     expect(r.err).toContain("no focus stands")

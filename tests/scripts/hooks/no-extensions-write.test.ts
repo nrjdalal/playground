@@ -263,10 +263,6 @@ describe("a direct write into the extensions root is refused, naming the owner's
       "the CLI as git's --config-env pager",
       "X='playground ext sync' git --config-env=core.pager=X log",
     ],
-    [
-      "a commit message holding a gated call",
-      `git commit -m "docs: the hook refuses playground ext sync now"`,
-    ],
     ["a write after a word with an unbalanced quote", `git commit -m "it's"; rm -rf ${ROOT}`],
     [
       "the CLI by name from a cwd holding a folder named playground",
@@ -587,6 +583,21 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
 
 // A quoted argument with a space is read as a command line unless every command on the line is on a closed list of readers (awk with a program that runs nothing, cat, grep, head, tail, wc, sort, uniq, cut), with no redirect that writes a file; an awk program that runs a command has its literals read wherever it stands, and sed keeps canary's reading.
 describe("a quoted argument is read as a command line only where a program runs it", () => {
+  // #1455: a quiet commit's message is text git never runs, so a gated call it names runs, in any case of git, while a gated call beside it stays refused
+  test.each([
+    ["names playground ext sync", `git commit -m "docs: the hook refuses playground ext sync now"`],
+    ["names playground migrate", "git commit -q -m 'fix: playground migrate seeds the lists'"],
+    ["names a gated call under Git", "Git commit -m 'docs: playground ext sync'"],
+  ])("a quiet commit whose message %s runs from the home", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test("a gated call after a quiet commit stays refused", async () => {
+    expect(await bash("git commit -m 'fix: x' && playground migrate")).toContain(
+      "playground migrate",
+    )
+  })
+
   const real = { HOME: homedir() }
   const at = (command: string, cwd: string) =>
     check(JSON.stringify({ cwd, tool_input: { command }, tool_name: "Bash" }), real)
@@ -1361,8 +1372,6 @@ describe("a quoted argument is read as a command line only where a program runs 
       "a function by the function keyword",
       `function f { eval "$@"; }; f 'rm -rf ~/.playground/extensions/.no-such-folder'`,
     ],
-    ["a gated message under git in capitals", "GIT commit -m 'docs: playground ext sync'"],
-    ["a gated message under Git", "Git commit -m 'docs: playground ext sync'"],
     [
       "a payload set as an argument, then evaluated",
       `set -- 'rm -rf ~/.playground/extensions/.no-such-folder'; eval "$1"`,
@@ -1606,10 +1615,6 @@ describe("a quoted argument is read as a command line only where a program runs 
     [
       "a redirect that writes a file, dropping its redirect guard runs it",
       `git commit -m "fix(x): y" > f`,
-    ],
-    [
-      "a message naming a gated call, dropping its message guard runs it",
-      `git commit -m "docs: the hook refuses playground ext sync now"`,
     ],
     [
       "a message holding the root's path as text, dropping its text guard runs it",
@@ -2310,7 +2315,7 @@ describe("a guard decision's keys are the keys the hook gates (PG-1090)", () => 
 
 // PG-1196: the guard decision also sets a job's enabled field, so a session's own write of it stays refused, the owner's Approve or Settings > Jobs the one way in.
 describe("a job's setting is the owner's alone (PG-1196)", () => {
-  test.each(["jobs.opsTicketCard", "jobs.opsSweep", "jobs.opsFirefightingStart"])(
+  test.each(["jobs.opsZaiUsage", "jobs.opsSweep"])(
     "a session's own settings set and reset of %s are refused",
     async (key) => {
       expect(await bash(`playground settings set ${key} '{"enabled":true}' --reason r`)).toContain(

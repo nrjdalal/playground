@@ -1368,19 +1368,6 @@ export function inboxOrder(items: InboxItem[], now = new Date()): InboxItem[] {
 
 type Row = typeof inboxItem.$inferSelect
 
-// The codes a sessions read's failure was recorded under before they took the sessions' name, each read as its new code for one ship (ADR 0015), after which this alias goes.
-const DELIVERY_CODE_ALIASES = new Map([
-  ["CMUX_FAILED", "SESSIONS_FAILED"],
-  ["CMUX_UNAVAILABLE", "SESSIONS_UNAVAILABLE"],
-])
-
-// A stored delivery as the API reads it: a failure recorded under an old code reads under its new one, while the row stays as stored.
-const deliveryOf = (stored: unknown): InboxDelivery | null => {
-  const delivery = (stored as InboxDelivery | null) ?? null
-  if (delivery?.status !== "failed") return delivery
-  return { ...delivery, code: DELIVERY_CODE_ALIASES.get(delivery.code) ?? delivery.code }
-}
-
 const toItem = (row: Row): InboxItem =>
   ({
     answer:
@@ -1395,7 +1382,7 @@ const toItem = (row: Row): InboxItem =>
         | InboxSettled
         | null) ?? null,
     createdAt: row.createdAt.toISOString(),
-    delivery: deliveryOf(row.delivery),
+    delivery: (row.delivery as InboxDelivery | null) ?? null,
     from: row.from,
     id: row.id,
     kind: row.kind,

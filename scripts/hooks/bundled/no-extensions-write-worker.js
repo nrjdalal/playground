@@ -5603,6 +5603,23 @@ function heredocs(lx, pending, nested) {
     const body = lines.map((line) => `${line}
 `).join("");
     doc.redirect.body = doc.quoted ? { value: body } : expandHeredoc(body);
+    if (!doc.quoted)
+      textCommands(lx, body);
+  }
+}
+function textCommands(lx, text) {
+  const sub = { ...lx, i: 0, src: text };
+  while (sub.i < text.length) {
+    tick();
+    const c = text[sub.i];
+    if (c === "\\")
+      sub.i += 2;
+    else if (c === "$")
+      dollar(sub, true);
+    else if (c === "`")
+      backtick(sub);
+    else
+      sub.i++;
   }
 }
 function expandHeredoc(body) {
@@ -5691,7 +5708,7 @@ function double(lx) {
       lx.i += 2;
     } else if (c === "$" || c === "`") {
       const from = lx.i;
-      const text = c === "$" ? dollar(lx) : backtick(lx);
+      const text = c === "$" ? dollar(lx, true) : backtick(lx);
       merge(out, text);
       if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
         out.splits = true;
@@ -5712,14 +5729,15 @@ function ansi(lx) {
   lx.i = i + 1;
   return { value: decode2(raw) };
 }
-function dollar(lx) {
+function dollar(lx, plain = false) {
   tick();
   const { src } = lx;
+  const readText = plain ? textCommands : inner;
   const next = src[lx.i + 1] ?? "";
   const variable = (name) => name !== undefined && lx.known[name] !== undefined ? { value: lx.known[name], variable: name } : { ...unknown("a shell variable"), variable: name };
   if (src.startsWith("$((", lx.i)) {
-    const end = balanced(src, lx.i + 1, "(", ")");
-    inner(lx, src.slice(lx.i + 3, end - 2));
+    const end = balanced(src, lx.i + 1, "(", ")", plain);
+    readText(lx, src.slice(lx.i + 3, end - 2));
     lx.i = end;
     return unknown("an arithmetic expansion");
   }
@@ -5730,9 +5748,9 @@ function dollar(lx) {
     return substituted(lx.commands.slice(from), lx.known);
   }
   if (next === "{") {
-    const end = balanced(src, lx.i + 1, "{", "}");
+    const end = balanced(src, lx.i + 1, "{", "}", plain);
     const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1];
-    inner(lx, src.slice(lx.i + 2, end - 1));
+    readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
   }
@@ -5768,14 +5786,14 @@ function inner(lx, src) {
       sub.i++;
   }
 }
-function balanced(src, from, open, close) {
+function balanced(src, from, open, close, plain = false) {
   let depth = 0;
   for (let i = from;i < src.length; i++) {
     tick();
     const c = src[i];
     if (c === "\\")
       i++;
-    else if (c === "'") {
+    else if (c === "'" && !plain) {
       const end = src.indexOf("'", i + 1);
       i = end === -1 ? src.length : end;
     } else if (c === open)
@@ -7739,6 +7757,48 @@ function sedReads(args) {
   const read = scripts.length ? scripts : operands.slice(0, 1);
   return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value));
 }
+var SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/;
+var SED_SUFFIX = /^(?:\.[\w.~-]*)?$/;
+var SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
+var SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}${SED_TEXT}[gpI0-9]*)[ \t]*`;
+var SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`);
+function sedInPlace(cmd, parsed) {
+  const { args, local, name } = parsed;
+  if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed))
+    return;
+  const scripts = [];
+  const operands = [];
+  let inPlace = false;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    const suffix = SED_IN_PLACE.exec(value);
+    if (value === "-e") {
+      if (!args[k + 1])
+        return;
+      scripts.push(args[++k]);
+    } else if (value === "--") {
+      operands.push(...args.slice(k + 1));
+      break;
+    } else if (suffix) {
+      inPlace = true;
+      if (suffix[1])
+        continue;
+      const word = args[++k];
+      if (!word || !literal(word) || !SED_SUFFIX.test(word.value))
+        return;
+    } else if (value.startsWith("-") && value !== "-") {
+      if (!/^-[Enrsuz]+$/.test(value))
+        return;
+    } else
+      operands.push(args[k]);
+  }
+  const read = scripts.length ? scripts : operands.slice(0, 1);
+  if (!inPlace || read.length === 0)
+    return;
+  if (!read.every((w) => literal(w) && SED_EDIT.test(w.value)))
+    return;
+  return new Set(read);
+}
 var PERL_FLAG = /^-[alnpw]*[eE]?$/;
 var PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
 var PERL_RE = `/${PERL_BODY}`;
@@ -7832,7 +7892,8 @@ function wholeLine(commands, env) {
     if (words.some((word) => word.procs && wholeLine(word.procs, env)))
       return true;
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
-    return writes || !(narrow(cmd, env) || quietCommit(cmd, parse3(cmd), env));
+    const parsed = parse3(cmd);
+    return writes || !(narrow(cmd, env) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed));
   });
 }
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
@@ -8117,13 +8178,7 @@ async function inspect(raw, environment, unknown = false) {
         return verdict;
     }
     const quiet = !whole && quietCommit(cmd, parsed, env);
-    for (const word of quiet ? args : []) {
-      if (!/\s/.test(word.value))
-        continue;
-      const named = lex(word.value.replace(/^--message=/, ""), env.known).commands.flatMap((c) => cliCalls(parse3(c), env)).map((words) => cliWrite(words)).find(Boolean);
-      if (named)
-        return refuse(named);
-    }
+    const sedScripts = whole ? undefined : sedInPlace(cmd, parsed);
     if (!first || EXPORTS3.has(name) || reader)
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
@@ -8167,7 +8222,7 @@ async function inspect(raw, environment, unknown = false) {
       }
       const literal = !whole && narrow(cmd, here);
       for (const word of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word))) {
-        const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
+        const text = quiet && /\s/.test(word.value) || !!sedScripts?.has(word) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;
         const named = names(word, here, remover, literal);

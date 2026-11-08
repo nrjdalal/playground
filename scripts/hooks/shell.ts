@@ -1129,6 +1129,20 @@ function heredocs(lx: Lexer, pending: Pending[], nested: boolean): void {
     }
     const body = lines.map((line) => `${line}\n`).join("")
     doc.redirect.body = doc.quoted ? { value: body } : expandHeredoc(body)
+    if (!doc.quoted) textCommands(lx, body)
+  }
+}
+
+// Lexes the commands the shell runs in text whose quotes are plain characters (an unquoted heredoc's body, a `${…}` or `$((…))` inside double quotes or such a body): each `$(…)` and backquoted command, through the word lexer's own dollar() and backtick(), so they join the line's commands as a word's substitution does; a backslash keeps the character after it (a `\`, `$`, backquote or line break) as text.
+function textCommands(lx: Lexer, text: string): void {
+  const sub = { ...lx, i: 0, src: text }
+  while (sub.i < text.length) {
+    tick()
+    const c = text[sub.i]
+    if (c === "\\") sub.i += 2
+    else if (c === "$") dollar(sub, true)
+    else if (c === "`") backtick(sub)
+    else sub.i++
   }
 }
 
@@ -1222,7 +1236,7 @@ function double(lx: Lexer): Text {
       lx.i += 2
     } else if (c === "$" || c === "`") {
       const from = lx.i
-      const text = c === "$" ? dollar(lx) : backtick(lx)
+      const text = c === "$" ? dollar(lx, true) : backtick(lx)
       merge(out, text)
       if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i))) out.splits = true
     } else {
@@ -1243,17 +1257,19 @@ function ansi(lx: Lexer): Text {
   return { value: decode(raw) }
 }
 
-function dollar(lx: Lexer): Text {
+// `plain` is set where a quote is a plain character (inside double quotes, an unquoted heredoc's body), so a `${…}` or `$((…))` ends at its brace or parenthesis whatever quote sits before it and its text is read by textCommands(), which reaches each substitution past a quote.
+function dollar(lx: Lexer, plain = false): Text {
   tick()
   const { src } = lx
+  const readText = plain ? textCommands : inner
   const next = src[lx.i + 1] ?? ""
   const variable = (name: string | undefined): Text =>
     name !== undefined && lx.known[name] !== undefined
       ? { value: lx.known[name], variable: name }
       : { ...unknown("a shell variable"), variable: name }
   if (src.startsWith("$((", lx.i)) {
-    const end = balanced(src, lx.i + 1, "(", ")")
-    inner(lx, src.slice(lx.i + 3, end - 2))
+    const end = balanced(src, lx.i + 1, "(", ")", plain)
+    readText(lx, src.slice(lx.i + 3, end - 2))
     lx.i = end
     return unknown("an arithmetic expansion")
   }
@@ -1264,9 +1280,9 @@ function dollar(lx: Lexer): Text {
     return substituted(lx.commands.slice(from), lx.known)
   }
   if (next === "{") {
-    const end = balanced(src, lx.i + 1, "{", "}")
+    const end = balanced(src, lx.i + 1, "{", "}", plain)
     const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1]
-    inner(lx, src.slice(lx.i + 2, end - 1))
+    readText(lx, src.slice(lx.i + 2, end - 1))
     lx.i = end
     return variable(name)
   }
@@ -1303,13 +1319,13 @@ function inner(lx: Lexer, src: string): void {
   }
 }
 
-function balanced(src: string, from: number, open: string, close: string): number {
+function balanced(src: string, from: number, open: string, close: string, plain = false): number {
   let depth = 0
   for (let i = from; i < src.length; i++) {
     tick()
     const c = src[i]
     if (c === "\\") i++
-    else if (c === "'") {
+    else if (c === "'" && !plain) {
       const end = src.indexOf("'", i + 1)
       i = end === -1 ? src.length : end
     } else if (c === open) depth++
