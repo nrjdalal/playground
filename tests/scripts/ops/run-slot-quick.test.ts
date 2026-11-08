@@ -4,13 +4,10 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   renameSync,
-  rmSync,
   writeFileSync,
 } from "node:fs"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { SCRIPT, WAITING, stop, machine } from "./run-slot-fake"
@@ -261,14 +258,14 @@ test("run-slot.sh kind prints the lane a command takes and runs nothing", async 
   // review round 1: a run run-slot refuses reads as refuse, a dev stack's among them
   expect(await kind(["bun", "run", "dev"])).toBe("refuse")
   // a chain's git steps take the commit lane only in a repo, so these name a throwaway one: kind runs nothing, but the lane decision reads the named repo's index and lefthook.yml, and naming this checkout let a staged packages/ file answer for it (issue 1487)
-  const repo = mkdtempSync(join(tmpdir(), "run-slot-kind-repo-"))
-  Bun.spawnSync(["git", "-C", repo, "init"])
+  const repo = join(m.root, "repo")
+  mkdirSync(repo)
+  expect(Bun.spawnSync(["git", "-C", repo, "init"]).exitCode).toBe(0)
   for (const shell of ["sh", "dash", "ksh"])
     expect([
       shell,
       await kind([shell, "-c", `git -C ${repo} commit -m x; git -C ${repo} push origin`]),
     ]).toEqual([shell, "commit"])
-  rmSync(repo, { recursive: true, force: true })
   expect(existsSync(join(m.root, "made"))).toBe(false)
   expect(existsSync(join(m.ops, "run-slot.runs.log"))).toBe(false)
   expect(existsSync(join(m.ops, "run-slot.waiters"))).toBe(false)
