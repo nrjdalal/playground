@@ -213,7 +213,12 @@ describe("bodyRefusal, reading an unfilled placeholder", () => {
   git("-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "-m", "a")
   // Whether the scratch repo's head holds the word, as git grep -w reads the PR's head.
   const known = (token: string) => git("grep", "-q", "-w", "-F", token, "HEAD").exitCode === 0
-  const check = { known, placeholders: ["<one-way or two-way>"] }
+  // The facts the gate reads for a body: the template's placeholders, and its tokens the scratch head does not hold.
+  const check = (body: string) => ({
+    placeholders: ["<one-way or two-way>"],
+    unfound: (bodyGate.bareTokens?.(body) ?? []).filter((token: string) => !known(token)),
+  })
+  const refusal = (body: string) => bodyRefusal(body, [], check(body))
   const withLine = (line: string) =>
     SKILL_BODY.replace("- **Before:** two rows.", `- ${line}\n- **Before:** two rows.`)
 
@@ -241,19 +246,27 @@ describe("bodyRefusal, reading an unfilled placeholder", () => {
 
   test("a body holding the pr template's own placeholder is refused, naming it", () => {
     const body = SKILL_BODY.replace("**Door:** two-way", "**Door:** <one-way or two-way>")
-    expect(bodyRefusal(body, [], check)).toContain("<one-way or two-way>")
+    expect(refusal(body)).toContain("<one-way or two-way>")
   })
 
   test("a body holding a bare all-caps token that no file at the head holds is refused, naming it", () => {
-    expect(bodyRefusal(withLine("**Green:** SUITE_LINE"), [], check)).toContain("SUITE_LINE")
+    expect(refusal(withLine("**Green:** SUITE_LINE"))).toContain("SUITE_LINE")
   })
 
   test("a bare all-caps token that a file at the head holds passes", () => {
-    expect(bodyRefusal(withLine("The pass leaves out CLOCK_EXEMPT's files."), [], check)).toBeNull()
+    expect(refusal(withLine("The pass leaves out CLOCK_EXEMPT's files."))).toBeNull()
+  })
+
+  // a code span stays on its line, as Markdown renders a list, so a stray backtick hides nothing on the lines after it
+  test("a stray backtick on one line leaves a later line's bare token read", () => {
+    const body = withLine(
+      "**Green:** the `test` job ran, it said 5` passes\n- **Skills:** SKILLS_LINE",
+    )
+    expect(refusal(body)).toContain("SKILLS_LINE")
   })
 
   test("an all-caps token in inline code or a fence passes", () => {
-    expect(bodyRefusal(withLine("Fill `SUITE_LINE` later."), [], check)).toBeNull()
-    expect(bodyRefusal(withLine("Sample:\n\n```\nSUITE_LINE\n```\n"), [], check)).toBeNull()
+    expect(refusal(withLine("Fill `SUITE_LINE` later."))).toBeNull()
+    expect(refusal(withLine("Sample:\n\n```\nSUITE_LINE\n```\n"))).toBeNull()
   })
 })

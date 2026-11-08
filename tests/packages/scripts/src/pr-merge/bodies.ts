@@ -23,3 +23,7 @@ export const SKILL_BODY = [
   "",
   "- Closes #1906",
 ].join("\n")
+
+// The pr skill's file as git show reads it at a head, its template inside its first markdown fence, for a stub or scratch git the body gate reads it through.
+export const PR_TEMPLATE =
+  "Use this template:\n\n```markdown\n**Door:** <one-way or two-way>\n```\n"

@@ -52,12 +52,13 @@ export type PrFacts = {
   // The PR's number.
   n: number
   owner: string
-  // The pr template's own placeholders read at the head, and the bare all-caps tokens of the body that no file at the head holds (git grep -w), which the body gate refuses; left out in a test, which skips that check.
-  placeholders?: string[]
-  unfound?: string[]
   // Each PR the body says it is stacked on (parentsOf) with its GitHub state, or why the state did not read; set wherever the body is read, [] for none.
   parents?: { n: number; state: string }[]
+  // The pr template's own placeholders, read at the head, which the body gate refuses in the body's prose; left out in a test, which skips that check.
+  placeholders?: string[]
   state: string
+  // The body's bare all-caps tokens that no file at the head holds outside the gate's own folders (unfoundTokens), which the body gate refuses; left out in a test, which skips that check.
+  unfound?: string[]
 }
 
 export const BASE = "canary"
@@ -318,10 +319,9 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
   gates.push(upToDate(facts), keepsCanary(facts.lost))
   gates.push(ciGate(facts.checks, { gitGuardian, required: REQUIRED_CHECKS }))
   if (facts.body !== undefined) {
-    const unfound = facts.unfound
     const why = bodyRefusal(facts.body, facts.files, {
-      known: unfound ? (token) => !unfound.includes(token) : undefined,
       placeholders: facts.placeholders,
+      unfound: facts.unfound,
     })
     gates.push(
       why

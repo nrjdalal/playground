@@ -27,7 +27,7 @@ import {
 } from "../../../../../packages/scripts/src/pr-merge/merge"
 import "./scratch-config"
 import { storeWith } from "../../../../scripts/hooks/render-set"
-import { SKILL_BODY } from "./bodies"
+import { PR_TEMPLATE, SKILL_BODY } from "./bodies"
 import { greenChecks } from "./suite"
 
 const HEAD = "69a6a4c5e6caf46c4abda6a89de4ce6f3b309e88"
@@ -64,17 +64,24 @@ const local = ({
   canary = CANARY,
   clean = [] as string[],
   parents = { [HEAD]: ["p0"] } as Record<string, string[]>,
+  template = PR_TEMPLATE as string | null,
   tree = TREE as string | null,
 }: {
   answer?: RunResult
   canary?: string
   clean?: string[]
   parents?: Record<string, string[]>
+  template?: string | null
   tree?: string | null
 } = {}) => {
   const lockRoot = mkdtempSync(join(scratch, "lock-"))
   const git: Run = async (args) => {
     if (args[0] === "fetch") return ok("")
+    if (args[0] === "show") {
+      return template === null
+        ? { code: 128, stderr: "fatal: path not in tree", stdout: "" }
+        : ok(template)
+    }
     if (args[0] === "merge-base") return ok(`${canary}\n`)
     if (args[0] === "rev-list" && args.includes("--parents")) {
       const sha = args.at(-1) ?? ""
@@ -624,6 +631,15 @@ describe("the merge lock", () => {
     ])
   })
 
+  test("a pr template the head cannot show, or one with no placeholder, stops the run with why, so the body gate fails closed", async () => {
+    await expect(
+      prMerge(112, { repo: REPO }, stub().run, local({ template: null })),
+    ).rejects.toThrow("the body gate cannot read the pr template's placeholders")
+    await expect(
+      prMerge(112, { repo: REPO }, stub().run, local({ template: "no fence here\n" })),
+    ).rejects.toThrow("its first markdown fence holds none")
+  })
+
   test("outside the CLI, a run without a git stub throws before it fetches or locks, whatever NODE_ENV says", async () => {
     const { calls, run } = stub()
     await expect(prMerge(112, { repo: REPO }, run, { lockRoot: local().lockRoot })).rejects.toThrow(
@@ -918,6 +934,17 @@ describe("the body gate's token grep at the head", () => {
     expect(await unfoundTokens(git, "HEAD", [])).toEqual([])
     await expect(unfoundTokens(git, "no-such-ref", ["SUITE_LINE"])).rejects.toThrow(
       "git grep exited",
+    )
+  })
+
+  test("at this repo's own head, the gate's sample tokens stay unfound, since the grep leaves out the gate's own folders", async () => {
+    const root = join(import.meta.dir, "..", "..", "..", "..", "..")
+    const git: Run = async (args) => {
+      const proc = Bun.spawnSync(["git", "-C", root, ...args])
+      return { code: proc.exitCode, stderr: proc.stderr.toString(), stdout: proc.stdout.toString() }
+    }
+    expect(await unfoundTokens(git, "HEAD", ["CLOCK_EXEMPT", "SKILLS_LINE", "SUITE_LINE"])).toEqual(
+      ["SKILLS_LINE", "SUITE_LINE"],
     )
   })
 })

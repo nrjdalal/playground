@@ -105,24 +105,22 @@ function proseOf(body: string): string {
       return !fenced
     })
     .join("\n")
-    .replace(/(`+)[^`]*?\1/g, " ")
+    .replace(/(`+)[^`\n]*?\1/g, " ")
 }
+
+const BARE_TOKEN = /(?<![\w-])[A-Z][A-Z0-9]*_[A-Z0-9_]*[A-Z0-9](?![\w-])/g
+
+// Pure: each bare all-caps token with an underscore in a text that is already prose, once.
+const tokensIn = (prose: string): string[] => [...new Set(prose.match(BARE_TOKEN) ?? [])]
 
 // Pure: each bare all-caps token with an underscore in a body's prose (SUITE_LINE), once, the shape a fill token left unfilled takes.
-export function bareTokens(body: string): string[] {
-  return [
-    ...new Set(proseOf(body).match(/(?<![\w-])[A-Z][A-Z0-9]*_[A-Z0-9_]*[A-Z0-9](?![\w-])/g) ?? []),
-  ]
-}
+export const bareTokens = (body: string): string[] => tokensIn(proseOf(body))
 
-// What the placeholder check reads beyond the body: the pr template's placeholders, and whether a token stands in a file at the PR's head (git grep -w).
-export type PlaceholderCheck = { known?: (token: string) => boolean; placeholders?: string[] }
-
-// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line, its Evidence holding an A/B line, its prose holding no unfilled placeholder (the template's own, or a bare all-caps token no file at the head holds), and its Evidence naming each changed doc in files (AGENTS.md's Shipping a Playground PR, step 1).
+// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line, its Evidence holding an A/B line, its prose holding no unfilled placeholder (the template's own, or a bare all-caps token in unfound, which no file at the head holds outside the gate's own folders), and its Evidence naming each changed doc in files (AGENTS.md's Shipping a Playground PR, step 1).
 export function bodyRefusal(
   body: string,
   files: string[] = [],
-  { known, placeholders = [] }: PlaceholderCheck = {},
+  { placeholders = [], unfound = [] }: { placeholders?: string[]; unfound?: string[] } = {},
 ): string | null {
   const label = tldrLabel(body)
   if (label) {
@@ -137,7 +135,7 @@ export function bodyRefusal(
   const prose = proseOf(body)
   const unfilled = [
     ...placeholders.filter((placeholder) => prose.includes(placeholder)),
-    ...(known ? bareTokens(body).filter((token) => !known(token)) : []),
+    ...tokensIn(prose).filter((token) => unfound.includes(token)),
   ]
   if (unfilled.length > 0) {
     return `its body holds ${unfilled.length === 1 ? "an unfilled placeholder" : `${unfilled.length} unfilled placeholders`}: ${unfilled.join(", ")}; fill each in, or put a real identifier in inline code (a <...> of the pr template, extensions/core/skills/pr/SKILL.md, or a bare all-caps token no file at the head holds)`
