@@ -566,6 +566,34 @@ function sedReads(args: Word[]): boolean {
   return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value))
 }
 
+// sed's in-place option: -i alone or after SED_FLAG's letters, with a backup suffix holding no / or * (GNU writes a suffix with either into another folder), or --in-place with the same suffix
+const SED_IN_PLACE = /^-[Enrsuz]*i[\w.~-]*$|^--in-place(?:=[\w.~-]*)?$/
+
+// The scripts of a sed call that edits its files in place and writes nothing else, or undefined: sed as its own program (ownProgram) with no variable set in the call, an in-place option (SED_IN_PLACE), every other option on SED_FLAG's list, and every script a literal word that SED_SCRIPT holds (each -e value, else each operand it holds), so a script writes no w file and runs no e command, while each other operand, a file it edits, is judged as any word is
+function sedInPlace(cmd: Command, parsed: Parsed): Set<Word> | undefined {
+  const { args, local, name } = parsed
+  if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed)) return undefined
+  const scripts: Word[] = []
+  const operands: Word[] = []
+  let inPlace = false
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (value === "-e" || value === "--expression") {
+      if (!args[k + 1]) return undefined
+      scripts.push(args[++k])
+    } else if (value === "--") operands.push(...args.slice(++k))
+    else if (SED_IN_PLACE.test(value)) inPlace = true
+    else if (value.startsWith("-") && value !== "-") {
+      if (!SED_FLAG.test(value)) return undefined
+    } else operands.push(args[k])
+    if (value === "--") break
+  }
+  const script = (w: Word) => literal(w) && SED_SCRIPT.test(w.value)
+  const read = scripts.length ? scripts : operands.filter(script)
+  if (!inPlace || read.length === 0 || !read.every(script)) return undefined
+  return new Set(read)
+}
+
 // perl's options that run no other code and write nothing: a, l, n, p and w clustered, the last of them may be e or E, whose script is the next word; -d, -i, -I, -m, -M, -s, -x and the rest are off it
 const PERL_FLAG = /^-[alnpw]*[eE]?$/
 // a regex with no variable, no array and no code block (`(?{`, `(??{`, `(*{`), its $ only an anchor
@@ -698,7 +726,10 @@ function wholeLine(commands: Command[], env: Env): boolean {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
     if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
-    return writes || !(narrow(cmd, env) || quietCommit(cmd, parse(cmd), env))
+    return (
+      writes ||
+      !(narrow(cmd, env) || quietCommit(cmd, parse(cmd), env) || sedInPlace(cmd, parse(cmd)))
+    )
   })
 }
 
@@ -1053,16 +1084,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
     }
-    // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
+    // a quiet commit's message is text git never runs, a gated call it names included, and an in-place sed's script is text sed reads as a program of its own
     const quiet = !whole && quietCommit(cmd, parsed, env)
-    for (const word of quiet ? args : []) {
-      if (!/\s/.test(word.value)) continue
-      const named = lex(word.value.replace(/^--message=/, ""), env.known)
-        .commands.flatMap((c) => cliCalls(parse(c), env))
-        .map((words) => cliWrite(words))
-        .find(Boolean)
-      if (named) return refuse(named)
-    }
+    const sedScripts = whole ? undefined : sedInPlace(cmd, parsed)
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
@@ -1135,8 +1159,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       for (const word of [first, ...args].map(
         (word) => heldWord(own(word), here, steady) ?? own(word),
       )) {
-        // a quiet commit's message and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
-        const text = (quiet && /\s/.test(word.value)) || (filters.has(word) && !word.glob)
+        // a quiet commit's message, an in-place sed's script and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
+        const text =
+          (quiet && /\s/.test(word.value)) ||
+          !!sedScripts?.has(word) ||
+          (filters.has(word) && !word.glob)
         if (text && !texts(word).some((t) => holds(t.value, here))) continue
         const named = names(word, here, remover, literal)
         if (named) return refuse(`${verb} on ${named}`)

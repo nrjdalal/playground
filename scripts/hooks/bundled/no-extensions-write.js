@@ -7870,6 +7870,38 @@ function sedReads(args) {
   const read = scripts.length ? scripts : operands.slice(0, 1);
   return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value));
 }
+var SED_IN_PLACE = /^-[Enrsuz]*i[\w.~-]*$|^--in-place(?:=[\w.~-]*)?$/;
+function sedInPlace(cmd, parsed) {
+  const { args, local, name } = parsed;
+  if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed))
+    return;
+  const scripts = [];
+  const operands = [];
+  let inPlace = false;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "-e" || value === "--expression") {
+      if (!args[k + 1])
+        return;
+      scripts.push(args[++k]);
+    } else if (value === "--")
+      operands.push(...args.slice(++k));
+    else if (SED_IN_PLACE.test(value))
+      inPlace = true;
+    else if (value.startsWith("-") && value !== "-") {
+      if (!SED_FLAG.test(value))
+        return;
+    } else
+      operands.push(args[k]);
+    if (value === "--")
+      break;
+  }
+  const script = (w) => literal(w) && SED_SCRIPT.test(w.value);
+  const read = scripts.length ? scripts : operands.filter(script);
+  if (!inPlace || read.length === 0 || !read.every(script))
+    return;
+  return new Set(read);
+}
 var PERL_FLAG = /^-[alnpw]*[eE]?$/;
 var PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
 var PERL_RE = `/${PERL_BODY}`;
@@ -7963,7 +7995,7 @@ function wholeLine(commands, env) {
     if (words.some((word) => word.procs && wholeLine(word.procs, env)))
       return true;
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
-    return writes || !(narrow(cmd, env) || quietCommit(cmd, parse3(cmd), env));
+    return writes || !(narrow(cmd, env) || quietCommit(cmd, parse3(cmd), env) || sedInPlace(cmd, parse3(cmd)));
   });
 }
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
@@ -8248,13 +8280,7 @@ async function inspect(raw, environment, unknown = false) {
         return verdict;
     }
     const quiet = !whole && quietCommit(cmd, parsed, env);
-    for (const word of quiet ? args : []) {
-      if (!/\s/.test(word.value))
-        continue;
-      const named = lex(word.value.replace(/^--message=/, ""), env.known).commands.flatMap((c) => cliCalls(parse3(c), env)).map((words) => cliWrite(words)).find(Boolean);
-      if (named)
-        return refuse(named);
-    }
+    const sedScripts = whole ? undefined : sedInPlace(cmd, parsed);
     if (!first || EXPORTS3.has(name) || reader)
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
@@ -8298,7 +8324,7 @@ async function inspect(raw, environment, unknown = false) {
       }
       const literal = !whole && narrow(cmd, here);
       for (const word of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word))) {
-        const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
+        const text = quiet && /\s/.test(word.value) || !!sedScripts?.has(word) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;
         const named = names(word, here, remover, literal);
