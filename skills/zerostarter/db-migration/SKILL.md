@@ -52,7 +52,7 @@ With `POSTGRES_URL` left empty, `bun run dev` opens `/dashboard` on first run's 
 - Seed your own fake rows rather than copying real ones. The live dashboard's database holds real sessions, secrets and customer data among them, and a screenshot or a response body from it must never reach a PR.
 - Applying to the live dashboard's database is the dashboard runner's act, after the change merges, not while it is being built.
 
-Two containers stand apart from that rule, each by the owner's choice: first run's pglaunch database, on all interfaces (above), and a Vibeground's copy, which holds real data so a Vibeground shows real rows while its database changes stay in a copy that is thrown away. A Vibeground's container is seeded by one `pg_dump` inside the live dashboard's container, the only read of the live database, its branch's migrations run on the copy alone (`api/hono/src/lib/dashboard/vibe.ts`), its real rows stay out of every screenshot and PR, and only the owner's own clicks start or stop one.
+Two containers stand apart from that rule, each by the owner's choice: first run's pglaunch database, on all interfaces (above), and a Vibeground's copy, which holds real data so a Vibeground shows real rows while its database changes stay in a copy that is thrown away, seeded by the one read above (`api/hono/src/lib/dashboard/vibe.ts`). Its real rows stay out of every screenshot and PR, and only the owner's own clicks start or stop one.
 
 A worktree that works on the merge lock's Redis (`@packages/redis`) runs its own the same way, `docker run -d --name playground-<worktree>-redis -p 127.0.0.1::6379 redis:alpine`, with `REDIS_URL` in its `.env`; left blank, the lock keeps to its folder.
 

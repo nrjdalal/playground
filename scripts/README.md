@@ -208,7 +208,9 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 ## A ZeroStarter sync
 
-- A ZeroStarter sync overlays `lefthook.yml` with the starter's and drops the docs this repo adds to the docs-wrap job's glob, so after one, restore each until `tests/lefthook.test.ts` passes, then run `bun node_modules/.bin/lefthook install`, since the sync's own install rewrote the shared `.git/hooks` outside run-slot.
+- A ZeroStarter sync overlays `lefthook.yml` and `packages/scripts/src/skills-manager.ts` with the starter's and drops the docs this repo adds to the docs-wrap job's glob, so after one, restore each until `tests/lefthook.test.ts` and `tests/packages/scripts/src/skills-manager.test.ts` pass, then run `bun node_modules/.bin/lefthook install`,
+  since the sync's own install rewrote the shared `.git/hooks` outside run-slot.
+- The sync also asks for the skills-table markers back in `AGENTS.md`: leave `AGENTS.md` as it is, since this repo's `skills-manager.ts` writes the tables to `skills/zerostarter/README.md`.
 - Its publish-step files (`auto-release.yml`, `changelog.config.json`, `release-version.ts`, `changelog-manager.ts`, the `changelogen` catalog entry) stay out, since they commit and tag on `canary`; a ship's GitHub release notes still take their shape, rendered at the ship by `bun run release:notes` with no commit (the `release` skill's step 4).
 - In `skills/zerostarter/.sync.json`, each skill that takes the update keeps the entry the sync wrote, so `skills-manager.ts --outdated` reads it as synced rather than edited here.
 

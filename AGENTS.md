@@ -38,7 +38,7 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
   Code that runs under Node anywhere stays on `node:`; the `runtime-apis` skill's table names where.
 - ALWAYS: Keep enumerable lists alphabetical (A→Z), union/enum members, env-var schemas and their `runtimeEnv`/`turbo.json` mirrors, and the docs that list them, so the code and its docs stay in the same order.
   Use a meaningful order (flow, priority, required-then-optional) only where alphabetical would obscure intent.
-  An API response schema leads with the key it is about, then sorts the rest A→Z (`users`, then `hasNextPage`, `page`, `perPage`, `total`), so the subject sits in one place on every endpoint; a row's own fields are plain A→Z, `id` included.
+  An API response schema with one key it is about leads with that key, then sorts the rest A→Z (`users`, then `hasNextPage`, `page`, `perPage`, `total`), so the subject sits in one place on every endpoint; a row's own fields are plain A→Z, `id` included.
 - ALWAYS: Version every root `catalog` entry with a caret range (`^1.2.3`), never an exact pin or a tilde.
   `packages/scripts/src/deps-manager.ts` rewrites them on `postinstall`, with no opt-out ([docs/dependencies.md](./docs/dependencies.md)).
 - Do not comment unnecessarily.
@@ -90,7 +90,7 @@ On a worktree's stack the dashboard then shows the fixture's made-up sessions un
 
 ZeroStarter's skills live in `skills/zerostarter`, which `.agents/skills` (the path ZeroStarter's CLI syncs through), `.claude/skills` and `.github/skills` link to, so every agent tool reads the same files.
 Before you run a ZeroStarter sync, read [scripts/README.md](./scripts/README.md#a-zerostarter-sync): it overlays files this repo keeps its own.
-[skills/zerostarter/README.md](./skills/zerostarter/README.md) lists each one, generated from its description by `skills-manager`: **custom** skills are maintained in this repo; **vendored** skills are copied verbatim from an upstream project (re-vendor to update, do not hand-edit).
+[skills/zerostarter/README.md](./skills/zerostarter/README.md) lists each skill, generated from its description by `skills-manager`: **custom** skills are maintained in this repo; **vendored** skills are copied verbatim from an upstream project (re-vendor to update, do not hand-edit).
 
 ## Playground
 
