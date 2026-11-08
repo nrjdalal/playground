@@ -705,6 +705,76 @@ print(json.dumps(sent))
     expect(sent[1][1]).toContain("worker-big2")
   })
 
+  // the same episode's kind change: after the no-fit send the holder in run-slot-2 ends, the same head's can-take passes,
+  // and the could-take line sends too, once, the two lines keyed per kind on the episode the head ticket holds
+  const EPISODE_KIND = `
+import importlib.util, json, os, sys, time
+spec = importlib.util.spec_from_file_location("run", sys.argv[1])
+run = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(run)
+clock = [1_800_000_000.0]
+run.time.time = lambda: clock[0]
+sent = []
+run.notify = lambda text, to="dispatcher": sent.append([to, text])
+run.log = lambda line: None
+for fn in ("stall", "ending_alert", "api_stop_alerts", "slot_idle_alerts", "docker_check", "memory_files", "heavy_jobs", "slot_alerts", "capped_alert"):
+    setattr(run, fn, lambda *a, **k: [])
+run.herdr_sessions = lambda: []
+run.moving = lambda now_t=None: None
+os.makedirs(run.HERE, exist_ok=True)
+state = {"blocks": {}}
+run.cycle(state)
+clock[0] += 200
+run.cycle(state)
+os.remove(os.path.join(run.OPS, "run-slot-2.holder"))
+os.rmdir(os.path.join(run.OPS, "run-slot-2"))
+clock[0] += 200
+run.cycle(state)
+clock[0] += 200
+run.cycle(state)
+print(json.dumps(sent))
+`
+  test("sends the could-take line when the holder ends and the same head can take it", async () => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    mkdirSync(join(ops, "run-slot-2"), { recursive: true })
+    writeFileSync(join(ops, "run-slot-2.holder"), `worker-big 1 2026-10-18T19:00:00Z 3 big\n`)
+    for (const off of ["run-slot.3-off", "run-slot.4-off", "run-slot.single"])
+      writeFileSync(join(ops, off), "")
+    mkdirSync(join(ops, "run-slot.waiters"), { recursive: true })
+    const head = join(ops, "run-slot.waiters", `1-${process.pid}-worker-big`)
+    writeFileSync(head, "s2 23 3 big\n")
+    const pinned = Date.now() / 1000 - 1300
+    utimesSync(head, pinned, pinned)
+    const proc = Bun.spawn([...PYTHON, "-I", "-c", EPISODE_KIND, RUN_PY], {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+        TZ: "UTC",
+        UV_CACHE_DIR: process.env.UV_CACHE_DIR,
+        UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
+    expect(code, err).toBe(0)
+    const sent = JSON.parse(out) as [string, string][]
+    expect(sent).toHaveLength(2)
+    expect(sent[0][0]).toBe("builder")
+    expect(sent[0][1]).toContain("its 3 units fit no open slot")
+    expect(sent[0][1]).toContain("run-slot-2 holds 3 units")
+    expect(sent[0][1]).not.toContain("could take")
+    expect(sent[1][1]).toContain("worker-big")
+    expect(sent[1][1]).toContain("could take it and takes nothing")
+  })
+
   // 31 Oct: both alerts named a big session's ticket, the oldest, which ranks behind a newer medium one by design
   test("watches the queue's head, so an older big ticket behind a newer medium one fires nothing", async () => {
     expect(await queue(false, { older: true })).toBeNull()
