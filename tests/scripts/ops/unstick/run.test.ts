@@ -831,13 +831,13 @@ describe("the session read", () => {
     ])
   })
 
-  test("runs the pinned herdr in HOME's data folder when HERDR_BIN_PATH is unset", async () => {
+  // the data folder PLAYGROUND_DATA_DIR names, HOME's ~/.playground only when it is unset, so a fixture stack's session never runs the machine's herdr (#1564)
+  test("runs the pinned herdr in the data folder when HERDR_BIN_PATH is unset", async () => {
     const { config, env } = machine(pid)
     const { HERDR_BIN_PATH: bin, ...rest } = env
-    const home = scratch()
-    mkdirSync(join(home, ".playground", "bin"), { recursive: true })
-    script(join(home, ".playground", "bin", "herdr"), readFileSync(bin, "utf8"))
-    const found = (await callWith({ ...rest, HOME: home }, config, "herdr_sessions")) as {
+    mkdirSync(join(config, "playground", "bin"), { recursive: true })
+    script(join(config, "playground", "bin", "herdr"), readFileSync(bin, "utf8"))
+    const found = (await callWith({ ...rest, HOME: scratch() }, config, "herdr_sessions")) as {
       pid: string
     }[]
     expect(found.map((s) => s.pid)).toEqual([pid])
