@@ -1657,3 +1657,96 @@ print(json.dumps(sent))
     )
   })
 })
+describe("the capped and ending account lines (#1457)", () => {
+  const RESET = Math.ceil(Date.now() / 3_600_000) * 3600 + 3 * DAY
+  const write = (path: string, body: string): void => {
+    mkdirSync(join(path, ".."), { recursive: true })
+    writeFileSync(path, body)
+  }
+  const usage = (
+    config: string,
+    file: string,
+    account: string,
+    pct: number,
+    reset = RESET,
+    at = new Date(),
+  ) =>
+    write(
+      join(config, "playground", file),
+      JSON.stringify({
+        account,
+        rate_limits: { seven_day: { resets_at: reset, used_percentage: pct } },
+        writtenAt: at.toISOString().replace(/\.\d{3}Z$/, "Z"),
+      }),
+    )
+  const record = (config: string, name: string, flags: string) =>
+    write(
+      join(config, "playground", "resume", `${name}.sh`),
+      `#!/bin/bash\n# server: factory\nexec /x/scripts/spawn.sh resume ${name} /x 0b9e8f1a ${flags}\n`,
+    )
+  const machine = (ownPct: number, twoPct: number, twoEnds?: string) => {
+    const config = scratch()
+    mkdirSync(join(config, "playground", "ops", "unstick"), { recursive: true })
+    usage(config, "usage.json", "own@example.net", ownPct)
+    usage(config, "usage-two.json", "two@example.com", twoPct)
+    record(config, "worker-on-two", "--account two@example.com --model claude-opus-5-5")
+    record(config, "worker-plain", "")
+    record(config, "worker-two-b", "--account two@example.com")
+    record(config, "worker-two-c", "--account two@example.com --model claude-sonnet-5-5")
+    if (twoEnds)
+      storeWith(join(config, "playground"), {}, {
+        "usage.accounts": [{ email: "two@example.com", provider: "claude", ends: twoEnds }],
+      } as never)
+    return config
+  }
+
+  test("a week at 98% with a live session on the account sends nothing (#1457)", async () => {
+    const config = machine(98, 22)
+    const { notified: sent } = await notified(config, "capped_alert", ["worker-plain"])
+    expect(sent).toEqual([])
+  })
+
+  test("a capped account names every live session on it and the roomiest target, once per reset (#1457)", async () => {
+    const config = machine(40, 100)
+    const { notified: sent } = await notified(config, "capped_alert", [
+      "worker-on-two",
+      "worker-two-b",
+      "worker-two-c",
+      "worker-plain",
+    ])
+    expect(sent).toHaveLength(2)
+    expect(sent.map(([to]) => to)).toEqual(["builder", "ops"])
+    const line = sent[0]![1]
+    expect(line).toContain("two@example.com")
+    expect(line).toContain("worker-on-two")
+    expect(line).toContain("worker-two-b")
+    expect(line).toContain("worker-two-c")
+    expect(line).not.toContain("worker-plain")
+    expect(line).toContain("own@example.net")
+    expect(line).toContain("spawn.sh close")
+    const again = (
+      await notified(config, "capped_alert", [
+        "worker-on-two",
+        "worker-two-b",
+        "worker-two-c",
+        "worker-plain",
+      ])
+    ).notified
+    expect(again).toEqual([])
+  })
+
+  test("an ending account with room sends ops one line naming the account, its end and the points left (#1457)", async () => {
+    const config = machine(40, 55, new Date(Date.now() + 12 * 3_600_000).toISOString())
+    const { notified: sent } = await notified(config, "ending_alert", ["worker-on-two"])
+    expect(sent).toHaveLength(1)
+    expect(sent[0]![0]).toBe("ops")
+    expect(sent[0]![1]).toContain("two@example.com")
+    expect(sent[0]![1]).toContain("points left")
+  })
+
+  test("an ending account at 100% sends nothing (#1457)", async () => {
+    const config = machine(40, 100, new Date(Date.now() + 12 * 3_600_000).toISOString())
+    const { notified: sent } = await notified(config, "ending_alert", ["worker-on-two"])
+    expect(sent).toEqual([])
+  })
+})
