@@ -13,7 +13,7 @@ const READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/
 const EVALUATES = [
   /\(\([^)]*[A-Za-z_]/,
   /\$\[[^\]]*[A-Za-z_]/,
-  /\[\[.*\s-(?:eq|ge|gt|le|lt|ne)\s/s,
+  /\[\[[\s\S]*\s-(?:eq|ge|gt|le|lt|ne)\s/,
   /\$\{[#!]?\w+:(?![-+=?:])[^}]*[A-Za-z_]/,
   /@P\}/,
 ]

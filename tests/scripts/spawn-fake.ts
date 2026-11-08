@@ -134,6 +134,7 @@ export type Session = { name?: string; pid: number; procStart?: string; raw?: st
 // The factory's settings as link-skills.sh links them, which every launch rebuilds into its own file with the factory's one compact window.
 export const FACTORY_SETTINGS = {
   autoCompactWindow: 400000,
+  autoMemoryEnabled: false,
   env: { KEEP: "1" },
   hooks: {
     PreToolUse: [{ hooks: [{ command: "no-env-dump", type: "command" }], matcher: "Bash" }],

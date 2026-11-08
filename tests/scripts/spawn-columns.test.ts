@@ -17,7 +17,7 @@ describe("under the gates it spawns", () => {
       `You are ${OLD.dispatcher}, the Playground factory's dispatcher; ${OLD.ops} briefs you`,
     )
     expect(command).not.toContain("Report to")
-    expect(r.roster).toEqual(["set", OLD.dispatcher, "kind=dispatcher", "task=h.md"])
+    expect(r.roster).toEqual(["set", OLD.dispatcher, "kind=dispatcher", "task=h.md", "memory=on"])
   })
 
   test("a manager's column names it once: a lead reports to the dispatcher", async () => {
@@ -163,6 +163,7 @@ describe("under the gates it spawns", () => {
       "pr=1",
       "title=Plain test work",
       "task=b.md",
+      "memory=off",
     ])
   })
 

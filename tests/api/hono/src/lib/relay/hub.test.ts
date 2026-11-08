@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test"
 
 import { type Bus, createHub, type Hub } from "../../../../../../api/hono/src/lib/relay/hub"
+import { RELAY_REPLACED_CLOSE } from "../../../../../../api/hono/src/lib/relay/protocol"
 
 const ID = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
 // a made-up public key, the shape the browser's P-256 key exports to
@@ -18,12 +19,12 @@ const mac = () => {
   return { send: (data: string) => void sent.push(data), sent }
 }
 
-const answer = (id: string, body = "ok") =>
+const answer = (id: string, body = "ok", status = 200) =>
   JSON.stringify({
     body: Buffer.from(body).toString("base64"),
     headers: { "content-type": "text/plain" },
     id,
-    status: 200,
+    status,
     type: "response",
   })
 
@@ -98,10 +99,12 @@ describe("the relay's hub", () => {
 // Two instances on one fake bus, which hands each published message to every instance, the publisher's included, on a later tick, as Redis does.
 const instances = (options: { ackMs?: number; now?: () => Date } = {}) => {
   const hubs: Hub[] = []
+  const published: string[] = []
   let listening = 0
   const bus: Bus = {
     listen: () => void listening++,
     publish: async (data) => {
+      published.push(data)
       await Bun.sleep(0)
       for (const one of hubs) one.receive(data)
     },
@@ -109,7 +112,14 @@ const instances = (options: { ackMs?: number; now?: () => Date } = {}) => {
   let n = 0
   const id = () => `00000000-0000-4000-8000-00000000000${n++}`
   hubs.push(createHub({ ...options, bus, id }), createHub({ ...options, bus, id }))
-  return { holder: hubs[0]!, listening: () => listening, other: hubs[1]! }
+  return {
+    holder: hubs[0]!,
+    listening: () => listening,
+    other: hubs[1]!,
+    published,
+    // puts bytes already on the bus on it again, as a publish whose first try landed and then reported closed re-sends them
+    republish: (data: string) => bus.publish(data),
+  }
 }
 
 // Two instances on one bus, the second cold: its first publish waits coldMs for its subscriber and sender to connect before the message reaches the bus, as a fresh instance's first Redis connect does.
@@ -180,6 +190,35 @@ describe("the relay's hub across instances", () => {
     expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
     expect(await other.status("u1")).toEqual({ online: true, since: null })
     expect(other.busy()).toBe(false)
+  })
+
+  // a publish whose first try landed and then reported closed puts the same request on the bus twice; the Mac refuses an id it answered already, and that refusal would settle the wait before the real answer, so the hub must drop the repeat before the Mac sees it
+  test("a request the bus carries twice reaches the Mac once, and the wait settles on the real answer", async () => {
+    const { holder, other, published, republish } = instances({ now: () => AT })
+    const answered: string[] = []
+    let received = 0
+    holder.attach("u1", {
+      send: (data: string) => {
+        received++
+        const { id } = JSON.parse(data) as { id: string }
+        // the Mac answers a request it has answered already at once with the seen-id refusal, and the first copy's real answer takes longer than this test's whole retry window
+        if (answered.includes(id))
+          setTimeout(() => holder.answer("u1", answer(id, "answered already", 409)), 0)
+        else {
+          answered.push(id)
+          setTimeout(() => holder.answer("u1", answer(id, "workers")), 30)
+        }
+      },
+    })
+    const forwarded = other.forward("u1", "owner", "/api/v1/workers")
+    await Bun.sleep(10)
+    expect(received).toBe(1)
+    await republish(published[0]!)
+    const got = await forwarded
+    expect(got.type).toBe("response")
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
+    expect(got.type === "response" && got.status).toBe(200)
+    expect(received).toBe(1)
   })
 
   // a cold instance spent its whole ack wait connecting to Redis, so a read and the status read offline while the Mac held its socket on another instance
@@ -263,6 +302,45 @@ describe("the relay's hub across instances", () => {
     expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
     expect(await holder.status("u1")).toEqual({ online: true, since: null })
     expect(await other.status("u1")).toEqual({ online: true, since: null })
+  })
+
+  // on each recycle the old socket's close put a ping, then gone, on the bus as its invocation ended, so both failed at the frozen instance's next thaw (#1537)
+  test("a socket the Mac closes as replaced is let go with nothing on the bus, and the Mac stays online through its next one", async () => {
+    const { holder, other, published } = instances({ ackMs: 50 })
+    const release = holder.attach("u1", mac())
+    other.attach("u1", mac())
+    release(RELAY_REPLACED_CLOSE)
+    await Bun.sleep(80)
+    expect(published).toEqual([])
+    expect(await holder.status("u1")).toEqual({ online: true, since: null })
+  })
+
+  test("a socket closed as replaced on a frozen instance's bus leaves no failed publish", async () => {
+    const frozen: Bus = {
+      listen() {},
+      publish: async () => {
+        throw new Error("Connection closed")
+      },
+    }
+    const { lines } = await logged(async () => {
+      const release = createHub({ ackMs: 50, bus: frozen }).attach("u1", mac())
+      release(RELAY_REPLACED_CLOSE)
+      await Bun.sleep(80)
+    })
+    expect(lines).toEqual([])
+  })
+
+  test("a close with no code, or any other, still asks the bus and then says gone, as an older Mac's does", async () => {
+    for (const code of [undefined, 1000, 1006, 4401]) {
+      const { holder, published } = instances({ ackMs: 20 })
+      const release = holder.attach("u1", mac())
+      release(code)
+      await Bun.sleep(60)
+      expect(published.map((one) => (JSON.parse(one) as { kind: string }).kind)).toEqual([
+        "ping",
+        "gone",
+      ])
+    }
   })
 
   test("an answer settles only a request its own owner's Mac was sent", async () => {

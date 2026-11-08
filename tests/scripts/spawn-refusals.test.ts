@@ -115,7 +115,7 @@ describe("a session starts the same on any Mac", () => {
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [])
     expect(r.rosterScript).toBe(join(root, "scripts", "roster.ts"))
     expect(r.rosterLog).toEqual([
-      "set worker-brave-otter kind=worker reportsTo=builder surface= title=Plain test work task=b.md",
+      "set worker-brave-otter kind=worker reportsTo=builder surface= title=Plain test work task=b.md memory=off",
     ])
   })
 

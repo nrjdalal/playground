@@ -26,7 +26,7 @@ import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { withoutRef, withoutSenderName } from "@/lib/agent-label"
-import { useAgentsBoard } from "@/lib/agents"
+import { socketsOf, useAgentsBoard } from "@/lib/agents"
 import { oneLine, toolLabel } from "@/lib/dashboard"
 import {
   chainLinkName,
@@ -59,7 +59,7 @@ function Step({
   name: string | null
   now: Date
 }) {
-  const sockets = useAgentsBoard().data?.sockets
+  const sockets = useAgentsBoard(socketsOf).data
   if (entry.kind === "tool") {
     return (
       <Marker className="text-xs">

@@ -43,7 +43,7 @@ if has gh; then
   if ! gh_helper && [ "$FIX" = 1 ]; then gh auth setup-git >/dev/null 2>&1; fi
   if gh_helper; then ok "git uses gh login" "credential helper for github.com"; else miss "git uses gh login" 1 "run: gh auth setup-git"; fi
 fi
-tool python3 python 1 "the ops scripts and code-review-loop's state.py"
+tool python3 python 1 "the ops scripts"
 tool npx node 1 "the MCP servers that run through npx"
 tool uv uv 1 "this repo's Python tests"
 tool pnpm pnpm 1 "a pnpm repo's gates"

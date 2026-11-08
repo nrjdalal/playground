@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { SQL } from "bun"
 
 import { MAX_TEXT } from "../../../../../packages/message/src/index"
+import { testContainerName } from "../../../../container"
 
 // Yard's tables as the migration chain builds them, on a throwaway Postgres in Docker published on 127.0.0.1 only, with made-up users. Skipped where Docker is not running.
 const MIGRATIONS = join(import.meta.dir, "../../../../../packages/db/drizzle")
@@ -23,6 +24,8 @@ describe.skipIf(!dockerUp())("Yard's tables", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("db-yard"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",

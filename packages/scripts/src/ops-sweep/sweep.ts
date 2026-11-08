@@ -215,7 +215,7 @@ const pullOf = (pr: unknown, repo: string): number | undefined => {
   return m ? Number(m[1]) : undefined
 }
 
-// A worker's PR whose head has been ready (its checks green) REVIEWER_LATE seconds with no review round (a ReviewBot verdict at any head) and no live session for the reviewer the roster names on it: one line to the worker's lead, once per head, since a reviewer started late or by hand left heads ready for over an hour. A parked row waits by design, as the runner check below reads it.
+// A worker's PR whose head has been ready (its checks green) REVIEWER_LATE seconds with no review round (a ReviewBot verdict at any head) and no live session for the reviewer the roster names on it, by its pr or any entry of its prs: one line to the worker's lead, once per head, since a reviewer started late or by hand left heads ready for over an hour. A draft PR and a parked row wait by design, so neither raises a line; the runner check below reads the parked one.
 export async function lateReviewers(
   ctx: Context,
   agents: Json[],
@@ -237,7 +237,7 @@ export async function lateReviewers(
   }
   if (!workers.size) return []
   const fields =
-    "state headRefOid comments(last: 100) { nodes { body } } commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes { ... on CheckRun { completedAt } ... on StatusContext { createdAt } } } } } } }"
+    "state headRefOid isDraft comments(last: 100) { nodes { body } } commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes { ... on CheckRun { completedAt } ... on StatusContext { createdAt } } } } } } }"
   const [owner, name] = repo.split("/")
   const query = `{ repository(owner: "${owner}", name: "${name}") { ${[...workers.keys()].map((n) => `p${n}: pullRequest(number: ${n}) { ${fields} }`).join(" ")} } }`
   const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
@@ -265,9 +265,10 @@ export async function lateReviewers(
         }[]
       }
       headRefOid?: string
+      isDraft?: boolean
       state?: string
     } | null
-    if (!pr || pr.state !== "OPEN" || !pr.headRefOid) continue
+    if (!pr || pr.state !== "OPEN" || !pr.headRefOid || pr.isDraft) continue
     if (told[n] === pr.headRefOid) keep[n] = pr.headRefOid
     const rollup = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup
     if (rollup?.state !== "SUCCESS") continue
@@ -281,7 +282,9 @@ export async function lateReviewers(
     if ((pr.comments?.nodes ?? []).some((c) => /^## ReviewBot · round /.test(c.body ?? "")))
       continue
     const reviewers = open.filter(
-      (a) => kindOf(String(a.name), a.kind) === "reviewer" && pullOf(a.pr, repo) === n,
+      (a) =>
+        kindOf(String(a.name), a.kind) === "reviewer" &&
+        [a.pr, ...(Array.isArray(a.prs) ? a.prs : [])].some((u) => pullOf(u, repo) === n),
     )
     if (reviewers.some((a) => live.has(String(a.name)))) continue
     if (keep[n] === pr.headRefOid) continue
@@ -524,6 +527,38 @@ export async function idleDbs(ctx: Context): Promise<string[]> {
   return out
 }
 
+// Whether a pid runs, read for a removal: a refused signal (another user's process, or one outside a sandbox the sweep runs in) counts as running, so a removal never rests on a pid the sweep cannot see.
+export const runsForDelete = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+// A test container named playground-test-<suite>-<pid> whose runner pid no longer runs is a killed test run's leftover (the kill never reaches the suite's cleanup): removed with its volumes, so a killed run leaks nothing. Every other container stays: the live dashboard's database, pglaunch's, a Vibeground copy, a worktree's, any running stack's, and any test container whose pid still runs; a name whose last field is not a pid, such as a worktree named test-x's playground-test-x-db, is never one. runs says whether a pid has a process, a test's table in its place.
+export async function leakedTests(
+  ctx: Context,
+  runs: (pid: number) => boolean = runsForDelete,
+): Promise<string[]> {
+  const ps = await ctx.run(
+    ["docker", "ps", "--filter", "name=^playground-test-", "--format", "{{.Names}}"],
+    {
+      timeoutMs: 60_000,
+    },
+  )
+  if (ps.code) return []
+  const removed: string[] = []
+  for (const name of ps.out.split("\n").filter(Boolean)) {
+    const pid = Number(/^playground-test-[a-z0-9-]+-(\d+)$/.exec(name)?.[1])
+    if (!Number.isInteger(pid) || pid <= 0 || runs(pid)) continue
+    if ((await ctx.run(["docker", "rm", "-fv", name], { timeoutMs: 60_000 })).code === 0)
+      removed.push(name)
+  }
+  return removed
+}
+
 // One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases, the runner-box route, late reviewers, branches with no PR, stalled PRs and the usage forecast.
 export async function check(ctx: Context): Promise<string[]> {
   let roster: Json
@@ -657,6 +692,16 @@ export async function pass(
     }
   } catch (err) {
     result = `error: ${err instanceof Error ? err.message : String(err)}`
+  }
+  try {
+    const removed = await leakedTests(ctx)
+    if (removed.length)
+      await appendFile(
+        join(ctx.ops, "ops-log.md"),
+        `- ${stamp(ctx)} leaked test containers removed (ops-sweep): ${removed.join(", ")}.\n`,
+      )
+  } catch (err) {
+    result = `error: leaked test containers: ${err instanceof Error ? err.message : String(err)}`
   }
   try {
     await maybePrune(ctx)

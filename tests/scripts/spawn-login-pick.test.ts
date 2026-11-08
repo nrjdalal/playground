@@ -555,4 +555,91 @@ describe("the capacity gate refuses and spawns nothing", () => {
       }),
     ])
   })
+
+  // #1560: a usage.accounts row parked until a future time keeps new sessions off its login, the split's pick and the lowest-week fallback alike, and an --account naming it is refused.
+  const iso = (ms: number) => `${new Date(Date.now() + ms).toISOString().slice(0, 19)}Z`
+  const until = iso(86_400_000)
+  const parkedRows = (parkedUntil = until) =>
+    JSON.stringify({
+      "usage.accounts": [
+        { email: "spare@example.com", parkedUntil },
+        { label: "zai", provider: "glm" },
+      ],
+    })
+  const parkedFiles = (h: string): void => {
+    loginFiles({
+      "usage-spare.json": login("spare@example.com", 10),
+      "usage-second.json": login("second@example.com", 95),
+    })(h)
+    splitFiles({ "spare@example.com": 0.7, "second@example.com": 0.3 })(h)
+  }
+
+  test("a parked login is passed over for the next one in the split, though it has the larger share and the most room", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [],
+      { PACE_OFF_UNTIL: offUntilUtc, SETTINGS_JSON: parkedRows(), USAGE_JSON: weekAt(98) },
+      script,
+      undefined,
+      parkedFiles,
+    )
+    expect(r.code).toBe(0)
+    expect(r.out).toContain(
+      "no --account, so it starts on second@example.com, next in the account split",
+    )
+    expect(launchOf(r)).toContain("-a second@example.com -w")
+  })
+
+  test("a parked login that is the only one under its pace is never picked: the start refuses with the usage gate's line", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [],
+      { SETTINGS_JSON: parkedRows(), USAGE_JSON: weekAt(98) },
+      script,
+      undefined,
+      parkedFiles,
+    )
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+    for (const fragment of [
+      "the usage gate holds it: every login is over it:",
+      `spare@example.com (usage-spare.json): it is parked until ${until} (usage.accounts parkedUntil)`,
+      "second@example.com (usage-second.json): the week is at 95%",
+    ])
+      expect(r.err).toContain(fragment)
+  })
+
+  test("a login whose parkedUntil has passed is picked as before", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [],
+      { SETTINGS_JSON: parkedRows(iso(-60_000)), USAGE_JSON: weekAt(98) },
+      script,
+      undefined,
+      parkedFiles,
+    )
+    expect(r.code).toBe(0)
+    expect(r.out).toContain(
+      "no --account, so it starts on spare@example.com, next in the account split",
+    )
+  })
+
+  test.each([
+    ["a start", ["worker", "worker-brave-otter", "b.md"]],
+    ["a resume", ["resume", "worker-brave-otter", root]],
+  ])("%s refuses an --account that names a parked login, naming parkedUntil", async (_, args) => {
+    const r = await spawn(
+      [...args, "--account", "spare@example.com"],
+      [],
+      { SETTINGS_JSON: parkedRows() },
+      script,
+      { name: "worker-brave-otter", backend: "claude" },
+      loginFiles({ "usage-spare.json": login("spare@example.com", 10) }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.cmux).toBeUndefined()
+    expect(r.err).toContain(
+      `the usage gate holds it: --account spare@example.com is parked until ${until} (usage.accounts parkedUntil).`,
+    )
+  })
 })

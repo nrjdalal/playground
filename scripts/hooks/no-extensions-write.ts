@@ -38,7 +38,6 @@ import {
   type Visit,
   withDeadline,
   type Word,
-  zshSplits,
 } from "./shell"
 import {
   held,
@@ -239,19 +238,9 @@ const after = (word: Word, cut: number): Word => ({
   value: word.value.slice(cut),
 })
 
-// Whether the shell may split a word into several: always for a substitution or a pasted value, and for a parameter where the shell splits one (`Word.splits` in shell.ts)
-const splitIn = (word: Word, splitting = false): boolean =>
-  word.splits === "always" || (word.splits === "sh" && splitting)
-
 // The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install, ln and mv (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch; and every word the shell may split (`Word.splits`), since one of its words may land as a target
-function writeTargets(
-  name: string,
-  args: Word[],
-  gnu: boolean,
-  posix = false,
-  splitting = false,
-): Word[] {
-  const splits = args.filter((word) => splitIn(word, splitting))
+function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): Word[] {
+  const splits = args.filter((word) => word.splits)
   if (name === "dd")
     return [
       ...new Set([
@@ -577,6 +566,46 @@ function sedReads(args: Word[]): boolean {
   return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value))
 }
 
+// sed's in-place option as macOS sed reads it: -i after any of -E, -n, -r, -s, -u and -z, its backup suffix attached (holding no / or *, which GNU writes into another folder) or, when nothing is attached, the next word
+const SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/
+// a bare -i's suffix word: empty or a dot and letters, so a GNU sed, which reads that word as its script, reads it as no command or none it knows
+const SED_SUFFIX = /^(?:\.[\w.~-]*)?$/
+const SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
+const SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}${SED_TEXT}[gpI0-9]*)[ \t]*`
+// an in-place sed's script read whole by its allowlist: line, $ or /regex/ addresses and their ranges, then d, p, or s/// with flags from g, p, I and digits; every other command and flag (w, W, r, R, e, s///w, s///e) is off it
+const SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`)
+
+// The scripts of a sed call that edits its files in place and writes nothing else, or undefined, its argv read as macOS sed reads it: sed as its own program (ownProgram) with no variable set in the call, an in-place option (SED_IN_PLACE) whose bare form takes the next word as its suffix (SED_SUFFIX), every other option on -E, -n, -r, -s, -u and -z, and every script (each -e value, else the first operand) a literal word that SED_EDIT holds, while each other operand, a file it edits, is judged as any word is
+function sedInPlace(cmd: Command, parsed: Parsed): Set<Word> | undefined {
+  const { args, local, name } = parsed
+  if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed)) return undefined
+  const scripts: Word[] = []
+  const operands: Word[] = []
+  let inPlace = false
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    const suffix = SED_IN_PLACE.exec(value)
+    if (value === "-e") {
+      if (!args[k + 1]) return undefined
+      scripts.push(args[++k])
+    } else if (value === "--") {
+      operands.push(...args.slice(k + 1))
+      break
+    } else if (suffix) {
+      inPlace = true
+      if (suffix[1]) continue
+      const word = args[++k]
+      if (!word || !literal(word) || !SED_SUFFIX.test(word.value)) return undefined
+    } else if (value.startsWith("-") && value !== "-") {
+      if (!/^-[Enrsuz]+$/.test(value)) return undefined
+    } else operands.push(args[k])
+  }
+  const read = scripts.length ? scripts : operands.slice(0, 1)
+  if (!inPlace || read.length === 0) return undefined
+  if (!read.every((w) => literal(w) && SED_EDIT.test(w.value))) return undefined
+  return new Set(read)
+}
+
 // perl's options that run no other code and write nothing: a, l, n, p and w clustered, the last of them may be e or E, whose script is the next word; -d, -i, -I, -m, -M, -s, -x and the rest are off it
 const PERL_FLAG = /^-[alnpw]*[eE]?$/
 // a regex with no variable, no array and no code block (`(?{`, `(??{`, `(*{`), its $ only an anchor
@@ -709,7 +738,8 @@ function wholeLine(commands: Command[], env: Env): boolean {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
     if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
-    return writes || !(narrow(cmd, env) || quietCommit(cmd, parse(cmd), env))
+    const parsed = parse(cmd)
+    return writes || !(narrow(cmd, env) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed))
   })
 }
 
@@ -826,10 +856,11 @@ function cliWrite(words: Word[]): string | undefined {
     if (verb !== "set" && verb !== "reset") return
     const key = positional[0]
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
-    if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX)) return
+    const job = key.startsWith(JOB_PREFIX)
+    if (!GUARD_KEYS.has(key) && !job) return
     return PRIVACY_KEYS.has(key) && !scoped
       ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}`
-      : key.startsWith(JOB_PREFIX)
+      : job
         ? `playground settings ${verb} of ${key}, ${BY_APPROVE}`
         : `playground settings ${verb} of ${key}, a key a guard reads`
   }
@@ -1060,25 +1091,12 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
-      // a runner the hook cannot name may hand the line to sh, which splits its parameters
-      const verdict = await run(
-        lex(line, env.known),
-        { ...env, splits: true, vars: new Map() },
-        visit,
-        true,
-      )
+      const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
     }
-    // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
+    // a quiet commit's message is text git never runs, a gated call it names included, and an in-place sed's script is text sed reads as a program of its own
     const quiet = !whole && quietCommit(cmd, parsed, env)
-    for (const word of quiet ? args : []) {
-      if (!/\s/.test(word.value)) continue
-      const named = lex(word.value.replace(/^--message=/, ""), env.known)
-        .commands.flatMap((c) => cliCalls(parse(c), env))
-        .map((words) => cliWrite(words))
-        .find(Boolean)
-      if (named) return refuse(named)
-    }
+    const sedScripts = whole ? undefined : sedInPlace(cmd, parsed)
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
@@ -1104,11 +1122,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         return refuse(`git on a clone in ${root}`)
       // a value the hook cannot read under a remover, as a writer's target, or in git's -c, could name the root, so it is refused unless the call holds it
       const unheld = (
-        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, here.splits) : []
+        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : []
       ).find((word) => !held(word, here, steady))
       if (unheld)
         return refuse(
-          splitIn(unheld, here.splits)
+          unheld.splits
             ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally`
             : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
         )
@@ -1151,8 +1169,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       for (const word of [first, ...args].map(
         (word) => heldWord(own(word), here, steady) ?? own(word),
       )) {
-        // a quiet commit's message and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
-        const text = (quiet && /\s/.test(word.value)) || (filters.has(word) && !word.glob)
+        // a quiet commit's message, an in-place sed's script and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
+        const text =
+          (quiet && /\s/.test(word.value)) ||
+          !!sedScripts?.has(word) ||
+          (filters.has(word) && !word.glob)
         if (text && !texts(word).some((t) => holds(t.value, here))) continue
         const named = names(word, here, remover, literal)
         if (named) return refuse(`${verb} on ${named}`)
@@ -1188,7 +1209,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // mv's -t folder, rsync's path values and the file find's write actions name are written to, though their word opens with a dash
     const values =
       tool === "mv"
-        ? writeTargets(tool, args, gnu, posix, env.splits)
+        ? writeTargets(tool, args, gnu, posix)
         : tool === "rsync"
           ? args.flatMap((word, k) => {
               const long = /^--([^=]+)=?/.exec(word.value)
@@ -1215,7 +1236,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           ...values,
         ]
       : WRITERS.has(tool)
-        ? writeTargets(tool, args, gnu, posix, env.splits)
+        ? writeTargets(tool, args, gnu, posix)
         : []
     const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined
     if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))
@@ -1235,7 +1256,6 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },
     process: environment,
-    splits: zshSplits(command),
     vars: new Map(),
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs

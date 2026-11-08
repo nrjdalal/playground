@@ -12,6 +12,9 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
+// the render_jobs harness runs jobs.ts through python, whose import graph (probe.ts's @packages/config/kinds among them) resolves through the built dists no import here reached, so a fresh checkout's render died on "Cannot find module" and its failure log then raised on the ops folder it never made (issue 1496); importing jobs.ts selects those builds
+import "../../../packages/scripts/src/playground/jobs"
+
 const upPy = join(import.meta.dir, "..", "..", "..", "scripts", "ops", "up.py")
 const scratch = mkdtempSync(join(tmpdir(), "ops-up-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -128,33 +131,33 @@ const exitOf = (jobs: object[], ...args: string[]) => {
   }
 }
 
-// a job row stored before cmux left the runtimes still names cmux or auto, and ops-up starts it in herdr.
-test("a pass exits 0 and starts a down job stored as cmux or auto in herdr", () => {
-  const cmuxJob = {
+// a job row an older install stored may hold any runtime word, and ops-up starts it in herdr, the one runtime.
+test("a pass exits 0 and starts a down job in herdr whatever runtime word its row holds", () => {
+  const oldJob = {
     command: "bash /x/ops/ops-dashboard/loop.sh",
     name: "ops-dashboard",
-    runtime: "cmux",
+    runtime: "made-up",
     stop: "dashboard",
   }
-  const autoJob = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "auto" }
+  const herdrJob = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "herdr" }
   const launchdJob = { launchd: "blue.acme.x", name: "x" }
-  expect(exitOf([cmuxJob, autoJob, launchdJob])).toEqual({
+  expect(exitOf([oldJob, herdrJob, launchdJob])).toEqual({
     code: 0,
     started: ["ops-dashboard", "ops-x"],
     stderr: "",
   })
   // a row that names no runtime and has a command starts in herdr too, as a hand-kept jobs.json row the render never parsed
-  expect(exitOf([{ ...cmuxJob, runtime: undefined }])).toEqual({
+  expect(exitOf([{ ...oldJob, runtime: undefined }])).toEqual({
     code: 0,
     started: ["ops-dashboard"],
     stderr: "",
   })
 })
 
-// an old ~/.zshrc hook still calls up.py --once-per-cmux in each terminal it opens, so an argument up.py does not know starts nothing.
+// an argument up.py does not know starts nothing.
 test("an argument up.py does not know is refused with its usage and runs no pass", () => {
   const job = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "herdr" }
-  for (const args of [["--once-per-cmux"], ["--restarted"], ["--sessions", "x"]])
+  for (const args of [["--once"], ["--restarted"], ["--sessions", "x"]])
     expect(exitOf([job], ...args)).toEqual({
       code: 1,
       started: [],
@@ -417,6 +420,37 @@ test("a pass renders jobs.json from the store, keeps it when the store has no po
   expect(pass().stderr.toString()).toBe("")
   expect(readFileSync(join(ops, "jobs.json"), "utf8")).toBe(rendered)
   expect(readFileSync(join(ops, "up.log"), "utf8")).toContain("jobs.json kept: ")
+})
+
+// issue 1538: a dead render's own error must reach up.log, so a pass makes the ops folder before its lock; on a fresh data dir the folder is missing, and the lock's open, then log()'s append, raised FileNotFoundError, hiding the render's error behind it; the pass runs main() with up() cut to its render
+test("a dead render with no ops folder shows the render's own error in up.log, not a missing-folder raise", () => {
+  const config = join(scratch, "config-dead-render")
+  mkdirSync(dataOf(config), { recursive: true })
+  const dead = join(scratch, "dead-render.ts")
+  writeFileSync(dead, `console.error("the render died here"); process.exit(2)\n`)
+  const pass = Bun.spawnSync(
+    [
+      "python3",
+      "-I",
+      "-c",
+      `${LOAD}up.JOBS_RENDER = sys.argv[2]\nup.up = lambda quiet: up.render_jobs()\nsys.argv = sys.argv[:1]\nup.main()`,
+      upPy,
+      dead,
+    ],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        HOME: scratch,
+        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      },
+      stderr: "pipe",
+    },
+  )
+  expect(pass.stderr.toString()).not.toContain("FileNotFoundError")
+  expect(readFileSync(join(dataOf(config), "ops", "up.log"), "utf8")).toContain(
+    "the render died here",
+  )
 })
 
 test("a pass writes jobs.json into the data folder dataDir() resolves, playground over an old dispatcher beside it", () => {

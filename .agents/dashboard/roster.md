@@ -55,6 +55,7 @@
   `kind` says what the session is, whatever its name: one of `ROSTER_KINDS` in `packages/config/src/kinds.ts` (assistant, builder, dispatcher, ops, optimizer, orchestrator, planner, probe, researcher, reviewer, runner, tester, worker), which spawn.sh writes at every start;
   `roleOf` in `workers.ts` places a session by it before its name's prefix (a dispatcher by its name still, a probe in Other), and an unknown kind is named and ignored, the agent kept.
   `slot` is a dispatcher's slot, `2` for the second (Bravo), which spawn.sh writes for a second `<id>-dispatcher` and `roster.ts who dispatcher` reads.
+  `memory` is the session's auto-memory trial arm, `on` or `off`, which spawn.sh writes at every start and a resume keeps ([ADR 0022](../adr/0022-auto-memory-runs-as-a-reviewed-trial.md)).
   `eta` is when a worker expects its chore done, the time it last sent its lead (playbook's **eta** rule); the sidebar row's tooltip counts down to it on a worker that is working, fixing or stuck (`timeLeft` in `web/next/src/lib/agents.ts`), showing nothing once it passes, once its pull request is merged or while it sits paused on a usage limit,
   and one that is not a time is named and ignored.
   `backlog` lists what is queued for the next free agent, in the order it was queued, and only grows (playbook's ROSTER.md says which entry a slot takes next): the lead that dispatches from it keeps two marks on its own entry,

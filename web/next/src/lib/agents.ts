@@ -5,7 +5,7 @@ import type { RosterKind } from "@packages/config/kinds"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 
-import { labelParts, labelText, setRosterKinds } from "@/lib/agent-label"
+import { labelParts, labelText, setRosterKinds, type LabelFacts } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import {
   agentGroup,
@@ -245,13 +245,34 @@ export function statusOf(
   return { text, tone }
 }
 
-// The board as last read, for a part of the page that only names agents (a stream's recipients): it reads whatever the page holds and fetches only when nothing has been read yet, leaving re-reads to useAgents.
-export const useAgentsBoard = () =>
+export type AgentsBoard = Awaited<ReturnType<typeof fetchAgents>>
+
+// A reader's own slice of the board, which React Query draws again only when that slice changes (its structural sharing keeps an unchanged slice's object across reads): the peer addresses alone, or with them what a label needs of every agent, so a stream's hundreds of names hold still through a read that moved only a session's activity.
+export const socketsOf = (board: AgentsBoard) => board.sockets
+export const labelBoard = (board: AgentsBoard) => ({
+  agents: board.agents.map(
+    ({ branchTicket, kind, name, pr, task, ticket, title, worker }): LabelFacts => ({
+      branchTicket,
+      kind,
+      name,
+      pr: pr && { number: pr.number },
+      task,
+      ticket,
+      title,
+      worker,
+    }),
+  ),
+  sockets: board.sockets,
+})
+
+// The board as last read, for a part of the page that only names agents (a stream's recipients): it reads whatever the page holds and fetches only when nothing has been read yet, leaving re-reads to useAgents; select narrows what it reads to the slice it draws.
+export const useAgentsBoard = <T = AgentsBoard>(select?: (board: AgentsBoard) => T) =>
   useQuery({
     queryKey: AGENTS_QUERY_KEY,
     queryFn: fetchAgents,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
+    select,
   })
 
 // The Orchestrators rows' dragged order, written whole, or forgotten so A to Z by title returns.

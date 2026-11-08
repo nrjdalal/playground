@@ -29,8 +29,11 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`), its own and each `slots.peers` folder's, each weighing half its item's load units, under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
    less a quarter (`gates.smallReserve`) kept for small items unless the start is small (`--size small|medium|big`, else small for a reviewer or tester, else the roster's or plan.json's size, else medium; [rules/slots.md](../../rules/slots.md)), while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the checkers,
    refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores, and the refusal names the load, the starts and the line;
-   a `--priority` start passes it while `priority.json` or a job's own `priority-start.json` stands in the data folder, since priority work comes first (`--firefighting` and the `firefighting-*.json` files are their old names, aliases);
-   memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, a run-slot lane free with the load units for a run, or an empty queue (`scripts/ops/run-slot.sh room`), so a new worker never joins a queue it has no room in, while checkers, resumes and moves skip it,
+   a `--priority` start passes it while `priority.json`, an org's own `priority-<name>.json` or a job's own `priority-start.json` stands in the data folder, since priority work comes first,
+   and so does a resume within 15 minutes of `spawn.sh close` ending a row that read live, since that session already counts in the load it comes back into;
+   memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`),
+   and for a fresh worker start alone swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), refusing when vm_stat gives no reading, since free memory counts compressible pages and read 62% on 7 Nov while 150 pages swapped in a second; every other start keeps its pass, as at the slots gate;
+   for a fresh worker start alone, a run-slot lane free with the load units for a run, or an empty queue (`scripts/ops/run-slot.sh room`), so a new worker never joins a queue it has no room in, while checkers, resumes and moves skip it,
    and a `--priority` start passes a full queue with a priority file standing, as at the load gate; and the launching backend's usage:
    Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone,
    which the dispatcher writes on the owner's go (#i509) and the pass line names, a missing, empty, past or unreadable time leaving the pace on;
@@ -49,7 +52,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A session that works with others opens as a full-height column to the right of the newest one in their workspace, never wrapped into a grid (side by side gives the most room, so nothing wraps): a worker's workspace reads worker | reviewer | tester, and the managers' reads `dispatcher` | `planner` | `builder` | `ops`.
    A session already running stays where it is until its next restart.
    spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions` (a probe's file is `factory-settings-sandbox-400k.json`):
-   every session starts at high effort; another effort is the owner's choice alone, which the owner picks for a dispatcher, the Assistant or the hosted session in the menu left of Send in its Dashboard composer, and a lead sets for any other session with spawn.sh's `--effort` at a start or a resume, on the owner's word relayed through the dispatcher in the **override** shape;
+   every session starts at high effort; the owner picks a dispatcher's, the Assistant's or the hosted session's effort in the menu left of Send in its Dashboard composer, and a lead picks any other session's with spawn.sh's `--effort` at a start or a resume, high for every class by brief-rush's model rule unless the owner's word in the **override** shape names another;
    every session runs on `models.default` (Opus) unless it starts with `--model` naming another of `models.claude` (Fable, Sonnet or Haiku by default; spawn.sh refuses any other id, `--model` beside `--backend glm`, and any but `models.checker` (Opus) for a reviewer or tester, whose verdict gates a merge, and records none of them,
    so a resume takes `--model` afresh and one without it runs on Opus) or with `--backend glm` (below) (Opus at extra-high effort for research and everything else, never Sonnet), and every subagent a session starts runs on Sonnet unless it names a model,
    from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approved #i492, 17 Oct; on GLM the alias maps to GLM), so a brief or subagent call that needs Opus names `model: opus`; a scheduled ops job that calls a model keeps its own.
@@ -86,13 +89,13 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
      Done when the restarted stack answers its `/api/health` and each watch is armed once.
      Before a close that a resume follows (an account move), wait until the session has no run-slot run in flight, since the close kills that run.
      Before an account move, its dispatcher tells every session that serves a dev stack, so what it serves does not go down unannounced.
-     Resumes go about 2 minutes apart to start, since spawn.sh's load gate counts recent starts and refuses a burst; a refused resume waits and runs again.
+     A resume within 15 minutes of its close passes spawn.sh's load gate (Spawn, above); later resumes go about 2 minutes apart, since the gate counts recent starts and refuses a burst, and a refused resume waits and runs again.
 
    It prints herdr's answer (`herdr pane <id> workspace <id>`) and records the session's `kind`, a checker's `worker=<its worker's full name>`, a worker's or runner's `reportsTo=<the session it reports to>` and, for an entry with no task, a `task` as [ROSTER.md](ROSTER.md) says, in the roster,
    by `set` through the checkout's `scripts/roster.ts`, which keeps a respawned session's work.
    The kind comes from the mode (`worker` for a worker, `runner` for a runner, the column's role for a checker or probe) or, for a manager, from its name (through `sessions.names`, then `sessions.aliases`, or `optimizer`), else an orchestrator's roster kind; a resume reads the roster's kind for the name first and refuses a name that neither the roster's kind nor a factory name places.
 
-   It refuses a name a live session already holds (a `claude -p` run, whose registry file reads `entrypoint` `sdk-cli`, holds none), naming that session's pid, since Claude Code would start the new one under a generated name while the roster still pointed at the old one: a respawn under the same name spawns only once the old session has closed (after a cmux restore).
+   It refuses a name a live session already holds (a `claude -p` run, whose registry file reads `entrypoint` `sdk-cli`, holds none), naming that session's pid, since Claude Code would start the new one under a generated name while the roster still pointed at the old one: a respawn under the same name spawns only once the old session has closed (after a `spawn.sh restore`).
    It launches every session with `--dangerously-skip-permissions`, the factory's bypass mode, so it never rests on the machine's own settings (a session in another mode holds every cross-session message for approval);
    the machine's `~/.claude/settings.json` (`$CLAUDE_CONFIG_DIR`'s when that is set) should also set `"permissions": { "defaultMode": "bypassPermissions" }` and `"skipDangerousModePermissionPrompt": true`, so a session started any other way lands there too with no prompt to stop on, which setup's check reports as `bypass mode`.
    On a Mac whose inscope exports a workspace's own `CLAUDE_CONFIG_DIR` (its `inscope.zsh` names it, or `INSCOPE_CCD` is set), it launches with `env -u CLAUDE_CONFIG_DIR -u INSCOPE_CCD`, where a session would otherwise start with no login, and reads the live sessions and the roster under `~/.claude`; elsewhere it leaves the environment as it is.
@@ -100,11 +103,12 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    `--account <email>`, with any mode and anywhere among its words, has the session log in as that Claude account: the lead names it to pin a login (`spawn.sh resume dispatcher <dir> <session-id> --account <email>`, `spawn.sh worker <name> <brief> --title "<title>" --in <dir> --account <email>`), and a running session never switches accounts by itself.
    spawn.sh refuses, before it opens a pane, an email that is not a plain `local@domain`, the machine's own login (`oauthAccount.emailAddress` in Claude Code's `.claude.json`, under `$CLAUDE_CONFIG_DIR` else in `~`, matched in any case), since a session on it would share that login's usage while `--account` skips the usage check, and one with no item in the Keychain under `usage.keychainService`,
    checking only that the item exists.
+   It also refuses an `--account` whose `usage.accounts` row sets `parkedUntil` to a later time, naming `parkedUntil`.
    It also refuses an `--account` whose week a reading names at 100% (`usage.json`, `ops/usage/stored-login.json` or a `usage-<name>.json`, until its `resets_at`, or `usage.json`'s `accounts` map, until its `weekReset`), naming the account and its reading, and, for the map's reading, the account with the most room, in any mode, a resume included.
    The launch then starts with `CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -s <usage.keychainService> -a <email> -w)"` as text, so the new pane's own shell reads the token into the session's environment and it never reaches herdr's argv, spawn.sh's output, the roster or a log; a read that comes back empty stops the pane there, before claude runs, naming the save-it-again command.
    With no `--account`, spawn.sh picks among the machine's own login (the one in `.claude.json`'s `oauthAccount`, judged by `usage.json`, or by `ops/usage/stored-login.json` while `usage.json` reads the factory account, which then counts as another login), each other login with a `usage-<name>.json`, and each account login-flip probes with a reading in `login-flip.json`'s `seen`,
-   keeping those that pass the usage gate.
-   It takes the one next in the account split: `ops/usage/login-flip.json`'s `split.shares`, each account's week left per hour to its week reset or, for an ending account, 2 hours before its end, whichever comes first, a fifth of that for an account whose row sets `own` while that deadline is over a day away, read when under 30 minutes old (two of the ops tick's 15-minute beats).
+   keeping those that pass the usage gate, a login whose `usage.accounts` row sets `parkedUntil` to a later time counting as over it.
+   It takes the one next in the account split: `ops/usage/login-flip.json`'s `split.shares`, each account's week left per hour to its week reset or, for an ending account, 2 hours before its end, whichever comes first, a fifth of that for an account whose row sets `own` while that deadline is over a day away, none for a parked one, read under 30 minutes old (two of the ops tick's 15-minute beats).
    The pick is a smooth weighted round robin: each start adds every passing login's share to its credit in `ops/usage/split-picks.json`, takes the highest, and takes the shares' sum off it.
    With no fresh split, or none of it passing, it takes the one with the lowest week.
    It prints `no --account, so it starts on <email>, next in the account split (<share>% of new sessions)` (or `the login with the most room this week`) when that is another login, which then starts on it as `--account <email>` would, and `so it stays on <email>` when it is the machine's own.
@@ -114,14 +118,15 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    `--backend glm`, with any mode and anywhere among its words, runs the session on Z.ai's GLM through Claude Code, so its hooks, skills and transcript stay as they are: a lead picks it per spawn for the work **glm** gives GLM, and never for a reviewer or a tester, whose verdict gates a merge.
    That work stays off the Opus paths: the factory's `no-glm-heavy-path` hook refuses a GLM session's `git commit` or `git push` that touches `web/next/`, `scripts/hooks/`, `scripts/spawn.sh`, the `pr-merge` or `verify` scripts, `lefthook.yml` or `.github/workflows/`, naming the files, so a worker it stops reports them to its lead, who moves that change to a Claude worker.
    While load5 (the third field of `sysctl -n vm.loadavg`) is over 15 the hook also refuses a GLM session's install, node_modules clone, commit or push whatever the paths, so the session waits for the load to fall.
-   The same hook refuses a GLM session's headless `claude -p` and its calls to an org's tracker, chat, docs and repos, and every MCP tool once its matcher takes them, naming the **glm** rule, so the session reports to its lead and the task goes to a Claude worker (`scripts/hooks/README.md`).
+   The same hook refuses a GLM session's headless `claude -p`, its calls to an org's tracker, chat, docs and repos, its shell reads of an org's checkout and its database clients aimed off this machine, every MCP tool or resource read, and a Read, Grep or Glob of an org's checkout once its matcher takes them.
+   Each refusal names the **glm** rule, so the session reports to its lead and the task goes to a Claude worker (`scripts/hooks/README.md`).
    spawn.sh refuses `--backend glm` for a reviewer or tester, as a column or on resume, and for a session in a checkout of an org `ext.links` guards (a folder on its path, or its GitHub origin's owner) or on a brief naming a word of the `glm-refused-sources` guard list ([rules/glm.md](../../rules/glm.md)).
    `tests/guarded-on-glm.test.ts` holds the repo's jobs (`scripts/ops`, `packages/scripts/src`, `api/hono/src` and `skills`) to the same line: it fails on a file that names a refused source and wires GLM, or that starts a headless `claude` on the environment it inherits; a job kept under `~/.playground/ops/`, outside the repo, is outside that scan, so the rule alone holds it.
    Its key is a `usage.accounts` row of provider `glm`: the one `--account <label>` names, else the first; `playground accounts add --provider glm --label <label>` adds one.
    It refuses another backend, an `--account` that labels no GLM row, `usage.accounts` with no GLM row, and a Keychain with no item for the label under `models.glmKeychainService` (default `playground-glm`), before any herdr call.
    The launch starts with `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, `ANTHROPIC_AUTH_TOKEN="$(security find-generic-password -s <models.glmKeychainService> -a <label> -w)"` as text (an empty read stops the pane there, before claude runs, naming the save-it-again command) and every model mapped to GLM (`models.glm` with `[1m]`, `glm-5.3-flash[1m]` by default,
    which carries 3x the plan's quota of glm-5.3 and keeps the 1M window the `[1m]` gives Claude Code; the small fast one `models.glm` bare), `ENABLE_TOOL_SEARCH=true`, since on a base URL that is not Anthropic's Claude Code would load every MCP tool's schema at start, past that window, and runs `--model 'glm-5.3-flash[1m]'` with `--settings ~/.playground/factory-settings-glm-400k.json`,
-   which spawn.sh rebuilds from the factory's settings on every GLM launch with the telemetry turned off (`CLAUDE_CODE_ENABLE_TELEMETRY=0`, `OTEL_METRICS_EXPORTER=none`), since the user settings export usage to the Loom relay and Loom counts Claude usage alone; that file's env outranks the user settings' env, and it holds every factory hook.
+   which spawn.sh rebuilds from the factory's settings on every GLM launch with the telemetry turned off (`CLAUDE_CODE_ENABLE_TELEMETRY=0`, `OTEL_METRICS_EXPORTER=none`), since the user settings may export usage to an org's usage collector, which counts Claude usage alone; that file's env outranks the user settings' env, and it holds every factory hook.
    The session compacts in the factory's one 400k window (**context**).
    A start records its backend in `~/.playground/backends/<name>` once herdr has the session (`--backend claude` names the default), and a resume runs that backend: it refuses `--backend` while a pin stands, a resume with no pin and no `--backend`, and a pin that reads neither glm nor claude.
    So a running session moves to GLM only by a close and a fresh start under `--backend glm`.
@@ -135,15 +140,15 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    It labels the session's pane with its name, and that label is where the session is found, so the session's roster entry records no `workspace` or `surface`.
    The Dashboard lists it by name, for any session to read; `herdr pane list` shows the labels only when run in a pane on the playground server, since from a pane on another server herdr's reads reach that server's socket.
    It waits for Claude's REPL with `pane wait-output`, and answers the folder trust and MCP picker for you only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else the session waits at the prompt for the owner, and spawn.sh says so.
-   The start records its runtime in `~/.playground/runtimes/<name>`, and a resume whose pin reads `cmux` opens in herdr and rewrites the pin.
-   With no `--runtime`, every start and resume opens in herdr, from any terminal; spawn.sh starts nothing in cmux, so it refuses `--runtime cmux` and a column anchored on a cmux `surface:N`.
+   Every start and resume records its runtime, herdr, in `~/.playground/runtimes/<name>`, rewriting whatever word an older pin held.
+   With no `--runtime`, every start and resume opens in herdr, from any terminal, and spawn.sh refuses a `--runtime` other than herdr and a column anchored on anything but a herdr pane id.
    After a herdr server's restart, which brings each pane back as a shell under its label, ops-herdr runs `spawn.sh restore` for that server (LIFECYCLE.md, Ops jobs), which resumes every session whose resume record in `~/.playground/resume` names it on that server (its `# server:` line, the factory's when it has none) and whose roster row is not done, ended, parked or paused,
    each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with, an `--effort` other than high and, for a reviewer or tester, `--pr` with the PRs its roster row serves,
-   in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, no runtime pin, a runtime other than herdr, or an exec line that does not parse or that it does not run) or `not restored <name>: <reason>`, a gate's refusal included; it is safe to run again, one at a time:
+   in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, or an exec line that does not parse or that it does not run) or `not restored <name>: <reason>`, a gate's refusal included; it is safe to run again, one at a time:
    while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
    A readable record on another server gets no line, since that server's own restore reads it.
    A session that never took its first turn has no transcript, so its resume starts it afresh under its own id and name, with the prompt its start recorded in `resume/<name>.prompt`.
-   Done when each line reads `restored`, `skipped <name>: live` or a roster row's down status, or you have acted on it (a full gate: run it again once a session closes; a broken record or a missing pin: resume the session by hand).
+   Done when each line reads `restored`, `skipped <name>: live` or a roster row's down status, or you have acted on it (a full gate: run it again once a session closes; a broken record or a missing backend pin: resume the session by hand).
 
    `--check`, with any mode but restore or close, runs every gate but the live-name one and starts or closes nothing.
 
@@ -158,7 +163,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A session resumed that way gets its hooks from its folder alone: Claude Code loads `.claude/settings.json` from the session's own folder, and in a checkout whose settings carry the same hooks they load from there and read the role from the session's name, but anywhere else (a work-org checkout, an older checkout, a subfolder) nothing does,
    so a factory session resumed without its settings where its own folder's `.claude/settings.json` lacks them is respawned from its handoff through spawn.sh, never left running as resumed.
    Every Ops sweep runs `python3 -I <main checkout>/scripts/ops/up.py --sessions`, which names each one (and none once each is respawned), and sends each to the one it reports to (a checker's or probe's spawner; the dispatcher's goes to Ops), which respawns it, since a live session keeps its name:
-   the session writes a handoff ([Write a handoff](#write-a-handoff), `~/.playground/handoffs/<name>.md`: its open items, each PR with its head, its next step), its pane closes ([End](#end)), and a spawn under the same name ([Spawn](#spawn)) briefs the respawned session with the handoff, which the respawned-session row of ROSTER.md records.
+   the session writes a handoff ([Write a handoff](#write-a-handoff), `~/.playground/handoffs/<name>.md`), its pane closes ([End](#end)), and a spawn under the same name ([Spawn](#spawn)) briefs the respawned session with the handoff, which the respawned-session row of ROSTER.md records.
    A resume's `<dir>` is a folder Claude Code already trusts (the Playground checkout or a worktree under it), never a scratchpad or /tmp path.
    In a folder it has never trusted, the session stops on the folder-trust dialog, which no session may approve, and `ListAgents` never lists it.
    A resumed session, a checker included, runs in the worktree or clone it ran in: spawn.sh resume refuses to move a session into the main checkout unless it started there, and refuses a removed folder, naming its branch and, for a the dispatcher worktree, the `git worktree add` line that brings it back.
@@ -167,7 +172,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    The brief carries its name and role, who it reports to, the task (for a bundle, its items and its test area, the pages and files it touches, and each `.agents/dashboard/<topic>.md` its item touches, since AGENTS.md holds only their pointers and ALWAYS lines),
    the words the task came from quoted verbatim, the done criterion (the **gate** for a PR; a worker marks its PR ready at 5/5, and the merge path marks a green draft ready itself), "load the playbook skill",
    an ETA with its first reply (**eta**), and that it runs only commands that need no approval: one plain command per call, no `sh -c` or `bash -c` wrapper, no `rm`, no `cd` (absolute paths, `git -C` and `bun run --cwd` instead: inscope's zsh hook runs 1Password's `op` on every `cd` and new shell, prompting the owner's fingerprint)
-   apart from the one at a worker's end (LIFECYCLE.md), which prompts once, the **signal** rule, a literal absolute path for `gh --body-file`, since `no-playground-leak` and `no-release-comment` each refuse a path built from a shell variable,
+   apart from the one at a worker's end (LIFECYCLE.md), which prompts once, the **signal** rule, a literal absolute path for `gh --body-file`, since `no-playground-leak` and `no-release-comment` each refuse a path built from a shell variable, a scratch script written through the Write tool and run as `bun <path>` (new-worker.md says why),
    that a worker starts its fixture stack outside run-slot, only while it takes shots, since a command that never exits would hold a slot until it is stopped (**slots**), that a multi-stack ask (a bisect, an A/B) builds one stack at a time, and the **writing** rule: load writing-for-agents with the Skill tool before writing any agent-facing doc, a handoff included.
    A worker's brief says that any change under `web/next/`, a docs `.mdx` included, gets its tester's drive, posted as a `## TesterBot · PASS at <sha7>` comment.
    A guard's plan and its brief (a hook or a gate that refuses calls) each name its threat model as a closed list of literal forms (for a path guard: an Edit or Write tool call on the path, and a shell write, copy, move or delete that names the path literally),
@@ -177,7 +182,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    By round 3 on that guard, or at its reviewer's ask for a scope ruling, the lead narrows the PR to that list or moves the protection to a layer that parses no shell, since a guard asked to stop every form never closes: on 1 Nov one ran 16 rounds over 299 minutes, each finding one more shell form, then shipped refusing read-only awk.
    A worker starts its checkers in one step, once its PR's head is ready (its checks green at it): its reviewer always, and its tester (`bun run name tester`) with it when a tester's drive is due, since a reviewer started later left heads waiting over an hour; ops-sweep tells the worker's lead of a head ready 20 minutes with no review round and no live reviewer.
    Done when both are briefed, or the reviewer alone for a PR with no `web/next/` change.
-   A worker's brief says that before a push it runs only the touched tests, the list `extensions/core/skills/code-review-loop/scripts/state.py touched-tests <worktree> origin/canary HEAD` writes to a file it checks is non-empty before passing it to xargs (code-review-loop's two steps), and check-types, through run-slot, and leaves the full suite to GitHub Actions,
+   A worker's brief says that before a push it runs only the touched tests, the list `extensions/core/skills/code-review-loop/scripts/state.ts touched-tests <worktree> origin/canary HEAD` writes to a file it checks is non-empty before passing it to xargs (code-review-loop's two steps), and check-types, through run-slot, and leaves the full suite to GitHub Actions,
    whose `Audit, Lint, and Build` and `test` checks gate the head (**ci**).
    A worker's brief says that a PR holding a long-lived connection (a socket, a pub/sub subscriber, a retrying client) puts code-review-loop's lifecycle table in its Evidence before round 1, one row per path from connect to close.
    A worker's brief says that a PR loosening a guard puts code-review-loop's refusal table in its Evidence before round 1: a `canary | head` row for each row it adds to `tests/scripts/hooks/fixtures/refused-forms/` or names in a source file's `allowed` list, and the refused-forms test's pass count at canary and at the head for the rest.
@@ -214,8 +219,9 @@ Done when `ListAgents` shows the session busy on the brief and the roster shows 
 ## Write a handoff
 
 A handoff, for a respawn, a parked chore or a priority close, counts as written only once `TZ=UTC ls -l <path>` prints its file, and the report that names it quotes that line.
+A handoff names the session's open items, each PR with its head, its next step and its own transcript path, which `ls ~/.claude/projects/*/<id>.jsonl` prints, `<id>` the session id in `~/.playground/resume/<name>.sh`, so whoever picks the work up can read there a detail the handoff dropped.
 A hook can refuse the write and leave nothing on disk, so a session whose write a hook refused answers the hook and retries the same write before it reports.
-Done when `TZ=UTC ls -l <path>` prints the file and the report quotes that line.
+Done when `TZ=UTC ls -l <path>` prints the file, `ls` prints the transcript path it names, and the report quotes the `ls -l` line.
 
 ## Rename
 
@@ -240,9 +246,11 @@ A sweep reads each agent's state from four places:
 ## Message a session
 
 `SendMessage` takes a live session's name.
-When a send by name fails for a session `ListAgents` lists, send the same message again to the `uds:/tmp/cc-socks/<pid>.sock` address that session's newest message came from (its `from`).
+A send that reports `Failed to send` may still arrive, so a sender re-sends it once at most, its first line marked `re-send`, and a receiver drops a `re-send` copy of a message it already holds.
+When the failed send went by name to a session `ListAgents` lists, that one re-send goes to the `uds:/tmp/cc-socks/<pid>.sock` address the session's newest message came from (its `from`).
+The after-resume re-send (Spawn's resume) takes the same `re-send` marker.
 Before you report that a session is acting on your message, read its session-state record as Check a session reads it: a record still holding `stuck` or `usage-limit` holds the message unread.
-Done when the send returns success.
+Done when the send, or its one re-send, returns success.
 
 ## A headless run
 
@@ -302,6 +310,8 @@ playground alerts-wait <your name>
 ```
 
 Run it with Bash `run_in_background`; when it exits it has printed one alert: start it again at once, then act on the alert.
+A waiter started after time down skips the alerts queued over 5 minutes before it began and names how many, since the relay sent each; while none runs, each alert also goes to Ops to send on, which is fast only while Ops' own waiter runs, so each line to Ops names Ops' restart while it does not.
+A worker a probe reports to keeps no waiter, and its probe's alert comes by the relay alone.
 Done when the task is running; the relay sends the same alert later, so drop that copy.
 
 ## Wait on a signal
@@ -333,7 +343,8 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
 - Then it cleans each worktree the session used, one at a time (`cleanWorktree`), and the lead's line names what went and what stayed, with why; a reviewer ended idle keeps its worktrees for its resume.
   A Playground worktree in `.claude/worktrees/` with uncommitted work, unpushed commits or work not on canary stays until `playground rm` confirms its PR has merged or closed (its own PR, by its branch or its exact head), then goes through `playground rm --worktree <path> --discard` whatever it holds, with no Inbox decision; another repo's such worktree stays.
   The live dashboard's checkout stays, by its branch.
-  A Playground worktree in `.claude/worktrees/` that a live session or a clone holds stays, where a hold by the merged PR's number alone, from the worker still merging it, does not count.
+  A Playground worktree in `.claude/worktrees/` that a live session or a clone holds stays, where a hold by the merged PR's number alone, from the worker still merging it, does not count, nor does a row naming it by its branch or its own PR's number once that PR has merged or closed and the worktree sits at that PR's head (`playground rm`'s `freed by` line;
+  commits past that head keep the hold, named with them).
   So does one a symlink outside it points into (another worktree's, a marked scratch folder's or a session scratchpad's, at its top level or one level into its `node_modules`), and its line names the first three links.
   Any other whose `.turbo/dev.pgid` records a stack has it stopped first (`bun run dev:stop` there, whose refusal keeps it), so a clone with no record, a reviewer's with no `node_modules` among them, goes on with nothing to stop.
   Then it goes to the 7-day trash through `playground rm --worktree` (`--pr <url>` at a merge), which keeps one a process holds, and then loses its `playground-<worktree>-db` and `-redis` containers (`docker rm -fv`, each name matched whole, never the live dashboard's database) and its local branch.

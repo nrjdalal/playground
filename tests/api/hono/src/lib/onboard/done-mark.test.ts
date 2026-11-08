@@ -3,6 +3,8 @@ import { join } from "node:path"
 
 import { SQL } from "bun"
 
+import { testContainerName } from "../../../../../container"
+
 type Reader = import("../../../../../../api/hono/src/lib/onboard/checks").Reader
 
 const MIGRATIONS = join(import.meta.dir, "../../../../../../packages/db/drizzle")
@@ -37,6 +39,8 @@ describe.skipIf(!dockerUp())("the done mark in app_state", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("done-mark"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",

@@ -1023,7 +1023,7 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
     expect(out.merged).toEqual([[97, 2]])
     expect(out.mergedProblems).toEqual([])
     // the ops jobs, whose heartbeats and pids a live stack reads from the config folder and ps
-    // 19 scripts: 11 running, ops-report and ops-sweep failing, and 6 paused with no heartbeat, so the Scripts label counts the 13 it lists
+    // 18 scripts: 11 running, ops-report and ops-sweep failing, and 5 paused with no heartbeat, so the Scripts label counts the 13 it lists
     expect(out.ops).toEqual([
       ["ops-awake", "running"],
       ["ops-changelog", "running"],
@@ -1032,7 +1032,6 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
       ["ops-dashboard", "running"],
       ["ops-fixture", "down"],
       ["ops-linear-dm", "down"],
-      ["ops-loom-relay", "down"],
       ["ops-machine", "running"],
       ["ops-merge-train", "running"],
       ["ops-merge-watch", "running"],
@@ -1054,7 +1053,6 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
       ["ops-dashboard", "running"],
       ["ops-fixture", "down"],
       ["ops-linear-dm", "down"],
-      ["ops-loom-relay", "down"],
       ["ops-machine", "running"],
       ["ops-merge-train", "running"],
       ["ops-merge-watch", "running"],

@@ -2,7 +2,16 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { FACTORY_SETTINGS, launchAfterRm, opened, placing, root, spawn, zai } from "./spawn-fake"
+import {
+  FACTORY_SETTINGS,
+  launchAfterRm,
+  lw,
+  opened,
+  placing,
+  root,
+  spawn,
+  zai,
+} from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them; one took 19.9s on the loaded runner box, so each gets twice that.
 setDefaultTimeout(40_000)
@@ -13,6 +22,11 @@ describe("every session compacts in one 400k window (#1805)", () => {
   const settingsOf = (r: { home: string }, file: string) => join(r.home, ".playground", file)
   const builtOf = (r: { home: string }, file: string) =>
     JSON.parse(readFileSync(settingsOf(r, file), "utf8"))
+  // a session the memory trial starts on (ADR 0022) reads a file of its own, the shared file's settings plus its memory folder
+  const fileOf = (name: string, kind?: string) =>
+    kind ? `factory-settings-400k-memory-${name}.json` : "factory-settings-400k.json"
+  const memoryOf = (r: { home: string }, kind?: string) =>
+    kind ? { autoMemoryDirectory: lw(r.home, "memory", kind), autoMemoryEnabled: true } : {}
   const roster = JSON.stringify({
     agents: [
       { kind: "builder", name: "x7mh4d-builder", role: "manager", status: "working", task: "t" },
@@ -20,21 +34,38 @@ describe("every session compacts in one 400k window (#1805)", () => {
   })
 
   test.each([
-    ["a worker", ["worker", "worker-brave-otter", "b.md"]],
-    ["a runner", ["runner", "runner-calm-heron", "b.md"]],
-    ["a reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"]],
-    ["a tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1"]],
-    ["a lead", ["column", "lead", "planner", "dispatcher", "w1:p2", "h.md"]],
+    ["a worker", ["worker", "worker-brave-otter", "b.md"], "worker-brave-otter", undefined],
+    ["a runner", ["runner", "runner-calm-heron", "b.md"], "runner-calm-heron", undefined],
+    [
+      "a reviewer",
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
+      "reviewer-x",
+      undefined,
+    ],
+    [
+      "a tester",
+      ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1"],
+      "tester-x",
+      undefined,
+    ],
+    ["a lead", ["column", "lead", "planner", "dispatcher", "w1:p2", "h.md"], "planner", "planner"],
     [
       "a lead by its roster kind",
       ["column", "lead", "x7mh4d-builder", "dispatcher", "w1:p2", "l.md"],
+      "x7mh4d-builder",
+      "builder",
     ],
-    ["the dispatcher", ["column", "dispatcher", "dispatcher", "ops", "w1:p2", "h.md"]],
-    ["an optimizer", ["manager", "optimizer", "b.md"]],
-  ])("%s starts with the 400k window", async (_, args) => {
+    [
+      "the dispatcher",
+      ["column", "dispatcher", "dispatcher", "ops", "w1:p2", "h.md"],
+      "dispatcher",
+      "dispatcher",
+    ],
+    ["an optimizer", ["manager", "optimizer", "b.md"], "optimizer", undefined],
+  ])("%s starts with the 400k window", async (_, args, name, kind) => {
     const r = await spawn(args, [], { ROSTER_JSON: roster })
     expect(r.code).toBe(0)
-    const file = "factory-settings-400k.json"
+    const file = fileOf(name, kind)
     expect(launchAfterRm(r).split(" --settings ")).toHaveLength(2)
     expect(launchAfterRm(r)).toContain(
       ` --settings ${settingsOf(r, file)} --dangerously-skip-permissions`,
@@ -43,6 +74,7 @@ describe("every session compacts in one 400k window (#1805)", () => {
       ...FACTORY_SETTINGS,
       autoCompactWindow: 400000,
       enabledPlugins: { "ws-home@ws": false },
+      ...memoryOf(r, kind),
     })
   })
 
@@ -58,14 +90,14 @@ describe("every session compacts in one 400k window (#1805)", () => {
   })
 
   test.each([
-    ["a worker", "worker-brave-otter"],
-    ["a runner", "runner-calm-heron"],
-    ["a reviewer", "reviewer-x"],
-    ["a tester", "tester-x"],
-    ["a lead", "builder"],
-    ["a lead by its roster kind", "x7mh4d-builder"],
-    ["the dispatcher", "dispatcher"],
-  ])("%s resumes with the 400k window", async (_, name) => {
+    ["a worker", "worker-brave-otter", undefined],
+    ["a runner", "runner-calm-heron", undefined],
+    ["a reviewer", "reviewer-x", undefined],
+    ["a tester", "tester-x", undefined],
+    ["a lead", "builder", "builder"],
+    ["a lead by its roster kind", "x7mh4d-builder", "builder"],
+    ["the dispatcher", "dispatcher", "dispatcher"],
+  ])("%s resumes with the 400k window", async (_, name, kind) => {
     const pr = /^(reviewer|tester)-/.test(name) ? ["--pr", "1"] : []
     const r = await spawn(
       ["resume", name, root, id, ...pr],
@@ -79,10 +111,8 @@ describe("every session compacts in one 400k window (#1805)", () => {
     )
     expect(r.code).toBe(0)
     expect(launchAfterRm(r)).toContain(` --resume ${id} `)
-    expect(launchAfterRm(r)).toContain(
-      ` --settings ${settingsOf(r, "factory-settings-400k.json")} `,
-    )
-    expect(builtOf(r, "factory-settings-400k.json").autoCompactWindow).toBe(400000)
+    expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, fileOf(name, kind))} `)
+    expect(builtOf(r, fileOf(name, kind)).autoCompactWindow).toBe(400000)
   })
 
   test.each([

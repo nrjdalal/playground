@@ -127,22 +127,22 @@ describe("playground sweep", () => {
   test("an alert whose since moves every cycle prints once, and again only after it clears", async () => {
     const dir = folder()
     const alerts = join(dir, "ops", "alerts-pending.json")
-    const shutdown = (since: string) =>
+    const capped = (since: string) =>
       writeFileSync(
         alerts,
         JSON.stringify({
-          alerts: [{ kind: "shutdown-98", line: "week at 98%", name: "a@b.c", since }],
+          alerts: [{ kind: "capped", line: "week at 100%", name: "a@b.c", since }],
         }),
       )
     await sweep(dir)
-    shutdown("2026-10-23T12:00:00Z")
-    expect(await sweep(dir)).toEqual(["alert: shutdown-98 a@b.c: week at 98%"])
-    shutdown("2026-10-23T12:02:00Z")
+    capped("2026-10-23T12:00:00Z")
+    expect(await sweep(dir)).toEqual(["alert: capped a@b.c: week at 100%"])
+    capped("2026-10-23T12:02:00Z")
     expect(await sweep(dir)).toEqual(["quiet"])
     writeFileSync(alerts, JSON.stringify({ alerts: [] }))
     expect(await sweep(dir)).toEqual(["quiet"])
-    shutdown("2026-10-23T12:30:00Z")
-    expect(await sweep(dir)).toEqual(["alert: shutdown-98 a@b.c: week at 98%"])
+    capped("2026-10-23T12:30:00Z")
+    expect(await sweep(dir)).toEqual(["alert: capped a@b.c: week at 100%"])
   })
 
   // a hand-set runner-host/slot-off kept the runner box idle for two days

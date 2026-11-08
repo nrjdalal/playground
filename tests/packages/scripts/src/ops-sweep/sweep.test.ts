@@ -21,11 +21,13 @@ import {
   IDLE_DB_GAP,
   idleDbs,
   lateReviewers,
+  leakedTests,
   maybePrune,
   opsDown,
   pass,
   prlessBranches,
   type Run,
+  runsForDelete,
   stalledPrs,
 } from "../../../../../packages/scripts/src/ops-sweep/sweep"
 
@@ -35,6 +37,17 @@ afterAll(() => {
 })
 
 const DEAD = Bun.spawnSync(["true"]).pid
+// A pid that reads gone now, verified before use, so a test holds however the machine reuses pids under load.
+const gonePid = (): number => {
+  for (;;) {
+    const pid = Bun.spawnSync(["true"]).pid
+    try {
+      process.kill(pid, 0)
+    } catch {
+      return pid
+    }
+  }
+}
 const NOW = Date.parse("2026-10-20T12:00:00Z")
 
 type Call = { argv: string[]; cwd?: string; env?: Record<string, string | undefined> }
@@ -87,6 +100,7 @@ const roster = (ctx: Context, agents: Record<string, unknown>[]) =>
   write(join(ctx.data, "roster.json"), { agents })
 
 const DOCKER_PS = "docker ps --filter name=^playground-"
+const TEST_PS = "docker ps --filter name=^playground-test-"
 const DASHBOARD_DB = "bun /repo/api/hono/src/bin/dashboard-db.ts"
 const psql = (name: string) => `docker exec ${name} psql`
 
@@ -163,6 +177,58 @@ describe("idleDbs", () => {
     expect(await idleDbs(ctx)).toEqual(["dashboard-db-unknown"])
     expect(calls.some((c) => c.argv[0] === "docker" && c.argv[1] === "exec")).toBe(false)
     expect(read(join(sweep, "idle-db.json"))).toEqual({ "playground-dispatcher-db": 0 })
+  })
+})
+
+describe("leakedTests", () => {
+  test("removes a playground-test-<suite>-<pid> container whose pid is gone, with its volumes", async () => {
+    const { calls, ctx } = setup({ [TEST_PS]: { out: "playground-test-ask-4242\n" } })
+    expect(await leakedTests(ctx, (pid) => pid !== 4242)).toEqual(["playground-test-ask-4242"])
+    expect(calls.some((c) => c.argv.join(" ") === "docker rm -fv playground-test-ask-4242")).toBe(
+      true,
+    )
+  })
+
+  test("leaves a playground-test- container whose pid still runs alone", async () => {
+    const { calls, ctx } = setup({ [TEST_PS]: { out: "playground-test-inbox-4243\n" } })
+    expect(await leakedTests(ctx, (pid) => pid === 4243)).toEqual([])
+    expect(calls.some((c) => c.argv[0] === "docker" && c.argv[1] === "rm")).toBe(false)
+  })
+
+  test("leaves a name whose last field is not a pid alone: a worktree named test-x reads playground-test-x-db", async () => {
+    const { calls, ctx } = setup({
+      [TEST_PS]: { out: "playground-test-x-db\nplayground-test-worktree-db\n" },
+    })
+    expect(await leakedTests(ctx, () => false)).toEqual([])
+    expect(calls.some((c) => c.argv[0] === "docker" && c.argv[1] === "rm")).toBe(false)
+  })
+
+  test("counts a pid whose signal is refused as running, so pid 1's container stays", async () => {
+    expect(runsForDelete(process.pid)).toBe(true)
+    expect(runsForDelete(gonePid())).toBe(false)
+    const { calls, ctx } = setup({ [TEST_PS]: { out: "playground-test-ask-1\n" } })
+    expect(await leakedTests(ctx)).toEqual([])
+    expect(calls.some((c) => c.argv[0] === "docker" && c.argv[1] === "rm")).toBe(false)
+  })
+
+  test("reads nothing when docker does not answer", async () => {
+    const { calls, ctx } = setup({ [TEST_PS]: { code: 1 } })
+    expect(await leakedTests(ctx)).toEqual([])
+    expect(calls.some((c) => c.argv[0] === "docker" && c.argv[1] === "rm")).toBe(false)
+  })
+
+  test("pass removes a dead-pid test container and logs the removal to the ops log", async () => {
+    const dead = gonePid()
+    const { calls, ctx, ops } = setup({ [TEST_PS]: { out: `playground-test-ask-${dead}\n` } })
+    roster(ctx, [])
+    const { result } = await pass(ctx, new Set(), new Set())
+    expect(result).toBe("ok")
+    expect(
+      calls.some((c) => c.argv.join(" ") === `docker rm -fv playground-test-ask-${dead}`),
+    ).toBe(true)
+    expect(readFileSync(join(ops, "ops-log.md"), "utf8")).toContain(
+      `leaked test containers removed (ops-sweep): playground-test-ask-${dead}`,
+    )
   })
 })
 
@@ -327,7 +393,7 @@ describe("boxRoute", () => {
 describe("lateReviewers", () => {
   const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString()
   // one PR as GitHub's GraphQL answers it: open, its head's checks in the rollup state given, the last finishing `ready` minutes ago, and the comments given
-  const answer = (ready: number, comments: string[] = [], state = "SUCCESS") =>
+  const answer = (ready: number, comments: string[] = [], state = "SUCCESS", isDraft = false) =>
     JSON.stringify({
       data: {
         repository: {
@@ -351,6 +417,7 @@ describe("lateReviewers", () => {
               ],
             },
             headRefOid: "b9861d6aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            isDraft,
             state: "OPEN",
           },
         },
@@ -406,6 +473,13 @@ describe("lateReviewers", () => {
     expect((await late(answer(30, [], "PENDING"))).told).toEqual([])
   })
 
+  test("a green draft with no reviewer row sends nothing, and a ready non-draft still alerts (#1565)", async () => {
+    expect((await late(answer(30, [], "SUCCESS", true), [], false)).told).toEqual([])
+    const nonDraft = await late(answer(30, [], "SUCCESS", false), [], false)
+    expect(nonDraft.told).toHaveLength(1)
+    expect(nonDraft.told[0]!.argv[3]).toContain("no reviewer on the roster")
+  })
+
   test("a parked worker's ready head sends nothing, while a working one's still alerts (#175)", async () => {
     expect((await late(answer(30), [], true, "parked")).told).toEqual([])
     expect((await late(answer(30), [], true, "working")).told).toHaveLength(1)
@@ -413,6 +487,84 @@ describe("lateReviewers", () => {
 
   test("a GraphQL answer it cannot read is reviewer-check-unreadable", async () => {
     expect((await late("not json")).found).toEqual(["reviewer-check-unreadable"])
+  })
+
+  // the two PRs as GitHub's GraphQL answers one query carrying both aliases, each ready the minutes given
+  const answerTwo = (ready: number) =>
+    JSON.stringify({
+      data: {
+        repository: Object.fromEntries(
+          [146, 147].map((n) => [
+            `p${n}`,
+            {
+              comments: { nodes: [] },
+              commits: {
+                nodes: [
+                  {
+                    commit: {
+                      statusCheckRollup: {
+                        contexts: {
+                          nodes: [
+                            { completedAt: minutesAgo(ready + 5) },
+                            { completedAt: minutesAgo(ready) },
+                          ],
+                        },
+                        state: "SUCCESS",
+                      },
+                    },
+                  },
+                ],
+              },
+              headRefOid: `b9860000000000000000000000000000000000${n}`,
+              state: "OPEN",
+            },
+          ]),
+        ),
+      },
+    })
+
+  test("a reviewer row whose prs names the PR covers it, and a PR no row names still alerts (#1533)", async () => {
+    const { ctx } = setup()
+    const told: Call[] = []
+    ctx.factory = async () => "acme/app"
+    ctx.run = async (argv, options = {}) => {
+      if (argv[1] === "/repo/scripts/ops/notify.sh") told.push({ argv, env: options.env })
+      return { code: 0, err: "", out: argv[0] === "gh" ? answerTwo(21) : "" }
+    }
+    const agents = [
+      { kind: "builder", name: "builder" },
+      {
+        kind: "worker",
+        name: "bbbbb-worker",
+        pr: "https://github.com/acme/app/pull/146",
+        status: "working",
+      },
+      {
+        kind: "worker",
+        name: "ccccc-worker",
+        pr: "https://github.com/acme/app/pull/147",
+        status: "working",
+      },
+      {
+        kind: "reviewer",
+        name: "ghjkmn-reviewer",
+        pr: "145",
+        prs: ["145", "146"],
+        status: "working",
+      },
+    ]
+    roster(ctx, agents)
+    const found = await lateReviewers(ctx, agents, new Map([["ghjkmn-reviewer", "busy"]]))
+    expect(found).toEqual([])
+    // PR 146 is covered by the live reviewer's prs, so it stays quiet; PR 147, named by no row, still alerts
+    expect(told).toHaveLength(1)
+    expect(told[0]!.argv[3]).toContain("PR #147 (ccccc-worker)")
+    expect(told[0]!.argv[3]).toContain("no reviewer on the roster")
+    // once that reviewer's session is gone, PR 146 alerts by its name; PR 147 was told at this head already
+    await lateReviewers(ctx, agents, new Map())
+    expect(told).toHaveLength(2)
+    expect(told[1]!.argv[3]).toContain("PR #146 (bbbbb-worker)")
+    expect(told[1]!.argv[3]).toContain("no live session for ghjkmn-reviewer")
   })
 })
 

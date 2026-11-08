@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { DashboardContext } from "../../../../../../web/next/src/components/dashboard/dashboard"
+import {
+  SessionsContext,
+  sessionsOf,
+} from "../../../../../../web/next/src/components/dashboard/dashboard"
 import {
   OlderSteps,
   PeerStep,
@@ -313,9 +316,12 @@ describe("another session's message", () => {
   test("opens to its whole text, its sender linked", () => {
     const html = wrap(
       createElement(
-        DashboardContext,
+        SessionsContext,
         {
-          value: { workers: [{ name: "builder", sessionId: "s2" }] } as unknown as DashboardContext,
+          value: sessionsOf(
+            [{ name: "builder", sessionId: "s2" }] as unknown as Parameters<typeof sessionsOf>[0],
+            null,
+          ),
         },
         createElement(PeerStep, { chips: [], defaultOpen: true, from: "builder", text: TEXT }),
       ),

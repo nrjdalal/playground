@@ -67,7 +67,7 @@ const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
       () =>
         reject(
           Object.assign(new Error("the sessions read did not answer in time"), {
-            code: "CMUX_FAILED",
+            code: "SESSIONS_FAILED",
           }),
         ),
       ms,
@@ -282,7 +282,7 @@ export class DashboardHub {
           workers: live.workers,
         }
       } catch (err) {
-        const code = err instanceof Error && "code" in err ? String(err.code) : "CMUX_FAILED"
+        const code = err instanceof Error && "code" in err ? String(err.code) : "SESSIONS_FAILED"
         frame = {
           code,
           dispatcher: DISPATCHER,

@@ -16,14 +16,15 @@ It does the same when those files leave a key the apps' schemas require unset or
 
 `bun run test` builds `packages/*` first, because a test reaches a shared package through its `exports`, which point at `dist`, so on a fresh checkout an unbuilt package resolves to nothing.
 Only the shared packages are built, not the apps: a test imports app code by source path and never through `dist`.
-`bun run test:file <paths>` first builds only the packages its files import whose `dist` is missing, is older than a file under its package's `src` while no stack runs in this worktree, or lacks a name they import, those reached through relative and `@/` imports included,
+`bun run test:file <paths>` first builds only the packages its files import whose `dist` is missing, is older than a file under its package's `src` while no stack runs in this worktree, or lacks a name they import, those reached through relative, `@/` and absolute imports into this checkout included,
 and writes the data table's metrics when missing (`prebuildTests` in `packages/scripts/src/verify/prebuild.ts`, under `NODE_ENV=production SKIP_ENV_VALIDATION=true`), so a fresh clone runs it directly.
+So a scratch test outside the checkout that imports its modules by absolute path builds what they import, while an absolute import into another clone stays unread.
 It also builds a package whose dist file a test names by path (`packages/env/dist/gaps.mjs`), when that package's `dist` folder is missing.
 `bun run check-types:tests` does the same for the packages its files import, type-only imports included, and builds `@api/hono`'s declarations, which the web's types import.
 In the factory's main checkout each stops instead, naming your own worktree.
 It runs the files in parallel (`packages/scripts/src/test-sandbox.ts`: `bun test --parallel`, the cores less one and at most 4, the slowest first by `tests/timings.json`, on GitHub the merged one below, which `bun run test:timings` rewrites after a run), then its `SERIAL` files one at a time.
 `bun run test:file <paths>` stops before any test runs when an argument ending in `.test.ts` or `.test.tsx` names no file, naming each one, since bun reads a path it cannot find as a filter that matches nothing and the run would pass on the rest; an argument without that suffix stays a filter.
-A test runs beside the others when it shares nothing with them: it binds port 0, starts its containers unnamed or named per process, and takes its scratch folders from `mkdtemp`; one that cannot joins `SERIAL`.
+A test runs beside the others when it shares nothing with them: it binds port 0, starts its containers named `playground-test-<suite>-<pid>` (`testContainerName` in `tests/container.ts`; ops-sweep removes one whose pid no longer runs, so a run killed before its `afterAll` leaks nothing), and takes its scratch folders from `mkdtemp`; one that cannot joins `SERIAL`.
 So does one that rebuilds a package or moves a file other tests read, since a worker beside it would read the half-built file, and one that hangs only beside other workers.
 In the parallel pass each test gets 30s where bun gives 5s, since a test runs slower beside other workers; a test's own timeout wins, so read it first.
 A parallel pass still running at its deadline (`TEST_PARALLEL_DEADLINE_MS`, 20 minutes, which the runner box's `suite.sh` raises and each of GitHub's shards lowers to 10, inside its own 20-minute `timeout-minutes`) is killed and fails, naming the files its workers still held, since bun's own timeout cannot stop synchronous code; the run's first line names the deadline it holds.
@@ -72,6 +73,7 @@ GitHub's ubuntu-26.04 runner runs uutils 0.10.0 as `mkdir`, which reports succes
 A test that races such a lock puts `gnumkdir` first on its child's PATH as `mkdir` (`GNU_MKDIR` in `tests/scripts/ops/run-slot-fake.ts`), so it checks the lock as the Mac's atomic `mkdir` runs it.
 A test that lists items keeps to the items it made, filtering the list by their ids (the "an update starts unread" test in `tests/api/hono/src/lib/dashboard/inbox.test.ts`), since a file's tests share one database and another test's items can land in its list: with the clock 30 days ahead, one test's list took four older updates another test had left.
 `Bun.which(name)` reads the PATH the process started with, so code under test that looks a tool up that way runs the real tool wherever one is installed and misses a stub the test prepends to `process.env.PATH`: look it up with `Bun.which(name, { PATH: process.env.PATH ?? "" })` (`packages/scripts/src/ops-ext-sync/sync.ts`), or take the lookup as a dependency the test passes in.
+A PATH shim for a bash script under test goes on its PATH before the script starts and acts once the test arms it (the `python3` and `stat` shims in `tests/scripts/ops/run-slot-look-marks.test.ts`), since bash keeps the path of each command it has run, so a shim written once the script has run that command is never called.
 
 ## End-to-end tests
 
