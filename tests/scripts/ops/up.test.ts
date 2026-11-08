@@ -422,6 +422,30 @@ test("a pass renders jobs.json from the store, keeps it when the store has no po
   expect(readFileSync(join(ops, "up.log"), "utf8")).toContain("jobs.json kept: ")
 })
 
+// issue 1538: a dead render's own error must reach up.log, so log() makes the ops folder it appends into; on a fresh data dir the folder is missing and the append raised FileNotFoundError, hiding the render's error behind it
+test("a dead render with no ops folder shows the render's own error in up.log, not a missing-folder raise", () => {
+  const config = join(scratch, "config-dead-render")
+  mkdirSync(dataOf(config), { recursive: true })
+  const dead = join(scratch, "dead-render.ts")
+  writeFileSync(dead, `console.error("the render died here"); process.exit(2)\n`)
+  const pass = Bun.spawnSync(
+    ["python3", "-I", "-c", `${LOAD}up.JOBS_RENDER = sys.argv[2]\nup.render_jobs()`, upPy, dead],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        HOME: scratch,
+        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      },
+      stderr: "pipe",
+    },
+  )
+  expect(pass.stderr.toString()).not.toContain("FileNotFoundError")
+  expect(readFileSync(join(dataOf(config), "ops", "up.log"), "utf8")).toContain(
+    "the render died here",
+  )
+})
+
 test("a pass writes jobs.json into the data folder dataDir() resolves, playground over an old dispatcher beside it", () => {
   const config = join(scratch, "config-fresh")
   mkdirSync(join(config, "dispatcher", "ops"), { recursive: true })
