@@ -226,7 +226,7 @@ Adding an account that is already listed replaces its secret and leaves its row 
 
 ## Skill sets: `playground orgs`
 
-`playground orgs resolve --repo <folder>` writes the one skill set a session in that folder loads, less each skill the folder's own `.claude/skills` already lists, and prints its folder; spawning a session runs it, so you rarely need to.
+`playground orgs resolve --repo <folder>` writes the one skill set a session in that folder loads, less each skill whose `SKILL.md` the folder's own `.claude/skills` already holds byte for byte, and prints its folder; spawning a session runs it, so you rarely need to.
 `playground orgs home` writes the home set, the one a session you start yourself gets, and installs it in Claude Code for your user; `scripts/link-skills.sh` runs it.
 `playground ext which <skill> [--repo <folder> | --org <org>]` prints the folder of the copy of a skill a session in that folder, or in a repo of that org, loads, so a job can run a skill's script from whichever scope holds it.
 `playground ext why <skill> [--repo <folder> | --org <org>]` prints that copy with its scope and each scope whose copy it shadows.
