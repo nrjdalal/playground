@@ -685,6 +685,8 @@ function narrow(cmd: Command, env: Env): boolean {
   if (SEDS.has(base)) return sedReads(args)
   if (base === "perl") return perlReads(parsed, env)
   if (base === "cut") return true
+  // echo prints its words and lsof lists open files, and neither runs or writes anything, so the filter they feed keeps its reading
+  if (base === "echo" || base === "lsof") return true
   // a read-only gh call is narrow when its jq filter is the only word that holds a space
   if (base === "gh") {
     const filters = ghFilters(parsed)

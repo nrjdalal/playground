@@ -7866,6 +7866,8 @@ function narrow(cmd, env) {
     return perlReads(parsed, env);
   if (base === "cut")
     return true;
+  if (base === "echo" || base === "lsof")
+    return true;
   if (base === "gh") {
     const filters = ghFilters(parsed);
     return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value));
