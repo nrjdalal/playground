@@ -594,9 +594,30 @@ try:
             text = f.read(65537)
         if len(text) > 65536:
             sys.exit(1)
-    lines, buf = [], None
+    lines, buf, quoted = [], None, ""
+
+    # cut each line at its trailing comment (an unquoted word-start #), carrying the quote state across lines
+    def scan(line, quoted, prev):
+        esc = False
+        for i, c in enumerate(line):
+            if esc:
+                esc = False
+            elif c == "\\" and quoted != "'":
+                esc = True
+            elif c == quoted:
+                quoted = ""
+            elif not quoted and c in "'\"":
+                quoted = c
+            elif not quoted and c == "#" and (
+                line[i - 1] in " \t;&|()" if i else (not prev or prev in " \t;&|()")
+            ):
+                return line[:i], quoted
+        return line, quoted
+
     for line in text.split("\n"):
-        if buf is None and line.lstrip().startswith("#"):
+        # prev is the character the join puts before this line's first, since bash joins x\ and #b into x#b, whose # starts no word
+        line, quoted = scan(line, quoted, buf[-1] if buf else "")
+        if buf is None and not quoted and line.strip() == "":
             continue
         buf = line if buf is None else buf + line
         if (len(buf) - len(buf.rstrip("\\"))) % 2:
