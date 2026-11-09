@@ -1,6 +1,6 @@
 ## What it does
 
-`pr` writes a pull request's body to one template: a `## TL;DR` of a few plain bullets on top, then Summary, Evidence and Merge Danger, with `## Links` last.
+`pr` writes a pull request's body to one template: a `## TL;DR` of a few bullets in [plain words](./plain-words.md) on top, then Summary, Evidence and Merge Danger, with `## Links` last.
 The template is the whole skill: it holds the shape and what each section is for, and leaves what goes in it to the session writing the body, so a body reads the same whichever session wrote it.
 
 ## When to reach for it
@@ -17,7 +17,7 @@ Abridged from [its file](../../extensions/core/skills/pr/SKILL.md):
 ```markdown
 ## TL;DR
 
-- <a few short ASD-STE100 bullet points: what changes, and why>
+- <a few short bullet points by the plain-words skill: what changes, and why>
 
 ## Summary
 
