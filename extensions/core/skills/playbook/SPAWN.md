@@ -65,7 +65,7 @@ A session already running stays where it is until its next restart.
 
 ## Launch, model and effort
 
-spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions` (a probe's file is `factory-settings-sandbox-400k.json`):
+spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions` (a probe's file is `factory-settings-sandbox-400k.json`, a dispatcher's or a lead's `factory-settings-manager-400k.json`):
 every session starts at high effort, and another effort comes with spawn.sh's `--effort` at a start or a resume, by whoever playbook's chain names ([SKILL.md](SKILL.md#chain)) and brief-rush's model rule;
 every session runs on `models.default` (Opus) unless it starts with `--model` naming another of `models.claude` (Fable, Sonnet or Haiku by default; spawn.sh refuses any other id, `--model` beside `--backend glm`, and any but `models.checker` (Opus) for a reviewer or tester, whose verdict gates a merge, and records none of them,
 so a resume takes `--model` afresh and one without it runs on Opus) or with `--backend glm` (below) (Opus at extra-high effort for research and everything else, never Sonnet), and every subagent a session starts runs on Sonnet unless it names a model,
@@ -142,7 +142,8 @@ It opens on the playground server; `PLAYGROUND_HERDR_SESSION=playground-probes` 
 When herdr refuses a placement, spawn.sh quotes herdr's own error in its refusal.
 It labels the session's pane with its name, and that label is where the session is found, so the session's roster entry records no `workspace` or `surface`.
 The Dashboard lists it by name, for any session to read; `herdr pane list` shows the labels only when run in a pane on the playground server, since from a pane on another server herdr's reads reach that server's socket.
-It waits for Claude's REPL with `pane wait-output`, and answers the folder trust and MCP picker for you only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else the session waits at the prompt for the owner, and spawn.sh says so.
+It waits for Claude's REPL with `pane wait-output`, and answers the folder trust and MCP picker for you (the picker by enabling its servers, when `~/.mcp.json` alone defines them) only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards;
+anywhere else the session waits at the prompt for the owner, and spawn.sh says so.
 Every start and resume records its runtime, herdr, in `~/.playground/runtimes/<name>`, rewriting whatever word an older pin held.
 With no `--runtime`, every start and resume opens in herdr, from any terminal, and spawn.sh refuses a `--runtime` other than herdr and a column anchored on anything but a herdr pane id.
 After a herdr server's restart, which brings each pane back as a shell under its label, ops-herdr runs `spawn.sh restore` for that server (LIFECYCLE.md, Ops jobs), which resumes every session whose resume record in `~/.playground/resume` names it on that server (its `# server:` line, the factory's when it has none) and whose roster row is not done, ended, parked or paused,
@@ -164,7 +165,8 @@ It turns on the factory's guards, such as the `no-linear-ticket` hook (**tickets
 `--settings` adds the factory's own hooks, such as the `no-playground-leak` hook (**classified**), on top of the owner's settings, wherever the session works;
 `scripts/link-skills.sh` links that file to the checkout's `scripts/factory-settings.json`, whose hooks find the main checkout through `PLAYGROUND_REPO`, which spawn.sh exports to every session it starts, so they run wherever the session works.
 A session gets exactly one `--settings`, since Claude Code keeps only the last one given, and anything extra is merged into that file, as a GLM launch merges its telemetry off.
-Every launch merges its compact window (**context**): spawn.sh rebuilds the linked file on each launch into `factory-settings-400k.json` for every kind but a probe, `factory-settings-glm-400k.json` on GLM, so a resume keeps the same window.
+Every launch merges its compact window (**context**): spawn.sh rebuilds the linked file on each launch into `factory-settings-400k.json` for a worker, a runner or a checker, `factory-settings-glm-400k.json` on GLM, so a resume keeps the same window.
+A dispatcher or a lead takes `factory-settings-manager-400k.json` (`factory-settings-glm-manager-400k.json` on GLM), the same file plus a deny of the Agent and Workflow tools, which its memory-trial file carries too (**workers**, scripts/README.md).
 A probe takes `factory-settings-sandbox-400k.json` (`factory-settings-glm-sandbox-400k.json` on GLM), the same file plus Claude Code's sandbox around its shell commands (scripts/README.md, spawn.sh).
 herdr's own resume is off (`resume_agents_on_restore = false` in ops-herdr's `config.toml`), since it would bring a session back without `--settings` or the role, as a bare `claude --resume` by hand does.
 A session resumed that way gets its hooks from its folder alone: Claude Code loads `.claude/settings.json` from the session's own folder, and in a checkout whose settings carry the same hooks they load from there and read the role from the session's name, but anywhere else (a work-org checkout, an older checkout, a subfolder) nothing does,
