@@ -1425,7 +1425,7 @@ describe("relay watch", () => {
 
   test("posts one Inbox alert once a line has waited past two cycles with no relay cursor moving, and resolves it once a cursor moves", async () => {
     const ops = scratch()
-    outbox(ops, at(14, 7))
+    outbox(ops, at(14, 7), true, "parked")
     const seen = watch(ops, at(14, 20), "pending: ops-unstick.jsonl")
     await beat("relay-watch").run(seen.ctx)
     expect(seen.asks).toEqual([])
@@ -1451,7 +1451,7 @@ describe("relay watch", () => {
     const still = watch(ops, at(14, 35), "pending: ops-unstick.jsonl")
     await beat("relay-watch").run(still.ctx)
     expect(still.asks).toEqual([])
-    outbox(ops, at(14, 38))
+    outbox(ops, at(14, 38), true, "parked")
     const back = watch(ops, at(14, 40), "timeout")
     await beat("relay-watch").run(back.ctx)
     expect(back.asks.map((a) => a.argv)).toEqual([
@@ -1479,7 +1479,7 @@ describe("relay watch", () => {
 
   test("a machine with no relay judges Ops' sweep: a line may wait two sweeps, then the alert names the sweep and no relay session", async () => {
     const ops = scratch()
-    outbox(ops, at(14, 7), false)
+    outbox(ops, at(14, 7), false, "parked")
     const early: unknown[] = []
     for (const minute of [20, 25, 35, 45]) {
       const tick = watch(ops, at(14, minute), "pending: ops-session-resume.jsonl")
@@ -1516,7 +1516,7 @@ describe("relay watch", () => {
 
   test("a resume record alone makes it a relay machine, whose alert names the relay as today", async () => {
     const ops = scratch()
-    outbox(ops, at(14, 7), false)
+    outbox(ops, at(14, 7), false, "parked")
     mkdirSync(join(ops, "..", "resume"), { recursive: true })
     writeFileSync(join(ops, "..", "resume", "runner-plain-relay.sh"), "exit 0\n")
     await beat("relay-watch").run(watch(ops, at(14, 20), "pending: ops-session-resume.jsonl").ctx)
@@ -1533,7 +1533,9 @@ describe("relay watch", () => {
     mkdirSync(join(ops, "outbox"), { recursive: true })
     writeFileSync(
       join(ops, "..", "roster.json"),
-      JSON.stringify({ agents: [{ kind: "ops", name: OLD.ops, role: "manager" }] }),
+      JSON.stringify({
+        agents: [{ kind: "ops", name: OLD.ops, role: "manager", status: "parked" }],
+      }),
     )
     const queue = join(ops, "outbox", "ops-session-resume.jsonl")
     const line = (date: Date) =>
@@ -1594,7 +1596,7 @@ describe("relay watch", () => {
       join(ops, "..", "roster.json"),
       JSON.stringify({
         agents: [
-          { kind: "ops", name: OLD.ops, role: "manager" },
+          { kind: "ops", name: OLD.ops, role: "manager", status: "parked" },
           { kind: "runner", name: "runner-plain-relay", role: "runner" },
         ],
       }),
@@ -1640,9 +1642,9 @@ describe("relay watch", () => {
 
   test("a cursor that moves while a line waits starts the wait over", async () => {
     const ops = scratch()
-    outbox(ops, at(14, 7))
+    outbox(ops, at(14, 7), true, "parked")
     await beat("relay-watch").run(watch(ops, at(14, 20), "pending: a.jsonl").ctx)
-    outbox(ops, at(14, 27))
+    outbox(ops, at(14, 27), true, "parked")
     const moved = watch(ops, at(14, 30), "pending: b.jsonl")
     await beat("relay-watch").run(moved.ctx)
     const early = watch(ops, at(14, 35), "pending: b.jsonl")
@@ -1655,7 +1657,7 @@ describe("relay watch", () => {
 
   test("a post or a resolve that fails throws for the heartbeat and keeps its state, so the next cycle tries again", async () => {
     const ops = scratch()
-    outbox(ops, at(14, 7))
+    outbox(ops, at(14, 7), true, "parked")
     await beat("relay-watch").run(watch(ops, at(14, 20), "pending: ops-unstick.jsonl").ctx)
     const refused = watch(ops, at(14, 30), "pending: ops-unstick.jsonl", 1)
     await expect(beat("relay-watch").run(refused.ctx)).rejects.toThrow("bun run ask new")
@@ -1665,7 +1667,7 @@ describe("relay watch", () => {
     const posted = watch(ops, at(14, 35), "pending: ops-unstick.jsonl")
     await beat("relay-watch").run(posted.ctx)
     expect(posted.asks).toHaveLength(1)
-    outbox(ops, at(14, 38))
+    outbox(ops, at(14, 38), true, "parked")
     const stuck = watch(ops, at(14, 40), "timeout", 1)
     await expect(beat("relay-watch").run(stuck.ctx)).rejects.toThrow(`bun run ask resolve ${ID}`)
     expect(JSON.parse(readFileSync(join(ops, "tick", "relay-watch.json"), "utf8")).id).toBe(ID)
@@ -1673,10 +1675,10 @@ describe("relay watch", () => {
 
   test("an alert whose item is gone counts as resolved, so the next outage is reported", async () => {
     const ops = scratch()
-    outbox(ops, at(14, 7))
+    outbox(ops, at(14, 7), true, "parked")
     await beat("relay-watch").run(watch(ops, at(14, 20), "pending: ops-unstick.jsonl").ctx)
     await beat("relay-watch").run(watch(ops, at(14, 30), "pending: ops-unstick.jsonl").ctx)
-    outbox(ops, at(14, 38))
+    outbox(ops, at(14, 38), true, "parked")
     const gone = watch(ops, at(14, 40), "timeout")
     gone.ctx.run = fakeRun({ ask: { code: 1, err: `dashboard-ask: no inbox item ${ID}\n` } }).run
     await beat("relay-watch").run(gone.ctx)
@@ -1704,16 +1706,12 @@ describe("relay watch", () => {
     await beat("relay-watch").run(told.ctx)
     expect(told.sent).toEqual([
       {
-        to: OLD.ops,
+        to: "ops",
         text: `The ops relay is down: no ops line has gone out since ${iso(at(14, 7))}. Resume runner-plain-relay.`,
       },
     ])
     expect(told.asks).toEqual([])
-    const again = watch(ops, at(14, 35), "pending: ops-unstick.jsonl")
-    await beat("relay-watch").run(again.ctx)
-    expect(again.sent).toEqual([])
-    expect(again.asks).toEqual([])
-    const escalated = watch(ops, at(14, 40), "pending: ops-unstick.jsonl")
+    const escalated = watch(ops, at(14, 35), "pending: ops-unstick.jsonl")
     await beat("relay-watch").run(escalated.ctx)
     expect(escalated.sent).toEqual([
       {
@@ -1722,6 +1720,10 @@ describe("relay watch", () => {
       },
     ])
     expect(escalated.asks).toEqual([])
+    const again = watch(ops, at(14, 40), "pending: ops-unstick.jsonl")
+    await beat("relay-watch").run(again.ctx)
+    expect(again.sent).toEqual([])
+    expect(again.asks).toEqual([])
   })
 
   test("posts the Inbox alert once Ops itself is down, a row the felled check skips, and never while Ops' row reads live", async () => {
@@ -1743,7 +1745,7 @@ describe("relay watch", () => {
     const live = watch(up, at(14, 30), "pending: ops-unstick.jsonl")
     await beat("relay-watch").run(live.ctx)
     expect(live.asks).toEqual([])
-    expect(live.sent.map((s) => s.to)).toEqual([OLD.ops])
+    expect(live.sent.map((s) => s.to)).toEqual(["ops"])
   })
 
   test("posts nothing while ops/sweep-hold-until holds a future time, and judges fresh once it passes", async () => {
