@@ -128,7 +128,7 @@ It refuses a file that is not an HTML page, and a `--by` or `--for` that names n
 
 ## Wait for stuck alerts: `playground alerts-wait`
 
-`playground alerts-wait <name>` waits until a session that `<name>` manages gets stuck, prints the alert, and exits.
+`playground alerts-wait <name>` waits until the next alert for a session that `<name>` manages, a stuck session's or the relay watch's late-stop line, prints the alert, and exits.
 It wakes on the stuck alerts a session's own hook sends; the 5-minute reminder to the dispatcher and the alert for a session quiet 15 minutes come by the relay alone.
 A manager keeps it running as a background task and starts it again after each alert, so it hears in a second or two rather than waiting for the relay.
 
