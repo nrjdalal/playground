@@ -57,7 +57,7 @@ export const runSlot = <
   children.push({ p, ops, at: Date.now() })
   return p
 }
-// Ends every recorded child still unreaped, with the command group it owns, on pass, fail and timeout alike: TERM first, which run-slot.sh's own trap turns on its command's group, then KILL after 5 s for what outlives it, as stop() does. A child that has ended is never signalled itself, since its pid may be anyone's on a Mac that wraps them in minutes. A *.child pid is signalled as a group only while the identity holds it is this run's own: still its runner's child leading its own group (the guard run-slot.sh's own preempt reads) while the runner lives, or, once the runner died without its trap, an orphan leading its own group whose *.child was written no before the process started, since a stale or wrapped id passes every guard.
+// Ends every recorded child still unreaped, with the command group it owns, on pass, fail and timeout alike: TERM first, which run-slot.sh's own trap turns on its command's group, then KILL after 5 s for what outlives it, as stop() does. A child that has ended is never signalled itself, since its pid may be anyone's on a Mac that wraps them in minutes. A *.child pid is signalled as a group only while the identity holds it is this run's own: still its runner's child leading its own group (the guard run-slot.sh's own preempt reads) while the runner lives, or, once the runner died without its trap, an orphan leading its own group that was already running when its *.child was written, since a stale or wrapped id passes neither.
 export const endChildren = async () => {
   const exited = (p: { exited: Promise<number> }) =>
     Promise.race([p.exited.then(() => true), Bun.sleep(50).then(() => false)])
