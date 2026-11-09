@@ -270,9 +270,11 @@ describe("a file whose fetch fails", () => {
       throw new TypeError("Failed to fetch")
     },
   }
-  // the files' queries settled through the real fetch with no retry, then the card rendered from that cache
+  // the files' queries settled through the real fetch with no retry, then the card rendered from that cache, held there with no retry on mount, which would show a settled error as pending again until it failed once more
   const settled = async (list: ViewerItem[], outcome: keyof typeof LOADS) => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, retryOnMount: false } },
+    })
     const ids = list.flatMap((item) =>
       item.pair ? [item.pair.before.id, item.pair.after.id] : [item.id],
     )
