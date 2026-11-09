@@ -10,7 +10,7 @@ import {
 } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, WAITING, stop, machine } from "./run-slot-fake"
+import { SCRIPT, WAITING, runSlot, stop, machine } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang: 60s, twice the slowest case under SLOW_CHILD=1.5 but local CI's, which sets its own
 setDefaultTimeout(60_000)
@@ -245,10 +245,11 @@ describe("a node_modules clone waits for its spacing", () => {
 test("run-slot.sh kind prints the lane a command takes and runs nothing", async () => {
   const m = machine()
   const kind = async (words: string[]) => {
-    const p = Bun.spawn(["bash", SCRIPT, "kind", "--", ...words], {
+    const p = runSlot(["bash", SCRIPT, "kind", "--", ...words], {
       cwd: m.root,
       env: m.env(),
       stdout: "pipe",
+      ops: m.ops,
     })
     expect(await p.exited).toBe(0)
     return (await new Response(p.stdout).text()).trim()
@@ -310,10 +311,11 @@ describe("a quick run takes its own slot past a full queue", () => {
           )
           .join(""),
     )
-    const p = Bun.spawn(["bash", SCRIPT, who, "--", ...argv, marker], {
+    const p = runSlot(["bash", SCRIPT, who, "--", ...argv, marker], {
       cwd: m.root,
       env: m.env({ RUN_SLOT_SIZE: "medium", ...as.env }),
       stderr: "pipe",
+      ops: m.ops,
     })
     let err = ""
     let ended = false
