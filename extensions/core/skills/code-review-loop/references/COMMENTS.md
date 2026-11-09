@@ -73,6 +73,7 @@ gh api repos/<repo>/pulls/<n>/reviews --input <file.json>
 - `event` is `COMMENT`: the PR's author is this same account, so GitHub refuses `APPROVE` and `REQUEST_CHANGES`.
 - Anchor only to a line inside one of the diff's hunks (added or context); any other line fails the whole call with a 422. A finding on an untouched line stays in the verdict alone.
 - A finding on a file under the ship skill's folder goes inline with the file's real `path`: the comment-wording hook reads only bodies, so a `path` field alone never trips it. That comment's body, and the verdict, name the file by role and bare name ("the ship skill's step 5, SKILL.md"), never with its folder: the folder's name is the publish-step word itself, and a body holding it is refused and lost.
+- A code line or identifier that holds the publish-step word is named by its `file:line`, or paraphrased (a lane-freeing call), and left unquoted, since the comment-wording hook refuses a body holding the word in a code span too: on one PR two verdicts that quoted such a test line were refused, and each was reworded before it posted.
 - Sign every inline comment with `ReviewBot · round <r>` as its last line: each is read on its own in Files changed, and `state.ts` knows a thread as yours by that word.
 - The review's `body` never starts with `## ReviewBot`, so no reader takes it for the verdict.
 
