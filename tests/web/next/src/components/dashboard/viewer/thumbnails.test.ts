@@ -8,6 +8,7 @@ import {
   AttachmentThumbs,
   focusTarget,
 } from "../../../../../../../web/next/src/components/dashboard/viewer/thumbnails"
+import { attachmentQuery } from "../../../../../../../web/next/src/components/dashboard/viewer/use-attachment-url"
 import {
   saveItem,
   STEP_OF_KEY,
@@ -23,7 +24,10 @@ const { renderToStaticMarkup } = (await import(Bun.resolveSync("react-dom/server
 }
 const { QueryClient, QueryClientProvider } = (await import(
   Bun.resolveSync("@tanstack/react-query", web)
-)) as { QueryClient: new () => unknown; QueryClientProvider: unknown }
+)) as {
+  QueryClient: new (options?: unknown) => { prefetchQuery: (options: unknown) => Promise<void> }
+  QueryClientProvider: unknown
+}
 
 const items = (n: number, kind: InboxAttachment["kind"] = "image"): InboxAttachment[] =>
   Array.from({ length: n }, (_, i) => ({
@@ -255,4 +259,57 @@ describe("a tile's Download", () => {
       { download: "Weekly plan, updated draft.png", href: expect.stringMatching(/^blob:/) },
     ])
   })
+})
+
+// a file whose fetch fails says so in its place: a 404 reads Missing, as before, and any other failure reads Did not load, where a 500 or a lost connection once left the card blank (#1615)
+describe("a file whose fetch fails", () => {
+  const LOADS = {
+    "a 404": async () => new Response("", { status: 404 }),
+    "a 500": async () => new Response("", { status: 500 }),
+    "a network error": async () => {
+      throw new TypeError("Failed to fetch")
+    },
+  }
+  // the files' queries settled through the real fetch with no retry, then the card rendered from that cache
+  const settled = async (list: ViewerItem[], outcome: keyof typeof LOADS) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const ids = list.flatMap((item) =>
+      item.pair ? [item.pair.before.id, item.pair.after.id] : [item.id],
+    )
+    for (const id of ids)
+      await client.prefetchQuery(
+        attachmentQuery(id, true, LOADS[outcome] as unknown as typeof fetch),
+      )
+    return renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(AttachmentThumbs, { items: list, onOpen: () => {} }),
+      ),
+    )
+  }
+  const [before, after] = items(2)
+  const LAYOUTS: [string, ViewerItem[]][] = [
+    ["a grid tile", items(2)],
+    ["a before/after pair", [{ ...before!, pair: { after: after!, before: before! } }]],
+    [
+      "a lone HTML page",
+      [{ id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000b1.html", kind: "html", name: "demo.html" }],
+    ],
+  ]
+
+  for (const [layout, list] of LAYOUTS) {
+    test.each(["a 500", "a network error"] as const)(
+      `${layout} shows Did not load for %s`,
+      async (outcome) => {
+        expect(await settled(list, outcome)).toContain(">Did not load<")
+      },
+    )
+
+    test(`${layout} keeps Missing for a 404`, async () => {
+      const html = await settled(list, "a 404")
+      expect(html).toContain(">Missing<")
+      expect(html).not.toContain("Did not load")
+    })
+  }
 })
