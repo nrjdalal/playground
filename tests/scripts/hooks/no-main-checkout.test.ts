@@ -127,16 +127,6 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ["a bare build under -F", "bun -F @packages/env build"],
     ["after other commands", "git status && bun run build"],
     ["turbo through bunx past an option", "bunx --bun turbo run build"],
-    [
-      "bun's --cwd before x, which bun x ignores",
-      "bun --cwd=.claude/worktrees/a x turbo run build",
-    ],
-    ["bun's --cwd after x, which bun x ignores", "bun x --cwd=.claude/worktrees/a turbo run build"],
-    ["bunx's --cwd, which it ignores", "bunx --cwd=.claude/worktrees/a turbo run build"],
-    [
-      "lefthook through bunx past its ignored --cwd",
-      "bunx --cwd=.claude/worktrees/a lefthook run pre-commit",
-    ],
   ])("%s", async (_name, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-main-checkout hook refuses")
@@ -571,12 +561,37 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     ["a test run in a worktree by bun's --cwd", "bun run --cwd .claude/worktrees/a test"],
     ["a build in a worktree by bun's --cwd=", "bun --cwd=.claude/worktrees/a run build"],
     [
-      "the packages build through bun x past an ignored --cwd",
+      "the packages build through bun x in a worktree by bun's --cwd",
       `${OFF} bun --cwd=.claude/worktrees/a x turbo run build --filter='./packages/*'`,
     ],
     [
-      "the packages build through bunx past an ignored --cwd",
+      "the packages build through bunx in a worktree by its --cwd",
       `${OFF} bunx --cwd=.claude/worktrees/a turbo run build --filter='./packages/*'`,
+    ],
+    // #1646: bun x and bunx run their tool in the folder bun's own --cwd names (bun 1.4.4, measured), so a review clone's build by it runs
+    [
+      "turbo through bun x in a worktree by bun's --cwd",
+      "bun --cwd=.claude/worktrees/a x turbo run build",
+    ],
+    [
+      "turbo through bun x in a worktree by its --cwd",
+      "bun x --cwd=.claude/worktrees/a turbo run build",
+    ],
+    [
+      "turbo through bunx in a worktree by its --cwd",
+      "bunx --cwd=.claude/worktrees/a turbo run build",
+    ],
+    [
+      "turbo through bunx in a worktree by its absolute --cwd",
+      `bunx --cwd=${WORKTREE} turbo run build --filter=@packages/env`,
+    ],
+    [
+      "lefthook through bunx in a worktree by its --cwd",
+      "bunx --cwd=.claude/worktrees/a lefthook run pre-commit",
+    ],
+    [
+      "the packages build through bunx in a worktree by its --cwd, its settings left out",
+      "bunx --cwd=.claude/worktrees/a turbo run build --filter='./packages/*'",
     ],
   ])("%s", async (_name, command) => {
     expect(await bash(command)).toBeUndefined()
@@ -599,9 +614,20 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     ["lefthook", "lefthook run pre-commit"],
     ["a redirect", "echo x > f"],
     ["a cd within it", "cd api/hono && bun test"],
-    ["bun x past a --cwd naming the main checkout", `bun --cwd=${MAIN} x turbo run build`],
   ])("in a worktree, %s", async (_name, command) => {
     expect(await bash(command, WORKTREE)).toBeUndefined()
+  })
+
+  // #1646: the same tools aimed at the main checkout by bun's --cwd build there
+  test.each([
+    ["turbo through bun x by bun's --cwd", `bun --cwd=${MAIN} x turbo run build`],
+    ["turbo through bunx by its --cwd", `bunx --cwd=${MAIN} turbo run build`],
+    [
+      "the packages build through bunx by its --cwd, its settings left out",
+      `bunx --cwd=${MAIN} turbo run build --filter='./packages/*'`,
+    ],
+  ])("in a worktree, %s is refused", async (_name, command) => {
+    expect(await bash(command, WORKTREE)).toContain("no-main-checkout hook refuses")
   })
 
   test("from a worktree, a cd the hook cannot follow leaves the command alone", async () => {
