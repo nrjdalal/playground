@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -8,9 +8,14 @@ import { check, mainCheckout } from "../../../scripts/hooks/no-main-checkout"
 const root = join(import.meta.dir, "..", "..", "..")
 const script = join(root, "scripts", "hooks", "no-main-checkout.ts")
 // real directories, since the reader follows a cd only into one that exists
-const MAIN = mkdtempSync(join(tmpdir(), "no-main-checkout-main-"))
+// where it lands, since bun x's --cwd is read only through no link and this Mac's tmpdir sits under the /var link
+const MAIN = realpathSync(mkdtempSync(join(tmpdir(), "no-main-checkout-main-")))
 const WORKTREE = `${MAIN}/.claude/worktrees/a`
 mkdirSync(join(WORKTREE, "api", "hono"), { recursive: true })
+// a worktree the main checkout lists, as git worktree add writes one
+mkdirSync(join(MAIN, ".git", "worktrees", "a"), { recursive: true })
+writeFileSync(join(WORKTREE, ".git"), `gitdir: ${MAIN}/.git/worktrees/a\n`)
+writeFileSync(join(MAIN, ".git", "worktrees", "a", "gitdir"), `${WORKTREE}/.git\n`)
 afterAll(() => rmSync(MAIN, { force: true, recursive: true }))
 // the settings the main checkout's packages build needs, as the release skill's step 5 types them
 const OFF = "env NODE_ENV=production SKIP_ENV_VALIDATION=true"
@@ -568,33 +573,55 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
       "the packages build through bunx in a worktree by its --cwd",
       `${OFF} bunx --cwd=.claude/worktrees/a turbo run build --filter='./packages/*'`,
     ],
-    // #1646: bun x and bunx run their tool in the folder bun's own --cwd names (bun 1.4.4, measured), so a review clone's build by it runs
-    [
-      "turbo through bun x in a worktree by bun's --cwd",
-      "bun --cwd=.claude/worktrees/a x turbo run build",
-    ],
-    [
-      "turbo through bun x in a worktree by its --cwd",
-      "bun x --cwd=.claude/worktrees/a turbo run build",
-    ],
+    // #1646: bun x and bunx run their tool in the folder bun's own --cwd names (bun 1.4.4, measured), so a review clone's build by an absolute one runs
+    ["turbo through bun x in a worktree by bun's --cwd", `bun --cwd=${WORKTREE} x turbo run build`],
+    ["turbo through bun x in a worktree by its --cwd", `bun x --cwd=${WORKTREE} turbo run build`],
     [
       "turbo through bunx in a worktree by its --cwd",
-      "bunx --cwd=.claude/worktrees/a turbo run build",
-    ],
-    [
-      "turbo through bunx in a worktree by its absolute --cwd",
       `bunx --cwd=${WORKTREE} turbo run build --filter=@packages/env`,
     ],
     [
+      "turbo through bunx in a folder of a worktree by its --cwd",
+      `bunx --cwd=${WORKTREE}/api/hono turbo run build`,
+    ],
+    [
       "lefthook through bunx in a worktree by its --cwd",
-      "bunx --cwd=.claude/worktrees/a lefthook run pre-commit",
+      `bunx --cwd=${WORKTREE} lefthook run pre-commit`,
     ],
     [
       "the packages build through bunx in a worktree by its --cwd, its settings left out",
-      "bunx --cwd=.claude/worktrees/a turbo run build --filter='./packages/*'",
+      `bunx --cwd=${WORKTREE} turbo run build --filter='./packages/*'`,
     ],
   ])("%s", async (_name, command) => {
     expect(await bash(command)).toBeUndefined()
+  })
+
+  // a relative bun x --cwd typed outside a worktree cannot be proven to land in one, so it is judged as the main checkout, fail-closed by design
+  test.each([
+    [
+      "turbo through bun x by bun's relative --cwd",
+      "bun --cwd=.claude/worktrees/a x turbo run build",
+    ],
+    [
+      "turbo through bun x by its relative --cwd",
+      "bun x --cwd=.claude/worktrees/a turbo run build",
+    ],
+    ["turbo through bunx by its relative --cwd", "bunx --cwd=.claude/worktrees/a turbo run build"],
+    [
+      "lefthook through bunx by its relative --cwd",
+      "bunx --cwd=.claude/worktrees/a lefthook run pre-commit",
+    ],
+  ])("%s, from the main checkout, is refused", async (_name, command) => {
+    expect(await bash(command)).toContain("bun x and bunx read one --cwd alone")
+  })
+
+  // a relative bun x --cwd typed inside a worktree, with no .. and no link, lands in that same worktree
+  test.each([
+    ["turbo through bunx into a folder of it", "bunx --cwd=api turbo run build"],
+    ["turbo through bun x into a nested folder of it", "bun x --cwd=api/hono turbo run build"],
+    ["turbo through bunx in its own folder", "bunx --cwd=. turbo run build"],
+  ])("in a worktree, %s", async (_name, command) => {
+    expect(await bash(command, WORKTREE)).toBeUndefined()
   })
 
   test("the packages build with its settings in the session's own environment", async () => {

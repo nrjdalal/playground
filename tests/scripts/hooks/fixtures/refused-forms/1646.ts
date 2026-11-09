@@ -129,8 +129,14 @@ export const groups: Group[] = [
     folders: ["checkout"],
     guards: ["no-unslotted-run"],
     rows: () => [
-      ["turbo through bunx by two --cwd words in a worktree", "bunx --cwd=api --cwd=.. turbo run build"],
-      ["turbo through bun x by two --cwd words in a worktree", "bun x --cwd=api --cwd=.. turbo run build"],
+      [
+        "turbo through bunx by two --cwd words in a worktree",
+        "bunx --cwd=api --cwd=.. turbo run build",
+      ],
+      [
+        "turbo through bun x by two --cwd words in a worktree",
+        "bun x --cwd=api --cwd=.. turbo run build",
+      ],
     ],
   },
   // a chained --cwd off a missing or unread folder is judged as the main checkout; bun itself stops on a missing one

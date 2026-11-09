@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join, resolve, sep } from "node:path"
 
 import { atOnce, buildName, DOCKERS, dockerBuild, portlessCompose } from "./docker-build"
-import { bunCall, bunDir, cwdFlag, mainCheckout, turboWords } from "./no-main-checkout"
+import { bunCall, bunDir, bunLost, cwdFlag, mainCheckout, turboWords } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
   ASSIGN,
@@ -278,9 +278,12 @@ function heavy(
   const turbo = turboWords(name, args, env)
   if (turbo) {
     const task = turboTask(turbo)
-    return task
-      ? { dir: cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) }), what: `turbo run ${task}` }
-      : undefined
+    if (!task) return
+    const dir = cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) })
+    // a bun x --cwd the hook cannot prove may land in a worktree, so the run counts as heavy wherever the line runs
+    return dir === undefined && bunLost(name, args, env)
+      ? { anywhere: true, dir: env.cwd, what: `turbo run ${task}` }
+      : { dir, what: `turbo run ${task}` }
   }
   if (RUNNERS.has(name)) {
     const words = args.filter(
@@ -291,15 +294,15 @@ function heavy(
       : undefined
   }
   if (name !== "bun") return
-  const { at, cwd, filtered, words } = bunCall(args, env)
+  const { at, cwd, filtered, lost, words } = bunCall(args, env)
   const rest = args.slice(at + 1)
   if (words[0] === "install" || words[0] === "i") {
     if (rest.some((a) => ["--dry-run", "--help", "-h"].includes(a.value))) return
     return { dir: cwdFlag(rest, { ...env, cwd }), what: "bun install" }
   }
-  // a --cwd the hook cannot read may land in a worktree, so the build counts as heavy wherever the line runs
+  // a --cwd the hook cannot prove may land in a worktree, so the build counts as heavy wherever the line runs
   if (words[0] === "x" && program(words[1] ?? "") === "next" && rest[0]?.value === "build")
-    return cwd === undefined
+    return lost || cwd === undefined
       ? { anywhere: true, dir: env.cwd, what: "bun x next build" }
       : { dir: cwd, what: "bun x next build" }
   // bun run test:file passes its words to bun test, and with no file runs the whole suite as bun test does

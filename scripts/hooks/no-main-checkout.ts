@@ -1,5 +1,5 @@
 // PreToolUse hook: refuses a build, a test run, lefthook, turbo (but for the packages build a pull needs, run with env validation off), a git command that moves HEAD, the index or the files (but for the release skill's step 5 fast-forward and the keep reset off a stray local commit; a worker's hard reset there ran another branch's code under every hook for 3.5 minutes) or a file write (a Bash command's, or a Write, Edit, MultiEdit or NotebookEdit), run-slot.sh's command read as typed bare, in the main checkout, which every installed skill follows and so stays clean (a reviewer's `lefthook run pre-commit` from the Bash tool's default cwd rebuilt packages' dist and wrote .turbo/runs there). It also refuses a git write in the live Dashboard's checkout to every factory session but its runner and the ops lead, since that checkout serves the owner's Dashboard.
-import { readdirSync, readFileSync, realpathSync } from "node:fs"
+import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
@@ -127,6 +127,8 @@ const UNKNOWN_FIX =
   "the hook cannot tell which folder it runs in, since a cd before it may not run, may run many times, or names a path it cannot read, so it reads every folder the shell may be in. Name the folder instead: git -C <your worktree>, bun --cwd <your worktree>, or cd by a literal path."
 
 // This hook's rule for a line that names more folders than the reader carries (`Env.cwdAnywhere`): the shell may be in any folder, the main checkout included, so a guarded command is refused wherever the line started.
+const BUNX_FIX =
+  "bun x and bunx read one --cwd alone, with no .. and no link in it: an absolute path inside your worktree, or a relative one typed from inside it. Name your worktree that way, or cd to it first."
 const ANYWHERE_FIX =
   "the line names more folders than the hook carries, so it cannot rule out the main checkout. Name the folder on the command instead: git -C <your worktree>, bun --cwd <your worktree>, or run it as a line of its own after a cd to a literal path."
 
@@ -172,7 +174,7 @@ export function cwdFlag(args: Word[], env: Env): string | undefined {
 export function bunCall(
   args: Word[],
   env: Env,
-): { at: number; cwd: string | undefined; filtered: boolean; words: string[] } {
+): { at: number; cwd: string | undefined; filtered: boolean; lost: boolean; words: string[] } {
   const dirs: (Word | undefined)[] = []
   let filtered = false
   const words: string[] = []
@@ -192,14 +194,63 @@ export function bunCall(
       if (v !== "run" && v !== "x") break
     }
   }
-  // bun x reads each relative --cwd from where the one before landed, a link followed; run, test, install and a bare script read each from the shell's folder, the last one winning (bun 1.4.4, measured)
-  const chained = words[0] === "x"
-  let cwd = env.cwd
-  for (const [n, dir] of (chained ? dirs : dirs.slice(-1)).entries()) {
-    const from = !chained ? env.cwd : n > 0 && cwd !== undefined ? real(cwd) : cwd
-    cwd = dir && pathOf(dir, { ...env, cwd: from })
+  // run, test, install and a bare script read each --cwd from the shell's folder, the last one winning (bun 1.4.4, measured)
+  const last = dirs.at(-1)
+  const cwd = dirs.length === 0 ? env.cwd : last && pathOf(last, env)
+  // bun x chains its --cwd words and follows links, so it reads only one --cwd the hook can prove lands in a listed worktree; any other may run its tool anywhere, the main checkout included
+  const lost = words[0] === "x" && dirs.length > 0 && !provenDir(dirs, env)
+  return { at: k, cwd, filtered, lost, words }
+}
+
+// One --cwd with no .. and no link in it: absolute, inside a worktree the main checkout lists, or relative from a shell folder in a listed worktree and inside that same one.
+function provenDir(dirs: (Word | undefined)[], env: Env): boolean {
+  const [dir] = dirs
+  const path = dirs.length === 1 && dir ? pathOf(dir, env) : undefined
+  if (!dir || path === undefined) return false
+  const parts = dir.value.split(sep).filter((part) => part !== "" && part !== ".")
+  if (parts.includes("..")) return false
+  if (isAbsolute(dir.value)) return linkFree(sep, parts) && listedWorktree(path) !== undefined
+  const home = env.cwd === undefined ? undefined : listedWorktree(env.cwd)
+  return home !== undefined && linkFree(env.cwd as string, parts) && listedWorktree(path) === home
+}
+
+// Whether each folder from base down through parts is a folder and no link, by lstat.
+function linkFree(base: string, parts: string[]): boolean {
+  let dir = base
+  for (const part of parts) {
+    dir = join(dir, part)
+    try {
+      if (!lstatSync(dir).isDirectory()) return false
+    } catch {
+      return false
+    }
   }
-  return { at: k, cwd, filtered, words }
+  return true
+}
+
+// The worktree a folder sits in: the nearest folder above it holding a .git, when that .git is a file pointing into a checkout's .git/worktrees whose gitdir points back, as git worktree list reads it; undefined for the main checkout, a clone or a folder git lists nowhere.
+export function listedWorktree(path: string): string | undefined {
+  for (let dir = path; ; dir = dirname(dir)) {
+    let text: string | undefined
+    try {
+      text = readFileSync(join(dir, ".git"), "utf8")
+    } catch (error) {
+      // a .git folder is a checkout of its own, and one the hook cannot read lists nothing
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return
+    }
+    if (text !== undefined) {
+      const admin = /^gitdir: (.+)$/m.exec(text)?.[1]?.trim()
+      const at = admin && resolve(dir, admin)
+      if (!at || !/\/\.git\/worktrees\/[^/]+$/.test(at)) return
+      try {
+        const back = dirname(resolve(at, readFileSync(join(at, "gitdir"), "utf8").trim()))
+        return resolved(back) !== undefined && resolved(back) === resolved(dir) ? dir : undefined
+      } catch {
+        return
+      }
+    }
+    if (dirname(dir) === dir) return
+  }
 }
 
 // git's subcommand and its words, and the tree it acts on: the checkout a --git-dir of `<checkout>/.git` names, whose HEAD and index move, else its --work-tree, else the folder its -C options name (each relative to the one before); each counts only before the subcommand.
@@ -310,10 +361,17 @@ function gitMoves(sub: string, rest: string[]): boolean {
   return false
 }
 
-// The folder bun or bunx runs a tool in: bun's own --cwd, else the shell's folder when a --cwd word cannot be read, so an unread one is judged where the line runs.
+// The folder bun or bunx runs a tool in: bun's own --cwd, else the shell's folder when a --cwd word cannot be read, or undefined when bun x's --cwd is lost (bunLost).
 export function bunDir(name: string, args: Word[], env: Env): string | undefined {
   if (name !== "bun" && name !== "bunx") return env.cwd
-  return bunCall(name === "bunx" ? [X, ...args] : args, env).cwd ?? env.cwd
+  const call = bunCall(name === "bunx" ? [X, ...args] : args, env)
+  return call.lost ? undefined : (call.cwd ?? env.cwd)
+}
+
+// Whether bun x or bunx names a --cwd the hook cannot prove, so its tool may run anywhere.
+export function bunLost(name: string, args: Word[], env: Env): boolean {
+  if (name !== "bun" && name !== "bunx") return false
+  return bunCall(name === "bunx" ? [X, ...args] : args, env).lost
 }
 
 // turbo's own words, however it is called: by name or path, through npx, or through bun, bunx read as bun x.
@@ -358,14 +416,16 @@ function runs(
   args: Word[],
   local: Map<string, Text>,
   env: Env,
-): { cwd: string | undefined; fix?: string; what: string } | undefined {
+): { cwd: string | undefined; fix?: string; lost?: boolean; what: string } | undefined {
   if (name === "bunx") return runs("bun", [X, ...args], local, env)
   const turbo = turboWords(name, args, env)
   if (turbo && packagesBuild(turbo)) {
     if (validationOff(local, env)) return
+    const cwd = cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) })
     return {
-      cwd: cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) }),
+      cwd,
       fix: BUILD_FIX,
+      lost: cwd === undefined && bunLost(name, args, env),
       what: "the packages build without NODE_ENV and SKIP_ENV_VALIDATION=true",
     }
   }
@@ -380,14 +440,12 @@ function runs(
     return sub && gitMoves(sub, rest) ? { cwd, fix: GIT_FIX, what: `git ${sub}` } : undefined
   }
   if (name !== "bun") return
-  const { at, cwd, filtered, words } = bunCall(args, env)
+  const { at, cwd, filtered, lost, words } = bunCall(args, env)
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0]
   // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name, at a version too, bun x included, in the folder bun's own --cwd names (bun 1.4.4, measured); a tool reads its own --cwd too
   if (TOOLS.has(toolName(target))) {
-    return {
-      cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: cwd ?? env.cwd }),
-      what: `bun ${words.join(" ")}`,
-    }
+    const dir = cwdFlag(args.slice(at + 1), { ...env, cwd: lost ? undefined : (cwd ?? env.cwd) })
+    return { cwd: dir, lost: lost && dir === undefined, what: `bun ${words.join(" ")}` }
   }
   // bun test runs no script, so a --cwd after test is still its own
   if (words[0] === "test")
@@ -633,6 +691,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const script = await fedScript(cmd, here, sure, inMain, visit)
       if (script) return script
       const ran = runs(name, args, local, here)
+      if (ran?.lost) return refuse(ran.what, BUNX_FIX)
       if (ran && inMain(ran.cwd)) return refuse(ran.what, fixFor(sure, ran.fix))
       const moved =
         name === "git" ? await liveRefusal(args, here, inLive, fixFor(sure, LIVE_FIX)) : undefined

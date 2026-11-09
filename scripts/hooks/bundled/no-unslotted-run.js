@@ -2104,7 +2104,7 @@ function portlessCompose(name, args) {
 }
 
 // scripts/hooks/no-main-checkout.ts
-import { readdirSync, readFileSync, realpathSync } from "fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync } from "fs";
 import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join4, normalize, resolve as resolve3, sep } from "path";
 
 // packages/env/src/aliases.ts
@@ -7146,22 +7146,6 @@ function mainCheckout(dir) {
   } catch {}
   return dir;
 }
-function real(path) {
-  const found = resolved(path);
-  if (found !== undefined || !isAbsolute3(path))
-    return found ?? nearest(path);
-  const parts = normalize(path).split(sep).filter(Boolean);
-  let low = 0;
-  let high = parts.length - 1;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (resolved(sep + parts.slice(0, mid).join(sep)) === undefined)
-      high = mid - 1;
-    else
-      low = mid;
-  }
-  return join4(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
-}
 var resolved = (path) => {
   try {
     return realpathSync(path);
@@ -7169,17 +7153,6 @@ var resolved = (path) => {
     return;
   }
 };
-function nearest(path) {
-  const rest = [];
-  for (let dir = path;; dir = dirname2(dir)) {
-    const found = resolved(dir);
-    if (found !== undefined)
-      return join4(found, ...rest.reverse());
-    if (dir === dirname2(dir))
-      return path;
-    rest.push(basename2(dir));
-  }
-}
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
 var RUNNERS = new Set(["npx"]);
 var X = { quoted: false, value: "x" };
@@ -7219,13 +7192,61 @@ function bunCall(args, env) {
         break;
     }
   }
-  const chained = words[0] === "x";
-  let cwd = env.cwd;
-  for (const [n, dir] of (chained ? dirs : dirs.slice(-1)).entries()) {
-    const from = !chained ? env.cwd : n > 0 && cwd !== undefined ? real(cwd) : cwd;
-    cwd = dir && pathOf(dir, { ...env, cwd: from });
+  const last = dirs.at(-1);
+  const cwd = dirs.length === 0 ? env.cwd : last && pathOf(last, env);
+  const lost = words[0] === "x" && dirs.length > 0 && !provenDir(dirs, env);
+  return { at: k, cwd, filtered, lost, words };
+}
+function provenDir(dirs, env) {
+  const [dir] = dirs;
+  const path = dirs.length === 1 && dir ? pathOf(dir, env) : undefined;
+  if (!dir || path === undefined)
+    return false;
+  const parts = dir.value.split(sep).filter((part) => part !== "" && part !== ".");
+  if (parts.includes(".."))
+    return false;
+  if (isAbsolute3(dir.value))
+    return linkFree(sep, parts) && listedWorktree(path) !== undefined;
+  const home = env.cwd === undefined ? undefined : listedWorktree(env.cwd);
+  return home !== undefined && linkFree(env.cwd, parts) && listedWorktree(path) === home;
+}
+function linkFree(base, parts) {
+  let dir = base;
+  for (const part of parts) {
+    dir = join4(dir, part);
+    try {
+      if (!lstatSync(dir).isDirectory())
+        return false;
+    } catch {
+      return false;
+    }
   }
-  return { at: k, cwd, filtered, words };
+  return true;
+}
+function listedWorktree(path) {
+  for (let dir = path;; dir = dirname2(dir)) {
+    let text;
+    try {
+      text = readFileSync(join4(dir, ".git"), "utf8");
+    } catch (error) {
+      if (error.code !== "ENOENT")
+        return;
+    }
+    if (text !== undefined) {
+      const admin = /^gitdir: (.+)$/m.exec(text)?.[1]?.trim();
+      const at = admin && resolve3(dir, admin);
+      if (!at || !/\/\.git\/worktrees\/[^/]+$/.test(at))
+        return;
+      try {
+        const back = dirname2(resolve3(at, readFileSync(join4(at, "gitdir"), "utf8").trim()));
+        return resolved(back) !== undefined && resolved(back) === resolved(dir) ? dir : undefined;
+      } catch {
+        return;
+      }
+    }
+    if (dirname2(dir) === dir)
+      return;
+  }
 }
 var GIT_MOVES = new Set([
   "am",
@@ -7246,7 +7267,13 @@ var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
 function bunDir(name, args, env) {
   if (name !== "bun" && name !== "bunx")
     return env.cwd;
-  return bunCall(name === "bunx" ? [X, ...args] : args, env).cwd ?? env.cwd;
+  const call = bunCall(name === "bunx" ? [X, ...args] : args, env);
+  return call.lost ? undefined : call.cwd ?? env.cwd;
+}
+function bunLost(name, args, env) {
+  if (name !== "bun" && name !== "bunx")
+    return false;
+  return bunCall(name === "bunx" ? [X, ...args] : args, env).lost;
 }
 function turboWords(name, args, env) {
   if (name === "turbo")
@@ -7476,7 +7503,10 @@ function heavy(name, args, env) {
   const turbo = turboWords(name, args, env);
   if (turbo) {
     const task = turboTask(turbo);
-    return task ? { dir: cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) }), what: `turbo run ${task}` } : undefined;
+    if (!task)
+      return;
+    const dir = cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) });
+    return dir === undefined && bunLost(name, args, env) ? { anywhere: true, dir: env.cwd, what: `turbo run ${task}` } : { dir, what: `turbo run ${task}` };
   }
   if (RUNNERS2.has(name)) {
     const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES2.has(args[k - 1]?.value ?? ""));
@@ -7484,7 +7514,7 @@ function heavy(name, args, env) {
   }
   if (name !== "bun")
     return;
-  const { at, cwd, filtered, words } = bunCall(args, env);
+  const { at, cwd, filtered, lost, words } = bunCall(args, env);
   const rest = args.slice(at + 1);
   if (words[0] === "install" || words[0] === "i") {
     if (rest.some((a) => ["--dry-run", "--help", "-h"].includes(a.value)))
@@ -7492,7 +7522,7 @@ function heavy(name, args, env) {
     return { dir: cwdFlag(rest, { ...env, cwd }), what: "bun install" };
   }
   if (words[0] === "x" && program(words[1] ?? "") === "next" && rest[0]?.value === "build")
-    return cwd === undefined ? { anywhere: true, dir: env.cwd, what: "bun x next build" } : { dir: cwd, what: "bun x next build" };
+    return lost || cwd === undefined ? { anywhere: true, dir: env.cwd, what: "bun x next build" } : { dir: cwd, what: "bun x next build" };
   const testFile = words[0] === "run" && words[1] === "test:file";
   if (words[0] === "test" || testFile) {
     if (rest.some((a) => a.value === "--help" || a.value === "-h"))

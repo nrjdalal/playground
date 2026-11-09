@@ -2,7 +2,7 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-main-checkout.ts
-import { readdirSync, readFileSync as readFileSync2, realpathSync } from "fs";
+import { lstatSync, readdirSync, readFileSync as readFileSync2, realpathSync } from "fs";
 import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join5, normalize, resolve as resolve3, sep } from "path";
 
 // packages/env/src/aliases.ts
@@ -7416,6 +7416,7 @@ var FILE_TOOLS = {
 var INSTEAD = "the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under .claude/worktrees/ (git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.";
 var refuse = (what, fix = INSTEAD) => `no-main-checkout hook refuses ${what}: ${fix}`;
 var UNKNOWN_FIX = "the hook cannot tell which folder it runs in, since a cd before it may not run, may run many times, or names a path it cannot read, so it reads every folder the shell may be in. Name the folder instead: git -C <your worktree>, bun --cwd <your worktree>, or cd by a literal path.";
+var BUNX_FIX = "bun x and bunx read one --cwd alone, with no .. and no link in it: an absolute path inside your worktree, or a relative one typed from inside it. Name your worktree that way, or cd to it first.";
 var ANYWHERE_FIX = "the line names more folders than the hook carries, so it cannot rule out the main checkout. Name the folder on the command instead: git -C <your worktree>, bun --cwd <your worktree>, or run it as a line of its own after a cd to a literal path.";
 var fixFor2 = (sure, own = INSTEAD) => sure ? own : UNKNOWN_FIX;
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
@@ -7473,13 +7474,61 @@ function bunCall(args, env) {
         break;
     }
   }
-  const chained = words[0] === "x";
-  let cwd = env.cwd;
-  for (const [n, dir] of (chained ? dirs : dirs.slice(-1)).entries()) {
-    const from = !chained ? env.cwd : n > 0 && cwd !== undefined ? real(cwd) : cwd;
-    cwd = dir && pathOf(dir, { ...env, cwd: from });
+  const last = dirs.at(-1);
+  const cwd = dirs.length === 0 ? env.cwd : last && pathOf(last, env);
+  const lost = words[0] === "x" && dirs.length > 0 && !provenDir(dirs, env);
+  return { at: k, cwd, filtered, lost, words };
+}
+function provenDir(dirs, env) {
+  const [dir] = dirs;
+  const path = dirs.length === 1 && dir ? pathOf(dir, env) : undefined;
+  if (!dir || path === undefined)
+    return false;
+  const parts = dir.value.split(sep).filter((part) => part !== "" && part !== ".");
+  if (parts.includes(".."))
+    return false;
+  if (isAbsolute3(dir.value))
+    return linkFree(sep, parts) && listedWorktree(path) !== undefined;
+  const home = env.cwd === undefined ? undefined : listedWorktree(env.cwd);
+  return home !== undefined && linkFree(env.cwd, parts) && listedWorktree(path) === home;
+}
+function linkFree(base, parts) {
+  let dir = base;
+  for (const part of parts) {
+    dir = join5(dir, part);
+    try {
+      if (!lstatSync(dir).isDirectory())
+        return false;
+    } catch {
+      return false;
+    }
   }
-  return { at: k, cwd, filtered, words };
+  return true;
+}
+function listedWorktree(path) {
+  for (let dir = path;; dir = dirname2(dir)) {
+    let text;
+    try {
+      text = readFileSync2(join5(dir, ".git"), "utf8");
+    } catch (error) {
+      if (error.code !== "ENOENT")
+        return;
+    }
+    if (text !== undefined) {
+      const admin = /^gitdir: (.+)$/m.exec(text)?.[1]?.trim();
+      const at = admin && resolve3(dir, admin);
+      if (!at || !/\/\.git\/worktrees\/[^/]+$/.test(at))
+        return;
+      try {
+        const back = dirname2(resolve3(at, readFileSync2(join5(at, "gitdir"), "utf8").trim()));
+        return resolved(back) !== undefined && resolved(back) === resolved(dir) ? dir : undefined;
+      } catch {
+        return;
+      }
+    }
+    if (dirname2(dir) === dir)
+      return;
+  }
 }
 function gitCall(args, env) {
   let cwd = env.cwd;
@@ -7580,7 +7629,13 @@ function gitMoves(sub, rest) {
 function bunDir(name, args, env) {
   if (name !== "bun" && name !== "bunx")
     return env.cwd;
-  return bunCall(name === "bunx" ? [X, ...args] : args, env).cwd ?? env.cwd;
+  const call = bunCall(name === "bunx" ? [X, ...args] : args, env);
+  return call.lost ? undefined : call.cwd ?? env.cwd;
+}
+function bunLost(name, args, env) {
+  if (name !== "bun" && name !== "bunx")
+    return false;
+  return bunCall(name === "bunx" ? [X, ...args] : args, env).lost;
 }
 function turboWords(name, args, env) {
   if (name === "turbo")
@@ -7617,9 +7672,11 @@ function runs(name, args, local, env) {
   if (turbo && packagesBuild(turbo)) {
     if (validationOff(local, env))
       return;
+    const cwd = cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) });
     return {
-      cwd: cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) }),
+      cwd,
       fix: BUILD_FIX,
+      lost: cwd === undefined && bunLost(name, args, env),
       what: "the packages build without NODE_ENV and SKIP_ENV_VALIDATION=true"
     };
   }
@@ -7638,13 +7695,11 @@ function runs(name, args, local, env) {
   }
   if (name !== "bun")
     return;
-  const { at, cwd, filtered, words } = bunCall(args, env);
+  const { at, cwd, filtered, lost, words } = bunCall(args, env);
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0];
   if (TOOLS.has(toolName(target))) {
-    return {
-      cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: cwd ?? env.cwd }),
-      what: `bun ${words.join(" ")}`
-    };
+    const dir = cwdFlag(args.slice(at + 1), { ...env, cwd: lost ? undefined : cwd ?? env.cwd });
+    return { cwd: dir, lost: lost && dir === undefined, what: `bun ${words.join(" ")}` };
   }
   if (words[0] === "test")
     return { cwd: cwdFlag(args.slice(at + 1), { ...env, cwd }), what: "bun test" };
@@ -7854,6 +7909,8 @@ async function inspect(raw, environment, main) {
       if (script)
         return script;
       const ran = runs(name, args, local, here);
+      if (ran?.lost)
+        return refuse(ran.what, BUNX_FIX);
       if (ran && inMain(ran.cwd))
         return refuse(ran.what, fixFor2(sure, ran.fix));
       const moved = name === "git" ? await liveRefusal(args, here, inLive, fixFor2(sure, LIVE_FIX)) : undefined;
@@ -7896,9 +7953,11 @@ export {
   FILE_TOOLS,
   bunCall,
   bunDir,
+  bunLost,
   check,
   cwdFlag,
   gitCall,
+  listedWorktree,
   liveCheckout,
   mainCheckout,
   real,

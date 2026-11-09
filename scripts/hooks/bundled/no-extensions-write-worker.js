@@ -67,7 +67,7 @@ var CORE = "core";
 var extensionsDir = (data) => join2(data, "extensions");
 
 // scripts/hooks/no-main-checkout.ts
-import { readdirSync, readFileSync, realpathSync } from "fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync } from "fs";
 import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join4, normalize, resolve as resolve3, sep } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
@@ -7295,13 +7295,61 @@ function bunCall(args, env) {
         break;
     }
   }
-  const chained = words[0] === "x";
-  let cwd = env.cwd;
-  for (const [n, dir] of (chained ? dirs : dirs.slice(-1)).entries()) {
-    const from = !chained ? env.cwd : n > 0 && cwd !== undefined ? real(cwd) : cwd;
-    cwd = dir && pathOf(dir, { ...env, cwd: from });
+  const last = dirs.at(-1);
+  const cwd = dirs.length === 0 ? env.cwd : last && pathOf(last, env);
+  const lost = words[0] === "x" && dirs.length > 0 && !provenDir(dirs, env);
+  return { at: k, cwd, filtered, lost, words };
+}
+function provenDir(dirs, env) {
+  const [dir] = dirs;
+  const path = dirs.length === 1 && dir ? pathOf(dir, env) : undefined;
+  if (!dir || path === undefined)
+    return false;
+  const parts = dir.value.split(sep).filter((part) => part !== "" && part !== ".");
+  if (parts.includes(".."))
+    return false;
+  if (isAbsolute3(dir.value))
+    return linkFree(sep, parts) && listedWorktree(path) !== undefined;
+  const home = env.cwd === undefined ? undefined : listedWorktree(env.cwd);
+  return home !== undefined && linkFree(env.cwd, parts) && listedWorktree(path) === home;
+}
+function linkFree(base, parts) {
+  let dir = base;
+  for (const part of parts) {
+    dir = join4(dir, part);
+    try {
+      if (!lstatSync(dir).isDirectory())
+        return false;
+    } catch {
+      return false;
+    }
   }
-  return { at: k, cwd, filtered, words };
+  return true;
+}
+function listedWorktree(path) {
+  for (let dir = path;; dir = dirname2(dir)) {
+    let text;
+    try {
+      text = readFileSync(join4(dir, ".git"), "utf8");
+    } catch (error) {
+      if (error.code !== "ENOENT")
+        return;
+    }
+    if (text !== undefined) {
+      const admin = /^gitdir: (.+)$/m.exec(text)?.[1]?.trim();
+      const at = admin && resolve3(dir, admin);
+      if (!at || !/\/\.git\/worktrees\/[^/]+$/.test(at))
+        return;
+      try {
+        const back = dirname2(resolve3(at, readFileSync(join4(at, "gitdir"), "utf8").trim()));
+        return resolved(back) !== undefined && resolved(back) === resolved(dir) ? dir : undefined;
+      } catch {
+        return;
+      }
+    }
+    if (dirname2(dir) === dir)
+      return;
+  }
 }
 function gitCall(args, env) {
   let cwd = env.cwd;
