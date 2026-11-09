@@ -37,12 +37,47 @@ export const groups: Group[] = [
       ["bun test past a later --cwd of .", "bun --cwd=.claude/worktrees/a --cwd=. test"],
     ],
   },
-  // the same last-one-wins reading from a worktree keeps a build there a heavy run
+  // the same last-one-wins reading from a worktree keeps a build there a heavy run, and bunx's -p and --package take a word, so turbo after it is still turbo; an unread --cwd before a next build may land anywhere, a worktree included
   {
     folders: ["checkout"],
     guards: ["no-unslotted-run"],
     rows: () => [
       ["a build past a later --cwd into the worktree", "bun --cwd=../../.. --cwd=api run build"],
+      ["turbo through bunx past -p and its package", "bunx -p typescript turbo run build"],
+      [
+        "turbo through bunx past --package and its package",
+        "bunx --package typescript turbo run build",
+      ],
+      [
+        "next build through bun x past an unread --cwd",
+        "bun x --cwd=$X --cwd=.claude/worktrees/a next build",
+      ],
+    ],
+  },
+  {
+    folders: ["main checkout"],
+    guards: ["no-unslotted-run"],
+    rows: () => [
+      [
+        "next build through bun x past an unread --cwd, from the main checkout",
+        "bun x --cwd=$X --cwd=.claude/worktrees/a next build",
+      ],
+    ],
+  },
+  // a chained --cwd that crosses a link lands where the link leads, and the worktrees root is no worktree, since turbo walks up from it to the main checkout's turbo.json
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      [
+        "turbo through bunx, a chained --cwd back across a link into the main checkout",
+        "bunx --cwd=.claude/worktrees/a/up --cwd=../.. turbo run build",
+      ],
+      [
+        "turbo through bun x, a chained --cwd across a link into the main checkout",
+        "bun x --cwd=.claude/worktrees/a/up --cwd=.. turbo run build",
+      ],
+      ["turbo through bunx in the worktrees root", "bunx --cwd=.claude/worktrees turbo run build"],
     ],
   },
   // bun x and bunx read each relative --cwd from the one before it, and a --cwd it cannot read leaves the line judged in the shell's folder

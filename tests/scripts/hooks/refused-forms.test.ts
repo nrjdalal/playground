@@ -86,6 +86,9 @@ symlinkSync(ROOT, PATHS.LINK)
 symlinkSync(ROOT, join(DATA, "store"))
 symlinkSync(DATA, join(HOME, "pg"))
 symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, "pc"))
+// a worktree's link into the main checkout, which a chained relative bun --cwd crosses
+mkdirSync(join(PATHS.MAIN, "api", "hono"), { recursive: true })
+symlinkSync(join(PATHS.MAIN, "api", "hono"), join(PATHS.MAIN, ".claude", "worktrees", "a", "up"))
 git(SCRATCH, "init", "-q", OTHER)
 git(OTHER, "remote", "add", "origin", "https://github.com/acme-labs/demo.git")
 // A repo with a heavy path staged, as no-glm-heavy-path's own test stages one.
