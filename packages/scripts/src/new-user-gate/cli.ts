@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path"
 import { makeScratch, removeScratch } from "@packages/safe-delete"
 import { gateSettings, SCHEMA_VERSION } from "@packages/settings"
 
+import { gateLine } from "../pr-merge/ship-lines"
 import { GATE_LABEL, stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
@@ -28,6 +29,13 @@ export type Step = {
   ok: boolean
   shot?: string
 }
+
+// The steps main checks, in order, so a run that stopped short of its last one is no pass.
+export const STEP_COUNT = 7
+
+// Pure: the gate's last line, which ship:merge reads in the ship PR's body: PASS only for a run that reached every step with none reading FAIL.
+export const resultLine = (sha: string, steps: Step[]): string =>
+  gateLine(sha, steps.length < STEP_COUNT || steps.some((s) => !s.ok && !s.inconclusive))
 
 // Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail, then the count.
 export const report = (steps: Step[]): string => {
@@ -617,6 +625,7 @@ const main = async (args: string[]) => {
       clean(box, home)
       console.log(`gate: screenshots and logs in ${shots}`)
     }
+    console.log(resultLine(full, steps))
   }
   return steps.every((s) => s.ok) ? 0 : 1
 }
