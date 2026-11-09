@@ -465,7 +465,6 @@ const main = async (args: string[]) => {
         () => existsSync(env) && /^POSTGRES_URL=\S/m.test(readFileSync(env, "utf8")),
         120_000,
       )
-      browser.cmd("wait", "--load", "networkidle")
       return {
         detail: saved ? "" : "no POSTGRES_URL in the desk's .env after 120s",
         ok: saved,
