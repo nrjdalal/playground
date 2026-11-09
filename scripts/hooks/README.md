@@ -29,7 +29,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 
 ## Registered in both settings files
 
-- A session resumed without its `--settings` or `PLAYGROUND_ROLE` (a bare `claude --resume`, or herdr's own resume, which ops-herdr's `config.toml` keeps off: playbook's SESSIONS.md) still loads the checkout's project settings, so `.claude/settings.json` registers every PreToolUse hook `scripts/factory-settings.json` does, with the same matcher and the same command string,
+- A session resumed without its `--settings` or `PLAYGROUND_ROLE` (a bare `claude --resume`, or herdr's own resume, which ops-herdr's `config.toml` keeps off: playbook's SPAWN.md, Role and settings) still loads the checkout's project settings, so `.claude/settings.json` registers every PreToolUse hook `scripts/factory-settings.json` does, with the same matcher and the same command string,
   since Claude Code runs a handler defined in both files once only when the two commands match byte for byte (measured on Claude Code 2.1.302: one space apart, it runs twice; `tests/scripts/hooks-abs-path.test.ts` holds every hook in both files to it).
   That one command finds the checkout with no `$HOME` in it: `$PLAYGROUND_REPO`, which spawn.sh's launch exports as its main checkout, else the main checkout git names for `$CLAUDE_PROJECT_DIR` (`--git-common-dir`, so a session in a worktree runs the main checkout's guards); when neither names a folder holding the hook's script, it runs nothing and exits 0.
 - A hook's script lands on `main` in one ship and its registration in a later one, since every wrapper runs its script from the main checkout, which follows `main`, and a factory session on `canary` loses the hook's tool the moment `canary` registers a script `main` lacks.
@@ -561,7 +561,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 ## no-playground-leak
 
 - ALWAYS: Keep the factory out of every ticket, PR, commit, branch, comment, Slack message or DM, and file in a guarded org's repo: playbook's **classified** rule, since the factory is the owner's own and stays out of the org's records in any shape.
-  Every factory session is spawned with `--settings ~/.playground/factory-settings.json` (playbook's SESSIONS.md), the file `scripts/link-skills.sh` links to `scripts/factory-settings.json`,
+  Every factory session is spawned with `--settings ~/.playground/factory-settings.json` (playbook's SPAWN.md, Role and settings), the file `scripts/link-skills.sh` links to `scripts/factory-settings.json`,
   which registers the PreToolUse hook `scripts/hooks/no-playground-leak.ts` wherever the session works (`.claude/settings.json` registers it too, for a session resumed without its settings in the factory's checkout).
   It refuses a write to a guarded org's surface whose text holds a factory term (a name, an old session name, which a scope's own copy adds, a path, a `<role>-<sin>` session or a `probe-<sin>` or `probe-<role>-<sin>` probe from `extensions/core/lists/playground-terms.json`,
   its sins the seven words alone so `worker-pool` and `probe-path` pass, any skill's name in the checkout's `skills/` bucket folders,
@@ -647,7 +647,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 ## no-linear-ticket
 
 - ALWAYS: File a new Linear ticket only after the owner's yes, and keep the factory out of Linear and out of every guarded org's ticket, PR, commit, branch, comment, Slack message or DM, and file in its repo: playbook's **tickets** rule, since the factory is no project of the org's and stays out of its records in any shape.
-  A session started with `PLAYGROUND_ROLE` set (every factory spawn, playbook's SESSIONS.md), or with no role but a factory name in Claude Code's registry (`scripts/hooks/role.ts`, for a session resumed without its settings), runs the PreToolUse hook `scripts/hooks/no-linear-ticket.ts`, registered in both settings files and in the ticket skill's and playbook's frontmatter,
+  A session started with `PLAYGROUND_ROLE` set (every factory spawn, by the launch line in playbook's SPAWN.md), or with no role but a factory name in Claude Code's registry (`scripts/hooks/role.ts`, for a session resumed without its settings), runs the PreToolUse hook `scripts/hooks/no-linear-ticket.ts`, registered in both settings files and in the ticket skill's and playbook's frontmatter,
   so it also runs in a guarded org's checkout whose session loads either; without the variable or a factory name it allows everything, so the owner's own sessions file freely.
   It refuses a call that files a new Linear ticket (`save_issue` with no `id`, a Linear server's create-issue tool, a GraphQL `issueCreate` or `issueBatchCreate` sent by curl, by `gh api` to a URL off GitHub, or by inline script code) unless `ticket-approvals/<team>-<UTC date>.json` in the data folder names its title;
   a GraphQL create is refused even then, since its `teamId` matches no approval.
