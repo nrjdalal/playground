@@ -7602,7 +7602,7 @@ function runs(name, args, local, env) {
     if (validationOff(local, env))
       return;
     return {
-      cwd: cwdFlag(turbo, env),
+      cwd: cwdFlag(turbo, { ...env, cwd: name === "bun" ? bunCall(args, env).cwd : env.cwd }),
       fix: BUILD_FIX,
       what: "the packages build without NODE_ENV and SKIP_ENV_VALIDATION=true"
     };
@@ -7625,9 +7625,8 @@ function runs(name, args, local, env) {
   const { at, cwd, filtered, words } = bunCall(args, env);
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0];
   if (TOOLS.has(program(target ?? ""))) {
-    const dir = words[0] === "x" ? env.cwd : cwd;
     return {
-      cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: dir }),
+      cwd: cwdFlag(args.slice(at + 1), { ...env, cwd }),
       what: `bun ${words.join(" ")}`
     };
   }

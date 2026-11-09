@@ -4,7 +4,7 @@ import { type Group } from "./_shared"
 export const groups: Group[] = [
   // bun x and bunx run their tool in the folder bun's own --cwd names, so a worktree's line aimed at the main checkout by it builds there
   {
-    folders: ["worktree"],
+    folders: ["checkout"],
     guards: ["no-main-checkout"],
     rows: ({ MAIN }) => [
       ["turbo through bunx by its --cwd", `bunx --cwd=${MAIN} turbo run build`],
