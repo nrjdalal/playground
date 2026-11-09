@@ -25,12 +25,12 @@ bun run ship:freeze vX.Y.Z
 CANARY=$(gh api repos/{owner}/{repo}/branches/canary --jq .commit.sha)
 ```
 
-The freeze lapses 4 hours after it is written ([pr-merge's Holds and rulings](../../../packages/scripts/src/pr-merge/README.md#holds-and-rulings)), so a ship still short of step 4 then runs `bun run ship:freeze vX.Y.Z` again.
+A ship still short of step 4 as the freeze nears its lapse ([pr-merge's Holds and rulings](../../../packages/scripts/src/pr-merge/README.md#holds-and-rulings)) runs `bun run ship:freeze vX.Y.Z` again, which restarts it.
 A ship that stops before its tag ends the freeze with `bun run ship:freeze --end`, so the held PRs merge again.
 
 Run the new-user gate on it, `bun run gate:new-user "$CANARY"` (`.agents/testing.md`, End-to-end tests), and name each FAIL and INCONCLUSIVE line in the ship PR's body.
 
-Done when `bun run ship:freeze status` prints the `"*"` line naming `vX.Y.Z`, `CANARY` holds the SHA you mean to ship and the gate's PASS and FAIL list for it is in hand. When `canary` moves before step 3, read it again.
+Done when `bun run ship:freeze status` prints the `"*"` line naming `vX.Y.Z` (or the line Ops wrote by hand, which `ship:freeze` kept and which holds every PR already), `CANARY` holds the SHA you mean to ship and the gate's PASS and FAIL list for it is in hand. When `canary` moves before step 3, read it again.
 
 ## Rehearse an invitee's update
 
@@ -147,4 +147,4 @@ Done when the main checkout's `HEAD` equals `origin/main`, `playground update` e
 
 - **Merge method is load-bearing.** `canary` PRs squash; the ship PR merges with a **merge commit** so `main` keeps shared history with `canary` and the next ship's diff stays clean.
 - **The notes are rendered, never committed.** `release:notes` groups the commits since the last tag as ZeroStarter's changelogen notes do, with `ci` hidden as ZeroStarter's `changelog.config.json` hides it, and the release keeps them, so a ship makes no changelog commit on `canary` or `main`.
-- **Each tag is made once.** A tag that already exists fails the `git/refs` call: read the last tag again and take the next number.
+- **Each tag is made once.** A tag that already exists fails the `git/refs` call: read the last tag again, take the next number, and run step 1's `bun run ship:freeze` with it.
