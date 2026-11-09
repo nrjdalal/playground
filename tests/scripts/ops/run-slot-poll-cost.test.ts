@@ -273,3 +273,25 @@ describe("a waiter behind the head", () => {
     await stop(next.p)
   })
 })
+
+// #1378: a waiter's waited count is the real seconds since its wait began, so the five-minute marks land on real minutes whatever RUN_SLOT_POLL is; a poll that added 15 of its own ran the marks early on a slow poll and late on a fast one
+describe("a waiter's waited count is the real seconds since its wait began", () => {
+  const script = readFileSync(join(import.meta.dir, "../../../scripts/ops/run-slot.sh"), "utf8")
+
+  test("no poll adds a figure of its own", () => {
+    expect(script.match(/waited=\$\(\(waited \+/g) ?? []).toEqual([])
+  })
+
+  test("each wait records its start, and four loops and focus_wait read the clock against it", () => {
+    expect(script.match(/WAIT_FROM=\$SECONDS/g) ?? []).toHaveLength(4)
+    expect(script.match(/waited=\$\(\(SECONDS - WAIT_FROM\)\)/g) ?? []).toHaveLength(5)
+  })
+
+  // a sampled clock count steps over an exact multiple, so each wait line prints by a threshold it raises past the mark, not by the modulo
+  test("each wait line prints by a threshold, and no modulo or first-line flag holds the five-minute marks", () => {
+    expect(script.match(/-ge "\$(FAT|QAT|UAT|BAT|SAT|MAT|DAT|CAT)"/g) ?? []).toHaveLength(8)
+    expect(script.match(/AT=\$\(\(\(waited \/ 300 \+ 1\) \* 300\)\)/g) ?? []).toHaveLength(8)
+    expect(script.match(/% 300/g) ?? []).toEqual([])
+    expect(script.match(/(?:F|M|D|C|Q)SAID=/g) ?? []).toEqual([])
+  })
+})

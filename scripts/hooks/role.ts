@@ -1,4 +1,4 @@
-// A session's factory role, which the hooks read: PLAYGROUND_ROLE, else the role its name in Claude Code's registry gives, through the roster's kind for that name first and the name itself second, since a session resumed without its settings (SESSIONS.md) lacks the env var, else "" for a session outside the factory.
+// A session's factory role, which the hooks read: PLAYGROUND_ROLE, else the role its name in Claude Code's registry gives, through the roster's kind for that name first and the name itself second, since a session resumed without its settings (playbook's SPAWN.md, Role and settings) lacks the env var, else "" for a session outside the factory.
 import "../../packages/env/src/aliases"
 import { homedir } from "node:os"
 import { join } from "node:path"

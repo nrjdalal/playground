@@ -15,6 +15,7 @@ const PROXY_PORT = "14155"
 const INSTALL_LIMIT_S = 1200
 const ROUTE_WAIT_MS = 180_000
 const SCRIPTS_WAIT_MS = 150_000
+const USAGE_WAIT_MS = 60_000
 const ROOM_WAIT_MS = 600_000
 // The box's PLAYGROUND_LOAD_MULT: the gate checks what a new user meets on a quiet Mac, so spawn.sh's load gate in the box allows this many times the cores and the host's other sessions never hold a start; its memory and usage gates stay as they are.
 export const BOX_LOAD_MULT = 10
@@ -464,7 +465,6 @@ const main = async (args: string[]) => {
         () => existsSync(env) && /^POSTGRES_URL=\S/m.test(readFileSync(env, "utf8")),
         120_000,
       )
-      browser.cmd("wait", "--load", "networkidle")
       return {
         detail: saved ? "" : "no POSTGRES_URL in the desk's .env after 120s",
         ok: saved,
@@ -540,9 +540,15 @@ const main = async (args: string[]) => {
       },
     )
     await check("Usage shows", async () => {
-      browser.cmd("open", `${web}/dashboard`)
-      browser.cmd("wait", "--load", "networkidle")
-      const words = usageWords(browser.text())
+      // a read can land before the machine's reading does, when the row still says Not read yet, so the last read is the one judged
+      let text = ""
+      await waitFor(() => {
+        browser.cmd("open", `${web}/dashboard`)
+        browser.cmd("wait", "--load", "networkidle")
+        text = browser.text()
+        return usageWords(text) !== null
+      }, USAGE_WAIT_MS)
+      const words = usageWords(text)
       return {
         detail: words ?? "no usage reading on the dispatcher's row",
         ok: words !== null,
