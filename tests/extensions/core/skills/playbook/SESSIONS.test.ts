@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
 const SESSIONS = join(import.meta.dir, "../../../../../extensions/core/skills/playbook/SESSIONS.md")
+// SESSIONS.md's Spawn step 2 points to SPAWN.md for the launch line
+const SPAWN = join(import.meta.dir, "../../../../../extensions/core/skills/playbook/SPAWN.md")
 
 describe("SESSIONS.md", () => {
   test("spawns every session with the factory settings", async () => {
-    expect(await Bun.file(SESSIONS).text()).toContain(
+    expect(await Bun.file(SPAWN).text()).toContain(
       "--settings $HOME/.playground/factory-settings-400k.json",
     )
   })

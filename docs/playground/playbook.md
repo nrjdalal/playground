@@ -6,25 +6,25 @@ It lives in the repo rather than in one session's memory, so every session loads
 
 ## When to reach for it
 
-| You are, or you are about to                                                                                             | It gives you                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| the dispatcher, the Planner, the Builder, Ops, the Optimizer, the Assistant, a worker, reviewer, tester, runner or probe | your role, who you report to and the rules you keep                            |
-| Spawn, brief, rename, check or end a session                                                                             | the lifecycle (`LIFECYCLE.md`) and the herdr commands (`SESSIONS.md`)          |
-| Update Claude Code                                                                                                       | the update steps in `LIFECYCLE.md`                                             |
-| Route a new ask, or run a lead's sweep                                                                                   | `DISPATCH.md` and `SWEEP.md`                                                   |
-| Answer the owner's DM while Slack mode is on                                                                             | the `slack` skill (`extensions/slack`) and `playground dm send`                |
-| Merge a Playground PR, or release `canary` to `main`                                                                     | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release** |
-| Comment or review on a repo whose owner `release-owners.json` lists                                                      | the **comments** rule                                                          |
-| Touch the live dashboard or the roster                                                                                   | the **dashboard** and **roster** rules (`ROSTER.md`)                           |
-| Ask the owner something, or pass on his override                                                                         | the **ask** and **override** rules                                             |
-| File a Linear ticket                                                                                                     | the **tickets** rule                                                           |
-| Write anything an org sees                                                                                               | the **classified** rule                                                        |
-| Post in the factory's channel, or take an ask from there                                                                 | the channel's lists and triage (`CHANNEL.md`)                                  |
-| Run a `vercel` command, a deploy among them                                                                              | the Vercel CLI's three traps (`VERCEL.md`)                                     |
-| Stop a process                                                                                                           | the **signal** rule                                                            |
-| Hand off a build, a read or research                                                                                     | the **workers** rule                                                           |
-| Run long, spawn a reviewer again, or wait on something                                                                   | the **context**, **rounds** and **polling** rules                              |
-| Write a skill, an agent guide, a docs page, a handoff or a brief                                                         | the **writing** rule                                                           |
+| You are, or you are about to                                                                                             | It gives you                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| the dispatcher, the Planner, the Builder, Ops, the Optimizer, the Assistant, a worker, reviewer, tester, runner or probe | your role, who you report to and the rules you keep                                                                   |
+| Spawn, brief, rename, check or end a session                                                                             | the lifecycle (`LIFECYCLE.md`), the herdr commands (`SESSIONS.md`) and spawn.sh's modes, gates and flags (`SPAWN.md`) |
+| Update Claude Code                                                                                                       | the update steps in `LIFECYCLE.md`                                                                                    |
+| Route a new ask, or run a lead's sweep                                                                                   | `DISPATCH.md` and `SWEEP.md`                                                                                          |
+| Answer the owner's DM while Slack mode is on                                                                             | the `slack` skill (`extensions/slack`) and `playground dm send`                                                       |
+| Merge a Playground PR, or release `canary` to `main`                                                                     | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release**                                        |
+| Comment or review on a repo whose owner `release-owners.json` lists                                                      | the **comments** rule                                                                                                 |
+| Touch the live dashboard or the roster                                                                                   | the **dashboard** and **roster** rules (`ROSTER.md`)                                                                  |
+| Ask the owner something, or pass on his override                                                                         | the **ask** and **override** rules                                                                                    |
+| File a Linear ticket                                                                                                     | the **tickets** rule                                                                                                  |
+| Write anything an org sees                                                                                               | the **classified** rule                                                                                               |
+| Post in the factory's channel, or take an ask from there                                                                 | the channel's lists and triage (`CHANNEL.md`)                                                                         |
+| Run a `vercel` command, a deploy among them                                                                              | the Vercel CLI's three traps (`VERCEL.md`)                                                                            |
+| Stop a process                                                                                                           | the **signal** rule                                                                                                   |
+| Hand off a build, a read or research                                                                                     | the **workers** rule                                                                                                  |
+| Run long, spawn a reviewer again, or wait on something                                                                   | the **context**, **rounds** and **polling** rules                                                                     |
+| Write a skill, an agent guide, a docs page, a handoff or a brief                                                         | the **writing** rule                                                                                                  |
 
 A factory session reaches for it on its own, and every brief tells the new session to load it.
 A session outside the factory has no reason to.
@@ -187,7 +187,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   So a herdr session ends through `spawn.sh close <name>`, which closes only the pane spawn.sh opened under that name, never the caller's own, and marks the session ended on the roster.
 - A new session's name reads like `k3m9px-worker`: a new 6-letter id, then what the session is, so no name is ever used twice, and its checkers get ids of their own, as `b7k2mq-reviewer` and `h4n8zt-tester`.
 - Every session starts at high effort; the owner picks a dispatcher's, the Assistant's or the hosted session's (the one the Dashboard runs on the Agent SDK) in the menu left of Send in its Dashboard composer.
-  A lead picks any other session's model by brief-rush's model classes and its effort, high by brief-rush's model rule, with spawn.sh's `--model` and `--effort` at a start or a resume, and the owner's word in the **override** shape outranks both.
+  A lead picks any other session's model and effort by brief-rush's model rule, with spawn.sh's `--model` and `--effort` at a start or a resume, and the owner's word in the **override** shape outranks both.
 - Every session runs on `models.default` (Opus) unless it was started on GLM or with spawn.sh's `--model` naming another of `models.claude`, and every subagent it starts for work runs on Sonnet unless its call names a model,
   from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approved #i492, 17 Oct; on GLM the alias maps to GLM), so a brief or subagent call that needs Opus names `model: opus`.
   The owner picks another model for a dispatcher, the Assistant or the hosted session in the menu left of Send in its Dashboard composer.
