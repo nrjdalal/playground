@@ -304,6 +304,7 @@ A lead keeps two cron jobs in its own session:
 
 Done when `CronList` shows both.
 A lead's new session creates both again.
+A lead that slows or pauses its sweep on purpose, a usage squeeze or maintenance, writes `~/.playground/ops/sweep-hold-until` one future ISO 8601 time with its zone, so ops-tick's relay watch stays quiet until it passes (it lapses on its own, and a missing, empty, past or unreadable time leaves the watch on; [LIFECYCLE.md](LIFECYCLE.md#starts-and-ends), the relay watch).
 
 Every manager (the dispatcher, the Planner and each lead) also keeps one background task waiting on its stuck alerts, so a stuck session reaches it in seconds rather than after the relay's turn (**unstick**):
 

@@ -22,6 +22,7 @@ import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
 import { dashboardCheckout, NO_CHECKOUT } from "../playground/probe"
+import { ALERT_JOB, waiterLive } from "../stuck-alert"
 import { swapBundles, unswapBundles } from "../swap-bundles"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
@@ -465,7 +466,7 @@ const RELAY = "runner-plain-relay"
 // Its brief, the resume's first prompt, since the brief has it start its wait task again, without which it relays nothing.
 const RELAY_BRIEF = "brief-runner-plain-relay.md"
 
-// The relay's resume line run here, through spawn.sh's capacity gate, rather than queued for the relay itself; never marked told, since a resume keeps the session id and the same line comes back with the next outage, so a relay still down is tried again at the next sweep; a failure is named to ops, where it waits for the relay like any other line, while relay-watch's Inbox alert stands for it.
+// The relay's resume line run here, through spawn.sh's capacity gate, rather than queued for the relay itself; never marked told, since a resume keeps the session id and the same line comes back with the next outage, so a relay still down is tried again at the next sweep; a failure is named to ops, where it waits for the relay like any other line, while relay-watch's late-stop line names the stall to whoever can act on it.
 const resumeRelay = async (ctx: Context, line: string): Promise<boolean> => {
   const argv = line.trim().split(/\s+/)
   const { code, out } = await ctx.run(
@@ -819,7 +820,7 @@ export const relayLink = (relay: boolean): string =>
     ? `- 🔎 The relay's row is under AI Runners in the sidebar (${RELAY} on hover), and this Mac's state is on the [System page](/dashboard/system).`
     : "- 🔎 Ops' row is under Orchestrators in the sidebar, since its sweep relays here, and this Mac's state is on the [System page](/dashboard/system)."
 
-// The Inbox alert's title: the relay's own on a machine that runs it, else the sweep's, each with the next step and naming only what this machine runs.
+// The late-stop line's text, the Inbox alert's title among its uses: the relay's own on a machine that runs it, else the sweep's, each with the next step and naming only what this machine runs.
 const relayDown = (relay: boolean, moved: number): string => {
   const since = moved ? `since ${isoSeconds(new Date(moved))}` : "since the watch began"
   if (relay)
@@ -840,9 +841,9 @@ type RelayWatch = {
   toldDispatcher?: string
 }
 
-// unstick.escalateMinutes in the data folder's policy, read at each pass so a change takes the next one, the window ops-session-resume gives a stuck session before its manager's silence reaches the dispatcher.
-const escalateMs = async (ops: string): Promise<number> => {
-  const read = await readPolicy(join(ops, ".."))
+// unstick.escalateMinutes in the data folder's policy, read at each pass so a change takes the next one, the window ops-session-resume gives a stuck session and the relay watch gives a late stop before the dispatcher hears of it.
+export const escalateMs = async (data: string): Promise<number> => {
+  const read = await readPolicy(data)
   const settings = read.settings ?? { schemaVersion: 1 as const, values: {} }
   return ruleSettings.get(settings, "unstick.escalateMinutes") * 60_000
 }
@@ -858,23 +859,37 @@ const sweepHold = async (ctx: Context): Promise<boolean> => {
   return !Number.isNaN(at) && at > ctx.now.getTime()
 }
 
-// Ops itself is down when its roster row holds a status the up beat's felled check skips (HELD), the check that names every other down manager to its lead, so a HELD row is the one absence no other check reports; a live row, or one with no status, reads up.
-const opsDown = async (ctx: Context): Promise<boolean> => {
+// Ops itself is down when nothing reads its queue: its alerts-wait waiter holds no running pid and handed it no alert within the grace (waiterLive, the liveness the stuck alerts judge a manager by), since a roster status cannot tell a down pane from a live one, live managers reading starting for their whole run; that absence no other check reports, so the Inbox is the fallback for it alone.
+const opsLive = async (ctx: Context): Promise<boolean> => {
   const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
     agents?: unknown
   } | null
-  const agents = roster?.agents
-  const by = managerOf(agents, "ops")
-  const row = (Array.isArray(agents) ? agents : []).find((a: Agent) => a?.name === by)
-  return HELD.has(row?.status ?? "")
+  const by = managerOf(roster?.agents, "ops")
+  return waiterLive(join(ctx.ops, "outbox"), by, ctx.now)
 }
 
-// The ops relay's watch: a line pending() reads is timed from the first cycle that reads it, and once it has waited two cycles of whoever relays (relayDown) with no cursor moved since, the stop goes to the session that can act on it, the way unstick routes a stuck session: one line to ops, then one to the dispatcher once the escalation window has passed with Ops yet to pick it up; the Inbox alert under the ops manager's name posts only while Ops itself is down (opsDown), the one absence no other check reports. The state in tick/relay-watch.json keeps each stop to one line per route, the Inbox post resolved once a cursor moves after it or its item is gone, and a routed stop's state clearing once the cursor moves or nothing waits.
+// One line in the managers' waiter queue (ops-stuck-alert.jsonl, stuck-alert's own shape), which each alerts-wait reads within seconds without the relay, the relay's own send of that queue standing as the backstop; the late-stop line rides it because the watch fires while the relay or the sweep that delivers every other queue is the thing that has stalled.
+const queueWaiterLine = async (ctx: Context, to: string, text: string) => {
+  await mkdir(join(ctx.ops, "outbox"), { recursive: true })
+  await appendFile(
+    join(ctx.ops, "outbox", `ops-${ALERT_JOB}.jsonl`),
+    `${JSON.stringify({ at: isoSeconds(ctx.now), job: ALERT_JOB, text, to })}\n`,
+  )
+}
+
+// The ops relay's watch: a line pending() reads is timed from the first cycle that reads it, and once it has waited two cycles of whoever relays (relayDown) with no cursor moved since, the stop goes to the session that can act on it, the way unstick routes a stuck session: one line into the managers' waiter queue for ops (queueWaiterLine, since the stalled relay or sweep that the stop names delivers every other channel), then one for the dispatcher once the escalation window has passed with Ops yet to pick it up; the Inbox alert under the ops manager's name posts only while Ops itself is down (opsLive), the one absence no other check reports. The state in tick/relay-watch.json keeps each stop to one line per route, the Inbox post resolved once a cursor moves after it or its item is gone, and a routed stop's state clearing once the cursor moves or nothing waits.
 const relayWatch = async (ctx: Context) => {
   const outbox = join(ctx.ops, "outbox")
   const statePath = join(ctx.ops, "tick", "relay-watch.json")
   const state = (await readJson(statePath).catch(() => null)) as RelayWatch | null
   if (await sweepHold(ctx)) {
+    if (state?.id && state.by)
+      await resolveOwn(
+        ctx,
+        state.id,
+        state.by,
+        "The sweep hold stands: Ops set ops/sweep-hold-until, and the watch stays quiet until it passes",
+      )
     if (state) await unlink(statePath)
     return
   }
@@ -903,7 +918,7 @@ const relayWatch = async (ctx: Context) => {
   const relay = await hasRelay(ctx)
   if (ctx.now.getTime() - since < 2 * (relay ? RELAY_CYCLE_MS : SWEEP_CYCLE_MS)) return
   const line = relayDown(relay, moved)
-  if (await opsDown(ctx)) {
+  if (!(await opsLive(ctx))) {
     if (!state?.id) {
       const { by, id } = await postAlert(ctx, line, relayLink(relay))
       await writeAtomic(
@@ -914,31 +929,32 @@ const relayWatch = async (ctx: Context) => {
     return
   }
   if (!state?.sentAt) {
-    if (await ctx.send("ops", line, true))
-      await writeAtomic(
-        statePath,
-        JSON.stringify({ pendingSince: state?.pendingSince, sentAt: ctx.now.toISOString() }),
-      )
+    const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+      agents?: unknown
+    } | null
+    await queueWaiterLine(ctx, managerOf(roster?.agents, "ops"), line)
+    await writeAtomic(
+      statePath,
+      JSON.stringify({ pendingSince: state?.pendingSince, sentAt: ctx.now.toISOString() }),
+    )
     return
   }
   if (
     !state.toldDispatcher &&
-    ctx.now.getTime() - Date.parse(state.sentAt) >= (await escalateMs(ctx.ops))
+    ctx.now.getTime() - Date.parse(state.sentAt) >= (await escalateMs(join(ctx.ops, "..")))
   ) {
     const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
       agents?: unknown
     } | null
-    if (
-      await ctx.send(
-        dispatcherOf(roster?.agents, 1),
-        `${line} Ops has not picked it up. Resolve it; post it to the owner's Inbox only if you cannot.`,
-        true,
-      )
+    await queueWaiterLine(
+      ctx,
+      dispatcherOf(roster?.agents, 1),
+      `${line} Ops has not picked it up. Resolve it; post it to the owner's Inbox only if you cannot.`,
     )
-      await writeAtomic(
-        statePath,
-        JSON.stringify({ ...state, toldDispatcher: ctx.now.toISOString() }),
-      )
+    await writeAtomic(
+      statePath,
+      JSON.stringify({ ...state, toldDispatcher: ctx.now.toISOString() }),
+    )
   }
 }
 
