@@ -4,8 +4,8 @@ import { join } from "node:path"
 
 import { SCRIPT, WAITING, runSlot, stop, machine } from "./run-slot-fake"
 
-// ten waiters under xtrace and the shims take up to a minute over their first looks on a loaded Mac, before the window opens
-setDefaultTimeout(180_000)
+// ten waiters' first looks under xtrace and the shims, about 700 process starts each at a queue of 10, took 45 to 110 s at load5 19 to 25 before the window opened, and one row 188 s in all (issue 1612), so each row has about twice that
+setDefaultTimeout(360_000)
 
 // every external command run-slot.sh calls by name; a shim for each counts its start, so a start the shims miss is a fork that runs bash alone, which the trace's subshell levels count
 const COMMANDS =
@@ -53,6 +53,9 @@ const waiter = (
   return w
 }
 type Waiter = ReturnType<typeof waiter>
+// whether the waiter has ended a look since `at` in its trace: a look_mark, then a sleep after it
+const lookedSince = (w: Waiter, at: number) =>
+  /^\++\d+ look_mark$[\s\S]*^\+0 sleep \S+$/m.test(w.err.slice(at))
 // the subshells a trace shows entered: each line at a deeper level than the line before it
 const subshells = (trace: string) => {
   let n = 0
@@ -190,7 +193,10 @@ describe("a waiter behind the head", () => {
       RUN_SLOT_SIZE: "small",
     })
     while (!asleep(next)) await Bun.sleep(50)
+    const seen = pick.err.length
     m.release("run-slot-2")
+    // the pick's look names worker-y in run-slot.next, so worker-y's polls count from that look's end: a look a loaded Mac slows adds no poll of its own (issue 1612)
+    while (!lookedSince(pick, seen) && !existsSync(next.marker)) await Bun.sleep(50)
     const from = next.err.length
     const sleeps = () => next.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0
     while (!existsSync(next.marker) && sleeps() < 10) await Bun.sleep(50)
@@ -231,9 +237,12 @@ describe("a waiter behind the head", () => {
       !asleep({ ...older, err: older.err.slice(seen) })
     )
       await Bun.sleep(50)
-    const from = second.err.length
     writeFileSync(gate, "")
     await first.p.exited
+    // the older waiter's look at the end names the pick's second in run-slot.next, so the second's polls count from that look's end (issue 1612)
+    const ended = older.err.length
+    while (!lookedSince(older, ended) && !existsSync(second.marker)) await Bun.sleep(50)
+    const from = second.err.length
     const sleeps = () => second.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0
     while (!existsSync(second.marker) && sleeps() < 10) await Bun.sleep(50)
     expect(sleeps()).toBeLessThanOrEqual(3)
