@@ -53,11 +53,16 @@ const nothing: Written = { disabledMcpjsonServers: [], enabledMcpjsonServers: []
 const FACTORY = ["fs", "git", "a", "b", "c", "d", "e"]
 
 // The factory's own MCP file, ~/.mcp.json, with FACTORY's servers, or none at all, and any other file the case writes.
-const keysFor = async (screen: string, mcpFile = true, more = (_home: string) => {}) => {
+const keysFor = async (
+  screen: string,
+  mcpFile = true,
+  more = (_home: string) => {},
+  env: Record<string, string> = {},
+) => {
   const r = await spawn(
     ["manager", "optimizer", "b.md", "--runtime", "herdr"],
     [],
-    { FAKE_SCREENS: `${screen},ready` },
+    { FAKE_SCREENS: `${screen},ready`, ...env },
     undefined,
     undefined,
     (home) => {
@@ -155,4 +160,17 @@ test("with no factory MCP file, the one-server picker stays for the owner", asyn
   const { err, keys } = await keysFor("mcp", false)
   expect(keys).toEqual([])
   expect(err).toContain("has no server list it can read")
+})
+
+// herdr can drop a key, so a lost move leaves the pointer short of the row spawn.sh means to pick, and Enter there would choose for the owner.
+test("a lost up leaves the one-server picker on its all-future row, which gets no Enter", async () => {
+  const { err, keys } = await keysFor("mcp", true, undefined, { FAKE_LOST_KEY: "2" })
+  expect(keys).not.toContain("enter")
+  expect(err).toContain('"Use this and all future MCP servers in this project" marked')
+})
+
+test("a lost down leaves the many-server picker on its last server, which gets no Enter", async () => {
+  const { err, keys } = await keysFor("mcpmany", true, undefined, { FAKE_LOST_KEY: "2" })
+  expect(keys).not.toContain("enter")
+  expect(err).toContain('"[✔] git" marked where "Enable selected" was wanted')
 })
