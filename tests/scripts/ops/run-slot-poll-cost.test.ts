@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { SCRIPT, WAITING, runSlot, stop, machine } from "./run-slot-fake"
 
-// ten waiters' first looks under xtrace and the shims, about 700 process starts each at a queue of 10, took 45 to 110 s at load5 19 to 25 before the window opened, and one row 188 s in all (issue 1612), so each row has about twice that
+// ten waiters' first looks under xtrace and the shims, about 700 process starts each at a queue of 10, took 45 to 110 s at load5 19 to 25 before the window opened, and one row 188 s in all (issue 1612, measured), so each row has about twice that
 setDefaultTimeout(360_000)
 
 // every external command run-slot.sh calls by name; a shim for each counts its start, so a start the shims miss is a fork that runs bash alone, which the trace's subshell levels count
@@ -193,14 +193,24 @@ describe("a waiter behind the head", () => {
       RUN_SLOT_SIZE: "small",
     })
     while (!asleep(next)) await Bun.sleep(50)
+    const nextf = join(m.ops, "run-slot.next")
+    const named = () => (existsSync(nextf) ? readFileSync(nextf, "utf8") : "")
+    const was = named()
     const seen = pick.err.length
+    const freed = next.err.length
     m.release("run-slot-2")
-    // the pick's look names worker-y in run-slot.next, so worker-y's polls count from that look's end: a look a loaded Mac slows adds no poll of its own (issue 1612)
-    while (!lookedSince(pick, seen) && !existsSync(next.marker)) await Bun.sleep(50)
+    const sleeps = (from: number) => next.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0
+    // the pick's look writes run-slot.next partway through, which a loaded Mac can take seconds to reach, so worker-y's polls count from the first sign it could act: that write, the look's end, or its take (issue 1612)
+    while (
+      named() === was &&
+      !lookedSince(pick, seen) &&
+      !existsSync(next.marker) &&
+      sleeps(freed) < 10
+    )
+      await Bun.sleep(50)
     const from = next.err.length
-    const sleeps = () => next.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0
-    while (!existsSync(next.marker) && sleeps() < 10) await Bun.sleep(50)
-    expect(sleeps()).toBeLessThanOrEqual(3)
+    while (!existsSync(next.marker) && sleeps(from) < 10) await Bun.sleep(50)
+    expect(sleeps(from)).toBeLessThanOrEqual(3)
     expect(existsSync(pick.marker)).toBe(false)
     await Promise.all([stop(pick.p), stop(next.p)])
   })
@@ -218,11 +228,12 @@ describe("a waiter behind the head", () => {
     const older = waiter(m, path, "worker-w", ["touch"], poll)
     while (!asleep(older)) await Bun.sleep(50)
     const gate = join(m.root, "gate")
+    // both runs are worker-p's and share one marker, so the first touches none and the marker says the second ran (issue 1612: the first's touch passed the row before its count began)
     const first = waiter(
       m,
       path,
       "worker-p",
-      ["bash", "-c", `until [ -e "${gate}" ]; do sleep 0.1; done; touch "$0"`],
+      ["bash", "-c", `until [ -e "${gate}" ]; do sleep 0.1; done`],
       poll,
     )
     while (!asleep(first)) await Bun.sleep(50)
@@ -232,17 +243,10 @@ describe("a waiter behind the head", () => {
     while (!/^run-slot\.sh: worker-p holds run-slot$/m.test(first.err)) await Bun.sleep(50)
     // the older waiter looks at the first run's take before its end
     const seen = older.err.length
-    while (
-      !/^\++\d+ look_mark$/m.test(older.err.slice(seen)) ||
-      !asleep({ ...older, err: older.err.slice(seen) })
-    )
-      await Bun.sleep(50)
+    while (!lookedSince(older, seen)) await Bun.sleep(50)
+    const from = second.err.length
     writeFileSync(gate, "")
     await first.p.exited
-    // the older waiter's look at the end names the pick's second in run-slot.next, so the second's polls count from that look's end (issue 1612)
-    const ended = older.err.length
-    while (!lookedSince(older, ended) && !existsSync(second.marker)) await Bun.sleep(50)
-    const from = second.err.length
     const sleeps = () => second.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0
     while (!existsSync(second.marker) && sleeps() < 10) await Bun.sleep(50)
     expect(sleeps()).toBeLessThanOrEqual(3)
