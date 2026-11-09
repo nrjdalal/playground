@@ -124,6 +124,29 @@ export const groups: Group[] = [
       ],
     ],
   },
+  // a proven bun x --cwd holds only first on the line, past a cd alone, since an earlier command could swap its folder for a link before bun x runs
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: ({ MAIN }) => [
+      [
+        "turbo through bunx past a swap of its folder for a link into the main checkout",
+        `mv ${MAIN}/.claude/worktrees/a/api ${MAIN}/.claude/worktrees/a/api.old; ln -s ${MAIN}/api ${MAIN}/.claude/worktrees/a/api; ~/.playground/ops/run-slot.sh r -- bunx --cwd=${MAIN}/.claude/worktrees/a/api turbo run build`,
+      ],
+      [
+        "turbo through bun x past a chained swap of its folder for a link to the main checkout",
+        `mv ${MAIN}/.claude/worktrees/a/api ${MAIN}/.claude/worktrees/a/old && ln -s ${MAIN} ${MAIN}/.claude/worktrees/a/api && ~/.playground/ops/run-slot.sh r -- bun x --cwd=${MAIN}/.claude/worktrees/a/api turbo run build`,
+      ],
+      [
+        "turbo through bunx second on the line",
+        `mkdir -p ${MAIN}/.claude/worktrees/a/x && bunx --cwd=${MAIN}/.claude/worktrees/a turbo run build`,
+      ],
+      [
+        "lefthook through bunx second on the line",
+        `touch ${MAIN}/.claude/worktrees/a/x; bunx --cwd=${MAIN}/.claude/worktrees/a lefthook run pre-commit`,
+      ],
+    ],
+  },
   // a run whose bun x --cwd the hook cannot prove counts as heavy wherever it lands, a worktree included
   {
     folders: ["checkout"],
