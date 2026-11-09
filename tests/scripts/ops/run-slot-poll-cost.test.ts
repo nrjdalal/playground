@@ -284,4 +284,12 @@ describe("a waiter's waited count is the real seconds since its wait began", () 
     expect(script.match(/WAIT_FROM=\$SECONDS/g) ?? []).toHaveLength(4)
     expect(script.match(/waited=\$\(\(SECONDS - WAIT_FROM\)\)/g) ?? []).toHaveLength(5)
   })
+
+  // a sampled clock count steps over an exact multiple, so each wait line prints by a threshold it raises past the mark, not by the modulo
+  test("each wait line prints by a threshold, and no modulo or first-line flag holds the five-minute marks", () => {
+    expect(script.match(/-ge "\$(FAT|QAT|UAT|BAT|SAT|MAT|DAT|CAT)"/g) ?? []).toHaveLength(8)
+    expect(script.match(/AT=\$\(\(\(waited \/ 300 \+ 1\) \* 300\)\)/g) ?? []).toHaveLength(8)
+    expect(script.match(/% 300/g) ?? []).toEqual([])
+    expect(script.match(/(?:F|M|D|C|Q)SAID=/g) ?? []).toEqual([])
+  })
 })

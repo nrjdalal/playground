@@ -37,7 +37,8 @@ switch_on() {
   local f="$OPS/$1" line ends now m
   [ -e "$f" ] || return 1
   line=$(head -n 1 "$f" 2>/dev/null)
-  ends=$(switch_ends "$1")
+  switch_ends "$1"
+  ends=$ENDS
   now=$(date -u +%FT%TZ)
   if [ -n "$ends" ]; then
     [[ "$now" < "$ends" ]] && return 0
@@ -50,8 +51,17 @@ switch_on() {
   mv "$f" "$f.expired-$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null && echo "$now expire ${WHO:-run-slot} $$ $1 $line" >> "$OPS/run-slot.runs.log"
   return 1
 }
-# the expiry a switch line carries, switch_on's own read, so due_at reads the same line rather than a second parse of it
-switch_ends() { head -n 1 "$OPS/$1" 2>/dev/null | grep -E '^[^ ]+ [0-9-]{10}T[0-9:]{8}Z [0-9-]{10}T[0-9:]{8}Z ' | cut -d' ' -f3; }
+# the expiry a switch line carries, read with builtins into ENDS, so switch_on and due_at parse one line with no process (issue 1378's fork bound)
+switch_ends() {
+  local line re='^[^ ]+ [0-9-]{10}T[0-9:]{8}Z [0-9-]{10}T[0-9:]{8}Z '
+  ENDS=
+  read -r line 2>/dev/null < "$OPS/$1" || return 0
+  [[ "$line" =~ $re ]] || return 0
+  line=${line#* }
+  line=${line#* }
+  ENDS=${line%% *}
+  return 0
+}
 # whether pid $1 runs: kill -0 reaches it, or the kernel refuses the signal (another user's process, or one outside Claude Code's sandbox, which also refuses the setuid ps) rather than finding no such process
 alive() {
   local err
@@ -1462,7 +1472,7 @@ cheap_sig() {
     SIG="$SIG|$f"
     p=
     case "$f" in
-      */run-slot.load5-cap) l=; while read -r w; do l=$w; done 2>/dev/null < "$f"; SIG="$SIG=$l" ;;
+      */run-slot.load5-cap) l=; while read -r w || [ -n "$w" ]; do l=$w; done 2>/dev/null < "$f"; SIG="$SIG=$l" ;;
       *.holder | */run-slot.priority | */run-slot.focus) l=; read -r l 2>/dev/null < "$f"; SIG="$SIG=$l"; [ "${f%.holder}" = "$f" ] || { p=${l#* }; p=${p%% *}; } ;;
       "$QUEUE"/*) p=${f##*/}; p=${p#*-}; p=${p%%-*} ;;
     esac
@@ -1501,7 +1511,8 @@ due_at() {
   [ "$e" -gt "$now" ] && { [ -z "$d" ] || [ "$e" -lt "$d" ]; } && d=$e
   for f in $SWITCHES; do
     [ -e "$OPS/$f" ] || continue
-    ends=$(switch_ends "$f")
+    switch_ends "$f"
+    ends=$ENDS
     if [ -n "$ends" ]; then
       e=$(date -u -j -f %Y-%m-%dT%H:%M:%SZ "$ends" +%s 2>/dev/null || date -u -d "$ends" +%s 2>/dev/null) || continue
     else
@@ -1593,10 +1604,10 @@ focus_holds() {
 }
 focus_wait() {
   waited=$((SECONDS - WAIT_FROM))
-  # the first wait says itself, since the wait's start sits behind the run's setup and the clock's waited count begins past 0
-  if [ $((waited % 300)) -eq 0 ] || [ -z "$FSAID" ]; then
+  # each wait line prints at its first poll, its threshold 0, and again each time the clock's waited count crosses the next 300 s mark, whatever the poll slept
+  if [ "$waited" -ge "$FAT" ]; then
     echo "run-slot.sh: waiting for $(focus_holder)'s focus to end (run-slot.focus, until $(cut -d' ' -f3 "$OPS/run-slot.focus" 2>/dev/null))" >&2
-    FSAID=1
+    FAT=$(((waited / 300 + 1) * 300))
   fi
   sleep "$POLL"
 }
@@ -2076,7 +2087,7 @@ model_cap() {
 }
 if [ -n "$MODEL_BOUND" ]; then
   CAP=$(model_cap)
-  WAIT_FROM=$SECONDS MSAID=
+  WAIT_FROM=$SECONDS MAT=0
   while :; do
     for n in $(seq 1 "$CAP"); do
       mkdir "$OPS/run-slot-model-$n" 2>/dev/null && { SLOT="$OPS/run-slot-model-$n"; break 2; }
@@ -2084,10 +2095,9 @@ if [ -n "$MODEL_BOUND" ]; then
     done
     reread
     waited=$((SECONDS - WAIT_FROM))
-    # the first wait says itself, since the loop's first pass takes a second and the clock's waited count begins past 0
-    if [ $((waited % 300)) -eq 0 ] || [ -z "$MSAID" ]; then
+    if [ "$waited" -ge "$MAT" ]; then
       echo "run-slot.sh: waiting for one of the $CAP model-bound slots" >&2
-      MSAID=1
+      MAT=$(((waited / 300 + 1) * 300))
     fi
     sleep "$POLL"
   done
@@ -2099,15 +2109,14 @@ fi
 # One docker build at a time on the machine, since each fills the Docker VM the live dashboard's Postgres shares (6 Nov 00:38Z: a parallel compose build got it killed): run-slot-docker is taken before the ticket, so a waiting build holds no place in the queue, and reclaimed only once its holder's pid has gone
 if [ -n "$DOCKER" ]; then
   [ -n "$TICKET" ] && rm -f "$TICKET" && TICKET=""
-  WAIT_FROM=$SECONDS DSAID=
+  WAIT_FROM=$SECONDS DAT=0
   until mkdir "$OPS/run-slot-docker" 2>/dev/null; do
     reclaim "$OPS/run-slot-docker"
     reread
     waited=$((SECONDS - WAIT_FROM))
-    # the first wait says itself, since the loop's first pass takes a second and the clock's waited count begins past 0
-    if [ $((waited % 300)) -eq 0 ] || [ -z "$DSAID" ]; then
+    if [ "$waited" -ge "$DAT" ]; then
       echo "run-slot.sh: waiting for run-slot-docker, one docker build at a time ($(cat "$OPS/run-slot-docker.holder" 2>/dev/null))" >&2
-      DSAID=1
+      DAT=$(((waited / 300 + 1) * 300))
     fi
     sleep "$CLONE_POLL"
   done
@@ -2124,7 +2133,7 @@ if [ "$KIND" = quick ] && [ "$WHO" = ops-merge-train ]; then
 fi
 if [ -n "$KIND" ]; then
   [ -n "$TICKET" ] && rm -f "$TICKET" && TICKET=""
-  WAIT_FROM=$SECONDS FSAID=
+  WAIT_FROM=$SECONDS CAT=0
   # run-slot.clone-off holds every clone while it exists (dispatcher, 18 Oct, with run-slot.3-off)
   # run-slot.clone-allow holds, one a line, grep patterns for the clones a lead lets through while clone-off stands (builder, 18 Oct: priority clones in order; every checker by default, finish-first)
   # clone-off lets a clone through while load1 and load5 are under 30 and memory passes spawn.sh's gate, pressure level 1 or 2 with 8% or more free (dispatcher, 19 Oct 01:18Z;
@@ -2244,7 +2253,6 @@ if [ -n "$KIND" ]; then
   : > "$REF" 2>/dev/null
   GOT=
   polls=0
-  CSAID=
   while :; do
     spaced=
     waited=$((SECONDS - WAIT_FROM))
@@ -2263,10 +2271,9 @@ if [ -n "$KIND" ]; then
     # the full reread, a stat, every 12th poll, about a minute; a newer mtime than the last tick's is read at the top of the poll, before a tick moves it
     [ $((polls % 12)) -eq 0 ] && reread
     polls=$((polls + 1))
-    # the first wait says itself, since the clone queue's setup takes a second and the clock's waited count starts past 0
-    if [ $((waited % 300)) -eq 0 ] || [ -z "$CSAID" ]; then
+    if [ "$waited" -ge "$CAT" ]; then
       if [ -n "$spaced" ]; then echo "run-slot.sh: this clone waits $spaced" >&2; else echo "run-slot.sh: waiting for the $KIND slot ($(cat "$OPS/run-slot-$KIND.holder" 2>/dev/null))" >&2; fi
-      CSAID=1
+      CAT=$(((waited / 300 + 1) * 300))
     fi
     sleep "$CLONE_POLL"
   done
@@ -2321,7 +2328,7 @@ if [ -n "$CAN_TAKE" ]; then
   exit
 fi
 
-WAIT_FROM=$SECONDS FSAID= QSAID=
+WAIT_FROM=$SECONDS FAT=0 QAT=0 UAT=0 BAT=0 SAT=0
 # a waiter that is not at the head and has waited past the backlog line polls at twice POLL (issue 1338)
 case "$POLL" in *[!0-9]*) SLOW_POLL=$POLL ;; *) SLOW_POLL=$((2 * POLL)) ;; esac
 nap() { if [ "$LOOKER" = 0 ] && [ "$waited" -ge "$BACKLOG_WAIT" ]; then sleep "$SLOW_POLL"; else sleep "$POLL"; fi; }
@@ -2358,10 +2365,10 @@ while :; do
   LOOKER=0
   { [ -z "$TICKET" ] || [ "$HEAD" = 1 ] || [ "$S2" = 1 ] || oldest_is_me; } && LOOKER=1
   if [ "$HEAD" = 0 ] && [ "$S2" = 0 ]; then
-    if [ $((waited % 300)) -eq 0 ] || [ -z "$QSAID" ]; then
+    if [ "$waited" -ge "$QAT" ]; then
       pos=$(ordered_waiters | cut -d' ' -f2 | grep -nxF "${TICKET##*/}" | cut -d: -f1)
       echo "run-slot.sh: queued behind $(( ${pos:-1} - 1 )) waiter(s) ahead of it in the queue's order" >&2
-      QSAID=1
+      QAT=$(((waited / 300 + 1) * 300))
     fi
     nap
     continue
@@ -2375,13 +2382,13 @@ while :; do
   c=$(capacity)
   if ! unit_fits "$CLASS$UNITS" "$UNITS" "$SIZE" "$WHO" "$c"; then
     m=$(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")")
-    if [ $((waited % 300)) -eq 0 ] || [ -z "$QSAID" ]; then echo "run-slot.sh: waiting for $UNITS free load units ($SIZE; $(held_for "$m") of $c held)" >&2; QSAID=1; fi
+    if [ "$waited" -ge "$UAT" ]; then echo "run-slot.sh: waiting for $UNITS free load units ($SIZE; $(held_for "$m") of $c held)" >&2; UAT=$(((waited / 300 + 1) * 300)); fi
     sleep "$POLL"
     continue
   fi
   if added=$(burst_held); then
     BURST=1
-    if [ $((waited % 300)) -eq 0 ] || [ -z "$QSAID" ]; then echo "run-slot.sh: waiting for the load to show the $added run(s) the last minute added" >&2; QSAID=1; fi
+    if [ "$waited" -ge "$BAT" ]; then echo "run-slot.sh: waiting for the load to show the $added run(s) the last minute added" >&2; BAT=$(((waited / 300 + 1) * 300)); fi
     sleep "$POLL"
     continue
   fi
@@ -2404,9 +2411,9 @@ while :; do
     fi
     reclaim "$OPS/$s"
   done
-  if [ $((waited % 300)) -eq 0 ] || [ -z "$QSAID" ]; then
+  if [ "$waited" -ge "$SAT" ]; then
     echo "run-slot.sh: waiting for a run slot ($(cat "$OPS/run-slot.holder" 2>/dev/null))" >&2
-    QSAID=1
+    SAT=$(((waited / 300 + 1) * 300))
   fi
   sleep "$POLL"
 done
