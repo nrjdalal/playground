@@ -38,6 +38,7 @@ the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus 
 less a quarter (`gates.smallReserve`) kept for small items unless the start is small (`--size small|medium|big`, else small for a reviewer or tester, else the roster's or plan.json's size, else medium; [rules/slots.md](../../rules/slots.md)), while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the checkers,
 refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores, and the refusal names the load, the starts and the line;
 a `--priority` start passes it while `priority.json`, an org's own `priority-<name>.json` or a job's own `priority-start.json` stands in the data folder, since priority work comes first,
+or a session's own window, which `playground priority on <session> --reason "<why>"` opens and `off` lifts, the one way to open one, and a lead's only on the owner's or the dispatcher's word ([scripts/README.md](../../../../scripts/README.md#spawnsh)),
 and so does a resume within 15 minutes of `spawn.sh close` ending a row that read live, since that session already counts in the load it comes back into;
 memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`),
 and for a fresh worker start alone swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), refusing when vm_stat gives no reading, since free memory counts compressible pages and read 62% on 7 Nov while 150 pages swapped in a second; every other start keeps its pass, as at the slots gate;
