@@ -7209,7 +7209,9 @@ function bunDir(name, args, env) {
 function turboWords(name, args, env) {
   if (name === "turbo")
     return args;
-  if (RUNNERS.has(name) || name === "bunx") {
+  if (name === "bunx")
+    return turboWords("bun", [X, ...args], env);
+  if (RUNNERS.has(name)) {
     const at = runnerTarget(args);
     return isTurbo(args[at]?.value) ? args.slice(at + 1) : undefined;
   }

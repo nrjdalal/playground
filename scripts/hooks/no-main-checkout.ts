@@ -312,7 +312,8 @@ export function bunDir(name: string, args: Word[], env: Env): string | undefined
 // turbo's own words, however it is called: by name or path, through npx, or through bun (runs reads bunx as bun x).
 export function turboWords(name: string, args: Word[], env: Env): Word[] | undefined {
   if (name === "turbo") return args
-  if (RUNNERS.has(name) || name === "bunx") {
+  if (name === "bunx") return turboWords("bun", [X, ...args], env)
+  if (RUNNERS.has(name)) {
     const at = runnerTarget(args)
     return isTurbo(args[at]?.value) ? args.slice(at + 1) : undefined
   }

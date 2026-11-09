@@ -58,7 +58,20 @@ export const groups: Group[] = [
   {
     folders: ["main checkout"],
     guards: ["no-unslotted-run"],
-    rows: () => [
+    rows: ({ MAIN }) => [
+      [
+        "turbo through bunx into a worktree by a spaced --cwd",
+        "bunx --cwd .claude/worktrees/a turbo run build",
+      ],
+      [
+        "turbo through bunx into a worktree by a spaced absolute --cwd",
+        `bunx --cwd ${MAIN}/.claude/worktrees/a turbo run build`,
+      ],
+      [
+        "turbo through bunx in a worktree by a spaced absolute --cwd",
+        `bunx --cwd ${MAIN}/.claude/worktrees/a turbo run build`,
+        "checkout",
+      ],
       ["turbo through bunx into a worktree", "bunx --cwd=.claude/worktrees/a turbo run build"],
       ["turbo through bun x into a worktree", "bun x --cwd=.claude/worktrees/a turbo run build"],
       [
