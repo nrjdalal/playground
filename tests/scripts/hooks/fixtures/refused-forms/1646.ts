@@ -15,9 +15,37 @@ export const groups: Group[] = [
         "the packages build through bunx by its --cwd, its settings left out",
         `bunx --cwd=${MAIN} turbo run build --filter='./packages/*'`,
       ],
+      ["turbo at a version through bunx by its --cwd", `bunx --cwd=${MAIN} turbo@latest run build`],
+      [
+        "turbo at a version through bun x by its --cwd",
+        `bun x --cwd=${MAIN} turbo@latest run build`,
+      ],
+      ["turbo at a version through bun x by bun's --cwd", `bun --cwd=${MAIN} x turbo@2 run build`],
     ],
   },
-  // bun reads each relative --cwd from the one before it, and a --cwd it cannot read leaves the line judged in the shell's folder
+  // bun run, bun test and a bare script read each --cwd from the shell's folder, the last one winning (bun 1.4.4, measured), so a later --cwd of . lands back in the main checkout
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      ["a build past a later --cwd of .", "bun --cwd=.claude/worktrees/a --cwd=. run build"],
+      ["a test run past a later --cwd of .", "bun --cwd=.claude/worktrees/a --cwd=. run test"],
+      [
+        "check-types past a later --cwd of .",
+        "bun --cwd=.claude/worktrees/a --cwd=. run check-types",
+      ],
+      ["bun test past a later --cwd of .", "bun --cwd=.claude/worktrees/a --cwd=. test"],
+    ],
+  },
+  // the same last-one-wins reading from a worktree keeps a build there a heavy run
+  {
+    folders: ["checkout"],
+    guards: ["no-unslotted-run"],
+    rows: () => [
+      ["a build past a later --cwd into the worktree", "bun --cwd=../../.. --cwd=api run build"],
+    ],
+  },
+  // bun x and bunx read each relative --cwd from the one before it, and a --cwd it cannot read leaves the line judged in the shell's folder
   {
     folders: ["main checkout"],
     guards: ["no-main-checkout"],

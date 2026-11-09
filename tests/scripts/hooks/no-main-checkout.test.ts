@@ -614,6 +614,8 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     ["lefthook", "lefthook run pre-commit"],
     ["a redirect", "echo x > f"],
     ["a cd within it", "cd api/hono && bun test"],
+    // bun run reads each --cwd from the shell's folder, the last one winning, so this builds in the worktree's api folder
+    ["a build past a later --cwd back into it", "bun --cwd=../../.. --cwd=api run build"],
   ])("in a worktree, %s", async (_name, command) => {
     expect(await bash(command, WORKTREE)).toBeUndefined()
   })
