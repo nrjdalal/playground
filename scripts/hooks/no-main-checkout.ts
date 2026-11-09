@@ -173,16 +173,14 @@ export function bunCall(
   args: Word[],
   env: Env,
 ): { at: number; cwd: string | undefined; filtered: boolean; words: string[] } {
-  let cwd = env.cwd
+  const dirs: (Word | undefined)[] = []
   let filtered = false
   const words: string[] = []
   let k = 0
   for (; k < args.length; k++) {
     const v = args[k].value
-    // bun reads a relative --cwd from the one before it
-    if (v === "--cwd") cwd = args[k + 1] && pathOf(args[++k], { ...env, cwd })
-    else if (v.startsWith("--cwd="))
-      cwd = pathOf({ ...args[k], value: v.slice(6) }, { ...env, cwd })
+    if (v === "--cwd") dirs.push(args[k + 1] && args[++k])
+    else if (v.startsWith("--cwd=")) dirs.push({ ...args[k], value: v.slice(6) })
     else if (v === "--filter" || v === "-F") {
       filtered = true
       k++
@@ -192,6 +190,10 @@ export function bunCall(
       if (v !== "run" && v !== "x") break
     }
   }
+  // bun x reads each relative --cwd from the one before it; run, test, install and a bare script read each from the shell's folder, the last one winning (bun 1.4.4, measured)
+  let cwd = env.cwd
+  for (const dir of words[0] === "x" ? dirs : dirs.slice(-1))
+    cwd = dir && pathOf(dir, { ...env, cwd: words[0] === "x" ? cwd : env.cwd })
   return { at: k, cwd, filtered, words }
 }
 
@@ -309,7 +311,7 @@ export function bunDir(name: string, args: Word[], env: Env): string | undefined
   return bunCall(name === "bunx" ? [X, ...args] : args, env).cwd ?? env.cwd
 }
 
-// turbo's own words, however it is called: by name or path, through npx, or through bun (runs reads bunx as bun x).
+// turbo's own words, however it is called: by name or path, through npx, or through bun, bunx read as bun x.
 export function turboWords(name: string, args: Word[], env: Env): Word[] | undefined {
   if (name === "turbo") return args
   if (name === "bunx") return turboWords("bun", [X, ...args], env)
@@ -323,7 +325,7 @@ export function turboWords(name: string, args: Word[], env: Env): Word[] | undef
   return isTurbo(target) ? args.slice(at + 1) : undefined
 }
 
-// npx's and bunx's options whose next word is their value
+// npx's options whose next word is their value
 const RUNNER_TAKES = new Set(["--package", "-p"])
 
 // The word a package runner runs, past its options and their values (-y, --yes, -p turbo).
@@ -335,8 +337,8 @@ function runnerTarget(args: Word[]): number {
 }
 
 // turbo by name or path, or as a package at a version (turbo@latest)
-const isTurbo = (word: string | undefined) =>
-  program((word ?? "").replace(/(?<=.)@[^/]*$/, "")) === "turbo"
+const toolName = (word: string | undefined) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""))
+const isTurbo = (word: string | undefined) => toolName(word) === "turbo"
 
 // Whether the build's settings reach turbo: from its own assignments or env wrapper, an export before it, or the session's environment.
 function validationOff(local: Map<string, Text>, env: Env): boolean {
@@ -375,8 +377,8 @@ function runs(
   if (name !== "bun") return
   const { at, cwd, filtered, words } = bunCall(args, env)
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0]
-  // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name, bun x included, in the folder bun's own --cwd names (bun 1.4.4, measured); a tool reads its own --cwd too
-  if (TOOLS.has(program(target ?? ""))) {
+  // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name, at a version too, bun x included, in the folder bun's own --cwd names (bun 1.4.4, measured); a tool reads its own --cwd too
+  if (TOOLS.has(toolName(target))) {
     return {
       cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: cwd ?? env.cwd }),
       what: `bun ${words.join(" ")}`,

@@ -7450,16 +7450,16 @@ function cwdFlag(args, env) {
   return cwd;
 }
 function bunCall(args, env) {
-  let cwd = env.cwd;
+  const dirs = [];
   let filtered = false;
   const words = [];
   let k = 0;
   for (;k < args.length; k++) {
     const v = args[k].value;
     if (v === "--cwd")
-      cwd = args[k + 1] && pathOf(args[++k], { ...env, cwd });
+      dirs.push(args[k + 1] && args[++k]);
     else if (v.startsWith("--cwd="))
-      cwd = pathOf({ ...args[k], value: v.slice(6) }, { ...env, cwd });
+      dirs.push({ ...args[k], value: v.slice(6) });
     else if (v === "--filter" || v === "-F") {
       filtered = true;
       k++;
@@ -7471,6 +7471,9 @@ function bunCall(args, env) {
         break;
     }
   }
+  let cwd = env.cwd;
+  for (const dir of words[0] === "x" ? dirs : dirs.slice(-1))
+    cwd = dir && pathOf(dir, { ...env, cwd: words[0] === "x" ? cwd : env.cwd });
   return { at: k, cwd, filtered, words };
 }
 function gitCall(args, env) {
@@ -7596,7 +7599,8 @@ function runnerTarget(args) {
     k += RUNNER_TAKES.has(args[k].value) ? 2 : 1;
   return k;
 }
-var isTurbo = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, "")) === "turbo";
+var toolName = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""));
+var isTurbo = (word) => toolName(word) === "turbo";
 function validationOff(local, env) {
   const read = (key) => local.get(key)?.value ?? env.vars.get(key)?.value ?? env.process[key];
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true";
@@ -7631,7 +7635,7 @@ function runs(name, args, local, env) {
     return;
   const { at, cwd, filtered, words } = bunCall(args, env);
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0];
-  if (TOOLS.has(program(target ?? ""))) {
+  if (TOOLS.has(toolName(target))) {
     return {
       cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: cwd ?? env.cwd }),
       what: `bun ${words.join(" ")}`
