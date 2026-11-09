@@ -12,6 +12,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   and a `--priority` start while a priority file stands in the data folder: `priority.json`, an urgent window, or any `priority-<name>.json`, an org's own urgent window or a session's own window, each writer keeping its own file.
   A job's own `priority-start.json` passes the load and slots gates alone, never focus; with no priority file, a `--priority` start is refused, naming the command that opens one.
 - A session opens a priority window only with `playground priority on <session> --reason "<why>"`, which writes `priority-<session>.json` naming the session, who opened it, the reason and the time, and lifts it with `playground priority off <session> --reason "<why>"`; a window written by hand passes no review of who opened it or why.
+  spawn.sh reads no window's content, so while one stands every `--priority` start passes, not only the start of the session it names: lift it once that start is done.
   A lead opens one only on the owner's or the dispatcher's word, never on its own.
   Each `on`, `off` and lapse is a line in the data folder's `ops/priority.log`, and ops-tick's `priority-lapse` beat lifts a window still standing after `LAPSE_HOURS` (`packages/scripts/src/playground/priority.ts`), telling ops, so a forgotten window stops passing starts by itself.
   Tests: `bun run test:file tests/packages/scripts/src/playground/priority.test.ts`.

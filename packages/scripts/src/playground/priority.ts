@@ -1,5 +1,5 @@
 import { appendFile, mkdir, readdir, rename } from "node:fs/promises"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import { parseArgs } from "node:util"
 
 // playground priority: the one way to open a priority window, on the owner's or the dispatcher's word alone. While priority-<session>.json stands in the data folder, spawn.sh's --priority start passes the load and slots gates and focus (its priority*.json glob); off, or ops-tick's priority-lapse beat once LAPSE_HOURS pass, moves it aside as .lifted-<ts>, which the glob skips, and every on, off and lapse is a line in ops/priority.log.
@@ -13,6 +13,8 @@ export type PriorityDeps = { by: () => Promise<string>; data: string; now: () =>
 
 const SESSION = /^[a-z0-9]+(-[a-z0-9]+)*$/
 const FILE = /^priority-(.+)\.json$/
+// priority-start.json is a job's own start file, which passes no focus, so this command never writes, lifts or lapses it
+const JOB = "start"
 
 export const windowPath = (data: string, session: string) => join(data, `priority-${session}.json`)
 
@@ -26,7 +28,8 @@ const readWindow = async (path: string): Promise<Window | null | undefined> => {
     const w = (await file.json()) as Partial<Window>
     const ours =
       [w.by, w.reason, w.session, w.since].every((v) => typeof v === "string") &&
-      path.endsWith(`priority-${w.session}.json`)
+      w.session !== JOB &&
+      basename(path) === `priority-${w.session}.json`
     return ours ? (w as Window) : null
   } catch {
     return null
@@ -62,6 +65,8 @@ const parse = (verb: string, args: string[]): { reason: string; session: string 
     const reason = (values.reason ?? "").trim()
     if (positionals.length !== 1 || !SESSION.test(session))
       return `priority ${verb} takes one session's name`
+    if (session === JOB)
+      return `priority-${JOB}.json is a job's own start file, which passes no focus: that job writes and lifts it`
     if (!reason) return `priority ${verb} takes --reason "<why>"`
     return { reason, session }
   } catch (error) {

@@ -40,8 +40,12 @@ const machine = (now = NOW) => {
 
 const printed: string[] = []
 const said: string[] = []
-spyOn(console, "log").mockImplementation((line: string) => void printed.push(line))
-spyOn(console, "error").mockImplementation((line: string) => void said.push(line))
+const logSpy = spyOn(console, "log").mockImplementation((line: string) => void printed.push(line))
+const errorSpy = spyOn(console, "error").mockImplementation((line: string) => void said.push(line))
+afterAll(() => {
+  logSpy.mockRestore()
+  errorSpy.mockRestore()
+})
 beforeEach(() => {
   printed.length = 0
   said.length = 0
@@ -111,18 +115,40 @@ describe("files playground priority did not write", () => {
       others.map((name) => `{"by":"${name}"}\n`),
     )
 
+  const JOB_FILE = "priority-start.json is a job's own start file"
   test.each([
-    ["on", "start", "priority-start.json"],
-    ["on", "acme", "priority-acme.json"],
-    ["off", "start", "priority-start.json"],
-    ["off", "acme", "priority-acme.json"],
-  ])("%s %s refuses %s, naming its writer", async (verb, session, name) => {
+    ["on", "start", JOB_FILE],
+    ["on", "acme", "priority-acme.json stands and playground priority did not write it"],
+    ["off", "start", JOB_FILE],
+    ["off", "acme", "priority-acme.json stands and playground priority did not write it"],
+  ])("%s %s refuses, naming its writer", async (verb, session, refusal) => {
     const { data, deps, log } = machine()
     seed(data)
     expect(await runPriority([verb, session, "--reason", "why"], deps)).toBe(2)
-    expect(said.at(-1)).toContain(`${name} stands and playground priority did not write it`)
+    expect(said.at(-1)).toContain(refusal)
     untouched(data)
     expect(log()).toBe("")
+  })
+
+  test.each(["on", "off"])(
+    "%s start refuses with no priority-start.json standing, writing nothing, since that name is a job's",
+    async (verb) => {
+      const { data, deps, log } = machine()
+      expect(await runPriority([verb, "start", "--reason", "why"], deps)).toBe(2)
+      expect(said.at(-1)).toContain(JOB_FILE)
+      expect(readdirSync(data)).toEqual([])
+      expect(log()).toBe("")
+    },
+  )
+
+  test("a job's priority-start.json shaped like this command's record, and a file whose name only ends in a window's, stay their writers'", async () => {
+    const { data } = machine()
+    const record = (session: string) =>
+      JSON.stringify({ by: "a job", reason: "r", session, since: NOW.toISOString() })
+    writeFileSync(join(data, "priority-start.json"), record("start"))
+    writeFileSync(join(data, "priority-priority-x.json"), record("x"))
+    expect(await lapse(data, new Date(NOW.getTime() + 100 * HOUR))).toEqual([])
+    expect(readdirSync(data).sort()).toEqual(["priority-priority-x.json", "priority-start.json"])
   })
 
   test("priority.json, which no session's name reaches, stands through every on, off and lapse", async () => {
