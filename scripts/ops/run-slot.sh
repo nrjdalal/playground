@@ -584,8 +584,8 @@ try:
             sys.exit(1)
     lines, buf, quoted = [], None, ""
 
-    # one scanner walks each line with the quote state the lines before it left open and cuts the line at its trailing comment (a word-start # outside quotes), so a quote in one comment pairs with none in a later line's, a continued line's and a spanning quote's own comments included, and a # inside quotes stays the text it is
-    def scan(line, quoted):
+    # cut each line at its trailing comment (an unquoted word-start #), carrying the quote state across lines
+    def scan(line, quoted, prev):
         esc = False
         for i, c in enumerate(line):
             if esc:
@@ -596,12 +596,15 @@ try:
                 quoted = ""
             elif not quoted and c in "'\"":
                 quoted = c
-            elif not quoted and c == "#" and (i == 0 or line[i - 1] in " \t;&|()"):
+            elif not quoted and c == "#" and (
+                line[i - 1] in " \t;&|()" if i else (not prev or prev in " \t;&|()")
+            ):
                 return line[:i], quoted
         return line, quoted
 
     for line in text.split("\n"):
-        line, quoted = scan(line, quoted)
+        # prev is the character the join puts before this line's first, since bash joins x\ and #b into x#b, whose # starts no word
+        line, quoted = scan(line, quoted, buf[-1] if buf else "")
         if buf is None and line.strip() == "":
             continue
         buf = line if buf is None else buf + line
