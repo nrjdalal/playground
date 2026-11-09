@@ -18,9 +18,9 @@ setDefaultTimeout(60_000)
 
 type Machine = ReturnType<typeof machine>
 const SPACED = /^run-slot\.sh: this clone waits /gm
-const cloning = (m: Machine, who: string, script = SCRIPT, extra: Record<string, string> = {}) => {
+const cloning = (m: Machine, who: string, script = SCRIPT) => {
   mkdirSync(join(m.root, "node_modules"), { recursive: true })
-  return m.start(who, extra, script, ["cp", "-R", "node_modules"])
+  return m.start(who, {}, script, ["cp", "-R", "node_modules"])
 }
 // whether the clone waited (printed its spacing line and had not run when stopped) or ran
 const clone = async (m: Machine, who: string) => {
@@ -76,11 +76,12 @@ describe("the clone lane", () => {
   test("starts the older of two waiting clones first", async () => {
     const m = machine()
     m.hold("run-slot-clone", 1, "small")
-    // the older polls at 30 s, so the newer one asks while the lane is free and the older sleeps, the race the ship run's failure ran
-    const older = cloning(m, "worker-older", SCRIPT, { RUN_SLOT_POLL: "30" })
+    const older = cloning(m, "worker-older")
     expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
-    m.release("run-slot-clone")
     const newer = cloning(m, "worker-newer")
+    // the lane names the older at the newer's first look, so the order is decided while both waiters are listed, before the lane frees
+    expect(await newer.saw(/^run-slot\.sh: this clone waits behind worker-older/gm)).toBe(true)
+    m.release("run-slot-clone")
     while (started(m).length === 0) await Bun.sleep(50)
     await Promise.all([stop(older.p), stop(newer.p)])
     expect(started(m)[0]).toBe("worker-older")
