@@ -10,7 +10,7 @@ import {
 import { join } from "node:path"
 
 import { clonesOf } from "../../../packages/scripts/src/playground/rm"
-import { SCRIPT, machine } from "./run-slot-fake"
+import { SCRIPT, machine, runSlot } from "./run-slot-fake"
 
 setDefaultTimeout(60_000)
 
@@ -34,10 +34,11 @@ const clone = async (args: (root: string) => string[]) => {
   ])
     mkdirSync(join(from, dir), { recursive: true })
   writeFileSync(join(from, "web", "w", "node_modules", ".bin", "tool"), "")
-  const p = Bun.spawn(["bash", SCRIPT, "worker-c", "--", ...args(m.root)], {
+  const p = runSlot(["bash", SCRIPT, "worker-c", "--", ...args(m.root)], {
     cwd: m.root,
     env: m.env(),
     stderr: "ignore",
+    ops: m.ops,
   })
   return { code: await p.exited, from, to }
 }
@@ -114,10 +115,11 @@ describe("a node_modules clone's holder line", () => {
     const cp = join(m.bin, "cp")
     writeFileSync(cp, `#!/bin/bash\ncat "${join(m.ops, "run-slot-clone.holder")}" > "${seen}"\n`)
     chmodSync(cp, 0o755)
-    const p = Bun.spawn(["bash", SCRIPT, "worker-c", "--", cp, "-cR", ...args(root)], {
+    const p = runSlot(["bash", SCRIPT, "worker-c", "--", cp, "-cR", ...args(root)], {
       cwd: root,
       env: m.env(),
       stderr: "ignore",
+      ops: m.ops,
     })
     expect(await p.exited).toBe(0)
     return { line: readFileSync(seen, "utf8"), root }

@@ -2,16 +2,15 @@ import { expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 
-import * as fake from "./run-slot-fake"
-
-const { SCRIPT, machine, stop } = fake
+import { SCRIPT, endChildren, machine, stop } from "./run-slot-fake"
 
 // this file's case is the hang itself, so its budget is its own
 setDefaultTimeout(60_000)
 
-const alive = (pid: number) => {
+// whether the process group still holds a member, by its leader's pid; a plain pid reads as alive once the pid has passed to another process, which a loaded runner does within the second
+const groupAlive = (pid: number) => {
   try {
-    process.kill(pid, 0)
+    process.kill(-pid, 0)
     return true
   } catch {
     return false
@@ -34,6 +33,9 @@ const childPids = (m: Machine) =>
         .filter((f) => f.endsWith(".child"))
         .map((f) => Number(readFileSync(join(m.ops, f), "utf8").trim()))
     : []
+// whether the child ended, by its own exit rather than a pid look, and whether every group it left is empty
+const ended = async (run: { p: { exited: Promise<number> } }) =>
+  await Promise.race([run.p.exited.then(() => true), Bun.sleep(1_000).then(() => false)])
 
 // 7 Nov 00:38Z, issue 1316: five run-slot.sh processes from these fixtures outlived their tests, each with ppid 1. A gated fixture whose gate never appears is stopped by nothing, so the file's cleanup has to end it and its command
 test("a gated fixture whose gate never appears leaves no run-slot child after the file's cleanup", async () => {
@@ -42,18 +44,21 @@ test("a gated fixture whose gate never appears leaves no run-slot child after th
   const run = m.start("worker-a", {}, SCRIPT, [
     "bash",
     "-c",
-    `until [ -e "${gate}" ]; do sleep 0.1; done`,
+    `touch "$0"; until [ -e "${gate}" ]; do sleep 0.1; done`,
   ])
   try {
     await until(() => logged(m, "start", run.p.pid))
+    await until(() => existsSync(run.marker))
     const command = childPids(m)
     expect(command.length).toBeGreaterThan(0)
-    // what the file's afterAll runs when a test times out; canary has none yet, so the run and its command are left behind
-    const end = (fake as { endChildren?: () => Promise<void> | void }).endChildren
-    await end?.()
-    expect(alive(run.p.pid), `run-slot child ${run.p.pid} of this fixture still runs`).toBe(false)
+    // what the file's afterAll runs when a test times out
+    await endChildren()
+    expect(await ended(run), `run-slot child ${run.p.pid} of this fixture still runs`).toBe(true)
+    expect(groupAlive(run.p.pid), `run-slot child ${run.p.pid}'s group still holds a member`).toBe(
+      false,
+    )
     for (const pid of command)
-      expect(alive(pid), `the fixture's command ${pid} still runs`).toBe(false)
+      expect(groupAlive(pid), `the fixture's command ${pid} still runs`).toBe(false)
   } finally {
     await stop(run.p)
   }
@@ -65,17 +70,20 @@ test("a fixture's loop that traps TERM ends with its test", async () => {
   const run = m.start("worker-x", {}, SCRIPT, [
     "bash",
     "-c",
-    'trap "" TERM; while :; do sleep 0.2; done',
+    'touch "$0"; trap "" TERM; while :; do sleep 0.2; done',
   ])
   try {
     await until(() => logged(m, "start", run.p.pid))
+    await until(() => existsSync(run.marker))
     const command = childPids(m)
     expect(command.length).toBeGreaterThan(0)
-    const end = (fake as { endChildren?: () => Promise<void> | void }).endChildren
-    await end?.()
-    expect(alive(run.p.pid), `run-slot child ${run.p.pid} of this fixture still runs`).toBe(false)
+    await endChildren()
+    expect(await ended(run), `run-slot child ${run.p.pid} of this fixture still runs`).toBe(true)
+    expect(groupAlive(run.p.pid), `run-slot child ${run.p.pid}'s group still holds a member`).toBe(
+      false,
+    )
     for (const pid of command)
-      expect(alive(pid), `the fixture's loop ${pid} still runs`).toBe(false)
+      expect(groupAlive(pid), `the fixture's loop ${pid} still runs`).toBe(false)
   } finally {
     await stop(run.p)
   }

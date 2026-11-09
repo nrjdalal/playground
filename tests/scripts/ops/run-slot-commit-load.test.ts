@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, machine, stop } from "./run-slot-fake"
+import { SCRIPT, machine, runSlot, stop } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -120,10 +120,11 @@ describe("a commit-lane start", () => {
       chmodSync(join(dir, name), 0o755)
     }
     const marker = join(m.root, "ran-worker-c")
-    const p = Bun.spawn(["bash", SCRIPT, "worker-c", "--", "git", "merge", "--no-edit", marker], {
+    const p = runSlot(["bash", SCRIPT, "worker-c", "--", "git", "merge", "--no-edit", marker], {
       cwd: m.root,
       env: m.env({ PATH: `${dir}:${rest}`, RUN_SLOT_POLL: "0.5" }),
       stderr: "pipe",
+      ops: m.ops,
     })
     let err = ""
     void (async () => {
