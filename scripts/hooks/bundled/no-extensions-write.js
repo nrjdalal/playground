@@ -7410,8 +7410,9 @@ function bunCall(args, env) {
   }
   const last = dirs.at(-1);
   const cwd = dirs.length === 0 ? env.cwd : last && pathOf(last, env);
-  const lost = words[0] === "x" && dirs.length > 0 && !provenDir(dirs, env);
-  return { at: k, cwd, filtered, lost, words };
+  const proven = words[0] === "x" && dirs.length > 0 && provenDir(dirs, env);
+  const lost = words[0] === "x" && dirs.length > 0 && !proven;
+  return { at: k, cwd, filtered, lost, proven, words };
 }
 function provenDir(dirs, env) {
   const [dir] = dirs;

@@ -7416,7 +7416,7 @@ var FILE_TOOLS = {
 var INSTEAD = "the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under .claude/worktrees/ (git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.";
 var refuse = (what, fix = INSTEAD) => `no-main-checkout hook refuses ${what}: ${fix}`;
 var UNKNOWN_FIX = "the hook cannot tell which folder it runs in, since a cd before it may not run, may run many times, or names a path it cannot read, so it reads every folder the shell may be in. Name the folder instead: git -C <your worktree>, bun --cwd <your worktree>, or cd by a literal path.";
-var BUNX_FIX = "bun x and bunx read one --cwd alone, with no .. and no link in it: an absolute path inside your worktree, or a relative one typed from inside it. Name your worktree that way, or cd to it first.";
+var BUNX_FIX = "bun x and bunx read one --cwd alone, with no .. and no link in it, on the line's first command or past a cd alone: an absolute path inside your worktree, or a relative one typed from inside it. Name your worktree that way, as a line of its own, or cd to it first.";
 var ANYWHERE_FIX = "the line names more folders than the hook carries, so it cannot rule out the main checkout. Name the folder on the command instead: git -C <your worktree>, bun --cwd <your worktree>, or run it as a line of its own after a cd to a literal path.";
 var fixFor2 = (sure, own = INSTEAD) => sure ? own : UNKNOWN_FIX;
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
@@ -7476,8 +7476,9 @@ function bunCall(args, env) {
   }
   const last = dirs.at(-1);
   const cwd = dirs.length === 0 ? env.cwd : last && pathOf(last, env);
-  const lost = words[0] === "x" && dirs.length > 0 && !provenDir(dirs, env);
-  return { at: k, cwd, filtered, lost, words };
+  const proven = words[0] === "x" && dirs.length > 0 && provenDir(dirs, env);
+  const lost = words[0] === "x" && dirs.length > 0 && !proven;
+  return { at: k, cwd, filtered, lost, proven, words };
 }
 function provenDir(dirs, env) {
   const [dir] = dirs;
@@ -7626,16 +7627,15 @@ function gitMoves(sub, rest) {
     return rest.some((w) => w === "--force" || /^-[a-zA-Z]*f/.test(w));
   return false;
 }
-function bunDir(name, args, env) {
+function bunFolder(name, args, env) {
   if (name !== "bun" && name !== "bunx")
-    return env.cwd;
-  const call = bunCall(name === "bunx" ? [X, ...args] : args, env);
-  return call.lost ? undefined : call.cwd ?? env.cwd;
+    return { dir: env.cwd, lost: false, proven: false };
+  const { cwd, lost, proven } = bunCall(name === "bunx" ? [X, ...args] : args, env);
+  return { dir: lost ? undefined : cwd ?? env.cwd, lost, proven };
 }
-function bunLost(name, args, env) {
-  if (name !== "bun" && name !== "bunx")
-    return false;
-  return bunCall(name === "bunx" ? [X, ...args] : args, env).lost;
+function firstOnLine(line, top) {
+  const at = top === undefined ? -1 : line.indexOf(top);
+  return at >= 0 && line.slice(0, at).every((earlier) => parse3(earlier).name === "cd");
 }
 function turboWords(name, args, env) {
   if (name === "turbo")
@@ -7672,11 +7672,13 @@ function runs(name, args, local, env) {
   if (turbo && packagesBuild(turbo)) {
     if (validationOff(local, env))
       return;
-    const cwd = cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) });
+    const bun = bunFolder(name, args, env);
+    const cwd = cwdFlag(turbo, { ...env, cwd: bun.dir });
     return {
       cwd,
       fix: BUILD_FIX,
-      lost: cwd === undefined && bunLost(name, args, env),
+      lost: cwd === undefined && bun.lost,
+      proven: bun.proven,
       what: "the packages build without NODE_ENV and SKIP_ENV_VALIDATION=true"
     };
   }
@@ -7695,11 +7697,11 @@ function runs(name, args, local, env) {
   }
   if (name !== "bun")
     return;
-  const { at, cwd, filtered, lost, words } = bunCall(args, env);
+  const { at, cwd, filtered, lost, proven, words } = bunCall(args, env);
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0];
   if (TOOLS.has(toolName(target))) {
     const dir = cwdFlag(args.slice(at + 1), { ...env, cwd: lost ? undefined : cwd ?? env.cwd });
-    return { cwd: dir, lost: lost && dir === undefined, what: `bun ${words.join(" ")}` };
+    return { cwd: dir, lost: lost && dir === undefined, proven, what: `bun ${words.join(" ")}` };
   }
   if (words[0] === "test")
     return { cwd: cwdFlag(args.slice(at + 1), { ...env, cwd }), what: "bun test" };
@@ -7866,6 +7868,9 @@ async function inspect(raw, environment, main) {
   const known = knownVariables(command, environment, directory);
   const lexed = lex(command, known);
   const fed = codeFed(lexed.commands);
+  const slotOf = new Map;
+  const top = (cmd) => lexed.commands.includes(cmd) ? cmd : slotOf.get(cmd);
+  const unproven = (ran, cmd) => !!ran.lost || !!ran.proven && !firstOnLine(lexed.commands, top(cmd));
   const visit = async (cmd, parsed, env) => {
     if (parsed.name === "" && !cmd.feedsShell || EXPORTS2.has(parsed.name)) {
       for (const here of places(env, directory)) {
@@ -7877,12 +7882,21 @@ async function inspect(raw, environment, main) {
       return;
     }
     const slot = slotWords(parsed);
-    if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
+    if (slot) {
+      if (slot.length === 0)
+        return;
+      const inner = { ...cmd, words: slot };
+      const at = top(cmd);
+      if (at)
+        slotOf.set(inner, at);
+      return examine(inner, env, visit, false);
+    }
     const { args, local, name } = parsed;
     if (env.cwdAnywhere) {
       const blind = { ...env, cwd: undefined };
       const ran = runs(name, args, local, blind);
+      if (ran && unproven(ran, cmd))
+        return refuse(ran.what, BUNX_FIX);
       if (ran && (ran.cwd === undefined || inMain(ran.cwd)))
         return refuse(ran.what, ANYWHERE_FIX);
       const blindWrite = writeTargets(cmd, name, args).find((t) => {
@@ -7909,7 +7923,7 @@ async function inspect(raw, environment, main) {
       if (script)
         return script;
       const ran = runs(name, args, local, here);
-      if (ran?.lost)
+      if (ran && unproven(ran, cmd))
         return refuse(ran.what, BUNX_FIX);
       if (ran && inMain(ran.cwd))
         return refuse(ran.what, fixFor2(sure, ran.fix));
@@ -7952,10 +7966,10 @@ if (import.meta.main) {
 export {
   FILE_TOOLS,
   bunCall,
-  bunDir,
-  bunLost,
+  bunFolder,
   check,
   cwdFlag,
+  firstOnLine,
   gitCall,
   listedWorktree,
   liveCheckout,

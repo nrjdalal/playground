@@ -4,7 +4,14 @@ import { tmpdir } from "node:os"
 import { join, resolve, sep } from "node:path"
 
 import { atOnce, buildName, DOCKERS, dockerBuild, portlessCompose } from "./docker-build"
-import { bunCall, bunDir, bunLost, cwdFlag, mainCheckout, turboWords } from "./no-main-checkout"
+import {
+  bunCall,
+  bunFolder,
+  cwdFlag,
+  firstOnLine,
+  mainCheckout,
+  turboWords,
+} from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
   ASSIGN,
@@ -251,6 +258,7 @@ function heavy(
   name: string,
   args: Word[],
   env: Env,
+  first: boolean,
 ): { anywhere?: true; dir: string | undefined; fix?: string; what: string } | undefined {
   const compose = portlessCompose(name, args)
   if (DOCKERS.has(name) || compose) {
@@ -279,9 +287,10 @@ function heavy(
   if (turbo) {
     const task = turboTask(turbo)
     if (!task) return
-    const dir = cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) })
-    // a bun x --cwd the hook cannot prove may land in a worktree, so the run counts as heavy wherever the line runs
-    return dir === undefined && bunLost(name, args, env)
+    const bun = bunFolder(name, args, env)
+    const dir = cwdFlag(turbo, { ...env, cwd: bun.dir })
+    // a bun x --cwd the hook cannot prove, or a proven one past the line's first command (firstOnLine), may land in a worktree, so the run counts as heavy wherever the line runs
+    return (dir === undefined && bun.lost) || (bun.proven && !first)
       ? { anywhere: true, dir: env.cwd, what: `turbo run ${task}` }
       : { dir, what: `turbo run ${task}` }
   }
@@ -294,7 +303,7 @@ function heavy(
       : undefined
   }
   if (name !== "bun") return
-  const { at, cwd, filtered, lost, words } = bunCall(args, env)
+  const { at, cwd, filtered, lost, proven, words } = bunCall(args, env)
   const rest = args.slice(at + 1)
   if (words[0] === "install" || words[0] === "i") {
     if (rest.some((a) => ["--dry-run", "--help", "-h"].includes(a.value))) return
@@ -302,7 +311,7 @@ function heavy(
   }
   // a --cwd the hook cannot prove may land in a worktree, so the build counts as heavy wherever the line runs
   if (words[0] === "x" && program(words[1] ?? "") === "next" && rest[0]?.value === "build")
-    return lost || cwd === undefined
+    return lost || (proven && !first) || cwd === undefined
       ? { anywhere: true, dir: env.cwd, what: "bun x next build" }
       : { dir: cwd, what: "bun x next build" }
   // bun run test:file passes its words to bun test, and with no file runs the whole suite as bun test does
@@ -379,6 +388,7 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
         : undefined
     const refused = await commits(cmd, parsed, env)
     if (refused) return refused
+    const leads = firstOnLine(line, line.includes(cmd) ? cmd : undefined)
     const words = () => {
       const at = first ? cmd.words.indexOf(first) : -1
       if (at < 0) return undefined
@@ -390,7 +400,7 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     }
     // a line that names more folders than the reader carries may run in a worktree, whatever folder it started in
     if (env.cwdAnywhere) {
-      const found = heavy(name, args, { ...env, cwd: undefined })
+      const found = heavy(name, args, { ...env, cwd: undefined }, leads)
       const line = words()
       if (found?.anywhere && line !== undefined)
         return refuseDocker(found.what, "", line, found.fix)
@@ -399,7 +409,7 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     }
     // every folder the shell may be in, so a heavy run after a cd the reader cannot be sure of is caught wherever that cd may have left it
     for (const here of places(env)) {
-      const found = heavy(name, args, here)
+      const found = heavy(name, args, here, leads)
       if (!found || !(found.anywhere || inWorktree(found.dir))) continue
       // run-slot execs the first word after its --, so the fix keeps the program, its words and every assignment before it behind env, and drops every wrapper (exec, timeout, env's own options)
       const line = words()

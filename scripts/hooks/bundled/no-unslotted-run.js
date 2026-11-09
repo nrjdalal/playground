@@ -7194,8 +7194,9 @@ function bunCall(args, env) {
   }
   const last = dirs.at(-1);
   const cwd = dirs.length === 0 ? env.cwd : last && pathOf(last, env);
-  const lost = words[0] === "x" && dirs.length > 0 && !provenDir(dirs, env);
-  return { at: k, cwd, filtered, lost, words };
+  const proven = words[0] === "x" && dirs.length > 0 && provenDir(dirs, env);
+  const lost = words[0] === "x" && dirs.length > 0 && !proven;
+  return { at: k, cwd, filtered, lost, proven, words };
 }
 function provenDir(dirs, env) {
   const [dir] = dirs;
@@ -7264,16 +7265,15 @@ var GIT_MOVES = new Set([
   "update-ref"
 ]);
 var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
-function bunDir(name, args, env) {
+function bunFolder(name, args, env) {
   if (name !== "bun" && name !== "bunx")
-    return env.cwd;
-  const call = bunCall(name === "bunx" ? [X, ...args] : args, env);
-  return call.lost ? undefined : call.cwd ?? env.cwd;
+    return { dir: env.cwd, lost: false, proven: false };
+  const { cwd, lost, proven } = bunCall(name === "bunx" ? [X, ...args] : args, env);
+  return { dir: lost ? undefined : cwd ?? env.cwd, lost, proven };
 }
-function bunLost(name, args, env) {
-  if (name !== "bun" && name !== "bunx")
-    return false;
-  return bunCall(name === "bunx" ? [X, ...args] : args, env).lost;
+function firstOnLine(line, top) {
+  const at = top === undefined ? -1 : line.indexOf(top);
+  return at >= 0 && line.slice(0, at).every((earlier) => parse(earlier).name === "cd");
 }
 function turboWords(name, args, env) {
   if (name === "turbo")
@@ -7482,7 +7482,7 @@ function turboTask(words) {
   return (tasks[0] === "run" ? tasks.slice(1) : tasks).find((t) => TURBO_TASKS.has(t));
 }
 var recursive2 = (args) => args.some((a) => /^-[a-zA-Z]*[Rra]/.test(a.value) || ["--archive", "--recursive"].includes(a.value));
-function heavy(name, args, env) {
+function heavy(name, args, env, first) {
   const compose = portlessCompose(name, args);
   if (DOCKERS.has(name) || compose) {
     const build = compose ? dockerBuild(compose, true) : dockerBuild(args, name === "docker-compose");
@@ -7505,8 +7505,9 @@ function heavy(name, args, env) {
     const task = turboTask(turbo);
     if (!task)
       return;
-    const dir = cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) });
-    return dir === undefined && bunLost(name, args, env) ? { anywhere: true, dir: env.cwd, what: `turbo run ${task}` } : { dir, what: `turbo run ${task}` };
+    const bun = bunFolder(name, args, env);
+    const dir = cwdFlag(turbo, { ...env, cwd: bun.dir });
+    return dir === undefined && bun.lost || bun.proven && !first ? { anywhere: true, dir: env.cwd, what: `turbo run ${task}` } : { dir, what: `turbo run ${task}` };
   }
   if (RUNNERS2.has(name)) {
     const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES2.has(args[k - 1]?.value ?? ""));
@@ -7514,7 +7515,7 @@ function heavy(name, args, env) {
   }
   if (name !== "bun")
     return;
-  const { at, cwd, filtered, lost, words } = bunCall(args, env);
+  const { at, cwd, filtered, lost, proven, words } = bunCall(args, env);
   const rest = args.slice(at + 1);
   if (words[0] === "install" || words[0] === "i") {
     if (rest.some((a) => ["--dry-run", "--help", "-h"].includes(a.value)))
@@ -7522,7 +7523,7 @@ function heavy(name, args, env) {
     return { dir: cwdFlag(rest, { ...env, cwd }), what: "bun install" };
   }
   if (words[0] === "x" && program(words[1] ?? "") === "next" && rest[0]?.value === "build")
-    return lost || cwd === undefined ? { anywhere: true, dir: env.cwd, what: "bun x next build" } : { dir: cwd, what: "bun x next build" };
+    return lost || proven && !first || cwd === undefined ? { anywhere: true, dir: env.cwd, what: "bun x next build" } : { dir: cwd, what: "bun x next build" };
   const testFile = words[0] === "run" && words[1] === "test:file";
   if (words[0] === "test" || testFile) {
     if (rest.some((a) => a.value === "--help" || a.value === "-h"))
@@ -7581,6 +7582,7 @@ function inspect(raw, environment, main) {
     const refused = await commits(cmd, parsed, env);
     if (refused)
       return refused;
+    const leads = firstOnLine(line, line.includes(cmd) ? cmd : undefined);
     const words = () => {
       const at = first ? cmd.words.indexOf(first) : -1;
       if (at < 0)
@@ -7592,7 +7594,7 @@ function inspect(raw, environment, main) {
       ].join(" ");
     };
     if (env.cwdAnywhere) {
-      const found = heavy(name, args, { ...env, cwd: undefined });
+      const found = heavy(name, args, { ...env, cwd: undefined }, leads);
       const line = words();
       if (found?.anywhere && line !== undefined)
         return refuseDocker(found.what, "", line, found.fix);
@@ -7600,7 +7602,7 @@ function inspect(raw, environment, main) {
         return anywhere(found.what, line);
     }
     for (const here of places(env)) {
-      const found = heavy(name, args, here);
+      const found = heavy(name, args, here, leads);
       if (!found || !(found.anywhere || inWorktree(found.dir)))
         continue;
       const line = words();

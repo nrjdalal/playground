@@ -621,17 +621,33 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
       "#1646's own form, through run-slot and env",
       `~/.playground/ops/run-slot.sh r -- env NODE_ENV=production SKIP_ENV_VALIDATION=true bunx --cwd=${WORKTREE} turbo run build --filter=@packages/env`,
     ],
-    ["turbo through bunx past an assignment", `FORCE_COLOR=0 bunx --cwd=${WORKTREE} turbo run build`],
-    ["turbo through bunx past a cd into the worktree", `cd ${WORKTREE} && bunx --cwd=api turbo run build`],
-    ["turbo through bunx past two cds", `cd ${WORKTREE}; cd api && bunx --cwd=hono turbo run build`],
+    [
+      "turbo through bunx past an assignment",
+      `FORCE_COLOR=0 bunx --cwd=${WORKTREE} turbo run build`,
+    ],
+    [
+      "turbo through bunx past a cd into the worktree",
+      `cd ${WORKTREE} && bunx --cwd=api turbo run build`,
+    ],
+    [
+      "turbo through bunx past two cds",
+      `cd ${WORKTREE}; cd api && bunx --cwd=hono turbo run build`,
+    ],
   ])("%s", async (_name, command) => {
     expect(await bash(command)).toBeUndefined()
   })
 
   test.each([
-    ["turbo through bunx after a mkdir", `mkdir -p ${WORKTREE}/x && bunx --cwd=${WORKTREE} turbo run build`],
+    [
+      "turbo through bunx after a mkdir",
+      `mkdir -p ${WORKTREE}/x && bunx --cwd=${WORKTREE} turbo run build`,
+    ],
     ["turbo through bunx after an echo", `echo go; bunx --cwd=${WORKTREE} turbo run build`],
-    ["turbo through bunx after a cd and a mkdir", `cd ${WORKTREE} && mkdir -p x && bunx --cwd=api turbo run build`],  ])("%s, the --cwd past the line's first command, is refused", async (_name, command) => {
+    [
+      "turbo through bunx after a cd and a mkdir",
+      `cd ${WORKTREE} && mkdir -p x && bunx --cwd=api turbo run build`,
+    ],
+  ])("%s, the --cwd past the line's first command, is refused", async (_name, command) => {
     expect(await bash(command)).toContain("bun x and bunx read one --cwd alone")
   })
 

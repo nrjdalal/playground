@@ -15,6 +15,7 @@ import {
   knownVariables,
   lex,
   marked,
+  parse,
   pathOf,
   places,
   program,
@@ -128,7 +129,7 @@ const UNKNOWN_FIX =
 
 // This hook's rule for a line that names more folders than the reader carries (`Env.cwdAnywhere`): the shell may be in any folder, the main checkout included, so a guarded command is refused wherever the line started.
 const BUNX_FIX =
-  "bun x and bunx read one --cwd alone, with no .. and no link in it: an absolute path inside your worktree, or a relative one typed from inside it. Name your worktree that way, or cd to it first."
+  "bun x and bunx read one --cwd alone, with no .. and no link in it, on the line's first command or past a cd alone: an absolute path inside your worktree, or a relative one typed from inside it. Name your worktree that way, as a line of its own, or cd to it first."
 const ANYWHERE_FIX =
   "the line names more folders than the hook carries, so it cannot rule out the main checkout. Name the folder on the command instead: git -C <your worktree>, bun --cwd <your worktree>, or run it as a line of its own after a cd to a literal path."
 
@@ -174,7 +175,14 @@ export function cwdFlag(args: Word[], env: Env): string | undefined {
 export function bunCall(
   args: Word[],
   env: Env,
-): { at: number; cwd: string | undefined; filtered: boolean; lost: boolean; words: string[] } {
+): {
+  at: number
+  cwd: string | undefined
+  filtered: boolean
+  lost: boolean
+  proven: boolean
+  words: string[]
+} {
   const dirs: (Word | undefined)[] = []
   let filtered = false
   const words: string[] = []
@@ -198,8 +206,9 @@ export function bunCall(
   const last = dirs.at(-1)
   const cwd = dirs.length === 0 ? env.cwd : last && pathOf(last, env)
   // bun x chains its --cwd words and follows links, so it reads only one --cwd the hook can prove lands in a listed worktree; any other may run its tool anywhere, the main checkout included
-  const lost = words[0] === "x" && dirs.length > 0 && !provenDir(dirs, env)
-  return { at: k, cwd, filtered, lost, words }
+  const proven = words[0] === "x" && dirs.length > 0 && provenDir(dirs, env)
+  const lost = words[0] === "x" && dirs.length > 0 && !proven
+  return { at: k, cwd, filtered, lost, proven, words }
 }
 
 // One --cwd with no .. and no link in it: absolute, inside a worktree the main checkout lists, or relative from a shell folder in a listed worktree and inside that same one.
@@ -361,17 +370,21 @@ function gitMoves(sub: string, rest: string[]): boolean {
   return false
 }
 
-// The folder bun or bunx runs a tool in: bun's own --cwd, else the shell's folder when a --cwd word cannot be read, or undefined when bun x's --cwd is lost (bunLost).
-export function bunDir(name: string, args: Word[], env: Env): string | undefined {
-  if (name !== "bun" && name !== "bunx") return env.cwd
-  const call = bunCall(name === "bunx" ? [X, ...args] : args, env)
-  return call.lost ? undefined : (call.cwd ?? env.cwd)
+// The folder bun or bunx runs a tool in: bun's own --cwd, else the shell's folder when a --cwd word cannot be read, or undefined when bun x's --cwd is lost; proven when bun x's one --cwd names a listed worktree, which holds only first on the line (firstOnLine).
+export function bunFolder(
+  name: string,
+  args: Word[],
+  env: Env,
+): { dir: string | undefined; lost: boolean; proven: boolean } {
+  if (name !== "bun" && name !== "bunx") return { dir: env.cwd, lost: false, proven: false }
+  const { cwd, lost, proven } = bunCall(name === "bunx" ? [X, ...args] : args, env)
+  return { dir: lost ? undefined : (cwd ?? env.cwd), lost, proven }
 }
 
-// Whether bun x or bunx names a --cwd the hook cannot prove, so its tool may run anywhere.
-export function bunLost(name: string, args: Word[], env: Env): boolean {
-  if (name !== "bun" && name !== "bunx") return false
-  return bunCall(name === "bunx" ? [X, ...args] : args, env).lost
+// Whether the line's own command runs first on it, past any cd before it, which writes nothing: an earlier command could swap a proven --cwd's folder for a link before bun x runs. A command the line does not list (a script's, a substitution's) has no top and never counts as first.
+export function firstOnLine(line: Command[], top: Command | undefined): boolean {
+  const at = top === undefined ? -1 : line.indexOf(top)
+  return at >= 0 && line.slice(0, at).every((earlier) => parse(earlier).name === "cd")
 }
 
 // turbo's own words, however it is called: by name or path, through npx, or through bun, bunx read as bun x.
@@ -416,16 +429,20 @@ function runs(
   args: Word[],
   local: Map<string, Text>,
   env: Env,
-): { cwd: string | undefined; fix?: string; lost?: boolean; what: string } | undefined {
+):
+  | { cwd: string | undefined; fix?: string; lost?: boolean; proven?: boolean; what: string }
+  | undefined {
   if (name === "bunx") return runs("bun", [X, ...args], local, env)
   const turbo = turboWords(name, args, env)
   if (turbo && packagesBuild(turbo)) {
     if (validationOff(local, env)) return
-    const cwd = cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) })
+    const bun = bunFolder(name, args, env)
+    const cwd = cwdFlag(turbo, { ...env, cwd: bun.dir })
     return {
       cwd,
       fix: BUILD_FIX,
-      lost: cwd === undefined && bunLost(name, args, env),
+      lost: cwd === undefined && bun.lost,
+      proven: bun.proven,
       what: "the packages build without NODE_ENV and SKIP_ENV_VALIDATION=true",
     }
   }
@@ -440,12 +457,12 @@ function runs(
     return sub && gitMoves(sub, rest) ? { cwd, fix: GIT_FIX, what: `git ${sub}` } : undefined
   }
   if (name !== "bun") return
-  const { at, cwd, filtered, lost, words } = bunCall(args, env)
+  const { at, cwd, filtered, lost, proven, words } = bunCall(args, env)
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0]
   // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name, at a version too, bun x included, in the folder bun's own --cwd names (bun 1.4.4, measured); a tool reads its own --cwd too
   if (TOOLS.has(toolName(target))) {
     const dir = cwdFlag(args.slice(at + 1), { ...env, cwd: lost ? undefined : (cwd ?? env.cwd) })
-    return { cwd: dir, lost: lost && dir === undefined, what: `bun ${words.join(" ")}` }
+    return { cwd: dir, lost: lost && dir === undefined, proven, what: `bun ${words.join(" ")}` }
   }
   // bun test runs no script, so a --cwd after test is still its own
   if (words[0] === "test")
@@ -642,6 +659,12 @@ async function inspect(raw: string, environment: Record<string, string | undefin
   const lexed = lex(command, known)
   // the shell each pipeline feeds, by the command whose output it reads, since the walk judges that command in the folder the pipeline runs in and never visits a shell of its own
   const fed = codeFed(lexed.commands)
+  // run-slot's words, each mapped to the line's own command that runs them, so a bun x through run-slot is as first as run-slot is
+  const slotOf = new Map<Command, Command>()
+  const top = (cmd: Command) => (lexed.commands.includes(cmd) ? cmd : slotOf.get(cmd))
+  // a proven bun x --cwd holds only first on the line (firstOnLine), and is lost anywhere else
+  const unproven = (ran: { lost?: boolean; proven?: boolean }, cmd: Command) =>
+    !!ran.lost || (!!ran.proven && !firstOnLine(lexed.commands, top(cmd)))
   const visit: Visit = async (cmd, parsed, env) => {
     // a builtin run() hands over (a bare `sudo -s`, which it hands every hook once a redirect feeds it, a bare copy of a followed shell, an export) is read only for the script a here-string, a heredoc or a pipeline feeds it; one that feeds a shell (a loop's `done`) is judged in full, as the reader hands it to every hook
     if ((parsed.name === "" && !cmd.feedsShell) || EXPORTS.has(parsed.name)) {
@@ -653,13 +676,19 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       return
     }
     const slot = slotWords(parsed)
-    if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
+    if (slot) {
+      if (slot.length === 0) return
+      const inner = { ...cmd, words: slot }
+      const at = top(cmd)
+      if (at) slotOf.set(inner, at)
+      return examine(inner, env, visit, false)
+    }
     const { args, local, name } = parsed
     // a line that names more folders than the reader carries may run anywhere, the main checkout included, so what it guards is refused with no folder to name
     if (env.cwdAnywhere) {
       const blind: Env = { ...env, cwd: undefined }
       const ran = runs(name, args, local, blind)
+      if (ran && unproven(ran, cmd)) return refuse(ran.what, BUNX_FIX)
       // a folder the command names itself is judged by that path, as everywhere else; one the shell gives it could be the main checkout
       if (ran && (ran.cwd === undefined || inMain(ran.cwd))) return refuse(ran.what, ANYWHERE_FIX)
       const blindWrite = writeTargets(cmd, name, args).find((t) => {
@@ -691,7 +720,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const script = await fedScript(cmd, here, sure, inMain, visit)
       if (script) return script
       const ran = runs(name, args, local, here)
-      if (ran?.lost) return refuse(ran.what, BUNX_FIX)
+      if (ran && unproven(ran, cmd)) return refuse(ran.what, BUNX_FIX)
       if (ran && inMain(ran.cwd)) return refuse(ran.what, fixFor(sure, ran.fix))
       const moved =
         name === "git" ? await liveRefusal(args, here, inLive, fixFor(sure, LIVE_FIX)) : undefined
