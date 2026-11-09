@@ -20,6 +20,30 @@ describe("the ship's merge step waits for the ship PR's own checks at the pin (#
     expect(await Bun.file(join(ROOT, WAITER)).exists()).toBe(true)
   })
 
+  test("it reads the pin's runs before the waiter, since the waiter counts only a red that concludes after it starts", async () => {
+    const text = await step3()
+    const read = text.indexOf(
+      'gh run list --commit "$CANARY" --event pull_request --json databaseId,workflowName,status,conclusion',
+    )
+    expect(read).toBeGreaterThan(-1)
+    expect(text.indexOf(`${WAITER} checks`)).toBeGreaterThan(read)
+    expect(text).toMatch(/red run is the first red: rerun it .* before the waiter starts/)
+  })
+
+  test("a pin with no gate run, its runs action_required under the bot's draft, opens the ship PR again from step 2", async () => {
+    const text = await step3()
+    expect(text).toMatch(/missing, or one reading `action_required`/)
+    expect(text).toContain("`gh pr close <n>`")
+    expect(text).toContain("step 2's `gh pr create`")
+  })
+
+  test("it names the waiter's CLOSED ending and reruns a cancelled run whole", async () => {
+    const text = await step3()
+    expect(text).toContain("`CLOSED <state>` when the ship PR closed (go back to step 2)")
+    expect(text).toContain("`cancelled`")
+    expect(text).toContain("# a cancelled run: gh run rerun <run id>")
+  })
+
   test("a red reruns its failed jobs once, and a second red holds the ship and ends the freeze by step 1", async () => {
     const text = await step3()
     expect(text).toContain("gh run rerun <run id> --failed")
