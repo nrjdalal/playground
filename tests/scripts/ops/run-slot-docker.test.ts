@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { machine, SCRIPT } from "./run-slot-fake"
+import { machine, runSlot, SCRIPT } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -38,10 +38,11 @@ touch "\${@: -1}"
   const builds = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [])
   // a docker command through run-slot, its stderr read as it comes, as start() reads a run's
   const docker = (who: string, words: string[], flags: string[] = []) => {
-    const p = Bun.spawn(["bash", SCRIPT, who, ...flags, "--", ...words], {
+    const p = runSlot(["bash", SCRIPT, who, ...flags, "--", ...words], {
       cwd: m.root,
       env: m.env(),
       stderr: "pipe",
+      ops: m.ops,
     })
     let err = ""
     const read = (async () => {
@@ -159,12 +160,13 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
 
   test("portless's compose up through bunx is refused with the same fix", async () => {
     const m = dockerMachine()
-    const p = Bun.spawn(
+    const p = runSlot(
       ["bash", SCRIPT, "worker-d", "--", "bunx", "portless", "compose", "up", "-d"],
       {
         cwd: m.root,
         env: m.env(),
         stderr: "pipe",
+        ops: m.ops,
       },
     )
     expect(await p.exited).toBe(2)
@@ -173,14 +175,12 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
 
   test("a chain that builds an image is refused, so each build is a run of its own", async () => {
     const m = dockerMachine()
-    const p = Bun.spawn(
-      ["bash", SCRIPT, "worker-d", "--", "bash", "-c", "true && docker build ."],
-      {
-        cwd: m.root,
-        env: m.env(),
-        stderr: "pipe",
-      },
-    )
+    const p = runSlot(["bash", SCRIPT, "worker-d", "--", "bash", "-c", "true && docker build ."], {
+      cwd: m.root,
+      env: m.env(),
+      stderr: "pipe",
+      ops: m.ops,
+    })
     expect(await p.exited).toBe(2)
     expect(await new Response(p.stderr).text()).toContain(
       "refuses a chain that builds a docker image",
@@ -192,10 +192,11 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     const run = async (shell: string, script: string) => {
       const m = dockerMachine()
       const marker = join(m.root, "ran")
-      const p = Bun.spawn(["bash", SCRIPT, "worker-d", "--", shell, "-c", script], {
+      const p = runSlot(["bash", SCRIPT, "worker-d", "--", shell, "-c", script], {
         cwd: m.root,
         env: m.env({ MARKER: marker }),
         stderr: "pipe",
+        ops: m.ops,
       })
       return {
         code: await p.exited,
@@ -227,10 +228,11 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     const file = async (args: string[], script: string) => {
       const m = dockerMachine()
       writeFileSync(join(m.root, "docker-steps.sh"), script)
-      const p = Bun.spawn(["bash", SCRIPT, "worker-d", "--", "bash", ...args, "docker-steps.sh"], {
+      const p = runSlot(["bash", SCRIPT, "worker-d", "--", "bash", ...args, "docker-steps.sh"], {
         cwd: m.root,
         env: m.env(),
         stderr: "pipe",
+        ops: m.ops,
       })
       return { code: await p.exited, err: await new Response(p.stderr).text() }
     }
@@ -271,10 +273,11 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     const run = async (argv: string[]) => {
       const m = dockerMachine()
       const marker = join(m.root, "ran")
-      const p = Bun.spawn(["bash", SCRIPT, "worker-d", "--", ...argv], {
+      const p = runSlot(["bash", SCRIPT, "worker-d", "--", ...argv], {
         cwd: m.root,
         env: m.env({ MARKER: marker }),
         stderr: "pipe",
+        ops: m.ops,
       })
       const code = await p.exited
       return {
@@ -628,7 +631,7 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     // a command substitution that reads portless's URL starts no container, so it keeps its lane
     test("while a portless URL read in a substitution keeps its lane", async () => {
       const m = dockerMachine()
-      const p = Bun.spawn(
+      const p = runSlot(
         [
           "bash",
           SCRIPT,
@@ -638,7 +641,7 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
           "-c",
           'curl -s "$(bunx portless get api.playground)/api/health"',
         ],
-        { cwd: m.root, env: m.env(), stdout: "pipe" },
+        { cwd: m.root, env: m.env(), stdout: "pipe", ops: m.ops },
       )
       expect(await p.exited).toBe(0)
       expect((await new Response(p.stdout).text()).trim()).toBe("")
