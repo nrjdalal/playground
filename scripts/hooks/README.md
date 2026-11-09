@@ -647,7 +647,8 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 ## no-linear-ticket
 
 - ALWAYS: File a new Linear ticket only after the owner's yes, and keep the factory out of Linear and out of every guarded org's ticket, PR, commit, branch, comment, Slack message or DM, and file in its repo: playbook's **tickets** rule, since the factory is no project of the org's and stays out of its records in any shape.
-  A session started with `PLAYGROUND_ROLE` set (every factory spawn, by the launch line in playbook's SPAWN.md), or with no role but a factory name in Claude Code's registry (`scripts/hooks/role.ts`, for a session resumed without its settings), runs the PreToolUse hook `scripts/hooks/no-linear-ticket.ts`, registered in both settings files and in the ticket skill's and playbook's frontmatter,
+  A session started with `PLAYGROUND_ROLE` set (every factory spawn, by the launch line in playbook's SPAWN.md, Launch, model and effort), or with no role but a factory name in Claude Code's registry (`scripts/hooks/role.ts`, for a session resumed without its settings), runs the PreToolUse hook `scripts/hooks/no-linear-ticket.ts`,
+  registered in both settings files and in the ticket skill's and playbook's frontmatter,
   so it also runs in a guarded org's checkout whose session loads either; without the variable or a factory name it allows everything, so the owner's own sessions file freely.
   It refuses a call that files a new Linear ticket (`save_issue` with no `id`, a Linear server's create-issue tool, a GraphQL `issueCreate` or `issueBatchCreate` sent by curl, by `gh api` to a URL off GitHub, or by inline script code) unless `ticket-approvals/<team>-<UTC date>.json` in the data folder names its title;
   a GraphQL create is refused even then, since its `teamId` matches no approval.
