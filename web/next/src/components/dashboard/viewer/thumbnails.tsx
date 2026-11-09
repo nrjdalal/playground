@@ -49,10 +49,14 @@ function Thumb({
   onOpen: (index: number) => void
 }) {
   const viewer = VIEWERS[item.kind]
-  const { missing, url } = useAttachment(item.id, Boolean(viewer?.Thumb))
+  const { failed, missing, url } = useAttachment(item.id, Boolean(viewer?.Thumb))
   return (
     <div className="group/tile relative">
-      <Hint content={missing ? `${item.name} is missing` : item.name}>
+      <Hint
+        content={
+          missing ? `${item.name} is missing` : failed ? `${item.name} did not load` : item.name
+        }
+      >
         <button
           aria-label={`Open ${item.name}`}
           className={TILE}
@@ -66,7 +70,7 @@ function Thumb({
             <span className="flex w-full min-w-0 flex-col items-center gap-2 px-2">
               <FileIcon className="size-8 shrink-0" name={item.name} />
               <span className="text-2xs w-full truncate text-center">
-                {missing ? "Missing" : item.name}
+                {missing ? "Missing" : failed ? "Did not load" : item.name}
               </span>
             </span>
           )}
@@ -110,7 +114,7 @@ function WideSide({
   label: string
   onOpen: () => void
 }) {
-  const { missing, url } = useAttachment(item.id)
+  const { failed, missing, url } = useAttachment(item.id)
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-muted-foreground text-xs">{label}</span>
@@ -124,8 +128,8 @@ function WideSide({
         >
           {url ? (
             <img alt={item.name} className="size-full object-contain" src={url} />
-          ) : missing ? (
-            <Missing />
+          ) : missing || failed ? (
+            <Missing failed={failed} />
           ) : null}
         </button>
         <TileDownload item={item} />
@@ -139,14 +143,14 @@ const stay = () => {}
 
 // A lone HTML page live in the card at its full width, through the viewer's own HTML view (its sandboxed frame, links opened in a tab, a page that leaves put back, Spinner and Unreadable), never taking the focus, with a floating bar in its corner that saves it (Download) and opens it in an aside tab, or full screen outside the aside.
 function LivePage({ item, onOpen }: { item: ViewerItem; onOpen: () => void }) {
-  const { missing, url } = useAttachment(item.id, true)
+  const { failed, missing, url } = useAttachment(item.id, true)
   const inTab = useAsideDocs() !== null
   return (
     <div className="relative flex h-80 items-center justify-center overflow-hidden rounded-md border">
       {url ? (
         <HTML_VIEWER.View active={false} item={item} onEdge={stay} url={url} />
-      ) : missing ? (
-        <Missing />
+      ) : missing || failed ? (
+        <Missing failed={failed} />
       ) : null}
       <div className={cn(FLOATING_BAR, "absolute top-2 right-2")}>
         <Download className={cn("size-8", BAR_ITEM)} item={item} />
