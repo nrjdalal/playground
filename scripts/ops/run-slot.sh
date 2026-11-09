@@ -1593,7 +1593,11 @@ focus_holds() {
 }
 focus_wait() {
   waited=$((SECONDS - WAIT_FROM))
-  [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for $(focus_holder)'s focus to end (run-slot.focus, until $(cut -d' ' -f3 "$OPS/run-slot.focus" 2>/dev/null))" >&2
+  # the first wait says itself, since the wait's start sits behind the run's setup and the clock's waited count begins past 0
+  if [ $((waited % 300)) -eq 0 ] || [ -z "$FSAID" ]; then
+    echo "run-slot.sh: waiting for $(focus_holder)'s focus to end (run-slot.focus, until $(cut -d' ' -f3 "$OPS/run-slot.focus" 2>/dev/null))" >&2
+    FSAID=1
+  fi
   sleep "$POLL"
 }
 prio_for() { local h; h=$(prio_holder) && [ -n "$h" ] && [ "$(owner_of "$1")" = "$h" ]; }
@@ -2112,7 +2116,7 @@ if [ "$KIND" = quick ] && [ "$WHO" = ops-merge-train ]; then
 fi
 if [ -n "$KIND" ]; then
   [ -n "$TICKET" ] && rm -f "$TICKET" && TICKET=""
-  WAIT_FROM=$SECONDS
+  WAIT_FROM=$SECONDS FSAID=
   # run-slot.clone-off holds every clone while it exists (dispatcher, 18 Oct, with run-slot.3-off)
   # run-slot.clone-allow holds, one a line, grep patterns for the clones a lead lets through while clone-off stands (builder, 18 Oct: priority clones in order; every checker by default, finish-first)
   # clone-off lets a clone through while load1 and load5 are under 30 and memory passes spawn.sh's gate, pressure level 1 or 2 with 8% or more free (dispatcher, 19 Oct 01:18Z;
@@ -2232,6 +2236,7 @@ if [ -n "$KIND" ]; then
   : > "$REF" 2>/dev/null
   GOT=
   polls=0
+  SAID=
   while :; do
     spaced=
     waited=$((SECONDS - WAIT_FROM))
@@ -2250,8 +2255,10 @@ if [ -n "$KIND" ]; then
     # the full reread, a stat, every 12th poll, about a minute; a newer mtime than the last tick's is read at the top of the poll, before a tick moves it
     [ $((polls % 12)) -eq 0 ] && reread
     polls=$((polls + 1))
-    if [ $((waited % 300)) -eq 0 ]; then
+    # the first wait says itself, since the clone queue's setup takes a second and the clock's waited count starts past 0
+    if [ $((waited % 300)) -eq 0 ] || [ -z "$SAID" ]; then
       if [ -n "$spaced" ]; then echo "run-slot.sh: this clone waits $spaced" >&2; else echo "run-slot.sh: waiting for the $KIND slot ($(cat "$OPS/run-slot-$KIND.holder" 2>/dev/null))" >&2; fi
+      SAID=1
     fi
     sleep "$CLONE_POLL"
   done
@@ -2306,7 +2313,7 @@ if [ -n "$CAN_TAKE" ]; then
   exit
 fi
 
-WAIT_FROM=$SECONDS
+WAIT_FROM=$SECONDS FSAID=
 # a waiter that is not at the head and has waited past the backlog line polls at twice POLL (issue 1338)
 case "$POLL" in *[!0-9]*) SLOW_POLL=$POLL ;; *) SLOW_POLL=$((2 * POLL)) ;; esac
 nap() { if [ "$LOOKER" = 0 ] && [ "$waited" -ge "$BACKLOG_WAIT" ]; then sleep "$SLOW_POLL"; else sleep "$POLL"; fi; }
