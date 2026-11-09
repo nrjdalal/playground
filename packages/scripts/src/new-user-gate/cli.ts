@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path"
 import { makeScratch, removeScratch } from "@packages/safe-delete"
 import { gateSettings, SCHEMA_VERSION } from "@packages/settings"
 
+import { gateLine } from "../pr-merge/ship-lines"
 import { GATE_LABEL, stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
@@ -591,6 +592,12 @@ const main = async (args: string[]) => {
   } finally {
     browser.close()
     console.log(report(steps))
+    console.log(
+      gateLine(
+        full,
+        steps.some((s) => !s.ok && !s.inconclusive),
+      ),
+    )
     if (keep) console.log(`gate: kept ${box}; bun run gate:new-user --clean ${box} removes it`)
     else {
       const shots = join(dirname(box), `${box.split("/").at(-1)}-shots`)
