@@ -835,4 +835,29 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     expect(await next.ran()).toBe(true)
     expect(next.p.exitCode).toBe(0)
   })
+
+  // #1321: chain_steps read a line's trailing comment with the code, so a quote in one line's comment paired with one in a later line's and the steps between read as one quoted word: a container build on a line between the two ran with no lane at all
+  describe("a chain whose comments hold the quotes", () => {
+    const run = async (script: string) => {
+      const m = dockerMachine()
+      const marker = join(m.root, "ran")
+      const p = Bun.spawn(["bash", SCRIPT, "worker-d", "--", "bash", "-c", script], {
+        cwd: m.root,
+        env: m.env({ MARKER: marker }),
+        stderr: "pipe",
+      })
+      return {
+        code: await p.exited,
+        err: await new Response(p.stderr).text(),
+        ran: existsSync(marker),
+      }
+    }
+
+    test("a build on a line between two comment-quote lines is read as a docker step, and the chain is refused", async () => {
+      const r = await run('echo one # open "quote\ndocker build .\ntouch $MARKER # close" it')
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("refuses a chain that builds a docker image")
+      expect(r.ran).toBe(false)
+    })
+  })
 })
