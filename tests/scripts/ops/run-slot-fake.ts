@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs"
@@ -33,9 +34,7 @@ export const stop = async (p: Subprocess) => {
 // Ubuntu 26.04's default mkdir, uutils 0.10.0, reports success when another process made the folder between its own check and its mkdir (fixed in uutils 0.11.0), so two looks could each take one of run-slot.sh's mkdir locks; the image keeps GNU's as gnumkdir, which fails there as the Mac's mkdir does, so a machine's fake bin runs that one where it exists
 const GNU_MKDIR = Bun.which("gnumkdir")
 
-// 7 Nov 00:38Z, issue 1316: five run-slot.sh processes from these fixtures outlived their tests, each with ppid 1, since a child left running when its test fails or times out is stopped by nothing. Every run-slot.sh child of these tests starts as the leader of a process group of its own through runSlot, which records it, and the file's afterAll ends each group still running, the command's among them, through endChildren.
-const SETSIDE = "import os, sys\nos.setsid()\nos.execvp(sys.argv[1], sys.argv[1:])"
-const PYTHON = Bun.which("python3") ?? "python3"
+// 7 Nov 00:38Z, issue 1316: five run-slot.sh processes from these fixtures outlived their tests, each with ppid 1, since a child left running when its test fails or times out is stopped by nothing. runSlot records every run-slot.sh child of these tests, and the file's afterAll ends each one still running, with the command it started, through endChildren. The child stays in the test run's own process group, so a TERM to the run (Ctrl-C, TaskStop, run-slot's trap, the sandbox's deadline) reaches it as canary's helper let it, ending it and, through its trap, its command.
 type RunSlotOptions<
   In extends Bun.SpawnOptions.Writable,
   Out extends Bun.SpawnOptions.Readable,
@@ -43,8 +42,8 @@ type RunSlotOptions<
 > = Bun.SpawnOptions.SpawnOptions<In, Out, Err> & {
   ops?: string
 }
-const children: { pgid: number; ops?: string }[] = []
-// Starts `argv` as the leader of a process group of its own: the trampoline's python3 is looked up in this process's PATH, so a machine's fake bin and a shim never see it, and exec keeps the pid, so every ask line, holder and ticket names it as before. `ops` is the machine's ops folder, whose *.child files name the command's group once the run starts.
+const children: { p: { exited: Promise<number>; pid: number }; ops?: string; at: number }[] = []
+// Starts `argv` recorded, so endChildren can end it; `ops` is the machine's ops folder, whose *.child files name the command's group once the run starts.
 export const runSlot = <
   const In extends Bun.SpawnOptions.Writable = "ignore",
   const Out extends Bun.SpawnOptions.Readable = "pipe",
@@ -54,52 +53,72 @@ export const runSlot = <
   opts: RunSlotOptions<In, Out, Err> = {} as RunSlotOptions<In, Out, Err>,
 ): Bun.Subprocess<In, Out, Err> => {
   const { ops, ...spawnOpts } = opts
-  const p = Bun.spawn<In, Out, Err>([PYTHON, "-I", "-c", SETSIDE, ...argv], spawnOpts)
-  children.push({ pgid: p.pid, ops })
+  const p = Bun.spawn<In, Out, Err>(argv, spawnOpts)
+  children.push({ p, ops, at: Date.now() })
   return p
 }
-// Ends every recorded child still running, with the command group it started, on pass, fail and timeout alike: TERM first, which run-slot.sh's own trap turns on its command's group, then KILL after 5 s for what outlives it, as stop() does
+// Ends every recorded child still unreaped, with the command group it owns, on pass, fail and timeout alike: TERM first, which run-slot.sh's own trap turns on its command's group, then KILL after 5 s for what outlives it, as stop() does. A child that has ended is never signalled itself, since its pid may be anyone's on a Mac that wraps them in minutes. A *.child pid is signalled as a group only while the identity holds it is this run's own: still its runner's child leading its own group (the guard run-slot.sh's own preempt reads) while the runner lives, or, once the runner died without its trap, an orphan leading its own group whose *.child was written within this run's window, since a stale or wrapped id passes neither.
 export const endChildren = async () => {
-  const alive = (pgid: number) => {
+  const exited = (p: { exited: Promise<number> }) =>
+    Promise.race([p.exited.then(() => true), Bun.sleep(50).then(() => false)])
+  const alive = (pid: number, group = false) => {
     try {
-      process.kill(-pgid, 0)
+      process.kill(group ? -pid : pid, 0)
       return true
     } catch {
       return false
     }
   }
-  const signal = (pgid: number, sig: number | "SIGTERM" | "SIGKILL") => {
+  const kill = (pid: number, group: boolean, sig: number | "SIGTERM" | "SIGKILL") => {
     try {
-      process.kill(-pgid, sig)
+      process.kill(group ? -pid : pid, sig)
     } catch {
-      // the group ended since the last look
+      // it ended since the last look
     }
   }
-  const left = new Set<number>()
-  for (const { pgid, ops } of children.splice(0)) {
-    if (alive(pgid)) left.add(pgid)
-    if (!ops || !existsSync(ops)) continue
-    for (const file of readdirSync(ops)) {
-      if (!file.endsWith(".child")) continue
-      const pid = Number(readFileSync(join(ops, file), "utf8").trim())
-      if (pid > 1 && alive(pid)) left.add(pid)
+  const live: { p: { exited: Promise<number> }; pid: number; groups: number[] }[] = []
+  for (const child of children.splice(0)) {
+    const done = await exited(child.p)
+    const groups: number[] = []
+    if (child.ops && existsSync(child.ops))
+      for (const file of readdirSync(child.ops)) {
+        if (!file.endsWith(".child")) continue
+        const command = Number(readFileSync(join(child.ops, file), "utf8").trim())
+        if (!(command > 1)) continue
+        if (statSync(join(child.ops, file)).mtimeMs < child.at - 60_000) continue
+        const [ppid, pgid] = Bun.spawnSync(["ps", "-o", "ppid=,pgid=", "-p", String(command)])
+          .stdout.toString()
+          .trim()
+          .split(/\s+/)
+        if (Number(pgid) !== command) continue
+        if (done ? Number(ppid) === 1 : Number(ppid) === child.p.pid) groups.push(command)
+      }
+    if (!done || groups.length > 0) live.push({ p: child.p, pid: child.p.pid, groups })
+  }
+  for (const { pid, groups } of live) {
+    kill(pid, false, "SIGTERM")
+    for (const gid of groups) kill(gid, true, "SIGTERM")
+  }
+  const left = async () =>
+    (await Promise.all(live.map(async ({ p }) => !(await exited(p))))).some(Boolean) ||
+    live.some(({ groups }) => groups.some((gid) => alive(gid, true)))
+  const deadline = Date.now() + 5_000
+  while ((await left()) && Date.now() < deadline) await Bun.sleep(50)
+  if (await left())
+    for (const { p, pid, groups } of live) {
+      if (!(await exited(p))) kill(pid, false, "SIGKILL")
+      for (const gid of groups) if (alive(gid, true)) kill(gid, true, "SIGKILL")
     }
-  }
-  for (const pgid of left) signal(pgid, "SIGTERM")
-  const gone = async (deadline: number) => {
-    while ([...left].some(alive) && Date.now() < deadline) await Bun.sleep(50)
-    return ![...left].some(alive)
-  }
-  if (!(await gone(Date.now() + 5_000)))
-    for (const pgid of left) if (alive(pgid)) signal(pgid, "SIGKILL")
-  await gone(Date.now() + 5_000)
+  const end = Date.now() + 5_000
+  while ((await left()) && Date.now() < end) await Bun.sleep(50)
 }
 
 export const dirs: string[] = []
+// endChildren's own budget is 10 s at the worst (TERM grace, then KILL wait), so the hook takes 30 s rather than the 5 s default a hook without one reads
 afterAll(async () => {
   await endChildren()
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
-})
+}, 30_000)
 
 export type Setup = {
   // the core count sysctl's hw.ncpu reads

@@ -1,90 +1,70 @@
 import { expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { SCRIPT, endChildren, machine, stop } from "./run-slot-fake"
+// the child `bun test` run's file, whose flagged tests hang and stop the fixtures this file reads evidence about
+const runSlotChildrenFixture = join(import.meta.dir, "run-slot-children-fixture.test.ts")
 
-// this file's case is the hang itself, so its budget is its own
-setDefaultTimeout(60_000)
+// this file drives a child `bun test` run, so its budget is its own
+setDefaultTimeout(120_000)
 
-// whether the process group still holds a member, by its leader's pid; a plain pid reads as alive once the pid has passed to another process, which a loaded runner does within the second
-const groupAlive = (pid: number) => {
-  try {
-    process.kill(-pid, 0)
-    return true
-  } catch {
-    return false
+// whether pid (or its group, with `group`) holds nothing, polled, since a read right after an end can still race the last breath
+const gone = async (pid: number, group = false) => {
+  const deadline = Date.now() + 5_000
+  for (;;) {
+    try {
+      process.kill(group ? -pid : pid, 0)
+    } catch {
+      return true
+    }
+    if (Date.now() > deadline) return false
+    await Bun.sleep(50)
   }
 }
 
-type Machine = ReturnType<typeof machine>
-const until = async (ok: () => boolean) => {
-  while (!ok()) await Bun.sleep(20)
-}
-const logged = (m: Machine, kind: string, pid: number) =>
-  existsSync(join(m.ops, "run-slot.runs.log")) &&
-  readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
-    .split("\n")
-    .some((l) => l.split(" ")[1] === kind && l.split(" ")[3] === `${pid}`)
-// the command's group leader, whose pid run-slot.sh writes beside its slot once the run starts
-const childPids = (m: Machine) =>
-  existsSync(m.ops)
-    ? readdirSync(m.ops)
-        .filter((f) => f.endsWith(".child"))
-        .map((f) => Number(readFileSync(join(m.ops, f), "utf8").trim()))
-    : []
-// whether the child ended, by its own exit rather than a pid look, and whether every group it left is empty
-const ended = async (run: { p: { exited: Promise<number> } }) =>
-  await Promise.race([run.p.exited.then(() => true), Bun.sleep(1_000).then(() => false)])
-
-// 7 Nov 00:38Z, issue 1316: five run-slot.sh processes from these fixtures outlived their tests, each with ppid 1. A gated fixture whose gate never appears is stopped by nothing, so the file's cleanup has to end it and its command
-test("a gated fixture whose gate never appears leaves no run-slot child after the file's cleanup", async () => {
-  const m = machine()
-  const gate = join(m.root, "gate-never")
-  const run = m.start("worker-a", {}, SCRIPT, [
-    "bash",
-    "-c",
-    `touch "$0"; until [ -e "${gate}" ]; do sleep 0.1; done`,
-  ])
-  try {
-    await until(() => logged(m, "start", run.p.pid))
-    await until(() => existsSync(run.marker))
-    const command = childPids(m)
-    expect(command.length).toBeGreaterThan(0)
-    // what the file's afterAll runs when a test times out
-    await endChildren()
-    expect(await ended(run), `run-slot child ${run.p.pid} of this fixture still runs`).toBe(true)
-    expect(groupAlive(run.p.pid), `run-slot child ${run.p.pid}'s group still holds a member`).toBe(
-      false,
-    )
-    for (const pid of command)
-      expect(groupAlive(pid), `the fixture's command ${pid} still runs`).toBe(false)
-  } finally {
-    await stop(run.p)
+// 7 Nov 00:38Z, issue 1316: five run-slot.sh processes from these fixtures outlived their tests, each with ppid 1, since a child left running when its test fails or times out is stopped by nothing. Each case runs a real child `bun test` on run-slot-children-fixture.test.ts, so what ends the fixture is the file's afterAll or run-slot's own trap, never a call this file makes; the outer reads the pids the fixture recorded and asserts them gone.
+test("a fixture hung past its test's timeout ends with its file: runner and command alike", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "children-fixture-"))
+  const evidence = join(dir, "evidence.json")
+  const p = Bun.spawn([process.execPath, "test", runSlotChildrenFixture], {
+    env: { ...process.env, RUN_SLOT_FIXTURE_HANG: "1", RUN_SLOT_FIXTURE_EVIDENCE: evidence },
+    stdout: "ignore",
+    stderr: "ignore",
+  })
+  const code = await p.exited
+  const read = JSON.parse(readFileSync(evidence, "utf8")) as {
+    aRunner: number
+    aCommand: number[]
   }
+  expect(code, "the child run's hang test should have failed on its timeout").not.toBe(0)
+  expect(
+    await gone(read.aRunner),
+    `run-slot child ${read.aRunner} of the hung fixture still runs`,
+  ).toBe(true)
+  for (const pid of read.aCommand)
+    expect(await gone(pid, true), `the hung fixture's command ${pid} still runs`).toBe(true)
+  rmSync(dir, { force: true, recursive: true })
 })
 
-// the worker-x fixture of run-slot-switches.test.ts traps TERM in its loop, so a test that dies before its own KILL leaves a loop nothing can stop by pid; the file's cleanup ends its group, escalating to KILL past the trap
-test("a fixture's loop that traps TERM ends with its test", async () => {
-  const m = machine()
-  const run = m.start("worker-x", {}, SCRIPT, [
-    "bash",
-    "-c",
-    'touch "$0"; trap "" TERM; while :; do sleep 0.2; done',
-  ])
-  try {
-    await until(() => logged(m, "start", run.p.pid))
-    await until(() => existsSync(run.marker))
-    const command = childPids(m)
-    expect(command.length).toBeGreaterThan(0)
-    await endChildren()
-    expect(await ended(run), `run-slot child ${run.p.pid} of this fixture still runs`).toBe(true)
-    expect(groupAlive(run.p.pid), `run-slot child ${run.p.pid}'s group still holds a member`).toBe(
-      false,
-    )
-    for (const pid of command)
-      expect(groupAlive(pid), `the fixture's loop ${pid} still runs`).toBe(false)
-  } finally {
-    await stop(run.p)
+test("a fixture stopped by its own stop leaves its command ended by run-slot's own trap and reap", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "children-fixture-"))
+  const evidence = join(dir, "evidence.json")
+  const p = Bun.spawn([process.execPath, "test", runSlotChildrenFixture], {
+    env: { ...process.env, RUN_SLOT_FIXTURE_HANG: "1", RUN_SLOT_FIXTURE_EVIDENCE: evidence },
+    stdout: "ignore",
+    stderr: "ignore",
+  })
+  await p.exited
+  const read = JSON.parse(readFileSync(evidence, "utf8")) as {
+    bRunner: number
+    bCommand: number[]
   }
+  expect(
+    await gone(read.bRunner),
+    `run-slot child ${read.bRunner} of the stopped fixture still runs`,
+  ).toBe(true)
+  for (const pid of read.bCommand)
+    expect(await gone(pid, true), `the stopped fixture's loop ${pid} still runs`).toBe(true)
+  rmSync(dir, { force: true, recursive: true })
 })
