@@ -641,11 +641,21 @@ describe("a bash script file", () => {
     expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
   })
 
+  // #1321: the read drops each line's trailing comment, so a chain whose comment hides nothing runs as the shell runs it
+  test("whose last step's trailing comment reads dropped takes run-slot-commit beside a big run", async () => {
+    const m = repo({ idle: 30 }, [], ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    await m.start("worker-x", {}, undefined, [
+      "bash",
+      script(m, [...COMMITS, "git push origin # done"]),
+    ]).p.exited
+    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
+  })
+
   for (const [what, lines, args] of [
     ["a build step", [...COMMITS.slice(0, 4), "bun run build", ...COMMITS.slice(4)], []],
     ["a variable", ["S=x", ...COMMITS], []],
     ["a set that sets arguments", ["set -- a", ...COMMITS], []],
-    ["a comment after a step", [...COMMITS, "git push origin # done"], []],
     [
       "a line break into a # line",
       [...COMMITS.slice(0, 5), "git commit -m x\\", "#;bun run build", ...COMMITS.slice(6)],
