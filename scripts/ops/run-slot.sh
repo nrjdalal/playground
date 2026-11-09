@@ -584,25 +584,10 @@ try:
             sys.exit(1)
     lines, buf, quoted = [], None, ""
 
-    # each line's trailing comment (a # that starts a word outside quotes) is dropped before the quote scan and the read, so a quote in one line's comment pairs with none in a later line's and the steps between keep their programs; a # inside quotes stays the text it is
-    def strip(line):
-        esc, hold = False, ""
-        for i, c in enumerate(line):
-            if esc:
-                esc = False
-            elif c == "\\" and hold != "'":
-                esc = True
-            elif c == hold:
-                hold = ""
-            elif not hold and c in "'\"":
-                hold = c
-            elif not hold and c == "#" and (i == 0 or line[i - 1] in " \t;&|()"):
-                return line[:i]
-        return line
-
+    # one scanner walks each line with the quote state the lines before it left open and cuts the line at its trailing comment (a word-start # outside quotes), so a quote in one comment pairs with none in a later line's, a continued line's and a spanning quote's own comments included, and a # inside quotes stays the text it is
     def scan(line, quoted):
         esc = False
-        for c in line:
+        for i, c in enumerate(line):
             if esc:
                 esc = False
             elif c == "\\" and quoted != "'":
@@ -611,14 +596,14 @@ try:
                 quoted = ""
             elif not quoted and c in "'\"":
                 quoted = c
-        return quoted
+            elif not quoted and c == "#" and (i == 0 or line[i - 1] in " \t;&|()"):
+                return line[:i], quoted
+        return line, quoted
 
     for line in text.split("\n"):
-        if buf is None and quoted == "":
-            line = strip(line)
-            if line.strip() == "":
-                continue
-        quoted = scan(line, quoted)
+        line, quoted = scan(line, quoted)
+        if buf is None and line.strip() == "":
+            continue
         buf = line if buf is None else buf + line
         if (len(buf) - len(buf.rstrip("\\"))) % 2:
             buf = buf[:-1]
