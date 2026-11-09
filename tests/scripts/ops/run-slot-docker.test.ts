@@ -859,5 +859,22 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       expect(r.err).toContain("refuses a chain that builds a docker image")
       expect(r.ran).toBe(false)
     })
+
+    // round 1 of the review: a continued line's comment and a comment on a line that starts inside a multi-line quote were read with the code, and their quotes paired with a later line's, so the build between them read as no lane again
+    test("a build after a continued line whose comment holds a quote is read as a docker step", async () => {
+      const r = await run(
+        'echo one \\\n  two # open "quote\ndocker build .\necho three # close" it',
+      )
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("refuses a chain that builds a docker image")
+      expect(r.ran).toBe(false)
+    })
+
+    test("a build after a line that starts inside a quote, with a comment after its close, is read as a docker step", async () => {
+      const r = await run(`echo "one\ntwo" # it's open\ndocker build .\necho three # close ' it`)
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("refuses a chain that builds a docker image")
+      expect(r.ran).toBe(false)
+    })
   })
 })
