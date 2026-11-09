@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path"
 import { makeScratch, removeScratch } from "@packages/safe-delete"
 import { gateSettings, SCHEMA_VERSION } from "@packages/settings"
 
+import { gateLine } from "../pr-merge/ship-lines"
 import { GATE_LABEL, stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
@@ -15,6 +16,7 @@ const PROXY_PORT = "14155"
 const INSTALL_LIMIT_S = 1200
 const ROUTE_WAIT_MS = 180_000
 const SCRIPTS_WAIT_MS = 150_000
+const USAGE_WAIT_MS = 60_000
 const ROOM_WAIT_MS = 600_000
 // The box's PLAYGROUND_LOAD_MULT: the gate checks what a new user meets on a quiet Mac, so spawn.sh's load gate in the box allows this many times the cores and the host's other sessions never hold a start; its memory and usage gates stay as they are.
 export const BOX_LOAD_MULT = 10
@@ -27,6 +29,13 @@ export type Step = {
   ok: boolean
   shot?: string
 }
+
+// The steps main checks, in order, so a run that stopped short of its last one is no pass.
+export const STEP_COUNT = 7
+
+// Pure: the gate's last line, which ship:merge reads in the ship PR's body: PASS only for a run that reached every step with none reading FAIL.
+export const resultLine = (sha: string, steps: Step[]): string =>
+  gateLine(sha, steps.length < STEP_COUNT || steps.some((s) => !s.ok && !s.inconclusive))
 
 // Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail, then the count.
 export const report = (steps: Step[]): string => {
@@ -464,7 +473,6 @@ const main = async (args: string[]) => {
         () => existsSync(env) && /^POSTGRES_URL=\S/m.test(readFileSync(env, "utf8")),
         120_000,
       )
-      browser.cmd("wait", "--load", "networkidle")
       return {
         detail: saved ? "" : "no POSTGRES_URL in the desk's .env after 120s",
         ok: saved,
@@ -540,9 +548,15 @@ const main = async (args: string[]) => {
       },
     )
     await check("Usage shows", async () => {
-      browser.cmd("open", `${web}/dashboard`)
-      browser.cmd("wait", "--load", "networkidle")
-      const words = usageWords(browser.text())
+      // a read can land before the machine's reading does, when the row still says Not read yet, so the last read is the one judged
+      let text = ""
+      await waitFor(() => {
+        browser.cmd("open", `${web}/dashboard`)
+        browser.cmd("wait", "--load", "networkidle")
+        text = browser.text()
+        return usageWords(text) !== null
+      }, USAGE_WAIT_MS)
+      const words = usageWords(text)
       return {
         detail: words ?? "no usage reading on the dispatcher's row",
         ok: words !== null,
@@ -611,6 +625,7 @@ const main = async (args: string[]) => {
       clean(box, home)
       console.log(`gate: screenshots and logs in ${shots}`)
     }
+    console.log(resultLine(full, steps))
   }
   return steps.every((s) => s.ok) ? 0 : 1
 }

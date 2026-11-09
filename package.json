@@ -60,6 +60,7 @@
     "serve": "bun --no-env-file api/hono/src/bin/dev-running.ts start && bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun --no-env-file api/hono/src/bin/dev.ts --serve",
     "shadcn:update": "bun packages/scripts/src/shadcn-update.ts && bun i",
     "ship:freeze": "bun packages/scripts/src/verify/prebuild.ts pr-merge && bun --no-env-file packages/scripts/src/pr-merge/freeze-cli.ts",
+    "ship:merge": "bun packages/scripts/src/verify/prebuild.ts pr-merge && bun --no-env-file packages/scripts/src/pr-merge/ship-merge.ts",
     "start": "turbo run start",
     "test": "if [ -d tests ]; then turbo run build --filter='./packages/*' && bun packages/scripts/src/env-keys.ts && bun packages/scripts/src/data-table-metrics.ts && NODE_ENV=test bun packages/scripts/src/test-sandbox.ts; fi",
     "test:e2e": "[ ! -d tests ] || E2E_API_URL=${E2E_API_URL:-http://localhost:4000} E2E_WEB_URL=${E2E_WEB_URL:-http://localhost:3000} bun run test:file e2e.test",
