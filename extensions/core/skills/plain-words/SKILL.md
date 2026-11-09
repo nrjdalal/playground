@@ -29,7 +29,9 @@ Done when a reader with no context can say, from the text alone, what changed an
 
 ## Owner style: picture first
 
-A message to the owner that to-inbox shapes, an ask, a read-only card or a reply in chat, Slack or Yard, takes the style of `mattpocock/skills`' pr skill; a draft, a `slack` or a `ticket` decision keeps its own text's shape (to-inbox):
+A message to the owner that to-inbox shapes takes the style of `mattpocock/skills`' pr skill: an ask, a read-only card, or a reply in chat, Slack or Yard.
+A draft, a `slack` or a `ticket` decision keeps its own text's shape (to-inbox).
+The style:
 
 - Open on the smallest picture that makes the point ([to-inbox](../to-inbox/SKILL.md) picks it), with a short note of one sentence on the line under it.
 - Give the evidence as a before and an after.
@@ -37,7 +39,7 @@ A message to the owner that to-inbox shapes, an ask, a read-only card or a reply
 - Give a little context in simple technical English.
 - Start at the point, with no preamble.
 
-Done when the message opens on its picture and its note, and a message about a change names its before and after, its undo and its reach.
+Done when the message opens on its picture with its note under it (on its note, when to-inbox shows the picture as an attachment under the text), and a message about a change names its before and after, its undo and its reach.
 
 A made-up fix, in this style for an Inbox card:
 
@@ -49,10 +51,10 @@ A made-up fix, in this style for an Inbox card:
 
 The export now returns every row.
 
-- Before: 100 rows. After: 2,400 rows, on one test file.
-- The old code stopped at a fixed limit of 100 rows.
-- One revert undoes it.
-- It touches the export alone.
+- ✅ Before: 100 rows. After: 2,400 rows, on one test file.
+- 🐛 The old code stopped at a fixed limit of 100 rows.
+- ↩️ One revert undoes it.
+- 🎯 It touches the export alone.
 ````
 
 ## Keep the skills learning

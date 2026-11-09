@@ -501,6 +501,7 @@
   - 🐛 The export ends at 100 rows.
   - ✅ The fix runs on dev since 24 Oct, with no errors.
   - ↩️ One commit reverts it.
+  - 🎯 It touches the export alone.
   ````
 
   Options: `Port the fix to staging, then main`; Deny: `Keep it on dev`.
@@ -533,6 +534,8 @@
   - 🖼️ The Inbox card shows its pictures as a row of thumbnails.
   - 👆 A click opens the picture in the viewer.
   - 📱 The row scrolls sideways on a phone.
+  - ↩️ One revert puts the old card back.
+  - 🎯 It touches the Inbox card alone.
   ````
 
   Options: `Build the row as the after picture shows`; Deny: `Keep the card as it is`.

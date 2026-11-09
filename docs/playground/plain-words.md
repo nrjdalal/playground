@@ -7,10 +7,10 @@ The defining constraint is its size: two rules and one style, and nothing more, 
 
 Agent-fired: a session loads it before it writes anything a person reads, and the owner can name it too.
 
-| You are writing                                           | What it takes                                     |
-| --------------------------------------------------------- | ------------------------------------------------- |
-| An Inbox item, or a message to you in chat, Slack or Yard | the two rules, and the owner style, picture first |
-| An issue, a PR body, a comment or a review                | the two rules, inside that text's own template    |
+| You are writing                                                      | What it takes                                     |
+| -------------------------------------------------------------------- | ------------------------------------------------- |
+| An ask, a read-only card, or a message to you in chat, Slack or Yard | the two rules, and the owner style, picture first |
+| An issue, a PR body, a comment or a review                           | the two rules, inside that text's own template    |
 
 ## The two rules and the owner style
 
@@ -23,10 +23,7 @@ It sits in a section of its own, so a new style pick changes that section alone 
 ## Common questions
 
 **Why ELI5 and not a child's voice?**
-ELI5 here means a reader new to the topic, written to in an adult's voice: each technical word gets everyday words the first time it appears, and an everyday comparison sits beside a fact without replacing it.
-
-**Where did first person and time zones go?**
-They stay in [to-inbox](./to-inbox.md), as house rules for a message to you: the poster's "I", and a time in your own zone.
+A child's voice talks down to its reader, and the ELI5 forum itself turns such answers away, so the skill keeps the plain words and drops the tone (rule 2 in [the skill's file](../../extensions/core/skills/plain-words/SKILL.md)).
 
 ## It's working if
 

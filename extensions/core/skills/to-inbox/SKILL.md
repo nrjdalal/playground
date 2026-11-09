@@ -19,7 +19,7 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 
 Every decision and draft then takes step 10 once the owner answers; an update gets no answer, so it ends at step 9.
 
-A message outside the Inbox, a dispatcher's reply in chat or a Slack or Yard DM, takes steps 2 to 6 and 8, since Choices and Post belong to a card alone; a relay in chat, the dispatcher passing a session's message on to the owner, is one such message, its picture and bullets the session's point in the owner's words.
+A message outside the Inbox, a dispatcher's reply in chat or a Slack or Yard DM, takes steps 2 to 6 and 8, since Choices and Post belong to a card alone; a relay in chat, the dispatcher passing a session's message on to the owner, is one such message, its picture, note and bullets the session's point in the owner's words.
 In chat, step 2's picture is a fenced block (an ASCII flow or a diff; a work status block lives in its card, which chat names by its `#iN`), since no-chat-question sends a table, or three or more numbered steps, to one Inbox card instead, unless every row or step names an issue or PR (`scripts/hooks/README.md`).
 
 Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, and you resolve your own update once it has settled: an alert that has fixed itself, a progress card whose last step is done.
@@ -31,7 +31,7 @@ On an update, Done types you `done` and Dismiss `dismiss`: post a new card for m
 ## Steps
 
 1. **Already open?** Run `bun run ask open` before you write anything (asks.md). Done when no open item asks the same thing, or you have named that item's `#iN` in chat and stopped here.
-2. **Picture and note.** Load [plain-words](../plain-words/SKILL.md) with the Skill tool, then pick the one picture asks.md's shape leads with, by its owner style, each line within the card's width ([Fit the card](#fit-the-card)), which a `diff` block is free of, since the card wraps it. Under it, write the picture's note: one sentence on the point. Attachments always show under the text, so an item with one keeps its text to the note and the bullets. Done when the text's first block is that picture, or the item's first attachment is, and the note follows it.
+2. **Picture and note.** Load [plain-words](../plain-words/SKILL.md) with the Skill tool, then pick the one picture asks.md's shape leads with, by its owner style, each line within the card's width ([Fit the card](#fit-the-card)), which a `diff` block is free of, since the card wraps it. Under it, write the picture's note: one sentence on the point. Attachments always show under the text, so an item whose picture is an attachment opens its text on the note, then the bullets. A work status card's block is its picture, and the block's first line, the job and its done/total, is its note ([PROGRESS.md](references/PROGRESS.md)). Done when the text opens on that picture with its note under it, or, when the picture is an attachment, on the note.
 
    Beside asks.md's diff, ASCII flow and before and after pair, two more fit:
 
