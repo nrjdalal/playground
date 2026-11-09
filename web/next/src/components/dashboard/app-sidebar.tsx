@@ -830,7 +830,7 @@ function ModelIcons({
           </span>
         </Hint>
       ) : (
-        <span className="size-4 shrink-0" />
+        <span className="size-4 shrink-0 group-data-[collapsible=icon]:hidden" />
       )}
     </>
   )

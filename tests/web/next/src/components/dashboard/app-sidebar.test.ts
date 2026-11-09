@@ -508,7 +508,12 @@ describe("SessionRow", () => {
       const html = row(name, role, [], { model: "claude-opus-5-5" })
       const logo = html.indexOf(pathOf(RiAnthropicFill))
       expect(logo).toBeGreaterThan(-1)
-      expect(html.indexOf('<span class="size-4 shrink-0"></span>', logo)).toBeGreaterThan(logo)
+      expect(
+        html.indexOf(
+          '<span class="size-4 shrink-0 group-data-[collapsible=icon]:hidden"></span>',
+          logo,
+        ),
+      ).toBeGreaterThan(logo)
     })
   }
 
