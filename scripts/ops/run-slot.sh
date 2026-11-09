@@ -53,9 +53,9 @@ switch_on() {
 }
 # the expiry a switch line carries, read with builtins into ENDS, so switch_on and due_at parse one line with no process (issue 1378's fork bound)
 switch_ends() {
-  local line re='^[^ ]+ [0-9-]{10}T[0-9:]{8}Z [0-9-]{10}T[0-9:]{8}Z '
+  local line= re='^[^ ]+ [0-9-]{10}T[0-9:]{8}Z [0-9-]{10}T[0-9:]{8}Z '
   ENDS=
-  read -r line 2>/dev/null < "$OPS/$1" || return 0
+  read -r line 2>/dev/null < "$OPS/$1"
   [[ "$line" =~ $re ]] || return 0
   line=${line#* }
   line=${line#* }
@@ -2133,7 +2133,7 @@ if [ "$KIND" = quick ] && [ "$WHO" = ops-merge-train ]; then
 fi
 if [ -n "$KIND" ]; then
   [ -n "$TICKET" ] && rm -f "$TICKET" && TICKET=""
-  WAIT_FROM=$SECONDS CAT=0
+  WAIT_FROM=$SECONDS FAT=0 CAT=0
   # run-slot.clone-off holds every clone while it exists (dispatcher, 18 Oct, with run-slot.3-off)
   # run-slot.clone-allow holds, one a line, grep patterns for the clones a lead lets through while clone-off stands (builder, 18 Oct: priority clones in order; every checker by default, finish-first)
   # clone-off lets a clone through while load1 and load5 are under 30 and memory passes spawn.sh's gate, pressure level 1 or 2 with 8% or more free (dispatcher, 19 Oct 01:18Z;
