@@ -15,16 +15,22 @@ Run every command from a cwd inside the Playground checkout, so `gh` reads the r
 
 ## 1. Pin the content
 
-Every PR meant for this ship is squash-merged into `canary`. Pin the head you ship:
+Every PR meant for this ship is squash-merged into `canary`.
+The ship's version `vX.Y.Z` is the last tag's patch plus one (`v0.0.98` is followed by `v0.0.99`); the root `package.json` version is not moved and does not decide it.
+Freeze `canary` at that version, so `pr:merge` and merge-on-ready hold every PR, then pin the head you ship:
 
 ```bash
 gh pr list --base canary --state open   # anything that should ship still open?
+bun run ship:freeze vX.Y.Z
 CANARY=$(gh api repos/{owner}/{repo}/branches/canary --jq .commit.sha)
 ```
 
+A ship still short of step 4 as the freeze nears its lapse ([pr-merge's Holds and rulings](../../../packages/scripts/src/pr-merge/README.md#holds-and-rulings)) runs `bun run ship:freeze vX.Y.Z` again, which restarts it.
+A ship that stops before its tag ends the freeze with `bun run ship:freeze --end`, so the held PRs merge again.
+
 Run the new-user gate on it, `bun run gate:new-user "$CANARY"` (`.agents/testing.md`, End-to-end tests), and name each FAIL and INCONCLUSIVE line in the ship PR's body.
 
-Done when `CANARY` holds the SHA you mean to ship and the gate's PASS and FAIL list for it is in hand. When `canary` moves before step 3, read it again.
+Done when `bun run ship:freeze status` prints the `"*"` line naming `vX.Y.Z` (or the line Ops wrote by hand, which `ship:freeze` kept and which holds every PR already), `CANARY` holds the SHA you mean to ship and the gate's PASS and FAIL list for it is in hand. When `canary` moves before step 3, read it again.
 
 ## Rehearse an invitee's update
 
@@ -94,7 +100,7 @@ Done when the PR reads `MERGED` and `MERGE` holds its merge commit. A refusal fo
 
 ## 4. Tag and publish
 
-The tag is the last tag's patch plus one (`v0.0.98` is followed by `v0.0.99`); the root `package.json` version is not moved and does not decide it.
+The tag is step 1's `vX.Y.Z`.
 
 The notes take ZeroStarter's shape: the compare link, one emoji section per commit type, then each contributor: the owner as `- <name> @<login>`, its name the words of the commit's author name that `owner.names` lists, and every other contributor as `- @<login>`, the login alone, the one line a ship's notes may name a person on (no-public-leak's section of `scripts/hooks/README.md` says how the guard reads it). `bun run release:notes <last tag> vX.Y.Z` renders them from GitHub's compare of the two tags (`packages/scripts/src/release-notes/`) and prints them. Write them to a file outside the checkout, and name it by its literal absolute path in `--notes-file`, since the leak guards read a notes file only through a literal path. Run each line below as a Bash call of its own, since the guards read the notes file before a call runs:
 
@@ -105,7 +111,8 @@ gh release create vX.Y.Z --verify-tag --latest --notes-file /tmp/notes-vX.Y.Z.md
 ```
 
 When a guard refuses the notes, edit the file in a call of its own, then create the release again in the next: an edit and the create in one call are refused again, since the guard read the file before the edit. Cut a refused contributor line to `- @<login>` and keep the section; delete a line only when the guard refuses its login itself.
-Done when `gh release list -L 1` shows `vX.Y.Z` marked Latest, and its page opens with the compare link.
+Then end step 1's freeze with `bun run ship:freeze --end`.
+Done when `gh release list -L 1` shows `vX.Y.Z` marked Latest, its page opens with the compare link, and `--end` printed `removed the "*" line`, or that a line Ops wrote by hand stays for Ops to remove.
 
 ## 5. Pull the main checkout
 
@@ -140,4 +147,4 @@ Done when the main checkout's `HEAD` equals `origin/main`, `playground update` e
 
 - **Merge method is load-bearing.** `canary` PRs squash; the ship PR merges with a **merge commit** so `main` keeps shared history with `canary` and the next ship's diff stays clean.
 - **The notes are rendered, never committed.** `release:notes` groups the commits since the last tag as ZeroStarter's changelogen notes do, with `ci` hidden as ZeroStarter's `changelog.config.json` hides it, and the release keeps them, so a ship makes no changelog commit on `canary` or `main`.
-- **Each tag is made once.** A tag that already exists fails the `git/refs` call: read the last tag again and take the next number.
+- **Each tag is made once.** A tag that already exists fails the `git/refs` call: read the last tag again, take the next number, and run step 1's `bun run ship:freeze` with it.

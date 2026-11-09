@@ -102,7 +102,7 @@ function Slide({
   onEdge: (direction: -1 | 1) => void
 }) {
   const viewer = VIEWERS[item.kind]
-  const { missing, url } = useAttachment(item.id, near && Boolean(viewer))
+  const { failed, missing, url } = useAttachment(item.id, near && Boolean(viewer))
   const Icon = viewer?.icon ?? RiFileLine
   return (
     <CarouselItem
@@ -115,15 +115,17 @@ function Slide({
       ) : (
         <span className="text-muted-foreground flex flex-col items-center gap-2 text-xs">
           <Icon className="size-8" />
-          {missing ? <Missing /> : null}
+          {missing || failed ? <Missing failed={failed} /> : null}
         </span>
       )}
     </CarouselItem>
   )
 }
 
-// What a file the API answered 404 for shows in its place
-export const Missing = () => <span className="text-muted-foreground text-xs">Missing</span>
+// What a file that did not arrive shows in its place: Missing for a 404, Did not load for any other failure
+export const Missing = ({ failed = false }: { failed?: boolean }) => (
+  <span className="text-muted-foreground text-xs">{failed ? "Did not load" : "Missing"}</span>
+)
 
 const CAROUSEL_ITEM = '[data-slot="carousel-item"]'
 
