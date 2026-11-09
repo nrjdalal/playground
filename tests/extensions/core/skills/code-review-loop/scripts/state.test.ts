@@ -1298,3 +1298,162 @@ test("10r a dotfile or a dotted folder keeps its whole name as its stem, so its 
     "tests/.gitignore.test.tsx",
   ])
 })
+
+// #1359: a fake GitHub of one PR whose body and comments the reviewer read at READ_AT.
+const READ_AT = "2026-11-08T19:00:00Z"
+const BODY = "## TL;DR\n\n- the body as read"
+const freshThrough = async (
+  body: string,
+  comments: object[],
+  reviewComments: object[] = [],
+  reviews: object[] = [],
+): Promise<[string, number, string[]]> => {
+  const paths: string[] = []
+  const lines: string[] = []
+  let code = 0
+  await withIo(
+    (...args: string[]) => {
+      const path = args.find((a) => a.startsWith("repos/"))!
+      paths.push(path)
+      if (path === "repos/acme/archive/pulls/160")
+        return JSON.stringify({ ...restView, body, updated_at: "2026-11-08T19:09:00Z" })
+      if (path.startsWith("repos/acme/archive/issues/160/comments"))
+        return JSON.stringify([comments])
+      if (path.startsWith("repos/acme/archive/pulls/160/comments"))
+        return JSON.stringify([reviewComments])
+      if (path.startsWith("repos/acme/archive/pulls/160/reviews")) return JSON.stringify([reviews])
+      throw new Error(path)
+    },
+    async () => {
+      const realLog = console.log
+      const realCode = process.exitCode
+      console.log = (line?: unknown) => {
+        lines.push(String(line))
+      }
+      process.exitCode = 0
+      try {
+        await state.cmdFresh("acme/archive", "160", READ_AT, state.bodyDigest(BODY))
+        code = Number(process.exitCode ?? 0)
+      } finally {
+        console.log = realLog
+        process.exitCode = realCode ?? 0
+      }
+    },
+  )
+  return [lines.join("\n"), code, paths]
+}
+
+const posted = (body: string, at: string, id = 7) => ({
+  body,
+  created_at: at,
+  html_url: `https://github.com/acme/archive/pull/160#issuecomment-${id}`,
+  id,
+  updated_at: at,
+  user: { login: "acme-owner" },
+})
+
+test("10a fresh refuses a body edited after the read, naming the body (#1359)", async () => {
+  const [out, code] = await freshThrough(`${BODY}\n- an edit after the read`, [])
+  expect(code).toBe(1)
+  expect(out).toContain(
+    `CHANGED body: ${state.bodyDigest(BODY)} at the read, ${state.bodyDigest(`${BODY}\n- an edit after the read`)} now`,
+  )
+})
+
+test("10b fresh refuses a comment posted after the read, naming it (#1359)", async () => {
+  const [out, code, paths] = await freshThrough(BODY, [
+    posted("an old note", "2026-11-08T18:00:00Z", 6),
+    posted("Before shot posted\n\nmore", "2026-11-08T19:04:00Z"),
+  ])
+  expect(code).toBe(1)
+  expect(out).toBe(
+    "CHANGED comment https://github.com/acme/archive/pull/160#issuecomment-7 by acme-owner at 2026-11-08T19:04:00Z: Before shot posted",
+  )
+  expect(paths).toContain(`repos/acme/archive/issues/160/comments?since=${READ_AT}&per_page=100`)
+})
+
+test("10c fresh refuses a thread reply posted after the read, naming it (#1359)", async () => {
+  const [out, code, paths] = await freshThrough(
+    BODY,
+    [],
+    [{ ...posted("fixed in abc", "2026-11-08T19:05:00Z", 9), html_url: "https://x/r9" }],
+  )
+  expect(code).toBe(1)
+  expect(out).toBe(
+    "CHANGED review comment https://x/r9 by acme-owner at 2026-11-08T19:05:00Z: fixed in abc",
+  )
+  expect(paths).toContain(`repos/acme/archive/pulls/160/comments?since=${READ_AT}&per_page=100`)
+})
+
+test("10d fresh passes an unchanged body with no comment after the read, one at the read itself included (#1359)", async () => {
+  const [out, code] = await freshThrough(BODY, [posted("at the read", READ_AT)])
+  expect(code).toBe(0)
+  expect(out).toBe(`FRESH since ${READ_AT}`)
+})
+
+test("10g fresh refuses a review submitted with a body after the read, naming it (#1359)", async () => {
+  const review = (body: string, at: string | null, id: number) => ({
+    body,
+    html_url: `https://github.com/acme/archive/pull/160#pullrequestreview-${id}`,
+    id,
+    submitted_at: at,
+    user: { login: "acme-owner" },
+  })
+  const [out, code, paths] = await freshThrough(
+    BODY,
+    [],
+    [],
+    [
+      review("an old summary", "2026-11-08T18:00:00Z", 1),
+      review("", "2026-11-08T19:06:00Z", 2),
+      review("a pending draft", null, 3),
+      review("Replies to round 1\n\nmore", "2026-11-08T19:07:00Z", 4),
+    ],
+  )
+  expect(code).toBe(1)
+  expect(out).toBe(
+    "CHANGED review https://github.com/acme/archive/pull/160#pullrequestreview-4 by acme-owner at 2026-11-08T19:07:00Z: Replies to round 1",
+  )
+  expect(paths).toContain("repos/acme/archive/pulls/160/reviews?per_page=100")
+})
+
+test("10e pr prints the read line fresh takes: its start time and the body's digest (#1359)", async () => {
+  const lines: string[] = []
+  await withIo(
+    (...args: string[]) => {
+      if (args.includes("graphql"))
+        throw new state.Called(args, "", "GraphQL: API rate limit already exceeded for user ID 1.")
+      if (args[2] === "user") return "acme-owner\n"
+      const path = args.find((a) => a.startsWith("repos/"))!
+      if (path.endsWith("/pulls/160")) return JSON.stringify({ ...restView, body: BODY })
+      return JSON.stringify([[]])
+    },
+    async () => {
+      const realLog = console.log
+      const realTime = state.io.time
+      state.io.time = () => Date.parse(READ_AT) / 1000
+      console.log = (line?: unknown) => {
+        lines.push(String(line))
+      }
+      try {
+        await state.cmdPr("acme/archive", "160")
+      } finally {
+        console.log = realLog
+        state.io.time = realTime
+      }
+    },
+  )
+  expect(lines.at(-1)).toBe(`read: ${READ_AT} ${state.bodyDigest(BODY)}`)
+  expect(state.PR_QUERY).toContain(" body ")
+})
+
+test("10f fresh refuses a read time or a digest it cannot use (#1359)", () => {
+  for (const args of [
+    ["fresh", "x/y", "1", "yesterday", "0123456789ab"],
+    ["fresh", "x/y", "1", READ_AT, "nothex"],
+  ]) {
+    const out = runCli(args)
+    expect(out.code, args.join(" ")).not.toBe(0)
+    expect(out.stderr).toMatch(/not a read time|not a body digest/)
+  }
+})

@@ -166,10 +166,11 @@ describe("each start takes the memory trial's arm by its role (#1484)", () => {
         turnWas("off"),
       )
       expect(r.code, r.err).toBe(0)
-      expect(launchAfterRm(r)).toContain(
-        ` --settings ${settingsOf(r, "factory-settings-400k.json")} `,
-      )
-      expect(builtOf(r, "factory-settings-400k.json").autoMemoryEnabled).toBe(false)
+      // a manager's shared file is its own, which denies it the Agent and Workflow tools (spawn-manager-deny.test.ts)
+      const shared =
+        args[0] === "worker" ? "factory-settings-400k.json" : "factory-settings-manager-400k.json"
+      expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, shared)} `)
+      expect(builtOf(r, shared).autoMemoryEnabled).toBe(false)
       expect(readdirSync(lw(r.home)).filter((file) => file.includes("-memory-"))).toEqual([])
       expect(r.roster).toContain("memory=off")
       expect(readFileSync(lw(r.home, "memory", "worker-arm"), "utf8")).toBe("off\n")
@@ -194,7 +195,7 @@ describe("each start takes the memory trial's arm by its role (#1484)", () => {
   })
 
   test.each([
-    ["off", "off", "factory-settings-400k.json"],
+    ["off", "off", "factory-settings-manager-400k.json"],
     ["on", "on", "factory-settings-400k-memory-builder.json"],
     [undefined, "on", "factory-settings-400k-memory-builder.json"],
   ])(
@@ -259,7 +260,7 @@ describe("each start takes the memory trial's arm by its role (#1484)", () => {
       ["worker", "worker-brave-otter", "b.md", "--backend", "glm"],
       "factory-settings-glm-400k.json",
     ],
-    ["the optimizer", ["manager", "optimizer", "b.md"], "factory-settings-400k.json"],
+    ["the optimizer", ["manager", "optimizer", "b.md"], "factory-settings-manager-400k.json"],
     ["a runner", ["runner", "runner-brave-otter", "b.md"], "factory-settings-400k.json"],
   ])("%s stays off and leaves the workers' turn alone", async (_, args, file) => {
     const r = await spawn(args, [])
