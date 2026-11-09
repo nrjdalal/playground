@@ -315,12 +315,10 @@ describe("code-review-loop's round 1 greps each changed term", () => {
   test("a PR that moves text out of a file greps the old file's name over the whole repo, on both sides (#1619)", async () => {
     const moved =
       "When the PR moves text out of a file, run `git grep -n <old file name>` over the whole repo too, code comments, `scripts/hooks/README.md` and `.agents/dashboard/` included, and check each hit against the moved text at the old base"
-    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    const [step, done] = await part("Round 1 greps")
     expect(step).toContain(moved)
     expect(step).toContain("rounds 4 and 5")
-    expect(step.split("**Done when**")[1] ?? "").toContain(
-      "each file the PR moves text out of grepped over the whole repo",
-    )
+    expect(done ?? "").toContain("each file the PR moves text out of grepped over the whole repo")
     expect(await Bun.file(join(root, "AGENTS.md")).text()).toContain(moved)
     expect(await page()).toContain("greps the old file's name over the whole repo")
   })
@@ -328,10 +326,10 @@ describe("code-review-loop's round 1 greps each changed term", () => {
 
 describe("code-review-loop keeps its clone at the head and asks the lead on a trust-widening nit", () => {
   test("step 4's sub-agents leave the clone as it stands, and its Done when checks HEAD after they return (#1624)", async () => {
-    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    const [step, done] = await part("Fresh read")
     expect(step).toContain("with no merge, checkout or reset there")
     expect(step).toContain("17 of `canary`'s files")
-    expect(step.split("**Done when**")[1] ?? "").toContain(
+    expect(done ?? "").toContain(
       "`git -C <clone> rev-parse HEAD` printed the head after every `code-review` call",
     )
     expect(await page()).toContain("They leave the review clone as it stands")
