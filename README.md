@@ -1,5 +1,9 @@
 # Playground
 
+> [!WARNING]
+> Playground is experimental. It changes every day and can break.
+> The main product is [ZeroSDK](https://github.com/nrjdalal/zerosdk), which comes later in 2027.
+
 Run a team of Claude agents.
 
 Playground runs the Claude Code sessions on your Mac as a team, with a Dashboard to watch and steer it.
