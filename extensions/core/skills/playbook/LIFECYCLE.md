@@ -44,7 +44,6 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   named `ops-*.json` so the Dashboard finds a new job by its file alone,
   in the shape `heartbeatSchema` in `api/hono/src/lib/dashboard/ops.ts` reads (`job`, `pid`, `startedAt`, `lastBeatAt`, `lastResult`, `cycleSeconds`), written atomically each beat by a loop that does not wait on the work.
   The Dashboard lists each under Scripts, by its plain name and its `jobs.json` `schedule`: Running while `lastResult` is `ok` and the beat is within three cycles, Waiting while it starts `waiting: ` (a job with nothing to read yet, muted and not broken), Failing on any other result, Down once the beat goes stale, the pid goes or the loop writes `loop exited <code>` or `supervisor exited`.
-  A restart ends the ops jobs and ops-tick's ops-up beat (`scripts/ops/up.py`, below) starts them again, so a restart plan holds no step that stops them first: up.py has no pause switch and starts a stopped job again on a later pass.
   ops-dashboard runs the dashboard checkout's own `scripts/ops/dashboard/`, swapping onto it in the same pid at each start and after a roll that changes it (`.agents/dashboard/live.md`).
   ops-merge-train is merge-on-ready, a job and never a worker: every 60 seconds it reads the open PRs' heads and checks, and on any change runs `bun run pr:train ready`, which merges the first PR in queue order whose every gate passes; its beat's `lastResult` is `ok` or the command that failed and why.
   ops-unstick (`scripts/ops/unstick/run.py`) watches for stuck sessions, by the **unstick** rule.
@@ -66,7 +65,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   which at a full week writes ops-unstick's move file while a second dispatcher is seated and tells the dispatchers and both leads),
   the usage-limit watch (each session on the usage-limit screen named to the builder once with its account, and the lowest-week account with its 5-hour window under 90% to move to),
   the auto-end beat every 5 minutes (`scripts/ops/optimizer/auto_end.ts` over `idle_sessions.ts`'s flags, [SESSIONS.md](SESSIONS.md#end)), each end or `Not ended` line to the session's lead, a `Not ended` line once until its words change,
-  ops-up every 5 minutes (`scripts/ops/up.py`, each line it prints told to ops once until it changes, so a reboot or a herdr server that went down brings every job back with no hand step),
+  ops-up every 5 minutes (`scripts/ops/up.py`, each line it prints told to ops once until it changes, so a reboot or a herdr server that went down brings every job back with no hand step, and a reboot plan holds no step that stops the jobs first, since the reboot ends them and this beat starts them again),
   the sweep (each felled session to its lead once, never a probe or one the roster holds done, parked, paused, ended or starting, but runner-plain-relay, the relay itself, whose resume line it runs through spawn.sh's capacity gate at every sweep that prints it, with `--brief brief-runner-plain-relay.md` so the relay starts its wait task again,
   never marked told since a resume keeps the session id and the line returns with the next outage,
   rather than queueing it for a relay that is down, naming the outcome to ops, and load past 30 once a crossing), the GLM credits log line, the optimizer's wake words,
