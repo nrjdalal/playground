@@ -57,7 +57,7 @@ export const runSlot = <
   children.push({ p, ops, at: Date.now() })
   return p
 }
-// Ends every recorded child still unreaped, with the command group it owns, on pass, fail and timeout alike: TERM first, which run-slot.sh's own trap turns on its command's group, then KILL after 5 s for what outlives it, as stop() does. A child that has ended is never signalled itself, since its pid may be anyone's on a Mac that wraps them in minutes. A *.child pid is signalled as a group only while the identity holds it is this run's own: still its runner's child leading its own group (the guard run-slot.sh's own preempt reads) while the runner lives, or, once the runner died without its trap, an orphan leading its own group whose *.child was written within this run's window, since a stale or wrapped id passes neither.
+// Ends every recorded child still unreaped, with the command group it owns, on pass, fail and timeout alike: TERM first, which run-slot.sh's own trap turns on its command's group, then KILL after 5 s for what outlives it, as stop() does. A child that has ended is never signalled itself, since its pid may be anyone's on a Mac that wraps them in minutes. A *.child pid is signalled as a group only while the identity holds it is this run's own: still its runner's child leading its own group (the guard run-slot.sh's own preempt reads) while the runner lives, or, once the runner died without its trap, an orphan leading its own group whose *.child was written no before the process started, since a stale or wrapped id passes every guard.
 export const endChildren = async () => {
   const exited = (p: { exited: Promise<number> }) =>
     Promise.race([p.exited.then(() => true), Bun.sleep(50).then(() => false)])
@@ -85,13 +85,28 @@ export const endChildren = async () => {
         if (!file.endsWith(".child")) continue
         const command = Number(readFileSync(join(child.ops, file), "utf8").trim())
         if (!(command > 1)) continue
-        if (statSync(join(child.ops, file)).mtimeMs < child.at - 60_000) continue
-        const [ppid, pgid] = Bun.spawnSync(["ps", "-o", "ppid=,pgid=", "-p", String(command)])
+        const written = statSync(join(child.ops, file)).mtimeMs
+        if (written < child.at - 60_000) continue
+        const [etime, ppid, pgid] = Bun.spawnSync([
+          "ps",
+          "-o",
+          "etime=,ppid=,pgid=",
+          "-p",
+          String(command),
+        ])
           .stdout.toString()
           .trim()
           .split(/\s+/)
         if (Number(pgid) !== command) continue
-        if (done ? Number(ppid) === 1 : Number(ppid) === child.p.pid) groups.push(command)
+        // the process must have started no later than the .child was written, which run-slot.sh does right after its command: a reused pid started after the write, and a wrap puts one there in minutes
+        const [days, rest] = etime.includes("-")
+          ? [etime.split("-")[0]!, etime.split("-")[1]!]
+          : ["0", etime]
+        const started =
+          Date.now() -
+          (Number(days) * 86_400 + rest.split(":").reduce((s, n) => s * 60 + Number(n), 0)) * 1_000
+        const runsIt = started <= written + 1_000
+        if (done ? Number(ppid) === 1 && runsIt : Number(ppid) === child.p.pid) groups.push(command)
       }
     if (!done || groups.length > 0) live.push({ p: child.p, pid: child.p.pid, groups })
   }

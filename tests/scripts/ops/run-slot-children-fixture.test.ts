@@ -1,14 +1,16 @@
 import { setDefaultTimeout, test } from "bun:test"
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { SCRIPT, machine, stop } from "./run-slot-fake"
 
-// The child `bun test` run behind run-slot-children.test.ts's two cases: one test hangs past its own timeout, so the file's afterAll (endChildren) is what ends its fixture, and one stops its fixture by its own stop, so run-slot.sh's own TERM and reap have to end the command. Each writes the handles it started to the evidence file the outer test reads, so the outer asserts on real pids. Without RUN_SLOT_FIXTURE_HANG the suite's own run of this file starts nothing and passes.
+// The child `bun test` run behind run-slot-children.test.ts's two cases: one test hangs past its own timeout, which bun's own timeout handling ends, its dangling run-slot.sh and the command alike, and one stops a loop that traps TERM by its own stop, whose KILL leaves the loop an orphan that only the file's afterAll (endChildren) ends. Each writes the handles it started to the evidence file the outer test reads, so the outer asserts on real pids. Without RUN_SLOT_FIXTURE_HANG the suite's own run of this file starts nothing and passes.
 setDefaultTimeout(30_000)
 
 const evidencePath = () =>
-  process.env.RUN_SLOT_FIXTURE_EVIDENCE ?? join(import.meta.dir, "run-slot-children-fixture.json")
+  process.env.RUN_SLOT_FIXTURE_EVIDENCE ??
+  join(tmpdir(), `run-slot-children-fixture-${process.pid}.json`)
 
 type Machine = ReturnType<typeof machine>
 const until = async (ok: () => boolean) => {
