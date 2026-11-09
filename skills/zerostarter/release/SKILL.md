@@ -93,13 +93,13 @@ When a dispatch of `auto-canary-into-main` already opened it as a draft, `gh pr 
 
 Merge only on the ship PR's own `Audit, Lint, and Build` and `test` (the **ci** rule's two), green at the pin: the ship PR's `pull_request` runs alone carry them, and a green `Lint and Build` beside a suite still running is no green read (v0.0.82 merged with `Suite (9)` red and `Audit, Lint, and Build` still running).
 A red is a run or check that concluded `failure`, `cancelled` or `timed_out`.
-First read the pin's gate runs, since the waiter below counts only a red that concludes after it starts:
+First read the pin's gate runs, each workflow's newest (the list is newest first), since the waiter below counts only a red that concludes after it starts:
 
 ```bash
 gh run list --commit "$CANARY" --event pull_request --json databaseId,workflowName,status,conclusion
 ```
 
-- An `auto-check-build` or `auto-test` run missing, or one reading `action_required`, means no gate run started at the pin: the bot opened the draft there, and a run the bot starts waits for an approval (on 632990e both read `action_required`). Close the draft (`gh pr close <n>`), open the ship PR again with step 2's `gh pr create`, whose `opened` event from your account starts both, and read again.
+- An `auto-check-build` or `auto-test` run missing, or one reading `action_required`, means no gate run started at the pin: the bot opened the draft there, so its runs are held runs ([GITHUB-BULK-READS.md, Reading canary's own checks](../../../extensions/core/skills/playbook/GITHUB-BULK-READS.md#reading-canarys-own-checks)). Close the draft (`gh pr close <n>`), open the ship PR again with step 2's `gh pr create`, whose `opened` event from your account starts both, and read again.
 - A red run is the first red: rerun it (below) before the waiter starts.
 
 Then wait on the checks with code-review-loop's waiter, run as a background task, which reads them over REST every 5 minutes and waits out a rate limit; `<owner>/<repo>` is the one `gh repo view --json nameWithOwner` names:
