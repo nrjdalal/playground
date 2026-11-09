@@ -605,7 +605,7 @@ try:
     for line in text.split("\n"):
         # prev is the character the join puts before this line's first, since bash joins x\ and #b into x#b, whose # starts no word
         line, quoted = scan(line, quoted, buf[-1] if buf else "")
-        if buf is None and line.strip() == "":
+        if buf is None and not quoted and line.strip() == "":
             continue
         buf = line if buf is None else buf + line
         if (len(buf) - len(buf.rstrip("\\"))) % 2:
