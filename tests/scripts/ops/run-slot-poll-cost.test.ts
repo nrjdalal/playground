@@ -272,16 +272,16 @@ describe("a waiter behind the head", () => {
   })
 })
 
-// #1378: a waiter's waited count adds the seconds its poll slept, so the five-minute marks land on real minutes whatever RUN_SLOT_POLL is; a poll that added 15 of its own ran the marks early on a slow poll and late on a fast one
-describe("a waiter's waited count adds the seconds its poll slept", () => {
+// #1378: a waiter's waited count is the real seconds since its wait began, so the five-minute marks land on real minutes whatever RUN_SLOT_POLL is; a poll that added 15 of its own ran the marks early on a slow poll and late on a fast one
+describe("a waiter's waited count is the real seconds since its wait began", () => {
   const script = readFileSync(join(import.meta.dir, "../../../scripts/ops/run-slot.sh"), "utf8")
 
   test("no poll adds a figure of its own", () => {
-    expect(script.match(/waited=\$\(\(waited \+ [0-9]+\)\)/g) ?? []).toEqual([])
+    expect(script.match(/waited=\$\(\(waited \+/g) ?? []).toEqual([])
   })
 
-  test("the polls that sleep POLL add POLL, and the queue's nap adds what it slept", () => {
-    expect(script).toContain("waited=$((waited + POLL))")
-    expect(script).toContain("waited=$((waited + NAPPED))")
+  test("each wait records its start, and four loops and focus_wait read the clock against it", () => {
+    expect(script.match(/WAIT_FROM=\$SECONDS/g) ?? []).toHaveLength(4)
+    expect(script.match(/waited=\$\(\(SECONDS - WAIT_FROM\)\)/g) ?? []).toHaveLength(5)
   })
 })

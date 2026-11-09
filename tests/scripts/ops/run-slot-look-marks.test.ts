@@ -76,10 +76,11 @@ describe("a look's marks are taken before its reads", () => {
 
   // #1378: a waiter a SIGKILL ended leaves its look mark, since free() never runs; a look sweeps a mark whose pid has ended
   test("a look sweeps a look mark whose pid has ended", async () => {
-    const m = machine()
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
     const stale = join(m.ops, ".run-slot-ref-99999999")
     writeFileSync(stale, "")
     m.hold("run-slot", 3, "big")
+    m.hold("run-slot-2", 3, "big")
     const run = m.start("worker-big", { RUN_SLOT_SIZE: "big" })
     expect(await run.saw(WAITING)).toBe(true)
     expect(existsSync(stale)).toBe(false)
