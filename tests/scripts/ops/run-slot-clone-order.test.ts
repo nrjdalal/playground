@@ -38,13 +38,13 @@ const log = (m: Machine) => {
 // the sessions whose clones have started, in the runs log's order
 const started = (m: Machine) =>
   [...log(m).matchAll(/ start (\S+) \d+ run-slot-clone /g)].map((s) => s[1])
-// both waiters' places listed in the order clone_first's glob reads them, the older ask time first; "" until then
+// both waiters' places listed in the order clone_first's glob reads them, the older ask time first
 const ordered = (m: Machine) => {
   const names = readdirSync(join(m.ops, "run-slot.clone-waiters")).sort()
-  return names.length === 2 &&
+  return (
+    names.length === 2 &&
     names.map((n) => n.split("-").slice(3).join("-")).join(",") === "worker-older,worker-newer"
-    ? names
-    : ""
+  )
 }
 
 // issue 1314, 7 Nov: after a ship the Dashboard roll's clone waited about 17 minutes behind a worker's big test run on run-slot-2, so the live Dashboard stayed on the old version
@@ -88,7 +88,7 @@ describe("the clone lane", () => {
     expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
     const newer = cloning(m, "worker-newer")
     // the order is decided once both places are listed, the older's ask time first, so the lane reads it whatever its waiters do next
-    while (ordered(m) === "") await Bun.sleep(50)
+    while (!ordered(m)) await Bun.sleep(50)
     m.release("run-slot-clone")
     while (started(m).length === 0) await Bun.sleep(50)
     await Promise.all([stop(older.p), stop(newer.p)])
@@ -132,7 +132,7 @@ describe("the clone lane", () => {
     const older = cloning(m, "worker-older", copy)
     expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
     const newer = cloning(m, "worker-newer")
-    while (ordered(m) === "") await Bun.sleep(50)
+    while (!ordered(m)) await Bun.sleep(50)
     copyFileSync(SCRIPT, `${copy}.new`)
     utimesSync(`${copy}.new`, new Date(), new Date())
     renameSync(`${copy}.new`, copy)
