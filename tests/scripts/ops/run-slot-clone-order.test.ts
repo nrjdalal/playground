@@ -18,9 +18,9 @@ setDefaultTimeout(60_000)
 
 type Machine = ReturnType<typeof machine>
 const SPACED = /^run-slot\.sh: this clone waits /gm
-const cloning = (m: Machine, who: string, script = SCRIPT) => {
+const cloning = (m: Machine, who: string, script = SCRIPT, extra: Record<string, string> = {}) => {
   mkdirSync(join(m.root, "node_modules"), { recursive: true })
-  return m.start(who, {}, script, ["cp", "-R", "node_modules"])
+  return m.start(who, extra, script, ["cp", "-R", "node_modules"])
 }
 // whether the clone waited (printed its spacing line and had not run when stopped) or ran
 const clone = async (m: Machine, who: string) => {
@@ -76,8 +76,8 @@ describe("the clone lane", () => {
   test("starts the older of two waiting clones first", async () => {
     const m = machine()
     m.hold("run-slot-clone", 1, "small")
-    const older = cloning(m, "worker-older")
-    // it printed that it waits for the lane and sleeps to its next look, so the newer one asks while the lane is free
+    // the older polls at 30 s, so the newer one asks while the lane is free and the older sleeps, the race the ship run's failure ran
+    const older = cloning(m, "worker-older", SCRIPT, { RUN_SLOT_POLL: "30" })
     expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
     m.release("run-slot-clone")
     const newer = cloning(m, "worker-newer")
