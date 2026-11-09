@@ -60,7 +60,7 @@ An outside author's PR goes to the Builder, who gives its go only after a read-o
 
 `bun run ship:merge <n>` is the ship skill's step 3, the one merge into `main` (`ship-merge.ts`): it merges ship PR `<n>` with a merge commit, `--match-head-commit` at the head it read, and refuses, naming each reason (`shipRefusals`), unless:
 
-- the PR is open, into `main`;
+- `pr`: the PR is open, into `main`;
 - `gate`: the body holds the new-user gate's PASS line for the head on a line of its own, and no FAIL line for it; the gate prints that line last (`resultLine` in `new-user-gate/cli.ts`, its words from `gateLine` in `ship-lines.ts`), PASS only for a run that reached its last step with none reading FAIL, an INCONCLUSIVE step included, since that reads this Mac, not the build;
 - `rehearsal`: the body holds the invitee rehearsal's line for the head (`rehearsalLine`), PASS or `not needed`;
 - `ci`: `Audit, Lint, and Build` and `test` (`REQUIRED_CHECKS`) are each green at the head by their newest run (`ciGate`), so a suite still running or red refuses;

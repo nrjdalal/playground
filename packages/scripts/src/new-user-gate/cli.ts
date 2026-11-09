@@ -29,7 +29,6 @@ export type Step = {
   shot?: string
 }
 
-// Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail, then the count.
 // The steps main checks, in order, so a run that stopped short of its last one is no pass.
 export const STEP_COUNT = 7
 
@@ -37,6 +36,7 @@ export const STEP_COUNT = 7
 export const resultLine = (sha: string, steps: Step[]): string =>
   gateLine(sha, steps.length < STEP_COUNT || steps.some((s) => !s.ok && !s.inconclusive))
 
+// Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail, then the count.
 export const report = (steps: Step[]): string => {
   const unsure = steps.filter((s) => s.inconclusive).length
   return [

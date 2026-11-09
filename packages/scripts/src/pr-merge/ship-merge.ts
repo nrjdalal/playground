@@ -22,13 +22,14 @@ export function shipRefusals(facts: ShipFacts): string[] {
   const refusals: string[] = []
   if (facts.state !== "OPEN" || facts.base !== "main")
     refusals.push(
-      `it is ${facts.state.toLowerCase()} into ${facts.base}: ship:merge merges an open ship PR into main`,
+      `pr: it is ${facts.state.toLowerCase()} into ${facts.base}: ship:merge merges an open ship PR into main`,
     )
   const lines = new Set(facts.body.split(/\r?\n/).map((line) => line.trim()))
   const pass = gateLine(facts.head, false)
-  if (lines.has(gateLine(facts.head, true)))
+  const fail = gateLine(facts.head, true)
+  if (lines.has(fail))
     refusals.push(
-      `gate: the body holds "${gateLine(facts.head, true)}": a FAIL holds the ship, by the ship skill's step 1 line for a ship that stops`,
+      `gate: the body holds "${fail}": a FAIL holds the ship, by the ship skill's step 1 line for a ship that stops`,
     )
   else if (!lines.has(pass))
     refusals.push(
