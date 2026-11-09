@@ -179,8 +179,10 @@ export function bunCall(
   let k = 0
   for (; k < args.length; k++) {
     const v = args[k].value
-    if (v === "--cwd") cwd = args[k + 1] && pathOf(args[++k], env)
-    else if (v.startsWith("--cwd=")) cwd = pathOf({ ...args[k], value: v.slice(6) }, env)
+    // bun reads a relative --cwd from the one before it
+    if (v === "--cwd") cwd = args[k + 1] && pathOf(args[++k], { ...env, cwd })
+    else if (v.startsWith("--cwd="))
+      cwd = pathOf({ ...args[k], value: v.slice(6) }, { ...env, cwd })
     else if (v === "--filter" || v === "-F") {
       filtered = true
       k++
@@ -301,6 +303,12 @@ function gitMoves(sub: string, rest: string[]): boolean {
   return false
 }
 
+// The folder bun or bunx runs a tool in: bun's own --cwd, else the shell's folder when a --cwd word cannot be read, so an unread one is judged where the line runs.
+export function bunDir(name: string, args: Word[], env: Env): string | undefined {
+  if (name !== "bun" && name !== "bunx") return env.cwd
+  return bunCall(name === "bunx" ? [X, ...args] : args, env).cwd ?? env.cwd
+}
+
 // turbo's own words, however it is called: by name or path, through npx, or through bun (runs reads bunx as bun x).
 export function turboWords(name: string, args: Word[], env: Env): Word[] | undefined {
   if (name === "turbo") return args
@@ -348,7 +356,7 @@ function runs(
   if (turbo && packagesBuild(turbo)) {
     if (validationOff(local, env)) return
     return {
-      cwd: cwdFlag(turbo, { ...env, cwd: name === "bun" ? bunCall(args, env).cwd : env.cwd }),
+      cwd: cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) }),
       fix: BUILD_FIX,
       what: "the packages build without NODE_ENV and SKIP_ENV_VALIDATION=true",
     }
@@ -369,7 +377,7 @@ function runs(
   // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name, bun x included, in the folder bun's own --cwd names (bun 1.4.4, measured); a tool reads its own --cwd too
   if (TOOLS.has(program(target ?? ""))) {
     return {
-      cwd: cwdFlag(args.slice(at + 1), { ...env, cwd }),
+      cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: cwd ?? env.cwd }),
       what: `bun ${words.join(" ")}`,
     }
   }

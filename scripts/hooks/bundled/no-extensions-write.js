@@ -7392,9 +7392,9 @@ function bunCall(args, env) {
   for (;k < args.length; k++) {
     const v = args[k].value;
     if (v === "--cwd")
-      cwd = args[k + 1] && pathOf(args[++k], env);
+      cwd = args[k + 1] && pathOf(args[++k], { ...env, cwd });
     else if (v.startsWith("--cwd="))
-      cwd = pathOf({ ...args[k], value: v.slice(6) }, env);
+      cwd = pathOf({ ...args[k], value: v.slice(6) }, { ...env, cwd });
     else if (v === "--filter" || v === "-F") {
       filtered = true;
       k++;

@@ -7148,6 +7148,7 @@ function mainCheckout(dir) {
 }
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
 var RUNNERS = new Set(["npx"]);
+var X = { quoted: false, value: "x" };
 var TOOLS = new Set(["lefthook", "turbo"]);
 function cwdFlag(args, env) {
   let cwd = env.cwd;
@@ -7168,9 +7169,9 @@ function bunCall(args, env) {
   for (;k < args.length; k++) {
     const v = args[k].value;
     if (v === "--cwd")
-      cwd = args[k + 1] && pathOf(args[++k], env);
+      cwd = args[k + 1] && pathOf(args[++k], { ...env, cwd });
     else if (v.startsWith("--cwd="))
-      cwd = pathOf({ ...args[k], value: v.slice(6) }, env);
+      cwd = pathOf({ ...args[k], value: v.slice(6) }, { ...env, cwd });
     else if (v === "--filter" || v === "-F") {
       filtered = true;
       k++;
@@ -7200,6 +7201,11 @@ var GIT_MOVES = new Set([
   "update-ref"
 ]);
 var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
+function bunDir(name, args, env) {
+  if (name !== "bun" && name !== "bunx")
+    return env.cwd;
+  return bunCall(name === "bunx" ? [X, ...args] : args, env).cwd ?? env.cwd;
+}
 function turboWords(name, args, env) {
   if (name === "turbo")
     return args;
@@ -7425,7 +7431,7 @@ function heavy(name, args, env) {
   const turbo = turboWords(name, args, env);
   if (turbo) {
     const task = turboTask(turbo);
-    return task ? { dir: cwdFlag(turbo, env), what: `turbo run ${task}` } : undefined;
+    return task ? { dir: cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) }), what: `turbo run ${task}` } : undefined;
   }
   if (RUNNERS2.has(name)) {
     const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES2.has(args[k - 1]?.value ?? ""));

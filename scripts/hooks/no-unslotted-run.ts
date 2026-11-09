@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join, resolve, sep } from "node:path"
 
 import { atOnce, buildName, DOCKERS, dockerBuild, portlessCompose } from "./docker-build"
-import { bunCall, cwdFlag, mainCheckout, turboWords } from "./no-main-checkout"
+import { bunCall, bunDir, cwdFlag, mainCheckout, turboWords } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
   ASSIGN,
@@ -278,7 +278,9 @@ function heavy(
   const turbo = turboWords(name, args, env)
   if (turbo) {
     const task = turboTask(turbo)
-    return task ? { dir: cwdFlag(turbo, env), what: `turbo run ${task}` } : undefined
+    return task
+      ? { dir: cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) }), what: `turbo run ${task}` }
+      : undefined
   }
   if (RUNNERS.has(name)) {
     const words = args.filter(

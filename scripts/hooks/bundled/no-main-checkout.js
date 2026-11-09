@@ -7457,9 +7457,9 @@ function bunCall(args, env) {
   for (;k < args.length; k++) {
     const v = args[k].value;
     if (v === "--cwd")
-      cwd = args[k + 1] && pathOf(args[++k], env);
+      cwd = args[k + 1] && pathOf(args[++k], { ...env, cwd });
     else if (v.startsWith("--cwd="))
-      cwd = pathOf({ ...args[k], value: v.slice(6) }, env);
+      cwd = pathOf({ ...args[k], value: v.slice(6) }, { ...env, cwd });
     else if (v === "--filter" || v === "-F") {
       filtered = true;
       k++;
@@ -7569,6 +7569,11 @@ function gitMoves(sub, rest) {
     return rest.some((w) => w === "--force" || /^-[a-zA-Z]*f/.test(w));
   return false;
 }
+function bunDir(name, args, env) {
+  if (name !== "bun" && name !== "bunx")
+    return env.cwd;
+  return bunCall(name === "bunx" ? [X, ...args] : args, env).cwd ?? env.cwd;
+}
 function turboWords(name, args, env) {
   if (name === "turbo")
     return args;
@@ -7602,7 +7607,7 @@ function runs(name, args, local, env) {
     if (validationOff(local, env))
       return;
     return {
-      cwd: cwdFlag(turbo, { ...env, cwd: name === "bun" ? bunCall(args, env).cwd : env.cwd }),
+      cwd: cwdFlag(turbo, { ...env, cwd: bunDir(name, args, env) }),
       fix: BUILD_FIX,
       what: "the packages build without NODE_ENV and SKIP_ENV_VALIDATION=true"
     };
@@ -7626,7 +7631,7 @@ function runs(name, args, local, env) {
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0];
   if (TOOLS.has(program(target ?? ""))) {
     return {
-      cwd: cwdFlag(args.slice(at + 1), { ...env, cwd }),
+      cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: cwd ?? env.cwd }),
       what: `bun ${words.join(" ")}`
     };
   }
@@ -7879,6 +7884,7 @@ if (import.meta.main) {
 export {
   FILE_TOOLS,
   bunCall,
+  bunDir,
   check,
   cwdFlag,
   gitCall,
