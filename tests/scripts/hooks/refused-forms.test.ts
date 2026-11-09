@@ -271,6 +271,14 @@ for (const folder of [CLONE, join(CLONE, "own"), UNDER_BUNFIG, PATHS.MAIN])
   writeFileSync(join(folder, "bunfig.toml"), 'preload = ["./pre.ts"]\n')
 // an env file bun loads into the script's variables, a harmless one: the hook judges the folder, never the file's lines
 for (const folder of [ENV_CLONE, PATHS.MAIN]) writeFileSync(join(folder, ".env"), "MADE_UP=1\n")
+// the checkout folder is a worktree the main checkout lists, as git worktree add writes one, and stray beside it a plain folder git lists nowhere
+const WORKTREE_A = join(PATHS.MAIN, ".claude", "worktrees", "a")
+mkdirSync(join(PATHS.MAIN, ".git", "worktrees", "a"), { recursive: true })
+writeFileSync(join(WORKTREE_A, ".git"), `gitdir: ${join(PATHS.MAIN, ".git", "worktrees", "a")}\n`)
+writeFileSync(join(PATHS.MAIN, ".git", "worktrees", "a", "gitdir"), `${join(WORKTREE_A, ".git")}\n`)
+mkdirSync(join(WORKTREE_A, "api"), { recursive: true })
+mkdirSync(join(PATHS.MAIN, ".claude", "worktrees", "stray"), { recursive: true })
+symlinkSync(join(PATHS.MAIN, "api", "missing"), join(WORKTREE_A, "dangling"))
 for (const skills of [
   join(DATA, "orgs", "home", "abc123", "skills"),
   join(PATHS.MAIN, "extensions", "core", "skills"),

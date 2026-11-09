@@ -64,7 +64,7 @@ export const groups: Group[] = [
       ],
     ],
   },
-  // a chained --cwd that crosses a link lands where the link leads, and the worktrees root is no worktree, since turbo walks up from it to the main checkout's turbo.json
+  // a --cwd that crosses a link is judged as the main checkout, and the worktrees root is no worktree, since turbo walks up from it to the main checkout's turbo.json
   {
     folders: ["main checkout"],
     guards: ["no-main-checkout"],
@@ -80,7 +80,60 @@ export const groups: Group[] = [
       ["turbo through bunx in the worktrees root", "bunx --cwd=.claude/worktrees turbo run build"],
     ],
   },
-  // a chained --cwd off a folder the hook cannot resolve may land anywhere, so it is judged as the main checkout; bun itself stops on a missing one
+  // bun x reads one --cwd alone, absolute or relative from inside a listed worktree, with no .. and no link in it, landing in a worktree the main checkout lists; any other may run its tool anywhere, so it is judged as the main checkout
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: ({ MAIN }) => [
+      [
+        "turbo through bunx into a folder under the worktrees root git lists nowhere",
+        "bunx --cwd=.claude/worktrees/stray turbo run build",
+      ],
+      [
+        "turbo through bunx by an absolute --cwd into a folder git lists nowhere",
+        `bunx --cwd=${MAIN}/.claude/worktrees/stray turbo run build`,
+      ],
+      [
+        "turbo through bunx by a --cwd through a dangling link",
+        "bunx --cwd=.claude/worktrees/a/dangling turbo run build",
+      ],
+      [
+        "turbo through bunx, a chained --cwd off a dangling link",
+        "bunx --cwd=.claude/worktrees/a/dangling --cwd=.. turbo run build",
+      ],
+      [
+        "turbo through bunx by an absolute --cwd through a link into the main checkout",
+        `bunx --cwd=${MAIN}/.claude/worktrees/a/up turbo run build`,
+      ],
+      [
+        "turbo through bunx by a relative --cwd typed outside any worktree",
+        "bunx --cwd=.claude/worktrees/a turbo run build",
+      ],
+    ],
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-main-checkout"],
+    rows: ({ MAIN }) => [
+      ["turbo through bunx by a relative --cwd with ..", "bunx --cwd=../a turbo run build"],
+      ["turbo through bunx by a relative --cwd through a link", "bunx --cwd=up turbo run build"],
+      ["turbo through bunx by two --cwd words", "bunx --cwd=api --cwd=.. turbo run build"],
+      [
+        "turbo through bunx by an absolute --cwd with ..",
+        `bunx --cwd=${MAIN}/.claude/worktrees/a/.. turbo run build`,
+      ],
+    ],
+  },
+  // a run whose bun x --cwd the hook cannot prove counts as heavy wherever it lands, a worktree included
+  {
+    folders: ["checkout"],
+    guards: ["no-unslotted-run"],
+    rows: () => [
+      ["turbo through bunx by two --cwd words in a worktree", "bunx --cwd=api --cwd=.. turbo run build"],
+      ["turbo through bun x by two --cwd words in a worktree", "bun x --cwd=api --cwd=.. turbo run build"],
+    ],
+  },
+  // a chained --cwd off a missing or unread folder is judged as the main checkout; bun itself stops on a missing one
   {
     folders: ["checkout"],
     guards: ["no-main-checkout"],
@@ -103,7 +156,7 @@ export const groups: Group[] = [
       ],
     ],
   },
-  // bun x and bunx read each relative --cwd from the one before it, and a --cwd it cannot read leaves the line judged in the shell's folder
+  // bun x and bunx with more than one --cwd, or one the hook cannot read, are judged as the main checkout
   {
     folders: ["main checkout"],
     guards: ["no-main-checkout"],
