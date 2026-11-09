@@ -1824,6 +1824,9 @@ describe("relay watch", () => {
     await beat("relay-watch").run(due.ctx)
     expect(due.asks).toEqual([])
     expect(waiterLines(ops).map((l) => l.to)).toEqual([OLD.ops])
+    writeFileSync(join(ops, "sweep-hold-until"), "not a time at all")
+    await beat("relay-watch").run(watch(ops, at(15, 50), "pending: ops-unstick.jsonl").ctx)
+    expect(waiterLines(ops).map((l) => l.to)).toEqual([OLD.ops, OLD.dispatcher])
   })
 })
 
