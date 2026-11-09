@@ -14,7 +14,7 @@ Use this template for writing the PR body:
 ```markdown
 ## TL;DR
 
-- <a few short ASD-STE100 bullet points: what changes, and why>
+- <a few short bullet points by the plain-words skill: what changes, and why>
 
 ## Summary
 
