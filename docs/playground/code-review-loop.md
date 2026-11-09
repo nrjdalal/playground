@@ -28,6 +28,7 @@ The review itself is core's `code-review`, loaded by name and never copied: a **
 A changed skill, agent guide or docs page is also held to core's `writing-for-agents`, which the reviewer loads first, so an agent doc that sprawls or leaves a step with no completion criterion costs the score as code would.
 The two stay apart in the verdict, so a well-built change that misses the ask cannot hide behind its quality.
 Its two sub-agents start with no memory of earlier rounds, which is what makes the read before the last 5/5 fresh.
+They only read the review clone, and the reviewer checks its HEAD still sits at the PR's head once they return, since a HEAD that moved under them shows `canary`'s files as the PR's.
 The reviewer pastes the spec's text beside its path into the `code-review` call and on into its Spec sub-agent's prompt, and a Spec read that reports the spec missing runs again rather than passing.
 
 ## State lives on the PR
@@ -47,6 +48,7 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
 - A push gets its round within a few minutes, announced or not.
 - Round 1 of a PR that adds a member to a kind (a status, a type, a choice, a button) files every list still naming the kind's old members as one finding, found by one grep for each list's wording, so later rounds spend no turn on lists outside the diff.
 - Round 1 also greps the agent-facing and web docs for each term whose meaning the diff changes, and files every doc still describing the old meaning as one finding, each by `file:line`, so later rounds spend no turn finding them one at a time.
+  When the PR moves text out of a file, it greps the old file's name over the whole repo, code comments included, since pointers to the old file can sit anywhere.
 - A reviewer reuses its newest free review clone, one whose PR has merged or closed and that no live reviewer holds, moving it to `review-<n>` before it checks out PR n, since the nightly clean reads a detached clone's PR from its folder's name; it makes a fresh clone, about 115k files, only when none is free.
   Once it moves a clone, it sends the session it reports to the old and new paths, so the cleanup that clone's last PR handed it to drops the old one.
 - A verdict posts with every blank filled, and a review's sub-agents search inside its clone and the paths its brief names, stopping every background task of theirs before they report.
@@ -92,6 +94,7 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
 - Before a 5/5 posts, `bun run pr:merge <n> --explain`, bare and unpiped, reads ✓ on every gate but ready, ci and review, since the body gate also needs a doc that a reviewer's patch or the last commit changed named in the Evidence; a ✗ is a finding for the worker.
 - The reviewer posts the 5/5 verdict and its `Review • 5/5` label; GitHub's two checks green at the head are the next gate, never an input to the score, and a run cited where CI stands in is evidence of the touched tests and check-types alone.
 - A round left with only nits scores 5/5: the reviewer lists them, or hands the small edit over as a patch, so a nit the worker leaves sends no PR through another test round.
+  A nit that would widen a permission, a setting or a guard's reach if a rare event happens goes to the worker's lead first, and the 5/5 waits for the lead's ruling, since a worker can merge seconds after a 5/5 posts.
 - A PR body with no `test:skills` result in it is a nit, since GitHub Actions runs the suite at the head.
 - When the ticket carries samples, the verdict holds a samples table, and a sample left unhandled holds the score down.
 - When the diff holds a long-lived connection (a socket, a pub/sub subscriber, a retrying client), the PR's Evidence holds a lifecycle table, one row per path from connect to close, and a missing table holds the score at 3.

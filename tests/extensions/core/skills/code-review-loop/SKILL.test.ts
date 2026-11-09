@@ -301,6 +301,46 @@ describe("code-review-loop's round 1 greps each changed term", () => {
     expect(line).toContain("each term whose meaning the diff changes")
     expect(agents).toContain("each list grep and changed-term grep with its hits")
   })
+
+  test("a PR that moves text out of a file greps the old file's name over the whole repo, on both sides (#1619)", async () => {
+    const moved =
+      "When the PR moves text out of a file, run `git grep -n <old file name>` over the whole repo too, code comments, `scripts/hooks/README.md` and `.agents/dashboard/` included, and check each hit against the moved text at the old base"
+    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(moved)
+    expect(step).toContain("rounds 4 and 5")
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "each file the PR moves text out of grepped over the whole repo",
+    )
+    expect(await Bun.file(join(root, "AGENTS.md")).text()).toContain(moved)
+    expect(await page()).toContain("greps the old file's name over the whole repo")
+  })
+})
+
+describe("code-review-loop keeps its clone at the head and asks the lead on a trust-widening nit", () => {
+  test("step 4's sub-agents read the clone only, and its Done when checks HEAD after they return (#1624)", async () => {
+    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain("with no merge, checkout or reset there")
+    expect(step).toContain("17 of `canary`'s files")
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "`git -C <clone> rev-parse HEAD` printed the head after every `code-review` call",
+    )
+    expect(await page()).toContain("They only read the review clone")
+  })
+
+  test("step 6 sends a trust-widening nit to the lead before the 5/5, and The last 5/5 points to it (#1613)", async () => {
+    const text = await skill()
+    const step = text.split(/^6\. \*\*Score\*\*/m)[1]?.split(/^7\. /m)[0] ?? ""
+    expect(step).toContain("A **trust-widening nit**")
+    expect(step).toContain("goes first to your worker's lead")
+    expect(step).toContain("the 5/5 waits for the lead's ruling")
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "each trust-widening nit carries its lead's ruling",
+    )
+    const last = text.split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    expect(last).toContain("each trust-widening nit has its lead's ruling (step 6)")
+    expect(text.split("**trust-widening nit**")).toHaveLength(2)
+    expect(await page()).toContain("goes to the worker's lead first")
+  })
 })
 
 describe("code-review-loop checks its own fixes and a repo scanner's landing (PG-251)", () => {
