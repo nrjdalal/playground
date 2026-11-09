@@ -22,13 +22,13 @@ export const attachmentQuery = (id: string, enabled = true, load: typeof fetch =
   staleTime: Number.POSITIVE_INFINITY,
 })
 
-// An ask's, a draft's, a Slack decision's or a read-only update's file, fetched with the owner's cookie from the dashboard's own page, since its route takes a trusted Origin, which an <img> never sends, and shown through a blob URL: url is null until it arrives, and missing is true once the API answered 404.
+// An ask's, a draft's, a Slack decision's or a read-only update's file, fetched with the owner's cookie from the dashboard's own page, since its route takes a trusted Origin, which an <img> never sends, and shown through a blob URL: url is null until it arrives, missing is true once the API answered 404, and failed once its fetch failed any other way (another status, a lost connection).
 export function useAttachment(
   id: string,
   enabled = true,
-): { missing: boolean; url: string | null } {
-  const { data } = useQuery(attachmentQuery(id, enabled))
-  return { missing: data === MISSING, url: data && data !== MISSING ? data : null }
+): { failed: boolean; missing: boolean; url: string | null } {
+  const { data, isError } = useQuery(attachmentQuery(id, enabled))
+  return { failed: isError, missing: data === MISSING, url: data && data !== MISSING ? data : null }
 }
 
 // Pure: where a kept file is served as a download, saved under its item's title.
