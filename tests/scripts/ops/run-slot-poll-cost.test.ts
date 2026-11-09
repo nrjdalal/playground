@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, WAITING, stop, machine } from "./run-slot-fake"
+import { SCRIPT, WAITING, runSlot, stop, machine } from "./run-slot-fake"
 
 // ten waiters under xtrace and the shims take up to a minute over their first looks on a loaded Mac, before the window opens
 setDefaultTimeout(180_000)
@@ -39,10 +39,11 @@ const waiter = (
   extra: Record<string, string>,
 ) => {
   const marker = join(m.root, `ran-${who}`)
-  const p = Bun.spawn(["bash", SCRIPT, who, "--", ...command, marker], {
+  const p = runSlot(["bash", SCRIPT, who, "--", ...command, marker], {
     cwd: m.root,
     env: m.env({ ...extra, PATH: path, PS4: "+$BASH_SUBSHELL ", SHELLOPTS: "xtrace" }),
     stderr: "pipe",
+    ops: m.ops,
   })
   const w = { err: "", marker, p }
   void (async () => {
@@ -127,11 +128,12 @@ describe("waiters cost close to nothing while they wait", () => {
     // a read subcommand, run outside the shims, so only the waiters' own starts count
     const slots = async () => {
       await Bun.sleep(5_000)
-      await Bun.spawn(["bash", SCRIPT, "slots"], {
+      await runSlot(["bash", SCRIPT, "slots"], {
         cwd: m.root,
         env: m.env(),
         stdout: "ignore",
         stderr: "ignore",
+        ops: m.ops,
       }).exited
     }
     expect(

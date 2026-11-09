@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, WAITING, machine, set, stop } from "./run-slot-fake"
+import { SCRIPT, WAITING, machine, runSlot, set, stop } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -130,11 +130,12 @@ describe("run-slot.sh preempt", () => {
     while (!existsSync(`${run.marker}.started`)) await Bun.sleep(20)
   }
   const preempt = async (m: ReturnType<typeof machine>) => {
-    const p = Bun.spawn(["bash", SCRIPT, "preempt"], {
+    const p = runSlot(["bash", SCRIPT, "preempt"], {
       cwd: m.root,
       env: m.env(),
       stderr: "pipe",
       stdout: "pipe",
+      ops: m.ops,
     })
     return {
       code: await p.exited,
