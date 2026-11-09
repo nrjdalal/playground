@@ -4,11 +4,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import type { Check } from "../../../../../packages/scripts/src/pr-merge/gates"
-import { freezeLine, startFreeze } from "../../../../../packages/scripts/src/pr-merge/held"
+import {
+  FREEZE_LAPSE_MS,
+  freezeLine,
+  startFreeze,
+} from "../../../../../packages/scripts/src/pr-merge/held"
 import type { Run, RunResult } from "../../../../../packages/scripts/src/pr-merge/merge"
 import { gateLine, rehearsalLine } from "../../../../../packages/scripts/src/pr-merge/ship-lines"
 import {
   nextVersion,
+  shipFactsOf,
   shipMerge,
   shipRefusals,
   type ShipFacts,
@@ -137,6 +142,18 @@ describe("shipMerge (#1659)", () => {
     expect(calls.filter((args) => args[1] === "merge")).toEqual([
       ["pr", "merge", "1633", "-R", REPO, "--merge", "--match-head-commit", HEAD],
     ])
+  })
+
+  test("(d) a freeze read past its lapse holds nothing, so it refuses", async () => {
+    const written = Date.now()
+    await startFreeze(HELD, "v0.0.84", new Date(written))
+    const { run } = stub(ready().body)
+    expect((await shipFactsOf(run, REPO, 1633, written + 60_000)).freeze).toBe(
+      freezeLine("v0.0.84"),
+    )
+    const late = await shipFactsOf(run, REPO, 1633, written + FREEZE_LAPSE_MS + 60_000)
+    expect(late.freeze).toBeNull()
+    expect(shipRefusals(late)).toEqual([expect.stringContaining('no "*" line holds')])
   })
 
   test("a refusal merges nothing", async () => {

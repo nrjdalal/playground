@@ -30,6 +30,13 @@ export type Step = {
 }
 
 // Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail, then the count.
+// The steps main checks, in order, so a run that stopped short of its last one is no pass.
+export const STEP_COUNT = 7
+
+// Pure: the gate's last line, which ship:merge reads in the ship PR's body: PASS only for a run that reached every step with none reading FAIL.
+export const resultLine = (sha: string, steps: Step[]): string =>
+  gateLine(sha, steps.length < STEP_COUNT || steps.some((s) => !s.ok && !s.inconclusive))
+
 export const report = (steps: Step[]): string => {
   const unsure = steps.filter((s) => s.inconclusive).length
   return [
@@ -592,12 +599,6 @@ const main = async (args: string[]) => {
   } finally {
     browser.close()
     console.log(report(steps))
-    console.log(
-      gateLine(
-        full,
-        steps.some((s) => !s.ok && !s.inconclusive),
-      ),
-    )
     if (keep) console.log(`gate: kept ${box}; bun run gate:new-user --clean ${box} removes it`)
     else {
       const shots = join(dirname(box), `${box.split("/").at(-1)}-shots`)
@@ -618,6 +619,7 @@ const main = async (args: string[]) => {
       clean(box, home)
       console.log(`gate: screenshots and logs in ${shots}`)
     }
+    console.log(resultLine(full, steps))
   }
   return steps.every((s) => s.ok) ? 0 : 1
 }

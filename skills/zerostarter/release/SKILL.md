@@ -28,7 +28,7 @@ CANARY=$(gh api repos/{owner}/{repo}/branches/canary --jq .commit.sha)
 A ship still short of step 4 as the freeze nears its lapse ([pr-merge's Holds and rulings](../../../packages/scripts/src/pr-merge/README.md#holds-and-rulings)) runs `bun run ship:freeze vX.Y.Z` again, which restarts it.
 A ship that stops before its tag ends the freeze with `bun run ship:freeze --end`, so the held PRs merge again.
 
-Run the new-user gate on it, `bun run gate:new-user "$CANARY"` (`.agents/testing.md`, End-to-end tests). Its last line, `New-user gate at <sha>: PASS` or `New-user gate at <sha>: FAIL`, goes into the ship PR's body on a line of its own, for step 3's `ship:merge` to read, with each FAIL and INCONCLUSIVE line it printed named below it. A FAIL holds the ship.
+Run the new-user gate on it, `bun run gate:new-user "$CANARY"` (`.agents/testing.md`, End-to-end tests). Its last line, `New-user gate at <sha>: PASS` or `New-user gate at <sha>: FAIL`, goes into the ship PR's body on a line of its own, for step 3's `ship:merge` to read, with each FAIL and INCONCLUSIVE line it printed named below it.
 
 Done when `bun run ship:freeze status` prints the `"*"` line naming `vX.Y.Z` (step 3's `ship:merge` refuses a line Ops wrote by hand, so ask Ops to lift one), `CANARY` holds the SHA you mean to ship and the gate's last line for it is in hand. When `canary` moves before step 3, read it again.
 
@@ -102,7 +102,7 @@ Fix each reason it names, then run it again, at most every 5 minutes while a che
 
 - A refusal naming a head other than `$CANARY` means `canary` moved: go back to step 1.
 - No `Audit, Lint, and Build` or `test` check at the head, with the pin's `auto-check-build` and `auto-test` runs reading `action_required` (`gh run list --commit "$CANARY" --event pull_request`), means the bot opened the draft there, so its runs are held runs ([GITHUB-BULK-READS.md, Reading canary's own checks](../../../extensions/core/skills/playbook/GITHUB-BULK-READS.md#reading-canarys-own-checks)). Close the draft (`gh pr close <n>`) and open the ship PR again with step 2's `gh pr create`, whose `opened` event from your account starts both.
-- A red check: rerun its run once, `gh run rerun <run id> --failed`, or a cancelled run whole with `gh run rerun <run id>`.
+- A red check: rerun its run once, `gh run rerun <run id> --failed`, or a cancelled run whole with `gh run rerun <run id>`, its id from `gh run list --commit "$CANARY" --event pull_request --json databaseId,workflowName,conclusion`.
 - A second red, or a FAIL gate line, holds the ship: name the failing test (`gh run view <run id> --log-failed`) or step in the ship PR and up the chain, and end the freeze by step 1's line for a ship that stops.
 
 Done when `ship:merge` printed `merged #<n> at <sha>` and `MERGE` holds that commit.
