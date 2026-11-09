@@ -317,14 +317,14 @@ describe("code-review-loop's round 1 greps each changed term", () => {
 })
 
 describe("code-review-loop keeps its clone at the head and asks the lead on a trust-widening nit", () => {
-  test("step 4's sub-agents read the clone only, and its Done when checks HEAD after they return (#1624)", async () => {
+  test("step 4's sub-agents leave the clone as it stands, and its Done when checks HEAD after they return (#1624)", async () => {
     const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
     expect(step).toContain("with no merge, checkout or reset there")
     expect(step).toContain("17 of `canary`'s files")
     expect(step.split("**Done when**")[1] ?? "").toContain(
       "`git -C <clone> rev-parse HEAD` printed the head after every `code-review` call",
     )
-    expect(await page()).toContain("They only read the review clone")
+    expect(await page()).toContain("They leave the review clone as it stands")
   })
 
   test("step 6 sends a trust-widening nit to the lead before the 5/5, and The last 5/5 points to it (#1613)", async () => {

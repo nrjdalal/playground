@@ -28,7 +28,7 @@ The review itself is core's `code-review`, loaded by name and never copied: a **
 A changed skill, agent guide or docs page is also held to core's `writing-for-agents`, which the reviewer loads first, so an agent doc that sprawls or leaves a step with no completion criterion costs the score as code would.
 The two stay apart in the verdict, so a well-built change that misses the ask cannot hide behind its quality.
 Its two sub-agents start with no memory of earlier rounds, which is what makes the read before the last 5/5 fresh.
-They only read the review clone, and the reviewer checks its HEAD still sits at the PR's head once they return, since a HEAD that moved under them shows `canary`'s files as the PR's.
+They leave the review clone as it stands, and the reviewer checks its HEAD still sits at the PR's head once they return, since a HEAD that moved under them shows `canary`'s files as the PR's.
 The reviewer pastes the spec's text beside its path into the `code-review` call and on into its Spec sub-agent's prompt, and a Spec read that reports the spec missing runs again rather than passing.
 
 ## State lives on the PR
