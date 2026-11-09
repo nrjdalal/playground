@@ -656,6 +656,26 @@ test("05u checks: a rate-limited check read waits for its reset, then reads agai
   expect(naps).toEqual([605])
 })
 
+test("05y checks: v0.0.82's ship pin holds while a red shard keeps Audit, Lint, and Build running, and an all-green pin ends green (#1650)", async () => {
+  const pin = [
+    run("Lint and Build", "success"),
+    run("test", "success"),
+    run("Suite (9)", "failure"),
+  ]
+  const [red, redNaps] = await checksThrough(
+    [still],
+    [runs(...pin, run(AUDIT, null)), runs(...pin, run(AUDIT, "failure"))],
+  )
+  expect(red).toBe(`CHECK failure ${AUDIT}\nCHECK success test`)
+  expect(redNaps).toEqual([300])
+  const [green, greenNaps] = await checksThrough(
+    [still],
+    [runs(run("Suite (9)", "success"), run("test", "success"), run(AUDIT, "success"))],
+  )
+  expect(green).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+  expect(greenNaps).toEqual([])
+})
+
 test("05v the checks it waits on are the gate's own (#1410)", () => {
   expect(state.GATE_CHECKS).toEqual(REQUIRED_CHECKS)
 })
