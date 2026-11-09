@@ -799,7 +799,7 @@ const PLUS_EFFORT_HIDDEN =
 
 const MODEL_ICON = "text-muted-foreground flex shrink-0 group-data-[collapsible=icon]:hidden"
 
-// A row's right end, ZeroSDK's: its provider's logo, naming its model on hover, then its effort's level, naming itself; with toggles, a row that opens, the effort gives way to the toggle (EFFORT_HIDDEN), and with no effort its place stays.
+// A row's right end, ZeroSDK's: its provider's logo, naming its model on hover, then its effort's level, naming itself; with toggles, a row that opens, the effort gives way to the toggle (EFFORT_HIDDEN), and with no effort its place stays on every row, so the logos line up.
 function ModelIcons({
   effort,
   effortHidden = EFFORT_HIDDEN,
@@ -830,7 +830,7 @@ function ModelIcons({
           </span>
         </Hint>
       ) : (
-        toggles && <span className="size-4 shrink-0" />
+        <span className="size-4 shrink-0" />
       )}
     </>
   )
