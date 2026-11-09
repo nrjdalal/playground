@@ -1,5 +1,7 @@
 import { join } from "node:path"
 
+import { spawnEnv } from "@packages/env/api-hono"
+
 import { checkoutRoot, fixtureStart, readsLive } from "@/lib/dashboard/fixture"
 import { DISPATCHER } from "@/lib/dashboard/workers"
 
@@ -19,7 +21,12 @@ export const dispatcherArgv = (root: string): string[] => [
 ]
 
 const run: Run = async (argv) => {
-  const child = Bun.spawn(argv, { stderr: "pipe", stdin: "ignore", stdout: "pipe" })
+  const child = Bun.spawn(argv, {
+    env: spawnEnv(),
+    stderr: "pipe",
+    stdin: "ignore",
+    stdout: "pipe",
+  })
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),

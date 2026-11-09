@@ -253,6 +253,7 @@
   It refuses, with one line naming the file, an unknown key, a relative path, a missing file, a file over the cap, and bytes that do not match the kind; it takes every kind (code, doc, html, image and pdf).
   `GET /api/v1/inbox/attachments/:id` serves a kept file behind `requireTrustedOrigin`, `requireLoopback` and the owner rung, so the web fetches it with its cookie into a blob URL (`useAttachment`), since an `<img>` sends no Origin.
   A 404 (a fixture stack's restart drops its files, or the week's sweep took one) settles as missing for the page's life, asked once and never retried, and the card shows Missing in the file's place, or a folded pair's before alone when its after is the one gone.
+  Any other failure (another status, a lost connection) retries as every read does, then shows Did not load in the same place, or the pair's before alone when its after is the one that failed.
   With `?download` it saves the file under its item's title, the file's own name after it when the item carries several, with the stored file's extension (`attachmentDownloadName`), in `Content-Disposition`'s `filename*` (`fileNameOf` and `attachmentDisposition` in `api/hono/src/lib/download.ts`), a header CORS exposes,
   so the card's Download fetches it with the cookie and saves it under that name (`saveFrom` in `web/next/src/lib/download.ts`).
   The card shows its files under the text gap-3 below the words:

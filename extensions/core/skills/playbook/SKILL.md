@@ -52,7 +52,7 @@ How the Dashboard shows each role, how a session is named and when a dev stack r
   Read [rules/voice.md](../../rules/voice.md) before you name a session or list PR status for the owner.
 - A running session's model and effort change by a start or a resume, its permission mode and settings by a PR (below), and any of them by the owner's own act, never by the session asked to change its own.
   The model and effort of a dispatcher, the Assistant and the hosted session (the one the Dashboard runs on the Agent SDK) are the owner's pick in the menu left of Send in that session's Dashboard composer.
-  A lead picks any other session's model by brief-rush's model classes and its effort, high by brief-rush's model rule (`scripts/briefs/brief-rush.md`), as it starts or resumes it, through spawn.sh's `--model` and `--effort` (SESSIONS.md); the owner's word, relayed in the **override** shape, outranks both.
+  A lead picks any other session's model and effort by brief-rush's model rule (`scripts/briefs/brief-rush.md`), as it starts or resumes it, through spawn.sh's `--model` and `--effort` ([SPAWN.md](SPAWN.md#launch-model-and-effort)); the owner's word, relayed in the **override** shape, outranks both.
   The hosted session's permission mode is the owner's pick in its composer's mode menu, while approvals are on.
   Any other session's permission mode and settings stay as spawn.sh's launch flags and the factory's settings set them, and a change to them is a PR to those, until the Dashboard control on a session's row lands (the issue "every step that needs the owner is one GUI action").
 
@@ -71,6 +71,7 @@ Cite a rule by its name, in bold; read it whole with `playground rules <name>` w
 - [SWEEP.md](SWEEP.md): the leads' sweep, step by step.
   Read it at each sweep.
 - [SESSIONS.md](SESSIONS.md): the commands to spawn, brief, rename, check and end a session, and the headless run that writes Notion for a session with no Notion tools.
+- [SPAWN.md](SPAWN.md): each spawn mode's command and the gates, flags and launch spawn.sh applies to a start, which SESSIONS.md's Spawn step 2 points to.
 - [ROSTER.md](ROSTER.md): what to write to the roster, and when.
 - [CHANNEL.md](CHANNEL.md): the factory channel's lists, limits and triage.
 - [VERCEL.md](VERCEL.md): the Vercel CLI's traps: the env `vercel link` and `vercel integration add` pull, `vercel api`'s first line and an empty `vercel logs`.

@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs"
@@ -33,10 +34,106 @@ export const stop = async (p: Subprocess) => {
 // Ubuntu 26.04's default mkdir, uutils 0.10.0, reports success when another process made the folder between its own check and its mkdir (fixed in uutils 0.11.0), so two looks could each take one of run-slot.sh's mkdir locks; the image keeps GNU's as gnumkdir, which fails there as the Mac's mkdir does, so a machine's fake bin runs that one where it exists
 const GNU_MKDIR = Bun.which("gnumkdir")
 
+// 7 Nov 00:38Z, issue 1316: five run-slot.sh processes from these fixtures outlived their tests, each with ppid 1, since a child left running when its test fails or times out is stopped by nothing. runSlot records every run-slot.sh child of these tests, and the file's afterAll ends each one still running, with the command it started, through endChildren. The child stays in the test run's own process group, so a TERM to the run (Ctrl-C, TaskStop, run-slot's trap, the sandbox's deadline) reaches it as canary's helper let it, ending it and, through its trap, its command.
+type RunSlotOptions<
+  In extends Bun.SpawnOptions.Writable,
+  Out extends Bun.SpawnOptions.Readable,
+  Err extends Bun.SpawnOptions.Readable,
+> = Bun.SpawnOptions.SpawnOptions<In, Out, Err> & {
+  ops?: string
+}
+const children: { p: { exited: Promise<number>; pid: number }; ops?: string; at: number }[] = []
+// Starts `argv` recorded, so endChildren can end it; `ops` is the machine's ops folder, whose *.child files name the command's group once the run starts.
+export const runSlot = <
+  const In extends Bun.SpawnOptions.Writable = "ignore",
+  const Out extends Bun.SpawnOptions.Readable = "pipe",
+  const Err extends Bun.SpawnOptions.Readable = "inherit",
+>(
+  argv: string[],
+  opts: RunSlotOptions<In, Out, Err> = {} as RunSlotOptions<In, Out, Err>,
+): Bun.Subprocess<In, Out, Err> => {
+  const { ops, ...spawnOpts } = opts
+  const p = Bun.spawn<In, Out, Err>(argv, spawnOpts)
+  children.push({ p, ops, at: Date.now() })
+  return p
+}
+// Ends every recorded child still unreaped, with the command group it owns, on pass, fail and timeout alike: TERM first, which run-slot.sh's own trap turns on its command's group, then KILL after 5 s for what outlives it, as stop() does. A child that has ended is never signalled itself, since its pid may be anyone's on a Mac that wraps them in minutes. A *.child pid is signalled as a group only while the identity holds it is this run's own: still its runner's child leading its own group (the guard run-slot.sh's own preempt reads) while the runner lives, or, once the runner died without its trap, an orphan leading its own group that was already running when its *.child was written, since a stale or wrapped id passes neither.
+export const endChildren = async () => {
+  const exited = (p: { exited: Promise<number> }) =>
+    Promise.race([p.exited.then(() => true), Bun.sleep(50).then(() => false)])
+  const alive = (pid: number, group = false) => {
+    try {
+      process.kill(group ? -pid : pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  const kill = (pid: number, group: boolean, sig: number | "SIGTERM" | "SIGKILL") => {
+    try {
+      process.kill(group ? -pid : pid, sig)
+    } catch {
+      // it ended since the last look
+    }
+  }
+  const live: { p: { exited: Promise<number> }; pid: number; groups: number[] }[] = []
+  for (const child of children.splice(0)) {
+    const done = await exited(child.p)
+    const groups: number[] = []
+    if (child.ops && existsSync(child.ops))
+      for (const file of readdirSync(child.ops)) {
+        if (!file.endsWith(".child")) continue
+        const command = Number(readFileSync(join(child.ops, file), "utf8").trim())
+        if (!(command > 1)) continue
+        const written = statSync(join(child.ops, file)).mtimeMs
+        if (written < child.at - 60_000) continue
+        const [etime, ppid, pgid] = Bun.spawnSync([
+          "ps",
+          "-o",
+          "etime=,ppid=,pgid=",
+          "-p",
+          String(command),
+        ])
+          .stdout.toString()
+          .trim()
+          .split(/\s+/)
+        if (Number(pgid) !== command) continue
+        // the process must have started no later than the .child was written, which run-slot.sh does right after its command: a reused pid started after the write, and a wrap puts one there in minutes
+        const [days, rest] = etime.includes("-")
+          ? [etime.split("-")[0]!, etime.split("-")[1]!]
+          : ["0", etime]
+        const started =
+          Date.now() -
+          (Number(days) * 86_400 + rest.split(":").reduce((s, n) => s * 60 + Number(n), 0)) * 1_000
+        const runsIt = started <= written + 1_000
+        if (done ? Number(ppid) === 1 && runsIt : Number(ppid) === child.p.pid) groups.push(command)
+      }
+    if (!done || groups.length > 0) live.push({ p: child.p, pid: child.p.pid, groups })
+  }
+  for (const { pid, groups } of live) {
+    kill(pid, false, "SIGTERM")
+    for (const gid of groups) kill(gid, true, "SIGTERM")
+  }
+  const left = async () =>
+    (await Promise.all(live.map(async ({ p }) => !(await exited(p))))).some(Boolean) ||
+    live.some(({ groups }) => groups.some((gid) => alive(gid, true)))
+  const deadline = Date.now() + 5_000
+  while ((await left()) && Date.now() < deadline) await Bun.sleep(50)
+  if (await left())
+    for (const { p, pid, groups } of live) {
+      if (!(await exited(p))) kill(pid, false, "SIGKILL")
+      for (const gid of groups) if (alive(gid, true)) kill(gid, true, "SIGKILL")
+    }
+  const end = Date.now() + 5_000
+  while ((await left()) && Date.now() < end) await Bun.sleep(50)
+}
+
 export const dirs: string[] = []
-afterAll(() => {
+// endChildren's own budget is 10 s at the worst (TERM grace, then KILL wait), so the hook takes 30 s rather than the 5 s default a hook without one reads
+afterAll(async () => {
+  await endChildren()
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
-})
+}, 30_000)
 
 export type Setup = {
   // the core count sysctl's hw.ncpu reads
@@ -195,10 +292,11 @@ esac
     cwd = root,
   ) => {
     const marker = join(root, `ran-${who}-${Math.random()}`)
-    const p = Bun.spawn(["bash", script, who, "--", ...command, marker], {
+    const p = runSlot(["bash", script, who, "--", ...command, marker], {
       cwd,
       env: env(extra),
       stderr: "pipe",
+      ops,
     })
     let err = ""
     let ended = false
@@ -240,14 +338,19 @@ esac
     return { marker, p, ran, saw, stderr: () => err, waits }
   }
   const canTake = async (slot: string, who: string, extra: Record<string, string> = {}) => {
-    const p = Bun.spawn(["bash", SCRIPT, "can-take", slot, who], { cwd: root, env: env(extra) })
+    const p = runSlot(["bash", SCRIPT, "can-take", slot, who], {
+      cwd: root,
+      env: env(extra),
+      ops,
+    })
     return (await p.exited) === 0
   }
   const size = async (who: string, extra: Record<string, string> = {}, cwd = root) => {
-    const p = Bun.spawn(["bash", SCRIPT, "size", who], {
+    const p = runSlot(["bash", SCRIPT, "size", who], {
       cwd,
       env: env(extra),
       stdout: "pipe",
+      ops,
     })
     await p.exited
     return (await new Response(p.stdout).text()).trim()
@@ -267,10 +370,11 @@ esac
     mkdirSync(join(root, "x", "node_modules"), { recursive: true })
     const to = `copy-${Math.random()}`
     const before = pressureReads()
-    const p = Bun.spawn(["bash", SCRIPT, who, "--", ...prefix, "cp", "-R", from, to], {
+    const p = runSlot(["bash", SCRIPT, who, "--", ...prefix, "cp", "-R", from, to], {
       cwd: from.startsWith("node_modules") ? join(root, "x") : root,
       env: env(),
       stderr: "ignore",
+      ops,
     })
     let ended = false
     void p.exited.then(() => (ended = true))
@@ -301,10 +405,11 @@ export const slots = (m: ReturnType<typeof machine>) =>
   Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() }).stdout.toString()
 // run-slot.sh set's exit code and stderr on the machine
 export const set = async (m: ReturnType<typeof machine>, ...args: string[]) => {
-  const p = Bun.spawn(["bash", SCRIPT, "set", ...args], {
+  const p = runSlot(["bash", SCRIPT, "set", ...args], {
     cwd: m.root,
     env: m.env(),
     stderr: "pipe",
+    ops: m.ops,
   })
   return { code: await p.exited, err: await new Response(p.stderr).text() }
 }
