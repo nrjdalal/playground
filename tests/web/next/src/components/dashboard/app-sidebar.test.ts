@@ -499,6 +499,24 @@ describe("SessionRow", () => {
     expect(tipsOf(bare)).toHaveLength(1)
   })
 
+  for (const [name, role] of [
+    ["ops", "manager"],
+    ["runner-pride", "runner"],
+    ["worker-greed", "worker"],
+  ] as const) {
+    test(`a ${role} row that opens nothing keeps the effort's place with no effort, so its logo lines up with a row that has one`, () => {
+      const html = row(name, role, [], { model: "claude-opus-5-5" })
+      const logo = html.indexOf(pathOf(RiAnthropicFill))
+      expect(logo).toBeGreaterThan(-1)
+      expect(
+        html.indexOf(
+          '<span class="size-4 shrink-0 group-data-[collapsible=icon]:hidden"></span>',
+          logo,
+        ),
+      ).toBeGreaterThan(logo)
+    })
+  }
+
   test("an idle worker, a runner and a manager show no ETA", () => {
     const eta = "2026-10-06T12:20:00.000Z"
     expect(tipLines(row("worker-greed", "worker", [], { eta, light: "idle" }))).toContain("Idle")

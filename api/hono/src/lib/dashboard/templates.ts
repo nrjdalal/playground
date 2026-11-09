@@ -2,6 +2,7 @@ import { copyFileSync, existsSync } from "node:fs"
 import { join } from "node:path"
 
 import { ID_ALPHABET, seatOf } from "@packages/config/kinds"
+import { spawnEnv } from "@packages/env/api-hono"
 import { BRIEF_NAME, readSessionTemplates, type SessionTemplate } from "@packages/settings"
 
 import { readConfigAccount } from "@/lib/dashboard/account"
@@ -82,7 +83,12 @@ const madeUpName = (kind: string) =>
   `${Array.from({ length: 6 }, () => ID_ALPHABET[Math.floor(Math.random() * ID_ALPHABET.length)]).join("")}-${kind}`
 
 const run: Run = async (argv) => {
-  const child = Bun.spawn(argv, { stderr: "pipe", stdin: "ignore", stdout: "pipe" })
+  const child = Bun.spawn(argv, {
+    env: spawnEnv(),
+    stderr: "pipe",
+    stdin: "ignore",
+    stdout: "pipe",
+  })
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),

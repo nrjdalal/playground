@@ -29,7 +29,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 
 ## Registered in both settings files
 
-- A session resumed without its `--settings` or `PLAYGROUND_ROLE` (a bare `claude --resume`, or herdr's own resume, which ops-herdr's `config.toml` keeps off: playbook's SESSIONS.md) still loads the checkout's project settings, so `.claude/settings.json` registers every PreToolUse hook `scripts/factory-settings.json` does, with the same matcher and the same command string,
+- A session resumed without its `--settings` or `PLAYGROUND_ROLE` (a bare `claude --resume`, or herdr's own resume, which ops-herdr's `config.toml` keeps off: playbook's SPAWN.md, Role and settings) still loads the checkout's project settings, so `.claude/settings.json` registers every PreToolUse hook `scripts/factory-settings.json` does, with the same matcher and the same command string,
   since Claude Code runs a handler defined in both files once only when the two commands match byte for byte (measured on Claude Code 2.1.302: one space apart, it runs twice; `tests/scripts/hooks-abs-path.test.ts` holds every hook in both files to it).
   That one command finds the checkout with no `$HOME` in it: `$PLAYGROUND_REPO`, which spawn.sh's launch exports as its main checkout, else the main checkout git names for `$CLAUDE_PROJECT_DIR` (`--git-common-dir`, so a session in a worktree runs the main checkout's guards); when neither names a folder holding the hook's script, it runs nothing and exits 0.
 - A hook's script lands on `main` in one ship and its registration in a later one, since every wrapper runs its script from the main checkout, which follows `main`, and a factory session on `canary` loses the hook's tool the moment `canary` registers a script `main` lacks.
@@ -73,7 +73,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   Four factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label, no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them,
   and no-raw-delete guards every session's deletes, since a delete is final whoever runs it.
   Every other factory hook acts for a factory session alone, `PLAYGROUND_ROLE` or else its name in Claude Code's registry, placed by the roster's `kind` for that name and then by the factory's names (`scripts/hooks/role.ts`), so a session the owner opens in the factory's checkout passes them untouched.
-  Claude Code loads project settings from the session's own folder alone, so a factory session restored where they lack the hooks (another checkout, an older one, a subfolder) is respawned with its settings (playbook's SESSIONS.md), and `scripts/ops/up.py --sessions`, which reads each session's command line and its own folder's `.claude/settings.json`, names each one.
+  Claude Code loads project settings from the session's own folder alone, so a factory session restored where they lack the hooks (another checkout, an older one, a subfolder) is respawned with its settings (playbook's SPAWN.md, Role and settings), and `scripts/ops/up.py --sessions`, which reads each session's command line and its own folder's `.claude/settings.json`, names each one.
 
 ## Guard lists
 
@@ -163,7 +163,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   That time is the newest timestamp in the tail of the transcript SessionStart names, since a resumed process writes no timestamped line before its first input (measured on 2.1.309), and the resume's own time when the transcript gives none; the text names both, since the session may read it hours later.
   Any restart that resumes a session fires it: Claude Code's `--resume` fires SessionStart with source `resume` (measured on Claude Code 2.1.309 through `spawn.sh resume`, where `spawn.sh`'s first start reads `startup`), and the restart ends every background task the old process held.
   A session idle at the restart takes no turn and so never reads the instruction, so `spawn.sh resume` (a herdr restore, an account switch, an update's resume records) gives a resume with no `--brief` a first prompt that names the session, whom it reports to (from its roster row, by [spawn.sh](../README.md#spawnsh)'s order), and has it act on the instruction;
-  A terminal's own restore passes no prompt: a session it restores where its folder lacks the factory's hooks is respawned through spawn.sh (playbook's SESSIONS.md), and one in the factory's checkout keeps running with the hook's context but stays idle until a message reaches it.
+  A terminal's own restore passes no prompt: a session it restores where its folder lacks the factory's hooks is respawned through spawn.sh (playbook's SPAWN.md, Role and settings), and one in the factory's checkout keeps running with the hook's context but stays idle until a message reaches it.
   On 25 Oct an account switch restarted every session: two reviewers lost their workers' round requests, and the ops lead's watches and the dispatcher's login-flip loop died, each found by hand later.
   It says nothing to the owner's own sessions here, fails open, and its tests are in `bun run test:file tests/scripts/hooks`.
 
@@ -561,7 +561,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 ## no-playground-leak
 
 - ALWAYS: Keep the factory out of every ticket, PR, commit, branch, comment, Slack message or DM, and file in a guarded org's repo: playbook's **classified** rule, since the factory is the owner's own and stays out of the org's records in any shape.
-  Every factory session is spawned with `--settings ~/.playground/factory-settings.json` (playbook's SESSIONS.md), the file `scripts/link-skills.sh` links to `scripts/factory-settings.json`,
+  Every factory session is spawned with `--settings ~/.playground/factory-settings.json` (playbook's SPAWN.md, Role and settings), the file `scripts/link-skills.sh` links to `scripts/factory-settings.json`,
   which registers the PreToolUse hook `scripts/hooks/no-playground-leak.ts` wherever the session works (`.claude/settings.json` registers it too, for a session resumed without its settings in the factory's checkout).
   It refuses a write to a guarded org's surface whose text holds a factory term (a name, an old session name, which a scope's own copy adds, a path, a `<role>-<sin>` session or a `probe-<sin>` or `probe-<role>-<sin>` probe from `extensions/core/lists/playground-terms.json`,
   its sins the seven words alone so `worker-pool` and `probe-path` pass, any skill's name in the checkout's `skills/` bucket folders,
@@ -647,7 +647,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 ## no-linear-ticket
 
 - ALWAYS: File a new Linear ticket only after the owner's yes, and keep the factory out of Linear and out of every guarded org's ticket, PR, commit, branch, comment, Slack message or DM, and file in its repo: playbook's **tickets** rule, since the factory is no project of the org's and stays out of its records in any shape.
-  A session started with `PLAYGROUND_ROLE` set (every factory spawn, playbook's SESSIONS.md), or with no role but a factory name in Claude Code's registry (`scripts/hooks/role.ts`, for a session resumed without its settings), runs the PreToolUse hook `scripts/hooks/no-linear-ticket.ts`, registered in both settings files and in the ticket skill's and playbook's frontmatter,
+  A session started with `PLAYGROUND_ROLE` set (every factory spawn, by the launch line in playbook's SPAWN.md), or with no role but a factory name in Claude Code's registry (`scripts/hooks/role.ts`, for a session resumed without its settings), runs the PreToolUse hook `scripts/hooks/no-linear-ticket.ts`, registered in both settings files and in the ticket skill's and playbook's frontmatter,
   so it also runs in a guarded org's checkout whose session loads either; without the variable or a factory name it allows everything, so the owner's own sessions file freely.
   It refuses a call that files a new Linear ticket (`save_issue` with no `id`, a Linear server's create-issue tool, a GraphQL `issueCreate` or `issueBatchCreate` sent by curl, by `gh api` to a URL off GitHub, or by inline script code) unless `ticket-approvals/<team>-<UTC date>.json` in the data folder names its title;
   a GraphQL create is refused even then, since its `teamId` matches no approval.
