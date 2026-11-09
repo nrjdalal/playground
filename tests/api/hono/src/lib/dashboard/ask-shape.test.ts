@@ -177,13 +177,19 @@ describe("ASK_EXAMPLES", () => {
     expect(isAskExampleKind("toString")).toBe(false)
   })
 
-  // PG-1607: an owner message puts its answer first (the plain-words skill), so each ask template opens on one sentence, its picture or bullets after a blank line
-  test("each ask template's text opens on its answer line", () => {
-    for (const kind of ["code", "decision", "ui"] as const) {
-      const [answer, gap] = ASK_EXAMPLES[kind].preview.text.split("\n")
-      expect(answer).toMatch(/^[A-Z][^`]*\.$/)
-      expect(gap).toBe("")
+  // PG-1607: an owner message opens on its smallest picture with a short note beside it (the plain-words skill's owner style), so a template's picture leads and its one-sentence note follows; the UI template's picture is its attachments, so its text opens on the note
+  test("each ask template leads with its picture, then a one-sentence note", () => {
+    const note = /^[A-Z][^`]*\.$/
+    for (const kind of ["code", "decision"] as const) {
+      const lines = ASK_EXAMPLES[kind].preview.text.split("\n")
+      expect(lines[0]).toMatch(/^```/)
+      const close = lines.indexOf("```", 1)
+      expect(close).toBeGreaterThan(0)
+      expect(lines.slice(close + 1, close + 4)).toEqual(["", expect.stringMatching(note), ""])
     }
+    const [first, gap] = ASK_EXAMPLES.ui.preview.text.split("\n")
+    expect(first).toMatch(note)
+    expect(gap).toBe("")
   })
 
   test("the UI template carries its before and after pictures as attachments by absolute path", () => {
