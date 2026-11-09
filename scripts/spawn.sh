@@ -1667,6 +1667,16 @@ for r in rows[titles[-1] + 1:]:
         print(row.group(1))
 '
 }
+# The row the MCP picker's pointer marks, the last row after its title that leads with ❯.
+mcp_focused() {
+  hr pane read "$PANE" --source recent-unwrapped --lines 80 | python3 -I -c '
+import re, sys
+rows = sys.stdin.read().splitlines()
+titles = [i for i, r in enumerate(rows) if re.search(r"New MCP server found in this project|[0-9]+ new MCP servers found", r)]
+focused = [r for r in rows[titles[-1] + 1:] if r.lstrip().startswith("❯")] if titles else []
+print(focused[-1].lstrip()[1:].strip() if focused else "")
+'
+}
 # Why the picker is the owner's, printed, unless the names on stdin are $1 servers, each one of the factory's own MCP file, ~/.mcp.json, the only servers spawn.sh enables in the owner's name.
 # Claude Code merges the .mcp.json of $CWD and of each folder above it but /, the nearest taking a name over, so another on that walk that defines a server leaves the picker to the owner; a plugin's server reads "<name> (from plugin <plugin>)", which no key matches.
 mcp_factory_only() {
@@ -1697,7 +1707,7 @@ if len(names) != int(sys.argv[2]) or not names <= servers:
 }
 # The screens come in order (trust, then the MCP picker, then the REPL), so each wait looks only for what can still come and a screen already answered never matches twice. One key a request, since herdr drops part of several keys sent together.
 herdr_answer() {
-  local want="$TRUST_RE|$MCP_RE|$READY_RE" line k n names why
+  local want="$TRUST_RE|$MCP_RE|$READY_RE" line k n names why target focused
   while :; do
     line=$(hr pane wait-output "$PANE" --regex "$want" --source visible --timeout 120000 |
       python3 -I -c 'import json, sys; print(json.load(sys.stdin)["result"]["matched_line"])' 2>/dev/null) ||
@@ -1726,11 +1736,18 @@ herdr_answer() {
       why=$(mcp_factory_only "$n" <<<"$names") ||
         { echo "spawn.sh: $NAME waits at Claude's MCP server picker for $CWD, which $why, so it is the owner's to answer" >&2; return 1; }
       # Then "Enable selected", one row below the last server with all selected at the start, or one server's "Use this MCP server", two rows above the focused "Continue without".
+      # herdr can drop a key, and Enter on "Use this and all future MCP servers" would trust every later .mcp.json of the folder unseen, so Enter goes only to the row the pointer marks as the one wanted.
       if [ "$n" -gt 1 ]; then
         hr pane send-keys "$PANE" down >/dev/null || return 1
+        target="Enable selected"
       else
         hr pane send-keys "$PANE" up >/dev/null && hr pane send-keys "$PANE" up >/dev/null || return 1
+        target="Use this MCP server"
       fi
+      sleep 0.2
+      focused=$(mcp_focused)
+      [ "$focused" = "$target" ] ||
+        { echo "spawn.sh: $NAME waits at Claude's MCP server picker for $CWD with \"${focused:-no row}\" marked where \"$target\" was wanted, so it is the owner's to answer" >&2; return 1; }
       hr pane send-keys "$PANE" enter >/dev/null || return 1
       want=$READY_RE
     else

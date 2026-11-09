@@ -434,7 +434,7 @@ export const others = (n: number, from = 1000): Session[] =>
 export const workers = (n: number, from = 2000): Session[] =>
   Array.from({ length: n }, (_, k) => ({ name: `worker-w-${k}`, pid: from + k }))
 
-// A fake herdr at the path its pin names: it logs each call as one line of words each ended by a unit separator, answers placement as herdr 0.9.5 does, and shows the screens FAKE_SCREENS lists (trust, trustcut, mcp, mcpother, mcpmany, mcpmanyother, mcpplugin, mcpseven, mcpsevenother, mcpstatus, cut, bare, blank, ready) one row per wait, each matched against the wait's regex, and a picker's whole screen to a read.
+// A fake herdr at the path its pin names: it logs each call as one line of words each ended by a unit separator, answers placement as herdr 0.9.5 does, and shows the screens FAKE_SCREENS lists (trust, trustcut, mcp, mcpother, mcpmany, mcpmanyother, mcpplugin, mcpseven, mcpsevenother, mcpstatus, cut, bare, blank, ready) one row per wait, each matched against the wait's regex, and a picker's whole screen to a read, its pointer moved by the keys sent since, FAKE_LOST_KEY naming one herdr dropped.
 const herdrBin = join(bin, "herdr-fake")
 writeFileSync(
   herdrBin,
@@ -495,20 +495,36 @@ case "$1 \${2:-}" in
       mcpseven) many="fs|git|a|b|c|d|e" ;;
       mcpsevenother) many="fs|git|a|b|c|d|evil" ;;
     esac
+    # the keys sent since the screen's wait, less the FAKE_LOST_KEY-th, which herdr dropped
+    keys=$(tr '\\037' ' ' < "$HOME/herdr.calls" | awk -v lost="\${FAKE_LOST_KEY:-0}" '$2 == "wait-output" {k = ""; c = 0} $2 == "send-keys" && ++c != lost {k = k " " $4} END {print k}')
+    ups=0 downs=0
+    for key in $keys; do
+      [ "$key" = up ] && ups=$((ups + 1))
+      [ "$key" = down ] && downs=$((downs + 1))
+    done
     if [ -n "$one" ]; then
-      printf '%s\\n' "New MCP server found in this project: $one" "MCP servers may execute code or access system resources." "  Use this MCP server" "  Use this and all future MCP servers in this project" "❯ Continue without using this MCP server"
+      rows=("Use this MCP server" "Use this and all future MCP servers in this project" "Continue without using this MCP server")
+      focus=$((2 - ups + downs))
+      [ "$focus" -ge 0 ] || focus=0
+      [ "$focus" -le 2 ] || focus=2
+      printf '%s\\n' "New MCP server found in this project: $one" "MCP servers may execute code or access system resources."
+      for i in 0 1 2; do
+        [ "$i" = "$focus" ] && p="❯" || p=" "
+        printf '%s %s\\n' "$p" "\${rows[$i]}"
+      done
     elif [ -n "$many" ]; then
       IFS="|" read -ra names <<<"$many"
-      # the picker shows five servers at a time and scrolls with the focus, which each down since the screen's wait moves
-      focus=$(tr '\\037' ' ' < "$HOME/herdr.calls" | awk '$2 == "wait-output" {c = 0} $2 == "send-keys" && $4 == "down" {c++} END {print c + 0}')
-      [ "$focus" -lt "\${#names[@]}" ] || focus=$((\${#names[@]} - 1))
-      from=$((focus > 4 ? focus - 4 : 0))
+      # the picker shows five servers at a time and scrolls with the focus; a down past the last server marks "Enable selected"
+      focus=$downs
+      [ "$focus" -le "\${#names[@]}" ] || focus=\${#names[@]}
+      shown=$((focus < \${#names[@]} ? focus : \${#names[@]} - 1))
+      from=$((shown > 4 ? shown - 4 : 0))
       printf '%s\\n' "\${#names[@]} new MCP servers found in this project" "Select any you wish to enable." "MCP servers may execute code or access system resources."
       for ((i = from; i < from + 5 && i < \${#names[@]}; i++)); do
         [ "$i" = "$focus" ] && p="❯" || p=" "
         printf '%s [✔] %s\\n' "$p" "\${names[$i]}"
       done
-      echo "  Enable selected"
+      [ "$focus" = "\${#names[@]}" ] && echo "❯   Enable selected" || echo "    Enable selected"
     fi ;;
 esac
 exit 0
