@@ -1,15 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync, readFileSync, statSync } from "node:fs"
-import { dirname, join, relative, resolve } from "node:path"
+import { join } from "node:path"
 
 import { hc } from "hono/client"
 
 import type { HostedAppType } from "../../../../api/hono/src/index"
 import { entryOf } from "../../../../api/hono/src/lib/entry"
+import { importGraph, ROOT, SRC } from "./import-graph"
 
-const ROOT = resolve(import.meta.dir, "../../../..")
 const API = join(ROOT, "api/hono")
-const SRC = join(API, "src")
 
 // A child Bun in the API's folder, so its tsconfig's @/ resolves, with a valid environment of its own: the hosted switch is read once, when the env module loads.
 const child = (script: string, env: Record<string, string>) => {
@@ -122,54 +120,6 @@ const LOCAL_DIRS = [
   "plugins",
 ]
 const HOSTED_ROUTERS = ["routers/auth.ts", "routers/relay.ts", "routers/yard.ts"]
-
-const transpiler = new Bun.Transpiler({ loader: "ts" })
-
-const resolveFile = (base: string): string | null =>
-  [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts")].find(
-    (file) => existsSync(file) && statSync(file).isFile(),
-  ) ?? null
-
-// The src folder a file's @/ alias points into: the API's, or the workspace package's it sits in.
-const srcOf = (file: string) => file.match(/^(.*\/packages\/[^/]+\/src)\//)?.[1] ?? SRC
-
-// A workspace package's import, @packages/<name>[/<sub>], as the source file its export builds from.
-const packageFile = (path: string) => {
-  const [, name, sub] = path.match(/^@packages\/([^/]+)(?:\/(.+))?$/) ?? []
-  return name ? resolveFile(join(ROOT, "packages", name, "src", sub ?? "index")) : null
-}
-
-// Every file the entry reaches through runtime imports, static or dynamic (type-only imports are erased), into the workspace packages too, with every package it names; an API file is named from api/hono/src, a package's from the repo root.
-const importGraph = (entry: string) => {
-  const files = new Set<string>()
-  const packages = new Set<string>()
-  const queue = [entry]
-  while (queue.length) {
-    const file = queue.pop()!
-    if (files.has(file)) continue
-    files.add(file)
-    for (const { path } of transpiler.scanImports(readFileSync(file, "utf8"))) {
-      if (path.startsWith("node:") || path === "bun") continue
-      const parts = path.split("/")
-      if (!path.startsWith("@/") && !path.startsWith(".")) {
-        packages.add(path.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!)
-        if (!path.startsWith("@packages/")) continue
-      }
-      const local = path.startsWith("@/")
-        ? join(srcOf(file), path.slice(2))
-        : path.startsWith(".")
-          ? resolve(dirname(file), path)
-          : null
-      const found = local ? resolveFile(local) : packageFile(path)
-      if (!found)
-        throw new Error(`${relative(ROOT, file)} imports ${path}, which resolves to no file`)
-      if (/\.tsx?$/.test(found)) queue.push(found)
-    }
-  }
-  const named = (file: string) =>
-    file.startsWith(`${SRC}/`) ? relative(SRC, file) : relative(ROOT, file)
-  return { files: [...files].map(named), packages: [...packages] }
-}
 
 describe("the hosted entry's import graph", () => {
   const graph = importGraph(join(SRC, "hosted.ts"))
