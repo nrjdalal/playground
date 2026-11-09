@@ -87,7 +87,7 @@ describe("the clone lane", () => {
     const older = cloning(m, "worker-older")
     expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
     const newer = cloning(m, "worker-newer")
-    // the order is decided once both places are listed, the older's ask time first, so the lane reads it whatever its waiters do next
+    // the order is decided once both places are listed, the older's ask time first, so the lane frees with the order decided
     while (!ordered(m)) await Bun.sleep(50)
     m.release("run-slot-clone")
     while (started(m).length === 0) await Bun.sleep(50)
