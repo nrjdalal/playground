@@ -80,6 +80,29 @@ export const groups: Group[] = [
       ["turbo through bunx in the worktrees root", "bunx --cwd=.claude/worktrees turbo run build"],
     ],
   },
+  // a chained --cwd off a folder the hook cannot resolve may land anywhere, so it is judged as the main checkout; bun itself stops on a missing one
+  {
+    folders: ["checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      [
+        "turbo through bunx, a chained --cwd off a missing folder",
+        "bunx --cwd=missing --cwd=.. turbo run build",
+      ],
+      [
+        "turbo through bun x, a chained --cwd off a substitution",
+        "bun x --cwd=$(pwd) --cwd=.. turbo run build",
+      ],
+      [
+        "lefthook through bunx, a chained --cwd off a variable",
+        "bunx --cwd=$UNSET_DIR --cwd=.. lefthook run pre-commit",
+      ],
+      [
+        "the packages build through bunx, a chained --cwd off a missing folder, its settings left out",
+        "bunx --cwd=missing --cwd=.. turbo run build --filter='./packages/*'",
+      ],
+    ],
+  },
   // bun x and bunx read each relative --cwd from the one before it, and a --cwd it cannot read leaves the line judged in the shell's folder
   {
     folders: ["main checkout"],
