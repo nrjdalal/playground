@@ -177,6 +177,15 @@ describe("ASK_EXAMPLES", () => {
     expect(isAskExampleKind("toString")).toBe(false)
   })
 
+  // PG-1607: an owner message puts its answer first (the plain-words skill), so each ask template opens on one sentence, its picture or bullets after a blank line
+  test("each ask template's text opens on its answer line", () => {
+    for (const kind of ["code", "decision", "ui"] as const) {
+      const [answer, gap] = ASK_EXAMPLES[kind].preview.text.split("\n")
+      expect(answer).toMatch(/^[A-Z][^`]*\.$/)
+      expect(gap).toBe("")
+    }
+  })
+
   test("the UI template carries its before and after pictures as attachments by absolute path", () => {
     expect(
       ASK_EXAMPLES.ui.preview.attachments.map(({ label, src }) => [label, src.startsWith("/")]),

@@ -232,7 +232,7 @@
   ```
 
   `kind` is `decision` (left out, it is one), `draft` or `update`; `from` is the posting session's name as the Dashboard shows it, since the answer is typed into that session; `title` is one line.
-  A decision's `preview` is one of fourteen, each what Approve does except the `secret` ask and the `reveal` card (below), written in ELI5 / ASD-STE100 plain words: `accept` (`scope`, `kind`, `key`, `rev`, `why`, an optional `more` list, below), `apps` (`app`, `change`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
+  A decision's `preview` is one of fourteen, each what Approve does except the `secret` ask and the `reveal` card (below), written in plain words (the `plain-words` skill): `accept` (`scope`, `kind`, `key`, `rev`, `why`, an optional `more` list, below), `apps` (`app`, `change`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
   a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with its options labelled one line each, `options`, 1 to 5 rows of `{label, description?}`, one row for a yes or no and 2 or more for lettered choices, or the older `approve` alone, never both, and an optional `deny` naming the no-go row (Deny, or None of these past one option),
@@ -471,17 +471,18 @@
   EOF
   ```
 
-- The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in three parts, top to bottom:
-  1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
+- The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in four parts, top to bottom:
+  1. The answer line: the result or the answer in one sentence, by the `plain-words` skill's owner style (`extensions/core/skills/plain-words/SKILL.md`).
+  2. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
      Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from; a `diff` block's lines may run longer, since the card wraps them.
      A wider drawing still posts and shrinks to 10px, then scrolls, so the limit is a writing guide.
-  2. Short bullets, one fact each, an emoji as each one's marker.
-  3. The options: for a true yes or no, one `options` row saying what Approve does, with `deny` beside it; for real alternatives, 2 to 5 rows, A to E, each a `label` and an optional `description`.
+  3. Short bullets, one fact each, an emoji as each one's marker.
+  4. The options: for a true yes or no, one `options` row saying what Approve does, with `deny` beside it; for real alternatives, 2 to 5 rows, A to E, each a `label` and an optional `description`.
      The card shows them as its choices under the text, in place of its On Approve line.
      For several calls at once, a `questions` list in place of `options`: 2 to 20 questions, each its own 1 to 5 `options` and an optional `recommended` index, which the card asks one at a time and sends together.
 
   A factory session writes each item's words and pictures by the `to-inbox` skill (`extensions/core/skills/to-inbox/SKILL.md`), loaded before `bun run ask new`.
-  A job of several steps leads with to-inbox's work status block, a read-only update its poster edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`).
+  A job of several steps opens on to-inbox's work status block, a read-only update its poster edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`); the block's first line, the job's name and its done/total, is its answer line.
 
   `bun run ask example code|decision|delete|questions|slack|ui` prints each worked example as an item to fill in, the asks below and the delete and slack decisions above.
   `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options,
@@ -490,6 +491,8 @@
   The four, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown
+  The export fix is ready to port to staging and main.
+
   ```diff
   - const limit = 100
   + const limit = rows.length
@@ -503,6 +506,8 @@
   Options: `Port the fix to staging, then main`; Deny: `Keep it on dev`.
 
   ````markdown
+  A dry run of the export job waits on your yes.
+
   ```
   web-api
      │ asks for a dry run
@@ -520,9 +525,11 @@
 
   Options: `Take the request and run the dry run`; Deny: `Turn the request down`.
 
-  The UI change leads with its before and after pictures, which join the ask as `attachments` (absolute paths on this Mac, each with its `label` and `group`, which `bun run ask new` copies in), and its card shows them under this text:
+  The UI change's before and after pictures join the ask as `attachments` (absolute paths on this Mac, each with its `label` and `group`, which `bun run ask new` copies in), and its card shows them under this text, which opens on its answer line:
 
   ````markdown
+  The Inbox card can show its pictures as one thumbnail row.
+
   - 🖼️ The Inbox card shows its pictures as a row of thumbnails.
   - 👆 A click opens the picture in the viewer.
   - 📱 The row scrolls sideways on a phone.
