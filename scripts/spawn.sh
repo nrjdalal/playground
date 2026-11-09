@@ -721,7 +721,7 @@ try:
                 refuse("usage", logins[0][4])
             readings["logins"] = {f"{email} ({name})": detail for email, name, _, _, detail in logins}
             refuse("usage", "every login is over it: " + "; ".join(f"{email} ({name}): {detail}" for email, name, _, _, detail in logins))
-        # login-flip.py's split, under 30 minutes old (two of the ops tick's 15-minute beats), picks among the passing logins it shares by smooth weighted round robin over split-picks.json (SESSIONS.md, Spawn), else the lowest week
+        # login-flip.py's split, under 30 minutes old (two of the ops tick's 15-minute beats), picks among the passing logins it shares by smooth weighted round robin over split-picks.json (playbook's SPAWN.md, --account), else the lowest week
         flip_dir = os.path.join(data_dir, "ops", "usage")
         try:
             with open(os.path.join(flip_dir, "login-flip.json")) as f:
