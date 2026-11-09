@@ -129,7 +129,7 @@ const heldAfterClearing = async (): Promise<string[]> => {
 
 export type DevEnv = { env: Record<string, string>; notes: string[] }
 
-// GIT_SHA is HEAD's short sha, which getBuildVersion() reports ahead of the one baked into @packages/env: turbo replays that build when only the commit moved, so /api/health would otherwise name an older commit.
+// GIT_SHA is HEAD's short sha, which getBuildVersion() reports ahead of the one baked into @packages/env: turbo replays that build when only the commit moved, so /api/health would otherwise name an older commit. NEXT_TELEMETRY_DISABLED keeps next dev's telemetry flush from outliving the stack it belongs to and holding a worktree's files.
 export const devEnv = (shell: Record<string, string | undefined>, gitSha: string): DevEnv => {
   const env: Record<string, string> = {}
   const notes: string[] = []
@@ -144,6 +144,7 @@ export const devEnv = (shell: Record<string, string | undefined>, gitSha: string
   }
   Object.assign(env, PORTLESS)
   if (gitSha) env.GIT_SHA = gitSha
+  env.NEXT_TELEMETRY_DISABLED = "1"
   return { env, notes }
 }
 

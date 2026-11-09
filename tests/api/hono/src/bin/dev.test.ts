@@ -92,7 +92,7 @@ describe("bun run dev", () => {
     expect(Object.values(turbo.tasks).flatMap((task) => task.env ?? [])).not.toContain("GIT_SHA")
   })
 
-  // next dev's telemetry flush can outlive the stack it belongs to and hold the worktree's files, so the launcher turns it off and turbo passes the value through to the dev tasks
+  // #1292, pinned through the real launcher's dry run, which reads what turbo passes the dev tasks
   test("sets NEXT_TELEMETRY_DISABLED=1 for next dev, and turbo passes it through", async () => {
     const { dry } = await dryRun(["--filter=@web/next"])
     expect(dry.globalCacheInputs.environmentVariables.passthrough).toContain(

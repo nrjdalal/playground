@@ -114,12 +114,13 @@ describe("turbo.json", () => {
   test("every PLAYGROUND_* name spawn.sh reads from its environment is on turbo's global pass-through lists", async () => {
     const turbo = await readTurbo()
     const script = await Bun.file(join(ROOT, "scripts/spawn.sh")).text()
-    // a shell parameter read (${PLAYGROUND_X:-default}) or a gate's os.environ/os.getenv read; names spawn.sh only sets for a child, or names in prose, are not reads
+    // a shell parameter read (${PLAYGROUND_X:-default} or $PLAYGROUND_X) or a gate's os.environ read, in its get, getenv and bracket forms; names spawn.sh only sets for a child, or names in prose, are not reads
     const reads = [
       ...new Set(
         [
-          ...script.matchAll(/\$\{(PLAYGROUND_[A-Z0-9_]+)/g),
+          ...script.matchAll(/\$\{?(PLAYGROUND_[A-Z0-9_]+)/g),
           ...script.matchAll(/os\.(?:environ\.get|getenv)\(.(PLAYGROUND_[A-Z0-9_]+)./g),
+          ...script.matchAll(/os\.environ\[.(PLAYGROUND_[A-Z0-9_]+)./g),
         ].map((match) => match[1]!),
       ),
     ].sort()

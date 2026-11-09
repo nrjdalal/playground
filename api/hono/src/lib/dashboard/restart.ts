@@ -1,6 +1,8 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { spawnEnv } from "@packages/env/api-hono"
+
 import { checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
 import { unstickPath } from "@/lib/dashboard/unstick"
 
@@ -11,7 +13,12 @@ export type Run = (argv: string[]) => Promise<{ code: number; stderr: string; st
 export type Restarted = { status: "restarted" } | { detail: string; status: "refused" }
 
 const run: Run = async (argv) => {
-  const child = Bun.spawn(argv, { stderr: "pipe", stdin: "ignore", stdout: "pipe" })
+  const child = Bun.spawn(argv, {
+    env: spawnEnv(),
+    stderr: "pipe",
+    stdin: "ignore",
+    stdout: "pipe",
+  })
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
