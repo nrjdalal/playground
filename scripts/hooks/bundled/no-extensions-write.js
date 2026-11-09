@@ -7400,15 +7400,20 @@ function bunCall(args, env) {
       k++;
     } else if (v.startsWith("--filter="))
       filtered = true;
+    else if (words[0] === "x" && (v === "-p" || v === "--package"))
+      k++;
     else if (!v.startsWith("-")) {
       words.push(v);
       if (v !== "run" && v !== "x")
         break;
     }
   }
+  const chained = words[0] === "x";
   let cwd = env.cwd;
-  for (const dir of words[0] === "x" ? dirs : dirs.slice(-1))
-    cwd = dir && pathOf(dir, { ...env, cwd: words[0] === "x" ? cwd : env.cwd });
+  for (const [n, dir] of (chained ? dirs : dirs.slice(-1)).entries()) {
+    const from = !chained ? env.cwd : n > 0 && cwd !== undefined ? real(cwd) : cwd;
+    cwd = dir && pathOf(dir, { ...env, cwd: from });
+  }
   return { at: k, cwd, filtered, words };
 }
 function gitCall(args, env) {

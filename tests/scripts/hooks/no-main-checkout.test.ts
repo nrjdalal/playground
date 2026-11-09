@@ -655,7 +655,7 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     expect(await bash(command, WORKTREE)).toContain("no-main-checkout hook refuses")
   })
 
-  // #623: a climb the shell runs at most once reaches one folder up, the worktrees folder, so each stays running
+  // #623: a climb the shell runs at most once reaches one folder up, here from the worktree's api folder to the worktree itself, so each stays running (the worktrees folder above it counts as the main checkout)
   test.each([
     ["a function whose cd climbs, called once", "f() { cd ..; }; f; git commit -m x"],
     ["an if condition that climbs", "if cd ..; then git commit -m x; fi"],
@@ -666,7 +666,14 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     ["an if condition with a brace argument", "if grep -q { f; then :; fi; git commit -m x"],
     ["a for loop with no cd", "for i in 1 2 3; do echo $i; done; git commit -m x"],
   ])("from a worktree, %s runs", async (_name, command) => {
-    expect(await bash(command, WORKTREE)).toBeUndefined()
+    expect(await bash(command, join(WORKTREE, "api"))).toBeUndefined()
+  })
+
+  // #1646: the worktrees folder is no worktree, since git and turbo walk up from it to the main checkout
+  test("from a worktree, one climb into the worktrees folder and a commit is refused", async () => {
+    expect(await bash("cd ..; git commit -m x", WORKTREE)).toContain(
+      "no-main-checkout hook refuses",
+    )
   })
 
   // #623: a while's or an until's condition runs at least once, so its cd leaves the main checkout behind

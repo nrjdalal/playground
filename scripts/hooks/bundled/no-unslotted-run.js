@@ -7146,6 +7146,40 @@ function mainCheckout(dir) {
   } catch {}
   return dir;
 }
+function real(path) {
+  const found = resolved(path);
+  if (found !== undefined || !isAbsolute3(path))
+    return found ?? nearest(path);
+  const parts = normalize(path).split(sep).filter(Boolean);
+  let low = 0;
+  let high = parts.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (resolved(sep + parts.slice(0, mid).join(sep)) === undefined)
+      high = mid - 1;
+    else
+      low = mid;
+  }
+  return join4(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
+}
+var resolved = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return;
+  }
+};
+function nearest(path) {
+  const rest = [];
+  for (let dir = path;; dir = dirname2(dir)) {
+    const found = resolved(dir);
+    if (found !== undefined)
+      return join4(found, ...rest.reverse());
+    if (dir === dirname2(dir))
+      return path;
+    rest.push(basename2(dir));
+  }
+}
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
 var RUNNERS = new Set(["npx"]);
 var X = { quoted: false, value: "x" };
@@ -7177,15 +7211,20 @@ function bunCall(args, env) {
       k++;
     } else if (v.startsWith("--filter="))
       filtered = true;
+    else if (words[0] === "x" && (v === "-p" || v === "--package"))
+      k++;
     else if (!v.startsWith("-")) {
       words.push(v);
       if (v !== "run" && v !== "x")
         break;
     }
   }
+  const chained = words[0] === "x";
   let cwd = env.cwd;
-  for (const dir of words[0] === "x" ? dirs : dirs.slice(-1))
-    cwd = dir && pathOf(dir, { ...env, cwd: words[0] === "x" ? cwd : env.cwd });
+  for (const [n, dir] of (chained ? dirs : dirs.slice(-1)).entries()) {
+    const from = !chained ? env.cwd : n > 0 && cwd !== undefined ? real(cwd) : cwd;
+    cwd = dir && pathOf(dir, { ...env, cwd: from });
+  }
   return { at: k, cwd, filtered, words };
 }
 var GIT_MOVES = new Set([
@@ -7453,7 +7492,7 @@ function heavy(name, args, env) {
     return { dir: cwdFlag(rest, { ...env, cwd }), what: "bun install" };
   }
   if (words[0] === "x" && program(words[1] ?? "") === "next" && rest[0]?.value === "build")
-    return { dir: cwd, what: "bun x next build" };
+    return cwd === undefined ? { anywhere: true, dir: env.cwd, what: "bun x next build" } : { dir: cwd, what: "bun x next build" };
   const testFile = words[0] === "run" && words[1] === "test:file";
   if (words[0] === "test" || testFile) {
     if (rest.some((a) => a.value === "--help" || a.value === "-h"))

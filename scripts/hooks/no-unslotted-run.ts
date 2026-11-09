@@ -297,8 +297,11 @@ function heavy(
     if (rest.some((a) => ["--dry-run", "--help", "-h"].includes(a.value))) return
     return { dir: cwdFlag(rest, { ...env, cwd }), what: "bun install" }
   }
+  // a --cwd the hook cannot read may land in a worktree, so the build counts as heavy wherever the line runs
   if (words[0] === "x" && program(words[1] ?? "") === "next" && rest[0]?.value === "build")
-    return { dir: cwd, what: "bun x next build" }
+    return cwd === undefined
+      ? { anywhere: true, dir: env.cwd, what: "bun x next build" }
+      : { dir: cwd, what: "bun x next build" }
   // bun run test:file passes its words to bun test, and with no file runs the whole suite as bun test does
   const testFile = words[0] === "run" && words[1] === "test:file"
   if (words[0] === "test" || testFile) {

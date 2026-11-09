@@ -185,15 +185,20 @@ export function bunCall(
       filtered = true
       k++
     } else if (v.startsWith("--filter=")) filtered = true
+    // bun x's -p and --package name the package to install, so the word after is no tool
+    else if (words[0] === "x" && (v === "-p" || v === "--package")) k++
     else if (!v.startsWith("-")) {
       words.push(v)
       if (v !== "run" && v !== "x") break
     }
   }
-  // bun x reads each relative --cwd from the one before it; run, test, install and a bare script read each from the shell's folder, the last one winning (bun 1.4.4, measured)
+  // bun x reads each relative --cwd from where the one before landed, a link followed; run, test, install and a bare script read each from the shell's folder, the last one winning (bun 1.4.4, measured)
+  const chained = words[0] === "x"
   let cwd = env.cwd
-  for (const dir of words[0] === "x" ? dirs : dirs.slice(-1))
-    cwd = dir && pathOf(dir, { ...env, cwd: words[0] === "x" ? cwd : env.cwd })
+  for (const [n, dir] of (chained ? dirs : dirs.slice(-1)).entries()) {
+    const from = !chained ? env.cwd : n > 0 && cwd !== undefined ? real(cwd) : cwd
+    cwd = dir && pathOf(dir, { ...env, cwd: from })
+  }
   return { at: k, cwd, filtered, words }
 }
 
@@ -539,7 +544,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     return (
       path !== undefined &&
       (path === checkout || path.startsWith(checkout + sep)) &&
-      !(path + sep).startsWith(worktrees)
+      // the worktrees root itself is no worktree: turbo walks up from it to the checkout's own turbo.json
+      !path.startsWith(worktrees)
     )
   }
   // the live checkout is read only for a Bash call, so a file tool's write pays nothing for it
