@@ -97,3 +97,4 @@ Before the install it waits up to 10 minutes for this Mac's load to fall under t
 The box sets `PLAYGROUND_LOAD_MULT=10` (`BOX_LOAD_MULT`, printed at the start), so the host's other sessions never hold a start there, since the gate checks what a new user meets on a quiet Mac.
 A step that fails while spawn.sh's capacity gate refused a start in the box (its `capacity.jsonl`, now its memory or usage gate) reads INCONCLUSIVE with that refusal, since the gate reads this Mac, not the build.
 Run it through run-slot before each ship (the release skill's step 1); it exits 1 when a step fails.
+Its last line, `New-user gate at <sha>: PASS` or `FAIL`, goes into the ship PR's body, where `ship:merge` reads it, the line and not the exit code, since a run whose only miss is INCONCLUSIVE exits 1 and reads PASS ([pr-merge's README](../packages/scripts/src/pr-merge/README.md#shipmerge)).

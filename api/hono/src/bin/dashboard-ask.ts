@@ -35,7 +35,7 @@ import { dataDir } from "@/lib/sessions/paths"
 // The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr); `edit <id|#iN> < item.json` replaces the poster's own item's title and preview in place until it closes, checked as new checks it; both fill `{now}` with the time they post at and refuse a measured or now time ahead of the clock, and a draft with no link, a public post's, whose text holds a work figure or an internal name (the public rule); `open [--from <session>] [--since <iso time>] [--until <iso time>]` lists the open items, oldest first, those posted in that window alone when given, so a poster names one on the same thing rather than posting it twice; `get <id|#iN>` prints the item, the owner's answer included once given, and the option the owner picked on stderr, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own update once it has settled; `stale` lists the answers no poster has closed, for ops-sweep; `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose, labels no options, names a PR, a tracker ID or a commit with no link on its line, or holds a code line too wide for the card. See `.agents/dashboard/asks.md` for the fields.
 const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 posts an inbox item from JSON on stdin, prints its id
-                                                options and approve/deny labels go in plain words (ELI5, ASD-STE100)
+                                                options and approve/deny labels go in plain words (the plain-words skill)
                                                 an ask's, a draft's or a slack decision's attachments name files on
                                                 this Mac by absolute path; a draft's or a slack decision's go into
                                                 its Slack link's thread on Send or Approve, before its words
@@ -67,7 +67,7 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 progress to its end: an update until it is Done or dismissed,
                                                 an ask, answered or not, until it closes; one put away with Later stays put away
        bun run ask example <code|decision|delete|questions|slack|ui>
-                                                prints an item to start from: an ask's picture of the point, bullets,
+                                                prints an item to start from: an ask's picture and its note, bullets,
                                                 then what Approve does (.agents/dashboard/asks.md, The ask's shape),
                                                 a delete decision naming its worktree by its full path,
                                                 or a Slack message led by its thread so far
@@ -237,7 +237,7 @@ if (command === "new" || command === "edit") {
   for (const hint of shapeHints(input)) {
     console.error(
       hint.kind === "prose"
-        ? "ask: this ask is one block of prose; lead with a picture of the point (an ASCII flow or a diff in a code block), then short bullets, then its options, in its `options` and `deny` labels. bun run ask example code|decision|ui prints a template (.agents/dashboard/asks.md, The ask's shape)"
+        ? "ask: this ask is one block of prose; lead with a picture of the point (an ASCII flow or a diff in a code block) and a one-sentence note under it, then short bullets, then its options, in its `options` and `deny` labels. bun run ask example code|decision|ui prints a template (.agents/dashboard/asks.md, The ask's shape)"
         : hint.kind === "unlabelled"
           ? 'ask: this ask labels no options, so its card shows a bare Approve and Deny; for a yes or no, label one option, "options": [{"label": "..."}], with "deny"; for real alternatives, label 2 to 5 (.agents/dashboard/asks.md, The ask\'s shape)'
           : hint.kind === "unlinked"
