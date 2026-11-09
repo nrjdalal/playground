@@ -43,3 +43,7 @@ Damage: no row was lost, but the file left out each row past the 100th.
 Fix: the limit now reads the row count.
 Undo: one commit reverts the fix.
 ```
+
+## Keep the skills learning
+
+When a text reads badly despite these rules, or a reader misreads a sentence that passed them, tell the `dispatcher` session: `SendMessage` to `dispatcher` with what happened, what worked, and which rule or section it belongs in, in a few plain lines. That session turns findings into a reviewed change to the factory's repo. When `ListAgents` lists no `dispatcher` session, end your report with the finding instead, so the owner can pass it on. A finding never carries prod data, secrets or customer details.
