@@ -7,23 +7,18 @@ The defining constraint is its size: two rules and one style, and nothing more, 
 
 Agent-fired: a session loads it before it writes anything a person reads, and the owner can name it too.
 
-| You are writing                                           | What it takes                                    |
-| --------------------------------------------------------- | ------------------------------------------------ |
-| An Inbox item, or a message to you in chat, Slack or Yard | the two rules, and the owner style, answer first |
-| An issue, a PR body, a comment or a review                | the two rules, inside that text's own template   |
+| You are writing                                           | What it takes                                     |
+| --------------------------------------------------------- | ------------------------------------------------- |
+| An Inbox item, or a message to you in chat, Slack or Yard | the two rules, and the owner style, picture first |
+| An issue, a PR body, a comment or a review                | the two rules, inside that text's own template    |
 
 ## The two rules and the owner style
 
-```
-rule 1    ASD-STE100: 20 words or fewer, one thing,
-          an active verb, one meaning for each word
-rule 2    ELI5: a newcomer can say what changed
-          and what comes next, from the text alone
-owner     answer first: the result in one sentence,
-          then the cause, the damage, the fix, the undo
-```
-
-The owner style sits in a section of its own, so a new style pick changes that section alone and leaves the two rules as they are.
+The rules themselves live in [the skill's file](../../extensions/core/skills/plain-words/SKILL.md) alone, so this page and every skill that names them stay right when a rule changes.
+Rule 1 keeps each sentence short and single-minded, so you read it once.
+Rule 2 keeps each text whole on its own, so a reader who arrives later needs no other context.
+The owner style shapes what reaches you, so you see the point before the words.
+It sits in a section of its own, so a new style pick changes that section alone and leaves the two rules as they are.
 
 ## Common questions
 
@@ -35,7 +30,7 @@ They stay in [to-inbox](./to-inbox.md), as house rules for a message to you: the
 
 ## It's working if
 
-- You can say what a card or a reply is about from its first line.
+- You can say what a card or a reply is about from its picture and note.
 - An issue comment or a review reads as clearly as a card does.
 - A newcomer to a topic can follow a PR's TL;DR with no other context.
 

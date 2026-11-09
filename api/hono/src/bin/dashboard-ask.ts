@@ -67,7 +67,7 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 progress to its end: an update until it is Done or dismissed,
                                                 an ask, answered or not, until it closes; one put away with Later stays put away
        bun run ask example <code|decision|delete|questions|slack|ui>
-                                                prints an item to start from: an ask's answer line, picture, bullets,
+                                                prints an item to start from: an ask's picture and its note, bullets,
                                                 then what Approve does (.agents/dashboard/asks.md, The ask's shape),
                                                 a delete decision naming its worktree by its full path,
                                                 or a Slack message led by its thread so far
@@ -237,7 +237,7 @@ if (command === "new" || command === "edit") {
   for (const hint of shapeHints(input)) {
     console.error(
       hint.kind === "prose"
-        ? "ask: this ask is one block of prose; open on its answer line in one sentence, then a picture of the point (an ASCII flow or a diff in a code block), then short bullets, then its options, in its `options` and `deny` labels. bun run ask example code|decision|ui prints a template (.agents/dashboard/asks.md, The ask's shape)"
+        ? "ask: this ask is one block of prose; lead with a picture of the point (an ASCII flow or a diff in a code block) and a one-sentence note under it, then short bullets, then its options, in its `options` and `deny` labels. bun run ask example code|decision|ui prints a template (.agents/dashboard/asks.md, The ask's shape)"
         : hint.kind === "unlabelled"
           ? 'ask: this ask labels no options, so its card shows a bare Approve and Deny; for a yes or no, label one option, "options": [{"label": "..."}], with "deny"; for real alternatives, label 2 to 5 (.agents/dashboard/asks.md, The ask\'s shape)'
           : hint.kind === "unlinked"

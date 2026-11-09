@@ -1,12 +1,12 @@
 ---
 name: to-inbox
-description: "Write every message the owner reads at a glance, an Inbox item or a reply in chat, Slack or Yard: its answer line first, then a picture (diff, ASCII, before and after shots, an HTML demo), emoji bullets in plain words, one callout, times in the owner's zone. Use before every `bun run ask new` and every message to the owner: an ask, a draft, an update, a work status, a relay in chat or a demo."
+description: "Write every message the owner reads at a glance, an Inbox item or a reply in chat, Slack or Yard: a picture of the point with a short note (diff, ASCII, before and after shots, an HTML demo), emoji bullets in plain words, one callout, times in the owner's zone. Use before every `bun run ask new` and every message to the owner: an ask, a draft, an update, a work status, a relay in chat or a demo."
 license: Complete terms in the repository's NOTICE
 ---
 
 # to-inbox
 
-Every message to the owner is read in seconds, an Inbox card in the aside's narrow column most of all, and the **talk** rule gives each one this skill's shape. This skill makes each message **glanceable**: the owner reads the answer first, then sees the picture and the facts, then what Approve does. The item's shape (its answer line, its picture, its bullets and its options, in that order), its width rule and the `bun run ask` commands live in asks.md's "The ask's shape" ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)); this skill picks the picture and writes the words.
+Every message to the owner is read in seconds, an Inbox card in the aside's narrow column most of all, and the **talk** rule gives each one this skill's shape. This skill makes each message **glanceable**: the owner sees the point first, a picture and its note, then the facts, then what Approve does. The item's shape (its picture and note, its bullets and its options, in that order), its width rule and the `bun run ask` commands live in asks.md's "The ask's shape" ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)); this skill picks the picture and writes the words.
 
 An `ask` decision renders its text as markdown, with its attachments under it: every step applies. The read-only card, an update carrying an ask's `text` and `attachments`, renders the same with no Approve or Deny: post it for something the owner only looks at (a table, a preview), and it takes every step but 7 and 10. Every other kind shows plain text, exactly as it goes out, so it takes fewer steps, step 1 always first:
 
@@ -31,7 +31,7 @@ On an update, Done types you `done` and Dismiss `dismiss`: post a new card for m
 ## Steps
 
 1. **Already open?** Run `bun run ask open` before you write anything (asks.md). Done when no open item asks the same thing, or you have named that item's `#iN` in chat and stopped here.
-2. **Answer, then picture.** Load [plain-words](../plain-words/SKILL.md) with the Skill tool, and open the text with its answer line, by its owner style. Then pick the one picture asks.md's shape puts after it, each line within the card's width ([Fit the card](#fit-the-card)), which a `diff` block is free of, since the card wraps it. Attachments always show under the text, so an item with one keeps its text to the answer line and the bullets. Done when the text's first line is the answer, and its next block is that picture, or the item's first attachment is; a work status block's first line, the job and its done/total, is its own answer line.
+2. **Picture and note.** Load [plain-words](../plain-words/SKILL.md) with the Skill tool, then pick the one picture asks.md's shape leads with, by its owner style, each line within the card's width ([Fit the card](#fit-the-card)), which a `diff` block is free of, since the card wraps it. Under it, write the picture's note: one sentence on the point. Attachments always show under the text, so an item with one keeps its text to the note and the bullets. Done when the text's first block is that picture, or the item's first attachment is, and the note follows it.
 
    Beside asks.md's diff, ASCII flow and before and after pair, two more fit:
 
@@ -69,7 +69,7 @@ On an update, Done types you `done` and Dismiss `dismiss`: post a new card for m
    | A dashboard page          | in an Inbox card or the dashboard's chat, its path alone, `[System page](/dashboard/system)`, which opens on the dashboard's own host; in a Slack or Yard message, the page's name in words |
    | A file in a repo          | its GitHub page at a commit, `https://github.com/<owner>/<repo>/blob/<sha>/<path>`                                                                                                          |
 
-5. **Plain words.** Write every sentence by plain-words' two rules. Done when each sentence passes them, and these two house rules too:
+5. **Plain words.** Load [plain-words](../plain-words/SKILL.md) with the Skill tool, when step 2 has not, and write every sentence by its two rules. Done when each sentence passes them, and these two house rules too:
    - It speaks in the first person singular, "I", never "we" or the session's name: the poster's "I" in an ask, the owner's in a draft or a `slack` decision, which goes out in his voice (asks.md).
    - A time reads in the owner's zone (`clock.ownerZone`, which `playground rules clock` prints), am/pm, named by that zone ("9:30 pm UTC"); a now-time is `{now}`, which `bun run ask` fills with the time it posts at.
 
@@ -102,14 +102,14 @@ A picture that runs past it becomes a table of three columns or fewer, or bullet
 An `ask` decision's text, as its card shows it to an owner whose `clock.ownerZone` is UTC, the setting's default:
 
 ````markdown
-Ops ships 3 PRs to main at 10:00 pm UTC.
-
 ```
 canary ──▶ main
    │
    ▼
 Ops ships 3 PRs
 ```
+
+Ops ships 3 PRs to main at 10:00 pm UTC.
 
 - ✅ Checks pass on all 3 PRs.
 - ⚠️ One PR changes the spawn gate.

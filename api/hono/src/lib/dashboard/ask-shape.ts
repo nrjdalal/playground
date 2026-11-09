@@ -1,6 +1,6 @@
 import { ASK_CODE_COLUMNS } from "@packages/config/inbox"
 
-// An Inbox ask reads the way chat talks to the owner: its answer line first (the plain-words skill), then a picture of the point, then short bullets, then its options, in its `options` and `deny` labels.
+// An Inbox ask reads the way chat talks to the owner: a picture of the point first, with a one-sentence note under it (the plain-words skill), then short bullets, then its options, in its `options` and `deny` labels.
 
 // Past this many characters, an ask's text with no picture and no bullets reads as a wall of prose.
 export const PROSE_LIMIT = 300
@@ -85,7 +85,7 @@ export function shapeHints(input: unknown): ShapeHint[] {
   return hints
 }
 
-// A template for each shape the docs work through, each ask opening on its answer line: a code change with a diff, a plain decision with an ASCII flow, a UI change, whose before and after pictures join it as attachments once the card takes attachments, and a Slack message led by its thread so far.
+// A template for each shape the docs work through, each picture with its one-sentence note under it: a code change led by a diff, a plain decision led by an ASCII flow, a UI change, whose before and after pictures join it as attachments once the card takes attachments, and a Slack message led by its thread so far.
 export const ASK_EXAMPLES = {
   code: {
     from: "builder",
@@ -93,12 +93,12 @@ export const ASK_EXAMPLES = {
       deny: "Keep it on dev",
       options: [{ label: "Port the fix to staging, then main" }],
       text: [
-        "The export fix is ready to port to staging and main.",
-        "",
         "```diff",
         "- const limit = 100",
         "+ const limit = rows.length",
         "```",
+        "",
+        "The export fix is ready to port to staging and main.",
         "",
         "- 🐛 The export ends at 100 rows.",
         "- ✅ The fix runs on dev since 24 Oct, with no errors.",
@@ -114,8 +114,6 @@ export const ASK_EXAMPLES = {
       deny: "Turn the request down",
       options: [{ label: "Take the request and run the dry run" }],
       text: [
-        "A dry run of the export job waits on your yes.",
-        "",
         "```",
         "web-api",
         "   │ asks for a dry run",
@@ -125,6 +123,8 @@ export const ASK_EXAMPLES = {
         "   ▼",
         "report to you",
         "```",
+        "",
+        "A dry run of the export job waits on your yes.",
         "",
         "- 📨 The web-api session asks for a dry run of the export job.",
         "- 🧪 The run is on dev only and writes no rows.",

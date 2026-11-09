@@ -27,22 +27,33 @@ Name each technical word in everyday words the first time it appears.
 An everyday comparison can sit beside a fact, and the fact stays.
 Done when a reader with no context can say, from the text alone, what changed and what comes next.
 
-## Owner style: answer first
+## Owner style: picture first
 
-A message to the owner, an Inbox item or a reply in chat, Slack or Yard, opens with its answer line: the result or the answer, in one sentence.
-The cause, the damage, the fix and the undo follow, each in short sentences by rule 1, and a picture comes after the answer line ([to-inbox](../to-inbox/SKILL.md) picks it).
-Done when the message's first line is its answer, in one sentence.
+A message to the owner that to-inbox shapes, an ask, a read-only card or a reply in chat, Slack or Yard, takes the style of `mattpocock/skills`' pr skill; a draft, a `slack` or a `ticket` decision keeps its own text's shape (to-inbox):
 
-A made-up fix, written answer first for an Inbox card:
+- Open on the smallest picture that makes the point ([to-inbox](../to-inbox/SKILL.md) picks it), with a short note of one sentence on the line under it.
+- Give the evidence as a before and an after.
+- Say how to undo it and how far it reaches, in plain words: "one revert undoes it" or "this cannot be undone", then what it touches, in a word or two.
+- Give a little context in simple technical English.
+- Start at the point, with no preamble.
 
-```markdown
-The export now returns every row: 100 before, 2,400 after, on one test file.
+Done when the message opens on its picture and its note, and a message about a change names its before and after, its undo and its reach.
 
-Cause: the export stopped at a fixed limit of 100 rows.
-Damage: no row was lost, but the file left out each row past the 100th.
-Fix: the limit now reads the row count.
-Undo: one commit reverts the fix.
+A made-up fix, in this style for an Inbox card:
+
+````markdown
+```diff
+- const limit = 100
++ const limit = rows.length
 ```
+
+The export now returns every row.
+
+- Before: 100 rows. After: 2,400 rows, on one test file.
+- The old code stopped at a fixed limit of 100 rows.
+- One revert undoes it.
+- It touches the export alone.
+````
 
 ## Keep the skills learning
 

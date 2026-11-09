@@ -471,18 +471,18 @@
   EOF
   ```
 
-- The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in four parts, top to bottom:
-  1. The answer line: the result or the answer in one sentence, by the `plain-words` skill's owner style (`extensions/core/skills/plain-words/SKILL.md`).
-  2. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
+- The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in three parts, top to bottom:
+  1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
      Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from; a `diff` block's lines may run longer, since the card wraps them.
      A wider drawing still posts and shrinks to 10px, then scrolls, so the limit is a writing guide.
-  3. Short bullets, one fact each, an emoji as each one's marker.
-  4. The options: for a true yes or no, one `options` row saying what Approve does, with `deny` beside it; for real alternatives, 2 to 5 rows, A to E, each a `label` and an optional `description`.
+     A note of one sentence on the point follows the picture, by the `plain-words` skill's owner style (`extensions/core/skills/plain-words/SKILL.md`).
+  2. Short bullets, one fact each, an emoji as each one's marker.
+  3. The options: for a true yes or no, one `options` row saying what Approve does, with `deny` beside it; for real alternatives, 2 to 5 rows, A to E, each a `label` and an optional `description`.
      The card shows them as its choices under the text, in place of its On Approve line.
      For several calls at once, a `questions` list in place of `options`: 2 to 20 questions, each its own 1 to 5 `options` and an optional `recommended` index, which the card asks one at a time and sends together.
 
   A factory session writes each item's words and pictures by the `to-inbox` skill (`extensions/core/skills/to-inbox/SKILL.md`), loaded before `bun run ask new`.
-  A job of several steps opens on to-inbox's work status block, a read-only update its poster edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`); the block's first line, the job's name and its done/total, is its answer line.
+  A job of several steps leads with to-inbox's work status block, a read-only update its poster edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`).
 
   `bun run ask example code|decision|delete|questions|slack|ui` prints each worked example as an item to fill in, the asks below and the delete and slack decisions above.
   `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options,
@@ -491,12 +491,12 @@
   The four, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown
-  The export fix is ready to port to staging and main.
-
   ```diff
   - const limit = 100
   + const limit = rows.length
   ```
+
+  The export fix is ready to port to staging and main.
 
   - 🐛 The export ends at 100 rows.
   - ✅ The fix runs on dev since 24 Oct, with no errors.
@@ -506,8 +506,6 @@
   Options: `Port the fix to staging, then main`; Deny: `Keep it on dev`.
 
   ````markdown
-  A dry run of the export job waits on your yes.
-
   ```
   web-api
      │ asks for a dry run
@@ -518,6 +516,8 @@
   report to you
   ```
 
+  A dry run of the export job waits on your yes.
+
   - 📨 The web-api session asks for a dry run of the export job.
   - 🧪 The run is on dev only and writes no rows.
   - ⏱️ It takes about 10 minutes.
@@ -525,7 +525,7 @@
 
   Options: `Take the request and run the dry run`; Deny: `Turn the request down`.
 
-  The UI change's before and after pictures join the ask as `attachments` (absolute paths on this Mac, each with its `label` and `group`, which `bun run ask new` copies in), and its card shows them under this text, which opens on its answer line:
+  The UI change's before and after pictures join the ask as `attachments` (absolute paths on this Mac, each with its `label` and `group`, which `bun run ask new` copies in), and its card shows them under this text, which opens on its note:
 
   ````markdown
   The Inbox card can show its pictures as one thumbnail row.
