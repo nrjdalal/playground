@@ -37,15 +37,15 @@ export const pageQuery = (url: string, load: typeof fetch = fetch) => ({
 })
 
 function FileBody({ item }: { item: Extract<AsideDoc, { item: unknown }>["item"] }) {
-  const { missing, url } = useAttachment(item.id, true)
+  const { failed, missing, url } = useAttachment(item.id, true)
   const View = VIEWERS[item.kind]?.View
-  if (missing) return <Missing />
+  if (missing || failed) return <Missing failed={failed} />
   return url && View ? <View active={false} item={item} onEdge={stay} url={url} /> : null
 }
 
 function PageBody({ doc }: { doc: Extract<AsideDoc, { url: string }> }) {
-  const { data } = useQuery(pageQuery(doc.url))
-  if (data === MISSING) return <Missing />
+  const { data, isError } = useQuery(pageQuery(doc.url))
+  if (data === MISSING || isError) return <Missing failed={isError} />
   const item = { id: doc.key, kind: "html" as const, name: doc.name }
   return data ? <HTML_VIEWER.View active={false} item={item} onEdge={stay} url={data} /> : null
 }
