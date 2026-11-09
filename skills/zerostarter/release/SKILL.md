@@ -91,12 +91,30 @@ When a dispatch of `auto-canary-into-main` already opened it as a draft, `gh pr 
 
 ## 3. Merge into `main`
 
+Merge only on the ship PR's own `Audit, Lint, and Build` and `test` (the **ci** rule's two), green at the pin: the ship PR's `pull_request` runs alone carry them, and a green `Lint and Build` beside a suite still running is no green read (v0.0.82 merged with `Suite (9)` red and `Audit, Lint, and Build` still running).
+Wait on them with code-review-loop's waiter, run as a background task, which reads them over REST every 5 minutes and waits out a rate limit; `<owner>/<repo>` is the one `gh repo view --json nameWithOwner` names:
+
+```bash
+extensions/core/skills/code-review-loop/scripts/state.ts checks <owner>/<repo> <n> "$CANARY"
+```
+
+It ends with one `CHECK <conclusion> <name>` line for each, or `MOVED <sha>` when `canary` moved: go back to step 1.
+On a red line, rerun that run's failed jobs once, then start the waiter again, which waits past the old red for the rerun:
+
+```bash
+gh run list --commit "$CANARY" --event pull_request --status failure --json databaseId,workflowName
+gh run rerun <run id> --failed
+```
+
+On a second red, hold the ship: name the failing test, from `gh run view <run id> --log-failed`, in the ship PR and up the chain, and end the freeze by step 1's line for a ship that stops.
+When both lines read `success`, merge:
+
 ```bash
 gh pr merge <n> --merge --match-head-commit "$CANARY"
 MERGE=$(gh pr view <n> --json mergeCommit --jq .mergeCommit.oid)
 ```
 
-Done when the PR reads `MERGED` and `MERGE` holds its merge commit. A refusal for a moved head means `canary` moved: go back to step 1.
+Done when the waiter printed `CHECK success Audit, Lint, and Build` and `CHECK success test` at `$CANARY`, the PR reads `MERGED` and `MERGE` holds its merge commit. A refusal for a moved head means `canary` moved: go back to step 1.
 
 ## 4. Tag and publish
 
