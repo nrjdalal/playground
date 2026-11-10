@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   utimesSync,
@@ -150,6 +151,8 @@ export type Setup = {
   off?: string[]
   peers?: string[]
   plan?: unknown
+  // the seconds between two looks of a waiting run (run-slot.sh's RUN_SLOT_POLL: 15 real for a queued run's looks, 5 for a clone's and an --after wait; 0.2 in the tests, 0.05 in the commit-lane files)
+  poll?: number
   pressure?: number
   roster?: unknown
   sandboxed?: boolean
@@ -170,6 +173,7 @@ export const machine = ({
   off = [],
   peers = [],
   plan,
+  poll,
   pressure = 1,
   roster,
   sandboxed = false,
@@ -257,7 +261,7 @@ esac
     HOME: root,
     PATH: `${bin}:${process.env.PATH}`,
     RUN_SLOT_OPS: ops,
-    RUN_SLOT_POLL: "0.2",
+    RUN_SLOT_POLL: poll === undefined ? "0.2" : String(poll),
     ...extra,
   })
   // A slot already held by this test's own process, which stays alive throughout, taken at `at`.
@@ -398,6 +402,126 @@ esac
     tickets,
     waits,
   }
+}
+
+// Playground's own lefthook.yml, whose pre-commit runs the build, as the commit-lane tests read it
+export const LEFTHOOK = readFileSync(join(import.meta.dir, "../../../lefthook.yml"), "utf8")
+// A machine whose fake git fails on a `-C` folder that is not one, answers `git config --get alias.<verb>` from a folder whose top level is the root by whether the root's `aliases` file lists that key, answers `git rev-parse --show-toplevel` with its folder's physical path, as git does (the root's, from `docs`, `web` or a folder under it), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths (each pathspec read from the `-C` folder, `.` included), `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, every one for `:/`, as git prints them), and touches its last argument for anything else, as a commit's marker
+export const repo = (
+  setup: Setup,
+  staged: string[],
+  unstaged: string[] = [],
+  lefthook: string | null = LEFTHOOK,
+  untracked: string[] = [],
+) => {
+  // the commit-lane rows wait often, so they look on a faster clock than the fake's 0.2
+  const m = machine({ poll: 0.05, ...setup })
+  if (lefthook !== null) writeFileSync(join(m.root, "lefthook.yml"), lefthook)
+  writeFileSync(
+    join(m.bin, "git"),
+    `#!/bin/bash
+[ "$1" = -C ] && { [ -d "$2" ] || exit 128; }
+d=$PWD; [ "$1" = -C ] && d=$2
+top() { (case "$1" in ${m.root}/web | ${m.root}/web/* | ${m.root}/docs) cd ${m.root} ;; *) cd "$1" ;; esac; pwd -P); }
+case " $* " in *" config --get "*) [ "$(top "$d")" = "$(top ${m.root})" ] && grep -qxF -- "\${@: -1}" ${m.root}/aliases 2>/dev/null; exit ;; esac
+case " $* " in *" rev-parse --show-toplevel "*) top "$d"; exit 0 ;; esac
+pre=""; case "$d" in ${m.root}/*) pre=\${d#${m.root}/}/ ;; esac
+full=""; case " $* " in *" --full-name "*) full=1 ;; esac
+case " $* " in *" :/ "*) pre="" ;; esac
+# whether path $2 is under pathspec $1, read from the folder, as git reads one
+under() { local q=$pre$1; [ "$1" = . ] && q=\${pre%/}; [ -z "$q" ] || case "$2" in "$q" | "$q"/*) ;; *) return 1 ;; esac; }
+case " $* " in
+  *" ls-files "*" -- "*) while [ "$1" != -- ]; do shift; done; shift
+    for f in ${untracked.join(" ")}; do for p in "$@"; do under "$p" "$f" && { [ -n "$full" ] && echo "$f" || echo "\${f#"$pre"}"; }; done; done; exit 0 ;;
+  *" ls-files "*) for f in ${untracked.join(" ")}; do case "$f" in "$pre"*) [ -n "$full" ] && echo "$f" || echo "\${f#"$pre"}" ;; esac; done; exit 0 ;;
+esac
+for a in "$@"; do
+  [ "$a" = diff ] || continue
+  case " $* " in
+    *" --cached "*) printf '%s\\n' ${staged.join(" ")} ;;
+    *" -- "*) while [ "$1" != -- ]; do shift; done; shift
+      for f in ${[...staged, ...unstaged].join(" ")}; do for p in "$@"; do under "$p" "$f" && echo "$f"; done; done ;;
+    *) printf '%s\\n' ${unstaged.join(" ")} ;;
+  esac
+  exit 0
+done
+touch "\${@: -1}"
+`,
+  )
+  chmodSync(join(m.bin, "git"), 0o755)
+  return m
+}
+// a fake bun whose `turbo run build --dry=json` reads every task with the cache status given, or fails for null, passing anything else to the machine's own
+export const turbo = (m: ReturnType<typeof machine>, status: string | null) => {
+  renameSync(join(m.bin, "bun"), join(m.bin, "bun-machine"))
+  const dry =
+    status === null
+      ? "exit 1"
+      : `echo '{"tasks":[{"command":"next build","cache":{"status":"HIT"}},{"command":"tsc","cache":{"status":"${status}"}}]}'; exit 0`
+  writeFileSync(
+    join(m.bin, "bun"),
+    `#!/bin/bash\ncase " $* " in *" turbo run build --dry=json "*) ${dry} ;; esac\nexec ${join(m.bin, "bun-machine")} "$@"\n`,
+  )
+  chmodSync(join(m.bin, "bun"), 0o755)
+}
+// a pre-commit step as commit-slot.ts hands it to run-slot, its last word the step's name (sh's $0), touching the marker the fake appends
+export const step = (name: string) => ["sh", "-c", 'touch "$1"', name]
+export const log = (m: ReturnType<typeof machine>) => {
+  const path = join(m.ops, "run-slot.runs.log")
+  return existsSync(path) ? readFileSync(path, "utf8") : ""
+}
+// a quick lane's holder line, as run-slot writes one: who, pid and when, with no units
+export const holdLane = (m: ReturnType<typeof machine>, lane: string, who: string) => {
+  writeFileSync(join(m.ops, `${lane}.holder`), `${who} ${process.pid} 2026-11-03T06:41:00Z\n`)
+  mkdirSync(join(m.ops, lane))
+}
+// starts a shell chain of git steps through run-slot, from a folder outside the repo's root unless `inRepo`, as the commit-lane chain tests read one
+export const chainStart = (
+  m: ReturnType<typeof machine>,
+  steps: string,
+  inRepo = false,
+  shell = "sh",
+) => {
+  const outside = join(m.root, "outside")
+  mkdirSync(outside, { recursive: true })
+  return m.start(
+    "worker-x",
+    {},
+    undefined,
+    [shell, "-c", steps.replaceAll("ROOT", m.root)],
+    inRepo ? m.root : outside,
+  )
+}
+// the lane a chain on the closed list takes, read from its start line once it has run
+export const chainLane = async (
+  m: ReturnType<typeof machine>,
+  steps: string,
+  inRepo = false,
+  shell = "sh",
+) => {
+  await chainStart(m, steps, inRepo, shell).p.exited
+  return log(m).match(/ start worker-x \d+ (\S+) waited=/)?.[1]
+}
+// a `shell -c` chain whose ROOT words name the machine's root
+export const chain = (m: ReturnType<typeof machine>, steps: string, shell = "sh") => [
+  shell,
+  "-c",
+  steps.replaceAll("ROOT", m.root),
+]
+// the lane a run takes, read from its start line, or "waited" once it prints a waiting line, when it is stopped
+export const takes = async (
+  m: ReturnType<typeof machine>,
+  argv: string[],
+  cwd = join(m.root, "outside"),
+  extra: Record<string, string> = {},
+) => {
+  mkdirSync(cwd, { recursive: true })
+  const run = m.start("worker-x", extra, undefined, argv, cwd)
+  if (await run.saw(WAITING)) {
+    await stop(run.p)
+    return "waited"
+  }
+  return log(m).match(/ start worker-x \d+ (\S+) waited=/)?.[1]
 }
 
 // what `run-slot.sh slots` prints on the machine: the count of run-slot to run-slot-4 held or open now, "4\n" with all four open and "1\n" with slots 2 to 4 shut
