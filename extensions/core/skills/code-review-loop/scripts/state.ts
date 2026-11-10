@@ -588,7 +588,26 @@ const charBefore = (text: string, from: number): string => {
   while (j > 0 && /\s/.test(text.charAt(j - 1))) j -= 1
   return text.charAt(j - 1)
 }
-// A scan word counts only where the test calls it, so what a string merely holds comes out before the regexes read: a string or template is kept by default and dropped only when it opens a value, straight after = : + ? or >, so fixture strings quoting readdirSync read as no scanner while a call, an argv element or a regex literal reads as one, and a quote or template pairs on its own line alone, so a stray backtick in a comment cannot swallow one (PG-1651's reviewer, PG-1661, PG-1708's rounds 1 and 2)
+const skipRegex = (text: string, from: number): number => {
+  let j = from
+  let inClass = false
+  while (j < text.length && text.charAt(j) !== "\n") {
+    const d = text.charAt(j)
+    if (d === "\\") j += 2
+    else if (inClass) {
+      if (d === "]") inClass = false
+      j += 1
+    } else if (d === "[") {
+      inClass = true
+      j += 1
+    } else if (d === "/") return j + 1
+    else j += 1
+  }
+  return -1
+}
+// a / after one of these opens a regex literal, never a comment or a division
+const REGEX_BEFORE = "([:!&|?{};>,"
+// A scan word counts only where the test calls it, so what a string merely holds comes out before the regexes read: a string or template is kept by default and dropped only when it opens a value, straight after = : + ? or >, so fixture strings quoting readdirSync read as no scanner while a call, an argv element or a regex literal reads as one, a / after ( = : [ ! & | ? { } ; > or , opens a regex literal that stays whole, so a quote inside one cannot drop or pair, and a quote or template pairs on its own line alone, so a stray backtick in a comment cannot swallow one (PG-1651's reviewer, PG-1661, PG-1708's rounds 1 to 3)
 const stripValues = (text: string): string => {
   let out = ""
   let depth = 0
@@ -603,6 +622,20 @@ const stripValues = (text: string): string => {
       depth = Math.max(0, depth - 1)
       out += c
       i += 1
+    } else if (
+      c === "/" &&
+      text.charAt(i + 1) !== "/" &&
+      text.charAt(i + 1) !== "*" &&
+      REGEX_BEFORE.includes(charBefore(text, i))
+    ) {
+      const end = skipRegex(text, i + 1)
+      if (end < 0) {
+        out += c
+        i += 1
+      } else {
+        out += text.slice(i, end)
+        i = end
+      }
     } else if (c === "`" || c === '"' || c === "'") {
       const prev = charBefore(text, i)
       const keeps = depth > 0 || !["=", ":", "+", "?", ">"].includes(prev)

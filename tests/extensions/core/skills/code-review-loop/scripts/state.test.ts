@@ -1166,16 +1166,36 @@ test("10 touched-tests: a real scanner reads as one past a quote in a regex lite
   scratchRepo(repo, {
     "api/hono/src/lib/sql.ts": "x\n",
     "tests/changed.test.ts": "x\n",
-    "tests/regex.test.ts":
-      'const ok = /^"/.test(s) && readdirSync(dir).map((f) => "x")\n' +
-      'const ok2 = /"/.test(s) && readdirSync(dir).filter((f) => f !== "x")\n' +
-      "if (/`/.test(s)) for (const f of readdirSync(d)) log(`${f}`)\n",
+    "tests/caret.test.ts": 'const ok = /^"/.test(s) && readdirSync(dir).map((f) => "x")\n',
+    "tests/plain.test.ts": 'const ok = /"/.test(s) && readdirSync(dir).filter((f) => f !== "x")\n',
+    "tests/tick.test.ts": "if (/`/.test(s)) for (const f of readdirSync(d)) log(`${f}`)\n",
   })
   writeFiles(repo, { "api/hono/src/lib/sql.ts": "y\n", "tests/changed.test.ts": "y\n" })
   git(repo, "commit", "-qam", "change")
   const { code, listed, stderr } = touched(repo)
   expect(code, stderr).toBe(0)
-  expect(listed).toContain("tests/regex.test.ts")
+  expect(listed).toContain("tests/caret.test.ts")
+  expect(listed).toContain("tests/plain.test.ts")
+  expect(listed).toContain("tests/tick.test.ts")
+  expect(listed).toContain("tests/changed.test.ts")
+})
+
+test("10 touched-tests: a real scanner reads as one past a value-shaped quote inside a regex", () => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "api/hono/src/lib/sql.ts": "x\n",
+    "tests/changed.test.ts": "x\n",
+    "tests/eqquote.test.ts": '/a="/.test(s) && readdirSync(dir).map((f) => "x")\n',
+    "tests/keyquote.test.ts": "/key:'/.test(s) && readdirSync(dir).map((f) => 'x')\n",
+    "tests/gttick.test.ts": "if (/>`/.test(s)) for (const f of readdirSync(d)) log(`${f}`)\n",
+  })
+  writeFiles(repo, { "api/hono/src/lib/sql.ts": "y\n", "tests/changed.test.ts": "y\n" })
+  git(repo, "commit", "-qam", "change")
+  const { code, listed, stderr } = touched(repo)
+  expect(code, stderr).toBe(0)
+  expect(listed).toContain("tests/eqquote.test.ts")
+  expect(listed).toContain("tests/keyquote.test.ts")
+  expect(listed).toContain("tests/gttick.test.ts")
   expect(listed).toContain("tests/changed.test.ts")
 })
 
