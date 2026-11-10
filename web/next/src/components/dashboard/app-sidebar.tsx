@@ -108,6 +108,7 @@ import {
   SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { YardGroups } from "@/components/yard/yard-groups"
 import { agentLabel, chatLabel, kindWord, labelOf } from "@/lib/agent-label"
@@ -591,7 +592,7 @@ export function useDashboardUpdate(): MenuUpdate | null {
 
 // The dispatcher rows, in the sidebar's header under its title row, with no group title or count: a row for each dispatcher, drawn as every agent's, in the order the API names them (#i520): each one's session row, found by role, named as agentLabel gives it, Alpha and Bravo, and by its slot's label while down (dispatcherLabel), with no dropdown. The primary's opens /dashboard, your chat, and the second's its own chat. A stored sidebar draws the slots the API counts (rows, from /api/health through the layout), placeholders for those it lacks (PendingRow), so the live board's arrival moves nothing below it, and the primary's slot, with its session down, NoDispatcherRow, so the rows under it never move; the second's slot shows only while its session is live or the roster lists it in a status other than done or ended (dispatchersOf), Not running while it is down. Before the sidebar is read, as many empty rows as the API counts, so the header never grows under the nav. A bare menu, so its rows line up with the groups' rows below.
 export function DashboardDispatchers({ rows = 1 }: { rows?: number }) {
-  const { allowed, board, dispatchers } = useDashboard()
+  const { allowed, board, dispatchers, restoring } = useDashboard()
   const source = useSidebarSource(allowed)
   const { close, row } = useSessionRows(source)
   const { now, read } = useSystemRead()
@@ -656,6 +657,7 @@ export function DashboardDispatchers({ rows = 1 }: { rows?: number }) {
             lost={source.kind === "lost"}
             muted={muted}
             onNavigate={close}
+            restoring={restoring}
             trailing={trailing}
           />
         )
@@ -679,13 +681,14 @@ export const dispatcherSlotsShown = <T,>(
     ? { held: Math.max(0, rows - slots.length), slots: slots.slice(0, rows) }
     : { held: 0, slots }
 
-// A dispatcher's row while its session is down, by its slot's label (dispatcherLabel's Alpha or Bravo, never a session's name): the slot keeps a row the placeholder's height, so the sidebar below it never moves when the board says no one holds the role (verify cls). A feed lost before any board says so rather than Not running, as the groups show no None running then, and a stored sidebar is muted as its rows are. The primary's opens /dashboard, whose empty state links to the System page; the second's opens nothing (href null), since no chat of its own is there to open.
+// A dispatcher's row while its session is down, by its slot's label (dispatcherLabel's Alpha or Bravo, never a session's name): the slot keeps a row the placeholder's height, so the sidebar below it never moves when the board says no one holds the role (verify cls). A feed lost before any board says so rather than Not running, as the groups show no None running then, a restore still owed reads Coming back, and a stored sidebar is muted as its rows are. The primary's opens /dashboard, whose empty state links to the System page; the second's opens nothing (href null), since no chat of its own is there to open.
 export function NoDispatcherRow({
   href = "/dashboard",
   label = dispatcherLabel(null, true),
   lost = false,
   muted = false,
   onNavigate,
+  restoring = false,
   trailing,
 }: {
   href?: string | null
@@ -693,9 +696,10 @@ export function NoDispatcherRow({
   lost?: boolean
   muted?: boolean
   onNavigate?: () => void
+  restoring?: boolean
   trailing?: React.ReactNode
 }) {
-  const state = lost ? "Cannot be read" : "Not running"
+  const state = lost ? "Cannot be read" : restoring ? "Coming back" : "Not running"
   return (
     <SidebarMenuItem aria-busy={muted || undefined} className={cn(muted && "opacity-60")}>
       <SidebarMenuButton
@@ -704,9 +708,11 @@ export function NoDispatcherRow({
         className={ROW_BOX}
         render={href ? <Link href={href} onClick={onNavigate} /> : <span />}
       >
-        {/* not running is Down, red from the one palette; a lost feed leaves the state unknown, so its mark stays gray */}
+        {/* not running is Down, red from the one palette; a lost feed leaves the state unknown, so its mark stays gray; a restore bringing it back is progress, a gray spinner */}
         {lost ? (
           <RiShutDownLine aria-hidden className="text-inactive size-4 shrink-0" />
+        ) : restoring ? (
+          <Spinner aria-hidden className="text-inactive shrink-0" />
         ) : (
           <StatusIcon state="down" />
         )}
