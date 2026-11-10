@@ -54,7 +54,7 @@ describe("restore resumes every manager its records name, or says which it left 
     )
   })
 
-  test("a manager the capacity gate refuses is named with the gate's reason, and the run exits 1", async () => {
+  test("a manager the capacity gate refuses is named with the gate's reason, and the run exits 0, since a gate's hold is progress (#1682)", async () => {
     const r = await spawn(
       ["restore"],
       [],
@@ -73,7 +73,7 @@ describe("restore resumes every manager its records name, or says which it left 
       expect(lines[i]).toStartWith(
         `not restored ${name}: the load gate holds it: max(load1, load5) is 77.00`,
       )
-    expect(r.code).toBe(1)
+    expect(r.code).toBe(0)
     expect(placing(r).filter((c) => c[1] === "run")).toEqual([])
     expect(capacityLog(r).filter((l) => l.gate === "load")).toHaveLength(3)
   })
