@@ -1,7 +1,7 @@
 import "@packages/env/aliases"
-import { readdirSync } from "node:fs"
+import { existsSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { envValue } from "@packages/config/org"
 import {
@@ -53,6 +53,14 @@ export const herdrServers = (
     .filter((name) => SERVER_NAME.test(name))
     .map((name) => ({ name, socket: join(dir, `${name}.sock`) }))
 }
+
+// Whether a restore is still bringing sessions back: ops-herdr keeps <server>.restore beside a server's socket (owedFile) from the server's start until every session its restore owes is back, gate waits included; a fixture stack reads its herdr.json's restoring instead.
+export const restoring = (servers = herdrServers(), fixtureDir?: string): boolean =>
+  servers.some(({ name, socket }) =>
+    socket === FIXTURE_SOCKET
+      ? Boolean(readFixtureHerdr(fixtureDir).restoring)
+      : existsSync(join(dirname(socket), `${name}.restore`)),
+  )
 
 // Every other server socket in the folder, by ops-herdr's socketServers rule (a <name>.sock, never a client's <name>-client.sock nor herdr's default), so a session on a server an older Playground started under another name, factory or probes before the rename, still shows while that server runs, as the CLI's Start already counts it.
 const leftOver = (dir: string): string[] => {

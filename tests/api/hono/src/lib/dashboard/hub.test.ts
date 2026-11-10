@@ -171,6 +171,31 @@ describe("DashboardHub", () => {
     leave()
   })
 
+  // #1682: while a restore brings the sessions back, the home says so rather than offering Start.
+  test("the workers frame says whether a restore is still bringing sessions back", async () => {
+    const calls: Deferred[] = []
+    const hub = new DashboardHub({
+      events: false,
+      listLive: () => {
+        const call = deferred()
+        calls.push(call)
+        return call.promise
+      },
+    })
+    const frames: DashboardFrame[] = []
+    const leave = hub.subscribe((frame) => frames.push(frame))
+    await until("the hub's first read", () => calls.length === 1)
+    calls[0]?.resolve({
+      restoring: true,
+      surfaces: new Map(),
+      transcripts: new Map(),
+      workers: [worker("one")],
+    })
+    await until("the workers frame", () => frames.length > 0)
+    expect(frames[0]).toMatchObject({ restoring: true, type: "workers" })
+    leave()
+  })
+
   // herdr's stream (herdr.ts) moves the board, and it ends with the last viewer
   test("a herdr event refreshes the board, and the stream is killed when the last viewer leaves", async () => {
     let push: (line: string) => void = () => {}

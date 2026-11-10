@@ -555,6 +555,7 @@ export function useDashboardSocket(enabled: boolean) {
   const [activity, setActivity] = useState<SessionActivity | null>(null)
   const watcher = useRef(createWatch())
   const [approvals, setApprovals] = useState(false)
+  const [restoring, setRestoring] = useState(false)
   const [dispatcher, setDispatcher] = useState<string | null>(null)
   const [dispatchers, setDispatchers] = useState<readonly string[] | null>(null)
   const [problem, setProblem] = useState<DashboardProblem | null>(null)
@@ -578,6 +579,7 @@ export function useDashboardSocket(enabled: boolean) {
         // each frame is parsed afresh, so a session it left as it was keeps its object and a frame that moved nothing keeps the board, and nothing reading them draws again
         setWorkers((shown) => replaceEqualDeep(shown, frame.workers))
         setApprovals(frame.approvals)
+        setRestoring(frame.restoring)
         setDispatcher(frame.dispatcher)
         setSessionNames(frame.names)
         setDispatcherOrder(frame.dispatchers)
@@ -668,6 +670,7 @@ export function useDashboardSocket(enabled: boolean) {
     dispatchers,
     generation,
     problem,
+    restoring,
     subscribe,
     watch,
     workers,

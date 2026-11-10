@@ -24,6 +24,7 @@ import {
   readScreen,
   readServer,
   request,
+  restoring,
   RESUBSCRIBE,
   showsAsk,
   typeKeys,
@@ -1245,5 +1246,45 @@ describe("a script's key into a pane or answer to a prompt", () => {
       "packages/scripts/src/playground/picker.ts",
       "scripts/ops/unstick/run.py",
     ])
+  })
+})
+
+// #1682: ops-herdr keeps <server>.restore beside the server's socket from its start until every session its restore owes is back, gate waits included, so the home reads a restore in progress from that file alone.
+describe("restoring", () => {
+  test("reads a restore in progress from a server's owed file beside its socket", () => {
+    const dir = mkdtempSync(join(tmpdir(), "restoring-"))
+    cleanups.push(() => rmSync(dir, { force: true, recursive: true }))
+    const servers = [
+      { name: "playground", socket: join(dir, "playground.sock") },
+      { name: "playground-probes", socket: join(dir, "playground-probes.sock") },
+    ]
+    expect(restoring(servers)).toBe(false)
+    writeFileSync(join(dir, "playground-probes.restore"), "2026-11-10T18:14:47.000Z\n")
+    expect(restoring(servers)).toBe(true)
+    rmSync(join(dir, "playground-probes.restore"))
+    expect(restoring(servers)).toBe(false)
+  })
+
+  test("a fixture stack reads it from the fixture's herdr.json, and a stack that reads no machine never restores", () => {
+    const dir = mkdtempSync(join(tmpdir(), "restoring-fixture-"))
+    cleanups.push(() => rmSync(dir, { force: true, recursive: true }))
+    const fixture = [{ name: "playground", socket: FIXTURE_SOCKET }]
+    writeFileSync(
+      join(dir, "herdr.json"),
+      JSON.stringify({ panes: [], prompts: {}, screens: {}, workspaces: [] }),
+    )
+    expect(restoring(fixture, dir)).toBe(false)
+    writeFileSync(
+      join(dir, "herdr.json"),
+      JSON.stringify({
+        panes: [],
+        prompts: {},
+        restoring: "2026-11-10T18:14:47Z",
+        screens: {},
+        workspaces: [],
+      }),
+    )
+    expect(restoring(fixture, dir)).toBe(true)
+    expect(restoring([])).toBe(false)
   })
 })

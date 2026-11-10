@@ -247,6 +247,8 @@ export const fixtureSchema = z.object({
       }),
     ),
     prompts: z.record(z.string(), z.string()),
+    // when ops-herdr began a restore it still owes, as its <server>.restore file holds, so the home says the factory is coming back; absent once every session is back
+    restoring: z.iso.datetime({ offset: true }).optional(),
     screens: z.record(z.string(), z.string()),
     workspaces: z.array(json),
   }),
