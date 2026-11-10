@@ -394,7 +394,7 @@ describe("the ops-herdr job's heartbeat", () => {
 
   // #1682: a restore a gate alone held beat its waits as the job's result, so Scripts read Herdr servers as Failing while the sessions were only waiting.
   test.each([
-    ["a gate alone held", 0, "not restored a-worker: the load gate holds it: x\n", "running"],
+    ["a gate alone held", 0, "waiting a-worker: the load gate holds it: x\n", "running"],
     ["a real failure", 1, "not restored a-worker: its brief is gone\n", "failing"],
   ] as const)("a cycle whose restore %s reads as %s", async (_, code, output, status) => {
     const path = join(dir, "ops-herdr.json")

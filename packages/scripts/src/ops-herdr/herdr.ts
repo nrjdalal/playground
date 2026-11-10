@@ -240,7 +240,7 @@ export type CycleDeps = {
   // Whether a server's restore is still owed (owedFile).
   owed: (session: string) => Owed
   pin: Pin
-  // spawn.sh restore for one server: what failed (restoreProblem), and whether a session still waits on a gate (restoreResult).
+  // spawn.sh restore for one server: what failed (restoreProblem), and whether its restore stays owed (restoreResult).
   restore: (session: string) => Promise<Restored>
   running: (session: string) => Promise<boolean>
   sessions: string[]
@@ -251,7 +251,7 @@ export type CycleDeps = {
 
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
-// Set as a server starts, and cleared once no session of its restore waits on a gate, every one back or failed, so a session a gate holds comes back on a later cycle and the home reads the factory as coming back until then.
+// Set as a server starts, and cleared once a restore leaves no session waiting, every one back or failed, so a session a gate or focus holds comes back on a later cycle; it is there for the home to read as the factory coming back.
 export type Owed = { get: () => Promise<boolean>; set: (owed: boolean) => Promise<void> }
 
 // A file beside the server's socket, so the job finishes a restore that `start` (bun run dev, the dispatcher) began and the gate cut short.
@@ -296,9 +296,9 @@ export async function cycle(deps: CycleDeps): Promise<string> {
       if (up) {
         try {
           if (await deps.owed(session).get()) {
-            const { problem, waiting } = await deps.restore(session)
+            const { owed, problem } = await deps.restore(session)
             if (problem) problems.push(`${session}: ${problem}`)
-            if (!waiting) await deps.owed(session).set(false)
+            if (!owed) await deps.owed(session).set(false)
           }
         } catch (err) {
           problems.push(`${session}: restore: ${messageOf(err)}`)
@@ -362,14 +362,13 @@ export const restoreEnv = (
   PLAYGROUND_HERDR_SESSION: session,
 })
 
-// spawn.sh restore prints one line a resume record (restored, skipped with its reason, or not restored with its reason), so a restore reads as counts: what came back, what ran already, what the roster keeps down, what else it passed over, what each gate holds (a later cycle restores those) and what failed another way; null when no line names a session.
+// spawn.sh restore prints one line a resume record (restored, skipped, waiting or not restored, each but restored with its reason), so a restore reads as counts: what came back, what ran already, what the roster keeps down, what else it passed over, what each gate or focus holds (a later cycle restores those) and what failed; null when no line names a session.
 export function restoreSummary(output: string): string | null {
   const lines = output.split("\n").filter(Boolean)
   const count = (pattern: RegExp) => lines.filter((line) => pattern.test(line)).length
   const live = count(/^skipped \S+: live$/)
   const down = count(/^skipped \S+: its roster row reads /)
-  const missed = lines.filter((line) => line.startsWith("not restored "))
-  const gates = gateWaits(output)
+  const gates = waits(output)
   const waiting = [...gates.values()].reduce((sum, n) => sum + n, 0)
   const parts = [
     [count(/^restored /), "restored"],
@@ -382,10 +381,14 @@ export function restoreSummary(output: string): string | null {
         ([gate, n]) =>
           [
             n,
-            gate === "load" ? "waiting for load to drop" : `waiting on the ${gate} gate`,
+            gate === "load"
+              ? "waiting for load to drop"
+              : gate === "focus"
+                ? "waiting for focus to end"
+                : `waiting on the ${gate} gate`,
           ] as const,
       ),
-    [missed.length - waiting, "not restored"],
+    [count(/^not restored /), "not restored"],
   ] as const
   const shown = parts.filter(([n]) => n > 0).map(([n, what]) => `${n} ${what}`)
   if (shown.length === 0) return null
@@ -403,7 +406,7 @@ export function restoreLines(session: string, code: number, output: string, log:
     .map((line) => `restore ${session}: ${line}`)
 }
 
-// spawn.sh restore exits 1 when a session failed another way than a gate's hold, so the beat names its counts and the file that holds each session's line, else its last line; a restore a gate alone held exits 0, which is progress and no problem.
+// spawn.sh restore exits 1 when a session was not restored, or when it tried none (another restore's lock, an unreadable roster), so the beat names its counts and the file that holds each session's line, else its last line; a restore whose only misses wait exits 0, which is progress and no problem.
 export function restoreProblem(code: number, output: string, log: string): string | null {
   if (code === 0) return null
   const summary = restoreSummary(output)
@@ -411,24 +414,25 @@ export function restoreProblem(code: number, output: string, log: string): strin
   return `restore: ${output.split("\n").filter(Boolean).at(-1) ?? `exited ${code}`}`
 }
 
-// Each gate that held a session's resume, with how many it held.
-const gateWaits = (output: string): Map<string, number> => {
-  const gates = new Map<string, number>()
+// What holds each session spawn.sh restore printed as waiting (its restore_waits decides), a gate or focus, with how many it holds.
+const waits = (output: string): Map<string, number> => {
+  const held = new Map<string, number>()
   for (const line of output.split("\n")) {
-    const gate = line.startsWith("not restored ")
-      ? /\bthe (\w+) gate holds it\b/.exec(line)?.[1]
-      : undefined
-    if (gate) gates.set(gate, (gates.get(gate) ?? 0) + 1)
+    if (!line.startsWith("waiting ")) continue
+    const by = /\bthe (\w+) gate holds it\b/.exec(line)?.[1] ?? "focus"
+    held.set(by, (held.get(by) ?? 0) + 1)
   }
-  return gates
+  return held
 }
 
-export type Restored = { problem: string | null; waiting: boolean }
+export type Restored = { owed: boolean; problem: string | null }
 
-// A restore's problem, and whether a gate still holds a session, which keeps the server's restore owed for the next cycle.
+// A restore's problem, and whether the server's restore stays owed for the next cycle: while a session waits, or when a failed restore tried no session.
 export const restoreResult = (code: number, output: string, log: string): Restored => ({
+  owed:
+    waits(output).size > 0 ||
+    (code !== 0 && !/^(restored|skipped|waiting|not restored) /m.test(output)),
   problem: restoreProblem(code, output, log),
-  waiting: gateWaits(output).size > 0,
 })
 
 // The heartbeat api/hono/src/lib/dashboard/ops.ts reads.

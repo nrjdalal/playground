@@ -309,7 +309,7 @@ describe("pinProblem", () => {
 })
 
 // A restore with every session back or failed, none a gate holds.
-const DONE = { problem: null, waiting: false }
+const DONE = { owed: false, problem: null }
 
 describe("cycle", () => {
   const deps = (
@@ -394,7 +394,7 @@ describe("cycle", () => {
   test("restores again each cycle while a session waits on a gate, then stops", async () => {
     const { restores, value } = deps({ sha256: PIN.sha256, version: "0.9.5" }, false)
     const answers = [
-      { problem: "restore: not restored worker-a: its brief is gone", waiting: true },
+      { owed: true, problem: "restore: not restored worker-a: its brief is gone" },
       DONE,
     ]
     let up = false
@@ -418,16 +418,12 @@ describe("cycle", () => {
     expect(restores).toEqual(["restore", "restore"])
   })
 
-  // #1682: the home reads the owed file as the factory coming back, so it stays while a gate holds a session, and goes once none does.
+  // #1682: the owed file is there for the home to read as the factory coming back, so it stays while a gate holds a session, and goes once none does.
   test("keeps the restore owed while a gate holds a session, with no problem, and clears it once none waits", async () => {
     const { restores, value } = deps({ sha256: PIN.sha256, version: "0.9.5" }, false)
     const log = "/h/factory.restore.log"
     const answers = [
-      restoreResult(
-        0,
-        "restored dispatcher\nnot restored a-worker: the load gate holds it: x\n",
-        log,
-      ),
+      restoreResult(0, "restored dispatcher\nwaiting a-worker: the load gate holds it: x\n", log),
       restoreResult(0, "restored a-worker\n", log),
     ]
     let up = false
@@ -459,6 +455,32 @@ describe("cycle", () => {
       "factory: restore: 1 not restored; each session's line: /h/p.log",
     )
     expect(await value.owed("factory").get()).toBe(false)
+  })
+
+  // #1682 round 1: focus ends by itself, so a session it holds waits like a gate's, and comes back once focus ends.
+  test("keeps the restore owed while focus holds a session, with no problem", async () => {
+    const { value } = deps({ sha256: PIN.sha256, version: "0.9.5" }, false)
+    const held = restoreResult(
+      0,
+      "waiting a-worker: focus stands for other-worker, so no new session starts until it ends\n",
+      "/h/p.log",
+    )
+    expect(await cycle({ ...value, restore: async () => held, sessions: ["factory"] })).toBe("ok")
+    expect(await value.owed("factory").get()).toBe(true)
+  })
+
+  test("a restore that tried no session, another's lock or an unreadable roster, is named and stays owed", async () => {
+    for (const said of [
+      "another restore is running (pid 4242)\n",
+      "spawn.sh refuses restore: it cannot read the roster or the resume files\n",
+    ]) {
+      const { value } = deps({ sha256: PIN.sha256, version: "0.9.5" }, false)
+      const failed = restoreResult(1, said, "/h/p.log")
+      expect(await cycle({ ...value, restore: async () => failed, sessions: ["factory"] })).toBe(
+        `factory: restore: ${said.trim()}`,
+      )
+      expect(await value.owed("factory").get()).toBe(true)
+    }
   })
 
   test("finishes a restore another process owed, on a server it found running", async () => {
@@ -589,7 +611,7 @@ describe("cycle", () => {
     test("a restore a gate alone held is progress: ok, and its line names the waits", async () => {
       const { value } = deps({ sha256: PIN.sha256, version: "0.9.5" }, (s) => s === "probes")
       const log = "/h/factory.restore.log"
-      const output = "restored dispatcher\nnot restored a-worker: the load gate holds it: x\n"
+      const output = "restored dispatcher\nwaiting a-worker: the load gate holds it: x\n"
       const job = { ...value, restore: async () => restoreResult(0, output, log) }
       expect(await startOnce(job)).toEqual({ lines: ["started factory", "ok"], ok: true })
       expect(restoreLines("factory", 0, output, log)).toEqual([
@@ -666,7 +688,7 @@ describe("owedFile", () => {
   })
 })
 
-// spawn.sh restore's lines for a server after a reboot: one back, two running, two the roster keeps down, one passed over, one the usage gate held, three the load gate held, one that failed.
+// spawn.sh restore's lines for a server after a reboot: one back, two running, two the roster keeps down, one passed over, one the usage gate holds, three the load gate holds, one that failed.
 const AFTER_BOOT = [
   "restored a-worker",
   "skipped b-worker: live",
@@ -674,10 +696,10 @@ const AFTER_BOOT = [
   "skipped i-worker: its roster row reads ended",
   "skipped j-worker: its roster row reads parked",
   "skipped k-worker: its exec line does not parse",
-  "not restored g-worker: the usage gate holds it: it cannot read zai-usage.json",
+  "waiting g-worker: the usage gate holds it: the 5-hour window is at 90% (usage.json five_hour.used_percentage), 90 is its cap",
   ...["d", "e", "f"].map(
     (id) =>
-      `not restored ${id}-worker: the load gate holds it: max(load1, load5) is 17.23 and 10 started in the last 5 minutes. Wait for it to fall, or close a session that is done, and run it again.`,
+      `waiting ${id}-worker: the load gate holds it: max(load1, load5) is 17.23 and 10 started in the last 5 minutes. Wait for it to fall, or close a session that is done, and run it again.`,
   ),
   "not restored h-worker: its brief is gone",
 ].join("\n")
@@ -716,22 +738,29 @@ describe("restoreLines", () => {
 })
 
 describe("restoreResult", () => {
-  test("a gate's hold alone is no problem, and keeps the restore waiting", () => {
+  test("a wait alone is no problem, and keeps the restore owed", () => {
     const output =
-      "restored a\nnot restored b: the load gate holds it: x\nnot restored c: the usage gate holds it: y\n"
-    expect(restoreResult(0, output, "/h/p.log")).toEqual({ problem: null, waiting: true })
+      "restored a\nwaiting b: the load gate holds it: x\nwaiting c: the usage gate holds it: y\n"
+    expect(restoreResult(0, output, "/h/p.log")).toEqual({ owed: true, problem: null })
   })
 
-  test("a real failure is a problem, waiting only while a gate also holds one", () => {
+  test("a real failure is a problem, owed only while a session also waits", () => {
     expect(restoreResult(1, "not restored a: its brief is gone\n", "/h/p.log")).toEqual({
+      owed: false,
       problem: "restore: 1 not restored; each session's line: /h/p.log",
-      waiting: false,
     })
-    expect(restoreResult(1, AFTER_BOOT, "/h/p.log").waiting).toBe(true)
+    expect(restoreResult(1, AFTER_BOOT, "/h/p.log").owed).toBe(true)
   })
 
-  test("a skipped line that names a gate is no wait", () => {
-    expect(restoreResult(0, "skipped a: the load gate holds it\n", "/h/p.log").waiting).toBe(false)
+  test("a line that names a gate but does not wait keeps nothing owed", () => {
+    expect(restoreResult(0, "skipped a: the load gate holds it\n", "/h/p.log").owed).toBe(false)
+    expect(
+      restoreResult(
+        1,
+        "not restored a: the load gate holds it: PLAYGROUND_LOAD_MULT is abc\n",
+        "/h/p.log",
+      ).owed,
+    ).toBe(false)
   })
 })
 

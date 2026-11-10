@@ -424,7 +424,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
     )
     const [first, second] = r.out.split("\n")
     expect(first).toBe("restored dispatcher")
-    expect(second).toStartWith("not restored 2bcdfg-worker: ")
+    expect(second).toStartWith("waiting 2bcdfg-worker: ")
     expect(second).toContain("the load gate holds it")
     expect(r.code).toBe(0)
     expect(placing(r).filter((c) => c[1] === "run")).toHaveLength(1)
