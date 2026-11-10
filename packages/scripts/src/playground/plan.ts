@@ -1,5 +1,7 @@
 import { getSessionNames, kindOfName, slotOfName } from "@packages/config/kinds"
 
+import { LAPSE_HOURS } from "./priority"
+
 export type Backend = "claude" | "glm"
 export type Dispatcher = { backend: Backend | null; name: string }
 export type Probes = {
@@ -29,6 +31,8 @@ playground sweep <lead>
                       what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs, its parked rows' closed or unreadable holds), or quiet
 playground focus [on --session <name> --reason "<why>" [--for <minutes>] | off]
                       give one session the Mac for up to 180 minutes (120 by default): every merge, every other session's heavy run and every new session but its own reviewer and tester and a priority start waits until off or its end, and the Inbox holds what comes in quiet but an alert; off prints how many runs queued while it stood and how long they waited, the line the Inbox's card carries once focus ends; bare, it prints the focus standing
+playground priority [on <session> --reason "<why>" | off <session> --reason "<why>"]
+                      the one way to open a priority window, and only on the owner's or the dispatcher's word: on writes the data folder's priority-<session>.json, naming the session, who opened it, the reason and the time, and while it stands a spawn.sh --priority start passes the load and slots gates and focus; off lifts it, and ops-tick's priority-lapse beat lifts one still standing after ${LAPSE_HOURS} hours; each on, off and lapse is a line in ops/priority.log; a priority file another writer keeps it leaves alone; bare, it lists the priority files standing
 playground page <file.html> --title "<title>" --by <session> [--for <session>]
                       keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, and print the copy's path for an Inbox card's html attachment (bun run ask new), opening nothing; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
 playground update [--to <tag>]
@@ -154,6 +158,9 @@ export const WORDS: Record<string, number | "rest"> = {
   page: 1,
   picker: "rest",
   planner: 0,
+  priority: 0,
+  "priority off": 1,
+  "priority on": 1,
   rm: "rest",
   rules: 1,
   "settings get": 1,

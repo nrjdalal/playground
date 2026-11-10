@@ -31,13 +31,14 @@ stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
 # (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
-SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load1-max run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
+SWITCHES="run-slot.3-off run-slot.4-off run-slot.battery run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load1-max run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
 # whether switch $1 (a path under ops) is on; one past its expiry is moved to <name>.expired-<ts> and logged in run-slot.runs.log
 switch_on() {
   local f="$OPS/$1" line ends now m
   [ -e "$f" ] || return 1
   line=$(head -n 1 "$f" 2>/dev/null)
-  ends=$(printf '%s\n' "$line" | grep -E '^[^ ]+ [0-9-]{10}T[0-9:]{8}Z [0-9-]{10}T[0-9:]{8}Z ' | cut -d' ' -f3)
+  switch_ends "$1"
+  ends=$ENDS
   now=$(date -u +%FT%TZ)
   if [ -n "$ends" ]; then
     [[ "$now" < "$ends" ]] && return 0
@@ -49,6 +50,17 @@ switch_on() {
   fi
   mv "$f" "$f.expired-$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null && echo "$now expire ${WHO:-run-slot} $$ $1 $line" >> "$OPS/run-slot.runs.log"
   return 1
+}
+# the expiry a switch line carries, read with builtins into ENDS, so switch_on and due_at parse one line with no process (issue 1378's fork bound)
+switch_ends() {
+  local line= re='^[^ ]+ [0-9-]{10}T[0-9:]{8}Z [0-9-]{10}T[0-9:]{8}Z '
+  ENDS=
+  read -r line 2>/dev/null < "$OPS/$1"
+  [[ "$line" =~ $re ]] || return 0
+  line=${line#* }
+  line=${line#* }
+  ENDS=${line%% *}
+  return 0
 }
 # whether pid $1 runs: kill -0 reaches it, or the kernel refuses the signal (another user's process, or one outside Claude Code's sandbox, which also refuses the setuid ps) rather than finding no such process
 alive() {
@@ -582,9 +594,30 @@ try:
             text = f.read(65537)
         if len(text) > 65536:
             sys.exit(1)
-    lines, buf = [], None
+    lines, buf, quoted = [], None, ""
+
+    # cut each line at its trailing comment (an unquoted word-start #), carrying the quote state across lines
+    def scan(line, quoted, prev):
+        esc = False
+        for i, c in enumerate(line):
+            if esc:
+                esc = False
+            elif c == "\\" and quoted != "'":
+                esc = True
+            elif c == quoted:
+                quoted = ""
+            elif not quoted and c in "'\"":
+                quoted = c
+            elif not quoted and c == "#" and (
+                line[i - 1] in " \t;&|()" if i else (not prev or prev in " \t;&|()")
+            ):
+                return line[:i], quoted
+        return line, quoted
+
     for line in text.split("\n"):
-        if buf is None and line.lstrip().startswith("#"):
+        # prev is the character the join puts before this line's first, since bash joins x\ and #b into x#b, whose # starts no word
+        line, quoted = scan(line, quoted, buf[-1] if buf else "")
+        if buf is None and not quoted and line.strip() == "":
             continue
         buf = line if buf is None else buf + line
         if (len(buf) - len(buf.rstrip("\\"))) % 2:
@@ -1305,7 +1338,7 @@ CHILD=""
 POLL=${RUN_SLOT_POLL:-15}
 # the longest a commit or quick start waits on load5 (issue 1385)
 LOAD_WAIT=${RUN_SLOT_LOAD_WAIT:-300}
-# the wait past which a waiter counts as a backlog the burst hold keeps spaced, small runs included (issue 1417): a queue that releases starts its small runs all at once, and load5 reads them only about a minute later (7 Nov 13:10 to 13:15Z: 12 queued runs started on run-slot and run-slot-2, and load5 crossed 15 at 13:16:08Z), so a small run that has waited this long also waits for burst_held to clear; a fresh small run starts at once (the tests shorten it; a poll adds 15 to a waiter's wait whatever POLL is, so with the default 15 s poll the line reads in seconds)
+# the wait past which a waiter counts as a backlog the burst hold keeps spaced, small runs included (issue 1417): a queue that releases starts its small runs all at once, and load5 reads them only about a minute later (7 Nov 13:10 to 13:15Z: 12 queued runs started on run-slot and run-slot-2, and load5 crossed 15 at 13:16:08Z), so a small run that has waited this long also waits for burst_held to clear; a fresh small run starts at once (the tests shorten it; a waiter's waited count is the real seconds since its wait began, so the line reads in seconds whatever RUN_SLOT_POLL is)
 BACKLOG_WAIT=${RUN_SLOT_BACKLOG_WAIT:-300}
 CLONE_POLL=${RUN_SLOT_POLL:-5}
 # the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake (clone_brake) it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
@@ -1453,14 +1486,15 @@ self_changed() { ! [ "$SELF" -ot "$REF" ]; }
 # lines, and a mark for each holder's or ticket's pid that has ended, since a killed run leaves its line; the runs log, the lanes' and gauges' caches,
 # run-slot.next (the oldest waiter's own write), this script and the switches' history stay out
 cheap_sig() {
-  local f l d p
+  local f l w d p
   SIG=
   for f in "$OPS"/run-slot* "$QUEUE"/*; do
     case "$f" in *.runs.log | */run-slot.lanes* | */run-slot.gauges* | *.lifted-* | *.expired-* | */run-slot.sh | */run-slot.next) continue ;; esac
     SIG="$SIG|$f"
     p=
     case "$f" in
-      *.holder | */run-slot.priority | */run-slot.load5-cap | */run-slot.focus) l=; read -r l 2>/dev/null < "$f"; SIG="$SIG=$l"; [ "${f%.holder}" = "$f" ] || { p=${l#* }; p=${p%% *}; } ;;
+      */run-slot.load5-cap) l=; while read -r w || [ -n "$w" ]; do l=$w; done 2>/dev/null < "$f"; SIG="$SIG=$l" ;;
+      *.holder | */run-slot.priority | */run-slot.focus) l=; read -r l 2>/dev/null < "$f"; SIG="$SIG=$l"; [ "${f%.holder}" = "$f" ] || { p=${l#* }; p=${p%% *}; } ;;
       "$QUEUE"/*) p=${f##*/}; p=${p#*-}; p=${p%%-*} ;;
     esac
     case "$p" in '' | *[!0-9]*) ;; *) alive "$p" || SIG="$SIG!ended" ;; esac
@@ -1468,6 +1502,8 @@ cheap_sig() {
   for d in "$@"; do
     for f in "$d"/run-slot*.holder; do l=; read -r l 2>/dev/null < "$f"; SIG="$SIG|$f=$l"; p=${l#* }; p=${p%% *}; case "$p" in '' | *[!0-9]*) ;; *) alive "$p" || SIG="$SIG!ended" ;; esac; done
   done
+  # a look mark whose pid has ended is swept here, since the waiter it belonged to was killed past its trap and free() never ran
+  for f in "$OPS"/.run-slot-ref-*; do [ -e "$f" ] || continue; p=${f##*-}; case "$p" in '' | *[!0-9]*) continue ;; esac; [ "$p" = "$$" ] && continue; alive "$p" || rm -f "$f"; done
 }
 # the load's line, its 1- and 5-minute loads in whole numbers, which a waiter at the head looks again on (two processes, so only the head's polls read it)
 cheap_load() { local l; l=$(loadavg); set -- $l; LOAD="${2%%.*} ${3%%.*}"; }
@@ -1478,7 +1514,7 @@ next_sig() { local f l; NSIG=; for f in "$NEXTF" "$OPS/run-slot.priority" "$OPS/
 # the epoch second the first rule a look reads by the clock alone turns, nothing while none will: a ticket reaching AGED (the queue's order),
 # run-slot.priority's hour, a switch's expiry and a holder line with no pid going stale at 2 hours, so a waiter at the head looks again then
 due_at() {
-  local now f m e l d=
+  local now f m e l ends d=
   now=$(date +%s)
   for f in "$QUEUE"/* "$OPS/run-slot.priority" "$OPS"/run-slot*.holder; do
     [ -e "$f" ] || continue
@@ -1496,9 +1532,10 @@ due_at() {
   [ "$e" -gt "$now" ] && { [ -z "$d" ] || [ "$e" -lt "$d" ]; } && d=$e
   for f in $SWITCHES; do
     [ -e "$OPS/$f" ] || continue
-    l=; read -r l 2>/dev/null < "$OPS/$f"
-    if [[ "$l" =~ ^[^\ ]+\ [0-9-]{10}T[0-9:]{8}Z\ ([0-9-]{10}T[0-9:]{8}Z)\  ]]; then
-      e=$(date -u -j -f %Y-%m-%dT%H:%M:%SZ "${BASH_REMATCH[1]}" +%s 2>/dev/null || date -u -d "${BASH_REMATCH[1]}" +%s 2>/dev/null) || continue
+    switch_ends "$f"
+    ends=$ENDS
+    if [ -n "$ends" ]; then
+      e=$(date -u -j -f %Y-%m-%dT%H:%M:%SZ "$ends" +%s 2>/dev/null || date -u -d "$ends" +%s 2>/dev/null) || continue
     else
       e=$(mtime "$OPS/$f") || continue
       e=$((e + 14400))
@@ -1586,10 +1623,24 @@ focus_holds() {
   h=$(focus_holder) || return 1
   ! focus_spares "$h" "$WHO"
 }
-focus_wait() {
-  [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for $(focus_holder)'s focus to end (run-slot.focus, until $(cut -d' ' -f3 "$OPS/run-slot.focus" 2>/dev/null))" >&2
+# the wait under the battery's red mark or focus, its line naming the battery's first
+hold_wait() {
+  waited=$((SECONDS - WAIT_FROM))
+  # each wait line prints at its first poll, its threshold 0, and again each time the clock's waited count crosses the next 300 s mark, whatever the poll slept
+  if [ "$waited" -ge "$FAT" ]; then
+    if battery_holds; then
+      echo "run-slot.sh: waiting for the Mac's charge to rise (run-slot.battery, which ops-awake lifts once it does)" >&2
+    else
+      echo "run-slot.sh: waiting for $(focus_holder)'s focus to end (run-slot.focus, until $(cut -d' ' -f3 "$OPS/run-slot.focus" 2>/dev/null))" >&2
+    fi
+    FAT=$(((waited / 300 + 1) * 300))
+  fi
   sleep "$POLL"
-  waited=$((waited + 15))
+}
+# true while the battery's red mark holds this run: ops-awake keeps run-slot.battery standing while the charge is at 5% or under and falling, on battery or on a charger losing to the load, so every heavy run on this Mac waits, a focused session's too, but ops' upkeep (ops-tick's beats, the dashboard), as under focus
+battery_holds() {
+  switch_on run-slot.battery || return 1
+  case "$WHO" in ops-dashboard | ops-tick) return 1 ;; esac
 }
 prio_for() { local h; h=$(prio_holder) && [ -n "$h" ] && [ "$(owner_of "$1")" = "$h" ]; }
 # the oldest live ticket the priority holder owns, its worktree's commit steps' included: the one of its tickets that skips the queue, so its runs go in the order it asked for them (4 Nov: a merge asked later took a slot before the same session's older merge)
@@ -2067,16 +2118,19 @@ model_cap() {
 }
 if [ -n "$MODEL_BOUND" ]; then
   CAP=$(model_cap)
-  waited=0
+  WAIT_FROM=$SECONDS MAT=0
   while :; do
     for n in $(seq 1 "$CAP"); do
       mkdir "$OPS/run-slot-model-$n" 2>/dev/null && { SLOT="$OPS/run-slot-model-$n"; break 2; }
       reclaim "$OPS/run-slot-model-$n"
     done
     reread
-    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for one of the $CAP model-bound slots" >&2
+    waited=$((SECONDS - WAIT_FROM))
+    if [ "$waited" -ge "$MAT" ]; then
+      echo "run-slot.sh: waiting for one of the $CAP model-bound slots" >&2
+      MAT=$(((waited / 300 + 1) * 300))
+    fi
     sleep "$POLL"
-    waited=$((waited + 15))
   done
   echo "$WHO $$ $(date -u +%FT%TZ) 0 model" > "$SLOT.holder"
   echo "run-slot.sh: $WHO holds $(basename "$SLOT")" >&2
@@ -2086,13 +2140,16 @@ fi
 # One docker build at a time on the machine, since each fills the Docker VM the live dashboard's Postgres shares (6 Nov 00:38Z: a parallel compose build got it killed): run-slot-docker is taken before the ticket, so a waiting build holds no place in the queue, and reclaimed only once its holder's pid has gone
 if [ -n "$DOCKER" ]; then
   [ -n "$TICKET" ] && rm -f "$TICKET" && TICKET=""
-  waited=0
+  WAIT_FROM=$SECONDS DAT=0
   until mkdir "$OPS/run-slot-docker" 2>/dev/null; do
     reclaim "$OPS/run-slot-docker"
     reread
-    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for run-slot-docker, one docker build at a time ($(cat "$OPS/run-slot-docker.holder" 2>/dev/null))" >&2
+    waited=$((SECONDS - WAIT_FROM))
+    if [ "$waited" -ge "$DAT" ]; then
+      echo "run-slot.sh: waiting for run-slot-docker, one docker build at a time ($(cat "$OPS/run-slot-docker.holder" 2>/dev/null))" >&2
+      DAT=$(((waited / 300 + 1) * 300))
+    fi
     sleep "$CLONE_POLL"
-    waited=$((waited + CLONE_POLL))
   done
   DOCKER_SLOT="$OPS/run-slot-docker"
   echo "$WHO $$ $(date -u +%FT%TZ)" > "$DOCKER_SLOT.holder"
@@ -2107,7 +2164,7 @@ if [ "$KIND" = quick ] && [ "$WHO" = ops-merge-train ]; then
 fi
 if [ -n "$KIND" ]; then
   [ -n "$TICKET" ] && rm -f "$TICKET" && TICKET=""
-  waited=0
+  WAIT_FROM=$SECONDS FAT=0 CAT=0
   # run-slot.clone-off holds every clone while it exists (dispatcher, 18 Oct, with run-slot.3-off)
   # run-slot.clone-allow holds, one a line, grep patterns for the clones a lead lets through while clone-off stands (builder, 18 Oct: priority clones in order; every checker by default, finish-first)
   # clone-off lets a clone through while load1 and load5 are under 30 and memory passes spawn.sh's gate, pressure level 1 or 2 with 8% or more free (dispatcher, 19 Oct 01:18Z;
@@ -2147,8 +2204,12 @@ if [ -n "$KIND" ]; then
       END { if (ENVIRON["CUTOFF"] != "" && t > ENVIRON["CUTOFF"]) print t }')
     [ -n "$last" ] && echo "${CLONE_GAP}s past the last clone's end at $last"
   }
-  # a commit's build, a merge or a clone is heavy, so it waits under focus; the quick slot's short runs go on
-  while [ "$KIND" != quick ] && focus_holds; do [ -z "$CLONE_TICKET" ] || rm -f "$CLONE_TICKET"; reread; focus_wait; done
+  # a commit's build, a merge or a clone is heavy, so it waits under focus or the battery's red mark; the quick slot's short runs go on
+  while [ "$KIND" != quick ] && { battery_holds || focus_holds; }; do
+    [ -z "$CLONE_TICKET" ] || rm -f "$CLONE_TICKET"
+    reread
+    hold_wait
+  done
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:
   # the waiter ran its command with no slot), so each wait checks it ended as it should, and the waiter stops when it did not
   clone_held && { echo "run-slot.sh: run-slot.clone-off holds this clone, so $WHO stops" >&2; exit 143; }
@@ -2232,6 +2293,7 @@ if [ -n "$KIND" ]; then
     # RUN_SLOT_TEST_LOOP_END ends this loop once with no lane taken, the way bash 5.2's loop drop (the rule at the load5 wait) does, so a test can hold the guard after it to its contract
     [ "$LOOPS_LEFT" -gt 0 ] && { LOOPS_LEFT=$((LOOPS_LEFT - 1)); break; }
     spaced=
+    waited=$((SECONDS - WAIT_FROM))
     self_changed && reread
     [ "$KIND" = clone ] && clone_verdict
     if [ "$KIND" = clone ] && [ -z "$spaced" ]; then
@@ -2247,11 +2309,11 @@ if [ -n "$KIND" ]; then
     # the full reread, a stat, every 12th poll, about a minute; a newer mtime than the last tick's is read at the top of the poll, before a tick moves it
     [ $((polls % 12)) -eq 0 ] && reread
     polls=$((polls + 1))
-    if [ $((waited % 300)) -eq 0 ]; then
+    if [ "$waited" -ge "$CAT" ]; then
       if [ -n "$spaced" ]; then echo "run-slot.sh: this clone waits $spaced" >&2; else echo "run-slot.sh: waiting for the $KIND slot ($(cat "$OPS/run-slot-$KIND.holder" 2>/dev/null))" >&2; fi
+      CAT=$(((waited / 300 + 1) * 300))
     fi
-    sleep 5
-    waited=$((waited + 5))
+    sleep "$CLONE_POLL"
   done
   [ -n "$GOT" ] || exit 143
   [ -n "$CLONE_TICKET" ] && rm -f "$CLONE_TICKET" && CLONE_TICKET=""
@@ -2304,14 +2366,14 @@ if [ -n "$CAN_TAKE" ]; then
   exit
 fi
 
-waited=0
-# a waiter that is not at the head and has waited 5 minutes polls at twice POLL (issue 1338)
+WAIT_FROM=$SECONDS FAT=0 QAT=0 UAT=0 BAT=0 SAT=0
+# a waiter that is not at the head and has waited past the backlog line polls at twice POLL (issue 1338)
 case "$POLL" in *[!0-9]*) SLOW_POLL=$POLL ;; *) SLOW_POLL=$((2 * POLL)) ;; esac
-nap() { if [ "$LOOKER" = 0 ] && [ "$waited" -ge 300 ]; then sleep "$SLOW_POLL"; else sleep "$POLL"; fi; }
+nap() { if [ "$LOOKER" = 0 ] && [ "$waited" -ge "$BACKLOG_WAIT" ]; then sleep "$SLOW_POLL"; else sleep "$POLL"; fi; }
 while :; do
+  waited=$((SECONDS - WAIT_FROM))
   if [ -n "$LOOKED" ] && cheap_idle; then
     nap
-    waited=$((waited + 15))
     continue
   fi
   look_mark
@@ -2341,33 +2403,31 @@ while :; do
   LOOKER=0
   { [ -z "$TICKET" ] || [ "$HEAD" = 1 ] || [ "$S2" = 1 ] || oldest_is_me; } && LOOKER=1
   if [ "$HEAD" = 0 ] && [ "$S2" = 0 ]; then
-    if [ $((waited % 300)) -eq 0 ]; then
+    if [ "$waited" -ge "$QAT" ]; then
       pos=$(ordered_waiters | cut -d' ' -f2 | grep -nxF "${TICKET##*/}" | cut -d: -f1)
       echo "run-slot.sh: queued behind $(( ${pos:-1} - 1 )) waiter(s) ahead of it in the queue's order" >&2
+      QAT=$(((waited / 300 + 1) * 300))
     fi
     nap
-    waited=$((waited + 15))
     continue
   fi
-  # under focus a run keeps its place in the queue and takes no slot
-  if focus_holds; then
-    focus_wait
+  # under the battery's red mark or focus a run keeps its place in the queue and takes no slot
+  if battery_holds || focus_holds; then
+    hold_wait
     continue
   fi
   # this run's own units must fit beside what the slots hold now (the queue's order checked them for a waiter at its head)
   c=$(capacity)
   if ! unit_fits "$CLASS$UNITS" "$UNITS" "$SIZE" "$WHO" "$c"; then
     m=$(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")")
-    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for $UNITS free load units ($SIZE; $(held_for "$m") of $c held)" >&2
+    if [ "$waited" -ge "$UAT" ]; then echo "run-slot.sh: waiting for $UNITS free load units ($SIZE; $(held_for "$m") of $c held)" >&2; UAT=$(((waited / 300 + 1) * 300)); fi
     sleep "$POLL"
-    waited=$((waited + 15))
     continue
   fi
   if added=$(burst_held); then
     BURST=1
-    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for the load to show the $added run(s) the last minute added" >&2
+    if [ "$waited" -ge "$BAT" ]; then echo "run-slot.sh: waiting for the load to show the $added run(s) the last minute added" >&2; BAT=$(((waited / 300 + 1) * 300)); fi
     sleep "$POLL"
-    waited=$((waited + 15))
     continue
   fi
   for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
@@ -2389,11 +2449,11 @@ while :; do
     fi
     reclaim "$OPS/$s"
   done
-  if [ $((waited % 300)) -eq 0 ]; then
+  if [ "$waited" -ge "$SAT" ]; then
     echo "run-slot.sh: waiting for a run slot ($(cat "$OPS/run-slot.holder" 2>/dev/null))" >&2
+    SAT=$(((waited / 300 + 1) * 300))
   fi
   sleep "$POLL"
-  waited=$((waited + 15))
 done
 
 [ -n "$SLOT" ] || exit 143

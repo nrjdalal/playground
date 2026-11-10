@@ -656,6 +656,26 @@ test("05u checks: a rate-limited check read waits for its reset, then reads agai
   expect(naps).toEqual([605])
 })
 
+test("05y checks: v0.0.82's ship pin holds while a red shard keeps Audit, Lint, and Build running, and an all-green pin ends green (#1650)", async () => {
+  const pin = [
+    run("Lint and Build", "success"),
+    run("test", "success"),
+    run("Suite (9)", "failure"),
+  ]
+  const [red, redNaps] = await checksThrough(
+    [still],
+    [runs(...pin, run(AUDIT, null)), runs(...pin, run(AUDIT, "failure"))],
+  )
+  expect(red).toBe(`CHECK failure ${AUDIT}\nCHECK success test`)
+  expect(redNaps).toEqual([300])
+  const [green, greenNaps] = await checksThrough(
+    [still],
+    [runs(run("Suite (9)", "success"), run("test", "success"), run(AUDIT, "success"))],
+  )
+  expect(green).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+  expect(greenNaps).toEqual([])
+})
+
 test("05v the checks it waits on are the gate's own (#1410)", () => {
   expect(state.GATE_CHECKS).toEqual(REQUIRED_CHECKS)
 })
@@ -1103,6 +1123,94 @@ test("10 touched-tests: the four rules on a scratch repository, printed one path
   expect(after.includes("tests/web/next/src/lib/outbox.test.ts")).toBe(false)
 })
 
+test("10 touched-tests: scan words inside fixture strings read as no scanner", () => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "api/hono/src/lib/sql.ts": "x\n",
+    "tests/changed.test.ts": "x\n",
+    "tests/fixture.test.ts":
+      "// the fixture's own text, not a scan this test runs\n" +
+      "const shape = 'readdirSync(\"skills\")'\n" +
+      'const tip = "run git grep -n over the repo first"\n' +
+      "const tag = `ls-files the whole repo`\n",
+  })
+  writeFiles(repo, { "api/hono/src/lib/sql.ts": "y\n", "tests/changed.test.ts": "y\n" })
+  git(repo, "commit", "-qam", "change")
+  const { code, listed, stderr } = touched(repo)
+  expect(code, stderr).toBe(0)
+  expect(listed).toContain("tests/changed.test.ts")
+  expect(listed).not.toContain("tests/fixture.test.ts")
+})
+
+test("10 touched-tests: a real scanner reads as one past a stray backtick or a call's argument", () => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "api/hono/src/lib/sql.ts": "x\n",
+    "tests/changed.test.ts": "x\n",
+    "tests/real.test.ts":
+      "// a stray backtick in a comment: `\n" +
+      "const re = /`x`/\n" +
+      'const found = execSync("git ls-files -z")\n' +
+      'const listed = spawnSync("git", ["grep", "-l", "x"])\n',
+  })
+  writeFiles(repo, { "api/hono/src/lib/sql.ts": "y\n", "tests/changed.test.ts": "y\n" })
+  git(repo, "commit", "-qam", "change")
+  const { code, listed, stderr } = touched(repo)
+  expect(code, stderr).toBe(0)
+  expect(listed).toContain("tests/real.test.ts")
+  expect(listed).toContain("tests/changed.test.ts")
+})
+
+test("10 touched-tests: a real scanner reads as one past a quote in a regex literal", () => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "api/hono/src/lib/sql.ts": "x\n",
+    "tests/changed.test.ts": "x\n",
+    "tests/caret.test.ts": 'const ok = /^"/.test(s) && readdirSync(dir).map((f) => "x")\n',
+    "tests/plain.test.ts": 'const ok = /"/.test(s) && readdirSync(dir).filter((f) => f !== "x")\n',
+    "tests/tick.test.ts": "if (/`/.test(s)) for (const f of readdirSync(d)) log(`${f}`)\n",
+  })
+  writeFiles(repo, { "api/hono/src/lib/sql.ts": "y\n", "tests/changed.test.ts": "y\n" })
+  git(repo, "commit", "-qam", "change")
+  const { code, listed, stderr } = touched(repo)
+  expect(code, stderr).toBe(0)
+  expect(listed).toContain("tests/caret.test.ts")
+  expect(listed).toContain("tests/plain.test.ts")
+  expect(listed).toContain("tests/tick.test.ts")
+  expect(listed).toContain("tests/changed.test.ts")
+})
+
+test("10 touched-tests: a real scanner reads as one past a value-shaped quote inside a regex", () => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "api/hono/src/lib/sql.ts": "x\n",
+    "tests/changed.test.ts": "x\n",
+    "tests/eqquote.test.ts": 'const ok = /a="/.test(s) && readdirSync(dir).map((f) => "x")\n',
+    "tests/keyquote.test.ts": "const ok = /key:'/.test(s) && readdirSync(dir).map((f) => 'x')\n",
+    "tests/gttick.test.ts": "const ok = />`/.test(s) && readdirSync(dir).map((f) => log(`${f}`))\n",
+  })
+  writeFiles(repo, { "api/hono/src/lib/sql.ts": "y\n", "tests/changed.test.ts": "y\n" })
+  git(repo, "commit", "-qam", "change")
+  const { code, listed, stderr } = touched(repo)
+  expect(code, stderr).toBe(0)
+  expect(listed).toContain("tests/eqquote.test.ts")
+  expect(listed).toContain("tests/keyquote.test.ts")
+  expect(listed).toContain("tests/gttick.test.ts")
+  expect(listed).toContain("tests/changed.test.ts")
+})
+
+// The empty diff leaves rule 4's whole-tree picks alone, so the row pins the repo's own scanners and the fixture-string rule at every head
+test("10 touched-tests: the repo's own scanners read as scanners and its fixture strings read as none", () => {
+  const out = runCli(["touched-tests", ROOT, "HEAD", "HEAD"])
+  const listed = out.stdout.split("\n").filter(Boolean)
+  expect(out.code, out.stderr).toBe(0)
+  expect(listed).toContain("tests/web/next/src/app/globals.test.ts")
+  expect(listed).toContain("tests/web/next/src/native-title.test.ts")
+  expect(listed).not.toContain(
+    "tests/extensions/core/skills/code-review-loop/scripts/state.test.ts",
+  )
+})
+
 test("10k a renamed file's old path still selects the test importing it", () => {
   const repo = scratch()
   scratchRepo(repo, {
@@ -1228,7 +1336,7 @@ test("10n a test reading a changed file by its src-relative path quoted whole, w
   ])
 })
 
-test("10o a test that runs git grep over the repo is listed, by argv or shell, wrapped or after -C", () => {
+test("10o a test that greps the repo is listed, by argv or shell, wrapped or after -C", () => {
   const repo = scratch()
   scratchRepo(repo, {
     "scripts/plain.sh": "x\n",

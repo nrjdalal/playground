@@ -4839,6 +4839,7 @@ function sessionOf(raw) {
 }
 
 // scripts/hooks/shell.ts
+import { AsyncLocalStorage } from "async_hooks";
 import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
@@ -4846,22 +4847,25 @@ var READ = "\x01";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
-var deadline;
-var steps = 0;
-function tick() {
-  if (++steps % 1024 !== 0 || deadline === undefined)
-    return;
-  if (performance.now() > deadline)
+var deadlines = new AsyncLocalStorage;
+function pastDeadline() {
+  const deadline = deadlines.getStore();
+  if (deadline !== undefined && performance.now() > deadline)
     throw new RangeError("past the hook's time");
 }
+var steps = 0;
+function tick() {
+  if (++steps % 1024 === 0)
+    pastDeadline();
+}
 function lexScript(value, env) {
-  if (deadline !== undefined && value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return lex(value, env.known);
 }
 function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
-  if (deadline !== undefined && script.length + count * value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
@@ -6529,7 +6533,7 @@ var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
   const scripts = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")];
-  if (deadline !== undefined && scripts.some((s) => s.unknown === LARGE))
+  if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;
 }
@@ -7413,7 +7417,7 @@ var FILE_TOOLS = {
   NotebookEdit: "notebook_path",
   Write: "file_path"
 };
-var INSTEAD = "the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under .claude/worktrees/ (git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.";
+var INSTEAD = `the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under the main checkout's .claude/worktrees/, made by absolute path so it nests in no other worktree (git worktree add --no-track "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.`;
 var refuse = (what, fix = INSTEAD) => `no-main-checkout hook refuses ${what}: ${fix}`;
 var UNKNOWN_FIX = "the hook cannot tell which folder it runs in, since a cd before it may not run, may run many times, or names a path it cannot read, so it reads every folder the shell may be in. Name the folder instead: git -C <your worktree>, bun --cwd <your worktree>, or cd by a literal path.";
 var ANYWHERE_FIX = "the line names more folders than the hook carries, so it cannot rule out the main checkout. Name the folder on the command instead: git -C <your worktree>, bun --cwd <your worktree>, or run it as a line of its own after a cd to a literal path.";
@@ -7517,7 +7521,7 @@ var GIT_MOVES = new Set([
 ]);
 var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
 var STEP_FIVE = /^(?:-q |--quiet )?--ff-only (?:-q |--quiet )?origin\/main$/;
-var GIT_FIX = "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made under .claude/worktrees/ by git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary.";
+var GIT_FIX = `it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made by absolute path under the main checkout's .claude/worktrees/, so it nests in no other worktree, by git worktree add --no-track "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" -b <branch> origin/canary.`;
 var LIVE_FIX = "it moves the live Dashboard's checkout, which serves the owner's Dashboard, and only the runner that holds it and the ops lead change it. Ask Ops: its supervisor rolls the checkout onto each canary head, and a change it needs goes through a PR into canary.";
 function liveWrite(args, env) {
   const { cwd, rest, sub } = gitCall(args, env);

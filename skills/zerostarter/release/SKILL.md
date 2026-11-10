@@ -28,9 +28,9 @@ CANARY=$(gh api repos/{owner}/{repo}/branches/canary --jq .commit.sha)
 A ship still short of step 4 as the freeze nears its lapse ([pr-merge's Holds and rulings](../../../packages/scripts/src/pr-merge/README.md#holds-and-rulings)) runs `bun run ship:freeze vX.Y.Z` again, which restarts it.
 A ship that stops before its tag ends the freeze with `bun run ship:freeze --end`, so the held PRs merge again.
 
-Run the new-user gate on it, `bun run gate:new-user "$CANARY"` (`.agents/testing.md`, End-to-end tests), and name each FAIL and INCONCLUSIVE line in the ship PR's body.
+Run the new-user gate on it, `bun run gate:new-user "$CANARY"` (`.agents/testing.md`, End-to-end tests). Its last line, `New-user gate at <sha>: PASS` or `New-user gate at <sha>: FAIL`, goes into the ship PR's body on a line of its own, for step 3's `ship:merge` to read, with each FAIL and INCONCLUSIVE line it printed named below it.
 
-Done when `bun run ship:freeze status` prints the `"*"` line naming `vX.Y.Z` (or the line Ops wrote by hand, which `ship:freeze` kept and which holds every PR already), `CANARY` holds the SHA you mean to ship and the gate's PASS and FAIL list for it is in hand. When `canary` moves before step 3, read it again.
+Done when `bun run ship:freeze status` prints the `"*"` line naming `vX.Y.Z` (step 3's `ship:merge` refuses a line Ops wrote by hand, so ask Ops to lift one), `CANARY` holds the SHA you mean to ship and the gate's last line for it is in hand. When `canary` moves before step 3, read it again.
 
 ## Rehearse an invitee's update
 
@@ -76,7 +76,7 @@ d. **Update.** Run `playground update --to <tag>`, then `playground doctor`, sti
    The first run leaves the tag's own commit in the throwaway data folder's `ops/update-head`, so a second run reads an empty change set and skips the install, the build and the skills line: first move that file aside when the change is on the no-record path, or write the last tag's commit into it when the change reads the change set, so the second run reads what the first did (the v0.0.26 rehearsal on 1 Nov: the first run ran v0.0.25's `update.ts`, and only the second, with the file moved aside, printed the candidate's new no-record line).
    Done when each update exits 0, doctor's version line reads `at <tag>` after each, and the MISSING lines are only the containment's own and the machine's own gaps: `claude` off `PATH`, `docker` and `gh` left off it and the pinned `herdr` the throwaway `HOME` lacks, while every need the update itself runs on reads ok (`bun`, `git` and `node`, with `python3` from the system basics); the after-state, taken the same way, reads unchanged against the before-state, and each stub's log names the calls the real machine would have taken, and a second run's output shows the step the candidate's change is on, with the line that change adds when it adds one. A step that fails names its caller: when a stub took that call, the update needs it, so contain that call another way (a flag, an env) and run the rehearsal again.
 
-The rehearsal's result goes into the ship PR's body beside the new-user gate's PASS and FAIL list.
+The rehearsal's result goes into the ship PR's body beside the new-user gate's line, as `Invitee rehearsal at <sha>: PASS` on a line of its own, `<sha>` the full `$CANARY`; a candidate that changes no update path writes `Invitee rehearsal at <sha>: not needed` there, since step 3's `ship:merge` reads one of the two.
 
 ## 2. Open the ship PR
 
@@ -91,12 +91,21 @@ When a dispatch of `auto-canary-into-main` already opened it as a draft, `gh pr 
 
 ## 3. Merge into `main`
 
+Merge with `ship:merge`, the one merge into `main`, which refuses, naming each reason, until its gates hold at the ship PR's head ([pr-merge's README, ship:merge](../../../packages/scripts/src/pr-merge/README.md#shipmerge)), then merges with a merge commit at that head:
+
 ```bash
-gh pr merge <n> --merge --match-head-commit "$CANARY"
+bun run ship:merge <n>
 MERGE=$(gh pr view <n> --json mergeCommit --jq .mergeCommit.oid)
 ```
 
-Done when the PR reads `MERGED` and `MERGE` holds its merge commit. A refusal for a moved head means `canary` moved: go back to step 1.
+Fix each reason it names, then run it again, at most every 5 minutes while a check still runs (the **github** rule):
+
+- A refusal naming a head other than `$CANARY` means `canary` moved: go back to step 1.
+- No `Audit, Lint, and Build` or `test` check at the head, with the pin's `auto-check-build` and `auto-test` runs reading `action_required` (`gh run list --commit "$CANARY" --event pull_request`), means the bot opened the draft there, so its runs are held runs ([GITHUB-BULK-READS.md, Reading canary's own checks](../../../extensions/core/skills/playbook/GITHUB-BULK-READS.md#reading-canarys-own-checks)). Close the draft (`gh pr close <n>`) and open the ship PR again with step 2's `gh pr create`, whose `opened` event from your account starts both.
+- A red check: rerun its run once, `gh run rerun <run id> --failed`, or a cancelled run whole with `gh run rerun <run id>`, its id from `gh run list --commit "$CANARY" --event pull_request --json databaseId,workflowName,conclusion`.
+- A second red, or a FAIL gate line, holds the ship: name the failing test (`gh run view <run id> --log-failed`) or step in the ship PR and up the chain, and end the freeze by step 1's line for a ship that stops.
+
+Done when `ship:merge` printed `merged #<n> at <sha>` and `MERGE` holds that commit.
 
 ## 4. Tag and publish
 

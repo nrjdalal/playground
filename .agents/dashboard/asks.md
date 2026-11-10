@@ -41,7 +41,7 @@
   Each row ends in its `ShelfMark` (`web/next/src/components/shelf-mark.tsx`) in place of the stock chevrons: a small circle on an empty row, else a right chevron turning down while open, on a muted square while the row is hovered ("show circle icon if no items in accordion, and right chevron on closed?", "and hover state like this").
   The open row reads Inbox and the open cards' count as the shelves' Badge, 0 included ("still keep showing counts", "all caught up to inbox then label count", "where is inbox zero"), the summary of the open cards, or All caught up, in an `sr-only` span, Inbox muted with the row disabled when none is open;
   the pill and Mark all as read (a single ✓ icon button, `RiCheckLine`, its Hint naming how many it reads, while anything is unread, else a muted ✓✓ named All read) sit over its right end, outside the trigger, so pressing one never folds the row.
-  Before the first read lands, the open row is already in its place, muted with a blank fixed-width count and the room for Mark all as read kept, with the Spinner under it and no shelf, so the read lands below it and moves nothing (`InboxLoading`).
+  Before the first read lands, the open row is already in its place, muted, its count shown only once the read lands (a Badge beside the Spinner counts nothing), and the room for Mark all as read kept, with the Spinner under it and no shelf, so the read lands below it and moves nothing (`InboxLoading`).
   A shelf's row is its icon, its name and its count as a mono outline Badge, every shelf counting what it holds, disabled and gray while empty (`ShelfLabel`): In progress holds a go its poster is carrying out, from its answer until its poster closes it or the owner presses its Done or Dismiss (`progress` in `inboxView`, the `sending` of `itemState`),
   offering no ✓ since its poster closes it;
   Later holds the open items and updates put away until a time still ahead, which the API returns apart from `items` as `snoozed` (`listItems`), since every other reader of `items` takes a row there as awake;
@@ -232,7 +232,7 @@
   ```
 
   `kind` is `decision` (left out, it is one), `draft` or `update`; `from` is the posting session's name as the Dashboard shows it, since the answer is typed into that session; `title` is one line.
-  A decision's `preview` is one of fourteen, each what Approve does except the `secret` ask and the `reveal` card (below), written in ELI5 / ASD-STE100 plain words: `accept` (`scope`, `kind`, `key`, `rev`, `why`, an optional `more` list, below), `apps` (`app`, `change`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
+  A decision's `preview` is one of fourteen, each what Approve does except the `secret` ask and the `reveal` card (below), written in plain words (the `plain-words` skill): `accept` (`scope`, `kind`, `key`, `rev`, `why`, an optional `more` list, below), `apps` (`app`, `change`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
   a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with its options labelled one line each, `options`, 1 to 5 rows of `{label, description?}`, one row for a yes or no and 2 or more for lettered choices, or the older `approve` alone, never both, and an optional `deny` naming the no-go row (Deny, or None of these past one option),
@@ -475,6 +475,7 @@
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
      Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from; a `diff` block's lines may run longer, since the card wraps them.
      A wider drawing still posts and shrinks to 10px, then scrolls, so the limit is a writing guide.
+     A note of one sentence on the point follows the picture, by the `plain-words` skill's owner style (`extensions/core/skills/plain-words/SKILL.md`).
   2. Short bullets, one fact each, an emoji as each one's marker.
   3. The options: for a true yes or no, one `options` row saying what Approve does, with `deny` beside it; for real alternatives, 2 to 5 rows, A to E, each a `label` and an optional `description`.
      The card shows them as its choices under the text, in place of its On Approve line.
@@ -495,9 +496,12 @@
   + const limit = rows.length
   ```
 
+  The export fix is ready to port to staging and main.
+
   - 🐛 The export ends at 100 rows.
   - ✅ The fix runs on dev since 24 Oct, with no errors.
   - ↩️ One commit reverts it.
+  - 🎯 It touches the export alone.
   ````
 
   Options: `Port the fix to staging, then main`; Deny: `Keep it on dev`.
@@ -513,6 +517,8 @@
   report to you
   ```
 
+  A dry run of the export job waits on your yes.
+
   - 📨 The web-api session asks for a dry run of the export job.
   - 🧪 The run is on dev only and writes no rows.
   - ⏱️ It takes about 10 minutes.
@@ -520,12 +526,16 @@
 
   Options: `Take the request and run the dry run`; Deny: `Turn the request down`.
 
-  The UI change leads with its before and after pictures, which join the ask as `attachments` (absolute paths on this Mac, each with its `label` and `group`, which `bun run ask new` copies in), and its card shows them under this text:
+  The UI change's before and after pictures join the ask as `attachments` (absolute paths on this Mac, each with its `label` and `group`, which `bun run ask new` copies in), and its card shows them under this text, which opens on its note:
 
   ````markdown
+  The Inbox card can show its pictures as one thumbnail row.
+
   - 🖼️ The Inbox card shows its pictures as a row of thumbnails.
   - 👆 A click opens the picture in the viewer.
   - 📱 The row scrolls sideways on a phone.
+  - ↩️ One revert puts the old card back.
+  - 🎯 It touches the Inbox card alone.
   ````
 
   Options: `Build the row as the after picture shows`; Deny: `Keep the card as it is`.

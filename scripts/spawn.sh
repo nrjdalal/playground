@@ -41,7 +41,7 @@ set -euo pipefail
 #      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; GLM reads zai-usage.json
 #      (the 5-hour window under 95% of its credits, with no week check, and no empty balance (its `balance`), valid only
 #      while the zai usage job's last beat is ok and within 3 cycles)
-#   The first dispatcher starts past every gate, so the owner always has one: the gates still read, a failure
+#   The first dispatcher starts past every gate, by a manager start or a resume, so the owner always has one: the gates still read, a failure
 #   logs a skipped row naming its gate and reading (which the load gate counts as a start) and prints it, and the
 #   pass picks its login as for any start; every other manager start, an orchestrator's included, takes them all
 # It also refuses a name a live session holds, since Claude Code would start the
@@ -56,11 +56,11 @@ set -euo pipefail
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time
-#   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again once its resume finds the session gone so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
+#   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row just before the pane closes, putting its status back when herdr refuses the close
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
-#   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, or priority-start.json, a job's own starts), and focus's refusal while any but priority-start.json does; it is refused while none does.
+#   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any but priority-start.json does; it is refused while none does.
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, never this machine's own login, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
@@ -102,7 +102,7 @@ fi
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
 # The roster's manager kinds (kinds.ts' ROSTER_ROLE_OF_KIND), so a kind role_of_kind does not list runs as a lead: an orchestrator. A read that fails leaves the named kinds alone, so an orchestrator is refused rather than guessed.
 MANAGER_KINDS=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { ROSTER_ROLE_OF_KIND as r } from '$REPO/packages/config/src/kinds.ts'; console.log(Object.keys(r).filter((k) => r[k] === 'manager').join(' '))" 2>/dev/null) || MANAGER_KINDS=
-# The priority file standing in the data folder, one that passes focus first, exit 1 when none does, its content unread: every priority*.json but priority-start.json (priority.json, or an org's own priority-<name>.json, each writer keeping its own) passes the load and slots gates and focus, and a job's own start file, priority-start.json, passes the load and slots gates but never focus.
+# The priority file standing in the data folder, one that passes focus first, exit 1 when none does, its content unread: every priority*.json but priority-start.json (priority.json, or an org's own priority-<name>.json or a session's from playground priority, each writer keeping its own) passes the load and slots gates and focus, and a job's own start file, priority-start.json, passes the load and slots gates but never focus.
 priority_file() {
   local f
   for f in "$DATA"/priority*.json; do
@@ -211,6 +211,13 @@ session_kind() { local n k; while read -r n k; do [ "$n" != "$1" ] || { echo "$k
 session_name() { local n k; while read -r n k; do [ "$k" != "$1" ] || { echo "$n"; return; }; done <<<"$SESSION_KINDS"; }
 # The second dispatcher's own name is a dispatcher's name, from sessions.names or sessions.aliases, with -2.
 second_dispatcher() { [ "${1%-2}" != "$1" ] && [ "$(session_kind "${1%-2}")" = dispatcher ]; }
+# The first dispatcher, a dispatcher (its caller reads KIND) that holds slot 1 or is sessions.names' own and not the second, starts past every gate, by manager and by resume alike, so a restore brings the owner's dispatcher back at once.
+first_dispatcher() { [ "$1" = "$(dispatcher_of 1)" ] || { [ "$(session_kind "$1")" = dispatcher ] && ! second_dispatcher "$1"; }; }
+# A resume's refusal that a later restore clears with no change: a gate holding it over a reading that falls, or focus standing for another session. A gate that cannot read its input or reads a bad setting is a fault, which waiting never ends.
+restore_waits() {
+  local wait_re='the [a-z]+ gate holds it:|focus stands for' fault_re='cannot read|PLAYGROUND_LOAD_MULT is|holds no'
+  [[ $1 =~ $wait_re ]] && ! [[ $1 =~ $fault_re ]]
+}
 
 # The live sessions: a registry file whose pid is alive with the start time the file records, as the Dashboard reads them, but for a `claude -p` run (entrypoint sdk-cli), which holds no name. It prints a line, tab-separated pid, session id, folder and process start ("-" for a field the file lacks), for each live session named $1, the lowest pid first.
 live_holders() {
@@ -267,7 +274,7 @@ for pid, data in sorted(entries.items()):
         print(pid, field(data.get("sessionId")), field(data.get("cwd")), starts[pid], sep="\t")
 PY
 }
-# The capacity gate: four gates in order (load, memory, slots for a fresh worker start, usage), the first failure naming its gate and its reading (a first dispatcher's failures each kept as a skip, the gates after it still read), every pass and refusal, and a first dispatcher's skipped start, one JSON line in ~/.playground/ops/capacity.jsonl (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing a past line for each skip and then ok, or the refusal for refuse() to print.
+# The capacity gate: four gates in order (load, memory, slots for a fresh worker start, usage), the first failure naming its gate and its reading (a first dispatcher's failures each kept as a skip, the gates after it still read), every pass and refusal, and a first dispatcher's skipped start, one JSON line in ~/.playground/ops/capacity.jsonl naming its session (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing a past line for each skip and then ok, or the refusal for refuse() to print.
 # The login a launch runs on with no --account, from Claude Code's config, which the launch reads from ~ when it drops inscope's folder.
 own_config() { if [ -n "$UNSET" ]; then echo "$HOME/.claude.json"; else echo "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"; fi; }
 gate_capacity() {
@@ -278,7 +285,7 @@ gate_capacity() {
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -288,7 +295,7 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed = sys.argv[1:15]
+data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed, session = sys.argv[1:16]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -305,7 +312,7 @@ def refuse(gate, detail):
     if first:
         skips.append((gate, detail))
         raise Skip
-    row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "detail": detail, "gate": gate, "readings": readings, "verdict": "refused"}
+    row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "detail": detail, "gate": gate, "readings": readings, "session": session, "verdict": "refused"}
     try:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "a") as f:
@@ -760,7 +767,7 @@ try:
 except Skip:
     pass
 
-row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "gate": None, "readings": readings, "verdict": "check" if check else "pass"}
+row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "gate": None, "readings": readings, "session": session, "verdict": "check" if check else "pass"}
 if skips:
     row.update(detail="; ".join(d for _, d in skips), gate=", ".join(g for g, _ in skips), verdict="check" if check else "skipped")
 try:
@@ -1041,6 +1048,14 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
 PY
   }
   lines=$(restore_list) || refuse "it cannot read the roster or the resume files"
+  # The first dispatcher's record runs first, so the owner's dispatcher is back before any other resume takes the gate's room.
+  first=$(dispatcher_of 1)
+  lead= rest=
+  while IFS= read -r line; do
+    case "$line" in "run"$'\t'"$first"$'\t'*) lead+="$line"$'\n' ;; *) rest+="$line"$'\n' ;; esac
+  done <<<"$lines"
+  lines="$lead$rest"
+  # A resume that waits (restore_waits) comes back on a later restore, so it is progress, printed as waiting, and leaves the exit 0; any other miss fails the restore.
   failed=0
   while IFS=$'\t' read -r -a args; do
     case "${args[0]:-}" in
@@ -1048,21 +1063,30 @@ PY
       run)
         args=("${args[@]:1}")
         [ "${#args[@]}" -ge 3 ] || continue
-        if said=$(bash "$0" resume "${args[@]}" 2>&1 </dev/null); then
+        # A close can end a row after restore_list read the roster, so each resume reads the row again once it finds the session gone (SPAWN_RESTORING, below) and exits 4 on a down row.
+        if said=$(SPAWN_RESTORING=1 bash "$0" resume "${args[@]}" 2>&1 </dev/null); then
           echo "restored ${args[0]}"
-        elif [ $? -eq 3 ]; then
-          echo "skipped ${args[0]}: live"
         else
-          failed=1
+          rc=$?
           said=$(tail -1 <<<"$said")
-          echo "not restored ${args[0]}: ${said#"spawn.sh refuses ${args[0]}: "}"
+          said=${said#"spawn.sh refuses ${args[0]}: "}
+          if [ "$rc" -eq 3 ]; then
+            echo "skipped ${args[0]}: live"
+          elif [ "$rc" -eq 4 ]; then
+            echo "skipped ${args[0]}: $said"
+          elif restore_waits "$said"; then
+            echo "waiting ${args[0]}: $said"
+          else
+            failed=1
+            echo "not restored ${args[0]}: $said"
+          fi
         fi
         ;;
     esac
   done <<<"$lines"
   exit "$failed"
 fi
-# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row once the pane closes, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
+# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row just before the pane closes (putting its status back when herdr refuses the close), so a restore that finds the session gone reads ended, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
 if [ "$MODE" = close ]; then
   NAME=${1:-close}
   [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
@@ -1088,16 +1112,26 @@ except (ValueError, KeyError, TypeError):
   # herdr sets HERDR_PANE_ID and HERDR_SESSION in every pane, and a pane id is unique on its own server alone.
   [ "$panes" != "${HERDR_PANE_ID:-}" ] || [ "${HERDR_SESSION:-$server}" != "$server" ] ||
     refuse "pane $panes is your own; a session ends itself with /exit"
+  # The row reads ended before the pane closes, so a restore's resume that finds the session gone reads ended too and leaves it down; a close herdr refuses puts the row's status back.
+  # roster.ts drops a parked row's hold once it reads ended, and a park takes one in the same call, so the put-back names it.
+  was=$(roster_field "$NAME" status)
+  back=("status=$was")
+  [ "$was" != parked ] || back+=("hold=$(roster_field "$NAME" hold)")
+  ended=1
+  rostered=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" status=ended 2>&1 >/dev/null) || ended=
   if ! said=$(hr pane close "$panes" 2>&1 >/dev/null | tr -s '\n' ' '); then
     said=${said% }
+    if [ -n "$ended" ] && [ -n "$was" ] && ! rostered=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" "${back[@]}" 2>&1 >/dev/null); then
+      [ -n "$rostered" ] && echo "roster.ts says: $rostered" >&2
+      echo "spawn.sh: $NAME's row reads ended, but its pane stays open; put it back with $BUN $ROSTER set $NAME ${back[*]}" >&2
+    fi
     refuse "herdr would not close pane $panes (${said:-no answer from herdr})"
   fi
   echo "closed $NAME (pane $panes on $server)"
-  # The close keeps its time and the row's status before it ends it, for the load gate's pass of a resume within 15 minutes (JUST_CLOSED, below).
-  was=$(roster_field "$NAME" status)
+  # The close keeps its time and the row's status before it ended it, for the load gate's pass of a resume within 15 minutes (JUST_CLOSED, below).
   { mkdir -p "$DATA/closes" && echo "$(date -u +%s) $(date -u +%FT%TZ) ${was:-none}" > "$DATA/closes/$NAME"; } 2>/dev/null || true
-  if ! said=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" status=ended 2>&1 >/dev/null); then
-    [ -n "$said" ] && echo "roster.ts says: $said" >&2
+  if [ -z "$ended" ]; then
+    [ -n "$rostered" ] && echo "roster.ts says: $rostered" >&2
     echo "spawn.sh: $NAME closed, but its roster write failed; record it with $BUN $ROSTER set $NAME status=ended, adding task=<what it does> for a name the roster lacks" >&2
   fi
   exit 0
@@ -1186,7 +1220,7 @@ case "$MODE" in
         word "$TO" || refuse "$NAME is an orchestrator of the $KIND kind, and its roster row names no session it reports to: roster.ts set $NAME reportsTo=<session>"
         ;;
     esac
-    [ "$KIND" = dispatcher ] && { [ "$NAME" = "$TO" ] || { [ "$(session_kind "$NAME")" = dispatcher ] && ! second_dispatcher "$NAME"; }; } && FIRST=1 TO=
+    [ "$KIND" = dispatcher ] && first_dispatcher "$NAME" && FIRST=1 TO=
     DIR="${PLAYGROUND_REPO:-$MAIN}/.claude/worktrees/leads"
     # A fresh checkout has no leads worktree until its first manager start cuts one as branch leads from origin's copy of the branch the checkout was cloned on, tracking it: canary only for a checkout cloned on canary on purpose, else main, so a public install's managers run what it shipped. A branch of its own, since the checkout holds its branch already, and a manager's bare git calls land in its own tree, never the main checkout.
     CUT=
@@ -1210,6 +1244,7 @@ case "$MODE" in
     KIND=$(kind_of "$NAME")
     ROLE=$(role_of_kind "$KIND")
     [ -n "$ROLE" ] || refuse "$NAME is not a factory session's name, and the roster gives it no kind"
+    [ "$KIND" = dispatcher ] && first_dispatcher "$NAME" && FIRST=1
     # A checker whose roster row names an ended worker is ended again on the checker reaper's next pass (checker-worker-gone, scripts/ops/optimizer/idle_sessions.ts), so its row moves to the worker it now serves before it comes back.
     if [[ $ROLE =~ ^(reviewer|tester)$ ]]; then
       serves=$(roster_field "$NAME" worker)
@@ -1408,6 +1443,14 @@ taken=$(tail -n 1 <<<"$holders" | cut -f 1)
 # It exits 3, so restore tells a live session, which it leaves as it is, from a resume that failed.
 [ -z "$taken" ] || [ -n "$CHECK" ] ||
   REFUSE_CODE=3 refuse "a live session already holds the name $NAME (pid $taken), so the new one would start under a generated name. A respawned session takes the name only once the old session is gone: close it first (its handoff written, SESSIONS.md End), then run this again."
+# restore's resume leaves a down row down, since a close ends the row before its pane closes: it reads the row once the session is gone and again just before the launch, exiting 4 on a down row, which restore prints as skipped, and its roster write keeps ended (write_row) for a close that lands after that.
+restoring_row_down() {
+  [ "$MODE" = resume ] && [ -n "${SPAWN_RESTORING:-}" ] || return 1
+  row_status=$(roster_field "$NAME" status)
+  case "$row_status" in done | ended | parked | paused) return 0 ;; esac
+  return 1
+}
+! restoring_row_down || REFUSE_CODE=4 refuse "its roster row reads $row_status"
 # The item's size and its load units: --size, else small for a checker, a short read run-slot.sh knows no name for, else the roster and plan.json through run-slot.sh's own reader
 [ -n "$SIZE" ] || case "$ROLE" in reviewer | tester) SIZE=small ;; esac
 case "$SIZE" in
@@ -1417,7 +1460,7 @@ esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
 PRIORITY_FILE=
 if [ -n "$PRIORITY" ]; then
-  PRIORITY_FILE=$(priority_file) || refuse "--priority starts only while a priority file stands in $DATA (priority.json, priority-start.json or another priority-<name>.json), and none does"
+  PRIORITY_FILE=$(priority_file) || refuse "--priority starts only while a priority file stands in $DATA (priority.json, priority-start.json or another priority-<name>.json), and none does: playground priority on <session> --reason \"<why>\" opens one, on the owner's or the dispatcher's word"
 fi
 # A resume within 15 minutes of spawn.sh closing its row while it read live (not ended, parked, paused or done) passes the load gate, as a Claude Code update's close and resume do, since that session already counts in the load it comes back into; a new start, an older close and a close of a row that read otherwise meet it.
 JUST_CLOSED=
@@ -1759,8 +1802,8 @@ herdr_answer() {
 # The roster row: a checker's is written before its pane opens, since no-outside-pr-code reads the PR it names at the session's first tool call, and every other row once its session has started.
 write_row() {
   set -- set "$NAME" "kind=$KIND"
-  # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status.
-  [ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "status=starting"
+  # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status, and so does restore's resume, whose row a close can end mid-launch.
+  [ "$(roster_field "$NAME" status)" = ended ] && [ -z "${SPAWN_RESTORING:-}" ] && set -- "$@" "status=starting"
   # A checker's --pr replaces an ended row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named; on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
   if [ -n "$PR_ARG" ]; then
     first_pull=
@@ -1866,6 +1909,11 @@ except (ValueError, KeyError, TypeError):
     pass' <<<"$out" || true)
   fi
   PANE=${placed% *} ws=${placed#* }
+  if restoring_row_down; then
+    rm -f -- "$LAUNCH_FILE" "$said_file"
+    [ -z "$placed" ] || [ "$out" = reused ] || hr pane close "$PANE" >/dev/null 2>&1 || true
+    REFUSE_CODE=4 refuse "its roster row reads $row_status"
+  fi
   # herdr clears an agent's name after every turn (measured), while a pane's label stays and comes back after a restart, so the label carries the name.
   if [ -z "$placed" ] || ! hr pane rename "$PANE" "$NAME" >/dev/null 2>>"$said_file" || ! hr pane run "$PANE" "exec bash '$LAUNCH_FILE'" >/dev/null 2>>"$said_file"; then
     herdr_said=$(tr -s '\n' ' ' 2>/dev/null <"$said_file" || true)

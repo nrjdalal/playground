@@ -11,7 +11,8 @@ Run `playground sweep <your name>`.
 It prints only what changed since your last sweep, one line each: a new alert from `ops/alerts-pending.json`, the merge queue when it changes, load5 (the third field of `sysctl -n vm.loadavg`) crossing 15, the single-slot flag turning on or off, each of your roster rows whose ETA has passed, and for Ops, once an hour, each ops switch on with its age and reason;
 its cursor is `sweep/<your name>.json` in the data folder.
 A parked row's passed ETA reads `parked past eta` where any other row's reads `eta passed`, and its `hold` ([ROSTER.md](ROSTER.md)) prints once when it has closed (`parked on closed hold`), and once when it reads as neither open nor closed (`parked hold unreadable`).
-For each `switch on:` line, Ops checks whether its reason still holds: one that does is set again with a fresh reason through `run-slot.sh set`, and any other is lifted by moving it to `<name>.lifted-<ts>` ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)); `run-slot.focus` alone ends with `playground focus off`, which lifts its merge hold too.
+For each `switch on:` line, Ops checks whether its reason still holds: one that does is set again with a fresh reason through `run-slot.sh set`, and any other is lifted by moving it to `<name>.lifted-<ts>` ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)); `run-slot.focus` ends only with `playground focus off`, which lifts its merge hold too.
+`run-slot.battery` is ops-awake's, so Ops leaves it standing, since ops-awake lifts it on the check that sees the charge rise.
 When it prints `quiet`, the Builder's sweep ends there, and Ops' goes on to step 2 and ends after it.
 
 Done when it printed `quiet` and your sweep has ended (Ops' after step 2), or you have each line it printed in hand for the steps below.
@@ -48,11 +49,13 @@ For every agent of yours that `ListAgents` lists, or the roster shows with a sta
 
 Before you staff a fix this step turns up (an off-scope bug, a down worker's chore), run DISPATCH.md's **open-PR check** on it.
 
-When spawn.sh's load gate refuses a worker's new checker, give that PR to a reviewer already running (a done worker's, before you close it) as another PR in its own rounds, reporting to that PR's worker, since a running reviewer adds no load.
+When spawn.sh's load gate refuses a worker's new checker, give that PR to a reviewer already running, one `ListAgents` lists when you check it before the PR moves (a done worker's, before you close it), as another PR in its own rounds, reporting to that PR's worker, since a running reviewer adds no load.
 Move its roster row in the same step, by [ROSTER.md](ROSTER.md)'s `A checker takes another PR` row, so the sidebar nests it under its new worker and run-slot ranks its runs by that worker's size (a stale row once queued a reviewer's install 1,211 s for a 0 s run).
-With no reviewer running, that PR's checker is **held**: the worker reports the refusal to you, and you hold the PR on your list, since a refused start leaves only a `capacity.jsonl` row that names no session.
+`assign` on a checker whose row reads `ended` sets it to `working` and starts nothing itself: only while ops-herdr still owes that server a restore (`<server>.restore`, kept while any session waits) does its next cycle resume the checker from its record, within a minute when that resume passes its gate.
+So give the PR to one `ListAgents` lists, since one assign on an ended checker once left a PR with two reviewers; to bring an ended checker back on purpose, resume it by [SESSIONS.md](SESSIONS.md#end)'s `spawn.sh resume <name> <dir> --pr <its PR's URL>`, and it is back once `ListAgents` lists it.
+With no reviewer `ListAgents` lists, that PR's checker is **held**: the worker reports the refusal to you, and you hold the PR on your list, since a refused start leaves only a `capacity.jsonl` row, which names the session and starts nothing.
 When a slot opens, the held checker starts in it ahead of any dispatch ([ROSTER.md](ROSTER.md)'s step 1): tell its worker to spawn it again.
-Done when each held checker's roster row reads `working`.
+Done when each held checker's roster row reads `working` and `ListAgents` lists it.
 
 Done when every agent of yours is working, has reported, or has had its state acted on and recorded.
 

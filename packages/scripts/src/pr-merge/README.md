@@ -56,6 +56,18 @@ A lead that overrules a reviewer's FAIL posts one comment on the PR whose first 
 A red check that `canary` caused needs a fresh run once `canary`'s fix lands: merge `canary` into the PR, since `gh run rerun` reuses the run's original merge commit, which holds the red `canary`.
 An outside author's PR goes to the Builder, who gives its go only after a read-only review of its diff.
 
+## ship:merge
+
+`bun run ship:merge <n>` is the ship skill's step 3, the one merge into `main` (`ship-merge.ts`): it merges ship PR `<n>` with a merge commit, `--match-head-commit` at the head it read, and refuses, naming each reason (`shipRefusals`), unless:
+
+- `pr`: the PR is open, into `main`;
+- `gate`: the body holds the new-user gate's PASS line for the head on a line of its own, and no FAIL line for it; the gate prints that line last (`resultLine` in `new-user-gate/cli.ts`, its words from `gateLine` in `ship-lines.ts`), PASS only for a run that reached its last step with none reading FAIL, an INCONCLUSIVE step included, since that reads this Mac, not the build;
+- `rehearsal`: the body holds the invitee rehearsal's line for the head (`rehearsalLine`), PASS or `not needed`;
+- `ci`: `Audit, Lint, and Build` and `test` (`REQUIRED_CHECKS`) are each green at the head by their newest run (`ciGate`), so a suite still running or red refuses;
+- `freeze`: the `"*"` line holds and is the ship's own freeze for the next version, the latest tag's patch plus one (`freezeLine` in `held.ts`, `nextVersion`), so a lapsed freeze, another version's, focus's or one Ops wrote by hand refuses.
+
+It takes no merge lock and runs no pr:merge gate, since a ship PR merges `canary` into `main` while the freeze holds every PR into `canary`.
+
 ## The merge lock
 
 Only one merge into `canary` runs at a time: pr:merge takes the factory's merge lock (`mkdir ~/.playground/merge.lock`, its PR number inside; `PLAYGROUND_MERGE_LOCK_DIR` moves it, as the tests do), reads every gate and `canary` inside it, and lets it go into `merge-locks/<pr>-<epoch ms>-<random>` however it ends, a refusal included,

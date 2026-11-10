@@ -45,6 +45,19 @@ describe("slots 2 to 4 with single-slot mode off", () => {
     expect(await loaded(18, 15).waits("worker-m", MEDIUM)).toBe(true)
   })
 
+  // #1378: cheap_sig read run-slot.load5-cap's first line while load_line reads its last, so a cap the operator set below its reason line moved nothing a waiter watched for
+  test("a cap whose last line moves under a reason line lets a held waiter take slot 2", async () => {
+    const m = loaded(16)
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "raised for the shards\n14\n")
+    const run = m.start("worker-m", { ...MEDIUM, RUN_SLOT_LOAD_WAIT: "600" })
+    expect(await run.saw(WAITING)).toBe(true)
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "raised for the shards\n20\n")
+    const done = run.ran()
+    const took = await Promise.race([done.then(() => true), Bun.sleep(8_000).then(() => false)])
+    await stop(run.p)
+    expect(took).toBe(true)
+  })
+
   // review round 1: the hold shut run-slot-2 alone, so a second heavy run took run-slot-3 or run-slot-4 at the cap while the lanes were open
   test("with run-slot-3 and run-slot-4 on as well", async () => {
     expect(await loaded(18, 15, []).waits("worker-m", MEDIUM)).toBe(true)
