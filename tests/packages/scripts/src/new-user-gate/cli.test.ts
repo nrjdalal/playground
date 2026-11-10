@@ -19,6 +19,7 @@ import {
   installCheck,
   leftForYou,
   makeBox,
+  readAfter,
   report,
   resultLine,
   scriptsGroup,
@@ -67,6 +68,22 @@ describe("the new-user gate's reads", () => {
         { detail: "no usage reading", name: "Usage shows", ok: false },
       ]),
     ).toBe("PASS 1. curl | bash exits 0\nFAIL 2. Usage shows: no usage reading\n1 of 2 passed")
+  })
+
+  test("names a shot the step could not take on its line, and leaves a taken shot's path off it", () => {
+    expect(
+      report([
+        {
+          detail: "",
+          name: "curl | bash exits 0",
+          ok: true,
+          shot: "no shot: agent-browser wait: timed out after 25000ms",
+        },
+        { detail: "", name: "Usage shows", ok: true, shot: "/box/shots/5-usage.png" },
+      ]),
+    ).toBe(
+      "PASS 1. curl | bash exits 0 (no shot: agent-browser wait: timed out after 25000ms)\nPASS 2. Usage shows\n2 of 2 passed",
+    )
   })
 })
 
@@ -118,6 +135,21 @@ describe("a step's screenshot settle", () => {
         () => {},
       ),
     ).toBe("/box/shots/7-follows-main.png")
+  })
+
+  test("a settle wait that throws inside a step's read loop still reads the page, so the step judges its text", () => {
+    expect(readAfter(settleFails, () => "Usage 12% of the week")).toBe("Usage 12% of the week")
+    const order: string[] = []
+    expect(
+      readAfter(
+        () => order.push("settle"),
+        () => {
+          order.push("read")
+          return "Scripts 2"
+        },
+      ),
+    ).toBe("Scripts 2")
+    expect(order).toEqual(["settle", "read"])
   })
 })
 

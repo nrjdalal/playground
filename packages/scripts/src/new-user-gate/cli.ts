@@ -37,13 +37,13 @@ export const STEP_COUNT = 7
 export const resultLine = (sha: string, steps: Step[]): string =>
   gateLine(sha, steps.length < STEP_COUNT || steps.some((s) => !s.ok && !s.inconclusive))
 
-// Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail, then the count.
+// Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail and any shot it could not take, then the count.
 export const report = (steps: Step[]): string => {
   const unsure = steps.filter((s) => s.inconclusive).length
   return [
     ...steps.map(
       (s, i) =>
-        `${s.ok ? "PASS" : s.inconclusive ? "INCONCLUSIVE" : "FAIL"} ${i + 1}. ${s.name}${s.detail ? `: ${s.detail}` : ""}`,
+        `${s.ok ? "PASS" : s.inconclusive ? "INCONCLUSIVE" : "FAIL"} ${i + 1}. ${s.name}${s.detail ? `: ${s.detail}` : ""}${s.shot?.startsWith("no shot: ") ? ` (${s.shot})` : ""}`,
     ),
     `${steps.filter((s) => s.ok).length} of ${steps.length} passed${unsure ? `, ${unsure} inconclusive` : ""}`,
   ].join("\n")
@@ -275,7 +275,15 @@ export const shotAfter = (take: () => string, settle?: () => void): string => {
   }
 }
 
-// Step 1's check: install.sh's exit and its Left for you lines, judged before shot opens the page.
+// A read a settle wait goes before: a wait that fails leaves the page not yet settled, so the read still runs and its text is what the step judges.
+export const readAfter = (settle: () => void, read: () => string): string => {
+  try {
+    settle()
+  } catch {}
+  return read()
+}
+
+// Step 1's check: install.sh's exit and its Left for you lines, judged before the shot's settle opens the page.
 export const installCheck = (out: string, shot: () => string): Omit<Step, "name"> => {
   const left = leftForYou(out)
   const code = Number(/install\.sh exit (\d+)/.exec(out)?.[1] ?? -1)
@@ -570,8 +578,10 @@ const main = async (args: string[]) => {
       let text = ""
       await waitFor(() => {
         browser.cmd("open", `${web}/dashboard`)
-        browser.cmd("wait", "--load", "networkidle")
-        text = browser.text()
+        text = readAfter(
+          () => browser.cmd("wait", "--load", "networkidle"),
+          () => browser.text(),
+        )
         return usageWords(text) !== null
       }, USAGE_WAIT_MS)
       const words = usageWords(text)
@@ -587,8 +597,10 @@ const main = async (args: string[]) => {
       let text = ""
       await waitFor(() => {
         browser.cmd("open", `${web}/dashboard`)
-        browser.cmd("wait", "--load", "networkidle")
-        const read = browser.text()
+        const read = readAfter(
+          () => browser.cmd("wait", "--load", "networkidle"),
+          () => browser.text(),
+        )
         if (scriptsGroup(read) || !text) text = read
         return scriptsGroup(read) && !/\bFailing\b/.test(read)
       }, SCRIPTS_WAIT_MS)
