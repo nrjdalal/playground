@@ -104,6 +104,7 @@ describe("the slots gate admits a new worker only when run-slot has room for its
     expect(r.err).toContain(
       "priority.json, priority-start.json or another priority-<name>.json), and none does",
     )
+    expect(r.err).toContain('playground priority on <session> --reason "<why>" opens one')
   })
 
   // the old names went with the core start job: --firefighting is no flag, and an old file name is no priority file

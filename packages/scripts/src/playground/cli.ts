@@ -389,6 +389,12 @@ const focusDeps = async () => {
   }
 }
 
+// playground priority's reads and writes: the data folder, the clock and the caller's name, loaded only for this command.
+const priorityDeps = async () => {
+  const { sessionName } = await import("../trash")
+  return { by: sessionName, data: dataDir(), now: () => new Date() }
+}
+
 // playground rm: the trash (rm.ts), loaded only for this command.
 const rm = async (words: string[]): Promise<number> => {
   const { rmDeps, runRm } = await import("./rm")
@@ -468,28 +474,32 @@ const code =
                                         ? await (
                                             await import("./focus")
                                           ).runFocus(rest, await focusDeps())
-                                        : command === "rm"
-                                          ? await rm(rest)
-                                          : command === "yard"
-                                            ? await (
-                                                await import("./yard")
-                                              ).runYard(
-                                                rest,
-                                                await (
+                                        : command === "priority"
+                                          ? await (
+                                              await import("./priority")
+                                            ).runPriority(rest, await priorityDeps())
+                                          : command === "rm"
+                                            ? await rm(rest)
+                                            : command === "yard"
+                                              ? await (
                                                   await import("./yard")
-                                                ).yardIo(REPO, accountsIo(dataDir()).readSecret),
-                                              )
-                                            : command === "herdr" && rest[0] === "stop"
-                                              ? (await opsHerdr(["stop-all"]).exited) === 0
-                                                ? 0
-                                                : 1
-                                              : command === "herdr" && rest[0] === "pin"
-                                                ? await (
-                                                    await import("./herdr-pin")
-                                                  ).runHerdrPin(rest.slice(1))
-                                                : VERBS.includes(command)
-                                                  ? await verb(command, rest)
-                                                  : fail(
-                                                      `no command ${command}; playground --help lists them`,
-                                                    )
+                                                ).runYard(
+                                                  rest,
+                                                  await (
+                                                    await import("./yard")
+                                                  ).yardIo(REPO, accountsIo(dataDir()).readSecret),
+                                                )
+                                              : command === "herdr" && rest[0] === "stop"
+                                                ? (await opsHerdr(["stop-all"]).exited) === 0
+                                                  ? 0
+                                                  : 1
+                                                : command === "herdr" && rest[0] === "pin"
+                                                  ? await (
+                                                      await import("./herdr-pin")
+                                                    ).runHerdrPin(rest.slice(1))
+                                                  : VERBS.includes(command)
+                                                    ? await verb(command, rest)
+                                                    : fail(
+                                                        `no command ${command}; playground --help lists them`,
+                                                      )
 process.exit(code)
