@@ -2227,7 +2227,10 @@ if [ -n "$KIND" ]; then
   : > "$REF" 2>/dev/null
   GOT=
   polls=0
+  LOOPS_LEFT=${RUN_SLOT_TEST_LOOP_END:-0}
   while :; do
+    # RUN_SLOT_TEST_LOOP_END ends this loop once with no lane taken, the way bash 5.2's loop drop (the rule at the load5 wait) does, so a test can hold the guard after it to its contract
+    [ "$LOOPS_LEFT" -gt 0 ] && { LOOPS_LEFT=$((LOOPS_LEFT - 1)); break; }
     spaced=
     self_changed && reread
     [ "$KIND" = clone ] && clone_verdict
