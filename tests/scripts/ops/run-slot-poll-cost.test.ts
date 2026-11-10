@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { SCRIPT, WAITING, runSlot, stop, machine } from "./run-slot-fake"
 
-// ten waiters' first looks under xtrace and the shims, about 700 process starts each at a queue of 10, took 45 to 110 s at load5 19 to 25 before the window opened, and one row 188 s in all (issue 1612, measured), so each row has about twice that
+// ten waiters' first looks under xtrace and the shims, about 700 process starts each at a queue of 10, took 45 to 110 s at load5 19 to 25 before the window opened, and with quiet rounds of a whole poll the ten-queue-waiter row took 142 to 181 s at load5 12 to 24 (issue 1612, measured), so each row has about twice the slowest
 setDefaultTimeout(360_000)
 
 // every external command run-slot.sh calls by name; a shim for each counts its start, so a start the shims miss is a fork that runs bash alone, which the trace's subshell levels count
@@ -204,7 +204,7 @@ describe("a waiter behind the head", () => {
     const freed = next.err.length
     m.release("run-slot-2")
     const sleeps = (from: number) => next.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0
-    // the pick's look writes run-slot.next partway through, which a loaded Mac can take seconds to reach, so worker-y's polls count from the first sign it could act: that write, the look's end, or its take (issue 1612)
+    // the pick's look writes run-slot.next partway through, which a loaded Mac can take seconds to reach, so worker-y's polls count from the first sign it could act: that write, the look's end, or its take (issue 1612); with no sign in 10 sleeps they count from the release
     while (
       named() === was &&
       !lookedSince(pick, seen) &&
@@ -212,7 +212,7 @@ describe("a waiter behind the head", () => {
       sleeps(freed) < 10
     )
       await Bun.sleep(50)
-    const from = next.err.length
+    const from = sleeps(freed) < 10 ? next.err.length : freed
     while (!existsSync(next.marker) && sleeps(from) < 10) await Bun.sleep(50)
     expect(sleeps(from)).toBeLessThanOrEqual(3)
     expect(existsSync(pick.marker)).toBe(false)
