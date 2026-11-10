@@ -21,6 +21,8 @@ Each dispatcher's chat and its box are named by its label, such as Message Alpha
 A menu directly left of the box's send button, such as **Opus · High**, shows the model and effort the dispatcher's newest reply ran with, and a pick types `/model` or `/effort` into it for you; the row shows the new one from its next reply.
 On a first run the chat starts with **Let's check this Mac**, each check marked there or missing with the button that fixes it, then **Continue**, which makes you this Mac's owner ([Where to start](/docs#where-to-start)).
 Once every check has passed, it shows one line, **This Mac has everything Playground needs**, over the steps left, each ticked once done: GitHub, Settings (**Set up settings**), a Claude account (**Add a Claude account**) and **Start** with the dispatcher's name.
+While a restore brings your sessions back after a restart, it says **The factory is coming back** in their place, with no **Start**, until the dispatcher is back.
+If the restore cannot bring the dispatcher back, **Start** shows again, even while other sessions still wait.
 Once the dispatcher runs, its chat takes their place.
 A smaller link under them opens the System page.
 
@@ -123,7 +125,8 @@ The icons are gray outlines with no number before the first reading and once sam
 
 Under the top line, with no title, sits a row for each dispatcher, Alpha, and then Bravo while a second one runs, its model, effort and state in its hover.
 The first opens your chat at `/dashboard`, the second its own chat.
-While the first is not running its row reads Alpha, Not running, so the rows below never move.
+While the first is not running its row reads Alpha, Not running, so the rows below never move; while a restore brings it back after a restart, it reads Coming back, with a gray spinner.
+A second dispatcher's row still reads Not running.
 The second's row shows only while its session runs or the roster lists it as not yet done or ended.
 Hover over the effort on Alpha's row, or Tab to it, for a plus in its place, always shown on a phone: it lists the templates you can start, a second dispatcher on Claude or GLM, an Assistant or an orchestrator, each with its model and effort.
 A template that cannot start yet shows greyed out with the reason, such as a second Claude account to add in Settings, and Edit templates at the list's foot opens Settings at its Templates section ([Settings](/docs/settings#templates)).

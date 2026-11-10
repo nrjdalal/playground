@@ -21,6 +21,7 @@ import {
   isHerdrSurface,
   readHerdr,
   readStates,
+  restoring,
   withHerdrState,
 } from "@/lib/dashboard/herdr"
 import {
@@ -428,6 +429,8 @@ export const answeredSince = (pickers: Pickers, at: string): boolean =>
 // partial: some herdr server's read was partial (ServerRead.partial).
 export type Live = {
   partial?: true
+  // a restore can still bring the dispatcher back (restoring() in herdr.ts)
+  restoring?: true
   surfaces: Map<string, string>
   transcripts: Map<string, string>
   workers: Worker[]
@@ -771,7 +774,10 @@ export async function listLive(): Promise<Live> {
   }))
   const marked = blockedSessions(blocked, held)
   unstickConflicts = { at: Date.now(), lines: marked.conflicts }
-  const shown = withHosted(withBlocked(live, marked.sessions, usage), hosted())
+  const shown = {
+    ...withHosted(withBlocked(live, marked.sessions, usage), hosted()),
+    ...(restoring({ dispatcher: DISPATCHER }) && { restoring: true as const }),
+  }
   return servers.some((read) => read.partial) ? { ...shown, partial: true } : shown
 }
 

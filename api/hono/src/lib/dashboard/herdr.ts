@@ -1,7 +1,7 @@
 import "@packages/env/aliases"
-import { readdirSync } from "node:fs"
+import { readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { envValue } from "@packages/config/org"
 import {
@@ -53,6 +53,68 @@ export const herdrServers = (
     .filter((name) => SERVER_NAME.test(name))
     .map((name) => ({ name, socket: join(dir, `${name}.sock`) }))
 }
+
+// A restore has 5 minutes from its owe to write its first run's lines, so a server whose start or restore never runs gives Start back; a restored dispatcher has 2 minutes for its pane to read live.
+const RESTORE_RUN_MS = 5 * 60_000
+const RESTORED_MS = 2 * 60_000
+
+const RESTORE_LINE = /^(restored|skipped|waiting|not restored) (\S+?)(?::|$)/
+
+// Pure: whether a server's owed restore can still bring the dispatcher back, from the owe's time and its newest run's lines (spawn.sh restore's, which tries the dispatcher first): before a run that names any session, for up to RESTORE_RUN_MS; while that run's line for the dispatcher reads waiting; or restored, for RESTORED_MS. A line that skipped or failed it, or none, is a restore that will not, whatever else still waits.
+export const bringsBack = ({
+  dispatcher,
+  log,
+  logAt,
+  now,
+  owedAt,
+}: {
+  dispatcher: string
+  log: string
+  logAt: number | null
+  now: number
+  owedAt: number
+}): boolean => {
+  const lines =
+    logAt === null || logAt < owedAt
+      ? []
+      : log.split("\n").flatMap((line) => {
+          const read = RESTORE_LINE.exec(line)
+          return read ? [{ kind: read[1], name: read[2] }] : []
+        })
+  if (lines.length === 0) return now - owedAt < RESTORE_RUN_MS
+  const kind = lines.find((line) => line.name === dispatcher)?.kind
+  return kind === "waiting" || (kind === "restored" && now - (logAt ?? 0) < RESTORED_MS)
+}
+
+const mtimeOf = (path: string): number | null => {
+  try {
+    return statSync(path).mtimeMs
+  } catch {
+    return null
+  }
+}
+
+// Whether a restore can still bring the dispatcher back: ops-herdr keeps <server>.restore beside a server's socket (owedFile) from the server's start until no session its restore owes waits on a gate or focus, and writes each run's lines to <server>.restore.log beside it (bringsBack reads both); a fixture stack reads its herdr.json's restoring instead.
+export const restoring = ({
+  dispatcher,
+  fixtureDir,
+  now = Date.now(),
+  servers = herdrServers(),
+}: {
+  dispatcher: string
+  fixtureDir?: string
+  now?: number
+  servers?: HerdrServer[]
+}): boolean =>
+  servers.some(({ name, socket }) => {
+    if (socket === FIXTURE_SOCKET) return Boolean(readFixtureHerdr(fixtureDir).restoring)
+    const owedAt = mtimeOf(join(dirname(socket), `${name}.restore`))
+    if (owedAt === null) return false
+    const path = join(dirname(socket), `${name}.restore.log`)
+    const logAt = mtimeOf(path)
+    const log = logAt === null ? "" : readFileSync(path, "utf8")
+    return bringsBack({ dispatcher, log, logAt, now, owedAt })
+  })
 
 // Every other server socket in the folder, by ops-herdr's socketServers rule (a <name>.sock, never a client's <name>-client.sock nor herdr's default), so a session on a server an older Playground started under another name, factory or probes before the rename, still shows while that server runs, as the CLI's Start already counts it.
 const leftOver = (dir: string): string[] => {
