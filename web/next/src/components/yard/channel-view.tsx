@@ -19,6 +19,7 @@ import {
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group"
+import { MessageFooter } from "@/components/ui/message"
 import {
   MessageScroller,
   MessageScrollerContent,
@@ -160,8 +161,18 @@ export function YardMessageView({
       variant={mine ? "default" : "muted"}
       who={<FromLine message={message} />}
     >
-      <MessageLinks links={message.links} />
-      {children}
+      {/* under your own bubble they end on the right, snug as the chat's footer sits under yours */}
+      {mine ? (
+        <MessageFooter className="flex-col items-end">
+          <MessageLinks links={message.links} />
+          {children}
+        </MessageFooter>
+      ) : (
+        <>
+          <MessageLinks links={message.links} />
+          {children}
+        </>
+      )}
     </TranscriptMessage>
   )
 }

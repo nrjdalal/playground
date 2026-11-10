@@ -68,6 +68,14 @@ describe("A channel's layout", () => {
     expect(yard).toContain("mine={isMine(message, me)}")
     expect(yard).toContain('variant={mine ? "default" : "muted"}')
   })
+
+  // MessageContent moves only its data-slot children to the right, so your post's links and status ride in the chat's own footer
+  test("ends your own post's links and status on the right, under its bubble", async () => {
+    const yard = await flat("yard/channel-view.tsx")
+    expect(yard).toContain(
+      '{mine ? ( <MessageFooter className="flex-col items-end"> <MessageLinks links={message.links} /> {children} </MessageFooter>',
+    )
+  })
 })
 
 // #1527: a channel opened at its oldest message, so the newest sat below the screen on both shells
