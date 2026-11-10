@@ -20,7 +20,7 @@ import { basename, dirname, join, resolve, sep } from "node:path"
 // The folders a delete starts from, passed in so a test builds them on a mkdtemp root of its own.
 export type Roots = { home: string; main: string; trash: string }
 
-// protected and tripwire refusals go to the dispatcher through the ops notify line; refused is a plain no.
+// protected and tripwire refusals go to the dispatcher through the ops notify line; refused is a plain no, as is a per-minute cap refusal after its burst's first (firstOfBurst), so a burst alerts once.
 export type Refusal = { kind: "protected" | "refused" | "tripwire"; refused: string }
 
 // A process with a working folder: its command line, and the unix sockets it holds open, read for an agent-browser daemon alone.
@@ -232,7 +232,7 @@ const manifestOf = (trash: string, batch: string): TrashEntry[] => {
   }
 }
 
-const recentCount = (trash: string, session: string, now: Date): number => {
+const recentMoves = (trash: string, session: string, now: Date): TrashEntry[] => {
   const since = now.getTime() - 60_000
   return batches(trash)
     .filter(
@@ -240,7 +240,25 @@ const recentCount = (trash: string, session: string, now: Date): number => {
         BATCH.exec(batch)![2] === session && stampMs(BATCH.exec(batch)![1]!) > since - 1000,
     )
     .flatMap((batch) => manifestOf(trash, batch))
-    .filter((entry) => Date.parse(entry.at) > since).length
+    .filter((entry) => Date.parse(entry.at) > since)
+}
+
+// Whether a cap refusal is its burst's first, so it alerts once: a burst is the moves that filled the cap, keyed by the newest of them, and the key told is kept in <trash>/.cap-told/<session>, so every later try inside it is a plain refusal.
+const firstOfBurst = (trash: string, session: string, recent: TrashEntry[]): boolean => {
+  const key =
+    recent
+      .map((entry) => entry.at)
+      .sort()
+      .at(-1) ?? ""
+  const told = join(trash, ".cap-told", session)
+  try {
+    if (readFileSync(told, "utf8") === key) return false
+  } catch {}
+  try {
+    mkdirSync(dirname(told), { recursive: true })
+    writeFileSync(told, key)
+  } catch {}
+  return true
 }
 
 const otherVolume = (path: string, trash: string) =>
@@ -281,11 +299,11 @@ export function quarantine(
   if (held) return refused(held)
   const now = io.now ?? new Date()
   const trash = real(roots.trash)
-  const recent = recentCount(trash, opts.session, now)
-  if (recent >= LIMITS.perMinute)
+  const recent = recentMoves(trash, opts.session, now)
+  if (recent.length >= LIMITS.perMinute)
     return refused(
-      `${opts.session} quarantined ${recent} paths in the last minute, the most one session may`,
-      "tripwire",
+      `${opts.session} quarantined ${recent.length} paths in the last minute, the most one session may`,
+      firstOfBurst(trash, opts.session, recent) ? "tripwire" : "refused",
     )
   const cap = carve ?? LIMITS
   const { files, size } = measure(abs, opts.worktree ? undefined : cap)

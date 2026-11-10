@@ -273,6 +273,32 @@ describe("the tripwire", () => {
     })
   })
 
+  test("a session at the cap alerts once a burst: its first refused try is a tripwire, every later one inside it a plain refusal, and the next burst alerts again", () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    const kinds = Array.from({ length: 11 }, (_, i) => {
+      const done = quarantine(file(join(roots.home, `x${i}`)), opts, roots, {
+        now: new Date(NOW.getTime() + 2_000 + i * 2_500),
+      })
+      return "kind" in done ? done.kind : "moved"
+    })
+    expect(kinds).toEqual(["tripwire", ...Array(10).fill("refused")])
+    const later = new Date(NOW.getTime() + 61_000)
+    for (const name of ["d", "e", "f"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: later })).toHaveProperty(
+        "id",
+      )
+    expect(
+      quarantine(file(join(roots.home, "g")), opts, roots, {
+        now: new Date(later.getTime() + 1_000),
+      }),
+    ).toMatchObject({ kind: "tripwire" })
+    expect(listTrash(roots.trash)).toHaveLength(6)
+  })
+
   test("refuses a fourth quarantine within a minute from one session, and lets another go", () => {
     const roots = machine()
     for (const name of ["a", "b", "c"])

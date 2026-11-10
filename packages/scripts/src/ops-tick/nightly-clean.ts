@@ -172,10 +172,12 @@ export async function pruneTurbo(dir: string, now: Date, days = 2): Promise<stri
   return `removed ${removed}, kept ${kept}, freed ${Math.round(freed / 1_048_576)} MB`
 }
 
-// rm quarantines at most 3 paths a session per minute; the beat paces its own moves under that cap, waiting before a 4th inside the minute so rm's tripwire stays quiet, retries a refused move once the minute is out, and names what a bound on the total wait leaves for the next run. Other beats run beside this one (tick.ts starts each due beat on its own), so the wait holds up nothing.
+// rm quarantines at most 3 paths a session per minute; the beat paces every move its worktree step makes under that cap, cleanWorktree's own included, waiting before a 4th inside the minute so rm's tripwire stays quiet, retries a refused move once the minute is out, and names what a bound on the total wait leaves for the next run. Other beats run beside this one (tick.ts starts each due beat on its own), so the wait holds up nothing.
 const RM_CAP = /quarantined \d+ paths in the last minute/
 const CAP_WAIT_MS = 60_000
 const CAP_WAIT_BOUND_MS = 600_000
+// The refs API's answer for a sha GitHub does not hold (measured, 422).
+const UNKNOWN_SHA = /Object does not exist/
 
 // Pure: whether a cleanWorktree line kept work the standing approval may trash: uncommitted or unpushed work, or rm's unlanded-work refusal that names --discard.
 export const discardable = (line: string): boolean =>
@@ -266,29 +268,40 @@ export const nightlyClean =
       const out: string[] = []
       let waited = 0
       const moves: number[] = []
+      const left = (path: string) => {
+        out.push(
+          `left ${path} for the next run: rm's cap held past the ${CAP_WAIT_BOUND_MS / 60_000}-minute wait`,
+        )
+        kept.push(`worktree ${path} left for the next run: rm's cap held past the wait bound`)
+      }
+      // The pace goes before every call that can reach rm, cleanWorktree's own move included, so a 4th move inside the minute never lands and rm's tripwire pages no one, under the same bound as the retry; false past the bound, where the worktree is named for the next run and rm is not called.
+      const paced = async (): Promise<boolean> => {
+        const recent = moves.filter((at) => deps.now() - at < CAP_WAIT_MS)
+        if (recent.length < 3) return true
+        if (waited + CAP_WAIT_MS > CAP_WAIT_BOUND_MS) return false
+        const pause = CAP_WAIT_MS - (deps.now() - recent[0]!)
+        if (pause > 0) {
+          await deps.sleep(pause)
+          waited += pause
+        }
+        return true
+      }
       for (const w of staleWorktrees(worktrees, prs)) {
+        if (!(await paced())) {
+          left(w.path)
+          continue
+        }
         const line = await cleanWorktree(w.path, "nightly-clean", cleanup, {
           pr: w.pr.url,
           pushed: w.pr.headRefOid,
         })
         out.push(line)
+        if (line.startsWith("removed ")) moves.push(deps.now())
         if (!discardable(line)) continue
-        // The owner's standing approval: trashed with no decision, the 7-day trash holds it and playground rm --restore brings it back.
-        // The pace goes before the call, so a 4th move inside the minute never lands and rm's tripwire pages no one, under the same bound as the retry; past the bound the worktree is named for the next run and rm is not called. The retry below stays for the callers this session shares with.
-        const recent = moves.filter((at) => deps.now() - at < CAP_WAIT_MS)
-        if (recent.length >= 3 && waited + CAP_WAIT_MS > CAP_WAIT_BOUND_MS) {
-          out.push(
-            `left ${w.path} for the next run: rm's cap held past the ${CAP_WAIT_BOUND_MS / 60_000}-minute wait`,
-          )
-          kept.push(`worktree ${w.path} left for the next run: rm's cap held past the wait bound`)
+        // The owner's standing approval: trashed with no decision, the 7-day trash holds it and playground rm --restore brings it back. The retry below stays for the callers this session shares with.
+        if (!(await paced())) {
+          left(w.path)
           continue
-        }
-        if (recent.length >= 3) {
-          const pause = CAP_WAIT_MS - (deps.now() - recent[0]!)
-          if (pause > 0) {
-            await deps.sleep(pause)
-            waited += pause
-          }
         }
         let moved = await trashWorktree(ctx, w.path)
         if (moved.code === 0) moves.push(deps.now())
@@ -304,12 +317,8 @@ export const nightlyClean =
         if (moved.code === 0 && id) {
           out.push(`trashed ${w.path} as ${id}, restorable with playground rm --restore ${id}`)
           removed.push(`worktree ${w.path} as trash ${id} (playground rm --restore ${id})`)
-        } else if (capped) {
-          out.push(
-            `left ${w.path} for the next run: rm's cap held past the ${CAP_WAIT_BOUND_MS / 60_000}-minute wait`,
-          )
-          kept.push(`worktree ${w.path} left for the next run: rm's cap held past the wait bound`)
-        } else {
+        } else if (capped) left(w.path)
+        else {
           out.push(`kept ${w.path}: its trash move failed: ${lines(moved.out).at(-1) ?? ""}`)
           kept.push(`worktree ${w.path} kept: its trash move failed`)
         }
@@ -362,6 +371,23 @@ export const nightlyClean =
               `sha=${sha}`,
             ])
           : { code: 1, out: "no repository read" }
+        // A head GitHub does not hold, a branch never pushed, would go public with a push, so it stays with a local archive tag alone, named the night that tag is made and quiet on every night after.
+        if (made.code !== 0 && UNKNOWN_SHA.test(made.out)) {
+          const local = await git(["rev-parse", "-q", "--verify", `refs/tags/${tag}`])
+          if (local.code === 0 && lines(local.out)[0] === sha) continue
+          if ((await git(["tag", tag, sha])).code === 0) {
+            out.push(
+              `kept ${name}: its head ${sha} is not on GitHub, so it is tagged ${tag} locally alone`,
+            )
+            kept.push(`branch ${name} kept: its head is not on GitHub, tagged ${tag} locally`)
+          } else {
+            out.push(
+              `kept ${name}: its head ${sha} is not on GitHub, and its local ${tag} tag failed`,
+            )
+            kept.push(`branch ${name} kept: its head is not on GitHub, its local tag failed`)
+          }
+          continue
+        }
         if (made.code !== 0) {
           // The tag already at this head, as a retried night finds, holds it: the deletes go on.
           const there = await git(["ls-remote", "origin", `refs/tags/${tag}`])
