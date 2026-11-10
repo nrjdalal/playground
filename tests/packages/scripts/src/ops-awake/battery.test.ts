@@ -1,5 +1,13 @@
-import { afterAll, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { afterAll, describe, expect, test } from "bun:test"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -13,6 +21,14 @@ const ON_BATTERY = (pct: number) =>
   `Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t${pct}%; discharging; 0:20 remaining present: true\n`
 const ON_AC =
   "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t40%; charging; present: true\n"
+const CHARGING = (pct: number) =>
+  `Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t${pct}%; charging; 1:40 remaining present: true\n`
+// a charger that loses to the load: pmset still names AC Power, with no charging word, so only the charge between two checks says it falls
+const AC_NOT_CHARGING = (pct: number) =>
+  `Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t${pct}%; AC attached; not charging present: true\n`
+// pmset's own state word on AC, when it says the battery discharges under the charger
+const AC_DISCHARGING = (pct: number) =>
+  `Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t${pct}%; discharging; (no estimate) present: true\n`
 const ID = (n: number) => `00000000-0000-4000-8000-00000000000${n}`
 
 // A Mac whose pmset answers the given text, and whose ask command posts with the next id and reads each item at the status given.
@@ -48,9 +64,23 @@ const machine = (name: string) => {
     return { code: 0, out: "" }
   }
   const check = (at = 0) => checkBattery({ now: new Date(at), ops, repo: "/r", run })
+  // the state file past the last reading, which each check keeps
+  const kept = () => {
+    const { reading: _, ...rest } = JSON.parse(
+      readFileSync(join(ops, "awake", "battery-state.json"), "utf8"),
+    )
+    return rest
+  }
+  // the pause run-slot reads: its line while it stands, else null
+  const pause = () => {
+    const path = join(ops, "run-slot.battery")
+    return existsSync(path) ? readFileSync(path, "utf8") : null
+  }
   return {
     calls,
     check,
+    kept,
+    pause,
     deleted,
     fields,
     ops,
@@ -59,9 +89,125 @@ const machine = (name: string) => {
   }
 }
 
-test("pmset's answer reads as discharging and its charge", () => {
-  expect(batteryOf(ON_BATTERY(9))).toEqual({ discharging: true, pct: 9 })
-  expect(batteryOf(ON_AC)).toEqual({ discharging: false, pct: 40 })
+test("pmset's answer reads as its power source, its charge and whether the charge falls", () => {
+  expect(batteryOf(ON_BATTERY(9))).toEqual({ ac: false, falling: true, pct: 9 })
+  expect(batteryOf(ON_AC)).toEqual({ ac: true, falling: false, pct: 40 })
+})
+
+test("on AC, a charge that falls reads as falling: pmset's discharging word, or the charge lower than the last check's with no charging word", () => {
+  expect(batteryOf(AC_DISCHARGING(4))).toEqual({ ac: true, falling: true, pct: 4 })
+  expect(batteryOf(AC_NOT_CHARGING(4), { ac: true, falling: false, pct: 5 })).toEqual({
+    ac: true,
+    falling: true,
+    pct: 4,
+  })
+  // whole percents: a reading level with the last keeps the last's trend, so a dip that then holds still reads as falling
+  expect(batteryOf(AC_NOT_CHARGING(4), { ac: true, falling: true, pct: 4 }).falling).toBe(true)
+  // a charge that holds with no fall seen, that rises, or that pmset says is charging, does not fall
+  expect(batteryOf(AC_NOT_CHARGING(5)).falling).toBe(false)
+  expect(batteryOf(AC_NOT_CHARGING(5), { ac: true, falling: false, pct: 5 }).falling).toBe(false)
+  expect(batteryOf(AC_NOT_CHARGING(5), { ac: true, falling: true, pct: 4 }).falling).toBe(false)
+  expect(batteryOf(CHARGING(4), { ac: true, falling: true, pct: 4 }).falling).toBe(false)
+  // a plug-in starts AC's trend afresh rather than carrying the battery's
+  expect(batteryOf(AC_NOT_CHARGING(4), { ac: false, falling: true, pct: 4 }).falling).toBe(false)
+})
+
+describe("the red mark on a charger losing to the load, and the pause", () => {
+  test("at 5% and falling on AC, the red alert posts with the charger's reason, the orange ask stays unposted, and run-slot.battery stands", async () => {
+    const mac = machine("ac-falling")
+    mac.set(AC_NOT_CHARGING(6))
+    await mac.check(1_000_000)
+    expect(mac.calls).toEqual([])
+    expect(mac.pause()).toBeNull()
+    mac.set(AC_NOT_CHARGING(5))
+    await mac.check(1_060_000)
+    expect(mac.calls).toEqual([
+      {
+        args: ["new"],
+        stdin: {
+          from: "b7k2mq-ops",
+          kind: "update",
+          preview: { outcome: "alert" },
+          title:
+            "The Mac's battery is at 5% on the charger: the charger is losing to the load, and heavy runs wait until the charge rises",
+        },
+      },
+    ])
+    expect(mac.kept()).toEqual({ alert: ID(1) })
+    expect(mac.pause()).toBe(
+      "ops-awake 1970-01-01T00:17:40Z 1970-01-01T00:27:40Z the battery is at 5% and falling, so heavy runs wait until the charge rises\n",
+    )
+    // each check while the mark holds pushes the fail-safe expiry on, so only an ops-awake that has stopped lets it lapse
+    await mac.check(1_120_000)
+    expect(mac.pause()).toStartWith("ops-awake 1970-01-01T00:18:40Z 1970-01-01T00:28:40Z ")
+  })
+
+  test("at 5% and falling on battery, the red alert says heavy runs wait, and run-slot.battery stands", async () => {
+    const mac = machine("battery-red")
+    mac.set(ON_BATTERY(5))
+    await mac.check(1_000_000)
+    expect(mac.calls.map((c) => (c.stdin as { title: string }).title)).toEqual([
+      "Plug in the Mac: its battery is at 5%",
+      "The Mac's battery is at 5%: plug it in now or it shuts down, and heavy runs wait until the charge rises",
+    ])
+    expect(mac.pause()).toStartWith("ops-awake ")
+  })
+
+  test("the check that sees the charge rise lifts run-slot.battery by its .lifted move, on battery and on AC", async () => {
+    for (const [name, red, rise] of [
+      ["lift-battery", ON_BATTERY(4), CHARGING(4)],
+      ["lift-ac", AC_DISCHARGING(4), AC_NOT_CHARGING(5)],
+    ] as const) {
+      const mac = machine(name)
+      mac.set(red)
+      await mac.check(1_000_000)
+      expect(mac.pause()).not.toBeNull()
+      mac.set(rise)
+      await mac.check(1_060_000)
+      expect(mac.pause()).toBeNull()
+      expect(readdirSync(mac.ops).filter((f) => f.startsWith("run-slot.battery"))).toEqual([
+        "run-slot.battery.lifted-19700101T001740Z",
+      ])
+    }
+  })
+
+  test("a 1% dip on AC pauses, a hold after it keeps the pause, and the next rise lifts it", async () => {
+    const mac = machine("dip")
+    mac.set(AC_NOT_CHARGING(5))
+    await mac.check(1_000_000)
+    mac.set(AC_NOT_CHARGING(4))
+    await mac.check(1_060_000)
+    expect(mac.pause()).not.toBeNull()
+    await mac.check(1_120_000)
+    expect(mac.pause()).not.toBeNull()
+    mac.set(AC_NOT_CHARGING(5))
+    await mac.check(1_180_000)
+    expect(mac.pause()).toBeNull()
+  })
+
+  test("on AC with the charge holding or rising at 5%, nothing posts and nothing pauses", async () => {
+    const mac = machine("ac-holding")
+    for (const [at, text] of [
+      [1_000_000, AC_NOT_CHARGING(5)],
+      [1_060_000, AC_NOT_CHARGING(5)],
+      [1_120_000, AC_NOT_CHARGING(5)],
+      [1_180_000, CHARGING(5)],
+    ] as const) {
+      mac.set(text)
+      await mac.check(at)
+    }
+    expect(mac.calls).toEqual([])
+    expect(mac.pause()).toBeNull()
+  })
+
+  test("the check calls pmset and ask alone, so no session is stopped at the red mark", async () => {
+    const mac = machine("sessions")
+    const { run, runs } = fakeRun({ "ask new": `${ID(1)}\n`, pmset: ON_BATTERY(3) })
+    await checkBattery({ now: new Date(1_000_000), ops: mac.ops, repo: "/r", run })
+    expect(
+      runs.map((argv) => (argv[0] === "pmset" ? "pmset" : argv.slice(5, 7).join(" "))),
+    ).toEqual(["pmset", "ask new", "ask new"])
+  })
 })
 
 test("discharging posts the orange ask at 10% and the red alert at 5%, each once, from the Ops lead", async () => {
@@ -91,11 +237,12 @@ test("discharging posts the orange ask at 10% and the red alert at 5%, each once
         from: "b7k2mq-ops",
         kind: "update",
         preview: { outcome: "alert" },
-        title: "The Mac's battery is at 5%: plug it in now or it shuts down",
+        title:
+          "The Mac's battery is at 5%: plug it in now or it shuts down, and heavy runs wait until the charge rises",
       },
     },
   ])
-  expect(JSON.parse(readFileSync(join(mac.ops, "awake", "battery-state.json"), "utf8"))).toEqual({
+  expect(mac.kept()).toEqual({
     alert: ID(2),
     ask: ID(1),
   })
@@ -118,7 +265,7 @@ test("back on power, an approved ask is acked, the alert resolved by its poster,
     ["get", ID(2), "--ack"],
     ["resolve", ID(2), "--by", "b7k2mq-ops", "--note", "The Mac is back on power"],
   ])
-  expect(JSON.parse(readFileSync(join(mac.ops, "awake", "battery-state.json"), "utf8"))).toEqual({})
+  expect(mac.kept()).toEqual({})
 })
 
 test("back on power, an open ask is settled", async () => {
@@ -150,7 +297,7 @@ test("back on power, a cleared ask and a resolved alert leave state on their rea
     ["get", ID(1), "--ack"],
     ["get", ID(2), "--ack"],
   ])
-  expect(JSON.parse(readFileSync(join(mac.ops, "awake", "battery-state.json"), "utf8"))).toEqual({})
+  expect(mac.kept()).toEqual({})
 })
 
 // a reply keeps the ask open, and its poster's ack stamps ackedAt, after which settle and ack are both refused
@@ -170,9 +317,7 @@ test("back on power, an ask whose answer its poster acked, open or approved, lea
     mac.calls.length = 0
     expect(await mac.check(1_000_000_000)).toBeUndefined()
     expect(mac.calls.map((c) => c.args)).toEqual([["get", ID(1), "--ack"]])
-    expect(JSON.parse(readFileSync(join(mac.ops, "awake", "battery-state.json"), "utf8"))).toEqual(
-      {},
-    )
+    expect(mac.kept()).toEqual({})
   }
 })
 
@@ -185,7 +330,7 @@ test("back on power, an item deleted from the Inbox leaves state with no failure
   mac.calls.length = 0
   expect(await mac.check(1_000_000_000)).toBeUndefined()
   expect(mac.calls.map((c) => c.args)).toEqual([["get", ID(1), "--ack"]])
-  expect(JSON.parse(readFileSync(join(mac.ops, "awake", "battery-state.json"), "utf8"))).toEqual({})
+  expect(mac.kept()).toEqual({})
 })
 
 test("a post that fails is told to ops once in 15 minutes, and tried again each minute", async () => {

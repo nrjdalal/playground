@@ -31,7 +31,7 @@ stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
 # (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
-SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load1-max run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
+SWITCHES="run-slot.3-off run-slot.4-off run-slot.battery run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load1-max run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
 # whether switch $1 (a path under ops) is on; one past its expiry is moved to <name>.expired-<ts> and logged in run-slot.runs.log
 switch_on() {
   local f="$OPS/$1" line ends now m
@@ -1632,6 +1632,19 @@ focus_wait() {
   fi
   sleep "$POLL"
 }
+# true while the battery's red mark holds this run: ops-awake keeps run-slot.battery standing while the charge is at 5% or under and falling, on battery or on a charger losing to the load, so every heavy run on this Mac waits, a focused session's too, but ops' upkeep (ops-tick's beats, the dashboard), as under focus
+battery_holds() {
+  switch_on run-slot.battery || return 1
+  case "$WHO" in ops-dashboard | ops-tick) return 1 ;; esac
+}
+battery_wait() {
+  waited=$((SECONDS - WAIT_FROM))
+  if [ "$waited" -ge "$FAT" ]; then
+    echo "run-slot.sh: waiting for the Mac's charge to rise (run-slot.battery, which ops-awake lifts once it does)" >&2
+    FAT=$(((waited / 300 + 1) * 300))
+  fi
+  sleep "$POLL"
+}
 prio_for() { local h; h=$(prio_holder) && [ -n "$h" ] && [ "$(owner_of "$1")" = "$h" ]; }
 # the oldest live ticket the priority holder owns, its worktree's commit steps' included: the one of its tickets that skips the queue, so its runs go in the order it asked for them (4 Nov: a merge asked later took a slot before the same session's older merge)
 prio_first() {
@@ -2194,8 +2207,12 @@ if [ -n "$KIND" ]; then
       END { if (ENVIRON["CUTOFF"] != "" && t > ENVIRON["CUTOFF"]) print t }')
     [ -n "$last" ] && echo "${CLONE_GAP}s past the last clone's end at $last"
   }
-  # a commit's build, a merge or a clone is heavy, so it waits under focus; the quick slot's short runs go on
-  while [ "$KIND" != quick ] && focus_holds; do [ -z "$CLONE_TICKET" ] || rm -f "$CLONE_TICKET"; reread; focus_wait; done
+  # a commit's build, a merge or a clone is heavy, so it waits under focus or the battery's red mark; the quick slot's short runs go on
+  while [ "$KIND" != quick ] && { battery_holds || focus_holds; }; do
+    [ -z "$CLONE_TICKET" ] || rm -f "$CLONE_TICKET"
+    reread
+    if battery_holds; then battery_wait; else focus_wait; fi
+  done
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:
   # the waiter ran its command with no slot), so each wait checks it ended as it should, and the waiter stops when it did not
   clone_held && { echo "run-slot.sh: run-slot.clone-off holds this clone, so $WHO stops" >&2; exit 143; }
@@ -2394,7 +2411,11 @@ while :; do
     nap
     continue
   fi
-  # under focus a run keeps its place in the queue and takes no slot
+  # under the battery's red mark or focus a run keeps its place in the queue and takes no slot
+  if battery_holds; then
+    battery_wait
+    continue
+  fi
   if focus_holds; then
     focus_wait
     continue
