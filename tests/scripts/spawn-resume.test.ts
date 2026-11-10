@@ -681,7 +681,7 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
   const socketOf = (r: { home: string }) =>
     readFileSync(join(r.home, "herdr.env"), "utf8").trim().split(" ")[1]
 
-  test("it closes the one pane labelled with the name on the server its resume record names, ends its roster row and keeps its pins and record", async () => {
+  test("it closes the one pane labelled with the name on the server its resume record names, ends its roster row before the pane closes and keeps its pins and record", async () => {
     const r = await spawn(["close", "worker-x"], [], {}, undefined, undefined, opened())
     expect(r.err).toBe("")
     expect(r.code).toBe(0)

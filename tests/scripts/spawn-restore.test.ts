@@ -123,7 +123,7 @@ describe("restore resumes every manager its records name, or says which it left 
   })
 
   // #1696: a run read the roster once at its start, so a close that landed while it resumed others was undone 6 s later.
-  test("a session closed while the restore runs is skipped, since its row is read again just before its resume", async () => {
+  test("a session closed while the restore runs is skipped, since its resume reads the row again once it finds the session gone", async () => {
     const r = await spawn(
       ["restore"],
       [],
