@@ -151,7 +151,7 @@ export type Setup = {
   off?: string[]
   peers?: string[]
   plan?: unknown
-  // the seconds between two looks of a waiting run (run-slot.sh's RUN_SLOT_POLL, 5 real, 0.2 in the tests, less where a file's rows wait often)
+  // the seconds between two looks of a waiting run (run-slot.sh's RUN_SLOT_POLL: 15 real for a queued run's looks, 5 for a clone's and an --after wait; 0.2 in the tests, 0.05 in the commit-lane files)
   poll?: number
   pressure?: number
   roster?: unknown

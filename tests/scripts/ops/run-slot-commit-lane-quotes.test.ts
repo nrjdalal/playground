@@ -11,7 +11,7 @@ setDefaultTimeout(60_000)
 describe("a comment's quotes leave the commit lane's read alone", () => {
   // kind runs nothing, so the lane decision reads the named repo's forms alone, as run-slot.sh kind does; the chain names a throwaway repo, since the lane reads the named repo's index and lefthook.yml
   const kind = async (scriptOf: (repo: string) => string) => {
-    const m = machine({ poll: 0.05 })
+    const m = machine()
     const repo = join(m.root, "repo")
     mkdirSync(repo)
     expect(Bun.spawnSync(["git", "-C", repo, "init"]).exitCode).toBe(0)
