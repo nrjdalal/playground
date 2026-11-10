@@ -690,6 +690,8 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
     expect(socketOf(r)).toBe(lw(r.home, "herdr", "factory.sock"))
     expect(r.cmux).toBeUndefined()
     expect(r.rosterLog).toEqual(["set worker-x status=ended"])
+    // the row reads ended before the pane closes, so a restore that finds the session gone leaves it down (#1696)
+    expect(r.rosterAtClose).toEqual(["set worker-x status=ended"])
     expect(readFileSync(lw(r.home, "runtimes", "worker-x"), "utf8")).toBe("herdr\n")
     expect(existsSync(lw(r.home, "resume", "worker-x.sh"))).toBe(true)
   })
@@ -787,18 +789,24 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
     expect(r.roster).toBeUndefined()
   })
 
-  test("a close herdr refuses names herdr's own words", async () => {
+  test("a close herdr refuses names herdr's own words and puts the row's status back", async () => {
     const r = await spawn(
       ["close", "worker-x"],
       [],
-      { FAKE_HERDR_CLOSE_FAIL: "1" },
+      {
+        FAKE_HERDR_CLOSE_FAIL: "1",
+        ROSTER_JSON: JSON.stringify({
+          agents: [{ name: "worker-x", role: "worker", status: "working", task: "t" }],
+        }),
+      },
       undefined,
       undefined,
       opened(),
     )
     expect(r.code).toBe(1)
     expect(r.err).toContain("herdr would not close pane w2:p3 (error: pane w2:p3 not found)")
-    expect(r.roster).toBeUndefined()
+    expect(r.rosterLog).toEqual(["set worker-x status=ended", "set worker-x status=working"])
+    expect(existsSync(lw(r.home, "closes", "worker-x"))).toBe(false)
   })
 
   test.each([

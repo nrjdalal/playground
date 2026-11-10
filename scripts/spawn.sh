@@ -56,8 +56,8 @@ set -euo pipefail
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again just before its resume so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
-#   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again once its resume finds the session gone so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
+#   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row just before the pane closes, putting its status back when herdr refuses the close
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
 #   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any but priority-start.json does; it is refused while none does.
@@ -1063,22 +1063,18 @@ PY
       run)
         args=("${args[@]:1}")
         [ "${#args[@]}" -ge 3 ] || continue
-        # Each resume takes seconds, so a close that ends a row after restore_list read the roster would be undone: each row is read again just before its resume.
-        now=$(roster_field "${args[0]}" status)
-        case "$now" in
-          done | ended | parked | paused)
-            echo "skipped ${args[0]}: its roster row reads $now"
-            continue
-            ;;
-        esac
-        if said=$(bash "$0" resume "${args[@]}" 2>&1 </dev/null); then
+        # A close can end a row after restore_list read the roster, so each resume reads the row again once it finds the session gone (SPAWN_RESTORING, below) and exits 4 on a down row.
+        if said=$(SPAWN_RESTORING=1 bash "$0" resume "${args[@]}" 2>&1 </dev/null); then
           echo "restored ${args[0]}"
-        elif [ $? -eq 3 ]; then
-          echo "skipped ${args[0]}: live"
         else
+          rc=$?
           said=$(tail -1 <<<"$said")
           said=${said#"spawn.sh refuses ${args[0]}: "}
-          if restore_waits "$said"; then
+          if [ "$rc" -eq 3 ]; then
+            echo "skipped ${args[0]}: live"
+          elif [ "$rc" -eq 4 ]; then
+            echo "skipped ${args[0]}: $said"
+          elif restore_waits "$said"; then
             echo "waiting ${args[0]}: $said"
           else
             failed=1
@@ -1090,7 +1086,7 @@ PY
   done <<<"$lines"
   exit "$failed"
 fi
-# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row once the pane closes, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
+# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row just before the pane closes (putting its status back when herdr refuses the close), so a restore that finds the session gone reads ended, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
 if [ "$MODE" = close ]; then
   NAME=${1:-close}
   [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
@@ -1116,16 +1112,20 @@ except (ValueError, KeyError, TypeError):
   # herdr sets HERDR_PANE_ID and HERDR_SESSION in every pane, and a pane id is unique on its own server alone.
   [ "$panes" != "${HERDR_PANE_ID:-}" ] || [ "${HERDR_SESSION:-$server}" != "$server" ] ||
     refuse "pane $panes is your own; a session ends itself with /exit"
+  # The row reads ended before the pane closes, so a restore's resume that finds the session gone reads ended too and leaves it down; a close herdr refuses puts the row's status back.
+  was=$(roster_field "$NAME" status)
+  ended=1
+  rostered=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" status=ended 2>&1 >/dev/null) || ended=
   if ! said=$(hr pane close "$panes" 2>&1 >/dev/null | tr -s '\n' ' '); then
     said=${said% }
+    [ -z "$ended" ] || [ -z "$was" ] || env $UNSET "$BUN" "$ROSTER" set "$NAME" "status=$was" >/dev/null 2>&1 || true
     refuse "herdr would not close pane $panes (${said:-no answer from herdr})"
   fi
   echo "closed $NAME (pane $panes on $server)"
-  # The close keeps its time and the row's status before it ends it, for the load gate's pass of a resume within 15 minutes (JUST_CLOSED, below).
-  was=$(roster_field "$NAME" status)
+  # The close keeps its time and the row's status before it ended it, for the load gate's pass of a resume within 15 minutes (JUST_CLOSED, below).
   { mkdir -p "$DATA/closes" && echo "$(date -u +%s) $(date -u +%FT%TZ) ${was:-none}" > "$DATA/closes/$NAME"; } 2>/dev/null || true
-  if ! said=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" status=ended 2>&1 >/dev/null); then
-    [ -n "$said" ] && echo "roster.ts says: $said" >&2
+  if [ -z "$ended" ]; then
+    [ -n "$rostered" ] && echo "roster.ts says: $rostered" >&2
     echo "spawn.sh: $NAME closed, but its roster write failed; record it with $BUN $ROSTER set $NAME status=ended, adding task=<what it does> for a name the roster lacks" >&2
   fi
   exit 0
@@ -1437,6 +1437,11 @@ taken=$(tail -n 1 <<<"$holders" | cut -f 1)
 # It exits 3, so restore tells a live session, which it leaves as it is, from a resume that failed.
 [ -z "$taken" ] || [ -n "$CHECK" ] ||
   REFUSE_CODE=3 refuse "a live session already holds the name $NAME (pid $taken), so the new one would start under a generated name. A respawned session takes the name only once the old session is gone: close it first (its handoff written, SESSIONS.md End), then run this again."
+# restore's resume reads the row once the session is gone, since a close ends the row before its pane closes: a session closed while the restore ran reads ended here, and exit 4 tells restore to skip it.
+if [ "$MODE" = resume ] && [ -n "${SPAWN_RESTORING:-}" ]; then
+  row_status=$(roster_field "$NAME" status)
+  case "$row_status" in done | ended | parked | paused) REFUSE_CODE=4 refuse "its roster row reads $row_status" ;; esac
+fi
 # The item's size and its load units: --size, else small for a checker, a short read run-slot.sh knows no name for, else the roster and plan.json through run-slot.sh's own reader
 [ -n "$SIZE" ] || case "$ROLE" in reviewer | tester) SIZE=small ;; esac
 case "$SIZE" in
