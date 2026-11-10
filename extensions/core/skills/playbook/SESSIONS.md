@@ -233,7 +233,8 @@ A session does not close its own pane, since that kills its claude mid-call: it 
 Before you close a checker by hand, read its roster entry and ask it which rounds it still holds, since it may be serving another PR (on one PR a reviewer closed mid-round).
 It closes the one pane spawn.sh opened for that name, found by the label it set, on the server the session's resume record names (the factory's when the record has no `# server:` line), and prints `closed <name> (pane <id> on <server>)`.
 It refuses a session whose runtime pin does not read herdr or that has no resume record, a server that is down or a herdr that is not the pinned one, no pane or two panes carrying the label, and your own pane, quoting herdr's words when herdr refuses the close.
-Once the pane closes it sets the session's roster row to `ended` itself, and leaves the pins and the resume record in place, so `spawn.sh resume` can reopen the session, setting the row back to `starting`, as any new start of that name does;
+It sets the session's roster row to `ended` itself just before the pane closes, so a restore that finds the session gone leaves it down, and puts the old status back when herdr refuses the close;
+it leaves the pins and the resume record in place, so `spawn.sh resume` can reopen the session, setting the row back to `starting`, as any new start of that name does;
 a reviewer or tester comes back with `--pr <the PR it serves now>`, which replaces the PRs its row lists ([SPAWN.md](SPAWN.md#modes), scripts/README.md's spawn.sh).
 
 Record why it ended with `report <name> "<why it ended>"` (ROSTER.md, It ends).
