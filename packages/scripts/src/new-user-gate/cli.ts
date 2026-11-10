@@ -37,13 +37,13 @@ export const STEP_COUNT = 7
 export const resultLine = (sha: string, steps: Step[]): string =>
   gateLine(sha, steps.length < STEP_COUNT || steps.some((s) => !s.ok && !s.inconclusive))
 
-// Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail, then the count.
+// Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail and any shot it could not take, then the count.
 export const report = (steps: Step[]): string => {
   const unsure = steps.filter((s) => s.inconclusive).length
   return [
     ...steps.map(
       (s, i) =>
-        `${s.ok ? "PASS" : s.inconclusive ? "INCONCLUSIVE" : "FAIL"} ${i + 1}. ${s.name}${s.detail ? `: ${s.detail}` : ""}`,
+        `${s.ok ? "PASS" : s.inconclusive ? "INCONCLUSIVE" : "FAIL"} ${i + 1}. ${s.name}${s.detail ? `: ${s.detail}` : ""}${s.shot?.startsWith("no shot: ") ? ` (${s.shot})` : ""}`,
     ),
     `${steps.filter((s) => s.ok).length} of ${steps.length} passed${unsure ? `, ${unsure} inconclusive` : ""}`,
   ].join("\n")
@@ -265,6 +265,36 @@ const addAccount = (browser: Browser, box: string, home: string): string | null 
   return kept ? null : "Add account kept no token in the stand-in Keychain within 30s"
 }
 
+// The shot a step ends on, taken once the page settles: a settle or screenshot that fails is named in the shot's place, so the step's verdict stays its own check's.
+export const shotAfter = (take: () => string, settle?: () => void): string => {
+  try {
+    settle?.()
+    return take()
+  } catch (error) {
+    return `no shot: ${(error as Error).message}`
+  }
+}
+
+// A read a settle wait goes before: a wait that fails leaves the page not yet settled, so the read still runs and its text is what the step judges.
+export const readAfter = (settle: () => void, read: () => string): string => {
+  try {
+    settle()
+  } catch {}
+  return read()
+}
+
+// Step 1's check: install.sh's exit and its Left for you lines, judged before the shot's settle opens the page.
+export const installCheck = (out: string, shot: () => string): Omit<Step, "name"> => {
+  const left = leftForYou(out)
+  const code = Number(/install\.sh exit (\d+)/.exec(out)?.[1] ?? -1)
+  const ok = code === 0 && !left.length
+  return {
+    detail: ok ? "" : `exit ${code}${left.length ? `; left for you: ${left.join(" | ")}` : ""}`,
+    ok,
+    shot: shot(),
+  }
+}
+
 // One agent-browser session for the run, its screenshots in the box.
 class Browser {
   readonly session = `pg-gate-${process.pid}`
@@ -287,10 +317,12 @@ class Browser {
   text(): string {
     return String(this.cmd("eval", "document.body.innerText").result ?? "")
   }
-  shot(name: string): string {
+  shot(name: string, settle?: () => void): string {
     const path = join(this.shots, `${name}.png`)
-    this.cmd("screenshot", "--full", path)
-    return path
+    return shotAfter(() => {
+      this.cmd("screenshot", "--full", path)
+      return path
+    }, settle)
   }
   // Clicks the button whose words are name once it is enabled; false while there is none.
   clickEnabled(name: string): boolean {
@@ -453,18 +485,12 @@ const main = async (args: string[]) => {
     // the bare name the live checkout aliases, as a new user opens it, on the box's own proxy
     const web = `http://playground.localhost:${PROXY_PORT}`
     await check("curl | bash exits 0 with no Left for you", async () => {
-      const left = leftForYou(out)
-      const code = Number(/install\.sh exit (\d+)/.exec(out)?.[1] ?? -1)
-      browser.cmd("open", `${web}/dashboard`)
-      browser.cmd("wait", "--load", "networkidle")
-      return {
-        detail:
-          code === 0 && !left.length
-            ? ""
-            : `exit ${code}${left.length ? `; left for you: ${left.join(" | ")}` : ""}`,
-        ok: code === 0 && !left.length,
-        shot: browser.shot("1-install"),
-      }
+      return installCheck(out, () =>
+        browser.shot("1-install", () => {
+          browser.cmd("open", `${web}/dashboard`)
+          browser.cmd("wait", "--load", "networkidle")
+        }),
+      )
     })
     await check("first run starts the database with one click", async () => {
       browser.cmd("find", "role", "button", "click", "--name", "Start the database")
@@ -552,8 +578,10 @@ const main = async (args: string[]) => {
       let text = ""
       await waitFor(() => {
         browser.cmd("open", `${web}/dashboard`)
-        browser.cmd("wait", "--load", "networkidle")
-        text = browser.text()
+        text = readAfter(
+          () => browser.cmd("wait", "--load", "networkidle"),
+          () => browser.text(),
+        )
         return usageWords(text) !== null
       }, USAGE_WAIT_MS)
       const words = usageWords(text)
@@ -569,8 +597,10 @@ const main = async (args: string[]) => {
       let text = ""
       await waitFor(() => {
         browser.cmd("open", `${web}/dashboard`)
-        browser.cmd("wait", "--load", "networkidle")
-        const read = browser.text()
+        const read = readAfter(
+          () => browser.cmd("wait", "--load", "networkidle"),
+          () => browser.text(),
+        )
         if (scriptsGroup(read) || !text) text = read
         return scriptsGroup(read) && !/\bFailing\b/.test(read)
       }, SCRIPTS_WAIT_MS)

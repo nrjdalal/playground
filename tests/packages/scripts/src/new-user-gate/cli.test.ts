@@ -16,11 +16,14 @@ import {
   BOX_LOAD_MULT,
   capacityRefusals,
   dropBox,
+  installCheck,
   leftForYou,
   makeBox,
+  readAfter,
   report,
   resultLine,
   scriptsGroup,
+  shotAfter,
   STEP_COUNT,
   type Step,
   strayStandIns,
@@ -65,6 +68,88 @@ describe("the new-user gate's reads", () => {
         { detail: "no usage reading", name: "Usage shows", ok: false },
       ]),
     ).toBe("PASS 1. curl | bash exits 0\nFAIL 2. Usage shows: no usage reading\n1 of 2 passed")
+  })
+
+  test("names a shot the step could not take on its line, and leaves a taken shot's path off it", () => {
+    expect(
+      report([
+        {
+          detail: "",
+          name: "curl | bash exits 0",
+          ok: true,
+          shot: "no shot: agent-browser wait: timed out after 25000ms",
+        },
+        { detail: "", name: "Usage shows", ok: true, shot: "/box/shots/5-usage.png" },
+      ]),
+    ).toBe(
+      "PASS 1. curl | bash exits 0 (no shot: agent-browser wait: timed out after 25000ms)\nPASS 2. Usage shows\n2 of 2 passed",
+    )
+  })
+})
+
+// #1674: step 1 opened the page and waited for networkidle inside its check, so a slow page failed an install that passed.
+describe("a step's screenshot settle", () => {
+  const settleFails = () => {
+    throw new Error("agent-browser wait: timed out after 25000ms")
+  }
+
+  test("a settle wait that throws leaves a passing install step passing, and names itself in the shot's place", () => {
+    const taken: string[] = []
+    const got = installCheck("Playground is ready.\ninstall.sh exit 0", () =>
+      shotAfter(() => {
+        taken.push("1-install")
+        return "/box/shots/1-install.png"
+      }, settleFails),
+    )
+    expect(got).toEqual({
+      detail: "",
+      ok: true,
+      shot: "no shot: agent-browser wait: timed out after 25000ms",
+    })
+    expect(taken).toEqual([])
+  })
+
+  test("a failing install still fails, its shot taken once", () => {
+    const order: string[] = []
+    const got = installCheck(
+      "Left for you:\n  - node: brew install node\ninstall.sh exit 1",
+      () => {
+        order.push("shot")
+        return "/box/shots/1-install.png"
+      },
+    )
+    expect(got.ok).toBe(false)
+    expect(got.detail).toBe("exit 1; left for you: node: brew install node")
+    expect(order).toEqual(["shot"])
+  })
+
+  test("a screenshot that throws is named in the shot's place, and one that settles gives its path", () => {
+    expect(
+      shotAfter(() => {
+        throw new Error("agent-browser screenshot: no page")
+      }),
+    ).toBe("no shot: agent-browser screenshot: no page")
+    expect(
+      shotAfter(
+        () => "/box/shots/7-follows-main.png",
+        () => {},
+      ),
+    ).toBe("/box/shots/7-follows-main.png")
+  })
+
+  test("a settle wait that throws inside a step's read loop still reads the page, so the step judges its text", () => {
+    expect(readAfter(settleFails, () => "Usage 12% of the week")).toBe("Usage 12% of the week")
+    const order: string[] = []
+    expect(
+      readAfter(
+        () => order.push("settle"),
+        () => {
+          order.push("read")
+          return "Scripts 2"
+        },
+      ),
+    ).toBe("Scripts 2")
+    expect(order).toEqual(["settle", "read"])
   })
 })
 
