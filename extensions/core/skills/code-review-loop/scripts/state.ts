@@ -573,6 +573,73 @@ export const cmdDelta = (worktree: string, base: string, old: string, neu: strin
 }
 
 const SCAN_TS = "ls-files|Bun\\.Glob|new Glob\\(|readdirSync|readdir\\("
+const SCAN_RE = new RegExp(SCAN_TS)
+// A scan word counts only where the test calls it, so what a string merely holds comes out before the regexes read: a string inside an [ ... ] argv and a $-tagged shell line are call shapes and stay whole, a value string or an untagged template is prose and its text goes (PG-1651's reviewer, PG-1661)
+const skipQuoted = (text: string, from: number, close: string): number => {
+  let j = from
+  while (j < text.length && text.charAt(j) !== "\n") {
+    if (text.charAt(j) === "\\") j += 2
+    else if (text.charAt(j) === close) return j + 1
+    else j += 1
+  }
+  return -1
+}
+const skipTemplate = (text: string, from: number): number => {
+  let j = from
+  while (j < text.length) {
+    if (text.charAt(j) === "\\") j += 2
+    else if (text.charAt(j) === "`") return j + 1
+    else j += 1
+  }
+  return -1
+}
+const stripValues = (text: string): string => {
+  let out = ""
+  let depth = 0
+  let i = 0
+  while (i < text.length) {
+    const c = text.charAt(i)
+    if (c === "[") {
+      depth += 1
+      out += c
+      i += 1
+    } else if (c === "]") {
+      depth = Math.max(0, depth - 1)
+      out += c
+      i += 1
+    } else if (c === "`" && text.charAt(i - 1) === "$") {
+      const end = skipTemplate(text, i + 1)
+      if (end < 0) {
+        out += c
+        i += 1
+      } else {
+        out += text.slice(i, end)
+        i = end
+      }
+    } else if (c === "`") {
+      const end = skipTemplate(text, i + 1)
+      if (end < 0) {
+        out += c
+        i += 1
+      } else {
+        i = end
+      }
+    } else if (c === '"' || c === "'") {
+      const end = skipQuoted(text, i + 1, c)
+      if (end < 0) {
+        out += c
+        i += 1
+      } else {
+        if (depth > 0) out += text.slice(i, end)
+        i = end
+      }
+    } else {
+      out += c
+      i += 1
+    }
+  }
+  return out
+}
 // A git grep run as a shell line or an argv, wrapped across lines or with options before the subcommand (PG-2323's old-proxy)
 const GIT_GREP =
   /\bgit["'`]?(?:[\s,\[]+(?:["']?-[\w-]+["']?|\$?\{?[\w.$]+\}?|["'][^"'\n]*["'])){0,3}?[\s,\[]+["'`]?grep\b/
@@ -747,12 +814,16 @@ export const cmdTouchedTests = (clone: string, base: string, head: string): void
   const nearTexts = readBlobs(clone, head, near)
   for (const [t, text] of Object.entries(nearTexts))
     if (changed.some((f) => spelledNear(text, f, t))) picked.add(t)
-  for (const f of grep(clone, head, "-E", [SCAN_TS])) if (!f.endsWith(".py")) picked.add(f)
+  const tsScanCandidates = [...grep(clone, head, "-E", [SCAN_TS])].filter((f) => !f.endsWith(".py"))
+  const tsScanTexts = readBlobs(clone, head, tsScanCandidates)
+  for (const [f, text] of Object.entries(tsScanTexts))
+    if (SCAN_RE.test(stripValues(text))) picked.add(f)
   const grepping = new Set(
     [...grep(clone, head, "-F", ["grep"])].filter((f) => tests.has(f) && !f.endsWith(".py")),
   )
   const grepTexts = readBlobs(clone, head, grepping)
-  for (const [f, text] of Object.entries(grepTexts)) if (GIT_GREP.test(text)) picked.add(f)
+  for (const [f, text] of Object.entries(grepTexts))
+    if (GIT_GREP.test(stripValues(text))) picked.add(f)
   if (python) {
     const scanners = [...grep(clone, head, "-E", [SCAN_PY])].filter(
       (f) => tests.has(f) && f.endsWith(".py"),

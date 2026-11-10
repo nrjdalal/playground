@@ -1123,6 +1123,27 @@ test("10 touched-tests: the four rules on a scratch repository, printed one path
   expect(after.includes("tests/web/next/src/lib/outbox.test.ts")).toBe(false)
 })
 
+test("10 touched-tests: scan words inside fixture strings read as no scanner", () => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "api/hono/src/lib/sql.ts": "x\n",
+    "tests/changed.test.ts": "x\n",
+    "tests/fixture.test.ts":
+      [
+        "// the fixture's own text, not a scan this test runs",
+        "const shape = 'readdirSync(\"skills\")'",
+        'const tip = "run git grep -n over the repo first"',
+        "const tag = `ls-files the whole repo`",
+      ].join("\n") + "\n",
+  })
+  writeFiles(repo, { "api/hono/src/lib/sql.ts": "y\n", "tests/changed.test.ts": "y\n" })
+  git(repo, "commit", "-qam", "change")
+  const { code, listed, stderr } = touched(repo)
+  expect(code, stderr).toBe(0)
+  expect(listed).toContain("tests/changed.test.ts")
+  expect(listed).not.toContain("tests/fixture.test.ts")
+})
+
 test("10k a renamed file's old path still selects the test importing it", () => {
   const repo = scratch()
   scratchRepo(repo, {
