@@ -6,6 +6,7 @@
     "tests/scripts/ops/runner-host/host.test.ts": 56217,
     "tests/scripts/spawn-gates.test.ts": 54800,
     "tests/scripts/spawn-kinds.test.ts": 46348,
+    "tests/scripts/hooks/refused-forms.test.ts": 36840,
     "tests/scripts/spawn.test.ts": 36004,
     "tests/packages/scripts/src/pr-merge/train.test.ts": 32517,
     "tests/api/hono/src/lib/dashboard/workers.test.ts": 30194,
