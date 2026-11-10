@@ -47,6 +47,8 @@ export const localYard = (deps: LocalYardDeps) => {
     run(await signedIn()).catch(relay)
   return {
     channels: () => call(async (client) => ({ channels: await client.channels() })),
+    // who the Keychain's token signs in as, so the channel shows its own posts on the right
+    me: () => call((client) => client.me()),
     messages: (channel: string, page: z.infer<typeof pageSchema>) =>
       call((client) => client.messages(channel, page)),
     // a post Yard holds pending reaches the Inbox through the poll (inbound.ts), as one held from the terminal does
