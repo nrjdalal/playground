@@ -6,6 +6,10 @@ import { join } from "node:path"
 import { check } from "../../../scripts/hooks/no-stash"
 import { overBaseline, stepsOf } from "./pace"
 
+// The worktree path every refusal gives: absolute, beside the main checkout's .git, so none nests in another worktree (AGENTS.md's Workflow rule).
+const ABS_WORKTREE =
+  '"$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>"'
+
 const root = join(import.meta.dir, "..", "..", "..")
 const script = join(root, "scripts", "hooks", "no-stash.ts")
 const SHA = "86efa61deb2f0d83e16c8feaee69a5cd12eaf99a"
@@ -71,7 +75,7 @@ describe("a git stash that can take another worktree's work is refused", () => {
     const reason = (await bash("git stash pop")) ?? ""
     expect(reason).toContain("WIP commit")
     expect(reason).toContain("git commit -m 'chore: wip <what>'")
-    expect(reason).toContain("git worktree add --detach .claude/worktrees/<name> origin/canary")
+    expect(reason).toContain(`git worktree add --detach ${ABS_WORKTREE} origin/canary`)
     expect(reason).toContain("git stash apply <full sha>")
   })
 })

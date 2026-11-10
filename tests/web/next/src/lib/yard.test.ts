@@ -8,6 +8,7 @@ import {
   channelHref,
   channelTitle,
   inviteRequests,
+  isMine,
   landingChannel,
   messagesQuery,
   retryDelay,
@@ -142,6 +143,19 @@ describe("the sidebar's rows", () => {
     expect(yardBadge(channel({ unread: 3 }))).toEqual({ label: "3", mention: false })
     expect(yardBadge(channel({ unread: 142 }))).toEqual({ label: "99+", mention: false })
     expect(yardBadge(channel({ mentions: 1, unread: 2 }))).toEqual({ label: "2", mention: true })
+  })
+})
+
+// a channel shows your own posts on the right, in a bubble, as the chat shows yours, and every other member's on the left
+describe("isMine", () => {
+  const from = (login: string) => ({ from: { device: "web", login } })
+  test("is your own post, by a login that matches whatever its case", () => {
+    expect(isMine(from("sam-example"), { login: "sam-example" })).toBe(true)
+    expect(isMine(from("Sam-Example"), { login: "sam-example" })).toBe(true)
+  })
+  test("is never another member's post, nor any before Yard says who you are", () => {
+    expect(isMine(from("riley-example"), { login: "sam-example" })).toBe(false)
+    expect(isMine(from("sam-example"), undefined)).toBe(false)
   })
 })
 

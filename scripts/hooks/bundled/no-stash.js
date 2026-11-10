@@ -194,6 +194,7 @@ function sessionOf(raw) {
 }
 
 // scripts/hooks/shell.ts
+import { AsyncLocalStorage } from "async_hooks";
 import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
@@ -201,22 +202,25 @@ var READ = "\x01";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
-var deadline;
-var steps = 0;
-function tick() {
-  if (++steps % 1024 !== 0 || deadline === undefined)
-    return;
-  if (performance.now() > deadline)
+var deadlines = new AsyncLocalStorage;
+function pastDeadline() {
+  const deadline = deadlines.getStore();
+  if (deadline !== undefined && performance.now() > deadline)
     throw new RangeError("past the hook's time");
 }
+var steps = 0;
+function tick() {
+  if (++steps % 1024 === 0)
+    pastDeadline();
+}
 function lexScript(value, env) {
-  if (deadline !== undefined && value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return lex(value, env.known);
 }
 function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
-  if (deadline !== undefined && script.length + count * value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
@@ -1862,7 +1866,7 @@ var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
   const scripts = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")];
-  if (deadline !== undefined && scripts.some((s) => s.unknown === LARGE))
+  if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;
 }
@@ -2082,7 +2086,7 @@ function knownVariables(command, environment, cwd) {
 var FULL_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 var READS = new Set(["list", "show"]);
 var WRITES = new Set(["create", "store"]);
-var INSTEAD = "Every worktree shares one stash list, so a stash taken by position or without a name can be another session's work. Commit a WIP commit on your own branch instead (git commit -m 'chore: wip <what>'), or take before-shots from a separate worktree on origin/canary (git worktree add --detach .claude/worktrees/<name> origin/canary). git stash list, git stash show, git stash push -m <message> and git stash apply <full sha> stay allowed.";
+var INSTEAD = `Every worktree shares one stash list, so a stash taken by position or without a name can be another session's work. Commit a WIP commit on your own branch instead (git commit -m 'chore: wip <what>'), or take before-shots from a separate worktree on origin/canary, made by absolute path under the main checkout so it nests in no other worktree (git worktree add --detach "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" origin/canary). git stash list, git stash show, git stash push -m <message> and git stash apply <full sha> stay allowed.`;
 var refuse = (what, why) => `no-stash hook refuses ${what}: ${why}. ${INSTEAD}`;
 var BROWSER_CLOSE = new Set(["close", "exit", "quit"]);
 var BROWSER_INSTEAD = "Close only the browser you opened; pass --session <name>: agent-browser --session <name> close.";

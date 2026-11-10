@@ -14,5 +14,6 @@ describe("the local Yard router's API reference", () => {
     expect(statuses("/channels/{id}/messages", "get")).toEqual(["200"])
     expect(statuses("/channels", "get")).toEqual(["200"])
     expect(statuses("/channels/{id}/read", "post")).toEqual(["200"])
+    expect(statuses("/me", "get")).toEqual(["200"])
   })
 })

@@ -4805,6 +4805,7 @@ function sessionOf(raw) {
 }
 
 // scripts/hooks/shell.ts
+import { AsyncLocalStorage } from "async_hooks";
 import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
@@ -4812,31 +4813,28 @@ var READ = "\x01";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
-var deadline;
+var deadlines = new AsyncLocalStorage;
 async function withDeadline(budget, body) {
-  const outer = deadline;
-  deadline = performance.now() + budget;
-  try {
-    return await body();
-  } finally {
-    deadline = outer;
-  }
+  return await deadlines.run(performance.now() + budget, body);
+}
+function pastDeadline() {
+  const deadline = deadlines.getStore();
+  if (deadline !== undefined && performance.now() > deadline)
+    throw new RangeError("past the hook's time");
 }
 var steps = 0;
 function tick() {
-  if (++steps % 1024 !== 0 || deadline === undefined)
-    return;
-  if (performance.now() > deadline)
-    throw new RangeError("past the hook's time");
+  if (++steps % 1024 === 0)
+    pastDeadline();
 }
 function lexScript(value, env) {
-  if (deadline !== undefined && value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return lex(value, env.known);
 }
 function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
-  if (deadline !== undefined && script.length + count * value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
@@ -6509,7 +6507,7 @@ var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
   const scripts = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")];
-  if (deadline !== undefined && scripts.some((s) => s.unknown === LARGE))
+  if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;
 }

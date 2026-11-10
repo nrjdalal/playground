@@ -21,6 +21,7 @@ import {
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
+import { lapse } from "../playground/priority"
 import { dashboardCheckout, NO_CHECKOUT } from "../playground/probe"
 import { ALERT_JOB, waiterLive } from "../stuck-alert"
 import { swapBundles, unswapBundles } from "../swap-bundles"
@@ -215,6 +216,11 @@ const focusCardBeat = async (ctx: Context) => {
     }
   })
   if (failed) throw failed
+}
+
+// Each window playground priority opened that has stood LAPSE_HOURS is lifted with a line in ops/priority.log (lapse), and that line goes to ops, so a window nobody lifted stops passing --priority starts by itself.
+const priorityLapse = async (ctx: Context) => {
+  for (const line of await lapse(join(ctx.ops, ".."), ctx.now)) await ctx.send("ops", line)
 }
 
 // One kept focus card resolved, true, once no ask posted in its window is open; false while one is
@@ -986,6 +992,7 @@ export const BEATS: Beat[] = [
   },
   { cron: "*/10 * * * *", name: "guard-probe", run: guardProbe, to: "dispatcher" },
   { cron: "* * * * *", name: "focus-card", run: focusCardBeat, to: "the Inbox, by bun run ask" },
+  { cron: "*/5 * * * *", name: "priority-lapse", run: priorityLapse, to: "ops" },
   {
     cron: "* * * * *",
     name: "dashboard-watch",
