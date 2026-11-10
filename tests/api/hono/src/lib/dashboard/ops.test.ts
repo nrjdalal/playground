@@ -12,7 +12,11 @@ import {
   readOps,
   RUNNER_NAMES,
 } from "../../../../../../api/hono/src/lib/dashboard/ops"
-import { beat as herdrBeat } from "../../../../../../packages/scripts/src/ops-herdr/herdr"
+import {
+  cycle,
+  beat as herdrBeat,
+  restoreResult,
+} from "../../../../../../packages/scripts/src/ops-herdr/herdr"
 import { liveReads } from "../../../../../live-reads"
 
 // readOps asks ps whether this process runs, a live read.
@@ -386,5 +390,30 @@ describe("the ops-herdr job's heartbeat", () => {
       "failing",
       "factory: down, not started on an unpinned binary",
     ])
+  })
+
+  // #1682: a restore a gate alone held beat its waits as the job's result, so Scripts read Herdr servers as Failing while the sessions were only waiting.
+  test.each([
+    ["a gate alone held", 0, "waiting a-worker: the load gate holds it: x\n", "running"],
+    ["a real failure", 1, "not restored a-worker: its brief is gone\n", "failing"],
+  ] as const)("a cycle whose restore %s reads as %s", async (_, code, output, status) => {
+    const path = join(dir, "ops-herdr.json")
+    const owed = new Set(["playground"])
+    const result = await cycle({
+      found: async () => ({ sha256: "a".repeat(64), version: "0.9.5" }),
+      log: async () => null,
+      owed: (session) => ({
+        get: async () => owed.has(session),
+        set: async (on) => void (on ? owed.add(session) : owed.delete(session)),
+      }),
+      pin: { path: "/h", sha256: "a".repeat(64), tag: "t", version: "0.9.5" },
+      restore: async () => restoreResult(code, output, "/h/p.log"),
+      running: async () => true,
+      sessions: ["playground"],
+      skipped: [],
+      start: async () => null,
+    })
+    await herdrBeat(path, new Date(NOW - 60_000), new Date(NOW), result)
+    expect(opsRowOf("ops-herdr", readFileSync(path, "utf8"), true, NOW).status).toBe(status)
   })
 })
