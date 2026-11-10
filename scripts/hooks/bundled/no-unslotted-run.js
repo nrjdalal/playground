@@ -7176,6 +7176,8 @@ function bunCall(args, env) {
       k++;
     } else if (v.startsWith("--filter="))
       filtered = true;
+    else if (words[0] === "x" && RUNNER_TAKES.has(v))
+      k++;
     else if (!v.startsWith("-")) {
       words.push(v);
       if (v !== "run" && v !== "x")
@@ -7220,7 +7222,8 @@ function runnerTarget(args) {
     k += RUNNER_TAKES.has(args[k].value) ? 2 : 1;
   return k;
 }
-var isTurbo = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, "")) === "turbo";
+var toolName = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""));
+var isTurbo = (word) => toolName(word) === "turbo";
 var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
 var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 if (false) {}

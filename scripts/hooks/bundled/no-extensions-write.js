@@ -7400,6 +7400,8 @@ function bunCall(args, env) {
       k++;
     } else if (v.startsWith("--filter="))
       filtered = true;
+    else if (words[0] === "x" && RUNNER_TAKES.has(v))
+      k++;
     else if (!v.startsWith("-")) {
       words.push(v);
       if (v !== "run" && v !== "x")

@@ -184,6 +184,8 @@ export function bunCall(
       filtered = true
       k++
     } else if (v.startsWith("--filter=")) filtered = true
+    // bun x's -p names the package, so the word after its value is the tool
+    else if (words[0] === "x" && RUNNER_TAKES.has(v)) k++
     else if (!v.startsWith("-")) {
       words.push(v)
       if (v !== "run" && v !== "x") break
@@ -323,9 +325,9 @@ function runnerTarget(args: Word[]): number {
   return k
 }
 
-// turbo by name or path, or as a package at a version (turbo@latest)
-const isTurbo = (word: string | undefined) =>
-  program((word ?? "").replace(/(?<=.)@[^/]*$/, "")) === "turbo"
+// A tool by name or path, or as a package at a version (turbo@latest)
+const toolName = (word: string | undefined) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""))
+const isTurbo = (word: string | undefined) => toolName(word) === "turbo"
 
 // Whether the build's settings reach turbo: from its own assignments or env wrapper, an export before it, or the session's environment.
 function validationOff(local: Map<string, Text>, env: Env): boolean {
@@ -352,8 +354,9 @@ function runs(
     }
   }
   if (TOOLS.has(name)) return { cwd: cwdFlag(args, env), what: name }
-  if (RUNNERS.has(name) && TOOLS.has(program(args[0]?.value ?? ""))) {
-    return { cwd: cwdFlag(args, env), what: `${name} ${program(args[0].value)}` }
+  if (RUNNERS.has(name)) {
+    const tool = toolName(args[runnerTarget(args)]?.value)
+    if (TOOLS.has(tool)) return { cwd: cwdFlag(args, env), what: `${name} ${tool}` }
   }
   if (name === "git") {
     const { cwd, rest, sub } = gitCall(args, env)
@@ -365,7 +368,7 @@ function runs(
   const { at, cwd, filtered, words } = bunCall(args, env)
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0]
   // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name; a tool reads its own --cwd too, and bun x runs in the shell's folder whatever bun's --cwd says
-  if (TOOLS.has(program(target ?? ""))) {
+  if (TOOLS.has(toolName(target))) {
     const dir = words[0] === "x" ? env.cwd : cwd
     return {
       cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: dir }),

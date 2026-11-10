@@ -7465,6 +7465,8 @@ function bunCall(args, env) {
       k++;
     } else if (v.startsWith("--filter="))
       filtered = true;
+    else if (words[0] === "x" && RUNNER_TAKES.has(v))
+      k++;
     else if (!v.startsWith("-")) {
       words.push(v);
       if (v !== "run" && v !== "x")
@@ -7589,7 +7591,8 @@ function runnerTarget(args) {
     k += RUNNER_TAKES.has(args[k].value) ? 2 : 1;
   return k;
 }
-var isTurbo = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, "")) === "turbo";
+var toolName = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""));
+var isTurbo = (word) => toolName(word) === "turbo";
 function validationOff(local, env) {
   const read = (key) => local.get(key)?.value ?? env.vars.get(key)?.value ?? env.process[key];
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true";
@@ -7609,8 +7612,10 @@ function runs(name, args, local, env) {
   }
   if (TOOLS.has(name))
     return { cwd: cwdFlag(args, env), what: name };
-  if (RUNNERS.has(name) && TOOLS.has(program(args[0]?.value ?? ""))) {
-    return { cwd: cwdFlag(args, env), what: `${name} ${program(args[0].value)}` };
+  if (RUNNERS.has(name)) {
+    const tool = toolName(args[runnerTarget(args)]?.value);
+    if (TOOLS.has(tool))
+      return { cwd: cwdFlag(args, env), what: `${name} ${tool}` };
   }
   if (name === "git") {
     const { cwd, rest, sub } = gitCall(args, env);
@@ -7624,7 +7629,7 @@ function runs(name, args, local, env) {
     return;
   const { at, cwd, filtered, words } = bunCall(args, env);
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0];
-  if (TOOLS.has(program(target ?? ""))) {
+  if (TOOLS.has(toolName(target))) {
     const dir = words[0] === "x" ? env.cwd : cwd;
     return {
       cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: dir }),
