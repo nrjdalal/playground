@@ -147,7 +147,7 @@ anywhere else the session waits at the prompt for the owner, and spawn.sh says s
 Every start and resume records its runtime, herdr, in `~/.playground/runtimes/<name>`, rewriting whatever word an older pin held.
 With no `--runtime`, every start and resume opens in herdr, from any terminal, and spawn.sh refuses a `--runtime` other than herdr and a column anchored on anything but a herdr pane id.
 After a herdr server's restart, which brings each pane back as a shell under its label, ops-herdr runs `spawn.sh restore` for that server (LIFECYCLE.md, Ops jobs), which resumes every session whose resume record in `~/.playground/resume` names it on that server (its `# server:` line, the factory's when it has none) and whose roster row is not done, ended, parked or paused,
-each row read again once its resume finds the session gone, so a session `spawn.sh close` ends while a run goes on stays down,
+each row read again once its resume finds the session gone and just before its launch, so a session `spawn.sh close` ends while a run goes on stays down,
 each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with, an `--effort` other than high and, for a reviewer or tester, `--pr` with the PRs its roster row serves,
 in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, or an exec line that does not parse or that it does not run),
 `waiting <name>: <reason>` (a gate holding it over a reading that falls, or focus standing for another session) or `not restored <name>: <reason>` (any other refusal, a gate that cannot read its input or reads a bad setting included).

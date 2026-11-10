@@ -1113,12 +1113,18 @@ except (ValueError, KeyError, TypeError):
   [ "$panes" != "${HERDR_PANE_ID:-}" ] || [ "${HERDR_SESSION:-$server}" != "$server" ] ||
     refuse "pane $panes is your own; a session ends itself with /exit"
   # The row reads ended before the pane closes, so a restore's resume that finds the session gone reads ended too and leaves it down; a close herdr refuses puts the row's status back.
+  # roster.ts drops a parked row's hold once it reads ended, and a park takes one in the same call, so the put-back names it.
   was=$(roster_field "$NAME" status)
+  back=("status=$was")
+  [ "$was" != parked ] || back+=("hold=$(roster_field "$NAME" hold)")
   ended=1
   rostered=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" status=ended 2>&1 >/dev/null) || ended=
   if ! said=$(hr pane close "$panes" 2>&1 >/dev/null | tr -s '\n' ' '); then
     said=${said% }
-    [ -z "$ended" ] || [ -z "$was" ] || env $UNSET "$BUN" "$ROSTER" set "$NAME" "status=$was" >/dev/null 2>&1 || true
+    if [ -n "$ended" ] && [ -n "$was" ] && ! rostered=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" "${back[@]}" 2>&1 >/dev/null); then
+      [ -n "$rostered" ] && echo "roster.ts says: $rostered" >&2
+      echo "spawn.sh: $NAME's row reads ended, but its pane stays open; put it back with $BUN $ROSTER set $NAME ${back[*]}" >&2
+    fi
     refuse "herdr would not close pane $panes (${said:-no answer from herdr})"
   fi
   echo "closed $NAME (pane $panes on $server)"

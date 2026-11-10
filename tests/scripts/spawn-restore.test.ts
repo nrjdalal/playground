@@ -142,7 +142,7 @@ describe("restore resumes every manager its records name, or says which it left 
     expect(placing(r).filter((c) => c[1] === "run")).toHaveLength(2)
   })
 
-  // round 1: a close can land after the resume's first read, during the gates and the pane's placement, or during the launch itself.
+  // A close can land after the resume's first read, during the gates and the pane's placement, or during the launch itself.
   const plannerAlone = JSON.stringify({
     agents: [row("builder", "ended"), row("optimizer", "ended"), row("planner", "starting")],
   })

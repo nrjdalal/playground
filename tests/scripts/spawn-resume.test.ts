@@ -789,25 +789,31 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
     expect(r.roster).toBeUndefined()
   })
 
-  test("a close herdr refuses names herdr's own words and puts the row's status back", async () => {
-    const r = await spawn(
-      ["close", "worker-x"],
-      [],
-      {
-        FAKE_HERDR_CLOSE_FAIL: "1",
-        ROSTER_JSON: JSON.stringify({
-          agents: [{ name: "worker-x", role: "worker", status: "working", task: "t" }],
-        }),
-      },
-      undefined,
-      undefined,
-      opened(),
-    )
-    expect(r.code).toBe(1)
-    expect(r.err).toContain("herdr would not close pane w2:p3 (error: pane w2:p3 not found)")
-    expect(r.rosterLog).toEqual(["set worker-x status=ended", "set worker-x status=working"])
-    expect(existsSync(lw(r.home, "closes", "worker-x"))).toBe(false)
-  })
+  test.each([
+    ["working", {}, "status=working"],
+    ["parked", { hold: "#12" }, "status=parked hold=#12"],
+  ])(
+    "a close herdr refuses names herdr's own words and puts a %s row back",
+    async (status, extra, back) => {
+      const r = await spawn(
+        ["close", "worker-x"],
+        [],
+        {
+          FAKE_HERDR_CLOSE_FAIL: "1",
+          ROSTER_JSON: JSON.stringify({
+            agents: [{ name: "worker-x", role: "worker", status, task: "t", ...extra }],
+          }),
+        },
+        undefined,
+        undefined,
+        opened(),
+      )
+      expect(r.code).toBe(1)
+      expect(r.err).toContain("herdr would not close pane w2:p3 (error: pane w2:p3 not found)")
+      expect(r.rosterLog).toEqual(["set worker-x status=ended", `set worker-x ${back}`])
+      expect(existsSync(lw(r.home, "closes", "worker-x"))).toBe(false)
+    },
+  )
 
   test.each([
     ["no name", ["close"]],
