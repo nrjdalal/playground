@@ -2016,6 +2016,7 @@ var DATA = new Set([
   "sed"
 ]);
 var isData = (name) => DATA.has(name) || /^python[\d.]*$/.test(name);
+var runsJavaScript = (name, args) => name === "agent-browser" && args.find((a) => !a.value.startsWith("-"))?.value === "eval";
 var STARTERS = new Set(["screen", "tmux"]);
 var RM = new Set(["grm", "rm"]);
 var DEL = new Set(["del", "del-cli"]);
@@ -2174,7 +2175,7 @@ async function inspect(raw, environment) {
         if (found)
           return found;
       }
-    if (isData(name))
+    if (isData(name) || runsJavaScript(name, args))
       return;
     const words = name === "git" ? gitCommand(args).aliases.flatMap((w) => /^alias\.[^=]*=!(.*)$/s.exec(w)?.[1] ?? []) : args.flatMap(({ value }) => [value, value.slice(value.indexOf("=") + 1)]);
     for (const text of new Set(words.map((w) => w.replace(/^!/, "")))) {
