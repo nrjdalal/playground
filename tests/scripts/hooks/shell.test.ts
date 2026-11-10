@@ -96,6 +96,8 @@ const madePaths = (prefix: string): Paths => {
     BARE: join(root, "bare"),
     CLI_DIR: join(root, "cli"),
     DATA: join(root, "data"),
+    FOREIGN_TREE: join(root, "foreign-tree"),
+    FOREIGN_TREE_IN_MAIN: join(root, "main", ".claude", "worktrees", "foreign"),
     HOME: join(root, "home"),
     LINK: join(root, "home", "store"),
     LIST: join(extensions, "hooks", "list.json"),
