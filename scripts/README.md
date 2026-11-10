@@ -104,6 +104,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `spawn.sh restore` reads both, taking no other option, and resumes each session on the server `PLAYGROUND_HERDR_SESSION` names (`playground` by default; a record with no server line is playground's) not done, ended, parked or paused in the roster, each row read again once its resume finds the session gone, so a session `spawn.sh close` ends while a run goes on stays down, through the gate,
   in the restored pane holding its label;
   a live one is skipped (the live-name refusal exits 3), and each resume of a herdr session stamps its run in `<name>.ran`.
+  Each of those resumes runs with `SPAWN_RESTORING=1`: it reads the row again once the live-name check finds the session gone and again just before the launch, exiting 4 on a down row, which restore prints as `skipped <name>: its roster row reads <status>`, and its roster write leaves an ended row ended, so a close landing at any point of the resume keeps the session down;
+  a resume by hand sets an ended row back to starting.
   It prints one line a record on its server, `restored <name>`, `skipped <name>: <reason>`, `waiting <name>: <reason>` or `not restored <name>: <reason>`, so a session it passed over, held or could not bring back is named with the reason.
   A resume waits (`restore_waits`) when a gate holds it over a reading that falls (`the <gate> gate holds it:`) or focus stands for another session; a gate that cannot read its input or reads a bad setting is no wait, since waiting never ends it.
   It runs the first dispatcher's record first, which its resume takes past every gate, and exits 0 when its only misses wait, 1 for a `not restored` line or a run that tried no session.
