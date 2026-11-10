@@ -44,6 +44,18 @@ export const groups: Group[] = [
         `agent-browser --session eval sh -c 'rm -rf ${NEVER_MADE}'`,
       ],
       ["a short option's value spelled eval", `agent-browser -p eval 'rm -rf ${NEVER_MADE}'`],
+      [
+        "an eval line read out of another agent-browser command's word",
+        `agent-browser open 'agent-browser eval "rm -rf ${NEVER_MADE}"'`,
+      ],
+      [
+        "an eval line through a function read out of another agent-browser command's word",
+        `agent-browser open 'agent-browser() { sh -c "$2"; }; agent-browser eval "rm -rf ${NEVER_MADE}"'`,
+      ],
+      [
+        "an eval line read out of agent-browser batch's word",
+        `agent-browser batch 'agent-browser eval "rm -rf ${NEVER_MADE}"'`,
+      ],
     ],
   },
 ]

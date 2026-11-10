@@ -2014,7 +2014,7 @@ var DATA = new Set([
   "sed"
 ]);
 var isData = (name) => DATA.has(name) || /^python[\d.]*$/.test(name);
-var scriptStaysText = (cmd, args, plain) => plain && cmd.words[0]?.source === "agent-browser" && args[0]?.value === "eval";
+var scriptStaysText = (cmd, args, browserOnly) => (browserOnly.has(cmd) || !!cmd.bareOf && browserOnly.has(cmd.bareOf)) && args[0]?.value === "eval";
 var STARTERS = new Set(["screen", "tmux"]);
 var RM = new Set(["grm", "rm"]);
 var DEL = new Set(["del", "del-cli"]);
@@ -2145,7 +2145,8 @@ async function inspect(raw, environment) {
     process: environment,
     vars: new Map
   };
-  const browserOnly = lex(command, env.known).commands.every((c) => c.words[0]?.source === "agent-browser");
+  const lexed = lex(command, env.known);
+  const browserOnly = new Set(lexed.commands.every((c) => c.words[0]?.source === "agent-browser") ? lexed.commands : []);
   const line = (text, at) => run(lex(text, at.known), { ...at, vars: new Map(at.vars) }, visit);
   const visitAs = (reach) => async (cmd, parsed, at) => {
     const { args, name } = parsed;
@@ -2261,7 +2262,7 @@ async function inspect(raw, environment) {
           return found;
       }
   };
-  return run(lex(command, env.known), env, visit);
+  return run(lexed, env, visit);
 }
 var bare = (command) => command.replace(/[\\'"]/g, "");
 var CANDIDATE = /rm|del|chflags|chmod|clean|worktree|rimraf|rsync|shred|\bg?tar\b|screen|tmux|\bat\b|batch|\$|`|[{*?[]/i;
