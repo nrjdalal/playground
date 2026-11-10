@@ -678,7 +678,8 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 
 ## no-main-checkout
 
-- A factory session keeps the main checkout clean: `scripts/hooks/no-main-checkout.ts`, registered beside no-stash on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), refuses lefthook, turbo (but for its packages build, below), `git commit` (it runs pre-commit), `bun run build`, `bun run check-types`,
+- A factory session keeps the main checkout clean: `scripts/hooks/no-main-checkout.ts`, registered beside no-stash on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), refuses lefthook and turbo, by name, path or versioned package (`turbo@latest`), through `bunx`,
+  `npx` or `bun x` past their own options and the package `-p` or `--package` names (but for turbo's packages build, below), `git commit` (it runs pre-commit), `bun run build`, `bun run check-types`,
   `bun run test`, `bun run test:file` and `bun test` while the command's directory ([The folder a hook reads](#the-folder-a-hook-reads), and a `git -C` or `bun --cwd` in it, but for `bun x` and `bunx`, which run in the shell's folder whatever bun's own `--cwd` says, each `~-` and `~+` expanded as that section says) is the main checkout and not a worktree under `.claude/worktrees/`,
   and a write into the main checkout from anywhere (a redirect, `cp`, `mv`, `touch`, `tee`, curl's `-c` or `-o`, the files `sed -i`, BSD's `sed -I`, `sed --in-place` or `perl -i` edits in place, or a file tool's path), naming the fix: run it in your own worktree.
   A command run through `run-slot.sh`, typed bare or as a shell's script (`bash <path>/run-slot.sh <who> -- <command>`, `shellSlot`), is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, which no-glm-heavy-path and no-false-green read it by too), so a commit, a build or a write through run-slot is refused as the same command typed bare.
@@ -838,7 +839,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 ## no-unslotted-run
 
 - A factory session runs every heavy run in a worktree through run-slot: `scripts/hooks/no-unslotted-run.ts`, registered beside no-stash, refuses `bun install`, a recursive `cp` of a `node_modules` folder, `bun run build`, `bun run check-types`, `bun run test`, a `bun test` or `bun run test:file` that names no file, `next build`,
-  and turbo running `build`, `check-types`, `lint` or `test` (`turbo run <task>` or `turbo <task>`), by name, path or versioned package (`turbo@latest`), through `bunx`, `npx` (past their own options, `-y` or `-p turbo`) or `bun x`, but for `--help`, `--version` and `--dry-run`,
+  and turbo running `build`, `check-types`, `lint` or `test` (`turbo run <task>` or `turbo <task>`), by name, path or versioned package (`turbo@latest`), through `bunx`, `npx` or `bun x` (past their own options and the package `-p` or `--package` names), but for `--help`, `--version` and `--dry-run`,
   whose directory (every folder the shell may be in, [The folder a hook reads](#the-folder-a-hook-reads), or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).
   It refuses a docker image build outside run-slot from any folder, since every folder's build fills the one Docker VM the live dashboard's Postgres shares (6 Nov 00:38Z: a parallel `docker compose build --no-cache` got it killed).
