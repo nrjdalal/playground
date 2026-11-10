@@ -8,11 +8,12 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 
 import { check as desktopOwnerApp } from "../../../scripts/hooks/no-desktop-owner-app"
 import { check as envDump } from "../../../scripts/hooks/no-env-dump"
@@ -58,6 +59,8 @@ const PATHS: Paths = {
   BARE: join(SCRATCH, "bare"),
   CLI_DIR: join(CHECKOUT, "packages", "scripts", "src", "playground"),
   DATA,
+  FOREIGN_TREE: join(SCRATCH, "foreign-tree"),
+  FOREIGN_TREE_IN_MAIN: join(SCRATCH, "main", ".claude", "worktrees", "foreign"),
   HOME,
   LINK: join(HOME, "store"),
   LIST: join(ROOT, "hooks", "desktop-owner-apps.json"),
@@ -88,6 +91,12 @@ symlinkSync(DATA, join(HOME, "pg"))
 symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, "pc"))
 git(SCRATCH, "init", "-q", OTHER)
 git(OTHER, "remote", "add", "origin", "https://github.com/acme-labs/demo.git")
+// Another repository and two worktrees it lists, whose .git file and admin gitdir point at each other, for #1653's rows: one outside the main checkout and one under its .claude/worktrees.
+const FOREIGN = join(SCRATCH, "foreign")
+git(SCRATCH, "init", "-q", "-b", "canary", FOREIGN)
+git(FOREIGN, "commit", "-q", "--allow-empty", "-m", "base")
+for (const tree of [PATHS.FOREIGN_TREE, PATHS.FOREIGN_TREE_IN_MAIN])
+  git(FOREIGN, "worktree", "add", "-q", "--detach", tree)
 // A repo with a heavy path staged, as no-glm-heavy-path's own test stages one.
 const GLM_REPO = join(SCRATCH, "glm-repo")
 git(SCRATCH, "init", "-q", "-b", "canary", GLM_REPO)
@@ -590,6 +599,113 @@ describe("every refused form stays refused unless the allow list names it", () =
   test("every allow-list entry names a case", () => {
     for (const entry of ALLOWED)
       expect(CASES.some(({ id, key }) => entry === id || entry === key)).toBe(true)
+  })
+})
+
+// Each path flag a row names, listed once, with the joins its program reads between the flag and its folder: "=" joined, " " spaced, "" attached; git reads -C spaced alone.
+const PATH_FLAGS = [
+  { flag: "--cwd", joins: ["=", " "], program: "bun" },
+  { flag: "--cwd", joins: ["=", " "], program: "bunx" },
+  { flag: "-C", joins: [" ", ""], program: "env" },
+  { flag: "-C", joins: [" "], program: "git" },
+  { flag: "--git-dir", joins: ["=", " "], program: "git" },
+  { flag: "--work-tree", joins: ["=", " "], program: "git" },
+] as const
+type PathFlag = (typeof PATH_FLAGS)[number]
+
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+// The program, the words before its flag, the join and a folder of plain characters alone, so a folder held in a variable, written from ~ or quoted stays as its row writes it
+const flagIn = ({ flag, joins, program }: PathFlag) =>
+  new RegExp(
+    `((?:^|[\\s;&|(])${escaped(program)}\\s(?:[^;&|\\n'"\`]*?\\s)?)${escaped(flag)}(${joins.map((j) => (j === " " ? "\\s+" : escaped(j))).join("|")})([\\w.,@+:/-]+)(?=$|[\\s;&|)])`,
+    "g",
+  )
+const LINKS = join(SCRATCH, "spelling-links")
+mkdirSync(LINKS)
+let links = 0
+const realOf = (path: string) => {
+  try {
+    return statSync(path).isDirectory() ? realpathSync(path) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// Each other spelling of one path flag's folder in a case's call: its other joins, the folder relative from the case's own folder, a ./ hop, an <x>/../<x> hop and a link made in a scratch folder, each kept only where it names the folder the row's does, by its real path; a row that moves folders (cd, pushd, popd) or a folder that is not one keeps its single spelling.
+function spellingsOf(call: Call, cwd: string): { spelling: string; text: string }[] {
+  if (typeof call !== "string" || !isAbsolute(cwd) || /\b(?:cd|pushd|popd)\b/.test(call)) return []
+  const found: { spelling: string; text: string }[] = []
+  for (const pathFlag of PATH_FLAGS)
+    for (const m of call.matchAll(flagIn(pathFlag))) {
+      const [all, before = "", glue = "", folder = ""] = m
+      const at = resolve(cwd, folder)
+      const real = realOf(at)
+      if (!real) continue
+      const own = /^\s+$/.test(glue) ? " " : glue
+      const rel = relative(cwd, at) || "."
+      const link = join(LINKS, `${++links}-${basename(at)}`)
+      symlinkSync(at, link)
+      const others: [string, string, string][] = [
+        ...pathFlag.joins
+          .filter((j) => j !== own)
+          .map((j) => [`${JSON.stringify(j)} join`, j, folder] as [string, string, string]),
+        ["relative from its folder", own, rel],
+        ["a ./ hop", own, `./${rel}`],
+        ["an <x>/../<x> hop", own, `${dirname(at)}/../${basename(dirname(at))}/${basename(at)}`],
+        ["a link in a scratch folder", own, link],
+      ]
+      for (const [spelling, j, path] of others) {
+        if (path === folder && j === own) continue
+        if (realOf(resolve(cwd, path)) !== real) continue
+        const text =
+          call.slice(0, m.index) +
+          before +
+          pathFlag.flag +
+          j +
+          path +
+          call.slice(m.index! + all.length)
+        found.push({ spelling: `${pathFlag.program} ${pathFlag.flag}, ${spelling}`, text })
+      }
+    }
+  return found
+}
+
+const SPELLINGS = CASES.flatMap((c) => {
+  const at = GUARDS[c.guard].folders[c.folder]
+  return at ? spellingsOf(c.call, at[0]).map((s) => ({ ...c, ...s, at })) : []
+})
+
+describe("every spelling of a row's path flag keeps the row's verdict", () => {
+  // the row's own verdict, read once per case; each check runs alone, since shell.ts holds one deadline for its module and two overlapping withDeadline calls leave a stale one behind
+  const verdicts = new Map<string, string | undefined>()
+  const verdictOf = async (c: (typeof SPELLINGS)[number]) => {
+    if (!verdicts.has(c.key))
+      verdicts.set(c.key, await GUARDS[c.guard].run(input(c.call, c.at[0]), c.at[1]))
+    return verdicts.get(c.key)
+  }
+
+  test.each(SPELLINGS.map((s) => [`${s.key} | ${s.spelling}`, s] as const))(
+    "%s",
+    async (_, s) => {
+      const row = await verdictOf(s)
+      const spelt = await GUARDS[s.guard].run(input(s.text, s.at[0]), s.at[1])
+      expect({ refused: spelt !== undefined, text: s.text }).toEqual({
+        refused: row !== undefined,
+        text: s.text,
+      })
+      if (spelt !== undefined) expect(spelt).toContain(`${s.guard} hook `)
+    },
+    60_000,
+  )
+
+  test("each path flag is listed once, and each is spelt again on some row", () => {
+    const names = PATH_FLAGS.map(({ flag, program }) => `${program} ${flag}`)
+    expect(new Set(names).size).toBe(names.length)
+    for (const name of names)
+      expect({ name, spelt: SPELLINGS.some((s) => s.spelling.startsWith(`${name},`)) }).toEqual({
+        name,
+        spelt: true,
+      })
   })
 })
 
