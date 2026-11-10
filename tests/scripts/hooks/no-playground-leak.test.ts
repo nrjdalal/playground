@@ -3,7 +3,13 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { check, skillNames } from "../../../scripts/hooks/no-playground-leak"
+import {
+  check,
+  inspectAs,
+  type Policy,
+  skillNames,
+} from "../../../scripts/hooks/no-playground-leak"
+import { withDeadline } from "../../../scripts/hooks/shell"
 import { OLD } from "../../session-names"
 import { storeWith } from "./render-set"
 
@@ -1552,4 +1558,47 @@ describe("an org whose extension gates its Slack sends", () => {
       ).toBeUndefined()
     },
   )
+})
+
+describe("each inspectAs call keeps its own policy (PG-1702)", () => {
+  const guards = (repo: string): Policy => ({
+    anyWrite: true,
+    find: () => undefined,
+    git: true,
+    guard: "A",
+    guarded: (r) => `${r.owner}/${r.repo}`.toLowerCase() === repo,
+    hosts: false,
+    place: "p",
+    what: "w",
+    why: "y",
+  })
+  const none: Policy = {
+    ...guards(""),
+    anyWrite: undefined,
+    guard: "B",
+    guarded: () => false,
+    hosts: true,
+  }
+  const input = (command: string) =>
+    JSON.stringify({
+      cwd: tmpdir(),
+      hook_event_name: "PreToolUse",
+      tool_input: { command },
+      tool_name: "Bash",
+    })
+  const env = { HOME: tmpdir(), PATH: process.env.PATH }
+  const judge = (policy: Policy, command: string) =>
+    withDeadline(10_000, () => inspectAs(policy, input(command), env))
+  // reading files first gives the walk awaits, so the other check runs inside it
+  const merge = "cat /etc/hosts /etc/shells > /dev/null; gh pr merge 1 -R acme/ext"
+  const read = "gh pr list -R other/x"
+
+  test("two overlapping checks under different policies in one Promise.all both keep their verdicts", async () => {
+    const alone = [await judge(guards("acme/ext"), merge), await judge(none, merge)]
+    expect(alone[0]).toContain("A hook refused")
+    expect(alone[1]).toBeUndefined()
+    const [guarded] = await Promise.all([judge(guards("acme/ext"), merge), judge(none, read)])
+    const [open] = await Promise.all([judge(none, merge), judge(guards("acme/ext"), read)])
+    expect([guarded, open]).toEqual(alone)
+  })
 })
