@@ -37,7 +37,7 @@ and counts no live sessions or workers (no cap; Ops watches the live board for t
 the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`), its own and each `slots.peers` folder's, each weighing half its item's load units, under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
 less a quarter (`gates.smallReserve`) kept for small items unless the start is small (`--size small|medium|big`, else small for a reviewer or tester, else the roster's or plan.json's size, else medium; [rules/slots.md](../../rules/slots.md)), while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the checkers,
 refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores, and the refusal names the load, the starts and the line;
-a `--priority` start passes it while `priority.json`, an org's own `priority-<name>.json` or a job's own `priority-start.json` stands in the data folder, since priority work comes first,
+a `--priority` start passes it while `priority.json`, an org's own `priority-<name>.json`, a job's own `priority-start.json` or a session's own window (`playground priority on`, [scripts/README.md](../../../../scripts/README.md#spawnsh)) stands in the data folder, since priority work comes first,
 and so does a resume within 15 minutes of `spawn.sh close` ending a row that read live, since that session already counts in the load it comes back into;
 memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`),
 and for a fresh worker start alone swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), refusing when vm_stat gives no reading, since free memory counts compressible pages and read 62% on 7 Nov while 150 pages swapped in a second; every other start keeps its pass, as at the slots gate;
@@ -51,8 +51,8 @@ each other login's `usage-<name>.json`, and each account login-flip probes by it
 or GLM's from `zai-usage.json` (the 5-hour window under 95% of its credits and no empty `balance`, with no week check (full use, judged on the 5-hour window), only while the ops-zai-usage job's last beat is ok and within 3 cycles,
 so every GLM spawn refuses until `bun run ops:zai-usage` has beaten once).
 A GLM start takes its own load and memory gate in place of the load and memory checks above: load5 (the third field of `sysctl -n vm.loadavg`) under 30 (`gates.glmLoad5Max`), memory pressure level 1, and swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`), so GLM starts while Claude's gate holds.
-Every pass and refusal is one line in `~/.playground/ops/capacity.jsonl`, which the load check counts its starts from, a refusal's carrying the words it printed as `detail`.
-Every manager start takes the gate, an orchestrator's included, but the first dispatcher's, which starts past a failing gate so the owner always has one: the gates after a failing one still read and pick its login, and its one row reads `skipped`, naming each gate it went past with a refusal's words, and counts as a start.
+Every pass and refusal is one line in `~/.playground/ops/capacity.jsonl` naming its session, which the load check counts its starts from, a refusal's carrying the words it printed as `detail`.
+Every manager start takes the gate, an orchestrator's included, but the first dispatcher's, by `manager` or by `resume`, which starts past a failing gate so the owner always has one: the gates after a failing one still read and pick its login, and its one row reads `skipped`, naming each gate it went past with a refusal's words, and counts as a start.
 `bun run verify system` reads how many more workers and how many more orchestrators fit now, and what limits each.
 It also refuses while a live session already holds the name (below).
 A refusal names its gate and what it read: close a session that is done ([End](SESSIONS.md#end)), or wait for the reading to fall, and run it again.
@@ -148,11 +148,15 @@ Every start and resume records its runtime, herdr, in `~/.playground/runtimes/<n
 With no `--runtime`, every start and resume opens in herdr, from any terminal, and spawn.sh refuses a `--runtime` other than herdr and a column anchored on anything but a herdr pane id.
 After a herdr server's restart, which brings each pane back as a shell under its label, ops-herdr runs `spawn.sh restore` for that server (LIFECYCLE.md, Ops jobs), which resumes every session whose resume record in `~/.playground/resume` names it on that server (its `# server:` line, the factory's when it has none) and whose roster row is not done, ended, parked or paused,
 each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with, an `--effort` other than high and, for a reviewer or tester, `--pr` with the PRs its roster row serves,
-in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, or an exec line that does not parse or that it does not run) or `not restored <name>: <reason>`, a gate's refusal included; it is safe to run again, one at a time:
+in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, or an exec line that does not parse or that it does not run),
+`waiting <name>: <reason>` (a gate holding it over a reading that falls, or focus standing for another session) or `not restored <name>: <reason>` (any other refusal, a gate that cannot read its input or reads a bad setting included).
+The first dispatcher's record runs first, past every gate, so the owner's dispatcher is back before any other resume takes the gate's room.
+A restore whose only misses wait exits 0, since ops-herdr runs it again each cycle while a session waits; a `not restored` line exits 1.
+It is safe to run again, one at a time:
 while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
 A readable record on another server gets no line, since that server's own restore reads it.
 A session that never took its first turn has no transcript, so its resume starts it afresh under its own id and name, with the prompt its start recorded in `resume/<name>.prompt`.
-Done when each line reads `restored`, `skipped <name>: live` or a roster row's down status, or you have acted on it (a full gate: run it again once a session closes; a broken record or a missing backend pin: resume the session by hand).
+Done when each line reads `restored`, `waiting`, `skipped <name>: live` or a roster row's down status, or you have acted on it (a gate that cannot read its input or reads a bad setting: fix it and run it again; a broken record or a missing backend pin: resume the session by hand).
 
 ## --check
 

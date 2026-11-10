@@ -399,6 +399,41 @@ describe("restore resumes the herdr sessions its resume files list", () => {
     )
   })
 
+  test("with the load gate held, the first dispatcher comes back first and past it, the next record waits, and the restore exits 0 (#1682)", async () => {
+    const sids = { "2bcdfg-worker": ids.a, dispatcher: ids.b }
+    const r = await spawn(
+      ["restore"],
+      [],
+      { FAKE_LOAD5: "24.00" },
+      undefined,
+      undefined,
+      (home) => {
+        herdrPin()(home)
+        for (const dir of ["resume", "runtimes", "backends"])
+          mkdirSync(lw(home, dir), { recursive: true })
+        for (const [name, sid] of Object.entries(sids)) {
+          writeFileSync(
+            lw(home, "resume", `${name}.sh`),
+            `#!/bin/bash\nexec /x/scripts/spawn.sh resume ${name} ${root} ${sid}\n`,
+          )
+          writeFileSync(lw(home, "runtimes", name), "herdr\n")
+          writeFileSync(lw(home, "backends", name), "claude\n")
+          transcript(home, sid)
+        }
+      },
+    )
+    const [first, second] = r.out.split("\n")
+    expect(first).toBe("restored dispatcher")
+    expect(second).toStartWith("waiting 2bcdfg-worker: ")
+    expect(second).toContain("the load gate holds it")
+    expect(r.code).toBe(0)
+    expect(placing(r).filter((c) => c[1] === "run")).toHaveLength(1)
+    expect(capacityLog(r)).toEqual([
+      expect.objectContaining({ gate: "load", session: "dispatcher", verdict: "skipped" }),
+      expect.objectContaining({ gate: "load", session: "2bcdfg-worker", verdict: "refused" }),
+    ])
+  })
+
   test("a checker's resume carries the PRs its roster row serves, its pr first, and one whose row names none is not restored (#1400)", async () => {
     const [pr1, pr2] = [1, 2].map((n) => `https://github.com/acme/factory/pull/${n}`)
     const rows = [
