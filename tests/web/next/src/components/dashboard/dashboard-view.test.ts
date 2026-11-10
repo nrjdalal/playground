@@ -37,7 +37,39 @@ describe("homeOf", () => {
   })
 })
 
+// #1682: while a restore brings the factory back, the home says so with no Start, until the restore is done.
+describe("homeOf while a restore runs", () => {
+  test("shows the restore in place of the steps, for as long as the restore is owed", () => {
+    for (const live of ["Live", "Lost"] as const) {
+      expect(
+        homeOf({ boardRead: true, checksFailed: false, live, restoring: true, view: "steps" }),
+      ).toBe("restoring")
+      expect(
+        homeOf({ boardRead: true, checksFailed: false, live, restoring: false, view: "steps" }),
+      ).toBe("steps")
+    }
+  })
+
+  test("the frame, a failed read, the checks and a reconnecting feed still come first", () => {
+    const at = { boardRead: true, checksFailed: false, live: "Live", restoring: true } as const
+    expect(homeOf({ ...at, boardRead: false, view: "steps" })).toBe("frame")
+    expect(homeOf({ ...at, checksFailed: true, view: "steps" })).toBe("error")
+    expect(homeOf({ ...at, view: "checks" })).toBe("checks")
+    expect(homeOf({ ...at, view: "frame" })).toBe("frame")
+    expect(homeOf({ ...at, live: "Reconnecting", view: "steps" })).toBe("reconnecting")
+  })
+})
+
 describe("noChat", () => {
+  test("while a restore runs it says the factory is coming back, never that the dispatcher is not running", () => {
+    const copy = noChat("Live", "Boss", true)
+    expect(copy.title).toBe("The factory is coming back")
+    expect(copy.why).toBe(
+      "Your sessions are coming back after a restart. Boss's chat opens here once it is running.",
+    )
+    expect(`${copy.title} ${copy.why}`).not.toContain("not running")
+  })
+
   test("with the feed reconnecting it says so in the sidebar's words, not that the dispatcher is not running", () => {
     const copy = noChat("Reconnecting", "Boss")
     expect(copy.title).toBe("Live feed reconnecting")

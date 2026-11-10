@@ -472,6 +472,34 @@ describe("the dispatcher's row with none live", () => {
     expect(svg(render(createElement(NoDispatcherRow, { lost: true })))).toContain("text-inactive")
   })
 
+  // #1682: the restore state is Alpha's alone, so Bravo's down row reads Not running as sidebar.md says
+  test("the header passes the restore state to the primary's slot alone", async () => {
+    const source = await Bun.file(
+      join(import.meta.dir, "../../../../../../web/next/src/components/dashboard/app-sidebar.tsx"),
+    ).text()
+    expect(source).toContain("restoring={i === 0 && restoring}")
+  })
+
+  // #1682: a restart should not look broken, so a dispatcher a restore still owes reads as coming back, in gray, never the red Not running
+  test("while a restore is owed it reads Coming back with a gray spinner, never the red Down mark", () => {
+    const html = render(createElement(NoDispatcherRow, { restoring: true }))
+    expect(html).toContain('<span data-slot="tooltip-content">Alpha: Coming back<')
+    expect(html).toContain('aria-description="Alpha: Coming back"')
+    expect(html).not.toContain("Not running")
+    const svg = /<svg[^>]*class="([^"]*)"/.exec(html)?.[1] ?? ""
+    expect(svg).toContain("text-inactive")
+    expect(svg).toContain("animate-spin")
+    expect(svg).not.toContain("text-destructive")
+    expect(html).not.toContain('role="status"')
+    // a feed lost after a board stills every row, this one's spinner included
+    const still = render(createElement(NoDispatcherRow, { restoring: true, still: true }))
+    expect(/<svg[^>]*class="([^"]*)"/.exec(still)?.[1] ?? "").not.toContain("animate-spin")
+    expect(still).toContain("opacity-60")
+    expect(linkTag(html)).toContain('href="/dashboard"')
+    const lost = render(createElement(NoDispatcherRow, { lost: true, restoring: true }))
+    expect(lost).toContain('<span data-slot="tooltip-content">Alpha: Cannot be read<')
+  })
+
   // #i520: "Each row keeps its slot while its session is down, reading Not running"
   test("the second dispatcher down keeps its row, by its role, reading Not running, and opens nothing", () => {
     const html = render(createElement(NoDispatcherRow, { href: null, label: "Bravo" }))

@@ -70,6 +70,8 @@ export type DashboardContext = {
   open: { has: (sessionId: string) => boolean; toggle: (sessionId: string) => void }
   outbox: Outbox
   problem: DashboardProblem | null
+  // A restore can still bring the dispatcher back after a restart, as the board's last frame says; false until the first board.
+  restoring: boolean
   selected: Worker | null
   // Each stream read now, by its session: Playground's, and the selected session's when it is another.
   streams: ReadonlyMap<string, DashboardStream>
@@ -161,8 +163,17 @@ export function DashboardProvider({
   children: React.ReactNode
 }) {
   const socket = useDashboardSocket(allowed)
-  const { approvals, connected, dispatcher, dispatchers, generation, problem, subscribe, watch } =
-    socket
+  const {
+    approvals,
+    connected,
+    dispatcher,
+    dispatchers,
+    generation,
+    problem,
+    restoring,
+    subscribe,
+    watch,
+  } = socket
   // The one poller of the inbox, here because the provider is always mounted (on a narrow screen the sidebar unmounts while it is closed); every surface that shows it reads its cache.
   const items = useInbox(allowed, { poll: true }).data?.items
   // a session waiting on an inbox item it posted waits on you as surely as one at a picker, so its row ranks with them
@@ -332,6 +343,7 @@ export function DashboardProvider({
       other,
       outbox,
       problem: problem ?? selectedProblem,
+      restoring,
       scripts,
       selected,
       streams,
@@ -354,6 +366,7 @@ export function DashboardProvider({
       other,
       outbox,
       problem,
+      restoring,
       scripts,
       selected,
       selectedProblem,

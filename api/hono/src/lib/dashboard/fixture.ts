@@ -247,6 +247,8 @@ export const fixtureSchema = z.object({
       }),
     ),
     prompts: z.record(z.string(), z.string()),
+    // set while a made-up restore can still bring the dispatcher back, as restoring() in herdr.ts reads a live one, so the home says the factory is coming back; absent otherwise
+    restoring: z.iso.datetime({ offset: true }).optional(),
     screens: z.record(z.string(), z.string()),
     workspaces: z.array(json),
   }),
