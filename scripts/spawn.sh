@@ -1437,11 +1437,14 @@ taken=$(tail -n 1 <<<"$holders" | cut -f 1)
 # It exits 3, so restore tells a live session, which it leaves as it is, from a resume that failed.
 [ -z "$taken" ] || [ -n "$CHECK" ] ||
   REFUSE_CODE=3 refuse "a live session already holds the name $NAME (pid $taken), so the new one would start under a generated name. A respawned session takes the name only once the old session is gone: close it first (its handoff written, SESSIONS.md End), then run this again."
-# restore's resume reads the row once the session is gone, since a close ends the row before its pane closes: a session closed while the restore ran reads ended here, and exit 4 tells restore to skip it.
-if [ "$MODE" = resume ] && [ -n "${SPAWN_RESTORING:-}" ]; then
+# restore's resume leaves a down row down, since a close ends the row before its pane closes: it reads the row once the session is gone and again just before the launch, exiting 4 on a down row, which restore prints as skipped, and its roster write keeps ended (write_row) for a close that lands after that.
+restoring_row_down() {
+  [ "$MODE" = resume ] && [ -n "${SPAWN_RESTORING:-}" ] || return 1
   row_status=$(roster_field "$NAME" status)
-  case "$row_status" in done | ended | parked | paused) REFUSE_CODE=4 refuse "its roster row reads $row_status" ;; esac
-fi
+  case "$row_status" in done | ended | parked | paused) return 0 ;; esac
+  return 1
+}
+! restoring_row_down || REFUSE_CODE=4 refuse "its roster row reads $row_status"
 # The item's size and its load units: --size, else small for a checker, a short read run-slot.sh knows no name for, else the roster and plan.json through run-slot.sh's own reader
 [ -n "$SIZE" ] || case "$ROLE" in reviewer | tester) SIZE=small ;; esac
 case "$SIZE" in
@@ -1793,8 +1796,8 @@ herdr_answer() {
 # The roster row: a checker's is written before its pane opens, since no-outside-pr-code reads the PR it names at the session's first tool call, and every other row once its session has started.
 write_row() {
   set -- set "$NAME" "kind=$KIND"
-  # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status.
-  [ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "status=starting"
+  # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status, and so does restore's resume, whose row a close can end mid-launch.
+  [ "$(roster_field "$NAME" status)" = ended ] && [ -z "${SPAWN_RESTORING:-}" ] && set -- "$@" "status=starting"
   # A checker's --pr replaces an ended row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named; on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
   if [ -n "$PR_ARG" ]; then
     first_pull=
@@ -1900,6 +1903,11 @@ except (ValueError, KeyError, TypeError):
     pass' <<<"$out" || true)
   fi
   PANE=${placed% *} ws=${placed#* }
+  if restoring_row_down; then
+    rm -f -- "$LAUNCH_FILE" "$said_file"
+    [ -z "$placed" ] || [ "$out" = reused ] || hr pane close "$PANE" >/dev/null 2>&1 || true
+    REFUSE_CODE=4 refuse "its roster row reads $row_status"
+  fi
   # herdr clears an agent's name after every turn (measured), while a pane's label stays and comes back after a restart, so the label carries the name.
   if [ -z "$placed" ] || ! hr pane rename "$PANE" "$NAME" >/dev/null 2>>"$said_file" || ! hr pane run "$PANE" "exec bash '$LAUNCH_FILE'" >/dev/null 2>>"$said_file"; then
     herdr_said=$(tr -s '\n' ' ' 2>/dev/null <"$said_file" || true)
