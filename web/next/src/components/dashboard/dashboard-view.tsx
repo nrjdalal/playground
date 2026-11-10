@@ -39,31 +39,43 @@ import { ONBOARD_QUERY_KEY, refusalOf } from "@/lib/onboard"
 
 const HOME_DESCRIPTION = "Your chat: what you ask, and what the factory reports."
 
-// Pure: what the home says once the board is read and no dispatcher's chat can open. While the feed reconnects the board is its last read, so it says so in the sidebar's words rather than that the dispatcher is not running.
-export const noChat = (live: LiveState, title: string): { title: string; why: string } =>
+// Pure: what the home says once the board is read and no dispatcher's chat can open. While the feed reconnects the board is its last read, so it says so in the sidebar's words rather than that the dispatcher is not running; while a restore still brings sessions back after a restart, it says the factory is coming back.
+export const noChat = (
+  live: LiveState,
+  title: string,
+  restoring = false,
+): { title: string; why: string } =>
   live === "Reconnecting"
     ? {
         title: FEED_LABELS.Reconnecting,
         why: "The last read showed no dispatcher. This page updates once the feed is back.",
       }
-    : { title: `${title} is not running`, why: `${title}'s chat opens here once it is running.` }
+    : restoring
+      ? {
+          title: "The factory is coming back",
+          why: `Your sessions are coming back after a restart. ${title}'s chat opens here once it is running.`,
+        }
+      : { title: `${title} is not running`, why: `${title}'s chat opens here once it is running.` }
 
-// Pure: what the home shows while no dispatcher's chat is open, the first that holds of: the neutral frame until the board is read, the checks' failed read, the checks, the feed reconnecting, then the steps. First run leads whatever the board holds, since a fresh Mac runs no session yet.
+// Pure: what the home shows while no dispatcher's chat is open, the first that holds of: the neutral frame until the board is read, the checks' failed read, the checks, the feed reconnecting, a restore still bringing sessions back (no Start, since the restore brings the dispatcher back itself), then the steps. First run leads whatever the board holds, since a fresh Mac runs no session yet.
 export const homeOf = ({
   boardRead,
   checksFailed,
   live,
+  restoring = false,
   view,
 }: {
   boardRead: boolean
   checksFailed: boolean
   live: LiveState
+  restoring?: boolean
   view: FirstRunView
-}): "checks" | "error" | "frame" | "reconnecting" | "steps" => {
+}): "checks" | "error" | "frame" | "reconnecting" | "restoring" | "steps" => {
   if (!boardRead) return "frame"
   if (checksFailed) return "error"
   if (view === "checks") return "checks"
   if (live === "Reconnecting") return "reconnecting"
+  if (restoring && view === "steps") return "restoring"
   return view
 }
 
@@ -223,8 +235,17 @@ function NoChat({
 
 // /dashboard: your chat with the dispatcher, the dashboard's home, since the owner talks to the dispatcher alone, or with ?worker= that session's own view: its steps as they happen with its Feed prompts under the latest step, and for a dispatcher, the assistant or a session the dashboard hosts a composer under them (hasChat). The aside window beside it (DashboardAside) holds the Inbox, Playground's chat on another session's view, and the session's Pages. A session the URL names that has ended shows your chat; every agent's status is on the System page.
 export function DashboardView() {
-  const { allowed, approvals, connected, dispatcher, feedProblem, problem, selected, workers } =
-    useDashboard()
+  const {
+    allowed,
+    approvals,
+    connected,
+    dispatcher,
+    feedProblem,
+    problem,
+    restoring,
+    selected,
+    workers,
+  } = useDashboard()
   const title = homeTitle(dispatcher)
   const [requested] = useQueryState("worker")
   const inbox = useInbox(allowed)
@@ -263,11 +284,12 @@ export function DashboardView() {
   // While no dispatcher is live, the page keeps the heading your chat will have, for screen readers alone as your chat's is, and its chat's top edge (no top padding), so nothing moves when the chat arrives; until the API names the dispatcher, it has none.
   if (!selected) {
     const live = liveState(connected, workers, feedProblem)
-    const empty = noChat(live, title ?? "The dispatcher")
+    const empty = noChat(live, title ?? "The dispatcher", restoring)
     const home = homeOf({
       boardRead: workers !== null || problem !== null,
       checksFailed: Boolean(checks.error),
       live,
+      restoring,
       view: firstRunView({ done: checks.data?.done, gate: "normal", signedIn: true }),
     })
     // the chat's own frame while it loads, so the spinner centres where the chat's will and never moves when the chat arrives: Load older's 48px row above it, and under it the scroll bar's 36px row and the composer's box (74px from md up, 78px below it) with its 8px margin, less the shell's bottom padding (16px, 24px from sm up)
@@ -295,7 +317,7 @@ export function DashboardView() {
                 signedIn
               />
             </div>
-          ) : home === "reconnecting" ? (
+          ) : home === "reconnecting" || home === "restoring" ? (
             <NoChat title={empty.title} why={empty.why} />
           ) : home === "steps" ? (
             <NoChat title={empty.title} why={empty.why}>
