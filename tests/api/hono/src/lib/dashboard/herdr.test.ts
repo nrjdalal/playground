@@ -1249,7 +1249,7 @@ describe("a script's key into a pane or answer to a prompt", () => {
   })
 })
 
-// #1682: ops-herdr keeps <server>.restore beside the server's socket from its start until every session its restore owes is back, gate waits included, so the home reads a restore in progress from that file alone.
+// #1682: ops-herdr keeps <server>.restore beside the server's socket from its start until no session its restore owes waits on a gate or focus, so the home reads a restore in progress from that file alone.
 describe("restoring", () => {
   test("reads a restore in progress from a server's owed file beside its socket", () => {
     const dir = mkdtempSync(join(tmpdir(), "restoring-"))

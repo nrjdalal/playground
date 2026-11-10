@@ -54,7 +54,7 @@ export const herdrServers = (
     .map((name) => ({ name, socket: join(dir, `${name}.sock`) }))
 }
 
-// Whether a restore is still bringing sessions back: ops-herdr keeps <server>.restore beside a server's socket (owedFile) from the server's start until every session its restore owes is back, gate waits included; a fixture stack reads its herdr.json's restoring instead.
+// Whether a restore is still bringing sessions back: ops-herdr keeps <server>.restore beside a server's socket (owedFile) from the server's start until no session its restore owes waits on a gate or focus; a fixture stack reads its herdr.json's restoring instead.
 export const restoring = (servers = herdrServers(), fixtureDir?: string): boolean =>
   servers.some(({ name, socket }) =>
     socket === FIXTURE_SOCKET
