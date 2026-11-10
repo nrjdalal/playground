@@ -67,9 +67,9 @@ const DATA = new Set([
   "sed",
 ])
 const isData = (name: string) => DATA.has(name) || /^python[\d.]*$/.test(name)
-// agent-browser's eval runs its script as JavaScript in the page, so its spaced words are code, never a shell command line (`a?.b ?? 1`)
-const runsJavaScript = (name: string, args: Word[]) =>
-  name === "agent-browser" && args.find((a) => !a.value.startsWith("-"))?.value === "eval"
+// agent-browser's eval runs its script as JavaScript in the page, so its words stay text, in the literal form alone: the bare word agent-browser with eval as its first argument, on a call whose every command opens with that bare word, so the call defines no function, alias, hashed name or PATH that runs another program by that name
+const scriptStaysText = (cmd: Command, args: Word[], plain: boolean) =>
+  plain && cmd.words[0]?.source === "agent-browser" && args[0]?.value === "eval"
 // Programs that run the command their arguments name, read here at each word that does not start with a dash.
 const STARTERS = new Set(["screen", "tmux"])
 // rm under its own name and GNU rm's Homebrew name.
@@ -256,6 +256,9 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     process: environment,
     vars: new Map(),
   }
+  const browserOnly = lex(command, env.known).commands.every(
+    (c) => c.words[0]?.source === "agent-browser",
+  )
   const line = (text: string, at: Env) =>
     run(lex(text, at.known), { ...at, vars: new Map(at.vars) }, visit)
   const visitAs =
@@ -291,7 +294,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
           )
           if (found) return found
         }
-      if (isData(name) || runsJavaScript(name, args)) return
+      if (isData(name) || scriptStaysText(cmd, args, browserOnly)) return
       // a spaced word is read as a command line of its own, the text after an = and a leading ! too (`sh -c '…'` behind any wrapper); git's only command lines are its -c aliases' `!` values, so its messages and patterns stay text; a part it cannot read stays unread in the words it lands in
       const words =
         name === "git"

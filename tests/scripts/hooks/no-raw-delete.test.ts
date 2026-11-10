@@ -164,6 +164,7 @@ describe("agent-browser eval's script is JavaScript, never a shell command line 
     "agent-browser eval 'a?.b ?? 1'",
     `agent-browser eval 'f("x")?.outerHTML ?? "none"'`,
     INBOX,
+    "agent-browser open http://x.localhost && agent-browser eval 'a?.b ?? 1'",
   ])("%s runs", async (command) => {
     expect(await check(input(command))).toBeUndefined()
   })

@@ -2014,7 +2014,7 @@ var DATA = new Set([
   "sed"
 ]);
 var isData = (name) => DATA.has(name) || /^python[\d.]*$/.test(name);
-var runsJavaScript = (name, args) => name === "agent-browser" && args.find((a) => !a.value.startsWith("-"))?.value === "eval";
+var scriptStaysText = (cmd, args, plain) => plain && cmd.words[0]?.source === "agent-browser" && args[0]?.value === "eval";
 var STARTERS = new Set(["screen", "tmux"]);
 var RM = new Set(["grm", "rm"]);
 var DEL = new Set(["del", "del-cli"]);
@@ -2145,6 +2145,7 @@ async function inspect(raw, environment) {
     process: environment,
     vars: new Map
   };
+  const browserOnly = lex(command, env.known).commands.every((c) => c.words[0]?.source === "agent-browser");
   const line = (text, at) => run(lex(text, at.known), { ...at, vars: new Map(at.vars) }, visit);
   const visitAs = (reach) => async (cmd, parsed, at) => {
     const { args, name } = parsed;
@@ -2173,7 +2174,7 @@ async function inspect(raw, environment) {
         if (found)
           return found;
       }
-    if (isData(name) || runsJavaScript(name, args))
+    if (isData(name) || scriptStaysText(cmd, args, browserOnly))
       return;
     const words = name === "git" ? gitCommand(args).aliases.flatMap((w) => /^alias\.[^=]*=!(.*)$/s.exec(w)?.[1] ?? []) : args.flatMap(({ value }) => [value, value.slice(value.indexOf("=") + 1)]);
     for (const text of new Set(words.map((w) => w.replace(/^!/, "")))) {
