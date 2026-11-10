@@ -1,5 +1,6 @@
 // PreToolUse hook for the factory's sessions, loaded from the factory settings file and, for a session resumed without its settings, the project settings, acting only for a factory session (role.ts): refuses a write to a guarded org's surface (Linear, Slack, a repository of an org ext.links guards, through gh, git, curl or the GitHub MCP) whose text holds a factory term, since the factory is private and stays out of every company write in any shape; a Slack MCP chat posting tool's post to a conversation in slack-cleared.json passes, signed where its entry names a signature; on the servers of an org whose extension gates its Slack sends (slack.gatedSends), every Slack write but a post to that org's self-DM is refused, and so is a curl that writes to Slack's API.
 import "../../packages/env/src/aliases"
+import { AsyncLocalStorage } from "node:async_hooks"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, join } from "node:path"
 
@@ -108,7 +109,6 @@ const isCleared = (value: unknown): value is Cleared =>
       typeof entry.name === "string" &&
       (entry.signature === undefined || typeof entry.signature === "string"),
   )
-let CLEARED: Cleared = {}
 // The Slack MCP tools that post to the conversation their `channel` names; any other tool naming a `channel` (a user group) writes elsewhere. Curl is never cleared, since the hook cannot parse its data exactly as Slack does.
 const CHAT_TOOL = /^chat_(?:me_message|post_ephemeral|post_message|schedule_message|update)$/
 // Each cleared posting tool, by the key naming its conversation and the key holding its text; the claude.ai Slack connector's tool is cleared for a signed channel alone.
@@ -116,7 +116,10 @@ const POST_KEYS = { channel: "channel", text: "text" }
 const CONNECTOR_TOOL = "slack_send_message"
 const CONNECTOR_KEYS = { channel: "channel_id", text: "message" }
 // The cleared conversations that take only signed posts, which curl may never write to.
-const signed = (): string[] => Object.keys(CLEARED).filter((c) => CLEARED[c].signature)
+const signed = (): string[] => {
+  const { cleared } = state()
+  return Object.keys(cleared).filter((c) => cleared[c].signature)
+}
 // A key naming a destination beside the tool's own channel key, which a Slack server may post to instead.
 const OTHER_DESTINATION = /channel|conversation/i
 // Fields Slack shows in place of a post's text, where a signature in the text would not show; blocks pass only as link chips (chipsSigned).
@@ -224,9 +227,6 @@ function pattern(environment: Environment, checkout = CHECKOUT): RegExp {
   if (!sources.length) return /(?!)/
   return new RegExp(`(?<![a-z\\d])(?:${sources.join("|")})(?![a-z\\d])`, "i")
 }
-
-// Built once per call, from the terms file, the roster and the skills as they stand.
-let TERM = pattern({})
 
 export const REPHRASE = "Say it without the term: name the work, not who did it or how it is run."
 const READABLE = `Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md, or -F /abs/msg.md for a commit). ${NOT_RUN}`
@@ -396,11 +396,6 @@ const CONFIG_WRITE =
   /^--(?:add|edit|remove-section|rename-section|replace-all|unset|unset-all)$|^-e$/
 const CONFIG_READ = /^--(?:get|get-all|get-color|get-colorbool|get-regexp|get-urlmatch|list)$|^-l$/
 const CONFIG_TAKES = new Set(["--blob", "--default", "-f", "--file", "--type"])
-let changed = false
-// Under anyWrite, whether the call has run a git or gh command or a program the hook cannot name, and whether one ran before the command being read, which may have moved the branch a bare push reads its remote from; and the folder the call starts in.
-let moved = false
-let movedBefore = false
-let startCwd: string | undefined
 let builtins: Set<string> | undefined
 const MCP_TOOL = /^mcp__(.+?)__(.+)$/
 const READ_TOOL =
@@ -413,10 +408,11 @@ const MAYBE_ANY = /alias|curl|gh|git|repo|send-pack|subtree/i
 // What an internal error still refuses: a call to a guarded org's tool or a writing command.
 const WRITE_CALL = /\b(?:curl|gh|git)\b|github|linear|slack/i
 
-const leakPolicy = (orgs: Set<string>): Policy => ({
+// term is the pattern check() builds each call, from the terms file, the roster and the skills as they stand; one matching nothing outside a check
+const leakPolicy = (orgs: Set<string>, term = /(?!)/): Policy => ({
   find: (text) => {
-    const term = TERM.exec(visible(text))?.[0]
-    return term ? { detail: `"${term}", a factory term`, fix: REPHRASE } : undefined
+    const found = term.exec(visible(text))?.[0]
+    return found ? { detail: `"${found}", a factory term`, fix: REPHRASE } : undefined
   },
   git: true,
   guard: "no-playground-leak",
@@ -426,19 +422,42 @@ const leakPolicy = (orgs: Set<string>): Policy => ({
   what: "a factory term",
   why: "the factory is private, so nothing about it, its skills or its sessions goes into anything a guarded org sees, in any shape.",
 })
-let policy = leakPolicy(new Set())
+// One inspectAs call's own state, held in its async context, so checks that overlap in one process never read each other's: its policy and Slack's cleared conversations;
+// under anyWrite, whether the call has run a git or gh command or a program the hook cannot name, and whether one ran before the command being read, which may have moved the branch a bare push reads its remote from; and the folder the call starts in.
+type Call = {
+  changed: boolean
+  cleared: Cleared
+  moved: boolean
+  movedBefore: boolean
+  policy: Policy
+  startCwd?: string
+}
+const calls = new AsyncLocalStorage<Call>()
+const IDLE: Call = {
+  changed: false,
+  cleared: {},
+  moved: false,
+  movedBefore: false,
+  policy: leakPolicy(new Set()),
+}
+const state = (): Call => calls.getStore() ?? IDLE
 
 const lower = (text: string) => text[0].toLowerCase() + text.slice(1)
 
 function refuse(what: string, target: Target, detail: string, fix: string): string {
-  return `${policy.guard} hook refused ${what} to ${target.label}: ${detail}. ${policy.why} ${fix}`
+  return `${state().policy.guard} hook refused ${what} to ${target.label}: ${detail}. ${state().policy.why} ${fix}`
 }
 
 // Under anyWrite, a write to a guarded repository, or one the hook cannot place, whatever its text.
 function refuseAny(what: string, target: Target, fix = NOT_RUN): string {
   return target.where === "guarded"
-    ? refuse(what, target, `it writes to ${policy.place}`, fix)
-    : refuse(what, target, `the hook cannot tell whether it writes to ${policy.place}`, PLACE_FIX)
+    ? refuse(what, target, `it writes to ${state().policy.place}`, fix)
+    : refuse(
+        what,
+        target,
+        `the hook cannot tell whether it writes to ${state().policy.place}`,
+        PLACE_FIX,
+      )
 }
 
 // `texts` must be read before the write runs; `extras` (a PR number, a URL) are searched only when the hook can read them.
@@ -450,16 +469,16 @@ async function judge(
   extras: Text[] = [],
 ): Promise<string | undefined> {
   if (target.where === "other") return
-  if (policy.anyWrite && !target.byText) return refuseAny(what, target)
+  if (state().policy.anyWrite && !target.byText) return refuseAny(what, target)
   const resolved = await Promise.all(texts.map((t) => resolveText(t, env)))
   const seen = (await Promise.all(extras.map((t) => resolveText(t, env)))).filter((t) => !t.unknown)
-  const hit = [...resolved, ...seen].map((t) => policy.find(t.value)).find(Boolean)
+  const hit = [...resolved, ...seen].map((t) => state().policy.find(t.value)).find(Boolean)
   if (target.where === "unknown") {
     if (!hit) return
     return refuse(
       what,
       target,
-      `the hook cannot tell whether it writes to ${policy.place}, and its text holds ${hit.detail}`,
+      `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${hit.detail}`,
       `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(hit.fix)} ${NOT_RUN}`,
     )
   }
@@ -469,7 +488,7 @@ async function judge(
     return refuse(
       what,
       target,
-      `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${policy.what}`,
+      `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`,
       READABLE,
     )
   }
@@ -477,7 +496,7 @@ async function judge(
 
 // Guarded when any candidate is a repository the policy guards, unknown when one cannot be read or none is named, else not guarded.
 function decide(candidates: (Repo | undefined)[]): Target {
-  const ours = candidates.find((c) => c && policy.guarded(c))
+  const ours = candidates.find((c) => c && state().policy.guarded(c))
   if (ours) return { label: `${ours.owner}/${ours.repo}`, where: "guarded" }
   if (candidates.length === 0 || candidates.some((c) => !c)) {
     return { label: "a repository the hook cannot resolve", where: "unknown" }
@@ -490,25 +509,26 @@ const XARGS_INPUT: Word = { quoted: false, unknown: "xargs's input", value: UNKN
 
 const leak: Visit = async (cmd, parsed, env) => {
   const { first, name, xargs } = parsed
-  if (policy.anyWrite) pastDeadline()
-  const appended = policy.anyWrite && xargs && xargs.replace === undefined
+  if (state().policy.anyWrite) pastDeadline()
+  const appended = state().policy.anyWrite && xargs && xargs.replace === undefined
   const args =
     appended && parsed.args.at(-1) !== XARGS_INPUT ? [...parsed.args, XARGS_INPUT] : parsed.args
-  if (policy.anyWrite && changesState(cmd, parsed)) changed = true
-  if (policy.anyWrite) {
-    movedBefore = moved
-    if (MOVERS.has(name) || first?.unknown) moved = true
+  if (state().policy.anyWrite && changesState(cmd, parsed)) state().changed = true
+  if (state().policy.anyWrite) {
+    state().movedBefore = state().moved
+    if (MOVERS.has(name) || first?.unknown) state().moved = true
   }
   const head = args[0]?.value ?? ""
-  const group = GH_GROUPS.has(head) || (policy.anyWrite && (head === "alias" || head === "repo"))
+  const group =
+    GH_GROUPS.has(head) || (state().policy.anyWrite && (head === "alias" || head === "repo"))
   if (name === "gh" || (first?.unknown && group)) {
     const verdict = await gh(args, cmd, env, parsed.local, xargs)
     // Under anyWrite, an unknown program whose words read as no gh write may still run one after them.
-    if (verdict || name === "gh" || !policy.anyWrite) return verdict
+    if (verdict || name === "gh" || !state().policy.anyWrite) return verdict
   }
-  const pusher = policy.anyWrite && (head === "send-pack" || head === "subtree")
+  const pusher = state().policy.anyWrite && (head === "send-pack" || head === "subtree")
   if (name === "git" || (first?.unknown && (head === "commit" || head === "push" || pusher)))
-    return policy.git ? git(args, cmd, env, parsed.local) : undefined
+    return state().policy.git ? git(args, cmd, env, parsed.local) : undefined
   if (name === "curl") return curl(args, cmd, env, xargs)
   if (PRINTERS.has(name)) return
   // A wrapper the reader does not know (`vault run -- gh ...`, `uv run git ...`) runs the command after it.
@@ -559,7 +579,7 @@ const MOVERS = new Set(["gh", "git"])
 
 // The repositories gh falls back to, none it can trust under anyWrite once an earlier command in the call changed them.
 const implicit = (env: Env, local: Map<string, Text>) =>
-  policy.anyWrite && changed ? [undefined] : implicitRepos(env, local)
+  state().policy.anyWrite && state().changed ? [undefined] : implicitRepos(env, local)
 
 async function gh(
   args: Word[],
@@ -571,7 +591,7 @@ async function gh(
   const { head, repos, rest } = ghCommand(args)
   if (head[0] === "api") return api(rest, cmd, env, local, xargs)
   const key = head.join(" ")
-  if (policy.anyWrite) {
+  if (state().policy.anyWrite) {
     if (key === "alias import" || key === "alias set") {
       return refuse(
         `gh ${key}`,
@@ -588,7 +608,7 @@ async function gh(
     const takes = REPO_WRITES.get(key)
     if (takes) return repoWrite(key, rest, repos, env, local, xargs, takes)
   }
-  const found = GH_WRITES.get(key) ?? (policy.anyWrite ? ANY_GH_WRITES.get(key) : undefined)
+  const found = GH_WRITES.get(key) ?? (state().policy.anyWrite ? ANY_GH_WRITES.get(key) : undefined)
   if (!found) return
   const { flags, positionals } = parseFlags(rest, found.takes)
   const texts: Text[] = []
@@ -614,7 +634,7 @@ async function gh(
   const urls = positionals.flatMap((p) => {
     if (fromXargs(p, xargs)) return [undefined]
     if (p === XARGS_INPUT || p.unknown || p.reads?.length || p.value.includes(UNKNOWN))
-      return policy.anyWrite ? [] : [undefined]
+      return state().policy.anyWrite ? [] : [undefined]
     return PR_URL.test(p.value) ? [repoOf(p)] : []
   })
   const named = [...flagged, ...urls]
@@ -643,7 +663,7 @@ function destination(
   fix?: string,
 ): string | undefined {
   if (owner === undefined || name === undefined) return refuseAny(what, decide([undefined]))
-  if (!policy.guarded({ owner, repo: name })) return
+  if (!state().policy.guarded({ owner, repo: name })) return
   const label = owner === "*" ? `a repository named ${name}` : `${owner}/${name}`
   return refuseAny(what, { label, where: "guarded" }, fix)
 }
@@ -700,7 +720,7 @@ function repoWrite(
 function unplaced(what: string, source: (Repo | undefined)[], env: Env): string | undefined {
   const lost = source.length === 0 && !env.cwd
   if (!lost && source.every(Boolean)) return
-  if (policy.anyWrite && changed)
+  if (state().policy.anyWrite && state().changed)
     return refuse(
       what,
       decide([]),
@@ -762,11 +782,11 @@ async function api(
   const request = await ghApi(args, cmd, env, xargs)
   if (!request || ["GET", "HEAD"].includes(request.method)) return
   // Under anyWrite, a plain xargs before a gh api with no method, field or input of its own reads, since only the words it appends make it a write.
-  if (policy.anyWrite && xargs && !xargs.replace) {
+  if (state().policy.anyWrite && xargs && !xargs.replace) {
     const method = args.some((a) => /^(?:-[A-Za-z]*X|--method)/.test(a.value))
     if (!method && request.fields.length === 1 && request.inputs.length === 0) return
   }
-  if (request.method === "DELETE" && !policy.anyWrite) return
+  if (request.method === "DELETE" && !state().policy.anyWrite) return
   const { endpoint, fields, inputs } = request
   const posted = (f: { key: string }) =>
     endpoint.value === "graphql" || f.key.includes(UNKNOWN) || TEXT_FIELD.test(f.key)
@@ -793,20 +813,24 @@ async function api(
     .replace(/^https?:\/\/[^/]+/i, "")
     .replace(/^\/+/, "")
     .replace(/^api\/v3\//, "")
-  const path = policy.anyWrite ? dotless(typed) : typed
+  const path = state().policy.anyWrite ? dotless(typed) : typed
   const repo = /^repos\/([^/]+)\/([^/]+)/.exec(path)
   const org = /^orgs\/([^/]+)/.exec(path)
   const what = `gh api ${path.split("?")[0]}`
-  if (policy.anyWrite) {
+  if (state().policy.anyWrite) {
     const refused = await apiDestination(what, request, path, env)
     if (refused) return refused
   }
-  if (policy.anyWrite && repo && conversation(path.slice(repo[0].length))) return
-  if (policy.anyWrite && path.startsWith("repositories/"))
+  if (state().policy.anyWrite && repo && conversation(path.slice(repo[0].length))) return
+  if (state().policy.anyWrite && path.startsWith("repositories/"))
     return judge(what, { label: "a repository named only by its id", where: "unknown" }, [], env)
   let candidates: (Repo | undefined)[]
   if (fromXargs(endpoint, xargs)) candidates = [undefined]
-  else if (policy.anyWrite && repo && (PLACEHOLDER.test(repo[1]) || PLACEHOLDER.test(repo[2])))
+  else if (
+    state().policy.anyWrite &&
+    repo &&
+    (PLACEHOLDER.test(repo[1]) || PLACEHOLDER.test(repo[2]))
+  )
     candidates = implicit(env, local).map(
       (r) =>
         r && {
@@ -896,7 +920,7 @@ const slackHost = (host: string | undefined): boolean =>
 // A URL on Linear's or Slack's API is a guarded org's; GitHub's API is judged by the repository in its path.
 function hostTarget(url: string): Target | undefined {
   const host = hostOf(url)
-  if (!host || !policy.hosts) return
+  if (!host || !state().policy.hosts) return
   if (host === "linear.app" || host.endsWith(".linear.app"))
     return { label: "Linear", where: "guarded" }
   if (slackHost(host)) return { label: "Slack", where: "guarded" }
@@ -911,8 +935,9 @@ async function curl(
   const { flags, positionals } = parseFlags(args, CURL_TAKES)
   const urls = curlUrls(flags, positionals)
   const globs =
-    policy.anyWrite === true && !flags.some((f) => f.name === "-g" || f.name === "--globoff")
-  if (policy.anyWrite) {
+    state().policy.anyWrite === true &&
+    !flags.some((f) => f.name === "-g" || f.name === "--globoff")
+  if (state().policy.anyWrite) {
     // A Host header, --connect-to, --request-target or --resolve beside a word naming GitHub sends the request somewhere its URL does not name.
     const redirect = args.some(
       (a, i) =>
@@ -925,7 +950,7 @@ async function curl(
       return judge("curl", { label: "a host the call redirects to", where: "unknown" }, [], env)
   }
   const targets = urls.map((u): Target => {
-    if (u.unknown === XARGS_INPUT.unknown || (policy.anyWrite && fromXargs(u, xargs)))
+    if (u.unknown === XARGS_INPUT.unknown || (state().policy.anyWrite && fromXargs(u, xargs)))
       return u.unknown || curlWrites(flags)
         ? { label: "a URL xargs supplies from its input", where: "unknown" }
         : { label: "", where: "other" }
@@ -936,7 +961,7 @@ async function curl(
     const url = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `http://${value}`
     const host = hostTarget(url)
     if (host) return host
-    if (policy.anyWrite) return curlTarget(url, globs)
+    if (state().policy.anyWrite) return curlTarget(url, globs)
     if (/^https?:\/\/api\.github\.com(?::\d+)?\/graphql(?:[/?#]|$)/i.test(url))
       return {
         byText: true,
@@ -961,7 +986,7 @@ async function curl(
     const read = await Promise.all([...urls, ...data].map((t) => resolveText(t, env)))
     const id = signed().find((c) => read.some((t) => t.value.includes(c)))
     if (id) {
-      return `no-playground-leak hook refused curl to ${CLEARED[id].name}: post there through the Slack MCP chat tools, which check that its last line is ${CLEARED[id].signature}.`
+      return `no-playground-leak hook refused curl to ${state().cleared[id].name}: post there through the Slack MCP chat tools, which check that its last line is ${state().cleared[id].signature}.`
     }
   }
   if (xargs && !xargs.replace) data.push(unknown("the arguments xargs appends"))
@@ -1025,8 +1050,8 @@ function clearedPost(
   if (keys.some((k) => k !== at.channel && OTHER_DESTINATION.test(k))) return
   const channel = input[at.channel]
   const text = input[at.text]
-  if (typeof channel !== "string" || !Object.hasOwn(CLEARED, channel)) return
-  const { name, signature } = CLEARED[channel]
+  if (typeof channel !== "string" || !Object.hasOwn(state().cleared, channel)) return
+  const { name, signature } = state().cleared[channel]
   if (!signature) return signedOnly ? undefined : ""
   const signed = typeof text === "string" && text.trimEnd().split("\n").at(-1) === signature
   const rich = keys.filter((k) => RICH.includes(k))
@@ -1094,7 +1119,12 @@ async function git(
   const here = { ...env, cwd: dir }
   // Outside anyWrite, an alias -c sets is followed when its value is literal git words, and refused when it runs a command, cannot be read or names another alias, or when the alias's name or the subcommand cannot be read.
   const maybeAlias = anyAlias || (aliasSet && !!sub && marked(sub))
-  if (!policy.anyWrite && sub && (maybeAlias || aliases.has(sub.toLowerCase())) && !builtin(sub)) {
+  if (
+    !state().policy.anyWrite &&
+    sub &&
+    (maybeAlias || aliases.has(sub.toLowerCase())) &&
+    !builtin(sub)
+  ) {
     const value = aliases.get(sub.toLowerCase())
     const words =
       value === undefined || value.trim().startsWith("!") ? undefined : splitCmdline(value)
@@ -1108,7 +1138,7 @@ async function git(
       )
     return git([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1)
   }
-  if (policy.anyWrite) {
+  if (state().policy.anyWrite) {
     const cannot = (detail: string) => refuse("git", decide([]), detail, PLACE_FIX)
     if (aliasSet)
       return cannot(
@@ -1120,7 +1150,7 @@ async function git(
         return cannot(
           `it runs ${sub}, which -c, --config-env, --git-dir or a GIT_ variable may define as an alias`,
         )
-      if (changed)
+      if (state().changed)
         return cannot(`it runs ${sub}, which an earlier command in the call may define as an alias`)
       // In a checkout the hook cannot resolve, only the global and system configs, which git reads from /, can define the alias.
       const alias = gitText(dir ?? "/", ["config", "--get", `alias.${sub}`], `alias ${sub}`)
@@ -1149,7 +1179,7 @@ async function git(
   if (sub === "push") return push(rest, here, checkout)
   // A checkout with no remote publishes nothing; one the hook cannot find may be a guarded org's.
   if (dir && checkout.length === 0) return
-  if (policy.anyWrite) {
+  if (state().policy.anyWrite) {
     // A commit changes only the local clone, so under anyWrite it is refused only in a guarded repository's clone.
     const target = decide(dir ? checkout : [undefined])
     return target.where === "guarded" ? judge("git commit", target, [], env) : undefined
@@ -1229,7 +1259,7 @@ function placeUrl(url: string): Repo | undefined {
 // Under anyWrite, where a push goes as git resolves it: a configured remote's every push URL (pushurl, each url, pushInsteadOf applied), every remote's when none is named, else the literal URL, which is unknown when an insteadOf or pushInsteadOf rule's prefix matches it.
 function pushTarget(remote: Word | undefined, dir: string | undefined): Target {
   if (
-    changed ||
+    state().changed ||
     !dir ||
     (remote && (remote.unknown || remote.reads?.length || marked(remote.value)))
   )
@@ -1254,7 +1284,9 @@ function pushTarget(remote: Word | undefined, dir: string | undefined): Target {
     // remote.pushDefault and the current branch's pushRemote and remote pick the push's remote, and each may hold a URL; after another git or gh command or an unnamed program earlier in the call, or in a folder other than the one the call starts in (a cd, git -C), any branch's may.
     const branch = lines(["symbolic-ref", "--short", "HEAD"])?.[0]
     const name =
-      movedBefore || dir !== startCwd ? ".*" : branch?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      state().movedBefore || dir !== state().startCwd
+        ? ".*"
+        : branch?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     const current = name ? `|branch\\.${name}\\.(pushremote|remote)` : ""
     const keys = lines(["config", "--get-regexp", `^(remote\\.pushdefault${current})$`])
     const picked = (keys ?? [])
@@ -1276,7 +1308,7 @@ async function push(
   takes = PUSH_TAKES,
 ): Promise<string | undefined> {
   const { flags, positionals } = parseFlags(rest, takes)
-  if (policy.anyWrite) {
+  if (state().policy.anyWrite) {
     const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value
     return judge("git push", pushTarget(remote, env.cwd), [], env)
   }
@@ -1362,7 +1394,7 @@ function gatedPost(
   const connector = name === CONNECTOR_TOOL
   const posting = CHAT_TOOL.test(name) || connector
   const what = tool.replace(/^mcp__/, "")
-  for (const gate of policy.gates ?? []) {
+  for (const gate of state().policy.gates ?? []) {
     if ("broken" in gate) {
       if (/slack/i.test(server)) return brokenGate(what, gate)
       continue
@@ -1386,7 +1418,7 @@ const brokenGate = (what: string, gate: { broken: string; org: string }): string
 const SLACK_READ_METHOD =
   /^(?:auth\.test|search\.[a-z]+|(?:[a-z]+\.)+(?:history|info|list|replies|unreads|get[A-Za-z]*|lookup[A-Za-z]*))$/
 function gatedCurl(urls: Word[]): string | undefined {
-  const gates = policy.gates ?? []
+  const gates = state().policy.gates ?? []
   if (!gates.length) return
   const writes = urls.some((u) => {
     const value = visible(u.value)
@@ -1420,7 +1452,7 @@ function mcp(tool: string, input: Record<string, unknown> | undefined): string |
       : /github/i.test(server)
         ? "GitHub"
         : undefined
-  if (!surface || READ_TOOL.test(name) || (surface !== "GitHub" && !policy.hosts)) return
+  if (!surface || READ_TOOL.test(name) || (surface !== "GitHub" && !state().policy.hosts)) return
   const what = tool.replace(/^mcp__/, "")
   let target: Target = { label: surface, where: "guarded" }
   if (!input)
@@ -1430,7 +1462,7 @@ function mcp(tool: string, input: Record<string, unknown> | undefined): string |
     const verdict = clearedPost(what, input, connector ? CONNECTOR_KEYS : POST_KEYS, connector)
     if (verdict !== undefined) return verdict || undefined
   }
-  if (surface === "GitHub" && policy.anyWrite && name === "create_repository") {
+  if (surface === "GitHub" && state().policy.anyWrite && name === "create_repository") {
     const owner = input.organization ?? "*"
     const named = input.name
     return destination(
@@ -1452,18 +1484,18 @@ function mcp(tool: string, input: Record<string, unknown> | undefined): string |
       )
     }
     const repo = { owner, repo: typeof input.repo === "string" ? input.repo : "*" }
-    if (!policy.guarded(repo)) return
+    if (!state().policy.guarded(repo)) return
     target = { label: `${repo.owner}/${repo.repo}`, where: "guarded" }
-    if (policy.anyWrite)
+    if (state().policy.anyWrite)
       return CONVERSATION_TOOL.test(name) ? undefined : refuseAny(what, target, "")
   }
-  const hit = strings(input).map(policy.find).find(Boolean)
+  const hit = strings(input).map(state().policy.find).find(Boolean)
   if (hit) return refuse(what, target, `its text holds ${hit.detail}`, hit.fix)
 }
 
 // The cheap first look, made with quotes and backslashes gone so `g\it` or `cu''rl` still counts.
 function candidate(command: string): boolean {
-  const maybe = policy.anyWrite ? MAYBE_ANY : MAYBE
+  const maybe = state().policy.anyWrite ? MAYBE_ANY : MAYBE
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""))
 }
 
@@ -1504,8 +1536,6 @@ export async function check(
     join(lists, "slack-cleared.json"),
   )
   if (loadedCleared.refusal !== undefined) return refusedList(raw, loadedCleared.refusal)
-  CLEARED = loadedCleared.list
-  TERM = loadedTerms.pattern
   const read = await readPolicy(dataDir(environment))
   if (read.refusal !== undefined)
     return refusedList(
@@ -1516,7 +1546,12 @@ export async function check(
   const gates = orgs.flatMap((org) =>
     gateOf(org, readPolicySync(dataDir(environment), org).settings?.values ?? {}),
   )
-  return inspectAs({ ...leakPolicy(new Set(orgs)), gates }, raw, environment)
+  return inspectAs(
+    { ...leakPolicy(new Set(orgs), loadedTerms.pattern), gates },
+    raw,
+    environment,
+    loadedCleared.list,
+  )
 }
 
 // An org's declared gate, none when it declares none, or why its declaration does not read.
@@ -1545,23 +1580,22 @@ export async function inspectAs(
   given: Policy,
   raw: string,
   environment: Environment,
+  cleared: Cleared = {},
 ): Promise<string | undefined> {
-  policy = given
-  changed = false
-  moved = false
-  movedBefore = false
-  startCwd = undefined
-  try {
-    return await inspect(raw, environment)
-  } catch (error) {
-    const subject = subjectOf(raw)
-    // Under anyWrite a call that may write is refused whatever it names, since an error it caused may hide where it writes.
-    const writes = WRITE_CALL.test(subject) || (policy.anyWrite && candidate(subject))
-    if (!writes || (!policy.anyWrite && !policy.find(subject))) return
-    if (policy.anyWrite)
-      return `${policy.guard} hook refused this call: it could not read it (${error}), so it cannot tell whether it is ${policy.what}. Split it into plain commands and run them again.`
-    return `${policy.guard} hook could not read this call (${error}), which may carry ${policy.what} to ${policy.place}, so it refuses it. Split it into plain commands and run them again.`
-  }
+  const call: Call = { changed: false, cleared, moved: false, movedBefore: false, policy: given }
+  return await calls.run(call, async () => {
+    try {
+      return await inspect(raw, environment)
+    } catch (error) {
+      const subject = subjectOf(raw)
+      // Under anyWrite a call that may write is refused whatever it names, since an error it caused may hide where it writes.
+      const writes = WRITE_CALL.test(subject) || (given.anyWrite && candidate(subject))
+      if (!writes || (!given.anyWrite && !given.find(subject))) return
+      if (given.anyWrite)
+        return `${given.guard} hook refused this call: it could not read it (${error}), so it cannot tell whether it is ${given.what}. Split it into plain commands and run them again.`
+      return `${given.guard} hook could not read this call (${error}), which may carry ${given.what} to ${given.place}, so it refuses it. Split it into plain commands and run them again.`
+    }
+  })
 }
 
 // What an error is judged by: the Bash command, or the tool's name and input, never its cwd.
@@ -1586,12 +1620,12 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
     payload = undefined
   }
   if (typeof payload !== "object" || payload === null) {
-    return WRITE_CALL.test(raw) && policy.find(raw)
-      ? `${policy.guard} hook could not parse its input, which may carry ${policy.what} to ${policy.place}, so it refuses the call.`
+    return WRITE_CALL.test(raw) && state().policy.find(raw)
+      ? `${state().policy.guard} hook could not parse its input, which may carry ${state().policy.what} to ${state().policy.place}, so it refuses the call.`
       : undefined
   }
   const { cwd, tool_input: toolInput, tool_name: tool } = payload as Record<string, unknown>
-  startCwd = typeof cwd === "string" ? cwd : undefined
+  state().startCwd = typeof cwd === "string" ? cwd : undefined
   const input =
     typeof toolInput === "object" && toolInput !== null
       ? (toolInput as Record<string, unknown>)
