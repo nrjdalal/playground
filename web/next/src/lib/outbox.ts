@@ -512,7 +512,8 @@ export function statusLine(
 ): string {
   switch (message.state) {
     case "sending":
-      return "Sending…"
+      // a held message read again keeps its held words, as it keeps its one tick (statusMark)
+      return message.code === QUEUED ? `Queued: ${queuedWhy(message, limited)}` : "Sending…"
     case "queued":
       if (message.reason) return `Queued: ${queuedWhy(message, limited) ?? message.reason}`
       return next ? "Sending…" : "Queued: waiting its turn"

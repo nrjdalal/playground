@@ -932,6 +932,20 @@ describe("statusMark", () => {
   test("a message Claude Code holds stays on one tick until its transcript holds it", () => {
     expect(statusMark(message("a", { code: "QUEUED", state: "queued" }))).toBe("typed")
     expect(statusMark(message("a", { code: "QUEUED", state: "sending" }))).toBe("typed")
+    // read again every QUEUED_POLL_MS, its words stay the held ones beside its tick, never Sending
+    const opts = { busy: true, label: "dispatcher", next: true }
+    let list = outboxReducer([message("a")], { id: "a", type: "sending" })
+    const held = {
+      code: "QUEUED",
+      message: "dispatcher has the message or takes it once it is free",
+    }
+    list = outboxReducer(list, onRefusal(list[0]!, held, "dispatcher", 0))
+    const words = statusLine(list[0]!, opts)
+    expect(words).toContain("has it, or takes it once free")
+    list = outboxReducer(list, { id: "a", type: "sending" })
+    expect(list[0]).toMatchObject({ code: "QUEUED", state: "sending" })
+    expect(statusMark(list[0]!)).toBe("typed")
+    expect(statusLine(list[0]!, opts)).toBe(words)
     // its line has landed while its try still runs: delivered, as the bubble it now shows on is
     for (const state of ["queued", "sending"] as const) {
       expect(statusMark(message("a", { code: "QUEUED", entryId: "e1", state }))).toBe("delivered")
