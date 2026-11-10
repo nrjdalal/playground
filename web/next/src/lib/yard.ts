@@ -53,6 +53,10 @@ export const approveHref = (message: Pick<YardMessage, "id">, hosted: boolean) =
 export const channelTitle = (channel: Pick<YardChannel, "kind" | "name" | "peer">) =>
   channel.kind === "dm" ? (channel.peer?.login ?? "Direct message") : `#${channel.name}`
 
+// Whether a message is yours, by Yard's login, which GitHub keeps case-blind; before Yard says who you are, none is.
+export const isMine = (message: Pick<YardMessage, "from">, me: { login: string } | undefined) =>
+  me !== undefined && message.from.login.toLowerCase() === me.login.toLowerCase()
+
 // The sidebar's two groups, each in the API's order: the channels you have joined (the API lists every one), and every DM.
 export const yardGroups = (channels: YardChannel[]) => ({
   channels: channels.filter((channel) => channel.kind === "channel" && channel.joined),

@@ -91,3 +91,11 @@ export const localYardRouter = new Hono<{ Variables: Session }>()
     doc("Marks a channel read up to now", z.object({ lastReadAt: z.iso.datetime() })),
     async (c) => c.json({ data: await yard.read(c.req.param("id")) }),
   )
+  .get(
+    "/me",
+    doc(
+      "Who this Mac's token is on Yard: its login, and whether it is the owner",
+      z.object({ login: z.string(), owner: z.boolean() }),
+    ),
+    async (c) => c.json({ data: await yard.me() }),
+  )

@@ -22,7 +22,7 @@ describe("Yard's composer", () => {
     const source = await read("yard/channel-view.tsx")
     const page = (path: string) =>
       Bun.file(join(import.meta.dir, "../../../../../../web/next/src/app", path)).text()
-    expect(source).toContain('shell === "yard" && "max-md:pb-26"')
+    expect(source).toContain('shell === "yard" && "max-md:mb-26"')
     expect(await page("(protected)/dashboard/yard/[id]/page.tsx")).toContain('shell="dashboard"')
     expect(await page("(yard)/yard/(app)/c/[id]/page.tsx")).toContain('shell="yard"')
   })
@@ -33,6 +33,40 @@ describe("Yard's composer", () => {
     const composer = source.slice(source.indexOf("function YardComposer"))
     expect(source).toContain('import { HOLDS_RELOAD } from "@/lib/build-reload"')
     expect(composer).toMatch(/<form\s+\{\.\.\.\{ \[HOLDS_RELOAD\]: "" \}\}/)
+  })
+})
+
+// a channel takes the dashboard chat's layout, read from the chat's own files, so the two keep one convention (the design skill's Chat layout)
+describe("A channel's layout", () => {
+  const flat = async (path: string) => (await read(path)).replace(/\s+/g, " ")
+  const pageBox = (source: string) =>
+    source.match(/<PageShell size="full" className="(flex h-full flex-col py-0[^"]*)"/)?.[1]
+
+  test("sits in the chat's page box, with its gutter and no top or bottom padding", async () => {
+    const chat = pageBox(await flat("dashboard/dashboard-view.tsx"))
+    expect(chat).toBeString()
+    expect(pageBox(await flat("yard/channel-view.tsx"))).toBe(chat)
+  })
+
+  test("spaces its rows as the chat does, 16px apart with 36px under the last, in the chat's scroller gutter", async () => {
+    const chat = await flat("dashboard/worker-stream.tsx")
+    const yard = await flat("yard/channel-view.tsx")
+    const scroller = '<MessageScroller className="-mx-1 min-h-0 w-auto flex-1">'
+    expect(chat).toContain("grow gap-4 pb-9")
+    expect(yard).toContain('<MessageScrollerContent className="gap-4 pt-3 pb-9">')
+    expect(chat).toContain(scroller)
+    expect(yard).toContain(scroller)
+  })
+
+  test("rests its composer 8px above the bottom, as the chat's does", async () => {
+    expect(await flat("dashboard/composer.tsx")).toContain('<FieldGroup className="mb-2">')
+    expect(await flat("yard/channel-view.tsx")).toContain('cn("mb-2", shell === "yard"')
+  })
+
+  test("puts your own post on the right in the chat's bubble and every other member's on the left", async () => {
+    const yard = await flat("yard/channel-view.tsx")
+    expect(yard).toContain("mine={isMine(message, me)}")
+    expect(yard).toContain('variant={mine ? "default" : "muted"}')
   })
 })
 
