@@ -7698,6 +7698,7 @@ function orgScript(parsed, env) {
       fix: FOLDER_FIX,
       why: "the hook cannot tell which script it runs, since it runs in a folder a value it cannot read names"
     };
+  at = realOf(at);
   const scripts = packageScripts(at);
   for (const a of args) {
     if (a.value.startsWith("-") || unreadValue(a))

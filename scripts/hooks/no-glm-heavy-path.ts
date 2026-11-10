@@ -486,6 +486,8 @@ function orgScript(parsed: Parsed, env: Env): { fix?: string; why: string } | un
       fix: FOLDER_FIX,
       why: "the hook cannot tell which script it runs, since it runs in a folder a value it cannot read names",
     }
+  // the folder's real form, so a link to an org script's package reads as the package itself
+  at = realOf(at)
   const scripts = packageScripts(at)
   for (const a of args) {
     if (a.value.startsWith("-") || unreadValue(a)) continue
