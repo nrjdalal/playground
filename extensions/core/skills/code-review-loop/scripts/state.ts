@@ -583,12 +583,12 @@ const skipQuoted = (text: string, from: number, close: string): number => {
   }
   return -1
 }
-const afterOpen = (text: string, from: number): string => {
+const charBefore = (text: string, from: number): string => {
   let j = from
   while (j > 0 && /\s/.test(text.charAt(j - 1))) j -= 1
   return text.charAt(j - 1)
 }
-// A scan word counts only where the test calls it, so what a string merely holds comes out before the regexes read: a string inside an [ ... ] argv, a $-tagged shell line and a string or template straight after ( are call shapes and stay whole, a value string or an untagged template is prose and its text goes, and a quote or template pairs on its own line alone, so a stray backtick in a regex or a comment cannot swallow one (PG-1651's reviewer, PG-1661, PG-1708's round 1)
+// A scan word counts only where the test calls it, so what a string merely holds comes out before the regexes read: a string or template is kept by default and dropped only when it opens a value, straight after = : + ? or >, so fixture strings quoting readdirSync read as no scanner while a call, an argv element or a regex literal reads as one, and a quote or template pairs on its own line alone, so a stray backtick in a comment cannot swallow one (PG-1651's reviewer, PG-1661, PG-1708's rounds 1 and 2)
 const stripValues = (text: string): string => {
   let out = ""
   let depth = 0
@@ -604,8 +604,8 @@ const stripValues = (text: string): string => {
       out += c
       i += 1
     } else if (c === "`" || c === '"' || c === "'") {
-      const prev = afterOpen(text, i)
-      const keeps = depth > 0 || prev === "(" || prev === "$"
+      const prev = charBefore(text, i)
+      const keeps = depth > 0 || !["=", ":", "+", "?", ">"].includes(prev)
       const end = skipQuoted(text, i + 1, c)
       if (end < 0) {
         out += c
