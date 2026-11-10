@@ -108,8 +108,8 @@ test("on AC, a charge that falls reads as falling: pmset's discharging word, or 
   expect(batteryOf(AC_NOT_CHARGING(5), { ac: true, falling: false, pct: 5 }).falling).toBe(false)
   expect(batteryOf(AC_NOT_CHARGING(5), { ac: true, falling: true, pct: 4 }).falling).toBe(false)
   expect(batteryOf(CHARGING(4), { ac: true, falling: true, pct: 4 }).falling).toBe(false)
-  // a plug-in starts AC's trend afresh rather than carrying the battery's
-  expect(batteryOf(AC_NOT_CHARGING(4), { ac: false, falling: true, pct: 4 }).falling).toBe(false)
+  // a plug-in into a charger losing to the load keeps the battery's fall, since only a rise or the charging word ends it
+  expect(batteryOf(AC_NOT_CHARGING(4), { ac: false, falling: true, pct: 4 }).falling).toBe(true)
 })
 
 describe("the red mark on a charger losing to the load, and the pause", () => {
@@ -181,6 +181,24 @@ describe("the red mark on a charger losing to the load, and the pause", () => {
     await mac.check(1_120_000)
     expect(mac.pause()).not.toBeNull()
     mac.set(AC_NOT_CHARGING(5))
+    await mac.check(1_180_000)
+    expect(mac.pause()).toBeNull()
+  })
+
+  test("plugged into a losing charger at the red mark, the pause stands and nothing posts or closes until the charge rises", async () => {
+    const mac = machine("plug-in")
+    mac.set(ON_BATTERY(4))
+    await mac.check(1_000_000)
+    expect(mac.calls.map((c) => c.args[0])).toEqual(["new", "new"])
+    mac.calls.length = 0
+    mac.set(AC_NOT_CHARGING(4))
+    await mac.check(1_060_000)
+    mac.set(AC_NOT_CHARGING(3))
+    await mac.check(1_120_000)
+    expect(mac.calls).toEqual([])
+    expect(mac.pause()).not.toBeNull()
+    expect(mac.kept()).toEqual({ alert: ID(2), ask: ID(1) })
+    mac.set(CHARGING(3))
     await mac.check(1_180_000)
     expect(mac.pause()).toBeNull()
   })
@@ -261,9 +279,9 @@ test("back on power, an approved ask is acked, the alert resolved by its poster,
   await mac.check()
   expect(mac.calls.map((c) => c.args)).toEqual([
     ["get", ID(1), "--ack"],
-    ["ack", ID(1), "--no-link", "The Mac is back on power"],
+    ["ack", ID(1), "--no-link", "The Mac's charge has stopped falling"],
     ["get", ID(2), "--ack"],
-    ["resolve", ID(2), "--by", "b7k2mq-ops", "--note", "The Mac is back on power"],
+    ["resolve", ID(2), "--by", "b7k2mq-ops", "--note", "The Mac's charge has stopped falling"],
   ])
   expect(mac.kept()).toEqual({})
 })
@@ -278,7 +296,7 @@ test("back on power, an open ask is settled", async () => {
   await mac.check()
   expect(mac.calls.map((c) => c.args)).toEqual([
     ["get", ID(1), "--ack"],
-    ["settle", ID(1), "--note", "The Mac is back on power"],
+    ["settle", ID(1), "--note", "The Mac's charge has stopped falling"],
   ])
 })
 

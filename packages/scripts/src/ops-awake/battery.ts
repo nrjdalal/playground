@@ -9,7 +9,7 @@ import type { Run } from "../ops-tick/tick"
 
 export const ORANGE = 10
 export const RED = 5
-const BACK = "The Mac is back on power"
+const BACK = "The Mac's charge has stopped falling"
 const RETRY_MS = 15 * 60_000
 // the pause's fail-safe: each check at the red mark pushes its expiry on, so it lapses only once ops-awake has stopped
 const PAUSE_MS = 10 * 60_000
@@ -18,7 +18,7 @@ const PAUSED = "heavy runs wait until the charge rises"
 export type Reading = { ac: boolean; falling: boolean; pct: number | null }
 export type BatteryState = { alert?: string; ask?: string; failedAt?: number; reading?: Reading }
 
-// Pure: pmset -g batt's answer as its power source, its charge, and whether the charge falls. On AC a charger losing to the load shows no state word of its own, so a charge lower than the last check's, with no charging word, falls; pmset gives whole percents, so a reading level with the last keeps the last's trend.
+// Pure: pmset -g batt's answer as its power source, its charge, and whether the charge falls. On AC a charger losing to the load shows no state word of its own, so a charge lower than the last check's, on either source, with no charging word, falls; pmset gives whole percents, so a reading level with the last keeps the last's trend.
 export const batteryOf = (pmset: string, last?: Reading): Reading => {
   const word = /(\d+)%;/.exec(pmset)
   const pct = word ? Number(word[1]) : null
@@ -26,7 +26,7 @@ export const batteryOf = (pmset: string, last?: Reading): Reading => {
   let falling = false
   if (/\bdischarging\b/.test(pmset)) falling = true
   else if (/;\s*(charging|charged|finishing charge)\b/.test(pmset)) falling = false
-  else if (ac && last?.ac && pct !== null && last.pct !== null)
+  else if (ac && last && pct !== null && last.pct !== null)
     falling = pct === last.pct ? last.falling : pct < last.pct
   return { ac, falling, pct }
 }
@@ -55,7 +55,7 @@ type Item = {
   status?: string
 }
 
-// The ask call that closes a battery item back on power; null for one already closed, undefined for an item that did not read.
+// The ask call that closes a battery item once the charge stops falling; null for one already closed, undefined for an item that did not read.
 const closingCall = (id: string, item: Item): string[] | null | undefined => {
   // the red alert is an update, posted at status done, which only its poster's resolve closes
   if (item.kind === "update" && item.from)
