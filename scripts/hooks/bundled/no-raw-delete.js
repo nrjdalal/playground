@@ -2014,7 +2014,7 @@ var DATA = new Set([
   "sed"
 ]);
 var isData = (name) => DATA.has(name) || /^python[\d.]*$/.test(name);
-var scriptStaysText = (cmd, args, browserOnly) => (browserOnly.has(cmd) || !!cmd.bareOf && browserOnly.has(cmd.bareOf)) && args[0]?.value === "eval";
+var scriptStaysText = (cmd, args, browserOnly) => browserOnly.has(cmd) && args[0]?.value === "eval";
 var STARTERS = new Set(["screen", "tmux"]);
 var RM = new Set(["grm", "rm"]);
 var DEL = new Set(["del", "del-cli"]);

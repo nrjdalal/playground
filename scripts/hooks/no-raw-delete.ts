@@ -67,10 +67,9 @@ const DATA = new Set([
   "sed",
 ])
 const isData = (name: string) => DATA.has(name) || /^python[\d.]*$/.test(name)
-// agent-browser's eval runs its script as JavaScript in the page, so its words stay text, but only as one of the call's own commands on a call made of bare agent-browser commands alone, where no function, alias, hash or PATH can stand in for it
+// agent-browser's eval runs its script as JavaScript in the page, so its words stay text, as one of the call's own commands on a call made of bare agent-browser commands alone
 const scriptStaysText = (cmd: Command, args: Word[], browserOnly: Set<Command>) =>
-  (browserOnly.has(cmd) || (!!cmd.bareOf && browserOnly.has(cmd.bareOf))) &&
-  args[0]?.value === "eval"
+  browserOnly.has(cmd) && args[0]?.value === "eval"
 // Programs that run the command their arguments name, read here at each word that does not start with a dash.
 const STARTERS = new Set(["screen", "tmux"])
 // rm under its own name and GNU rm's Homebrew name.
