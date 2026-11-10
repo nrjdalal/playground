@@ -68,24 +68,28 @@ const subshells = (trace: string) => {
   }
   return n
 }
-// the processes the waiters started together each second over `window` seconds, once each has printed its first wait line and a whole poll has passed in which each is in its sleep and no queue waiter began a look (look_mark, which the clone loop never calls), since a waiter whose first look ran before the others had joined looks once more at them
+// whether a waiter has ended its last look: a sleep follows its last look_mark, or it has none (the clone loop never calls look_mark)
+const settled = (trace: string) => {
+  const at = trace.lastIndexOf(" look_mark\n")
+  return at < 0 || /^\+0 sleep \S+$/m.test(trace.slice(at))
+}
+// whether a whole poll ran in this part of a trace: a sleep, the wake after it, and the next sleep
+const polled = (trace: string) =>
+  /^\+0 sleep \S+$[\s\S]*?^\+0 (?!sleep )[\s\S]*?^\+0 sleep \S+$/m.test(trace)
+// the processes the waiters started together each second over `window` seconds, once each has printed its first wait line and then a round has passed that began with no look under way, in which each waiter ran a whole poll and none began a look, since a waiter whose first look ran before the others had joined looks once more at them; a round of a fixed poll's length ended before a loaded Mac woke the waiters, so their look at the oldest's first run-slot.next landed in the window (issue 1612, measured)
 const starts = async (
   count: string,
   waiters: Waiter[],
   waits: RegExp,
-  poll: number,
   window: number,
   during: () => Promise<unknown> = async () => {},
 ) => {
   for (const w of waiters) while (!waits.test(w.err)) await Bun.sleep(50)
   for (let quiet = false; !quiet;) {
     const at = waiters.map((w) => w.err.length)
-    await Bun.sleep((poll + 1) * 1000)
-    quiet = waiters.every(
-      (w, i) =>
-        !/^\++\d+ look_mark$/m.test(w.err.slice(at[i])) &&
-        /^\+0 sleep \S+$/.test(w.err.match(/^\+0 .*$/gm)?.at(-1) ?? ""),
-    )
+    const idle = waiters.every((w) => settled(w.err))
+    while (!waiters.every((w, i) => polled(w.err.slice(at[i])))) await Bun.sleep(50)
+    quiet = idle && waiters.every((w, i) => !/^\++\d+ look_mark$/m.test(w.err.slice(at[i])))
   }
   const from = waiters.map((w) => w.err.length)
   const before = readFileSync(count, "utf8").split("\n").length
@@ -115,7 +119,7 @@ describe("waiters cost close to nothing while they wait", () => {
     const waiters = Array.from({ length: 10 }, (_, i) =>
       waiter(m, path, `worker-${i}`, ["touch"], { RUN_SLOT_POLL: "15" }),
     )
-    expect(await starts(count, waiters, new RegExp(WAITING.source, "m"), 15, 30)).toBeLessThan(5)
+    expect(await starts(count, waiters, new RegExp(WAITING.source, "m"), 30)).toBeLessThan(5)
   })
 
   // a count of polls to look again on (an older copy's 20) sets each waiter looking within the window, about 900 to 2,200 processes a look with ten tickets
@@ -139,9 +143,9 @@ describe("waiters cost close to nothing while they wait", () => {
         ops: m.ops,
       }).exited
     }
-    expect(
-      await starts(count, waiters, new RegExp(WAITING.source, "m"), 1, 25, slots),
-    ).toBeLessThan(20)
+    expect(await starts(count, waiters, new RegExp(WAITING.source, "m"), 25, slots)).toBeLessThan(
+      20,
+    )
   })
 
   test("and so do ten clone waiters behind the load brake", async () => {
@@ -151,7 +155,7 @@ describe("waiters cost close to nothing while they wait", () => {
     const waiters = Array.from({ length: 10 }, (_, i) =>
       waiter(m, path, `worker-${i}`, ["cp", "-R", "node_modules"], { RUN_SLOT_POLL: "5" }),
     )
-    expect(await starts(count, waiters, /^run-slot\.sh: this clone waits /m, 5, 10)).toBeLessThan(5)
+    expect(await starts(count, waiters, /^run-slot\.sh: this clone waits /m, 10)).toBeLessThan(5)
   })
 })
 
