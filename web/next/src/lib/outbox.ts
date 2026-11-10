@@ -525,18 +525,21 @@ export function statusLine(
   }
 }
 
-// The mark his footer draws for a message, one at a time in one fixed-width slot: a spinner until the session's transcript holds it, then one tick, or a red mark when it failed; statusLine's words are its hover and its screen-reader text.
-export type StatusMarkKind = "delivered" | "failed" | "sending"
+// The mark his footer draws for a message, one at a time in one fixed-width slot: a spinner until the session has it, one tick once typed into it or held by Claude Code (QUEUED), a double tick once its transcript holds it, or a red mark when it failed; statusLine's words are its hover and its screen-reader text.
+export type StatusMarkKind = "delivered" | "failed" | "sending" | "typed"
 
 export const statusMark = ({
+  code,
   entryId,
   state,
-}: Pick<OutboxMessage, "entryId" | "state">): StatusMarkKind =>
+}: Pick<OutboxMessage, "code" | "entryId" | "state">): StatusMarkKind =>
   state === "failed"
     ? "failed"
     : state === "delivered" || entryId !== null
       ? "delivered"
-      : "sending"
+      : state === "typed" || code === QUEUED
+        ? "typed"
+        : "sending"
 
 // The one action his pending message's footer offers in its slot: Unsend while it waits here, Dismiss once typed into an idle session and held a moment (typedHeld); none while Claude Code holds it, since it goes on its own.
 export const pendingAction = (
