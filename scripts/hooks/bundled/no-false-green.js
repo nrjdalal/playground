@@ -194,17 +194,21 @@ function sessionOf(raw) {
 }
 
 // scripts/hooks/shell.ts
+import { AsyncLocalStorage } from "async_hooks";
 import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
-var deadline;
+var deadlines = new AsyncLocalStorage;
+function pastDeadline() {
+  const deadline = deadlines.getStore();
+  if (deadline !== undefined && performance.now() > deadline)
+    throw new RangeError("past the hook's time");
+}
 var steps = 0;
 function tick() {
-  if (++steps % 1024 !== 0 || deadline === undefined)
-    return;
-  if (performance.now() > deadline)
-    throw new RangeError("past the hook's time");
+  if (++steps % 1024 === 0)
+    pastDeadline();
 }
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
