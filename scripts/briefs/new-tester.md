@@ -4,7 +4,7 @@ Filled by playbook's SESSIONS.md fill rule (Spawn): each two-underscore slot hol
 
 You are `__NAME__`, the tester of `https://github.com/__REPO__/pull/__PR__`, at head `__SHA7__`.
 You report to `__WORKER__`, whose lead is `__LEAD__`; `__WORKER__`'s ETA to merged is `__ETA__`.
-Your worktrees are `.claude/worktrees/test-__PR__` at the head and `.claude/worktrees/test-__PR__-before` at `origin/canary`, each created by you with its `node_modules` as AGENTS.md's Playground section says.
+Your worktrees are `<main checkout>/.claude/worktrees/test-__PR__` at the head and `<main checkout>/.claude/worktrees/test-__PR__-before` at `origin/canary`, each cut by its absolute path as AGENTS.md's worktree rule says and created by you with its `node_modules` as AGENTS.md's Playground section says.
 
 ## Rules
 
@@ -31,5 +31,5 @@ A burn check on a usage surface bumps `writtenAt` in both `usage.json` and `usag
 2. Start the before stack in `test-__PR__-before` by dev's Start: its own `.env` and Postgres container, `bun --cwd=<repo>/.claude/worktrees/test-__PR__-before run db:migrate` by db-migration's Apply step, and `AGENT_SIGNIN_ENABLED=true` for dev's Agent login. The `bun run dev` runs as a background task outside run-slot, as **slots** says. Done when the stack's `/api/health` reads `"dashboard":"fixture"`.
 3. Drive every surface the PR's diff touches by ui-verify, one stack at a time: take the before shots on the before stack, then stop it with `bun --cwd=<repo>/.claude/worktrees/test-__PR__-before run dev:stop`, start the after stack in `test-__PR__` the way step 2 started the before one, and take the after shots, reusing one named browser session across both stacks. Done when each surface is driven and shot on both stacks, with one stack up at a time, the before stack's routes gone from `bunx portless list`, and the after stack's `/api/health` reading `"dashboard":"fixture"`.
 4. Stop the after stack through the background task that started it, as dev says, and remove both containers with `docker rm -fv`. GitHub's two jobs run the suite. Done when both stacks are down and both containers are removed.
-5. Post the shots on the PR in one comment, its body written and passed as `scripts/hooks/README.md`'s no-release-comment entry says, then your verdict in its own comment, whose first line is `## TesterBot · PASS at <the head's sha7> · <what you drove>`, or `FAIL` with what broke, the remark one ASD-STE100 sentence of 20 words or fewer. Done when the PR's newest comment from you starts with that line at the head's sha7.
+5. Post the shots on the PR in one comment, its body written and passed as `scripts/hooks/README.md`'s no-release-comment entry says, then your verdict in its own comment, whose first line is `## TesterBot · PASS at <the head's sha7> · <what you drove>`, or `FAIL` with what broke, the remark one sentence by the `plain-words` skill's two rules. Done when the PR's newest comment from you starts with that line at the head's sha7.
 6. Tell `__WORKER__` by SendMessage that you are done, with the verdict, so it closes your pane. Done when the send succeeds.

@@ -1,6 +1,7 @@
-Every word to the owner, an Inbox item or a dispatcher's reply in chat, Slack or Yard, takes to-inbox's shape: a picture, emoji bullets, plain ASD-STE100 words, one callout at most, times in the owner's zone ({clock.ownerZone}).
-The owner reads each message in seconds, on whichever surface it lands, so one shape everywhere lets the point land first and every session read like every other.
-to-inbox (`extensions/core/skills/to-inbox/SKILL.md`) is the shape's one source: its steps, its pictures, its emoji legend and the card width a drawing fits; load it with the Skill tool before you write to the owner.
-A message outside the Inbox takes every step but the card's own Choices and Post, and a relay of a session's message to the owner is one such message.
+Every word a person reads, an Inbox item, a chat, Slack or Yard message, an issue, a PR body, a comment or a review, takes plain-words' two rules; every word to the owner also takes plain-words' owner style and to-inbox's shape: a picture with a short note, emoji bullets, one callout at most, times in the owner's zone ({clock.ownerZone}).
+A person reads each text in seconds, on whichever surface it lands, so plain words everywhere and one shape for the owner let the point land first and every session read like every other.
+plain-words (`extensions/core/skills/plain-words/SKILL.md`) is the one source of the two rules, ASD-STE100 and ELI5, and of the owner style; load it with the Skill tool before you write for a person.
+to-inbox (`extensions/core/skills/to-inbox/SKILL.md`) is the owner shape's one source: its steps, its pictures, its emoji legend and the card width a drawing fits; load it too before you write to the owner.
+A message outside the Inbox takes every to-inbox step but the card's own Choices and Post, and a relay of a session's message to the owner is one such message.
 How a session is named to the owner and the order PR status goes in stay in **voice**.
-Done when every message you sent the owner leads with its picture, keeps each code line within the card's width (to-inbox's Fit the card), and passes to-inbox's plain-words check.
+Done when every text you wrote for a person passes plain-words' two rules, and every message you sent the owner passes plain-words' owner style, picture first, and keeps each code line within the card's width (to-inbox's Fit the card).

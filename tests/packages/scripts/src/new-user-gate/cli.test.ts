@@ -19,7 +19,10 @@ import {
   leftForYou,
   makeBox,
   report,
+  resultLine,
   scriptsGroup,
+  STEP_COUNT,
+  type Step,
   strayStandIns,
   usageWords,
   zshStartup,
@@ -174,5 +177,37 @@ describe("the gate's stand-ins preflight", () => {
     expect(zshStartup(box)).toContain(
       `export PLAYGROUND_USAGE_API=file://${join(box, "usage-api")}\n`,
     )
+  })
+})
+
+describe("the gate's last line, which ship:merge reads (#1659)", () => {
+  const SHA = "a11fb8850c8304a91ab714b2ff46ad89fe7411a7"
+  const step = (name: string, ok: boolean, inconclusive?: boolean): Step => ({
+    detail: "",
+    name,
+    ok,
+    ...(inconclusive && { inconclusive }),
+  })
+  const all = () => Array.from({ length: STEP_COUNT }, (_, i) => step(`step ${i + 1}`, true))
+
+  test("a run that reached every step with none reading FAIL reads PASS, an INCONCLUSIVE step included", () => {
+    expect(resultLine(SHA, all())).toBe(`New-user gate at ${SHA}: PASS`)
+    const unsure = [...all().slice(1), step("Usage", false, true)]
+    expect(resultLine(SHA, unsure)).toBe(`New-user gate at ${SHA}: PASS`)
+  })
+
+  test("a step reading FAIL, or a run that stopped short of its last step, reads FAIL", () => {
+    expect(resultLine(SHA, [...all().slice(1), step("Usage", false)])).toBe(
+      `New-user gate at ${SHA}: FAIL`,
+    )
+    expect(resultLine(SHA, [])).toBe(`New-user gate at ${SHA}: FAIL`)
+    expect(resultLine(SHA, all().slice(1))).toBe(`New-user gate at ${SHA}: FAIL`)
+  })
+
+  test("STEP_COUNT is the number of steps main checks", async () => {
+    const source = await Bun.file(
+      join(import.meta.dir, "../../../../../packages/scripts/src/new-user-gate/cli.ts"),
+    ).text()
+    expect(source.match(/\bawait check\((?!\))/g)?.length).toBe(STEP_COUNT)
   })
 })
