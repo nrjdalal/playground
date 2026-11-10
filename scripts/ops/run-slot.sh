@@ -1623,11 +1623,16 @@ focus_holds() {
   h=$(focus_holder) || return 1
   ! focus_spares "$h" "$WHO"
 }
-focus_wait() {
+# the wait under the battery's red mark or focus, its line naming the battery's first
+hold_wait() {
   waited=$((SECONDS - WAIT_FROM))
   # each wait line prints at its first poll, its threshold 0, and again each time the clock's waited count crosses the next 300 s mark, whatever the poll slept
   if [ "$waited" -ge "$FAT" ]; then
-    echo "run-slot.sh: waiting for $(focus_holder)'s focus to end (run-slot.focus, until $(cut -d' ' -f3 "$OPS/run-slot.focus" 2>/dev/null))" >&2
+    if battery_holds; then
+      echo "run-slot.sh: waiting for the Mac's charge to rise (run-slot.battery, which ops-awake lifts once it does)" >&2
+    else
+      echo "run-slot.sh: waiting for $(focus_holder)'s focus to end (run-slot.focus, until $(cut -d' ' -f3 "$OPS/run-slot.focus" 2>/dev/null))" >&2
+    fi
     FAT=$(((waited / 300 + 1) * 300))
   fi
   sleep "$POLL"
@@ -1636,14 +1641,6 @@ focus_wait() {
 battery_holds() {
   switch_on run-slot.battery || return 1
   case "$WHO" in ops-dashboard | ops-tick) return 1 ;; esac
-}
-battery_wait() {
-  waited=$((SECONDS - WAIT_FROM))
-  if [ "$waited" -ge "$FAT" ]; then
-    echo "run-slot.sh: waiting for the Mac's charge to rise (run-slot.battery, which ops-awake lifts once it does)" >&2
-    FAT=$(((waited / 300 + 1) * 300))
-  fi
-  sleep "$POLL"
 }
 prio_for() { local h; h=$(prio_holder) && [ -n "$h" ] && [ "$(owner_of "$1")" = "$h" ]; }
 # the oldest live ticket the priority holder owns, its worktree's commit steps' included: the one of its tickets that skips the queue, so its runs go in the order it asked for them (4 Nov: a merge asked later took a slot before the same session's older merge)
@@ -2211,7 +2208,7 @@ if [ -n "$KIND" ]; then
   while [ "$KIND" != quick ] && { battery_holds || focus_holds; }; do
     [ -z "$CLONE_TICKET" ] || rm -f "$CLONE_TICKET"
     reread
-    if battery_holds; then battery_wait; else focus_wait; fi
+    hold_wait
   done
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:
   # the waiter ran its command with no slot), so each wait checks it ended as it should, and the waiter stops when it did not
@@ -2412,12 +2409,8 @@ while :; do
     continue
   fi
   # under the battery's red mark or focus a run keeps its place in the queue and takes no slot
-  if battery_holds; then
-    battery_wait
-    continue
-  fi
-  if focus_holds; then
-    focus_wait
+  if battery_holds || focus_holds; then
+    hold_wait
     continue
   fi
   # this run's own units must fit beside what the slots hold now (the queue's order checked them for a waiter at its head)
