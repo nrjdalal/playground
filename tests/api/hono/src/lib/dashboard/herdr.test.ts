@@ -1,10 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
   answerKeys,
+  bringsBack,
   FIXTURE_SOCKET,
   HerdrDown,
   herdrEvents,
@@ -24,6 +33,7 @@ import {
   readScreen,
   readServer,
   request,
+  restoring,
   RESUBSCRIBE,
   showsAsk,
   typeKeys,
@@ -1245,5 +1255,121 @@ describe("a script's key into a pane or answer to a prompt", () => {
       "packages/scripts/src/playground/picker.ts",
       "scripts/ops/unstick/run.py",
     ])
+  })
+})
+
+// #1682: ops-herdr keeps <server>.restore beside the server's socket from its start until no session its restore owes waits on a gate or focus, and writes each restore's lines to <server>.restore.log, so the home reads whether this restore can still bring the dispatcher back.
+describe("bringsBack", () => {
+  const at = Date.parse("2026-11-10T18:14:47Z")
+  const minute = 60_000
+  const ran = (log: string, logAt = at + minute) =>
+    bringsBack({ dispatcher: "dispatcher", log, logAt, now: logAt + 1000, owedAt: at })
+
+  test("before the restore's first run since the owe, for up to 5 minutes, so a start or restore that never runs gives Start back", () => {
+    const owed = { dispatcher: "dispatcher", log: "", logAt: null, owedAt: at }
+    expect(bringsBack({ ...owed, now: at + 4 * minute })).toBe(true)
+    expect(bringsBack({ ...owed, now: at + 6 * minute })).toBe(false)
+    const older = { ...owed, log: "restored dispatcher\n", logAt: at - minute }
+    expect(bringsBack({ ...older, now: at + minute })).toBe(true)
+    expect(bringsBack({ ...older, now: at + 6 * minute })).toBe(false)
+  })
+
+  test("while the dispatcher waits, or for 2 minutes after it was restored, as its pane comes up", () => {
+    expect(
+      ran("waiting dispatcher: focus holds it\nwaiting a-worker: the load gate holds it\n"),
+    ).toBe(true)
+    expect(ran("restored dispatcher\nwaiting a-worker: the load gate holds it\n")).toBe(true)
+    const restored = {
+      dispatcher: "dispatcher",
+      log: "restored dispatcher\n",
+      logAt: at,
+      owedAt: at,
+    }
+    expect(bringsBack({ ...restored, now: at + 3 * minute })).toBe(false)
+  })
+
+  test("never once the run failed the dispatcher, skipped it, or held no line for it, whatever else still waits", () => {
+    const wait = "waiting a-worker: the load gate holds it\n"
+    expect(ran(`not restored dispatcher: herdr refused\n${wait}`)).toBe(false)
+    expect(ran(`skipped dispatcher: its roster row reads ended\n${wait}`)).toBe(false)
+    expect(ran(wait)).toBe(false)
+    expect(ran("waiting dispatcher-2: focus holds it\n")).toBe(false)
+  })
+
+  test("a run that named no session, such as another restore's lock, counts as not run yet", () => {
+    const locked = {
+      dispatcher: "dispatcher",
+      log: "restore: another restore runs\n",
+      logAt: at + minute,
+      owedAt: at,
+    }
+    expect(bringsBack({ ...locked, now: at + 2 * minute })).toBe(true)
+    expect(bringsBack({ ...locked, now: at + 6 * minute })).toBe(false)
+  })
+})
+
+describe("restoring", () => {
+  test("reads each owing server's newest restore log for the dispatcher's line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "restoring-"))
+    cleanups.push(() => rmSync(dir, { force: true, recursive: true }))
+    const servers = [
+      { name: "playground", socket: join(dir, "playground.sock") },
+      { name: "playground-probes", socket: join(dir, "playground-probes.sock") },
+    ]
+    const now = Date.now()
+    const at = (path: string, ms: number) => utimesSync(path, ms / 1000, ms / 1000)
+    const read = () => restoring({ dispatcher: "dispatcher", now, servers })
+    expect(read()).toBe(false)
+    const owed = join(dir, "playground.restore")
+    writeFileSync(owed, "x\n")
+    at(owed, now - 60_000)
+    expect(read()).toBe(true)
+    const log = join(dir, "playground.restore.log")
+    writeFileSync(
+      log,
+      "not restored dispatcher: herdr refused\nwaiting a-worker: the load gate holds it\n",
+    )
+    at(log, now - 30_000)
+    expect(read()).toBe(false)
+    writeFileSync(log, "waiting dispatcher: focus holds it\n")
+    at(log, now - 30_000)
+    expect(read()).toBe(true)
+    rmSync(owed)
+    expect(read()).toBe(false)
+    // probes never holds the dispatcher: once its restore has run, its owe says nothing of it
+    const probes = join(dir, "playground-probes.restore")
+    writeFileSync(probes, "x\n")
+    at(probes, now - 60_000)
+    writeFileSync(
+      join(dir, "playground-probes.restore.log"),
+      "waiting a-probe: the load gate holds it\n",
+    )
+    at(join(dir, "playground-probes.restore.log"), now - 30_000)
+    expect(read()).toBe(false)
+  })
+
+  test("a fixture stack reads it from the fixture's herdr.json, and a stack that reads no machine never restores", () => {
+    const dir = mkdtempSync(join(tmpdir(), "restoring-fixture-"))
+    cleanups.push(() => rmSync(dir, { force: true, recursive: true }))
+    const fixture = [{ name: "playground", socket: FIXTURE_SOCKET }]
+    const read = (servers: typeof fixture) =>
+      restoring({ dispatcher: "dispatcher", fixtureDir: dir, servers })
+    writeFileSync(
+      join(dir, "herdr.json"),
+      JSON.stringify({ panes: [], prompts: {}, screens: {}, workspaces: [] }),
+    )
+    expect(read(fixture)).toBe(false)
+    writeFileSync(
+      join(dir, "herdr.json"),
+      JSON.stringify({
+        panes: [],
+        prompts: {},
+        restoring: "2026-11-10T18:14:47Z",
+        screens: {},
+        workspaces: [],
+      }),
+    )
+    expect(read(fixture)).toBe(true)
+    expect(read([])).toBe(false)
   })
 })

@@ -29,12 +29,13 @@ export type DashboardFrame =
       names: SessionNames
       type: "error"
     }
-  // approvals: whether a session's permission and plan prompts may be answered from the dashboard (PLAYGROUND_APPROVALS_ENABLED), so their cards say when they cannot.
+  // approvals: whether a session's permission and plan prompts may be answered from the dashboard (PLAYGROUND_APPROVALS_ENABLED), so their cards say when they cannot; restoring: a restore can still bring the dispatcher back (restoring() in herdr.ts), so the home says the factory is coming back rather than offering Start.
   | {
       approvals: boolean
       dispatcher: string
       dispatchers: readonly string[]
       names: SessionNames
+      restoring: boolean
       type: "workers"
       workers: Worker[]
     }
@@ -278,6 +279,7 @@ export class DashboardHub {
           dispatcher: DISPATCHER,
           dispatchers: DISPATCHERS,
           names: getSessionNames(),
+          restoring: live.restoring === true,
           type: "workers",
           workers: live.workers,
         }

@@ -48,11 +48,13 @@ For every agent of yours that `ListAgents` lists, or the roster shows with a sta
 
 Before you staff a fix this step turns up (an off-scope bug, a down worker's chore), run DISPATCH.md's **open-PR check** on it.
 
-When spawn.sh's load gate refuses a worker's new checker, give that PR to a reviewer already running (a done worker's, before you close it) as another PR in its own rounds, reporting to that PR's worker, since a running reviewer adds no load.
+When spawn.sh's load gate refuses a worker's new checker, give that PR to a reviewer already running, one `ListAgents` lists when you check it before the PR moves (a done worker's, before you close it), as another PR in its own rounds, reporting to that PR's worker, since a running reviewer adds no load.
 Move its roster row in the same step, by [ROSTER.md](ROSTER.md)'s `A checker takes another PR` row, so the sidebar nests it under its new worker and run-slot ranks its runs by that worker's size (a stale row once queued a reviewer's install 1,211 s for a 0 s run).
-With no reviewer running, that PR's checker is **held**: the worker reports the refusal to you, and you hold the PR on your list, since a refused start leaves only a `capacity.jsonl` row, which names the session and starts nothing.
+`assign` on a checker whose row reads `ended` sets it to `working` and starts nothing itself: only while ops-herdr still owes that server a restore (`<server>.restore`, kept while any session waits) does its next cycle resume the checker from its record, within a minute when that resume passes its gate.
+So give the PR to one `ListAgents` lists, since one assign on an ended checker once left a PR with two reviewers; to bring an ended checker back on purpose, resume it by [SESSIONS.md](SESSIONS.md#end)'s `spawn.sh resume <name> <dir> --pr <its PR's URL>`, and it is back once `ListAgents` lists it.
+With no reviewer `ListAgents` lists, that PR's checker is **held**: the worker reports the refusal to you, and you hold the PR on your list, since a refused start leaves only a `capacity.jsonl` row, which names the session and starts nothing.
 When a slot opens, the held checker starts in it ahead of any dispatch ([ROSTER.md](ROSTER.md)'s step 1): tell its worker to spawn it again.
-Done when each held checker's roster row reads `working`.
+Done when each held checker's roster row reads `working` and `ListAgents` lists it.
 
 Done when every agent of yours is working, has reported, or has had its state acted on and recorded.
 
