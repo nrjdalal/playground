@@ -282,7 +282,7 @@ describe("a waiter's waited count is the real seconds since its wait began", () 
     expect(script.match(/waited=\$\(\(waited \+/g) ?? []).toEqual([])
   })
 
-  test("each wait records its start, and four loops and focus_wait read the clock against it", () => {
+  test("each wait records its start, and four loops and hold_wait read the clock against it", () => {
     expect(script.match(/WAIT_FROM=\$SECONDS/g) ?? []).toHaveLength(4)
     expect(script.match(/waited=\$\(\(SECONDS - WAIT_FROM\)\)/g) ?? []).toHaveLength(5)
   })
