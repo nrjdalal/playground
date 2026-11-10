@@ -17,7 +17,7 @@ Plan: send the Builder 3 lines (files, done list, ETA) before building, then bui
 
 How:
 
-- Worktree: .claude/worktrees/<slice-id> from the latest origin/canary, then bun install. Branch `<key>-<ticket>-<slug>`, the org's ticket key lowercased, as the slice file says. Write its .env before the first commit (NODE_ENV, POSTGRES_URL for your own loopback container with fake rows, BETTER_AUTH_SECRET). Never touch :65521 or the live dashboard.
+- Worktree: <main checkout>/.claude/worktrees/<slice-id> by its absolute path, as AGENTS.md's worktree rule says, from the latest origin/canary, then bun install. Branch `<key>-<ticket>-<slug>`, the org's ticket key lowercased, as the slice file says. Write its .env before the first commit (NODE_ENV, POSTGRES_URL for your own loopback container with fake rows, BETTER_AUTH_SECRET). Never touch :65521 or the live dashboard.
 - Commit in the foreground.
 - Before you report ready, run `bun run check-types` at the repo root, with your stack stopped. `tsc --noEmit` in web/next skips the tests' tsconfigs (one PR went red on check-types:tests that way).
 - Memory is tight: run your stack only while driving it (bun run dev:stop after), `docker stop` your DB when idle, and close agent-browser sessions when done. If the Builder sends "pause Docker", stop at once and confirm.
@@ -40,6 +40,7 @@ Standing lines:
 - No Co-Authored-By trailer on any commit: AGENTS.md forbids it and wins over the harness's attribution reminder.
 - Commitlint: a lowercase subject and body lines of 100 characters or fewer.
 - Give --body-file and --attach a literal absolute path to a file written in an earlier call, never a $VAR.
+- Fetch, edit and PATCH a gh body in three separate calls, naming the file by its absolute path in each: `no-public-leak` reads a body only from a file already on disk, so it refuses one call that fills the file from gh's output and PATCHes it.
 - An org's own brief rules live in its extension's `rules/brief.md`, whose glance a session working in the org's checkout sees under "The <org> org's rules:": anything sent from the owner's account is a draft unless a line there pre-approves it, the factory stays out of the org's writes, and the file is read in full before a Slack post or DM, a review ask, a staging or prod step, or an outside author's PR.
 - Never `git stash` in a worktree: the stash list is shared by every worktree, so a `stash pop` can take another worker's entry (it happened today). Take before-shots from a separate worktree on origin/canary, or commit first and check out the base.
 - agent-browser sessions are machine-wide: close only your own with `agent-browser --session <your-name> close`, never `close --all` (a teardown closed seven other sessions on 6 Oct).
