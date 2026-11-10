@@ -204,15 +204,15 @@ describe("a waiter behind the head", () => {
     const freed = next.err.length
     m.release("run-slot-2")
     const sleeps = (from: number) => next.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0
-    // the pick's look writes run-slot.next partway through, which a loaded Mac can take seconds to reach, so worker-y's polls count from the first sign it could act: that write, the look's end, or its take (issue 1612); with no sign in 10 sleeps they count from the release
+    // the pick's look writes run-slot.next partway through, which a loaded Mac can take seconds to reach, so worker-y's polls count from the first sign it could act, that write or the look's end, read before its take, and from the release when its take or 10 sleeps come first (issue 1612)
+    let signed = false
     while (
-      named() === was &&
-      !lookedSince(pick, seen) &&
+      !(signed = named() !== was || lookedSince(pick, seen)) &&
       !existsSync(next.marker) &&
       sleeps(freed) < 10
     )
       await Bun.sleep(50)
-    const from = sleeps(freed) < 10 ? next.err.length : freed
+    const from = signed ? next.err.length : freed
     while (!existsSync(next.marker) && sleeps(from) < 10) await Bun.sleep(50)
     expect(sleeps(from)).toBeLessThanOrEqual(3)
     expect(existsSync(pick.marker)).toBe(false)
