@@ -211,6 +211,8 @@ session_kind() { local n k; while read -r n k; do [ "$n" != "$1" ] || { echo "$k
 session_name() { local n k; while read -r n k; do [ "$k" != "$1" ] || { echo "$n"; return; }; done <<<"$SESSION_KINDS"; }
 # The second dispatcher's own name is a dispatcher's name, from sessions.names or sessions.aliases, with -2.
 second_dispatcher() { [ "${1%-2}" != "$1" ] && [ "$(session_kind "${1%-2}")" = dispatcher ]; }
+# The first dispatcher, a dispatcher by kind that holds slot 1 or is sessions.names' own and not the second, starts past every gate, by manager and by resume alike, so a restore brings the owner's dispatcher back at once.
+first_dispatcher() { [ "$(kind_of "$1")" = dispatcher ] && { [ "$1" = "$(dispatcher_of 1)" ] || { [ "$(session_kind "$1")" = dispatcher ] && ! second_dispatcher "$1"; }; }; }
 
 # The live sessions: a registry file whose pid is alive with the start time the file records, as the Dashboard reads them, but for a `claude -p` run (entrypoint sdk-cli), which holds no name. It prints a line, tab-separated pid, session id, folder and process start ("-" for a field the file lacks), for each live session named $1, the lowest pid first.
 live_holders() {
@@ -278,7 +280,7 @@ gate_capacity() {
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -288,7 +290,7 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed = sys.argv[1:15]
+data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed, session = sys.argv[1:16]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -305,7 +307,7 @@ def refuse(gate, detail):
     if first:
         skips.append((gate, detail))
         raise Skip
-    row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "detail": detail, "gate": gate, "readings": readings, "verdict": "refused"}
+    row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "detail": detail, "gate": gate, "readings": readings, "session": session, "verdict": "refused"}
     try:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "a") as f:
@@ -760,7 +762,7 @@ try:
 except Skip:
     pass
 
-row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "gate": None, "readings": readings, "verdict": "check" if check else "pass"}
+row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "gate": None, "readings": readings, "session": session, "verdict": "check" if check else "pass"}
 if skips:
     row.update(detail="; ".join(d for _, d in skips), gate=", ".join(g for g, _ in skips), verdict="check" if check else "skipped")
 try:
@@ -1041,6 +1043,14 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
 PY
   }
   lines=$(restore_list) || refuse "it cannot read the roster or the resume files"
+  # The first dispatcher's record runs first, so the owner's dispatcher is back before any other resume takes the gate's room.
+  first=$(dispatcher_of 1)
+  lead= rest=
+  while IFS= read -r line; do
+    case "$line" in "run"$'\t'"$first"$'\t'*) lead+="$line"$'\n' ;; *) rest+="$line"$'\n' ;; esac
+  done <<<"$lines"
+  lines="$lead$rest"
+  # A resume a gate holds comes back on a later restore, so it is progress and leaves the exit 0; any other miss fails the restore.
   failed=0
   while IFS=$'\t' read -r -a args; do
     case "${args[0]:-}" in
@@ -1053,8 +1063,8 @@ PY
         elif [ $? -eq 3 ]; then
           echo "skipped ${args[0]}: live"
         else
-          failed=1
           said=$(tail -1 <<<"$said")
+          [[ $said =~ the\ [a-z]+\ gate\ holds\ it ]] || failed=1
           echo "not restored ${args[0]}: ${said#"spawn.sh refuses ${args[0]}: "}"
         fi
         ;;
@@ -1186,7 +1196,7 @@ case "$MODE" in
         word "$TO" || refuse "$NAME is an orchestrator of the $KIND kind, and its roster row names no session it reports to: roster.ts set $NAME reportsTo=<session>"
         ;;
     esac
-    [ "$KIND" = dispatcher ] && { [ "$NAME" = "$TO" ] || { [ "$(session_kind "$NAME")" = dispatcher ] && ! second_dispatcher "$NAME"; }; } && FIRST=1 TO=
+    [ "$KIND" = dispatcher ] && first_dispatcher "$NAME" && FIRST=1 TO=
     DIR="${PLAYGROUND_REPO:-$MAIN}/.claude/worktrees/leads"
     # A fresh checkout has no leads worktree until its first manager start cuts one as branch leads from origin's copy of the branch the checkout was cloned on, tracking it: canary only for a checkout cloned on canary on purpose, else main, so a public install's managers run what it shipped. A branch of its own, since the checkout holds its branch already, and a manager's bare git calls land in its own tree, never the main checkout.
     CUT=
@@ -1210,6 +1220,7 @@ case "$MODE" in
     KIND=$(kind_of "$NAME")
     ROLE=$(role_of_kind "$KIND")
     [ -n "$ROLE" ] || refuse "$NAME is not a factory session's name, and the roster gives it no kind"
+    [ "$KIND" = dispatcher ] && first_dispatcher "$NAME" && FIRST=1
     # A checker whose roster row names an ended worker is ended again on the checker reaper's next pass (checker-worker-gone, scripts/ops/optimizer/idle_sessions.ts), so its row moves to the worker it now serves before it comes back.
     if [[ $ROLE =~ ^(reviewer|tester)$ ]]; then
       serves=$(roster_field "$NAME" worker)
