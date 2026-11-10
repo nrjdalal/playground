@@ -7167,6 +7167,7 @@ function cwdFlag(args, env) {
 function bunCall(args, env) {
   let cwd = env.cwd;
   let filtered = false;
+  let sub = -1;
   const words = [];
   let k = 0;
   for (;k < args.length; k++) {
@@ -7183,12 +7184,13 @@ function bunCall(args, env) {
     else if (words[0] === "x" && RUNNER_TAKES.has(v))
       k++;
     else if (!v.startsWith("-")) {
-      words.push(v);
+      if (words.push(v) === 1)
+        sub = k;
       if (v !== "run" && v !== "x")
         break;
     }
   }
-  return { at: k, cwd, filtered, words };
+  return { at: k, cwd, filtered, sub, words };
 }
 var GIT_MOVES = new Set([
   "am",
@@ -7209,17 +7211,45 @@ var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
 function turboWords(name, args, env) {
   if (name === "turbo")
     return args;
-  if (RUNNERS.has(name) || name === "bunx") {
-    const at = runnerTarget(args);
-    return isTurbo(args[at]?.value) ? args.slice(at + 1) : undefined;
-  }
+  if (RUNNERS.has(name) || name === "bunx")
+    return runnerTurbo(args);
   if (name !== "bun")
     return;
-  const { at, words } = bunCall(args, env);
-  const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0];
+  const { at, sub, words } = bunCall(args, env);
+  if (words[0] === "x")
+    return runnerTurbo(args.slice(sub + 1));
+  const target = words[0] === "run" ? words[1] : words[0];
   return isTurbo(target) ? args.slice(at + 1) : undefined;
 }
-var RUNNER_TAKES = new Set(["--package", "-p"]);
+function runnerTurbo(args) {
+  const at = runnerTarget(args);
+  if (isTurbo(args[at]?.value))
+    return args.slice(at + 1);
+  return packagedTools(args).includes("turbo") ? args.slice(at) : undefined;
+}
+var RUNNER_TAKES = new Set([
+  "--ca",
+  "--cafile",
+  "--cwd",
+  "--env-file",
+  "--minimum-release-age",
+  "--package",
+  "--registry",
+  "-p"
+]);
+function packagedTools(args) {
+  const tools = [];
+  for (let k = 0;k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value;
+    if (v === "-p" || v === "--package")
+      tools.push(toolName(args[++k]?.value));
+    else if (v.startsWith("--package="))
+      tools.push(toolName(v.slice("--package=".length)));
+    else if (RUNNER_TAKES.has(v))
+      k++;
+  }
+  return tools;
+}
 function runnerTarget(args) {
   let k = 0;
   while (k < args.length && args[k].value.startsWith("-"))
@@ -7354,7 +7384,6 @@ Fix the message by the gh-commit skill's Commit step, then commit again.`;
 var anywhere = (what, command) => `no-unslotted-run hook refuses ${what} on a line that names more folders than the hook carries, since it cannot rule out a worktree: every heavy run goes through run-slot (playbook's **slots**). Run it as ~/.playground/ops/run-slot.sh <your name> -- ${command}, or as a line of its own after a cd to a literal path.`;
 var BUN_SCRIPTS2 = new Set(["build", "check-types", "test"]);
 var RUNNERS2 = new Set(["bunx", "npx"]);
-var RUNNER_TAKES2 = new Set(["--package", "-p"]);
 var TEST_TAKES = new Set([
   "--conditions",
   "--console-depth",
@@ -7435,7 +7464,7 @@ function heavy(name, args, env) {
     return task ? { dir: cwdFlag(turbo, env), what: `turbo run ${task}` } : undefined;
   }
   if (RUNNERS2.has(name)) {
-    const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES2.has(args[k - 1]?.value ?? ""));
+    const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES.has(args[k - 1]?.value ?? ""));
     return program(words[0]?.value ?? "") === "next" && words[1]?.value === "build" ? { dir: env.cwd, what: `${name} next build` } : undefined;
   }
   if (name !== "bun")

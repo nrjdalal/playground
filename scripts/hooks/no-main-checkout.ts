@@ -171,9 +171,10 @@ export function cwdFlag(args: Word[], env: Env): string | undefined {
 export function bunCall(
   args: Word[],
   env: Env,
-): { at: number; cwd: string | undefined; filtered: boolean; words: string[] } {
+): { at: number; cwd: string | undefined; filtered: boolean; sub: number; words: string[] } {
   let cwd = env.cwd
   let filtered = false
+  let sub = -1
   const words: string[] = []
   let k = 0
   for (; k < args.length; k++) {
@@ -184,14 +185,14 @@ export function bunCall(
       filtered = true
       k++
     } else if (v.startsWith("--filter=")) filtered = true
-    // bun x's -p names the package, so the word after its value is the tool
+    // bun x's options that take a value (-p, --registry), so the word after one is the tool
     else if (words[0] === "x" && RUNNER_TAKES.has(v)) k++
     else if (!v.startsWith("-")) {
-      words.push(v)
+      if (words.push(v) === 1) sub = k
       if (v !== "run" && v !== "x") break
     }
   }
-  return { at: k, cwd, filtered, words }
+  return { at: k, cwd, filtered, sub, words }
 }
 
 // git's subcommand and its words, and the tree it acts on: the checkout a --git-dir of `<checkout>/.git` names, whose HEAD and index move, else its --work-tree, else the folder its -C options name (each relative to the one before); each counts only before the subcommand.
@@ -301,21 +302,47 @@ function gitMoves(sub: string, rest: string[]): boolean {
   return false
 }
 
-// turbo's own words, however it is called: by name or path, through npx, or through bun (runs reads bunx as bun x).
+// turbo's own words, however it is called: by name or path, through npx, bunx or bun x (runs reads bunx as bun x), as their tool or the package their -p names.
 export function turboWords(name: string, args: Word[], env: Env): Word[] | undefined {
   if (name === "turbo") return args
-  if (RUNNERS.has(name) || name === "bunx") {
-    const at = runnerTarget(args)
-    return isTurbo(args[at]?.value) ? args.slice(at + 1) : undefined
-  }
+  if (RUNNERS.has(name) || name === "bunx") return runnerTurbo(args)
   if (name !== "bun") return
-  const { at, words } = bunCall(args, env)
-  const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0]
+  const { at, sub, words } = bunCall(args, env)
+  if (words[0] === "x") return runnerTurbo(args.slice(sub + 1))
+  const target = words[0] === "run" ? words[1] : words[0]
   return isTurbo(target) ? args.slice(at + 1) : undefined
 }
 
-// npx's and bunx's options whose next word is their value
-const RUNNER_TAKES = new Set(["--package", "-p"])
+// A package runner's turbo words: after turbo as its tool, or from its tool on when its -p names turbo, since the runner then runs whatever it names with turbo on PATH.
+function runnerTurbo(args: Word[]): Word[] | undefined {
+  const at = runnerTarget(args)
+  if (isTurbo(args[at]?.value)) return args.slice(at + 1)
+  return packagedTools(args).includes("turbo") ? args.slice(at) : undefined
+}
+
+// npx's and bunx's options whose next word is their value (bun x --help, npx's -p)
+export const RUNNER_TAKES = new Set([
+  "--ca",
+  "--cafile",
+  "--cwd",
+  "--env-file",
+  "--minimum-release-age",
+  "--package",
+  "--registry",
+  "-p",
+])
+
+// The tools a package runner's -p or --package names among its options: it puts that package's programs on PATH and may run any program there (a shell, env), so naming the tool runs it.
+function packagedTools(args: Word[]): string[] {
+  const tools: string[] = []
+  for (let k = 0; k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value
+    if (v === "-p" || v === "--package") tools.push(toolName(args[++k]?.value))
+    else if (v.startsWith("--package=")) tools.push(toolName(v.slice("--package=".length)))
+    else if (RUNNER_TAKES.has(v)) k++
+  }
+  return tools
+}
 
 // The word a package runner runs, past its options and their values (-y, --yes, -p turbo).
 function runnerTarget(args: Word[]): number {
@@ -355,8 +382,10 @@ function runs(
   }
   if (TOOLS.has(name)) return { cwd: cwdFlag(args, env), what: name }
   if (RUNNERS.has(name)) {
-    const tool = toolName(args[runnerTarget(args)]?.value)
-    if (TOOLS.has(tool)) return { cwd: cwdFlag(args, env), what: `${name} ${tool}` }
+    const tool = [toolName(args[runnerTarget(args)]?.value), ...packagedTools(args)].find((t) =>
+      TOOLS.has(t),
+    )
+    if (tool) return { cwd: cwdFlag(args, env), what: `${name} ${tool}` }
   }
   if (name === "git") {
     const { cwd, rest, sub } = gitCall(args, env)
@@ -365,10 +394,12 @@ function runs(
     return sub && gitMoves(sub, rest) ? { cwd, fix: GIT_FIX, what: `git ${sub}` } : undefined
   }
   if (name !== "bun") return
-  const { at, cwd, filtered, words } = bunCall(args, env)
+  const { at, cwd, filtered, sub, words } = bunCall(args, env)
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0]
+  const packaged = words[0] === "x" ? packagedTools(args.slice(sub + 1)) : []
+  const tool = [toolName(target), ...packaged].find((t) => TOOLS.has(t))
   // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name; a tool reads its own --cwd too, and bun x runs in the shell's folder whatever bun's --cwd says
-  if (TOOLS.has(toolName(target))) {
+  if (tool) {
     const dir = words[0] === "x" ? env.cwd : cwd
     return {
       cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: dir }),

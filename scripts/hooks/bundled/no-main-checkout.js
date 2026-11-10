@@ -7456,6 +7456,7 @@ function cwdFlag(args, env) {
 function bunCall(args, env) {
   let cwd = env.cwd;
   let filtered = false;
+  let sub = -1;
   const words = [];
   let k = 0;
   for (;k < args.length; k++) {
@@ -7472,12 +7473,13 @@ function bunCall(args, env) {
     else if (words[0] === "x" && RUNNER_TAKES.has(v))
       k++;
     else if (!v.startsWith("-")) {
-      words.push(v);
+      if (words.push(v) === 1)
+        sub = k;
       if (v !== "run" && v !== "x")
         break;
     }
   }
-  return { at: k, cwd, filtered, words };
+  return { at: k, cwd, filtered, sub, words };
 }
 function gitCall(args, env) {
   let cwd = env.cwd;
@@ -7578,17 +7580,45 @@ function gitMoves(sub, rest) {
 function turboWords(name, args, env) {
   if (name === "turbo")
     return args;
-  if (RUNNERS.has(name) || name === "bunx") {
-    const at = runnerTarget(args);
-    return isTurbo(args[at]?.value) ? args.slice(at + 1) : undefined;
-  }
+  if (RUNNERS.has(name) || name === "bunx")
+    return runnerTurbo(args);
   if (name !== "bun")
     return;
-  const { at, words } = bunCall(args, env);
-  const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0];
+  const { at, sub, words } = bunCall(args, env);
+  if (words[0] === "x")
+    return runnerTurbo(args.slice(sub + 1));
+  const target = words[0] === "run" ? words[1] : words[0];
   return isTurbo(target) ? args.slice(at + 1) : undefined;
 }
-var RUNNER_TAKES = new Set(["--package", "-p"]);
+function runnerTurbo(args) {
+  const at = runnerTarget(args);
+  if (isTurbo(args[at]?.value))
+    return args.slice(at + 1);
+  return packagedTools(args).includes("turbo") ? args.slice(at) : undefined;
+}
+var RUNNER_TAKES = new Set([
+  "--ca",
+  "--cafile",
+  "--cwd",
+  "--env-file",
+  "--minimum-release-age",
+  "--package",
+  "--registry",
+  "-p"
+]);
+function packagedTools(args) {
+  const tools = [];
+  for (let k = 0;k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value;
+    if (v === "-p" || v === "--package")
+      tools.push(toolName(args[++k]?.value));
+    else if (v.startsWith("--package="))
+      tools.push(toolName(v.slice("--package=".length)));
+    else if (RUNNER_TAKES.has(v))
+      k++;
+  }
+  return tools;
+}
 function runnerTarget(args) {
   let k = 0;
   while (k < args.length && args[k].value.startsWith("-"))
@@ -7617,8 +7647,8 @@ function runs(name, args, local, env) {
   if (TOOLS.has(name))
     return { cwd: cwdFlag(args, env), what: name };
   if (RUNNERS.has(name)) {
-    const tool = toolName(args[runnerTarget(args)]?.value);
-    if (TOOLS.has(tool))
+    const tool = [toolName(args[runnerTarget(args)]?.value), ...packagedTools(args)].find((t) => TOOLS.has(t));
+    if (tool)
       return { cwd: cwdFlag(args, env), what: `${name} ${tool}` };
   }
   if (name === "git") {
@@ -7631,9 +7661,11 @@ function runs(name, args, local, env) {
   }
   if (name !== "bun")
     return;
-  const { at, cwd, filtered, words } = bunCall(args, env);
+  const { at, cwd, filtered, sub, words } = bunCall(args, env);
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0];
-  if (TOOLS.has(toolName(target))) {
+  const packaged = words[0] === "x" ? packagedTools(args.slice(sub + 1)) : [];
+  const tool = [toolName(target), ...packaged].find((t) => TOOLS.has(t));
+  if (tool) {
     const dir = words[0] === "x" ? env.cwd : cwd;
     return {
       cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: dir }),
@@ -7888,6 +7920,7 @@ if (import.meta.main) {
 }
 export {
   FILE_TOOLS,
+  RUNNER_TAKES,
   bunCall,
   check,
   cwdFlag,

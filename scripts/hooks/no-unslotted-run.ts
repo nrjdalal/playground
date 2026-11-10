@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join, resolve, sep } from "node:path"
 
 import { atOnce, buildName, DOCKERS, dockerBuild, portlessCompose } from "./docker-build"
-import { bunCall, cwdFlag, mainCheckout, turboWords } from "./no-main-checkout"
+import { bunCall, cwdFlag, mainCheckout, RUNNER_TAKES, turboWords } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
   ASSIGN,
@@ -179,8 +179,6 @@ const anywhere = (what: string, command: string) =>
 // bun scripts that build packages/* or run the whole suite
 const BUN_SCRIPTS = new Set(["build", "check-types", "test"])
 const RUNNERS = new Set(["bunx", "npx"])
-// bunx's and npx's options whose next word is their value
-const RUNNER_TAKES = new Set(["--package", "-p"])
 // bun test's options, and bun's runtime ones it also takes, whose next word is their value (bun test --help, bun --help), so it is no test file; --bail, -c, --changed, --config, --elide-lines, --inspect, --parallel and --shell take theirs only attached
 const TEST_TAKES = new Set([
   "--conditions",
