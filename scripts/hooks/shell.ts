@@ -1,4 +1,5 @@
 // The Bash reader the PreToolUse hooks share: it lexes a command and walks it as the shell would run it, reading the heredocs, files and substitutions it can see and marking the rest unknown.
+import { AsyncLocalStorage } from "node:async_hooks"
 import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, resolve } from "node:path"
 
@@ -116,22 +117,17 @@ const MAX_BYTES = 1_048_576
 const MAX_SCRIPT = 131_072
 const LARGE = "a text too large to read"
 
-// The performance.now() past which every lex, expansion and walk step throws a RangeError, set by a hook that must answer inside its timeout.
-let deadline: number | undefined
+// The performance.now() past which every lex, expansion and walk step throws a RangeError, set by a hook that must answer inside its timeout; each withDeadline call holds its own in its async context, so overlapping checks in one process never share one.
+const deadlines = new AsyncLocalStorage<number>()
 
 // Runs body with a deadline budget ms away, so any slow route through the lexer or the walk refuses, whatever made it slow.
 export async function withDeadline<T>(budget: number, body: () => Promise<T>): Promise<T> {
-  const outer = deadline
-  deadline = performance.now() + budget
-  try {
-    return await body()
-  } finally {
-    deadline = outer
-  }
+  return await deadlines.run(performance.now() + budget, body)
 }
 
 // Throws once the walk is past its deadline, for a visit whose spawns take time no tick sees.
 export function pastDeadline(): void {
+  const deadline = deadlines.getStore()
   if (deadline !== undefined && performance.now() > deadline)
     throw new RangeError("past the hook's time")
 }
@@ -143,13 +139,12 @@ export const stepsTaken = (): number => steps
 
 // The one choke point every lex, expansion and walk step passes through; it counts each step and reads the clock once every 1024 under a deadline, so a tight loop pays for a counter alone.
 export function tick(): void {
-  if (++steps % 1024 !== 0 || deadline === undefined) return
-  if (performance.now() > deadline) throw new RangeError("past the hook's time")
+  if (++steps % 1024 === 0) pastDeadline()
 }
 
 // A script a shell, eval or source reads, held under a deadline to the size of a command the hook reads.
 function lexScript(value: string, env: Env): Lexed {
-  if (deadline !== undefined && value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read")
   return lex(value, env.known)
 }
@@ -157,7 +152,7 @@ function lexScript(value: string, env: Env): Lexed {
 // A script with xargs' -I string filled in from stdin, refused before it is built when it would outgrow a script the hook reads.
 export function filled(script: string, mark: string, value: string): string {
   const count = script.split(mark).length - 1
-  if (deadline !== undefined && script.length + count * value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read")
   return script.replaceAll(mark, value)
 }
@@ -2142,7 +2137,7 @@ async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Prom
     !operand || STDIN_PATHS.has(operand.value)
       ? await scriptStdin(cmd, env)
       : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")]
-  if (deadline !== undefined && scripts.some((s) => s.unknown === LARGE))
+  if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE)
   return scripts
 }
