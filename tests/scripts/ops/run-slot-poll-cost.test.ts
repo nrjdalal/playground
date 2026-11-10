@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { SCRIPT, WAITING, runSlot, stop, machine } from "./run-slot-fake"
 
-// ten waiters' first looks under xtrace and the shims, about 700 process starts each at a queue of 10, took 45 to 110 s at load5 19 to 25 before the window opened, and with quiet rounds of a whole poll the ten-queue-waiter row took 142 to 181 s at load5 12 to 24 (issue 1612, measured), so each row has about twice the slowest
+// ten waiters' first looks under xtrace and the shims, about 700 process starts each at a queue of 10, took 45 to 110 s at load5 19 to 25 before the window opened, and with quiet rounds of a whole poll the ten-queue-waiter row took 142 to 246 s at load5 12 to 24 (issue 1612, measured), so the slowest row has about 1.5 times its time
 setDefaultTimeout(360_000)
 
 // every external command run-slot.sh calls by name; a shim for each counts its start, so a start the shims miss is a fork that runs bash alone, which the trace's subshell levels count
