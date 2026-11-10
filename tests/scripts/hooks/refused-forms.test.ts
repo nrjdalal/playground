@@ -608,10 +608,12 @@ const PATH_FLAGS = [
   { flag: "--cwd", joins: ["=", " "], program: "bunx" },
   { flag: "--chdir", joins: ["=", " "], program: "env" },
   { flag: "-C", joins: [" ", ""], program: "env" },
+  { flag: "-D", joins: [" ", ""], program: "gh" },
   { flag: "-C", joins: [" "], program: "git" },
   { flag: "--git-dir", joins: ["=", " "], program: "git" },
   { flag: "--work-tree", joins: ["=", " "], program: "git" },
   { flag: "-C", joins: [" ", ""], program: "tar" },
+  { flag: "-d", joins: [" ", ""], program: "unzip" },
 ] as const
 type PathFlag = (typeof PATH_FLAGS)[number]
 
@@ -633,16 +635,25 @@ const realOf = (path: string) => {
   }
 }
 
-// Each other spelling of one path flag's folder in a case's call: its other joins, the folder relative from the case's own folder, a ./ hop, an <x>/../<x> hop and a link made in a scratch folder, each kept only where it names the folder the row's does, by its real path; a row that moves folders (cd, pushd, popd) or a folder that is not one keeps its single spelling.
-function spellingsOf(call: Call, cwd: string): { spelling: string; text: string }[] {
-  if (typeof call !== "string" || !isAbsolute(cwd) || /\b(?:cd|pushd|popd)\b/.test(call)) return []
+// Each row and path flag that keeps its single spelling, with why: the row moves folders (cd, pushd, popd), or the flag names no folder; the pinned list below shows a row that stops being spelt
+const UNSPELT = new Set<string>()
+
+// Each other spelling of one path flag's folder in a case's call: its other joins, the folder relative from the case's own folder, a ./ hop, an <x>/../<x> hop and a link made in a scratch folder, each kept only where it names the folder the row's does, by its real path.
+function spellingsOf(call: Call, cwd: string, id: string): { spelling: string; text: string }[] {
+  if (typeof call !== "string" || !isAbsolute(cwd)) return []
+  const moves = /\b(?:cd|pushd|popd)\b/.test(call)
   const found: { spelling: string; text: string }[] = []
   for (const pathFlag of PATH_FLAGS)
     for (const m of call.matchAll(flagIn(pathFlag))) {
       const [all, before = "", glue = "", folder = ""] = m
       const at = resolve(cwd, folder)
-      const real = realOf(at)
-      if (!real) continue
+      const real = moves ? undefined : realOf(at)
+      if (!real) {
+        UNSPELT.add(
+          `${id} | ${pathFlag.program} ${pathFlag.flag}, ${moves ? "it moves folders" : "no folder"}`,
+        )
+        continue
+      }
       const own = /^\s+$/.test(glue) ? " " : glue
       const rel = relative(cwd, at) || "."
       const link = join(LINKS, `${++links}-${basename(at)}`)
@@ -674,7 +685,7 @@ function spellingsOf(call: Call, cwd: string): { spelling: string; text: string 
 
 const SPELLINGS = CASES.flatMap((c) => {
   const at = GUARDS[c.guard].folders[c.folder]
-  return at ? spellingsOf(c.call, at[0]).map((s) => ({ ...c, ...s, at })) : []
+  return at ? spellingsOf(c.call, at[0], c.id).map((s) => ({ ...c, ...s, at })) : []
 })
 
 describe("every spelling of a row's path flag keeps the row's verdict", () => {
@@ -699,6 +710,13 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
     },
     60_000,
   )
+
+  test("the rows whose path flag keeps its single spelling are the ones pinned here", () => {
+    expect([...UNSPELT].sort()).toEqual([
+      "#466 git --work-tree with a subcommand for its value | git --work-tree, no folder",
+      "#466 git -C with a subcommand for its value | git -C, no folder",
+    ])
+  })
 
   test("each path flag is listed once, and each is spelt again on some row", () => {
     const names = PATH_FLAGS.map(({ flag, program }) => `${program} ${flag}`)
