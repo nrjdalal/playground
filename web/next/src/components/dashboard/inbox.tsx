@@ -1989,7 +1989,7 @@ export function NewPill({
   )
 }
 
-// The Inbox's first load: its open row where it will sit, a blank count and the Mark all as read room kept, the Spinner under it, so the data lands below without moving the row
+// The Inbox's first load: its open row where it will sit with no count until there is one to show, the Mark all as read room kept, the Spinner under it, so the data lands below without moving the row
 function InboxLoading() {
   return (
     <section aria-busy aria-label="Inbox" className="@container flex flex-col gap-3">
@@ -2004,11 +2004,6 @@ function InboxLoading() {
             <span className="flex min-w-0 flex-1 items-center gap-2 pr-10">
               <RiInboxLine className="size-3.5 shrink-0" aria-hidden />
               <span className="text-muted-foreground truncate">Inbox</span>
-              <Badge
-                aria-hidden
-                variant="outline"
-                className="text-2xs h-4 w-5 px-1.5 font-mono tabular-nums"
-              />
             </span>
             <ShelfMark empty />
           </AccordionTrigger>

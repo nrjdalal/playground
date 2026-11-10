@@ -2082,7 +2082,7 @@ function knownVariables(command, environment, cwd) {
 var FULL_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 var READS = new Set(["list", "show"]);
 var WRITES = new Set(["create", "store"]);
-var INSTEAD = "Every worktree shares one stash list, so a stash taken by position or without a name can be another session's work. Commit a WIP commit on your own branch instead (git commit -m 'chore: wip <what>'), or take before-shots from a separate worktree on origin/canary (git worktree add --detach .claude/worktrees/<name> origin/canary). git stash list, git stash show, git stash push -m <message> and git stash apply <full sha> stay allowed.";
+var INSTEAD = `Every worktree shares one stash list, so a stash taken by position or without a name can be another session's work. Commit a WIP commit on your own branch instead (git commit -m 'chore: wip <what>'), or take before-shots from a separate worktree on origin/canary, made by absolute path under the main checkout so it nests in no other worktree (git worktree add --detach "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" origin/canary). git stash list, git stash show, git stash push -m <message> and git stash apply <full sha> stay allowed.`;
 var refuse = (what, why) => `no-stash hook refuses ${what}: ${why}. ${INSTEAD}`;
 var BROWSER_CLOSE = new Set(["close", "exit", "quit"]);
 var BROWSER_INSTEAD = "Close only the browser you opened; pass --session <name>: agent-browser --session <name> close.";
