@@ -610,6 +610,7 @@ const PATH_FLAGS = [
   { flag: "-C", joins: [" ", ""], program: "env" },
   { flag: "-D", joins: [" ", ""], program: "gh" },
   { flag: "-C", joins: [" "], program: "git" },
+  { flag: "--exec-path", joins: ["="], program: "git" },
   { flag: "--git-dir", joins: ["=", " "], program: "git" },
   { flag: "--work-tree", joins: ["=", " "], program: "git" },
   { flag: "-C", joins: [" ", ""], program: "tar" },
@@ -715,6 +716,49 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
     expect([...UNSPELT].sort()).toEqual([
       "#466 git --work-tree with a subcommand for its value | git --work-tree, no folder",
       "#466 git -C with a subcommand for its value | git -C, no folder",
+    ])
+  })
+
+  // Every flag a row gives a folder, joined by =, by spaces or attached as /… or ./…, read from the row's text wherever its program sits
+  const FLAG_FOLDER =
+    /(?<=^|[\s;&|(])(--?[A-Za-z][\w-]*?)(?:(?:=|\s+)([^\s;&|()'"`$\\]+)|([/.][^\s;&|()'"`$\\]*))(?=$|[\s;&|)])/g
+  test("every flag a row gives a folder is in PATH_FLAGS, or pinned here as no path flag", () => {
+    const left = new Set<string>()
+    for (const c of CASES) {
+      const at = GUARDS[c.guard].folders[c.folder]
+      if (typeof c.call !== "string" || !at) continue
+      const call = c.call
+      const listed = new Set(
+        PATH_FLAGS.flatMap((p) => [...call.matchAll(flagIn(p))].map((m) => `${p.flag} ${m[3]}`)),
+      )
+      for (const [, flag = "", spaced, attached] of call.matchAll(FLAG_FOLDER)) {
+        const value = spaced ?? attached ?? ""
+        if (realOf(resolve(at[0], value)) && !listed.has(`${flag} ${value}`))
+          left.add(`${c.id} | ${flag}`)
+      }
+    }
+    expect([...left].sort()).toEqual([
+      // GNU mv's target folder, on rows that cd to a variable first, so no spelling names the same folder
+      "#1173 GNU mv to the shell's folder attached to its short target option after a cd to a variable | -t",
+      "#1173 GNU mv to the shell's folder attached to its target option in a cluster after a cd to a variable | -ft",
+      "#1173 GNU mv to the shell's folder by its long target option after a cd to a variable | --target-directory",
+      "#1173 GNU mv to the shell's folder by its shortened long target option after a cd to a variable | --target",
+      // an option that takes no value, followed by an operand
+      "#356 a link to the data folder made in the same call | -s",
+      "#356 a write after a word with an unbalanced quote | -rf",
+      "#356 many variables ahead of a write | -rf",
+      "#356 rm -rf of the data folder above it | -rf",
+      "#356 rm -rf of the data folder in ${X:-…} | -rf",
+      "#356 rm -rf of the root | -rf",
+      "#402 rm of a glob with a .. after it | -rf",
+      "#402 rm of a link to the root through a missing folder and .. | -rf",
+      "#402 rm through a missing folder, .., then a link to the data folder | -rf",
+      "#402 rm through a missing folder, .., then a link to the root | -rf",
+      "#402 rm through two missing folders, .., .., then a link to the root | -rf",
+      // a folder flag inside a cluster (env -iP, sudo -sD) or behind a quoted program ('env' --ch), which its row holds in that one form
+      "#508 ext score behind env's -i grouped with -P | -iP",
+      "#533 a removal echoed to sudo's shell, its chdir value a path attached in the cluster | -sD",
+      "#716 a recursive delete echoed to sudo's shell in a quoted env's split string after an abbreviated chdir | --ch",
     ])
   })
 
