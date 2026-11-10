@@ -606,10 +606,12 @@ describe("every refused form stays refused unless the allow list names it", () =
 const PATH_FLAGS = [
   { flag: "--cwd", joins: ["=", " "], program: "bun" },
   { flag: "--cwd", joins: ["=", " "], program: "bunx" },
+  { flag: "--chdir", joins: ["=", " "], program: "env" },
   { flag: "-C", joins: [" ", ""], program: "env" },
   { flag: "-C", joins: [" "], program: "git" },
   { flag: "--git-dir", joins: ["=", " "], program: "git" },
   { flag: "--work-tree", joins: ["=", " "], program: "git" },
+  { flag: "-C", joins: [" ", ""], program: "tar" },
 ] as const
 type PathFlag = (typeof PATH_FLAGS)[number]
 
