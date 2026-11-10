@@ -121,8 +121,8 @@ const LARGE = "a text too large to read"
 const deadlines = new AsyncLocalStorage<number>()
 
 // Runs body with a deadline budget ms away, so any slow route through the lexer or the walk refuses, whatever made it slow.
-export function withDeadline<T>(budget: number, body: () => Promise<T>): Promise<T> {
-  return deadlines.run(performance.now() + budget, body)
+export async function withDeadline<T>(budget: number, body: () => Promise<T>): Promise<T> {
+  return await deadlines.run(performance.now() + budget, body)
 }
 
 // Throws once the walk is past its deadline, for a visit whose spawns take time no tick sees.

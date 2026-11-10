@@ -4831,8 +4831,8 @@ var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
 var deadlines = new AsyncLocalStorage;
-function withDeadline(budget, body) {
-  return deadlines.run(performance.now() + budget, body);
+async function withDeadline(budget, body) {
+  return await deadlines.run(performance.now() + budget, body);
 }
 function pastDeadline() {
   const deadline = deadlines.getStore();
