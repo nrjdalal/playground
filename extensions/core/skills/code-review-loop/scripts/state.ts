@@ -574,7 +574,6 @@ export const cmdDelta = (worktree: string, base: string, old: string, neu: strin
 
 const SCAN_TS = "ls-files|Bun\\.Glob|new Glob\\(|readdirSync|readdir\\("
 const SCAN_RE = new RegExp(SCAN_TS)
-// A scan word counts only where the test calls it, so what a string merely holds comes out before the regexes read: a string inside an [ ... ] argv and a $-tagged shell line are call shapes and stay whole, a value string or an untagged template is prose and its text goes (PG-1651's reviewer, PG-1661)
 const skipQuoted = (text: string, from: number, close: string): number => {
   let j = from
   while (j < text.length && text.charAt(j) !== "\n") {
@@ -584,15 +583,12 @@ const skipQuoted = (text: string, from: number, close: string): number => {
   }
   return -1
 }
-const skipTemplate = (text: string, from: number): number => {
+const afterOpen = (text: string, from: number): string => {
   let j = from
-  while (j < text.length) {
-    if (text.charAt(j) === "\\") j += 2
-    else if (text.charAt(j) === "`") return j + 1
-    else j += 1
-  }
-  return -1
+  while (j > 0 && /\s/.test(text.charAt(j - 1))) j -= 1
+  return text.charAt(j - 1)
 }
+// A scan word counts only where the test calls it, so what a string merely holds comes out before the regexes read: a string inside an [ ... ] argv, a $-tagged shell line and a string or template straight after ( are call shapes and stay whole, a value string or an untagged template is prose and its text goes, and a quote or template pairs on its own line alone, so a stray backtick in a regex or a comment cannot swallow one (PG-1651's reviewer, PG-1661, PG-1708's round 1)
 const stripValues = (text: string): string => {
   let out = ""
   let depth = 0
@@ -607,30 +603,15 @@ const stripValues = (text: string): string => {
       depth = Math.max(0, depth - 1)
       out += c
       i += 1
-    } else if (c === "`" && text.charAt(i - 1) === "$") {
-      const end = skipTemplate(text, i + 1)
-      if (end < 0) {
-        out += c
-        i += 1
-      } else {
-        out += text.slice(i, end)
-        i = end
-      }
-    } else if (c === "`") {
-      const end = skipTemplate(text, i + 1)
-      if (end < 0) {
-        out += c
-        i += 1
-      } else {
-        i = end
-      }
-    } else if (c === '"' || c === "'") {
+    } else if (c === "`" || c === '"' || c === "'") {
+      const prev = afterOpen(text, i)
+      const keeps = depth > 0 || prev === "(" || prev === "$"
       const end = skipQuoted(text, i + 1, c)
       if (end < 0) {
         out += c
         i += 1
       } else {
-        if (depth > 0) out += text.slice(i, end)
+        if (keeps) out += text.slice(i, end)
         i = end
       }
     } else {
