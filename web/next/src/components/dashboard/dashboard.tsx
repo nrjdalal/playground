@@ -70,7 +70,7 @@ export type DashboardContext = {
   open: { has: (sessionId: string) => boolean; toggle: (sessionId: string) => void }
   outbox: Outbox
   problem: DashboardProblem | null
-  // A restore is still bringing sessions back after a restart, as the board's last frame says; false until the first board.
+  // A restore can still bring the dispatcher back after a restart, as the board's last frame says; false until the first board.
   restoring: boolean
   selected: Worker | null
   // Each stream read now, by its session: Playground's, and the selected session's when it is another.
