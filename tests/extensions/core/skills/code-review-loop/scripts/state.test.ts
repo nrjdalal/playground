@@ -1185,9 +1185,9 @@ test("10 touched-tests: a real scanner reads as one past a value-shaped quote in
   scratchRepo(repo, {
     "api/hono/src/lib/sql.ts": "x\n",
     "tests/changed.test.ts": "x\n",
-    "tests/eqquote.test.ts": '/a="/.test(s) && readdirSync(dir).map((f) => "x")\n',
-    "tests/keyquote.test.ts": "/key:'/.test(s) && readdirSync(dir).map((f) => 'x')\n",
-    "tests/gttick.test.ts": "if (/>`/.test(s)) for (const f of readdirSync(d)) log(`${f}`)\n",
+    "tests/eqquote.test.ts": 'const ok = /a="/.test(s) && readdirSync(dir).map((f) => "x")\n',
+    "tests/keyquote.test.ts": "const ok = /key:'/.test(s) && readdirSync(dir).map((f) => 'x')\n",
+    "tests/gttick.test.ts": "const ok = />`/.test(s) && readdirSync(dir).map((f) => log(`${f}`))\n",
   })
   writeFiles(repo, { "api/hono/src/lib/sql.ts": "y\n", "tests/changed.test.ts": "y\n" })
   git(repo, "commit", "-qam", "change")
