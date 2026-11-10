@@ -122,6 +122,26 @@ describe("restore resumes every manager its records name, or says which it left 
     expect(r.code).toBe(1)
   })
 
+  // #1696: a run read the roster once at its start, so a close that landed while it resumed others was undone 6 s later.
+  test("a session closed while the restore runs is skipped, since its row is read again just before its resume", async () => {
+    const r = await spawn(
+      ["restore"],
+      [],
+      {
+        FAKE_HERDR_RUN_ENDS: "planner",
+        ROSTER_JSON: JSON.stringify({ agents: managers.map((name) => row(name, "starting")) }),
+      },
+      undefined,
+      undefined,
+      recorded,
+    )
+    expect(r.out).toBe(
+      "restored builder\nrestored optimizer\nskipped planner: its roster row reads ended\n",
+    )
+    expect(r.code).toBe(0)
+    expect(placing(r).filter((c) => c[1] === "run")).toHaveLength(2)
+  })
+
   test("each record it passes over is named with its reason", async () => {
     const r = await spawn(
       ["restore"],

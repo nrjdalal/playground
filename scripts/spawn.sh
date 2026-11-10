@@ -56,7 +56,7 @@ set -euo pipefail
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again just before its resume so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
@@ -1063,6 +1063,14 @@ PY
       run)
         args=("${args[@]:1}")
         [ "${#args[@]}" -ge 3 ] || continue
+        # Each resume takes seconds, so a close that ends a row after restore_list read the roster would be undone: each row is read again just before its resume.
+        now=$(roster_field "${args[0]}" status)
+        case "$now" in
+          done | ended | parked | paused)
+            echo "skipped ${args[0]}: its roster row reads $now"
+            continue
+            ;;
+        esac
         if said=$(bash "$0" resume "${args[@]}" 2>&1 </dev/null); then
           echo "restored ${args[0]}"
         elif [ $? -eq 3 ]; then

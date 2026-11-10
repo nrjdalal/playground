@@ -460,6 +460,8 @@ case "$1 \${2:-}" in
   "pane run")
     # the roster writes made before the session's launch runs, which a checker's first tool call reads
     cp "$HOME/roster.log" "$HOME/roster-at-run.log" 2>/dev/null || : > "$HOME/roster-at-run.log"
+    # a spawn.sh close of the named session landing while this launch runs, which ends its roster row
+    [ -z "$FAKE_HERDR_RUN_ENDS" ] || python3 -I -c 'import json, sys; p = sys.argv[1]; r = json.load(open(p)); [a.update(status="ended") for a in r["agents"] if a.get("name") == sys.argv[2]]; json.dump(r, open(p, "w"))' "$HOME/.playground/roster.json" "$FAKE_HERDR_RUN_ENDS"
     [ -z "$FAKE_HERDR_RUN_SAYS" ] || { echo "$FAKE_HERDR_RUN_SAYS" >&2; exit 1; }
     [ -z "$FAKE_HERDR_RUN_FAIL" ] || exit 1 ;;
   "pane wait-output")
