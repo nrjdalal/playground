@@ -5,13 +5,9 @@ import { holdLane, repo } from "./run-slot-fake"
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
 
-// builder, 5 Nov: the commit lane fails closed, so a flag run-slot does not read counts as a build, even beside Markdown alone
-describe("git forms the commit read does not know count as a build", () => {
+// builder, 5 Nov: the commit lane fails closed, so an option word it does not read counts as a build, before the verb or as an alias of it
+describe("git forms the commit read does not know count as a build: options and aliases", () => {
   for (const flags of [
-    ["commit", "--no-such-flag", "-m", "x"],
-    ["commit", "-Zm", "x"],
-    ["commit", "-pm", "x"],
-    ["commit", "-m", "x", "--pathspec-fr=list.txt"],
     ["-c", "core.hooksPath=/x", "commit", "-m", "x"],
     ["--git-dir", "/x/.git", "commit", "-m", "x"],
     ["commit", "-n", "--verify", "-m", "x"],
