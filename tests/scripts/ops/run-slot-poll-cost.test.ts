@@ -4,8 +4,8 @@ import { join } from "node:path"
 
 import { SCRIPT, WAITING, runSlot, stop, machine } from "./run-slot-fake"
 
-// ten waiters under xtrace and the shims take up to a minute over their first looks on a loaded Mac, before the window opens
-setDefaultTimeout(180_000)
+// ten waiters' first looks under xtrace and the shims, about 700 process starts each at a queue of 10, took 45 to 110 s at load5 19 to 25 before the window opened, and with quiet rounds of a whole poll the ten-queue-waiter row took 142 to 246 s at load5 12 to 24 (issue 1612, measured), so the slowest row has about 1.5 times its time
+setDefaultTimeout(360_000)
 
 // every external command run-slot.sh calls by name; a shim for each counts its start, so a start the shims miss is a fork that runs bash alone, which the trace's subshell levels count
 const COMMANDS =
@@ -53,6 +53,9 @@ const waiter = (
   return w
 }
 type Waiter = ReturnType<typeof waiter>
+// whether the waiter has ended a look since `at` in its trace: a look_mark, then a sleep after it
+const lookedSince = (w: Waiter, at: number) =>
+  /^\++\d+ look_mark$[\s\S]*^\+0 sleep \S+$/m.test(w.err.slice(at))
 // the subshells a trace shows entered: each line at a deeper level than the line before it
 const subshells = (trace: string) => {
   let n = 0
@@ -65,24 +68,28 @@ const subshells = (trace: string) => {
   }
   return n
 }
-// the processes the waiters started together each second over `window` seconds, once each has printed its first wait line and a whole poll has passed in which each is in its sleep and no queue waiter began a look (look_mark, which the clone loop never calls), since a waiter whose first look ran before the others had joined looks once more at them
+// whether a waiter has ended its last look: a sleep follows its last look_mark, or it has none (the clone loop never calls look_mark)
+const settled = (trace: string) => {
+  const at = trace.lastIndexOf(" look_mark\n")
+  return at < 0 || /^\+0 sleep \S+$/m.test(trace.slice(at))
+}
+// whether a whole poll ran in this part of a trace: a sleep, the wake after it, and the next sleep
+const polled = (trace: string) =>
+  /^\+0 sleep \S+$[\s\S]*?^\+0 (?!sleep )[\s\S]*?^\+0 sleep \S+$/m.test(trace)
+// the processes the waiters started together each second over `window` seconds, once each has printed its first wait line and then a round has passed that began with no look under way, in which each waiter ran a whole poll and none began a look, since a waiter whose first look ran before the others had joined looks once more at them; a round of a fixed poll's length ended before a loaded Mac woke the waiters, so their look at the oldest's first run-slot.next landed in the window (issue 1612, measured)
 const starts = async (
   count: string,
   waiters: Waiter[],
   waits: RegExp,
-  poll: number,
   window: number,
   during: () => Promise<unknown> = async () => {},
 ) => {
   for (const w of waiters) while (!waits.test(w.err)) await Bun.sleep(50)
   for (let quiet = false; !quiet;) {
     const at = waiters.map((w) => w.err.length)
-    await Bun.sleep((poll + 1) * 1000)
-    quiet = waiters.every(
-      (w, i) =>
-        !/^\++\d+ look_mark$/m.test(w.err.slice(at[i])) &&
-        /^\+0 sleep \S+$/.test(w.err.match(/^\+0 .*$/gm)?.at(-1) ?? ""),
-    )
+    const idle = waiters.every((w) => settled(w.err))
+    while (!waiters.every((w, i) => polled(w.err.slice(at[i])))) await Bun.sleep(50)
+    quiet = idle && waiters.every((w, i) => !/^\++\d+ look_mark$/m.test(w.err.slice(at[i])))
   }
   const from = waiters.map((w) => w.err.length)
   const before = readFileSync(count, "utf8").split("\n").length
@@ -112,7 +119,7 @@ describe("waiters cost close to nothing while they wait", () => {
     const waiters = Array.from({ length: 10 }, (_, i) =>
       waiter(m, path, `worker-${i}`, ["touch"], { RUN_SLOT_POLL: "15" }),
     )
-    expect(await starts(count, waiters, new RegExp(WAITING.source, "m"), 15, 30)).toBeLessThan(5)
+    expect(await starts(count, waiters, new RegExp(WAITING.source, "m"), 30)).toBeLessThan(5)
   })
 
   // a count of polls to look again on (an older copy's 20) sets each waiter looking within the window, about 900 to 2,200 processes a look with ten tickets
@@ -136,9 +143,9 @@ describe("waiters cost close to nothing while they wait", () => {
         ops: m.ops,
       }).exited
     }
-    expect(
-      await starts(count, waiters, new RegExp(WAITING.source, "m"), 1, 25, slots),
-    ).toBeLessThan(20)
+    expect(await starts(count, waiters, new RegExp(WAITING.source, "m"), 25, slots)).toBeLessThan(
+      20,
+    )
   })
 
   test("and so do ten clone waiters behind the load brake", async () => {
@@ -148,7 +155,7 @@ describe("waiters cost close to nothing while they wait", () => {
     const waiters = Array.from({ length: 10 }, (_, i) =>
       waiter(m, path, `worker-${i}`, ["cp", "-R", "node_modules"], { RUN_SLOT_POLL: "5" }),
     )
-    expect(await starts(count, waiters, /^run-slot\.sh: this clone waits /m, 5, 10)).toBeLessThan(5)
+    expect(await starts(count, waiters, /^run-slot\.sh: this clone waits /m, 10)).toBeLessThan(5)
   })
 })
 
@@ -190,11 +197,24 @@ describe("a waiter behind the head", () => {
       RUN_SLOT_SIZE: "small",
     })
     while (!asleep(next)) await Bun.sleep(50)
+    const nextf = join(m.ops, "run-slot.next")
+    const named = () => (existsSync(nextf) ? readFileSync(nextf, "utf8") : "")
+    const was = named()
+    const seen = pick.err.length
+    const freed = next.err.length
     m.release("run-slot-2")
-    const from = next.err.length
-    const sleeps = () => next.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0
-    while (!existsSync(next.marker) && sleeps() < 10) await Bun.sleep(50)
-    expect(sleeps()).toBeLessThanOrEqual(3)
+    const sleeps = (from: number) => next.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0
+    // the pick's look writes run-slot.next partway through, which a loaded Mac can take seconds to reach, so worker-y's polls count from the first sign it could act, that write or the look's end, read before its take, and from the release when its take or 10 sleeps come first (issue 1612)
+    let signed = false
+    while (
+      !(signed = named() !== was || lookedSince(pick, seen)) &&
+      !existsSync(next.marker) &&
+      sleeps(freed) < 10
+    )
+      await Bun.sleep(50)
+    const from = signed ? next.err.length : freed
+    while (!existsSync(next.marker) && sleeps(from) < 10) await Bun.sleep(50)
+    expect(sleeps(from)).toBeLessThanOrEqual(3)
     expect(existsSync(pick.marker)).toBe(false)
     await Promise.all([stop(pick.p), stop(next.p)])
   })
@@ -212,11 +232,12 @@ describe("a waiter behind the head", () => {
     const older = waiter(m, path, "worker-w", ["touch"], poll)
     while (!asleep(older)) await Bun.sleep(50)
     const gate = join(m.root, "gate")
+    // both runs are worker-p's and share one marker, so the first touches none and the marker says the second ran (issue 1612: the first's touch passed the row before its count began)
     const first = waiter(
       m,
       path,
       "worker-p",
-      ["bash", "-c", `until [ -e "${gate}" ]; do sleep 0.1; done; touch "$0"`],
+      ["bash", "-c", `until [ -e "${gate}" ]; do sleep 0.1; done`],
       poll,
     )
     while (!asleep(first)) await Bun.sleep(50)
@@ -226,11 +247,7 @@ describe("a waiter behind the head", () => {
     while (!/^run-slot\.sh: worker-p holds run-slot$/m.test(first.err)) await Bun.sleep(50)
     // the older waiter looks at the first run's take before its end
     const seen = older.err.length
-    while (
-      !/^\++\d+ look_mark$/m.test(older.err.slice(seen)) ||
-      !asleep({ ...older, err: older.err.slice(seen) })
-    )
-      await Bun.sleep(50)
+    while (!lookedSince(older, seen)) await Bun.sleep(50)
     const from = second.err.length
     writeFileSync(gate, "")
     await first.p.exited
@@ -282,7 +299,7 @@ describe("a waiter's waited count is the real seconds since its wait began", () 
     expect(script.match(/waited=\$\(\(waited \+/g) ?? []).toEqual([])
   })
 
-  test("each wait records its start, and four loops and focus_wait read the clock against it", () => {
+  test("each wait records its start, and four loops and hold_wait read the clock against it", () => {
     expect(script.match(/WAIT_FROM=\$SECONDS/g) ?? []).toHaveLength(4)
     expect(script.match(/waited=\$\(\(SECONDS - WAIT_FROM\)\)/g) ?? []).toHaveLength(5)
   })

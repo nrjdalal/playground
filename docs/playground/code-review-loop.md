@@ -82,7 +82,7 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
 - A test that fails only on the runner box counts against the score once a rerun on the Mac fails too, so a difference in the box alone never lowers a score.
 - A report that fails to send by name reaches the worker anyway, sent again to the `uds:` address its newest message came from.
 - The reviewer's small fix goes to the worker as a patch, never as a commit of its own, since ADR 0004 makes the gate a reviewer independent of the code it scores: save `git -C <clone> diff > <scratch>/fix.patch`, restore the clone, check it with `git -C <clone> apply --check <scratch>/fix.patch`,
-  and hand it over as a diff inline in the verdict, which the message to the worker links, since a restart clears `/tmp`, and the worker applies it word for word.
+  and hand it over inline in the verdict, which the message to the worker links, since a restart clears `/tmp`: that `fix.patch` as a `diff` block, pasted whole and unedited with every context line kept so `git apply` takes it as it stands, which the worker applies word for word.
   It applies a patch or a suggested wording in its clone and runs the checks its files call for before it posts, the trace ratchet's test and the em-dash check among them on any doc, so its own fix never costs the PR a round.
   Each patched test file outside `CLOCK_EXEMPT` also runs once under `CLOCK_AHEAD_DAYS=30`, since a file's mtime and a child process stay on the real clock, and an exempt file's run counts as a no-op, not a pass.
   A patch to a promoted skill's `SKILL.md` also greps each changed term over that skill's docs page and every README that lists it, and patches every hit.

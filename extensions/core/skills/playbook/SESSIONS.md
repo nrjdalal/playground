@@ -74,7 +74,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    The reviewer template's `__SPEC__` slot, under its This PR heading, holds the PR's scope as the lead ruled it, the bar the review scores against and any harness the reviewer re-runs, so the reviewer scores the ruled scope rather than the issue's first Done when.
    Fill it from the lead's ruling and the PR body's scope, and where the lead ruled nothing beyond the ticket, say so.
    Unlike the other slots, the `__SPEC__` fill replaces the backticked token together with its backticks, since the spec runs to paragraphs that inline code would break; the template keeps the backticks only so the slots test, which wants every slot backticked, stays green.
-   Done when the filled brief's This PR section names the scope, the bar and the harness, or that there is none, with no `__SPEC__` token left.
+   Done when the filled brief's This PR section names the scope, the bar and the harness, or that there is none, and spawn.sh starts the reviewer, since it refuses a brief still holding the `__SPEC__` token, naming it.
    The tester template carries no such slot, since a tester drives the diff's surfaces for CI and posts PASS or FAIL, not a score against the scope.
    A probe's brief adds that it ends by telling its spawner it is done, so the spawner closes its pane (End).
    A brief that has a script written for `/bin/bash` keeps it to macOS's bash 3.2.57, which stops on a fractional `read -t 0.5` (`invalid timeout specification`): wait in whole seconds (`read -t 1`), or run the script under zsh or bun.
@@ -233,7 +233,8 @@ A session does not close its own pane, since that kills its claude mid-call: it 
 Before you close a checker by hand, read its roster entry and ask it which rounds it still holds, since it may be serving another PR (on one PR a reviewer closed mid-round).
 It closes the one pane spawn.sh opened for that name, found by the label it set, on the server the session's resume record names (the factory's when the record has no `# server:` line), and prints `closed <name> (pane <id> on <server>)`.
 It refuses a session whose runtime pin does not read herdr or that has no resume record, a server that is down or a herdr that is not the pinned one, no pane or two panes carrying the label, and your own pane, quoting herdr's words when herdr refuses the close.
-Once the pane closes it sets the session's roster row to `ended` itself, and leaves the pins and the resume record in place, so `spawn.sh resume` can reopen the session, setting the row back to `starting`, as any new start of that name does;
+It sets the session's roster row to `ended` itself just before the pane closes, so a restore that finds the session gone leaves it down, and puts the old status back when herdr refuses the close;
+it leaves the pins and the resume record in place, so `spawn.sh resume` can reopen the session, setting the row back to `starting`, as any new start of that name does;
 a reviewer or tester comes back with `--pr <the PR it serves now>`, which replaces the PRs its row lists ([SPAWN.md](SPAWN.md#modes), scripts/README.md's spawn.sh).
 
 Record why it ended with `report <name> "<why it ended>"` (ROSTER.md, It ends).

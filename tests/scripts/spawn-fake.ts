@@ -357,6 +357,7 @@ export async function spawn(
     roster: await read("roster.args"),
     rosterScript: (await read("roster.script"))?.[0],
     rosterLog: (await read("roster.log"))?.filter(Boolean),
+    rosterAtClose: (await read("roster-at-close.log"))?.filter(Boolean),
     rosterAtRun: (await read("roster-at-run.log"))?.filter(Boolean),
     security: (await read("security.args"))?.filter(Boolean),
   }
@@ -441,6 +442,16 @@ writeFileSync(
   `#!/bin/bash
 printf '%s\\037' "$@" >> "$HOME/herdr.calls"; echo >> "$HOME/herdr.calls"
 echo "$HERDR_SESSION $HERDR_SOCKET_PATH $HERDR_CONFIG_PATH" > "$HOME/herdr.env"
+# a spawn.sh close of the named session landing during this call, which ends its roster row
+ends() {
+  python3 -I -c 'import json, sys
+p = sys.argv[1]
+r = json.load(open(p))
+for a in r["agents"]:
+    if a.get("name") == sys.argv[2]:
+        a["status"] = "ended"
+json.dump(r, open(p, "w"))' "$HOME/.playground/roster.json" "$1"
+}
 case "$1 \${2:-}" in
   "--version "*) echo "herdr \${FAKE_HERDR_VERSION:-0.9.5}" ;;
   "status server") [ -n "$FAKE_HERDR_DOWN" ] && echo '{"running":false}' || echo '{"running":true}' ;;
@@ -452,14 +463,19 @@ case "$1 \${2:-}" in
     echo '{"result":{"pane":{"pane_id":"w1:p7","workspace_id":"w1"}}}' ;;
   "pane list")
     [ -z "$FAKE_HERDR_LIST_FAIL" ] || exit 1
+    [ -z "$FAKE_HERDR_LIST_ENDS" ] || ends "$FAKE_HERDR_LIST_ENDS"
     cat "$HOME/herdr.panes" 2>/dev/null || echo '{"result":{"panes":[]}}' ;;
   "pane rename")
     [ -z "$FAKE_HERDR_RENAME_EATS" ] || rm -f "$HOME"/.playground/launch/*.herdr
     [ -z "$FAKE_HERDR_RENAME_FAIL" ] || { echo "error: label taken" >&2; exit 1; } ;;
-  "pane close") [ -z "$FAKE_HERDR_CLOSE_FAIL" ] || { echo "error: pane w2:p3 not found" >&2; exit 1; } ;;
+  "pane close")
+    # the roster writes made before the pane closes, which a restore running beside the close reads
+    cp "$HOME/roster.log" "$HOME/roster-at-close.log" 2>/dev/null || : > "$HOME/roster-at-close.log"
+    [ -z "$FAKE_HERDR_CLOSE_FAIL" ] || { echo "error: pane w2:p3 not found" >&2; exit 1; } ;;
   "pane run")
     # the roster writes made before the session's launch runs, which a checker's first tool call reads
     cp "$HOME/roster.log" "$HOME/roster-at-run.log" 2>/dev/null || : > "$HOME/roster-at-run.log"
+    [ -z "$FAKE_HERDR_RUN_ENDS" ] || ends "$FAKE_HERDR_RUN_ENDS"
     [ -z "$FAKE_HERDR_RUN_SAYS" ] || { echo "$FAKE_HERDR_RUN_SAYS" >&2; exit 1; }
     [ -z "$FAKE_HERDR_RUN_FAIL" ] || exit 1 ;;
   "pane wait-output")
