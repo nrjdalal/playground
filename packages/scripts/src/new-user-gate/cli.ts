@@ -265,6 +265,28 @@ const addAccount = (browser: Browser, box: string, home: string): string | null 
   return kept ? null : "Add account kept no token in the stand-in Keychain within 30s"
 }
 
+// The shot a step ends on, taken once the page settles: a settle or screenshot that fails is named in the shot's place, so the step's verdict stays its own check's.
+export const shotAfter = (take: () => string, settle?: () => void): string => {
+  try {
+    settle?.()
+    return take()
+  } catch (error) {
+    return `no shot: ${(error as Error).message}`
+  }
+}
+
+// Step 1's check: install.sh's exit and its Left for you lines, judged before shot opens the page.
+export const installCheck = (out: string, shot: () => string): Omit<Step, "name"> => {
+  const left = leftForYou(out)
+  const code = Number(/install\.sh exit (\d+)/.exec(out)?.[1] ?? -1)
+  const ok = code === 0 && !left.length
+  return {
+    detail: ok ? "" : `exit ${code}${left.length ? `; left for you: ${left.join(" | ")}` : ""}`,
+    ok,
+    shot: shot(),
+  }
+}
+
 // One agent-browser session for the run, its screenshots in the box.
 class Browser {
   readonly session = `pg-gate-${process.pid}`
@@ -287,10 +309,12 @@ class Browser {
   text(): string {
     return String(this.cmd("eval", "document.body.innerText").result ?? "")
   }
-  shot(name: string): string {
+  shot(name: string, settle?: () => void): string {
     const path = join(this.shots, `${name}.png`)
-    this.cmd("screenshot", "--full", path)
-    return path
+    return shotAfter(() => {
+      this.cmd("screenshot", "--full", path)
+      return path
+    }, settle)
   }
   // Clicks the button whose words are name once it is enabled; false while there is none.
   clickEnabled(name: string): boolean {
@@ -453,18 +477,12 @@ const main = async (args: string[]) => {
     // the bare name the live checkout aliases, as a new user opens it, on the box's own proxy
     const web = `http://playground.localhost:${PROXY_PORT}`
     await check("curl | bash exits 0 with no Left for you", async () => {
-      const left = leftForYou(out)
-      const code = Number(/install\.sh exit (\d+)/.exec(out)?.[1] ?? -1)
-      browser.cmd("open", `${web}/dashboard`)
-      browser.cmd("wait", "--load", "networkidle")
-      return {
-        detail:
-          code === 0 && !left.length
-            ? ""
-            : `exit ${code}${left.length ? `; left for you: ${left.join(" | ")}` : ""}`,
-        ok: code === 0 && !left.length,
-        shot: browser.shot("1-install"),
-      }
+      return installCheck(out, () =>
+        browser.shot("1-install", () => {
+          browser.cmd("open", `${web}/dashboard`)
+          browser.cmd("wait", "--load", "networkidle")
+        }),
+      )
     })
     await check("first run starts the database with one click", async () => {
       browser.cmd("find", "role", "button", "click", "--name", "Start the database")
