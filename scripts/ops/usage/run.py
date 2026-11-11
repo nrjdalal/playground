@@ -17,7 +17,7 @@ sessions spend into, login-flip.py pruning it to the pool on each run; each is p
 ops/alerts-usage.json holds, while each lasts, one alert per factory account whose week is past 90, 97 or 98% (usage.json's account
 and each in its `accounts`), and the logged-in account's 5-hour window at 90% or more; ops-unstick folds it in.
 Each alert's `name` is its account, since the leads' sweep keys an alert by its kind and name.
-While login-flip.json names no `factory`, each Claude account the Dashboard's Add a Claude account keeps (usage.accounts, its
+While login-flip.json's `factory` resolves to no account, each Claude account the Dashboard's Add a Claude account keeps (usage.accounts, its
 setup-token under usage.keychainService) comes before the stored login: usage.json holds the first one's probe reading, since the
 dispatcher's sessions run on it, and the stored login's only when none of them reads. With neither a stored login nor an added account, the job beats "waiting", not an error.
 usage.json's `rotation` is login-flip.json's: `pool`, each account login-flip.py switches between (its TARGETS), whether its plan ends, when, and the day of the month a renewing one renews.
@@ -196,9 +196,12 @@ def resolved_factory(flip):
     return factory_login(flip.get("factory"), [e["account"] for e in pool["pool"]] if pool else None, (flip.get("split") or {}).get("shares") or {}, SERVICE)
 
 
-def factory_reading(stored, flip, accounts, resolved=None):
+_UNRESOLVED = object()  # factory_reading's resolved argument: absent, so the caller's None (the rule resolving to none) is taken as handed in
+
+
+def factory_reading(stored, flip, accounts, resolved=_UNRESOLVED):
     """usage.json's data for the factory login resolved_factory resolves (the cycle hands one resolution in, so a cycle resolves once), when that is not the stored login and usage.accounts still lists it; else None."""
-    factory = resolved_factory(flip) if resolved is None else resolved
+    factory = resolved_factory(flip) if resolved is _UNRESOLVED else resolved
     if not factory or (stored and factory == stored["account"]) or (accounts is not None and factory not in accounts):
         return None
     now = time.time()
