@@ -767,6 +767,19 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["gh api with a Go template", `gh api x --template '{{range .}}{{.a}} {{end}}'`],
     ["gh api with a Go template by -t", `gh api x -t '{{range .}}{{.a}} {{end}}'`],
     ["gh pr view with a Go template", `gh pr view 1 --json a --template '{{.a}} x'`],
+    [
+      "gh issue create with a title naming the data folder",
+      `gh issue create --title "a note about ~/.playground" --body x`,
+    ],
+    ["gh pr comment with a body naming the data folder", `gh pr comment 1 -b "see ~/.playground"`],
+    [
+      "a cd to a folder, then a sed range from a bracket regex",
+      "cd /tmp && sed -n '/[Ff]ollow/,$p' f",
+    ],
+    [
+      "a cd to the checkout, then gh's jq body through a sed range and head",
+      `cd ${CHECKOUT} && gh api repos/o/r/issues/comments/1 --jq .body | sed -n '/[Ff]ollow/,$p' | head -40`,
+    ],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
