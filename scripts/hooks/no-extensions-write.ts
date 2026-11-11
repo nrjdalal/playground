@@ -828,7 +828,7 @@ function narrow(cmd: Command, env: Env): boolean {
   if (base === "perl") return perlReads(parsed, env)
   // date prints the time and runs nothing, so a read line ending in `; date -u +%FT%TZ` keeps its readers' reading
   if (base === "cut" || base === "date" || base === "echo" || base === "lsof") return true
-  // bash given one script by -c runs that script alone, which the reader walks call by call, so it is narrow when that script reads call by call too; wholeLine counts it only as its line's one command, and sh and zsh keep canary's reading
+  // bash given one script by -c runs that script alone, which the reader walks call by call, so it is narrow when that script holds reads alone; wholeLine counts it only as its line's one command, and sh and zsh keep canary's reading
   if (base === "bash") {
     const [flag, script] = args
     return (
@@ -836,7 +836,7 @@ function narrow(cmd: Command, env: Env): boolean {
       flag.value === "-c" &&
       script.quoted &&
       !marked(script.value) &&
-      !wholeLine(lex(script.value, env.known).commands, env)
+      !wholeLine(lex(script.value, env.known).commands, env, true)
     )
   }
   // a read-only gh call is narrow when its jq filter is the only word that holds a space, and a gh post when its title and body are
@@ -893,21 +893,33 @@ function quietCommit(cmd: Command, parsed: Parsed, env: Env): boolean {
 }
 
 // Whether a line is read whole, as canary read it, every spaced text of every program but a reader a command line; a line is read call by call only when every command, its substitutions' included, is narrow or a quiet commit, and no redirect but a quiet commit's own writes a file
-function wholeLine(commands: Command[], env: Env): boolean {
+function wholeLine(commands: Command[], env: Env, readsOnly = false): boolean {
+  // date is a reader only on a line that edits nothing, so one beside an in-place sed or a quiet commit keeps canary's reading; readsOnly, a bash -c's script, spares neither edit
+  const edited = !readsOnly && commands.some((cmd) => edits(cmd, parse(cmd), env))
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
-    if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
+    if (words.some((word) => word.procs && wholeLine(word.procs, env, readsOnly))) return true
     const parsed = parse(cmd)
+    const base = parsed.first && program(parsed.first.value)
     // a bash -c is narrow only as its line's one command, so a shell beside another call keeps canary's reading
-    if (commands.length > 1 && parsed.first && program(parsed.first.value) === "bash") return true
-    // a quiet commit run-slot runs is read as the commit (slotWords), and its own redirect takes what git prints, never its message, judged by where it writes as every redirect is
-    const slot = slotWords(parsed)
-    const commit = slot ? { ...cmd, words: slot } : cmd
-    if (quietCommit(commit, slot ? parse(commit) : parsed, env)) return false
+    if (base === "bash" && commands.length > 1) return true
+    if (edited && base === "date") return true
+    if (!readsOnly && quietRun(cmd, parsed, env)) return false
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
-    return writes || !(narrow(cmd, env) || sedInPlace(cmd, parsed))
+    return writes || !(narrow(cmd, env) || (!readsOnly && sedInPlace(cmd, parsed)))
   })
 }
+
+// a quiet commit run-slot runs is read as the commit (slotWords), and its own redirect takes what git prints, never its message, judged by where it writes as every redirect is
+function quietRun(cmd: Command, parsed: Parsed, env: Env): boolean {
+  const slot = slotWords(parsed)
+  const commit = slot ? { ...cmd, words: slot } : cmd
+  return quietCommit(commit, slot ? parse(commit) : parsed, env)
+}
+
+// Whether a call edits a file on a line read call by call: a quiet commit or an in-place sed, each judged by what it writes
+const edits = (cmd: Command, parsed: Parsed, env: Env) =>
+  quietRun(cmd, parsed, env) || sedInPlace(cmd, parsed) !== undefined
 
 // Calls whose string argument a shell runs: exec and execSync in a program that names child_process, and execFile, execFileSync, spawn and spawnSync in a program that names `shell` other than as a key whose whole value is a literal `false` (true, a shell's path, a value read at run time or an expression that starts with `false` all run one). A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
 const IMPLICIT_SHELL = new Set(["exec", "execSync"])
