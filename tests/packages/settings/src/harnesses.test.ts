@@ -17,7 +17,7 @@ describe("a backend pin", () => {
     expect(readPin("claude")).toEqual({ backend: "claude", harness: "claude-code" })
   })
 
-  test.each(["", "gpt", "codex claude", "claude-code gpt", "claude-code glm extra"])(
+  test.each(["", "gpt", "openai", "codex claude", "claude-code gpt", "claude-code glm extra"])(
     "reads %p as no pin",
     (text) => {
       expect(readPin(text)).toBeNull()
