@@ -545,10 +545,12 @@ describe("Inbox cards on WhatsApp", () => {
       card(22, {}, { amount: "$5", type: "budget", why: "a run" } as never),
       card(23, {}, { sha: "abcdef1", type: "ship" } as never),
       card(24, {}, { shape: "a table", type: "schema" } as never),
+      card(25, {}, { key: "wa.owner", type: "guard", value: "15550000000" } as never),
     ]
     const h = await withCards(kept)
-    expect(h.texts()).toEqual([waitingLine(5)])
-    for (const ref of [20, 21, 22, 23, 24])
+    expect(h.texts()).toEqual([waitingLine(6)])
+    expect(h.texts().join("\n")).not.toContain("15550000000")
+    for (const ref of [20, 21, 22, 23, 24, 25])
       expect(await say(h, `1 #i${ref}`)).toEqual([notSent(ref)])
     expect(h.answers).toEqual([])
   })
