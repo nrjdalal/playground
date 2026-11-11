@@ -87,13 +87,15 @@ describe("after a restart, a resumed factory session re-arms its watches and re-
       )
       if (run.exitCode !== 0) throw new Error(run.stderr.toString())
     }
-    // A main checkout and two worktrees whose folders are not their branches' names, since lefthook names its patch by the worktree's folder, the second's name starting with the first's.
+    // A main checkout and two worktrees, each holding the file the patch changes, whose folders are not their branches' names, since lefthook names its patch by the worktree's folder, the second's name starting with the first's.
     const scratch = () => {
       const root = realpathSync(mkdtempSync(join(tmpdir(), "after-resume-git-")))
       const main = join(root, "main")
       mkdirSync(main)
       git(main, "init", "-q", "-b", "canary")
-      git(main, "commit", "-q", "--allow-empty", "-m", "init")
+      writeFileSync(join(main, "f.txt"), "a\nb\nc\n")
+      git(main, "add", "f.txt")
+      git(main, "commit", "-q", "-m", "init")
       git(main, "worktree", "add", "-q", join(root, "wt-folder"), "-b", "PG-9-slug")
       git(main, "worktree", "add", "-q", join(root, "wt-folder-2"), "-b", "PG-10-slug")
       const info = join(main, ".git", "info")
@@ -144,6 +146,28 @@ describe("after a restart, a resumed factory session re-arms its watches and re-
         { cwd: main, message: { content: [{ input: { command }, type: "tool_use" }] } },
       ])
       expect(text).toContain(`git -C ${worktree} apply --unidiff-zero ${left}`)
+    })
+
+    test("a worktree named only in a message or a command other than a commit is not this session's", async () => {
+      const { info, main, worktree } = scratch()
+      writeFileSync(join(info, "lefthook-unstaged.wt-folder.patch"), patch)
+      const text = await resumedIn(main, [
+        { cwd: main, message: { content: [{ text: `works in ${worktree}`, type: "text" }] } },
+        {
+          cwd: main,
+          message: {
+            content: [{ input: { command: `git -C ${worktree} log` }, type: "tool_use" }],
+          },
+        },
+      ])
+      expect(text).not.toContain("lefthook")
+    })
+
+    test("a patch whose edit is back in the worktree is named no more", async () => {
+      const { info, worktree } = scratch()
+      writeFileSync(join(info, "lefthook-unstaged.wt-folder.patch"), patch)
+      writeFileSync(join(worktree, "f.txt"), "a\nb\nc2\n")
+      expect(await resumedIn(worktree)).not.toContain("lefthook")
     })
 
     test("a main checkout's patch has no worktree name", async () => {
