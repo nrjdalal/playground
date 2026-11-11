@@ -674,11 +674,15 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     expect(await bash(`bun run --cwd ${MAIN}/.claude/worktrees/b build`, WORKTREE)).toBeUndefined()
   })
 
-  // #1663: what a cd's || runs, runs only where the cd failed; an exit or a return there ends the line, so what follows runs where the cd landed
+  // #1663: what a cd's || runs, runs where the cd failed; after an exit or a return there, or an || that answers a later command of the cd's run, what follows runs where the cd landed
   test.each([
     ["an exit", `cd ${WORKTREE} || exit; git commit -m x`],
     ["an exit with a status", `cd ${WORKTREE} || exit 1; git commit -m x`],
     ["a return", `cd ${WORKTREE} || return; git commit -m x`],
+    [
+      "a true after a later command of its run",
+      `cd ${WORKTREE} && echo x || true; git commit -m x`,
+    ],
   ])(
     "from the main checkout, a commit after a cd whose || runs %s runs",
     async (_name, command) => {
@@ -689,6 +693,7 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
   test.each([
     ["an echo", `cd ${WORKTREE} || echo no; git commit -m x`],
     ["a cd back", `cd ${WORKTREE} || cd ${MAIN}; git commit -m x`],
+    ["a commit after a later command of its run", `cd ${WORKTREE} && echo x || git commit -m x`],
   ])(
     "from the main checkout, a commit after a cd whose || runs %s is refused",
     async (_name, command) => {

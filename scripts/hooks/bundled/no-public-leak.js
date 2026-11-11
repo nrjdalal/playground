@@ -8354,20 +8354,25 @@ var negated = (cmd) => markers(cmd.words).filter((word) => word === "!").length 
 var EXITS = new Set(["exit", "return"]);
 function orElse(cmd, env) {
   const or = env.cwdOr;
-  if (!or || cmd.chain === or.token || cmd.chain === or.operand)
+  if (!or || cmd.chain === or.operand)
     return;
+  if (cmd.chain === or.token) {
+    if (!or.tail)
+      env.cwdOr = { ...or, tail: true };
+    return;
+  }
   if (or.operand === undefined && cmd.follows === "||") {
     env.cwdOr = {
       ...or,
-      exits: EXITS.has(parse3(cmd).name),
       landed: { maybe: env.cwdMaybe ?? [], sure: env.cwdSure },
-      operand: cmd.chain
+      operand: cmd.chain,
+      resumes: or.tail || EXITS.has(parse3(cmd).name)
     };
     env.cwdMaybe = keep([...new Set([...startFolders(env), ...or.before])], env);
     env.cwdSure = undefined;
     return;
   }
-  if (or.exits && or.landed) {
+  if (or.resumes && or.landed) {
     env.cwdMaybe = or.landed.maybe;
     env.cwdSure = or.landed.sure;
   }

@@ -86,7 +86,7 @@ export type Env = {
   cwdHeld?: string[]
   // The folders a cd the reader could not be sure of may have left the shell in, beside `cwdSure`; `cwdSure` is unnamed whenever one of them is the shell's instead
   cwdMaybe?: string[]
-  // A sure cd that an `||` may follow (`orElse`): the folders the shell was in before it and its run's token; once the `||`'s command arrives, that command's token, where the cd left the shell, and whether that command is an exit or a return
+  // A sure cd whose run an `||` may follow (`orElse`): the folders the shell was in before it, its run's token, and whether a later command joined that run; once the `||`'s command arrives, that command's token, where the shell was, and whether the commands after it return there
   cwdOr?: CdOr
   // The folder the reader proved the shell is in: a cd it is sure the shell runs once, into one folder it reads. Unnamed wherever the reader cannot prove one, which is what `places` enumerates instead.
   cwdSure?: string
@@ -2057,31 +2057,36 @@ const negated = (cmd: Command): boolean =>
 
 type CdOr = {
   before: string[]
-  exits?: boolean
   landed?: { maybe: string[]; sure?: string }
   operand?: number
+  resumes?: boolean
+  tail?: boolean
   token?: number
 }
 
 // The words that end the line where they run, so a cd's `||` that runs one leaves the commands after it where the cd landed
 const EXITS = new Set(["exit", "return"])
 
-// What a cd's `||` runs, runs only where the cd failed, so it and its own run are judged in the folders from before the cd too, beside where the cd landed; the commands after that run keep both, but after an exit or a return, which ends the line where the cd failed.
+// What an `||` after a sure cd's run runs may run where the cd failed, so it and its own run are judged in the folders from before the cd too, beside where the shell was. The commands after that run keep both when the `||` follows the cd itself (`cd <path> || echo no; git commit`), and return to where the shell was when the `||` follows a later command of the cd's run, or what it runs is an exit or a return, which ends the line where the cd failed.
 function orElse(cmd: Command, env: Env): void {
   const or = env.cwdOr
-  if (!or || cmd.chain === or.token || cmd.chain === or.operand) return
+  if (!or || cmd.chain === or.operand) return
+  if (cmd.chain === or.token) {
+    if (!or.tail) env.cwdOr = { ...or, tail: true }
+    return
+  }
   if (or.operand === undefined && cmd.follows === "||") {
     env.cwdOr = {
       ...or,
-      exits: EXITS.has(parse(cmd).name),
       landed: { maybe: env.cwdMaybe ?? [], sure: env.cwdSure },
       operand: cmd.chain,
+      resumes: or.tail || EXITS.has(parse(cmd).name),
     }
     env.cwdMaybe = keep([...new Set([...startFolders(env), ...or.before])], env)
     env.cwdSure = undefined
     return
   }
-  if (or.exits && or.landed) {
+  if (or.resumes && or.landed) {
     env.cwdMaybe = or.landed.maybe
     env.cwdSure = or.landed.sure
   }
