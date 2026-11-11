@@ -1,5 +1,5 @@
 import { readFileSync, unlinkSync } from "node:fs"
-import { chmod, mkdir, unlink, writeFile } from "node:fs/promises"
+import { chmod, link, mkdir, rename, unlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import { writeAtomic } from "../write-atomic"
@@ -72,32 +72,40 @@ export async function keepAlive(dir: string, now: number, remind: () => Promise<
   await writeOwn(path, { ...link, remindedAt: now })
 }
 
-// One process holds the auth state: the lock is created exclusively with the holder's pid, taken over only from a holder that is gone, and removed by its holder on exit; it answers the live holder's pid when another holds it.
+// One process holds the auth state: the lock is created exclusively with the holder's pid and removed by its holder on exit; a gone holder's lock is moved aside and checked, so a takeover never removes a newer lock; it answers why the lock is not this process's.
 export async function takeLock(
   path: string,
   pid: number,
   holds: (pid: number) => boolean,
-): Promise<number | undefined> {
-  for (let tries = 0; tries < 2; tries++) {
+): Promise<string | undefined> {
+  const pidIn = async (file: string) =>
+    Number(
+      await Bun.file(file)
+        .text()
+        .catch(() => ""),
+    ) || undefined
+  for (let tries = 0; tries < 3; tries++) {
     try {
       await writeFile(path, String(pid), { flag: "wx", mode: 0o600 })
       return undefined
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
     }
-    const holder = Number(
-      await Bun.file(path)
-        .text()
-        .catch(() => ""),
+    const holder = await pidIn(path)
+    if (holder && holder !== pid && holds(holder)) return `pid ${holder} holds the auth state`
+    const aside = `${path}.${pid}.gone`
+    if (
+      !(await rename(path, aside).then(
+        () => true,
+        () => false,
+      ))
     )
-    if (holder && holder !== pid && holds(holder)) return holder
-    await unlink(path).catch(() => {})
+      continue
+    // another start took the lock between the read and the move, so its lock goes back
+    if ((await pidIn(aside)) !== holder) await link(aside, path).catch(() => {})
+    await unlink(aside).catch(() => {})
   }
-  return Number(
-    await Bun.file(path)
-      .text()
-      .catch(() => ""),
-  )
+  return "another start is taking the auth state's lock"
 }
 
 // The holder's own release, sync so it runs in an exit handler; another process's lock stays.

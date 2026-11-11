@@ -152,13 +152,28 @@ describe("ops-wa's ban-safety habits", () => {
     await Bun.write(join(dir, "x"), "")
     const lock = join(dir, "lock")
     expect(await takeLock(lock, 101, () => true)).toBeUndefined()
-    expect(await takeLock(lock, 202, (pid) => pid === 101)).toBe(101)
+    expect(await takeLock(lock, 202, (pid) => pid === 101)).toBe("pid 101 holds the auth state")
     expect(await takeLock(lock, 202, () => false)).toBeUndefined()
     expect(await Bun.file(lock).text()).toBe("202")
     releaseLock(lock, 101)
     expect(await Bun.file(lock).exists()).toBe(true)
     releaseLock(lock, 202)
     expect(await Bun.file(lock).exists()).toBe(false)
+  })
+
+  test("gives a gone holder's lock to one of two starts that race for it, never both", async () => {
+    for (let round = 0; round < 50; round++) {
+      const dir = scratch()
+      await Bun.write(join(dir, "x"), "")
+      const lock = join(dir, "lock")
+      await Bun.write(lock, "999")
+      const live = (pid: number) => pid === 101 || pid === 202
+      const [a, b] = await Promise.all([takeLock(lock, 101, live), takeLock(lock, 202, live)])
+      const winner = a === undefined ? 101 : 202
+      expect([a, b].filter((r) => r === undefined)).toHaveLength(1)
+      expect(await Bun.file(lock).text()).toBe(String(winner))
+      expect(a ?? b).toBe(`pid ${winner} holds the auth state`)
+    }
   })
 
   test("refuses to pair while no-raw-wa is not registered in the factory's settings", async () => {

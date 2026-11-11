@@ -75,7 +75,7 @@ const main = async () => {
       .stdout.toString()
       .includes("ops-wa")
   })
-  if (holder !== undefined) return stop(`pid ${holder} holds the auth state`)
+  if (holder) return stop(holder)
   process.on("exit", () => releaseLock(lock, process.pid))
   for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"] as const)
     process.on(signal, () => process.exit(0))

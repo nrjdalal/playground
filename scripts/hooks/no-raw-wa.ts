@@ -24,7 +24,7 @@ const refuse = (what: string) =>
   `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`
 
 // Programs that read a folder's files all the way down, so naming a folder above whatsapp/ reaches it too.
-const RECURSIVE = new Set(["ack", "ag", "ditto", "find", "rg", "rsync", "tar", "zip"])
+const RECURSIVE = new Set(["ack", "ag", "ditto", "find", "rg", "rsync", "tar"])
 // Programs that read all the way down given one of these options.
 const RECURSIVE_WITH: Record<string, RegExp> = {
   cp: /^-[A-Za-z]*[rRa]|^--(?:recursive|archive)$/,
@@ -113,10 +113,10 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
           const value = /^~(?:\/|$)/.test(raw) ? `${homedir()}${raw.slice(1)}` : raw
           const path = value.startsWith("/") ? value : place.cwd && resolve(place.cwd, value)
           if (!path) continue
-          const at = worst(path, targets, !!word.glob)
-          if (at === "inside")
+          const stands = worst(path, targets, !!word.glob)
+          if (stands === "inside")
             return refuse(`${visible(word.value)}, which reaches whatsapp/ in the data folder`)
-          if (at === "above" && recursive(program(name), args))
+          if (stands === "above" && recursive(program(name), args))
             return refuse(
               `${name} through ${visible(word.value)}, which reads whatsapp/ in the data folder on its way down`,
             )

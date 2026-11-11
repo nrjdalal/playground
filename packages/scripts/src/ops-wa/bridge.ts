@@ -169,9 +169,8 @@ export function sender(io: Omit<Io, "relay">) {
         "the owner has not written in the last 24 hours, and ops-wa never starts a chat",
       )
     const parts = split(toWhatsApp(body))
-    const sends = (
-      await readOwn<{ sends: number[] }>(sendsFile(io.dir), { sends: [] })
-    ).sends.filter((at) => now - at < HOUR)
+    const kept = await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})
+    const sends = (kept.sends ?? []).filter((at) => now - at < HOUR)
     if (sends.length + parts.length > SEND.perHour) {
       const frees = new Date(Math.min(...sends, now) + HOUR).toISOString().slice(11, 16)
       throw new Error(`the hourly cap of ${SEND.perHour} sends is reached until ${frees}Z`)
