@@ -306,6 +306,7 @@ function checkRetask(
   const gone = !worker || roster.agents.find((a) => a.name === worker)?.status === "ended"
   const held = (entry.prs as string[] | undefined) ?? []
   const newPr =
+    pairs.some(([k, v]) => (k === "prs" || k === "prs+") && v.trim()) ||
     ((next.prs as string[] | undefined) ?? []).some((u) => !held.includes(u)) ||
     (next.pr !== undefined && next.pr !== entry.pr)
   if (gone && newPr)
