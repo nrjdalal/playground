@@ -118,10 +118,30 @@ describe("playground sweep", () => {
       "alert: pr-stalled acme/archive#9: no activity for 50m",
       "queue: #9 ready, #10",
       "load5 28.0, at or above 15",
-      "single slot: on",
+      "single slot: on, held by load until load5 holds under 22 for 5 min (load5 28.0)",
     ])
     expect(await sweep(dir, NOW, 20)).toEqual(["quiet"])
     expect(await sweep(dir, NOW, 9)).toEqual(["load5 9.0, back under 15"])
+  })
+
+  // issue 1737: single stood by timer at load5 5.6, so the line says whether the load holds it or it has lifted under the cap
+  test("the single-slot line says whether load holds it or it has lifted under the cap", async () => {
+    const dir = folder()
+    writeFileSync(join(dir, "ops", "run-slot.single"), "")
+    writeFileSync(join(dir, "ops", "run-slot.load5-cap"), "14\n")
+    const under = (seconds: number) =>
+      writeFileSync(join(dir, "ops", "run-slot.under"), `${NOW.getTime() / 1000 - seconds}\n`)
+    under(60)
+    expect(await sweep(dir, NOW, 5.6)).toEqual([
+      "single slot: on, held by load until load5 holds under 14 for 5 min (load5 5.6)",
+    ])
+    under(301)
+    expect(await sweep(dir, NOW, 5.6)).toEqual([
+      "single slot: on, lifted under the cap: load5 5.6 has held under 14 for 5 min",
+    ])
+    expect(await sweep(dir, NOW, 14.2)).toEqual([
+      "single slot: on, held by load until load5 holds under 14 for 5 min (load5 14.2)",
+    ])
   })
 
   test("an alert whose since moves every cycle prints once, and again only after it clears", async () => {
