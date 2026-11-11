@@ -1420,14 +1420,21 @@ ordered_waiters() {
   # (<id>-reviewer, -reviewer-spec), so a drafted review is never held behind workers' long runs (Ops, 2 Nov: 9 of 17 waiters were reviewers). Then
   # the rest. Within each class one past AGED is pinned, so no newer ticket of its class passes it; each small before medium before big, oldest first.
   # A dead waiter's goes on the way
-  local t pid rank ask m p aged k sub seg=0 now ready
+  local t pid rank ask m p aged k sub seg=0 now ready name mt
   local -a subs=(1 1 1 1 1 1)
+  local -a ST
+  # the tickets' mtimes, one stat call for every ticket, name and time paired by the name the line carries and checked against the loop's own, with a
+  # stat of its own for a line that does not pair (a ticket gone between the two reads), instead of a stat a ticket a call (issue 1654)
+  if stat -c %Y "$QUEUE" > /dev/null 2>&1; then ST=(-c '%Y %n'); else ST=(-f '%m %N'); fi
   now=$(date +%s)
   ready=$(ready_line)
-  for t in $(ls "$QUEUE" 2>/dev/null | sort -t- -k1,1n); do
-    pid=$(printf '%s' "$t" | cut -d- -f2)
+  while read -r t name mt; do
+    [ -n "$t" ] || continue
+    pid=${t#*-}; pid=${pid%%-*}
     if ! alive "$pid"; then rm -f "${QUEUE:?}/${t:?}"; continue; fi
-    m=$(mtime "$QUEUE/$t") || continue
+    if [ "$name" != "$t" ]; then mt=$(stat "${ST[0]}" "${ST[1]}" "$QUEUE/$t" 2>/dev/null); name=$t; fi
+    [ -n "$mt" ] || continue
+    m=$mt
     rank="" ask=""
     read -r _ rank _ _ ask _ 2>/dev/null < "$QUEUE/$t"
     case "$rank" in
@@ -1447,7 +1454,7 @@ ordered_waiters() {
     [ "$k" -lt 4 ] || [ "$ask" != ask ] || { k=3; rank=23${rank: -1}; }
     sub=${subs[$k]}
     if [ "$aged" = 0 ]; then echo "$seg $k $sub $rank 0 $t"; else echo "$seg $k $((sub + 1)) 00 1 $t"; subs[$k]=$((sub + 2)); fi
-  done | sort -s -k1,1n -k2,2n -k3,3n -k4,4 | cut -d' ' -f5,6
+  done < <(paste -d ' ' <(ls "$QUEUE" 2>/dev/null | sort -t- -k1,1n) <(stat "${ST[0]}" "${ST[1]}" "$QUEUE"/* 2>/dev/null | awk -v q="$QUEUE/" '{ i = index($0, " "); print substr($0, i + 1 + length(q)) "\t" substr($0, 1, i - 1) }' | sort -t- -k1,1n)) | sort -s -k1,1n -k2,2n -k3,3n -k4,4 | cut -d' ' -f5,6
 }
 first_waiter() {
   # the first waiter in that order whose run fits the units free now (unit_fits), so a run too big for them never holds back a smaller one behind it;
@@ -1455,18 +1462,20 @@ first_waiter() {
   # when no run behind it fits, so it starts once its lanes open and is never starved (issue 1216: a pinned 3-unit head kept 11 smaller waiters
   # behind it for 25 minutes with 2 lanes free); with s2, only among the waiters that can take run-slot-2 (builder, 12 Oct: older copies at
   # the head left slot 2 idle)
-  local p t f c held list pc pl mode=${1:-} blocked=""
+  local p t f c held list pc pl mode=${1:-} blocked="" lu holder
+  # the walk's lane units and priority holder read once, so it pays no read a ticket (issue 1654)
   c=$(capacity); held=$(held_units)
+  lu=$(lane_units); holder=$(prio_holder) || holder=
   list=$(ordered_waiters)
   while read -r p t; do
     [ -n "$t" ] || continue
-    f=$(cat "$QUEUE/$t" 2>/dev/null)
+    f=; read -r f 2>/dev/null < "$QUEUE/$t" || :
     [ "$mode" = s2 ] && [ -z "$f" ] && continue
     set -- $f
-    if unit_fits "${2:-22}" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" "$held"; then echo "$t"; return; fi
+    if unit_fits "${2:-22}" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" "$held" "" "$lu" "$holder"; then echo "$t"; return; fi
     [ "$p" = 1 ] || continue
     [ -n "${2:-}" ] && read -r pc pl <<< "$(passer_units "$t")"
-    if [ -z "${2:-}" ] || unit_fits "$2" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" $((held - pc)) "$pl"; then echo "$t"; return; fi
+    if [ -z "${2:-}" ] || unit_fits "$2" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" $((held - pc)) "$pl" "$lu" "$holder"; then echo "$t"; return; fi
     [ -n "$blocked" ] || blocked=$t
   done <<< "$list"
   [ -z "$blocked" ] || echo "$blocked"
@@ -1527,19 +1536,20 @@ next_sig() { local f l; NSIG=; for f in "$NEXTF" "$OPS/run-slot.priority" "$OPS/
 # the epoch second the first rule a look reads by the clock alone turns, nothing while none will: a ticket reaching AGED (the queue's order),
 # run-slot.priority's hour, a switch's expiry and a holder line with no pid going stale at 2 hours, so a waiter at the head looks again then
 due_at() {
-  local now f m e l ends d=
+  local now f m e l ends d= name mt
+  local -a ST
+  # the candidates' mtimes, one stat call for every file, each line carrying its own name, instead of a stat a file (issue 1654)
+  if stat -c %Y "$QUEUE" > /dev/null 2>&1; then ST=(-c '%Y %n'); else ST=(-f '%m %N'); fi
   now=$(date +%s)
-  for f in "$QUEUE"/* "$OPS/run-slot.priority" "$OPS"/run-slot*.holder; do
-    [ -e "$f" ] || continue
-    case "$f" in
+  while read -r mt name; do
+    case "$name" in
       */run-slot.priority) m=3600 ;;
-      *.holder) l=; read -r _ l _ 2>/dev/null < "$f"; case "$l" in '' | *[!0-9]*) m=7200 ;; *) continue ;; esac ;;
+      *.holder) l=; read -r _ l _ 2>/dev/null < "$name"; case "$l" in '' | *[!0-9]*) m=7200 ;; *) continue ;; esac ;;
       *) m=$AGED ;;
     esac
-    e=$(mtime "$f") || continue
-    e=$((e + m))
+    e=$((mt + m))
     [ "$e" -gt "$now" ] && { [ -z "$d" ] || [ "$e" -lt "$d" ]; } && d=$e
-  done
+  done < <(stat "${ST[0]}" "${ST[1]}" "$QUEUE"/* "$OPS/run-slot.priority" "$OPS"/run-slot*.holder 2>/dev/null)
   # the load5 hold's ceiling for slots 2 to 4 (load5_held)
   oldest_asked; e=$((OLDEST + LOAD_WAIT))
   [ "$e" -gt "$now" ] && { [ -z "$d" ] || [ "$e" -lt "$d" ]; } && d=$e
@@ -2049,10 +2059,11 @@ holders() {
 }
 # the units held against a run that must leave $1 free: the CPU slots' and peers' (held_units's $2 when given), plus the lanes' less $3 when $1 is over 0, never under 0
 held_for() {
-  local h=${2:-$(held_units)}
-  [ "$1" -gt 0 ] && h=$((h + $(lane_units) - ${3:-0}))
-  [ "$h" -ge 0 ] || h=0
-  echo "$h"
+  local hh=${2:-$(held_units)}
+  # $5 given names the walk's one lane_units read, so a walk pays no read a ticket (issue 1654)
+  [ "$1" -gt 0 ] && hh=$((hh + ${5:-$(lane_units)} - ${3:-0}))
+  [ "$hh" -ge 0 ] || hh=0
+  if [ -n "${4:-}" ]; then printf -v "$4" '%s' "$hh"; else echo "$hh"; fi
 }
 # lanes_open, once per capacity() count: its slot checks share the first one's verdict, since a reading per slot counted slot 2 shut on a stale reading and slots 3 and 4 open on one that landed between them; a waiter's checks take the verdict its last look_mark read until its next look, and outside the wait loop and a count LANES is unset, so each check reads afresh
 lanes_now() {
@@ -2072,19 +2083,27 @@ capacity() {
 }
 # the one gate: whether a run of rank $1, $2 units and size $3, for $4, fits the load units free now, beside $6 held within capacity $5 when given (with $7 of the lanes' units left out); the wait loop, first_waiter, room and can-take all read it, so a lane room counts as free is one the queue's next run can take (issue 1216)
 unit_fits() {
-  local c=${5:-$(capacity)} m
-  m=$(may_reserve "$1" "$3" "$4" "$(reserve "$c")")
-  fits "$(held_for "$m" "${6:-}" "${7:-0}")" "$2" $((c - m))
+  local c=${5:-$(capacity)} m h r lu=${8:-}
+  [ -n "$lu" ] || lu=$(lane_units)
+  r=$(($c / 4)); [ "$r" -ge 1 ] || r=1
+  may_reserve "$1" "$3" "$4" "$r" m ${9+"$9"}
+  held_for "$m" "${6:-}" "${7:-0}" h "$lu"
+  fits "$h" "$2" $((c - m))
 }
 # whether a run of $2 units fits beside $1 held within a limit of $3; any run fits while no slot is held, so a big run still starts on a quiet machine
 fits() { [ "$1" -eq 0 ] || [ $(($1 + $2)) -le "$3" ]; }
 reserve() { local r=$(($1 / 4)); [ "$r" -ge 1 ] && echo "$r" || echo 1; }
-# the units a run must leave free: none for a small run, one that gates a merge (rank 0x), an org's run (1x) or the run-slot.priority pick, else the reserve
+# the units a run must leave free: none for a small run, one that gates a merge (rank 0x), an org's run (1x) or the run-slot.priority pick, else the reserve; with $5 given it is set instead of echoed, and $6 given names the holder the walk read once, empty when none stands, so a walk pays no read a ticket; callers without $6 read their own (issue 1654)
 may_reserve() {
-  case "$2" in small) echo 0; return ;; esac
-  case "$1" in 0?|1?) echo 0; return ;; esac
-  [ -n "$3" ] && prio_for "$3" && { echo 0; return; }
-  echo "$4"
+  local rr
+  case "$2" in small) rr=0 ;; *)
+    case "$1" in 0?|1?) rr=0 ;; *)
+      if [ -z "$3" ]; then rr=$4
+      elif [ -n "${6+x}" ]; then { [ -n "$6" ] && [ "$(owner_of "$3")" = "$6" ]; } && rr=0 || rr=$4
+      elif prio_for "$3"; then rr=0; else rr=$4; fi
+    ;; esac
+  ;; esac
+  if [ -n "${5:-}" ]; then printf -v "$5" '%s' "$rr"; else echo "$rr"; fi
 }
 
 # the load averages as `{ <1m> <5m> <15m> }`: from sysctl, else from uptime, since Claude Code's sandbox refuses the sysctl command's name lookup
