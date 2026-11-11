@@ -295,6 +295,31 @@ export const installCheck = (out: string, shot: () => string): Omit<Step, "name"
   }
 }
 
+// Step 2's wait: the click can land before the button renders under load, so the click retries each poll until POSTGRES_URL lands, the way step 3 retries Continue; a miss names the deadline that passed, the button's 60s or the URL's 120s.
+export const databaseCheck = async (
+  click: () => boolean,
+  saved: () => boolean,
+  waits: { buttonMs: number; pollMs: number; urlMs: number } = {
+    buttonMs: 60_000,
+    pollMs: 2_000,
+    urlMs: 120_000,
+  },
+): Promise<Pick<Step, "detail" | "ok">> => {
+  let showed = false
+  for (const end = Date.now() + waits.urlMs; Date.now() < end; await Bun.sleep(waits.pollMs)) {
+    if (click()) showed = true
+    if (saved()) return { detail: "", ok: true }
+  }
+  if (click()) showed = true
+  if (saved()) return { detail: "", ok: true }
+  return {
+    detail: showed
+      ? "no POSTGRES_URL in the desk's .env after 120s"
+      : "the Start the database button never showed in 60s",
+    ok: false,
+  }
+}
+
 // One agent-browser session for the run, its screenshots in the box.
 class Browser {
   readonly session = `pg-gate-${process.pid}`
@@ -493,17 +518,12 @@ const main = async (args: string[]) => {
       )
     })
     await check("first run starts the database with one click", async () => {
-      browser.cmd("find", "role", "button", "click", "--name", "Start the database")
       const env = join(desk, ".env")
-      const saved = await waitFor(
+      const saved = await databaseCheck(
+        () => browser.clickEnabled("Start the database"),
         () => existsSync(env) && /^POSTGRES_URL=\S/m.test(readFileSync(env, "utf8")),
-        120_000,
       )
-      return {
-        detail: saved ? "" : "no POSTGRES_URL in the desk's .env after 120s",
-        ok: saved,
-        shot: browser.shot("2-database"),
-      }
+      return { ...saved, shot: browser.shot("2-database") }
     })
     await check("the Dashboard shows Alpha", async () => {
       browser.cmd("open", `${web}/dashboard`)
