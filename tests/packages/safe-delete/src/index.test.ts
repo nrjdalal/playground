@@ -117,6 +117,38 @@ describe("isProtected", () => {
     expect(isProtected(join(roots.main, ".claude", "worktrees", "wt"), roots)).toBeNull()
     expect(isProtected(join(roots.main, ".claude", "worktrees", "wt", ".next"), roots)).toBeNull()
   })
+
+  test("lets the caller's own scratch and scratchpad folders go", () => {
+    const roots = machine()
+    const own = join(roots.home, ".playground", "scratch", opts.session)
+    const pad = join(roots.home, ".playground", "scratchpad", opts.session)
+    expect(isProtected(own, roots, opts.session)).toBeNull()
+    expect(isProtected(join(own, "build"), roots, opts.session)).toBeNull()
+    expect(isProtected(join(pad, "notes"), roots, opts.session)).toBeNull()
+  })
+
+  test("refuses another session's scratch folder and a .. escape out of the own one", () => {
+    const roots = machine()
+    const own = join(roots.home, ".playground", "scratch", opts.session)
+    const other = join(roots.home, ".playground", "scratch", "a4b5c6-worker")
+    expect(isProtected(other, roots, opts.session)).toBeString()
+    expect(isProtected(`${own}/../a4b5c6-worker`, roots, opts.session)).toBeString()
+  })
+
+  test("holds the exemption closed for a session name no session may hold", () => {
+    const roots = machine()
+    const inside = join(roots.home, ".playground", "scratch", "a", "b")
+    expect(isProtected(inside, roots, "a/b")).toBeString()
+    expect(isProtected(inside, roots)).toBeString()
+  })
+
+  test("refuses a symlink inside the own scratch that points out of it", () => {
+    const roots = machine()
+    const own = join(roots.home, ".playground", "scratch", opts.session)
+    mkdirSync(own, { recursive: true })
+    symlinkSync(join(roots.home, ".ssh"), join(own, "keys"))
+    expect(isProtected(join(own, "keys"), roots, opts.session)).toBeString()
+  })
 })
 
 describe("quarantine, listTrash and restore", () => {
@@ -154,6 +186,17 @@ describe("quarantine, listTrash and restore", () => {
     quarantine(file(join(roots.home, "one")), opts, roots, { now: NOW })
     const second = quarantine(file(join(roots.home, "two")), opts, roots, { now: NOW })
     expect(second).toMatchObject({ id: "20261102T120000Z-j6rjgy-worker/2" })
+  })
+
+  test("restore moves an own-scratch item back into the folder that owns it", () => {
+    const roots = machine()
+    const own = join(roots.home, ".playground", "scratch", opts.session)
+    const path = file(join(own, "tmp", "work.txt"))
+    const moved = quarantine(path, opts, roots)
+    if (!("id" in moved)) throw new Error(moved.refused)
+    expect(restore(moved.id, roots)).toEqual({ path })
+    expect(existsSync(path)).toBe(true)
+    expect(listTrash(roots.trash)).toEqual([])
   })
 
   test("restore refuses when something stands at the original path, or the id is unknown", () => {

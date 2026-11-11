@@ -33,7 +33,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   It takes only a folder directly under the main checkout's `.claude/worktrees/`, so a tree nested in another goes with its parent, which AGENTS.md's worktree rule prevents.
   The Builder then closes its workspace, which takes any split still open in it, and its slot returns to the pool.
   Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead.
-  The Builder closes a session by hand only on a `Not ended` line, whose reason names what to fix first.
+  The Builder closes a session by hand only on a `Not ended` line, whose reason names what to fix first, and reassigns or closes a worker on a `Kept` line, whose last PR closed unmerged.
   The Builder may also end a worker mid-chore to drop or reassign the chore, recording why.
   A parked chore gets its branch pushed (`git push origin <branch>`) and a handoff note ([SESSIONS.md](SESSIONS.md#write-a-handoff)), `~/.playground/handoffs/<ID>.md`, and its worker closes, its final report naming the pushed head; the chore restarts later from the note, its branch and its PR.
 - **Runners** belong to Ops.
@@ -64,7 +64,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   the roll gate, the tick (usage marks, whose Inbox week alert at 97% or 98% it keeps in `tick/week-alerts.json` and resolves once `usage.json` reads that account's week under the mark, a `switch due`, load, the train's slot wait, near-limit marks, and the switch watch,
   which at a full week writes ops-unstick's move file while a second dispatcher is seated and tells the dispatchers and both leads),
   the usage-limit watch (each session on the usage-limit screen named to the builder once with its account, and the lowest-week account with its 5-hour window under 90% to move to),
-  the auto-end beat every 5 minutes (`scripts/ops/optimizer/auto_end.ts` over `idle_sessions.ts`'s flags, [SESSIONS.md](SESSIONS.md#end)), each end or `Not ended` line to the session's lead, a `Not ended` line once until its words change,
+  the auto-end beat every 5 minutes (`scripts/ops/optimizer/auto_end.ts` over `idle_sessions.ts`'s flags, [SESSIONS.md](SESSIONS.md#end)), each end, `Kept` or `Not ended` line to the session's lead, a `Kept` or `Not ended` line once until its words change,
   ops-up every 5 minutes (`scripts/ops/up.py`, each line it prints told to ops once until it changes, so a reboot or a herdr server that went down brings every job back with no hand step, and a reboot plan holds no step that stops the jobs first, since the reboot ends them and this beat starts them again),
   the sweep (each felled session to its lead once, never a probe or one the roster holds done, parked, paused, ended or starting, but runner-plain-relay, the relay itself, whose resume line it runs through spawn.sh's capacity gate at every sweep that prints it, with `--brief brief-runner-plain-relay.md` so the relay starts its wait task again,
   never marked told since a resume keeps the session id and the line returns with the next outage,

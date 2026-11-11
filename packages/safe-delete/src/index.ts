@@ -146,23 +146,36 @@ const whyHolds = (path: string, roots: Roots): string | null => {
   return null
 }
 
-const whyProtected = (path: string, roots: Roots): string | null => {
+// The caller's own scratch folders in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved, none for a name no session may hold.
+const ownScratchOf = (home: string, session: string): string[] =>
+  SESSION.test(session)
+    ? [
+        join(home, ".playground", "scratch", session),
+        join(home, ".playground", "scratchpad", session),
+      ].map(real)
+    : []
+
+const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string | null => {
   const held = whyHolds(path, roots)
   if (held) return held
   const main = real(roots.main)
   const subtrees = subtreesOf(real(roots.home), real(roots.trash))
   for (const root of subtrees)
-    if (inside(path, root)) return `${path} is inside the protected ${root}`
+    if (inside(path, root)) {
+      if (ownScratch.some((own) => inside(path, own))) return null
+      return `${path} is inside the protected ${root}`
+    }
   if (inside(path, main) && !path.startsWith(worktreesOf(roots) + sep))
     return `${path} is inside the main checkout ${main}`
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target.
-export function isProtected(path: string, roots: Roots): string | null {
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, and nothing else.
+export function isProtected(path: string, roots: Roots, session?: string): string | null {
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
-  return whyProtected(own, roots) ?? whyProtected(real(abs), roots)
+  const scratch = session === undefined ? [] : ownScratchOf(real(roots.home), session)
+  return whyProtected(own, roots, scratch) ?? whyProtected(real(abs), roots, scratch)
 }
 
 // The carve-out named name when path is an entry directly in its folder, symlinks resolved, that is not and holds no protected root; else the refusal's text.
@@ -188,8 +201,9 @@ const carveOutOf = (
   carveOut: string | undefined,
   roots: Roots,
   table: Record<string, CarveOut>,
+  session?: string,
 ): CarveOut | Refusal | null => {
-  const why = isProtected(path, roots)
+  const why = isProtected(path, roots, session)
   if (!why) return null
   const found = carveOut === undefined ? why : carveOutAt(path, carveOut, roots, table)
   return typeof found === "string"
@@ -306,7 +320,7 @@ export function quarantine(
   if (!SESSION.test(opts.session))
     return refused(`the session name ${opts.session} is not a word of letters, digits and hyphens`)
   if (!lstat(abs)) return refused(`no such path ${abs}`)
-  const carve = carveOutOf(abs, opts.carveOut, roots, io.carveOuts ?? CARVE_OUTS)
+  const carve = carveOutOf(abs, opts.carveOut, roots, io.carveOuts ?? CARVE_OUTS, opts.session)
   if (carve && "refused" in carve) return carve
   const isWorktree = inWorktrees(abs, roots)
   if (isWorktree && !opts.worktree)
@@ -415,7 +429,7 @@ export function restore(
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
-  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts)
+  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts, entry.session)
   if (carve && "refused" in carve) return carve
   if (lstat(entry.path)) return refused(`${entry.path} already exists; move it aside first`)
   if (!existsSync(dirname(entry.path)))
