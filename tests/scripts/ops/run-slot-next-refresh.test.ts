@@ -46,6 +46,12 @@ const head = async (m: Machine) => {
   })
   return (await new Response(p.stdout).text()).trim()
 }
+// whether run-slot.next names `ticket` within a deadline, so a loaded pass waits out the fourth-poll cadence instead of racing one check; the base never names it, so the red run takes the deadline whole
+const namesWithin = async (named: () => string, ticket: string, seconds: number) => {
+  const at = Date.now()
+  while (!named().startsWith(ticket) && Date.now() - at < seconds * 1000) await Bun.sleep(50)
+  return named().startsWith(ticket)
+}
 
 describe("the oldest names the queue's fresh pick through a lanes flip", () => {
   test("one the gauges shut within four polls of its open-lanes look, as a fresh head read names it", async () => {
@@ -54,10 +60,9 @@ describe("the oldest names the queue's fresh pick through a lanes flip", () => {
     // the open-lanes look names the reviewer's medium, the first in the order that fits 4 held of 8
     while (!named().startsWith(t2)) await Bun.sleep(20)
     flip(m, 30)
-    await Bun.sleep(2_000)
-    // the fresh read names the small ticket the frozen verdict never named again, and the oldest follows it
+    // the oldest follows the fresh pick within the cadence, and a fresh read then names the small ticket the frozen verdict never named again
+    expect(await namesWithin(named, t3, 20)).toBe(true)
     expect(await head(m)).toBe(t3)
-    expect(named().startsWith(t3)).toBe(true)
     expect(existsSync(join(m.ops, "run-slot.holder"))).toBe(false)
     await stop(w.p)
   })
@@ -69,9 +74,8 @@ describe("the oldest names the queue's fresh pick through a lanes flip", () => {
     // the shut-lanes look names the small ticket, the first in the order that fits 4 held of 6
     while (!named().startsWith(t3)) await Bun.sleep(20)
     flip(m, 80)
-    await Bun.sleep(2_000)
+    expect(await namesWithin(named, t2, 20)).toBe(true)
     expect(await head(m)).toBe(t2)
-    expect(named().startsWith(t2)).toBe(true)
     expect(existsSync(join(m.ops, "run-slot.holder"))).toBe(false)
     await stop(w.p)
   })
