@@ -38,7 +38,8 @@ export function treeAt(root: string, oid: string): Tree {
   // one git cat-file --batch for every blob on the first text read, in place of one spawn per file
   const readAll = () => {
     if (texts.size) return
-    const decode = new TextDecoder()
+    // ignoreBOM keeps the bytes git holds, where a plain decoder would read a leading BOM away
+    const decode = new TextDecoder("utf-8", { ignoreBOM: true })
     const proc = Bun.spawnSync(["git", "-C", root, "cat-file", "--batch"], {
       stdin: new TextEncoder().encode([...blobs.values()].map((sha) => `${sha}\n`).join("")),
     })

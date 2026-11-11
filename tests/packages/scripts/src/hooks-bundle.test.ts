@@ -600,6 +600,16 @@ describe("--check reads a tree git holds, never the working files", () => {
     expect(merged.stderr).toContain(join(HOOKS, "lib.ts"))
   })
 
+  // A tree file holding a leading UTF-8 BOM reads with the BOM git holds, so a BOM'd source is never read as a change it does not carry
+  test("a tree file's leading UTF-8 BOM reads as git holds it", () => {
+    const { git, root, write } = checkout()
+    const text = '\uFEFFexport const lib = "one"\n'
+    write("lib.ts", text)
+    git("add", "-A")
+    git("commit", "-q", "--no-verify", "-m", "bom")
+    expect(treeAt(root, "HEAD").text(join(HOOKS, "lib.ts"))).toBe(text)
+  })
+
   // cat-file names a blob the object store has lost as `<sha> missing` in its header, and the read says so instead of stopping silently
   test("a tree blob the object store has lost throws, naming the header", () => {
     const { root } = checkout()
