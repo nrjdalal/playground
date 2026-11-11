@@ -709,7 +709,7 @@ export const warmUp = async (warm: Warm, web: string, route: string): Promise<vo
   await warm.fetch(`${web}${route}`).catch(() => undefined)
 }
 
-// A route READY does not name (a session's own page) waits on its data alone; a wait that runs out still takes the shot, and the result names each wait that ran out.
+// Each shot loads its page fresh through a blank page, since an open that changes only the hash keeps the page an earlier shot loaded; a route READY does not name (a session's own page) waits on its data alone; a wait that runs out still takes the shot, and the result names each wait that ran out.
 export const screenshot = async (
   browser: Browser,
   { web }: Target,
@@ -724,6 +724,7 @@ export const screenshot = async (
   await warmUp(warm, web, route)
   await browser.viewport(viewport)
   await browser.run("set", "media", theme)
+  await browser.run("open", "about:blank")
   await browser.visit(`${web}${route}`)
   const ready = READY[new URL(route, "http://dashboard").pathname]
   const data: [string, string[]] = ["the page's data", DATA_READY]
@@ -731,14 +732,20 @@ export const screenshot = async (
     ? [["the page's ready marker", ready], ["the sidebar", SIDEBAR_READY], data]
     : [data]
   const ranOut: string[] = []
-  for (const [name, args] of waits) {
+  const wait = async ([name, args]: [string, string[]]) => {
     try {
       await browser.run("wait", ...args)
     } catch (error) {
       ranOut.push(`${name} (${error instanceof Error ? error.message : String(error)})`)
     }
   }
+  for (const step of waits) await wait(step)
   await browser.run("screenshot", "--full", path)
+  // A full shot sizes the page to 1x1 and back, which can draw a region anew; a page busy again after it is shot once more when its data is back in.
+  if (!(await browser.eval<boolean>(DATA_READY[1]!))) {
+    await wait(["the page's data after the shot", DATA_READY])
+    await browser.run("screenshot", "--full", path)
+  }
   return ranOut.length
     ? fail(`screenshot ${route}`, `${path} was shot, but its wait ran out on ${ranOut.join("; ")}`)
     : pass(`screenshot ${route}`, path)
