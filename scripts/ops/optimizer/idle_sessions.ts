@@ -227,7 +227,7 @@ export async function collect(input: CollectInput): Promise<Row[]> {
       )
         why.push(`checker-worker-gone (${worker})`)
       refs = states.flatMap((s) => (s?.ref ? [s.ref] : []))
-      // The PR that closed last decides the end, a merge by its merged_at and a close by its closed_at, so an older merged PR never names a newer close: a state closed before its time was kept sorts oldest, and a tie keeps the later in the list.
+      // The PR that closed last decides the end, a merge by its merged_at and a close by its closed_at, so an older merged PR never names a newer close: a state with no merged_at or closed_at sorts oldest, and a tie keeps the later in the list.
       let newest: number | undefined
       let newestAt: string | undefined
       states.forEach((s, i) => {
@@ -371,19 +371,8 @@ export async function prStateLive(
     return fresh
   }
   if (!m) {
-    const read = (await api(`repos/${issue![1]}/issues/${issue![2]}`)) as {
-      closed_at?: string | null
-      state?: string
-    } | null
-    return read?.state
-      ? remember({
-          at: now,
-          closedAt: read.closed_at || undefined,
-          head: "",
-          state: read.state,
-          verdicts: [],
-        })
-      : null
+    const read = (await api(`repos/${issue![1]}/issues/${issue![2]}`)) as { state?: string } | null
+    return read?.state ? remember({ at: now, head: "", state: read.state, verdicts: [] }) : null
   }
   const pr = (await api(`repos/${m[1]}/pulls/${m[2]}`)) as {
     closed_at?: string | null
