@@ -1,5 +1,6 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -137,7 +138,7 @@ describe("the clone lane", () => {
     expect(started(m)[0]).toBe("worker-older")
   })
 
-  // review round 1, should-fix 2: the stamp intake takes digits and dots alone, as RUN_SLOT_ASKED's does, so a value with /, - or a space cannot name a ticket; the waiter stamps itself fresh instead
+  // the stamp intake takes digits and dots alone, as RUN_SLOT_ASKED's does, so a value with /, - or a space cannot name a ticket; the waiter stamps itself fresh instead
   test("and takes no ask stamp that holds a character outside digits and dots", async () => {
     const m = machine()
     m.hold("run-slot-clone", 1, "small")
@@ -152,6 +153,34 @@ describe("the clone lane", () => {
     )!
     await stop(run.p)
     expect(mine.split("-")[1]).toMatch(/^\d+\.\d{9}$/)
+  })
+
+  // a clock read that fails at the first ask still hands the reread a stamp, so the new copy names the ticket as the first copy did and no waiter waits behind one of its own names
+  test("and a waiter whose first clock read fails keeps its one ticket across a reread", async () => {
+    const m = machine()
+    const armed = join(m.root, "python-armed")
+    writeFileSync(
+      join(m.bin, "python3"),
+      `#!/bin/bash\n[ -e "${armed}" ] || exit 1\nexec ${Bun.which("python3")} "$@"\n`,
+    )
+    chmodSync(join(m.bin, "python3"), 0o755)
+    m.hold("run-slot-clone", 1, "small")
+    const copy = join(m.root, "run-slot.sh")
+    copyFileSync(SCRIPT, copy)
+    const older = m.start("worker-clocked", {}, copy, ["cp", "-R", "node_modules"])
+    expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
+    const queue = join(m.ops, "run-slot.clone-waiters")
+    const first = readdirSync(queue)
+    expect(first).toHaveLength(1)
+    writeFileSync(armed, "")
+    copyFileSync(SCRIPT, `${copy}.new`)
+    // copyFileSync keeps the source's mtime on macOS, so the copy takes the moment it lands, as a pull's write does
+    utimesSync(`${copy}.new`, new Date(), new Date())
+    renameSync(`${copy}.new`, copy)
+    expect(await older.saw(/running the new copy/g)).toBe(true)
+    await within(() => readdirSync(queue).length === 1, "one ticket across the reread", m)
+    await stop(older.p)
+    expect(readdirSync(queue)).toEqual(first)
   })
 
   test("but the Dashboard roll's clone, class 0, goes before an older worker's", async () => {

@@ -2186,9 +2186,10 @@ if [ -n "$KIND" ]; then
   # a clone waiter's place, run-slot.clone-waiters/<class>-<asked second>.<nanoseconds>-<pid>-<who>, keeps its name across a reread's exec, so a new copy a gate holds drops it until the gates pass (review round 1: it held back every clone clone-allow let through), and one no gate holds keeps its place; the nanoseconds keep two clones that ask in one second in ask order, where seconds alone tied and the glob fell to the pid (issues 1619, 1688)
   CLONE_QUEUE="$OPS/run-slot.clone-waiters"
   if [ "$KIND" = clone ]; then
-    # the whole stamp from one read, since a second from one read and nanoseconds from another straddle the second between them and stamp an earlier ask after a newer one (the 100-run batch, run 4); where the read is refused, $ASKED.0 names the ticket and takes the earliest place in its second
+    # the whole stamp from one read, since a second from one read and nanoseconds from another straddle the second between them and stamp an earlier ask after a newer one; where the read is refused, $ASKED.0 names the ticket, takes the earliest place in its second, and hands the same name through a reread
     [ -n "$ASK_STAMP" ] || ASK_STAMP=$(python3 -I -c 'import time; t = time.time_ns(); print(f"{t // 10**9}.{t % 10**9:09d}")' 2>/dev/null)
-    CLONE_TICKET="$CLONE_QUEUE/$CLASS-${ASK_STAMP:-$ASKED.0}-$$-$WHO"
+    [ -n "$ASK_STAMP" ] || ASK_STAMP="$ASKED.0"
+    CLONE_TICKET="$CLONE_QUEUE/$CLASS-$ASK_STAMP-$$-$WHO"
     # the second, on this image's clock, past which this clone passes the big-run hold (CLONE_WAIT_MAX)
     CLONE_PASS_AT=$((SECONDS + ASKED + CLONE_WAIT_MAX - $(date +%s)))
   fi
