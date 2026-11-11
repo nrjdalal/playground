@@ -378,6 +378,25 @@ describe("the tripwire", () => {
     })
   })
 
+  test("a legacy mark whose clear is refused still alerts: the folder's make answers, not its EEXIST", () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    const toldDir = join(roots.trash, ".cap-told")
+    mkdirSync(toldDir, { recursive: true })
+    writeFileSync(join(toldDir, opts.session), "2026-11-01T00:00:00.000Z")
+    chmodSync(toldDir, 0o555)
+    try {
+      expect(quarantine(file(join(roots.home, "x")), opts, roots, { now: NOW })).toMatchObject({
+        kind: "tripwire",
+      })
+    } finally {
+      chmodSync(toldDir, 0o755)
+    }
+  })
+
   test("a .cap-told that is a file does not throw out of quarantine: the burst alerts", () => {
     const roots = machine()
     for (const name of ["a", "b", "c"])
@@ -1086,6 +1105,30 @@ describe("purgeTrash", () => {
     purgeTrash(trash, { free: () => 100 * GB, now: NOW })
     expect(existsSync(old)).toBe(false)
     expect(existsSync(fresh)).toBe(true)
+  })
+
+  test("keeps a session's empty folder, which a concurrent try may be about to fill", () => {
+    const { trash } = machine()
+    const told = join(trash, ".cap-told", "j6rjgy-worker")
+    mkdirSync(told, { recursive: true })
+    purgeTrash(trash, { free: () => 100 * GB, now: NOW })
+    expect(existsSync(told)).toBe(true)
+  })
+
+  test("carries on past a told mark it cannot remove", () => {
+    const { trash } = machine()
+    const toldDir = join(trash, ".cap-told", "j6rjgy-worker")
+    mkdirSync(toldDir, { recursive: true })
+    const old = join(toldDir, "2026-11-01T00:00:00.000Z")
+    writeFileSync(old, "")
+    utimesSync(old, new Date(NOW.getTime() - 61_000), new Date(NOW.getTime() - 61_000))
+    chmodSync(toldDir, 0o555)
+    try {
+      const done = purgeTrash(trash, { free: () => 100 * GB, now: NOW })
+      expect(done.removed).toEqual([])
+    } finally {
+      chmodSync(toldDir, 0o755)
+    }
   })
 
   test("removes the oldest batches early while free space is under 50 GB", () => {
