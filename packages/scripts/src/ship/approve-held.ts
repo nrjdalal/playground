@@ -1,10 +1,16 @@
-// ship:approve-held <n>: approves the held CI runs of the ship PR alone, the pull_request runs at its head whose status is action_required, which the bot that opened the draft leaves waiting for an approval; prints each run it approved, or none held.
+// ship:approve-held <n>: approves the held CI runs of the ship PR alone, the pull_request runs at its head whose conclusion is action_required, which the bot that opened the draft leaves waiting for an approval; prints each run it approved, or none held.
 
 import { gh, repoOf, runGh, type Run } from "../pr-merge/merge"
 
 export type HeldFacts = { base: string; head: string; sha: string; state: string }
 
-export type HeldRun = { event: string; headSha: string; id: number; status: string }
+export type HeldRun = {
+  conclusion: string
+  event: string
+  headSha: string
+  id: number
+  status: string
+}
 
 // Pure: why the ship PR's held runs may not be approved, one line each; none means they may.
 export function heldRefusals(facts: HeldFacts): string[] {
@@ -15,10 +21,10 @@ export function heldRefusals(facts: HeldFacts): string[] {
   return []
 }
 
-// Pure: the held runs of a list, a pull_request run at this head waiting for its approval.
+// Pure: the held runs of a list, a pull_request run at this head waiting for its approval; GitHub reads one status completed with conclusion action_required.
 export function heldRuns(runs: HeldRun[], sha: string): HeldRun[] {
   return runs.filter(
-    (r) => r.headSha === sha && r.event === "pull_request" && r.status === "action_required",
+    (r) => r.headSha === sha && r.event === "pull_request" && r.conclusion === "action_required",
   )
 }
 
@@ -42,9 +48,18 @@ export async function approveHeld(run: Run, repo: string, n: number): Promise<st
       "api",
       `repos/${repo}/actions/runs?event=pull_request&head_sha=${facts.sha}&per_page=100&status=action_required`,
     ]),
-  ) as { workflow_runs?: { event: string; head_sha: string; id: number; status: string }[] }
+  ) as {
+    workflow_runs?: {
+      conclusion: string
+      event: string
+      head_sha: string
+      id: number
+      status: string
+    }[]
+  }
   const held = heldRuns(
     (listed.workflow_runs ?? []).map((r) => ({
+      conclusion: r.conclusion,
       event: r.event,
       headSha: r.head_sha,
       id: r.id,
