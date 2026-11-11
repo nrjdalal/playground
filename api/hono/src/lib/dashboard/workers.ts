@@ -415,6 +415,10 @@ export const lightOf = (lifecycle: string, questions: Question[], feed: FeedItem
   return lifecycle === "running" ? "working" : "idle"
 }
 
+// Pure: a Codex session's light: it writes no state record (its hooks.json leaves session-state out), so a light that would read idle is unknown, never idle.
+export const codexLight = (agent: unknown, light: Light): Light =>
+  agent === "codex" && light === "idle" ? "unknown" : light
+
 // Pure: whether an answer landed after a prompt stamped at `at` went up. A stamp in whole seconds covers all of its second, so a prompt stamped 12:00:05Z went up before 12:00:06.
 const answeredAfter = (answeredAt: string | null, at: string): boolean => {
   const answered = Date.parse(answeredAt ?? "")
@@ -591,10 +595,12 @@ export function composeWorkers(
       lifecycle,
       ...(read.loginExpired && { loginExpired: true as const }),
       // a probe's prompts are its spawner's, so it never reads as waiting on the owner
-      light:
+      light: codexLight(
+        record.agent,
         role === "other" && isProbe(name)
           ? lightOf(lifecycle === "needsInput" ? "idle" : lifecycle, [])
           : lightOf(lifecycle, [], feed),
+      ),
       model: read.model,
       name,
       questions: [],

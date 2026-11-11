@@ -451,7 +451,7 @@ export const oneLine = (text: string, max = 80): string => {
 export const LIGHT_LABELS: Record<Worker["light"], string> = {
   idle: "Idle",
   "needs-you": "Waiting on you",
-  unknown: "Idle",
+  unknown: "State unknown",
   working: "Working",
 }
 

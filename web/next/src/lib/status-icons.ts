@@ -12,6 +12,7 @@ import {
   RiLoader4Line,
   RiPauseCircleLine,
   RiPauseLine,
+  RiQuestionLine,
   RiSearchEyeLine,
   RiShutDownLine,
   RiSignalCellular1Fill,
@@ -93,12 +94,8 @@ const ICONS: Record<ShownState, StatusIconSpec> = {
   approvals: { Icon: RiGroupLine, label: "Waiting on approvals", spins: false, tone: "caution" },
   ready: { Icon: RiZzzLine, label: "Ready", spins: false, tone: "success" },
   parked: { Icon: RiPauseCircleLine, label: "Parked", spins: false, tone: "inactive" },
-  unknown: {
-    Icon: RiCheckboxBlankCircleLine,
-    label: LIGHT_LABELS.idle,
-    spins: false,
-    tone: "inactive",
-  },
+  // a session whose state no record tells, a Codex one, which writes none
+  unknown: { Icon: RiQuestionLine, label: LIGHT_LABELS.unknown, spins: false, tone: "inactive" },
   idle: {
     Icon: RiCheckboxBlankCircleLine,
     label: LIGHT_LABELS.idle,
@@ -187,13 +184,14 @@ export type LightFacts = {
   waits?: Wait[]
 }
 
-// Pure: an agent's one state, the most urgent that applies: Stuck (Paused · usage limit when the account's usage limit alone holds it, since it waits on the reset rather than a person), Merged, Down (Ended when closed on purpose, Parked when the roster has it parked), Failing, No progress, Fixing (at work on a pull request whose CI fails or whose review is below 5/5), Working, Waiting (idle with something it waits on still open), Waiting on approvals (one still needed, or two and more), Ready (5/5 at the head, CI green or none, no approval missing), Parked, Idle. A reviewer or tester idle after its verdict at the head is done.
+// Pure: an agent's one state, the most urgent that applies: Stuck (Paused · usage limit when the account's usage limit alone holds it, since it waits on the reset rather than a person), Merged, Down (Ended when closed on purpose, Parked when the roster has it parked), Failing, State unknown (a session whose state no record tells, a Codex one), No progress, Fixing (at work on a pull request whose CI fails or whose review is below 5/5), Working, Waiting (idle with something it waits on still open), Waiting on approvals (one still needed, or two and more), Ready (5/5 at the head, CI green or none, no approval missing), Parked, Idle. A reviewer or tester idle after its verdict at the head is done.
 export function lightOf(facts: LightFacts): ShownState {
   const { light, pr = null } = facts
   if (light === "needs-you") return facts.usageLimit ? "usage-limit" : "stuck"
   if (pr?.state === "merged") return "merged"
   if (light === "down") return facts.ended ? "ended" : facts.rosterParked ? "parked" : "down"
   if (facts.failed) return "failing"
+  if (light === "unknown") return "unknown"
   if (light === "working") {
     if ((facts.idleFor ?? 0) > NO_PROGRESS_MS) return "no-progress"
     const open = pr?.state === "open"

@@ -125,7 +125,14 @@ export const doingOf = (agent: Agent, dispatcher: boolean): string =>
 // How a status reads at a glance: quiet for what is stopped, parked or merely idle, else the text's own; the state's colour is its icon's, never the words'.
 export type StatusTone = "muted" | "normal"
 
-const QUIET: ReadonlySet<ShownState> = new Set(["down", "ended", "idle", "parked", "usage-limit"])
+const QUIET: ReadonlySet<ShownState> = new Set([
+  "down",
+  "ended",
+  "idle",
+  "parked",
+  "unknown",
+  "usage-limit",
+])
 
 // An open decision or draft a live session posted to Playground's Inbox and depends on: since no factory session blocks on the owner (playbook's ask rule), this is how one shows it waits, linked to the item.
 export type InboxWait = { id: string; ref: number } | null
