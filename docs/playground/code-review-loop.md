@@ -95,7 +95,7 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
 - A 5/5 verdict says the fresh full read found nothing blocking or should-fix and `bun run check-types` ran green, or green CI at the head stood in for it; a red run is a blocking finding.
 - Before a 5/5 posts, `bun run pr:merge <n> --explain`, bare and unpiped, reads ✓ on every gate but ready, ci and review, since the body gate also needs a doc that a reviewer's patch or the last commit changed named in the Evidence; a ✗ is a finding for the worker.
 - The reviewer posts the 5/5 verdict and its `Review • 5/5` label; GitHub's two checks green at the head are the next gate, never an input to the score, and a run cited where CI stands in is evidence of the touched tests and check-types alone.
-- A round left with only nits scores 5/5: the reviewer lists them, or hands the small edit over as a patch, for the worker's follow-up PR, since the 5/5 head merges as it stands and a push after it would need a fresh full read.
+- A round left with only nits scores 5/5: the reviewer lists them, or hands the small edit over as a patch, for the worker's follow-up PR, opened once the 5/5 head merges, since that head merges as it stands and a push after it would need a fresh full read.
   A nit that would widen a permission, a setting or a guard's reach if a rare event happens goes to the worker's lead first, and the 5/5 waits for the lead's ruling, since a worker can merge seconds after a 5/5 posts.
 - A PR body with no `test:skills` result in it is a nit, since GitHub Actions runs the suite at the head.
 - When the ticket carries samples, the verdict holds a samples table, and a sample left unhandled holds the score down.
