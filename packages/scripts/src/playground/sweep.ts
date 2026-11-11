@@ -13,6 +13,7 @@ const HOUR = 3_600_000
 export const SWITCHES = [
   "run-slot.3-off",
   "run-slot.4-off",
+  "run-slot.battery",
   "run-slot.clone-off",
   "run-slot.focus",
   "run-slot.idle-min",

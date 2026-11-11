@@ -51,7 +51,7 @@ const yard = localYard({
   keychain: keychain(),
 })
 
-// The local Playground's Yard (lib/yard/local.ts): the hosted Yard's channels, DMs and messages read and posted with the Mac's token, on the dashboard's owner rung over loopback, so the local sidebar shows them; with YARD_API_URL unset or no token, each answers 404.
+// The local Playground's Yard (lib/yard/local.ts): the hosted Yard's channels, DMs and messages read and posted, and who the token is, with the Mac's token, on the dashboard's owner rung over loopback, so the local sidebar shows them; with YARD_API_URL unset or no token, each answers 404.
 export const localYardRouter = new Hono<{ Variables: Session }>()
   .use("/*", guardWrites)
   .use("/*", requireLoopback)
@@ -90,4 +90,12 @@ export const localYardRouter = new Hono<{ Variables: Session }>()
     "/channels/:id/read",
     doc("Marks a channel read up to now", z.object({ lastReadAt: z.iso.datetime() })),
     async (c) => c.json({ data: await yard.read(c.req.param("id")) }),
+  )
+  .get(
+    "/me",
+    doc(
+      "Who this Mac's token is on Yard: its login, and whether it is the owner",
+      z.object({ login: z.string(), owner: z.boolean() }),
+    ),
+    async (c) => c.json({ data: await yard.me() }),
   )

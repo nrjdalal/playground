@@ -75,6 +75,7 @@ export const yardApi = {
   denyInvite: (id: string) =>
     yard<{ invite: YardInvite }>(`/invites/${segment(id)}/deny`, { method: "POST" }),
   invites: () => yard<{ invites: YardInvite[] }>("/invites"),
+  me: () => yard<{ login: string; owner: boolean }>("/me"),
   message: (id: string) => yard<{ message: YardMessage }>(`/messages/${segment(id)}`),
   messages: (channel: string) =>
     yard<{ hasMore: boolean; messages: YardMessage[] }>(`/channels/${segment(channel)}/messages`),
@@ -131,6 +132,10 @@ export function useYardLate(started: boolean): boolean {
   }, [started])
   return late
 }
+
+// Who you are on Yard, read once a tab, so a channel shows your own posts on the right as the chat shows yours.
+export const useYardMe = () =>
+  useQuery({ queryFn: yardApi.me, queryKey: [...YARD_KEY, "me"], staleTime: Infinity })
 
 export const useYardMessages = (channel: string) =>
   useQuery(messagesQuery(channel, async () => (await yardApi.messages(channel)).messages ?? []))

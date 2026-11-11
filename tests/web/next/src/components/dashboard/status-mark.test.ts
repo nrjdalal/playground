@@ -19,7 +19,7 @@ const { renderToStaticMarkup } = (await import(Bun.resolveSync("react-dom/server
   renderToStaticMarkup: (node: Node) => string
 }
 
-const render = (mark: "delivered" | "failed" | "sending", label: string) =>
+const render = (mark: "delivered" | "failed" | "sending" | "typed", label: string) =>
   renderToStaticMarkup(createElement(StatusMark, { label, mark }))
 
 // the opening tag of the live region the mark sits in
@@ -28,6 +28,7 @@ const slotClass = (html: string): string => /class="([^"]*)"/.exec(slot(html))?.
 
 const MARKS = [
   ["sending", "Sending…"],
+  ["typed", "Queued"],
   ["delivered", "Delivered"],
   ["failed", "Failed: too long"],
 ] as const
@@ -72,23 +73,23 @@ describe("the sent message's state as one mark", () => {
     }
   })
 
-  test("a spinner until delivered, turning only where motion is allowed; then one tick; red when it failed", () => {
+  test("a spinner until typed, turning only where motion is allowed; then a tick; red when it failed", () => {
     const icons = Object.fromEntries(MARKS.map(([mark, label]) => [mark, render(mark, label)]))
     expect(icons.sending).toContain("motion-safe:animate-spin")
-    for (const mark of ["delivered", "failed"]) {
+    for (const mark of ["typed", "delivered", "failed"]) {
       expect(icons[mark], mark).not.toContain("animate-spin")
     }
     expect(icons.failed).toContain("text-destructive")
-    for (const mark of ["sending", "delivered"]) {
+    for (const mark of ["sending", "typed", "delivered"]) {
       expect(icons[mark], mark).not.toContain("text-destructive")
     }
     const svgs = MARKS.map(
       ([mark, label]) => /<svg[^>]*>[\s\S]*?<\/svg>/.exec(render(mark, label))?.[0],
     )
-    expect(new Set(svgs).size).toBe(3)
+    expect(new Set(svgs).size).toBe(4)
   })
 
-  test("delivered is one tick, never two", async () => {
+  test("typed is one tick and delivered a double tick", async () => {
     const icons = (await import(Bun.resolveSync("@remixicon/react", web))) as Record<
       string,
       (props: Record<string, unknown>) => Node
@@ -96,9 +97,8 @@ describe("the sent message's state as one mark", () => {
     const shape = (html: string) =>
       (/<svg[^>]*>([\s\S]*?)<\/svg>/.exec(html)?.[1] ?? "").replace(/class="[^"]*"/g, "")
     const of = (name: string) => shape(renderToStaticMarkup(createElement(icons[name], {})))
-    const delivered = shape(render("delivered", "Delivered"))
-    expect(delivered).toBe(of("RiCheckLine"))
-    expect(delivered).not.toBe(of("RiCheckDoubleLine"))
+    expect(shape(render("typed", "Queued"))).toBe(of("RiCheckLine"))
+    expect(shape(render("delivered", "Delivered"))).toBe(of("RiCheckDoubleLine"))
   })
 })
 
