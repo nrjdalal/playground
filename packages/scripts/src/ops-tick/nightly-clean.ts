@@ -374,7 +374,7 @@ export const nightlyClean =
       }
       return out.length ? out.join("; ") : "none stale"
     })
-    // Every other repo the factory works in: a worktree goes by git worktree remove, with no --force so git refuses a dirty tree, only when its PR merged or closed (or it has none and every commit is on a remote), it holds no work but build output, and no live process or roster row has it; each kept one is named with why, and its branch stays, so git worktree add <path> <branch> brings it back.
+    // Every other repo the factory works in: a worktree goes by git worktree remove, with no force flag, so git refuses a dirty tree, only when its PR merged or closed (or it has none and every commit is on a remote), it holds no work but build output, and no live process or roster row has it; each kept one is named with why, and its branch stays, so git worktree add <path> <branch> brings it back.
     await step("other repos", async () => {
       const repos = await otherRepos(await deps.roots(data, main), main)
       if (!repos.length) return "none with a .claude/worktrees folder"
