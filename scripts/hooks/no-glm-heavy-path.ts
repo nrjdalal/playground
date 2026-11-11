@@ -323,10 +323,10 @@ async function commit(
   return refuse("git commit", heavyFiles)
 }
 
-// The tip a push replaces and the base its commits now sit on, when it rewrites a branch the remote holds that is no ancestor of what it pushes: a rebase.
+// The tip a push replaces and the base its commits now sit on, when it rewrites a branch the remote holds that is no ancestor of what it pushes: a rebase; a push naming no remote goes where git sends it.
 function rebased(
   dir: string,
-  remote: string,
+  named: string | undefined,
   source: string,
   dest: string,
   not: string,
@@ -335,8 +335,15 @@ function rebased(
     dest === "HEAD"
       ? names(dir, ["symbolic-ref", "-q", "--short", "HEAD"])?.[0]
       : dest.replace(/^refs\/heads\//, "")
-  const old =
-    branch && names(dir, ["rev-parse", "-q", "--verify", `refs/remotes/${remote}/${branch}`])?.[0]
+  if (!branch) return
+  const config = (key: string) => names(dir, ["config", "--get", key])?.[0]
+  const remote =
+    named ??
+    config(`branch.${branch}.pushRemote`) ??
+    config("remote.pushDefault") ??
+    config(`branch.${branch}.remote`) ??
+    "origin"
+  const old = names(dir, ["rev-parse", "-q", "--verify", `refs/remotes/${remote}/${branch}`])?.[0]
   if (!old) return
   const ancestor = Bun.spawnSync(["git", "-C", dir, "merge-base", "--is-ancestor", old, source], {
     env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
@@ -433,8 +440,8 @@ function push(rest: Word[], dir: string, branchReads: (string | undefined)[]): s
   }
   // a rebase rewrites a branch the remote holds, so what it pushes is judged by its tip against git's own merge of the tip it replaces and the base it now sits on
   const bases =
-    tracked && sources.length === 1
-      ? rebased(dir, name as string, sources[0], dests[0], not)
+    sources.length === 1 && dests.length === 1 && (!remote || name)
+      ? rebased(dir, name, sources[0], dests[0], not)
       : undefined
   if (bases)
     beyondMerge(

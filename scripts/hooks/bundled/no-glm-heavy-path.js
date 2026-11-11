@@ -7552,9 +7552,13 @@ async function commit(rest, dir, chained, forced) {
     return `no-glm-heavy-path hook refuses this git commit: ${heavyFiles.join(", ")} is on disk and not staged, and the hook cannot tell before the call runs whether the git add before it stages it, while this session runs on GLM and that is Opus work. Run git commit as its own call.`;
   return refuse("git commit", heavyFiles);
 }
-function rebased(dir, remote, source, dest, not) {
+function rebased(dir, named, source, dest, not) {
   const branch = dest === "HEAD" ? names2(dir, ["symbolic-ref", "-q", "--short", "HEAD"])?.[0] : dest.replace(/^refs\/heads\//, "");
-  const old = branch && names2(dir, ["rev-parse", "-q", "--verify", `refs/remotes/${remote}/${branch}`])?.[0];
+  if (!branch)
+    return;
+  const config = (key) => names2(dir, ["config", "--get", key])?.[0];
+  const remote = named ?? config(`branch.${branch}.pushRemote`) ?? config("remote.pushDefault") ?? config(`branch.${branch}.remote`) ?? "origin";
+  const old = names2(dir, ["rev-parse", "-q", "--verify", `refs/remotes/${remote}/${branch}`])?.[0];
   if (!old)
     return;
   const ancestor = Bun.spawnSync(["git", "-C", dir, "merge-base", "--is-ancestor", old, source], {
@@ -7641,7 +7645,7 @@ function push(rest, dir, branchReads) {
     for (const file of made)
       files.add(file);
   }
-  const bases = tracked && sources.length === 1 ? rebased(dir, name, sources[0], dests[0], not) : undefined;
+  const bases = sources.length === 1 && dests.length === 1 && (!remote || name) ? rebased(dir, name, sources[0], dests[0], not) : undefined;
   if (bases)
     beyondMerge(files, bases[0], bases[1], (tree) => [pathsOf(dir, ["diff", "--name-only", "--no-renames", tree, sources[0]])], dir);
   const heavyFiles = [...files].filter(heavy).sort();
