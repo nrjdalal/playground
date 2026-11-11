@@ -16,16 +16,8 @@ const checkout = (name: string, origin?: string): string => {
   return dir
 }
 
-// the public repositories reposOf reads with factory.publicRepo unset, run from the checkout given, as a guard runs from the main checkout
-const unsetFrom = (dir: string): string[] => {
-  const home = process.cwd()
-  process.chdir(dir)
-  try {
-    return reposOf({ schemaVersion: 1, values: {} }).public
-  } finally {
-    process.chdir(home)
-  }
-}
+// the public repositories reposOf reads with factory.publicRepo unset, for the checkout given, as a bundled guard reads the main checkout
+const unsetFrom = (dir: string): string[] => reposOf({ schemaVersion: 1, values: {} }, dir).public
 
 // issue 1454: with factory.publicRepo unset the public repository is the checkout's origin, never a fixed pair
 test("factory.publicRepo unset reads the checkout's origin, and none with no origin", () => {

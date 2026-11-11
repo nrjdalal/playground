@@ -8,9 +8,9 @@ import { originRepo } from "../playground/setting"
 
 type Environment = Record<string, string | undefined>
 
-// The repositories, and the owner's names (owner.names, then the archive's owner), read from the settings at run time so no private name is written in the tree; an unset archive is empty, which leaves its links unmeasured, and an unset public repository is the origin of the checkout the caller runs in (a guard runs in the main checkout), none with no origin.
+// The repositories, and the owner's names (owner.names, then the archive's owner), read from the settings at run time so no private name is written in the tree; an unset archive is empty, which leaves its links unmeasured, and an unset public repository is the origin of the checkout this code runs from (a bundled guard the main checkout), none with no origin.
 export type Repos = { archive: string; owner: string[]; public: string[] }
-export const reposOf = (settings: Settings): Repos => {
+export const reposOf = (settings: Settings, checkout?: string): Repos => {
   const archive = factorySettings.get(settings, "factory.archiveRepo").toLowerCase()
   const archiveOwner = archive ? [archive.split("/")[0]!] : []
   const set = [factorySettings.get(settings, "factory.publicRepo")].flat().filter(Boolean)
@@ -19,7 +19,7 @@ export const reposOf = (settings: Settings): Repos => {
     owner: [...new Set([...ownerSettings.get(settings, "owner.names"), ...archiveOwner])],
     public: set.length
       ? set.map((repo) => repo.toLowerCase())
-      : [originRepo(process.cwd())].filter(Boolean),
+      : [originRepo(checkout)].filter(Boolean),
   }
 }
 // The repositories with neither key set, as a machine with no store reads them.

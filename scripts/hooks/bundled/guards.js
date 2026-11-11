@@ -14427,14 +14427,14 @@ if (false)
   ;
 
 // packages/scripts/src/trace-count/kinds.ts
-var reposOf = (settings) => {
+var reposOf = (settings, checkout) => {
   const archive = factorySettings.get(settings, "factory.archiveRepo").toLowerCase();
   const archiveOwner = archive ? [archive.split("/")[0]] : [];
   const set = [factorySettings.get(settings, "factory.publicRepo")].flat().filter(Boolean);
   return {
     archive,
     owner: [...new Set([...ownerSettings.get(settings, "owner.names"), ...archiveOwner])],
-    public: set.length ? set.map((repo) => repo.toLowerCase()) : [originRepo(process.cwd())].filter(Boolean)
+    public: set.length ? set.map((repo) => repo.toLowerCase()) : [originRepo(checkout)].filter(Boolean)
   };
 };
 var UNSET_REPOS = reposOf({ schemaVersion: 1, values: {} });
