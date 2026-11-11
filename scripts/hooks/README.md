@@ -383,8 +383,11 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   The closed list is an `awk`, `gawk`, `mawk` or `nawk` whose program runs nothing, a `cat`, `git`, `grep`, `head`, `jq`, `tail` or `wc` that is a reader by the list above (so `git show <rev>:<file> | awk '/^f\(\)/,/^}/'` runs), `cut`, a `sort` with no `-o` and no long option (macOS sort takes an abbreviation, `--out=`), and a `uniq` with at most one file, since its second is its output.
   A `git` on it holds no word the hook cannot read, since one may be an option that writes or runs (`--output=…`).
   The closed list also holds an `echo` or `lsof`, which prints and runs nothing, so the awk it feeds keeps its reading: `lsof -U | awk '$5 ~ /unix/'` and `echo x | awk '{print $1}'` run from `~`.
-  It holds `date`, `true` and `false` too, which print or exit and run nothing, so `sed -n '/{/p' f; date` runs from `~`.
-  It holds a `bash`, `sh` or `zsh` given only `-c` and a quoted script whose own line is read call by call, as its line's one command, since the shell runs that script alone: `/bin/bash -c 'sed -n "/^f() {/,/^}/p" f'` runs from `~`, while `bash -c 'eval "$(sed -n …)"'` keeps canary's reading.
+  It holds `date` too, which prints and runs nothing, so `sed -n '/{/p' f; date` runs from `~`.
+  It holds a `bash` given only `-c` and a quoted script whose own line is read call by call, since bash runs that script alone: `/bin/bash -c 'sed -n "/^f() {/,/^}/p" f'` runs from `~`, while `bash -c 'eval "$(sed -n …)"'` keeps canary's reading.
+  That `bash -c` counts only as its line's one command, so a shell beside another call (`git commit -m "fix(x): y"; bash -c 'sed -n p f'`) keeps canary's reading; every other shell keeps it too.
+  Those members (`date`, `jq`, a `bash -c` and an awk with a plain `getline`, below) stay off the list on a line holding text the shell runs as code where the lexer reads a plain word (`evaluates`), so that line keeps canary's reading.
+  Such text is an `e` or `+` glob qualifier, an `e` or `P` parameter flag, `${~…}`, `@P`, arithmetic over a name, a subscript or an indirection.
   The closed list also holds a read-only gh call with a `-q` or `--jq` filter or a `-t` or `--template` template: `gh api` with no option that sends, or `issue list`, `issue view`, `pr list`, `pr view`, `run list`, `run view` or `search`.
   A call with an option that sends (`-F`, `-X`, `-f`, `--cache`, `--field`, `--input`, `--method` or `--raw-field`) or opens the browser (`--web` or `-w`) is no read, a short one counted alone or in a cluster ahead of the filter's letter (`-iX POST`).
   Such a call holds no other word with a space, and no pager or editor variable (`EDITOR`, `GH_EDITOR`, `GH_PAGER`, `PAGER`, `VISUAL`) is set on its line, since an assignment or an export keeps a line from being read call by call.
@@ -474,8 +477,8 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   A form that passes is a guard hole, kept in fixture rows off GitHub until its fix merges; the check is done when each reverse case is refused at `check()`, or held as a fixture row and reported to your lead.
   A refusal that likely names no write (`unwritten`) ends by asking the session to report it to its lead as a false positive if the command writes nothing: the typed line's redirects write no file, the word reads as a folder above the root or a glob there rather than as the root's own path, and the command was read out of a quoted text or is a reader that writes nothing as called.
   Every other refusal keeps the owner's route, so `sed -i`, `perl -pi` or `chmod` on a file in the root, or `chmod` on a glob above it, is routed to the owner.
-  A gh `-q` filter on a line read whole (one beside a program off the closed list or a redirect that writes a file, such as `gh … > out.txt` or `gh … | sh`) keeps canary's reading,
-  so one that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(`; pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
+  A gh `-q` filter on a line read whole (one beside a program off the closed list or a redirect that writes a file, such as `gh … > out.txt` or `gh … | sh`) keeps canary's reading.
+  There a filter that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(`; pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
   It fails open on any other error, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
 ## no-false-green

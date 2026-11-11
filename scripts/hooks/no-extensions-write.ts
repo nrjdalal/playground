@@ -705,11 +705,11 @@ function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
   )
 }
 
-// the shells whose -c script the lexer reads as they do
-const BASH_LIKE = new Set(["bash", "sh", "zsh"])
+// Whether a line holds text the shell runs as code where the lexer reads a plain word: namings' blind (an e or + glob qualifier, an e or P parameter flag, @P, arithmetic over a name, a subscript, an indirection) or zsh's glob substitution (`${~…}`, `$~…`)
+const evaluates = (text: string) => namings(text).blind || /\$\{?~/.test(text)
 
-// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, date, echo, false, git, grep, head, jq, lsof, perl, sed, sort, tail, true, uniq or wc, a bash, sh or zsh -c whose script is read call by call, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
-function narrow(cmd: Command, env: Env): boolean {
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call; joined adds date, jq, an awk with a plain getline and a bash -c whose script is read call by call, which a line that evaluates text keeps off
+function narrow(cmd: Command, env: Env, joined = true): boolean {
   const parsed = parse(cmd)
   const { args, first } = parsed
   // a command of reserved words alone (`fi`, `done`) runs nothing; any other with no program read (`sudo -s`, a group) has its line read whole
@@ -726,24 +726,31 @@ function narrow(cmd: Command, env: Env): boolean {
   const base = program(first.value)
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
-    return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))
+    return (
+      !!programs &&
+      programs.every(
+        ({ value }) => !marked(value) && !awkRuns(value) && (joined || !value.includes("getline")),
+      )
+    )
   }
-  if (["cat", "grep", "head", "jq", "tail", "wc"].includes(base)) return reads(parsed, env)
+  if (["cat", "grep", "head", "tail", "wc"].includes(base) || (joined && base === "jq"))
+    return reads(parsed, env)
   // a git reader with a word the hook cannot read keeps canary's reading, since that word may be an option that writes or runs (`--output=…`)
   if (base === "git") return reads(parsed, env) && !args.some(({ value }) => marked(value))
   if (SEDS.has(base)) return sedReads(args)
   if (base === "perl") return perlReads(parsed, env)
   if (base === "cut" || base === "echo" || base === "lsof") return true
-  // date, true and false print or exit and run nothing, so `sed -n '/{/p' f; date` keeps the reader's reading
-  if (base === "date" || base === "false" || base === "true") return true
-  // a shell given a script by -c alone runs that script, so it is narrow when its script is a line read call by call (wholeLine), which counts it only as its line's one command
-  if (BASH_LIKE.has(base)) {
+  // date prints and runs nothing, so `sed -n '/{/p' f; date` keeps the reader's reading
+  if (joined && base === "date") return true
+  // bash given a script by -c alone runs that script, so it is narrow when its script evaluates no text and is a line read call by call (wholeLine), which counts it only as its line's one command; the other shells keep canary's reading
+  if (joined && base === "bash") {
     const [flag, script] = args
     return (
       args.length === 2 &&
       flag.value === "-c" &&
       script.quoted &&
       !marked(script.value) &&
+      !evaluates(script.value) &&
       !wholeLine(lex(script.value, env.known).commands, env)
     )
   }
@@ -795,16 +802,18 @@ function quietCommit(cmd: Command, parsed: Parsed, env: Env): boolean {
 }
 
 // Whether a line is read whole, as canary read it, every spaced text of every program but a reader a command line; a line is read call by call only when every command, its substitutions' included, is narrow or a quiet commit and no redirect writes a file
-function wholeLine(commands: Command[], env: Env): boolean {
+function wholeLine(commands: Command[], env: Env, joined = true): boolean {
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
-    if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
+    if (words.some((word) => word.procs && wholeLine(word.procs, env, joined))) return true
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
     const parsed = parse(cmd)
-    // a shell's -c is narrow only as its line's one command, so a shell beside another call keeps canary's reading
-    if (commands.length > 1 && parsed.first && BASH_LIKE.has(program(parsed.first.value)))
-      return true
-    return writes || !(narrow(cmd, env) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed))
+    // a bash -c is narrow only as its line's one command, so a shell beside another call keeps canary's reading
+    if (commands.length > 1 && parsed.first && program(parsed.first.value) === "bash") return true
+    return (
+      writes ||
+      !(narrow(cmd, env, joined) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed))
+    )
   })
 }
 
@@ -1344,7 +1353,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
   rootLine = rooted(lexed.commands)
-  whole = rootLine || wholeLine(lexed.commands, env)
+  whole = rootLine || wholeLine(lexed.commands, env, !evaluates(command))
   patterns = casePatterns(lexed.commands)
   lineWrites = redirectsWrite(lexed.commands)
   // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change

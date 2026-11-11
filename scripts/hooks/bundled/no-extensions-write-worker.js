@@ -7871,8 +7871,8 @@ function perlReads({ args, local }, env) {
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
 }
-var BASH_LIKE = new Set(["bash", "sh", "zsh"]);
-function narrow(cmd, env) {
+var evaluates = (text) => namings(text).blind || /\$\{?~/.test(text);
+function narrow(cmd, env, joined = true) {
   const parsed = parse3(cmd);
   const { args, first } = parsed;
   if (!first) {
@@ -7883,9 +7883,9 @@ function narrow(cmd, env) {
   const base = program(first.value);
   if (AWKS.has(base)) {
     const programs = awkPrograms(args);
-    return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value));
+    return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value) && (joined || !value.includes("getline")));
   }
-  if (["cat", "grep", "head", "jq", "tail", "wc"].includes(base))
+  if (["cat", "grep", "head", "tail", "wc"].includes(base) || joined && base === "jq")
     return reads(parsed, env);
   if (base === "git")
     return reads(parsed, env) && !args.some(({ value }) => marked(value));
@@ -7895,11 +7895,11 @@ function narrow(cmd, env) {
     return perlReads(parsed, env);
   if (base === "cut" || base === "echo" || base === "lsof")
     return true;
-  if (base === "date" || base === "false" || base === "true")
+  if (joined && base === "date")
     return true;
-  if (BASH_LIKE.has(base)) {
+  if (joined && base === "bash") {
     const [flag, script] = args;
-    return args.length === 2 && flag.value === "-c" && script.quoted && !marked(script.value) && !wholeLine(lex(script.value, env.known).commands, env);
+    return args.length === 2 && flag.value === "-c" && script.quoted && !marked(script.value) && !evaluates(script.value) && !wholeLine(lex(script.value, env.known).commands, env);
   }
   if (base === "gh") {
     const filters = ghFilters(parsed);
@@ -7928,16 +7928,16 @@ function quietCommit(cmd, parsed, env) {
     return false;
   return args.every((word, at) => !/\s/.test(word.value) || word.quoted && !marked(word.value) && (/^(?:-[a-zA-Z]*m|--message)$/.test(args[at - 1]?.value ?? "") || word.value.startsWith("--message=")));
 }
-function wholeLine(commands, env) {
+function wholeLine(commands, env, joined = true) {
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])];
-    if (words.some((word) => word.procs && wholeLine(word.procs, env)))
+    if (words.some((word) => word.procs && wholeLine(word.procs, env, joined)))
       return true;
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
     const parsed = parse3(cmd);
-    if (commands.length > 1 && parsed.first && BASH_LIKE.has(program(parsed.first.value)))
+    if (commands.length > 1 && parsed.first && program(parsed.first.value) === "bash")
       return true;
-    return writes || !(narrow(cmd, env) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed));
+    return writes || !(narrow(cmd, env, joined) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed));
   });
 }
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
@@ -8329,7 +8329,7 @@ async function inspect(raw, environment, unknown = false) {
     vars: new Map
   };
   rootLine = rooted(lexed.commands);
-  whole = rootLine || wholeLine(lexed.commands, env);
+  whole = rootLine || wholeLine(lexed.commands, env, !evaluates(command));
   patterns = casePatterns(lexed.commands);
   lineWrites = redirectsWrite(lexed.commands);
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))

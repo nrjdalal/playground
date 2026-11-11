@@ -771,11 +771,12 @@ describe("a quoted argument is read as a command line only where a program runs 
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
 
-  // #1657: date, true, a jq read and a bash -c of a read join the closed list, and a plain getline runs nothing, so a reader's line beside them is read call by call and its quoted glob stays text
+  // #1657: date, a jq read and a bash -c of a read join the closed list, and a plain getline runs nothing, so a reader's line beside them is read call by call and its quoted glob stays text
   test.each([
-    ["sed -n with a brace, then true", "sed -n '/{/p' f; true"],
+    ["sed -n with a brace, then date", "sed -n '/{/p' f; date"],
+    ["date, then sed -n with a brace", "date -u +%FT%TZ; sed -n '/{/p' f"],
     ["sed -n with a bracket, then date", "sed -n '/\\[b\\]/p' f; date"],
-    ["sed -n with a brace range, then true", `sed -n "/^switch_ends() {/,/^}/p" f; true`],
+    ["sed -n with a brace range, then date", `sed -n "/^switch_ends() {/,/^}/p" f; date`],
     [
       "sed -n with a brace range under bash -c",
       `/bin/bash -c 'sed -n "/^switch_ends() {/,/^}/p" f'`,
@@ -793,6 +794,10 @@ describe("a quoted argument is read as a command line only where a program runs 
     [
       "jq with a slashed filter piped to awk, then date",
       `jq -r '.[] | "\\(.a)/\\(.b)"' f | awk '{print $1}'; date`,
+    ],
+    [
+      "jq with a slashed filter, then sed -n with a brace",
+      `jq -r '"\\(.a)/\\(.b)"' f; sed -n '/{/p' f`,
     ],
   ])("%s runs from the home, the data folder and the checkout", async (_, command) => {
     for (const cwd of [...homes, CHECKOUT]) expect(await at(command, cwd)).toBeUndefined()
