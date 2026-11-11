@@ -163,11 +163,10 @@ describe("the command finds the checkout", () => {
   const both = withHook(join(scratch, "both"), 'console.log("bundle")\n')
   withHook(both, 'console.log("source")\n', join("scripts", "hooks", "no-stash.ts"))
 
-  const command = async (file: string, hook: string) => {
+  const command = async (file: string, hook: string, event: string) => {
     const found = (await entries(file)).find(
       (e) =>
-        new RegExp(`scripts/hooks/(bundled/)?${hook}\\.[jt]s`).test(e.command) &&
-        e.event !== "SessionStart",
+        new RegExp(`scripts/hooks/(bundled/)?${hook}\\.[jt]s`).test(e.command) && e.event === event,
     )
     if (!found) throw new Error(`${file} registers no ${hook} hook`)
     return found.command
@@ -178,8 +177,9 @@ describe("the command finds the checkout", () => {
     cwd: string,
     env: Record<string, string>,
     hook = "no-stash",
+    event = "PreToolUse",
   ) => {
-    const proc = Bun.spawn([shell, "-c", await command(file, hook)], {
+    const proc = Bun.spawn([shell, "-c", await command(file, hook, event)], {
       cwd,
       // the ceiling keeps git from finding a repository above the scratch folders
       env: {
@@ -262,6 +262,7 @@ describe("the command finds the checkout", () => {
         outside,
         { CLAUDE_PROJECT_DIR: outside, PLAYGROUND_REPO: crashing, PLAYGROUND_ROLE: "worker" },
         "no-chat-question",
+        "Stop",
       )
       expect(code).toBe(1)
     })

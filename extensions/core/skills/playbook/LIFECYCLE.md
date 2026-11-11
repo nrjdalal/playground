@@ -33,14 +33,14 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   It takes only a folder directly under the main checkout's `.claude/worktrees/`, so a tree nested in another goes with its parent, which AGENTS.md's worktree rule prevents.
   The Builder then closes its workspace, which takes any split still open in it, and its slot returns to the pool.
   Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead.
-  The Builder closes a session by hand only on a `Not ended` line, whose reason names what to fix first.
+  The Builder closes a session by hand only on a `Not ended` line, whose reason names what to fix first, and reassigns or closes a worker on a `Kept` line, whose last PR closed unmerged.
   The Builder may also end a worker mid-chore to drop or reassign the chore, recording why.
   A parked chore gets its branch pushed (`git push origin <branch>`) and a handoff note ([SESSIONS.md](SESSIONS.md#write-a-handoff)), `~/.playground/handoffs/<ID>.md`, and its worker closes, its final report naming the pushed head; the chore restarts later from the note, its branch and its PR.
 - **Runners** belong to Ops.
   A long-running job joins an open runner; Ops spawns a runner when none is open, or another one for isolation or load.
   Each job runs as its own background task with its own log and health check, all listed in that runner's roster task.
   Ops closes a runner once it holds no job that is still needed.
-- **Ops jobs** Ops runs as scripts with no session (ops-awake, ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-unstick, ops-usage, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
+- **Ops jobs** Ops runs as scripts with no session (ops-awake, ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-unstick, ops-usage, ops-wa, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
   named `ops-*.json` so the Dashboard finds a new job by its file alone,
   in the shape `heartbeatSchema` in `api/hono/src/lib/dashboard/ops.ts` reads (`job`, `pid`, `startedAt`, `lastBeatAt`, `lastResult`, `cycleSeconds`), written atomically each beat by a loop that does not wait on the work.
   The Dashboard lists each under Scripts, by its plain name and its `jobs.json` `schedule`: Running while `lastResult` is `ok` and the beat is within three cycles, Waiting while it starts `waiting: ` (a job with nothing to read yet, muted and not broken), Failing on any other result, Down once the beat goes stale, the pid goes or the loop writes `loop exited <code>` or `supervisor exited`.
@@ -64,7 +64,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   the roll gate, the tick (usage marks, whose Inbox week alert at 97% or 98% it keeps in `tick/week-alerts.json` and resolves once `usage.json` reads that account's week under the mark, a `switch due`, load, the train's slot wait, near-limit marks, and the switch watch,
   which at a full week writes ops-unstick's move file while a second dispatcher is seated and tells the dispatchers and both leads),
   the usage-limit watch (each session on the usage-limit screen named to the builder once with its account, and the lowest-week account with its 5-hour window under 90% to move to),
-  the auto-end beat every 5 minutes (`scripts/ops/optimizer/auto_end.ts` over `idle_sessions.ts`'s flags, [SESSIONS.md](SESSIONS.md#end)), each end or `Not ended` line to the session's lead, a `Not ended` line once until its words change,
+  the auto-end beat every 5 minutes (`scripts/ops/optimizer/auto_end.ts` over `idle_sessions.ts`'s flags, [SESSIONS.md](SESSIONS.md#end)), each end, `Kept` or `Not ended` line to the session's lead, a `Kept` or `Not ended` line once until its words change,
   ops-up every 5 minutes (`scripts/ops/up.py`, each line it prints told to ops once until it changes, so a reboot or a herdr server that went down brings every job back with no hand step, and a reboot plan holds no step that stops the jobs first, since the reboot ends them and this beat starts them again),
   the sweep (each felled session to its lead once, never a probe or one the roster holds done, parked, paused, ended or starting, but runner-plain-relay, the relay itself, whose resume line it runs through spawn.sh's capacity gate at every sweep that prints it, with `--brief brief-runner-plain-relay.md` so the relay starts its wait task again,
   never marked told since a resume keeps the session id and the line returns with the next outage,
@@ -120,6 +120,10 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   which sends each new owner message to the dispatcher in full and to the session in the assistant seat (`roster.ts who assistant`; with none, it logs that the message stays with the dispatcher)
   when none is answered in 3 minutes while the dispatcher is not mid-turn (its session state `working` and written in the last 3 minutes), or the dispatcher's session state has read stuck or failed for 3 minutes, telling Ops of that once through ops-unstick's outbox;
   every 15 minutes it tells the dispatcher to post an update, and a failure goes to ops once per kind until a pass succeeds, the extension turned off as `Slack is not set up here`.
+  ops-wa (`jobs.opsWa`, off by default) holds the WhatsApp link on the spare number (ADR 0023): while `wa.owner` and `wa.device` are set, it links as a device by a pairing code it posts as an Inbox card, and only once `no-raw-wa` is registered in `scripts/factory-settings.json` (it beats `stopped: ` with that reason until then),
+  sends each 1:1 owner message to the dispatcher whole through the relay, which logs its length alone, and drops every other message and call with one line in `whatsapp/dropped.log`;
+  `playground wa send <file>` is the one way out, to the owner alone, and the ban-safety habits in `packages/scripts/src/ops-wa/habits.ts` hold every connect and send.
+  It beats `waiting: ` until both numbers are set, and once stopped (12 failed connects in a row, a logout, a lock another process holds) it stays up beating `stopped: <why>`, so up.py leaves it be until the job starts again.
   ops-herdr is `bun run ops:herdr` in the main checkout: every minute it starts each herdr server that is down, `playground` for every session and `playground-probes` for drills, upgrades and shell panes (names of Playground's own, since herdr keeps each server's state and logs under `~/.config/herdr/sessions/<name>`), under `env -i` with HOME, LANG, LOGNAME, PATH, SHELL, TERM and USER alone,
   on the absolute path the repo's `packages/scripts/src/ops-herdr/pin.json` names, as launchd's child, so stopping the job leaves it running.
   It refuses to start a binary whose version or sha256 differs from the pin and beats the mismatch, naming both, and never restarts a running server, since a stop exits every pane.

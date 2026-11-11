@@ -55,6 +55,10 @@ playground ingest [--follow | status]
 playground queues     print the merge queue and the work queue (bun run queues)
 playground thread <command> ...
                       open, route, rename or list the Inbox's threads (bun run thread)
+playground wa send <file>
+                      send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, the one way any session writes there; it refuses a body holding a token shape (bun run wa)
+playground wa relink
+                      after WhatsApp logged out the linked device, set the old link aside so ops-wa's next start posts a new pairing card (bun run wa)
 playground accounts list | add --provider claude --email <email> [--label <label>] | add --provider glm --label <label> | remove <email|label>
                       the accounts the factory spends, each a usage.accounts row with its secret in the Keychain: list each with whether its secret is kept and its last 5-hour and week reading; add a Claude account by running claude setup-token here, then pasting the token it prints, or a GLM key pasted under its label, neither echoed; remove one's row and its Keychain item
 playground yard login | logout | channels | read <channel> | post <channel> <text> [--kind <kind>]
@@ -88,7 +92,7 @@ playground picker <session> allow <key> | deny <key> "<reason>"
                       as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; each answer is a line in ops/picker.log`
 
 // The package scripts playground runs as its own verbs.
-export const VERBS = ["ask", "changelog", "dm", "ingest", "queues", "thread"]
+export const VERBS = ["ask", "changelog", "dm", "ingest", "queues", "thread", "wa"]
 
 // playground <verb> runs the package script of that name in the Dashboard's checkout, words and all.
 export const verbArgv = (verb: string, words: string[]): string[] => ["run", verb, ...words]

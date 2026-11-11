@@ -89,6 +89,7 @@ The dispatcher, the Planner and the two leads never close, except to be started 
 In herdr, sessions that work together share a workspace, each in a pane of its own: a checker opens as a column beside its worker's pane (`spawn.sh column`), and every other start opens a workspace of its own.
 A session ends when the one it reports to closes its pane, never the others.
 A finished worker, reviewer or tester also ends by itself: right after its PR merges, and from a check every 5 minutes, while one with work left unsaved stays open and its lead gets a `Not ended` line saying why, unless that work sits in one of Playground's own worktrees whose PR has merged or closed, which the cleanup moves to the trash.
+A worker whose last PR closed unmerged stays open too, and its lead gets a `Kept` line to reassign or end it.
 Sessions already running move at their next restart, so nothing is closed just to re-arrange it.
 
 The leads keep watch with a sweep: every 15 minutes each one runs `playground sweep`, which prints only what changed since its last sweep (new alerts, the merge queue, the load, ETAs that have passed, a parked row's hold that has closed, and for Ops, once an hour, each ops switch still on with its reason) or `quiet`,
@@ -179,8 +180,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A resumed session restarts any dev stack it served and re-arms its watches, CronList before CronCreate, since the resume kept its crons and dropped its background tasks.
   The factory no longer moves sessions to GLM at 98% usage (retired on Inbox #i827): the account rotation moves it between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
 - A session started with no `--runtime`, from any terminal, or with `--runtime herdr`, opens in herdr, in a pane labelled with its name, and its next resume opens there too.
-  spawn.sh opens every session in herdr: it refuses a `--runtime` other than herdr or hc and a column started beside anything but a herdr pane, and every resume opens in herdr, whatever word its runtime pin held.
-  The one exception is the herdr-core trial: `spawn.sh probe ... --runtime hc` opens a probe in hc's own trial world, and spawn.sh refuses `--runtime hc` with every other mode.
+  spawn.sh opens every session in herdr: it refuses a `--runtime` other than herdr and a column started beside anything but a herdr pane, and every resume opens in herdr, whatever word its runtime pin held.
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused (that row read again once its resume finds the session gone, so a session you closed stays down), one that never got its first message included,
