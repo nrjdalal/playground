@@ -187,10 +187,10 @@ describe("the backend pin carries a start onto its resume", () => {
   test("a start records glm or claude beside the session's name", async () => {
     const glm = await spawn(["worker", "worker-brave-otter", "b.md", "--backend", "glm"], [])
     expect(glm.code).toBe(0)
-    expect(pinOf(glm, "worker-brave-otter")).toBe("glm")
+    expect(pinOf(glm, "worker-brave-otter")).toBe("claude-code glm")
     const plain = await spawn(["worker", "worker-calm-heron", "b.md"], [])
     expect(plain.code).toBe(0)
-    expect(pinOf(plain, "worker-calm-heron")).toBe("claude")
+    expect(pinOf(plain, "worker-calm-heron")).toBe("claude-code claude")
   })
 
   test("a resume of a session started on glm relaunches the whole GLM launch from its pin", async () => {
@@ -229,13 +229,13 @@ describe("the backend pin carries a start onto its resume", () => {
   test("a resume that carries an explicit --backend with no pin heals the record", async () => {
     const r = await spawn(["resume", "worker-brave-otter", root, "--backend", "glm"], [])
     expect(r.code).toBe(0)
-    expect(pinOf(r, "worker-brave-otter")).toBe("glm")
+    expect(pinOf(r, "worker-brave-otter")).toBe("claude-code glm")
   })
 
   test("a pinless resume with --backend claude relaunches on Claude and heals the record", async () => {
     const r = await spawn(["resume", "worker-brave-otter", root, "--backend", "claude"], [])
     expect(r.code).toBe(0)
-    expect(pinOf(r, "worker-brave-otter")).toBe("claude")
+    expect(pinOf(r, "worker-brave-otter")).toBe("claude-code claude")
     expect(command(r)).toStartWith("(env PLAYGROUND_ROLE=worker claude --resume worker-brave-otter")
     expect(command(r)).not.toContain("ANTHROPIC_BASE_URL")
     expect(r.security).toBeUndefined()
@@ -247,7 +247,7 @@ describe("the backend pin carries a start onto its resume", () => {
       [],
     )
     expect(r.code).toBe(0)
-    expect(pinOf(r, "reviewer-nopin")).toBe("claude")
+    expect(pinOf(r, "reviewer-nopin")).toBe("claude-code claude")
   })
 
   test("a checker takes no --backend glm", async () => {

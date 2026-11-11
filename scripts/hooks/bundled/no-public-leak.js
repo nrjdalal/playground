@@ -6239,6 +6239,12 @@ var gateSettings = defineSettings({
     schema: number2().int().positive()
   }
 });
+// packages/settings/src/harnesses.ts
+var HARNESSES = [
+  { backends: ["claude", "glm"], id: "claude-code", label: "Claude Code" }
+];
+var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
+var GLM_MODEL = "glm";
 // packages/settings/src/models.ts
 var id = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id, such as claude-opus-5-5");
 var modelSettings = defineSettings({
@@ -6374,16 +6380,26 @@ var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var BRIEF_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 var sessionTemplate = strictObject({
   account: string2().email().optional(),
-  backend: _enum(["claude", "glm"]),
   brief: string2().regex(BRIEF_NAME, "a brief is a file name, with no /").refine((brief) => !brief.includes(".."), "a brief is a file name, with no .."),
   effort: _enum(EFFORTS).optional(),
+  harness: _enum(HARNESS_IDS),
   id: name,
   kind: _enum(TEMPLATE_KINDS),
   label: string2().min(1).max(40),
   model: string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id").optional()
-}).refine((t) => t.backend === "claude" || t.account === undefined && t.effort === undefined && t.model === undefined, {
-  message: "a GLM template runs on models.glm and its first GLM row, so it takes no account, effort or model"
+}).refine((t) => t.model !== GLM_MODEL || t.account === undefined && t.effort === undefined, {
+  message: "a GLM template runs on models.glm and its first GLM row, so it takes no account or effort"
 });
+var storedTemplates = (value) => Array.isArray(value) ? value.map((row) => {
+  if (typeof row !== "object" || row === null || !("backend" in row) || "harness" in row)
+    return row;
+  const { backend, ...rest } = row;
+  return {
+    ...rest,
+    harness: "claude-code",
+    ...backend === "glm" ? { model: GLM_MODEL } : backend === "claude" ? {} : { backend }
+  };
+}) : value;
 var sessionTemplates = array(sessionTemplate).refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "each id is listed once");
 var unknownAccounts = (templates, accounts) => {
   const known = new Set(accountsOf(accounts, "claude").map(accountKey));
@@ -6409,36 +6425,38 @@ var sessionSettings = defineSettings({
     against: (templates, read) => unknownAccounts(templates, read("usage.accounts")),
     default: [
       {
-        backend: "claude",
         brief: "assistant.md",
+        harness: "claude-code",
         id: "assistant",
         kind: "assistant",
         label: "Assistant"
       },
       {
-        backend: "claude",
         brief: "orchestrator.md",
+        harness: "claude-code",
         id: "orchestrator",
         kind: "orchestrator",
         label: "Orchestrator"
       },
       {
-        backend: "claude",
         brief: "dispatcher-2.md",
+        harness: "claude-code",
         id: "second-dispatcher-claude",
         kind: "dispatcher",
         label: "Second dispatcher on Claude"
       },
       {
-        backend: "glm",
         brief: "dispatcher-2.md",
+        harness: "claude-code",
         id: "second-dispatcher-glm",
         kind: "dispatcher",
-        label: "Second dispatcher on GLM"
+        label: "Second dispatcher on GLM",
+        model: GLM_MODEL
       }
     ],
-    description: "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, backend, model, effort, account (a Claude row of usage.accounts) and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
-    schema: sessionTemplates
+    description: "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, harness, model (a Claude id, or glm), effort, account (a Claude row of usage.accounts) and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
+    schema: sessionTemplates,
+    stored: storedTemplates
   }
 });
 // packages/settings/src/slack.ts

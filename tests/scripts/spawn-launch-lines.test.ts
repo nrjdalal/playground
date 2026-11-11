@@ -2,6 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 
+import { HARNESSES, pinText } from "../../packages/settings/src/harnesses"
 import { OLD } from "../session-names"
 import { launchOf, lw, root, scratch, spawn, typed, type Spawned } from "./spawn-fake"
 
@@ -86,4 +87,22 @@ describe("spawn.sh's launch lines stay byte for byte the same", () => {
     expect(r.code).toBe(0)
     expect(launch(r, c.name)).toBe(EXPECTED[label]!)
   })
+})
+
+// A pin in the new shape, each harness then each of its backends, resumes as the old pin of its backend does.
+describe("a resume from a pin naming its harness runs the old pin's launch line", () => {
+  test.each(HARNESSES.flatMap((h) => h.backends.map((backend) => [h.id, backend] as const)))(
+    "%s %s",
+    async (harness, backend) => {
+      const label = `a resume pinned on ${backend === "glm" ? "GLM" : "Claude"}`
+      const c = CASES[label]!
+      const r = await spawn(c.args, [], {}, undefined, {
+        name: c.name,
+        backend: pinText(harness, backend),
+      })
+      expect(r.err).toBe("")
+      expect(r.code).toBe(0)
+      expect(launch(r, c.name)).toBe(EXPECTED[label]!)
+    },
+  )
 })

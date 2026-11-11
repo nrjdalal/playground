@@ -6,6 +6,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { guardedOrgs } from "../../packages/settings/src/ext"
+import { readPin } from "../../packages/settings/src/harnesses"
 import { readPolicy } from "../../packages/settings/src/rendered"
 import { ruleSettings } from "../../packages/settings/src/rules"
 import { implicitRepos, type Repo, remotes, repoOf } from "./github"
@@ -119,7 +120,7 @@ const ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/
 export const heavy = (path: string): boolean =>
   OPUS_PATHS.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p))
 
-// Whether the session runs on GLM: spawn.sh's GLM launch points ANTHROPIC_BASE_URL at api.z.ai, else the backend pin spawn.sh keeps under the session's registry name reads glm.
+// Whether the session runs on GLM: spawn.sh's GLM launch points ANTHROPIC_BASE_URL at api.z.ai, else the backend pin spawn.sh keeps under the session's registry name names glm (readPin, either shape).
 export async function onGlm(raw: string, environment: Environment = process.env): Promise<boolean> {
   if (/(?:^|\/\/|\.)api\.z\.ai(?:[:/]|$)/.test(environment.ANTHROPIC_BASE_URL ?? "")) return true
   const id = sessionOf(raw)
@@ -128,7 +129,7 @@ export async function onGlm(raw: string, environment: Environment = process.env)
     const name = await registryName(id, environment)
     if (!name || name.includes("/")) return false
     const pin = join(dataDir(environment), "backends", name)
-    return (await Bun.file(pin).text()).trim() === "glm"
+    return readPin(await Bun.file(pin).text())?.backend === "glm"
   } catch {
     return false
   }

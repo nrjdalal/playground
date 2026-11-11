@@ -272,6 +272,16 @@ describe("a session's account, for the capped account line and the dialog's room
     expect(result).toEqual([])
   })
 
+  test("reads a pin that names its harness, claude-code glm, as GLM too", async () => {
+    const config = machine(98, 22)
+    write(join(config, "playground", "backends", "dispatcher-2"), "claude-code glm\n")
+    const { notified: sent } = await notified(config, "capped_alert", [
+      "worker-on-two",
+      "dispatcher-2",
+    ])
+    expect(sent).toEqual([])
+  })
+
   test("counts a session by its record's account line, a login spawn.sh's usage gate picked (PG-2137)", async () => {
     const config = machine(40, 100)
     write(

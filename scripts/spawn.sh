@@ -65,7 +65,7 @@ set -euo pipefail
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, never this machine's own login, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
-#     The backend is recorded at the start in ~/.playground/backends/<name> and carried on its resume: a resume takes no --backend while a pin stands, and refuses with no pin and none given, or with a pin that reads as neither glm nor claude.
+#     The backend is recorded at the start in ~/.playground/backends/<name>, its harness then its backend (claude-code glm), and carried on its resume, which also reads a pin of the backend alone: a resume takes no --backend while a pin stands, and refuses with no pin and none given, or with a pin that reads as neither glm nor claude.
 #   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
 #   --effort <level>   with any mode but restore or close, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
@@ -1374,9 +1374,10 @@ if [ "$MODE" = resume ]; then
   if [ -e "$PINS/$NAME" ]; then
     [ -z "$BACKEND" ] || refuse "the pin decides how $NAME runs; --backend would change it mid-life. Close it and start it again instead."
     pin=$(cat "$PINS/$NAME") || refuse "it cannot read the backend pin for $NAME"
+    # A pin names its harness, then its backend (HARNESSES in packages/settings/src/harnesses.ts, Claude Code alone); one written before the harness split names its backend alone.
     case "$pin" in
-      glm) BACKEND=glm ;;
-      claude) ;;
+      glm | "claude-code glm") BACKEND=glm ;;
+      claude | "claude-code claude") ;;
       *) refuse "the backend pin for $NAME reads neither glm nor claude: it cannot know how $NAME ran. Fix or remove $SHOWN/backends/$NAME, then resume." ;;
     esac
   elif [ -n "$BACKEND" ]; then
@@ -1995,7 +1996,7 @@ fi
 
 # The pin lands only once herdr has the session; a healed resume records the backend it was given.
 if [ "$MODE" != resume ] || [ -n "$PIN_GIVEN" ]; then
-  if ! { mkdir -p "$PINS" && printf '%s\n' "${BACKEND:-claude}" > "$PINS/$NAME"; }; then
+  if ! { mkdir -p "$PINS" && printf 'claude-code %s\n' "${BACKEND:-claude}" > "$PINS/$NAME"; }; then
     echo "spawn.sh: $NAME started, but its backend pin write failed; its next resume refuses until the pin reads glm or claude" >&2
   fi
 fi

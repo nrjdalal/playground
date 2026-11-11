@@ -502,7 +502,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   A clone is `cp`, `ditto` or `rsync` naming a `node_modules` folder or its contents (`node_modules/`, `node_modules/.`, `node_modules/*`), read as run-slot.sh reads `cp`'s.
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD commit` reads as a commit.
   An Opus path's refusal comes first, since that change moves to a Claude worker whatever the load.
-  A session is on GLM when its `ANTHROPIC_BASE_URL` points at `api.z.ai`, or when the backend pin spawn.sh keeps under its registry name reads `glm`; a Claude session commits those paths as before.
+  A session is on GLM when its `ANTHROPIC_BASE_URL` points at `api.z.ai`, or when the backend pin spawn.sh keeps under its registry name names `glm` (`glm`, or `claude-code glm` since the harness split); a Claude session commits those paths as before.
   It fails closed only on a call that reads as a git commit or push, an org tool or a database client whose host it cannot read (below), a call it cannot parse inside a guarded checkout (below), or over that load as an install or clone (one whose directory, paths or refs it cannot read, or whose input does not parse), and passes every other call.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
 - A factory session on GLM keeps off every org's tracker, chat, docs, repos, checkouts and databases, and off a headless Claude run, as the **glm** rule says: the same hook refuses each such call, naming the rule and its fix: report to your lead, who moves the task to a Claude worker.
