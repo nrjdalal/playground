@@ -1663,12 +1663,16 @@ SID=${SESSION:-}
 if [ "$RUNTIME" = herdr ] && [ "$MODE" != resume ]; then
   SID=$(uuidgen | tr 'A-F' 'a-f') || refuse "it cannot make a session id (uuidgen)"
 fi
+FRESH=
 if [ "$MODE" = resume ]; then
   COMMAND="$LAUNCH --resume $SESSION -n $NAME $FLAGS"
   PROMPT=
   # A herdr session that never took a message has no transcript, so --resume finds no conversation, while --session-id refuses an id that has one (both measured on claude in herdr): it starts afresh under its own id and name, with the prompt its start recorded.
-  if [ "$RUNTIME" = herdr ] && [ "$HARNESS" != codex ] && [[ $SESSION =~ ^[0-9a-f-]{36}$ ]] &&
-    [ -z "$(find "$PROJECTS" -mindepth 2 -maxdepth 2 -name "$SESSION.jsonl" -print -quit 2>/dev/null)" ]; then
+  # A Codex thread that never wrote its rollout has nothing to resume either, so it starts afresh the same way, under the thread its new beat names.
+  saved=$(find "$PROJECTS" -mindepth 2 -maxdepth 2 -name "$SESSION.jsonl" -print -quit 2>/dev/null) || saved=
+  if [ "$HARNESS" = codex ]; then saved=$(find "$DATA/codex/sessions" -name "rollout-*-$SESSION.jsonl" -print -quit 2>/dev/null) || saved=; fi
+  if [ "$RUNTIME" = herdr ] && [[ $SESSION =~ ^[0-9a-f-]{36}$ ]] && [ -z "$saved" ]; then
+    FRESH=1
     COMMAND="$LAUNCH --session-id $SESSION -n $NAME $FLAGS"
     PROMPT=$(cat "$RESUME_DIR/$NAME.prompt" 2>/dev/null) || PROMPT=
     # The prompt goes into the launch inside double quotes, so a quote, $, backquote or backslash would end or run them.
@@ -1726,7 +1730,7 @@ beat = {"hooks": [{"command": 'f="$SPAWN_CODEX_BEAT"; cat > "$f.tmp" && mv "$f.t
 write("hooks.json", json.dumps({"hooks": {"SessionStart": [beat]}}, indent=2) + "\n")
 PY
   LAUNCH="env ${UNSET}${CARRY}PLAYGROUND_ROLE=$ROLE CODEX_HOME=$(printf %q "$CODEX_HOME") SPAWN_CODEX_BEAT=$(printf %q "$BEAT") $(printf %q "$CODEX")"
-  if [ "$MODE" = resume ]; then
+  if [ "$MODE" = resume ] && [ -z "$FRESH" ]; then
     COMMAND="$LAUNCH resume --dangerously-bypass-hook-trust $SESSION"
   else
     COMMAND="$LAUNCH --dangerously-bypass-hook-trust"
