@@ -19,7 +19,9 @@ import {
   answerInputSchema,
   answerLine,
   answerPayload,
+  askCli,
   checkAnswer,
+  closedPayload,
   inboxCount,
   inboxInputSchema,
   type Delivery,
@@ -1097,6 +1099,23 @@ describe("an answer", () => {
     expect(payloadOf(noted)?.comment).toBe("one\ntwo")
     // no comment, no key
     expect(answerPayload(decided, { at: AT, choice: "deny" })).not.toHaveProperty("comment")
+    // a live-reads test stack's close names its own checkout's CLI, so a probe never closes the live Inbox's item of that number
+    const own = "bun run --cwd /wt ask"
+    expect(answerPayload(decided, { at: AT, choice: "deny" }, own).close).toBe(
+      `${own} get #i${decided.ref} --ack`,
+    )
+    const denied = { ...decided, answer: { at: AT, choice: "deny" } } as InboxItem
+    expect(closedPayload(denied, "dismiss", AT, own).close).toBe(
+      `${own} get #i${decided.ref} --ack`,
+    )
+  })
+
+  test("a close names playground ask, but a live-reads test stack's own checkout's CLI", () => {
+    expect(askCli({ kind: "live", rule: "live-branch" }, "/live")).toBe("playground ask")
+    expect(askCli({ kind: "live", rule: "own" }, "/mine")).toBe("playground ask")
+    expect(askCli({ file: null, kind: "fixture", rule: "factory" }, "/wt")).toBe("playground ask")
+    expect(askCli({ kind: "live", rule: "live-reads" }, "/wt")).toBe("bun run --cwd /wt ask")
+    expect(askCli({ kind: "live", rule: "live-reads" }, null)).toBe("playground ask")
   })
 
   // Send types the words alone into the poster: a draft's files are shared into Slack by the dashboard itself (PG-649), never handed to the session
