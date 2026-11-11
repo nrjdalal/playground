@@ -1997,7 +1997,7 @@ except (ValueError, KeyError, TypeError):
   fi
   rm -f -- "$said_file"
   echo "herdr pane $PANE workspace $ws"
-  # Codex fails closed: the beat its SessionStart hook writes proves its hooks loaded, and names its thread, so a session with none in 60 seconds is ended before it takes a turn.
+  # Codex fails closed: the beat its SessionStart hook writes proves its hooks loaded, and names its thread, so a session with none is stopped within 60 seconds of its start.
   if [ "$HARNESS" = codex ]; then
     for ((tick = 0; tick < 120; tick++)); do
       [ -s "$BEAT" ] && break

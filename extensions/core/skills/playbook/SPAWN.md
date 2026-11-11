@@ -76,7 +76,8 @@ Its first prompt names the session, its role and who it reports to, and has it l
 `--harness codex` starts the first dispatcher in Codex in place of Claude Code: `spawn.sh manager <dispatcher> <brief> --harness codex`, and its resume, alone; spawn.sh refuses it for any other session and beside `--backend`, `--account`, `--model` or `--effort`, since Codex runs on the one login and the model its `CODEX_HOME` holds.
 That `CODEX_HOME` is the data folder's `codex/`, whose `config.toml` (the login kept in its `auth.json`, no update check, the session's folder trusted), `hooks.json` and `app-server-daemon/settings.json` (no self-update) spawn.sh writes at each launch, and the launch runs the `codex` on spawn.sh's `PATH` with `--dangerously-bypass-hook-trust`,
 since Codex silently drops a hook with no recorded trust.
-It fails closed: the SessionStart hook writes a beat naming the session's thread, and a start or resume whose beat does not land within 60 seconds has its pane closed and is refused, with no pin, resume record or roster row, so a Codex session whose guards did not load never takes a turn.
+It fails closed: the SessionStart hook writes a beat naming the session's thread, and a start or resume whose beat does not land within 60 seconds has its pane closed and is refused, with no pin, resume record or roster row, so a Codex session whose guards did not load is stopped within a minute of starting;
+its brief rides the launch as Codex's first prompt, so it may work on that brief until then.
 The beat's thread is the session id its resume record keeps, and it takes the session's name through `codex app-server`'s `thread/name/set`.
 Until phase 3 of the harness layer wires the factory's guards into Codex's hooks, a Codex start or resume runs only on a scratch data folder (`PLAYGROUND_DATA_DIR` naming one), and spawn.sh refuses it on the live one, naming phase 3; phase 3 lifts that refusal in the change that wires the guards.
 
