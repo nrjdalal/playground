@@ -73,14 +73,14 @@ test("no two checks in a run share a browser session", async () => {
   expect(source).not.toMatch(/browse\(\s*at,\s*async/)
 })
 
-// A fake agent-browser first on PATH, logging each call: its sign-in wait hangs, writing its own pid to hung, or fails with "fail", and every other call answers success.
+// A fake agent-browser first on PATH, logging each call: its sign-in wait hangs, writing its own pid to hung, until verify, its parent, has gone (30 s at most), or fails with "fail", and every other call answers success.
 const fakeBrowser = (wait: "hang" | "fail") => {
   const dir = mkdtempSync(join(tmpdir(), "verify-close-"))
   const log = join(dir, "calls.log")
   const hung = join(dir, "hung.pid")
   const answer =
     wait === "hang"
-      ? `echo $$ > "${hung}"; sleep 30; echo '{"success":true,"data":{}}'`
+      ? `echo $$ > "${hung}"; i=0; while [ $i -lt 300 ] && kill -0 $PPID 2>/dev/null; do sleep 0.1; i=$((i+1)); done; echo '{"success":true,"data":{}}'`
       : `echo '{"success":false,"error":"boom"}'`
   writeFileSync(
     join(dir, "agent-browser"),
