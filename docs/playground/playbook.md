@@ -77,7 +77,9 @@ and the Dashboard shows each one it finds as Stuck, with a red alarm, or as Paus
 Each night at 3:00 am, ops-tick's nightly clean removes what no merge's cleanup reached: worktrees and branches of merged or closed PRs, exited containers of worktrees that are gone, Docker's dangling images and build cache, and turbo cache files over 2 days old.
 It keeps a worktree that another worktree or a scratch folder still links into, and names the first three links.
 A merged or closed PR's worktree goes to the trash whatever it holds, and one whose merge or close `playground rm` cannot confirm goes there too under the owner's standing approval, each move restorable with `playground rm --restore`.
+It spaces its deletes under `playground rm`'s limit of 3 a minute, so none is refused, and leaves what does not fit in a 10-minute wait for the next night.
 An unmerged branch's head is tagged `archive/<branch>` on origin before any delete, so the tag holds it and `git branch <name> archive/<branch>` brings the branch back; one whose tag cannot be made, or whose origin head is not the local head the tag would hold, stays, named in the log.
+A branch never pushed stays too, with a local `archive/<branch>` tag alone, since a push would publish commits no one has reviewed, and is named once, the night that tag is made.
 Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch.
 It posts an Inbox update when it freed 1 GB or more, and asks no decision: a container or unused volume over 1 GB that no rule takes is kept, and named as kept in the same log and outbox line, as is a container whose removal failed.
 A worker spawns its own reviewer and tester, each briefed from a template it fills in, and the Dashboard nests them under it; the reviewer scores the PR through [code-review-loop](./code-review-loop.md).
@@ -177,7 +179,8 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A resumed session restarts any dev stack it served and re-arms its watches, CronList before CronCreate, since the resume kept its crons and dropped its background tasks.
   The factory no longer moves sessions to GLM at 98% usage (retired on Inbox #i827): the account rotation moves it between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
 - A session started with no `--runtime`, from any terminal, or with `--runtime herdr`, opens in herdr, in a pane labelled with its name, and its next resume opens there too.
-  spawn.sh opens every session in herdr: it refuses a `--runtime` other than herdr and a column started beside anything but a herdr pane, and every resume opens in herdr, whatever word its runtime pin held.
+  spawn.sh opens every session in herdr: it refuses a `--runtime` other than herdr or hc and a column started beside anything but a herdr pane, and every resume opens in herdr, whatever word its runtime pin held.
+  The one exception is the herdr-core trial: `spawn.sh probe ... --runtime hc` opens a probe in hc's own trial world, and spawn.sh refuses `--runtime hc` with every other mode.
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused (that row read again once its resume finds the session gone, so a session you closed stays down), one that never got its first message included,

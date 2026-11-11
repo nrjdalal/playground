@@ -74,6 +74,13 @@ export const frameLoad = (ready: boolean, restored: boolean): FrameLoad =>
 const PAGE_POLICY =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'"
 
+const escapeHtml = (text: string): string =>
+  text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
+// A card's page on a browser tab of its own, since its route answers the Dashboard's own fetch alone: a document that runs no script, holding the page in a frame whose sandbox allows its own script and never same-origin, so the page reads nothing of the Dashboard's though the tab's blob URL takes its origin; the frame takes the page as srcdoc and inherits the holder's policy, PAGE_POLICY, as Previews serves a kept page.
+export const pageTab = (name: string, html: string): string =>
+  `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${PAGE_POLICY}"><title>${escapeHtml(name)}</title><style>html,body,iframe{display:block;width:100%;height:100%;margin:0;border:0}</style><iframe sandbox="allow-scripts" srcdoc="${escapeHtml(html)}" title="${escapeHtml(name)}"></iframe>`
+
 // The page as the viewer's frame takes it: its doctype first when it opens with one, so it keeps its standards mode, then the policy, its own markup, and the keys script.
 export const asViewerPage = (html: string): string => {
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html)?.[0] ?? ""

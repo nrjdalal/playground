@@ -603,7 +603,6 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     ["lefthook", "lefthook run pre-commit"],
     ["a redirect", "echo x > f"],
     ["a cd within it", "cd api/hono && bun test"],
-    ["bun x past a --cwd naming the main checkout", `bun --cwd=${MAIN} x turbo run build`],
   ])("in a worktree, %s", async (_name, command) => {
     expect(await bash(command, WORKTREE)).toBeUndefined()
   })

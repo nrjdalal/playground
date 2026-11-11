@@ -1,14 +1,19 @@
 "use client"
 
-import { RiCloseLine, RiDownloadLine, RiFileLine, RiHtml5Line } from "@remixicon/react"
-import { useQuery } from "@tanstack/react-query"
+import { RiCloseLine, RiFileLine, RiHtml5Line } from "@remixicon/react"
 import { cn } from "cn"
-import { createContext, useContext } from "react"
+import { createContext, useContext, useState } from "react"
 
-import { HTML_VIEWER } from "@/components/dashboard/viewer/documents"
-import { VIEWERS } from "@/components/dashboard/viewer/registry"
-import { MISSING, useAttachment } from "@/components/dashboard/viewer/use-attachment-url"
-import { Download, Missing } from "@/components/dashboard/viewer/viewer"
+import { type ViewerItem, VIEWERS } from "@/components/dashboard/viewer/registry"
+import { useAttachment } from "@/components/dashboard/viewer/use-attachment-url"
+import {
+  Download,
+  FullScreen,
+  Missing,
+  OpenInNewTab,
+  Viewer,
+} from "@/components/dashboard/viewer/viewer"
+import { Hint } from "@/components/hint"
 import { Button } from "@/components/ui/button"
 import type { AsideDoc } from "@/lib/aside-docs"
 import { BAR_ITEM, FLOATING_BAR } from "@/lib/floating-bar"
@@ -23,31 +28,22 @@ const SQUARE = cn("size-8", BAR_ITEM)
 // a document's pane has no slide before or after to hand the arrows to
 const stay = () => {}
 
-// The query for a kept page from Previews, fetched with the owner's cookie into a blob URL as a card's file is (attachmentQuery), once for the page's life, since the HTML view reads its text with a fetch that sends none. load is fetch, a test's stand-in aside.
-export const pageQuery = (url: string, load: typeof fetch = fetch) => ({
-  gcTime: Number.POSITIVE_INFINITY,
-  queryFn: async (): Promise<string> => {
-    const response = await load(url, { credentials: "include" })
-    if (response.status === 404) return MISSING
-    if (!response.ok) throw new Error(`The page did not load (${response.status})`)
-    return URL.createObjectURL(await response.blob())
-  },
-  queryKey: ["aside-page", url],
-  staleTime: Number.POSITIVE_INFINITY,
-})
+// Pure: an open document as the viewer shows it: a card's file as it is, a kept page as an HTML file that loads from its own address and saves from the one that downloads it.
+export const docItem = (doc: AsideDoc): ViewerItem =>
+  "item" in doc
+    ? doc.item
+    : {
+        id: doc.key,
+        kind: "html",
+        name: doc.name,
+        page: { download: doc.download, url: doc.url },
+      }
 
-function FileBody({ item }: { item: Extract<AsideDoc, { item: unknown }>["item"] }) {
-  const { failed, missing, url } = useAttachment(item.id, true)
+function DocBody({ item }: { item: ViewerItem }) {
+  const { failed, missing, url } = useAttachment(item.id, true, item.page?.url)
   const View = VIEWERS[item.kind]?.View
   if (missing || failed) return <Missing failed={failed} />
   return url && View ? <View active={false} item={item} onEdge={stay} url={url} /> : null
-}
-
-function PageBody({ doc }: { doc: Extract<AsideDoc, { url: string }> }) {
-  const { data, isError } = useQuery(pageQuery(doc.url))
-  if (data === MISSING || isError) return <Missing failed={isError} />
-  const item = { id: doc.key, kind: "html" as const, name: doc.name }
-  return data ? <HTML_VIEWER.View active={false} item={item} onEdge={stay} url={data} /> : null
 }
 
 // An open document's square: its kind's icon in the viewer, a kept page's the HTML one.
@@ -56,35 +52,38 @@ export function AsideDocsIcon({ doc }: { doc: AsideDoc }) {
   return <Icon />
 }
 
-// An open document's pane: a card's file, or a kept page, through the viewer's own renderer (a page in the HTML view's sandboxed frame, its links opening in a browser tab and a page that leaves put back), filling the pane in a bordered box, with a floating bar in its corner that saves the file or the page and closes the tab, the look and size of a card's live page.
+// An open document's pane: a card's file, or a kept page, through the viewer's own renderer (a page in the HTML view's sandboxed frame, its links opening in a browser tab and a page that leaves put back), filling the pane in a bordered box, with a floating bar in its corner, the look and size of a card's live page: Download, Open in new tab for a page, an image or a PDF, Full screen, which opens the viewer over the page, and Close, which closes the tab.
 export function AsideDocsPane({ doc, onClose }: { doc: AsideDoc; onClose: () => void }) {
+  const item = docItem(doc)
+  const [open, setOpen] = useState(false)
   return (
     <div className="relative flex h-full min-h-0 items-center justify-center overflow-hidden rounded-md border">
-      {"item" in doc ? <FileBody item={doc.item} /> : <PageBody doc={doc} />}
+      <DocBody item={item} />
       <div className={cn(FLOATING_BAR, "absolute top-2 right-2")}>
-        {"item" in doc ? (
-          <Download className={SQUARE} item={doc.item} />
-        ) : (
+        <Download className={SQUARE} item={item} />
+        <OpenInNewTab item={item} />
+        <FullScreen onClick={() => setOpen(true)} />
+        <Hint content="Close" description={null}>
           <Button
-            aria-label={`Download ${doc.name}`}
+            aria-label="Close"
             className={SQUARE}
-            render={<a href={doc.download} />}
+            onClick={onClose}
             size="icon-sm"
             variant="ghost"
           >
-            <RiDownloadLine />
+            <RiCloseLine />
           </Button>
-        )}
-        <Button
-          aria-label={`Close ${doc.name}`}
-          className={SQUARE}
-          onClick={onClose}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <RiCloseLine />
-        </Button>
+        </Hint>
       </div>
+      {/* the page already shows in its tab, so the viewer's Open in side panel comes back to it */}
+      <Viewer
+        index={0}
+        items={[item]}
+        onIndexChange={stay}
+        onOpenChange={setOpen}
+        onSidePanel={() => setOpen(false)}
+        open={open}
+      />
     </div>
   )
 }
