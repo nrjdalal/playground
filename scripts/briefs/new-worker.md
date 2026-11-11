@@ -19,7 +19,8 @@ Push bare, then confirm the push with `git -C <your worktree> ls-remote origin r
 
 Every git call names its tree, `git -C <your worktree> ...`, so a shell left in another folder moves nothing there. Run spawn.sh by its absolute path, `"${PLAYGROUND_REPO:?}/scripts/spawn.sh"`, from your own folder.
 
-Your PR's checkers (its reviewer and tester) are yours to brief, as playbook's SESSIONS.md (Spawn) says: the spawn passes a filled copy of the template (`~/.playground/<name>-reviewer-<pr>.md`), never the bare template. A run your checker has already measured at the same head is not queued again: ask for its result and cite it. What a push after review carries, and where a 5/5's nits go, is code-review-loop's step 6.
+Answer each review round by playbook's SESSIONS.md, Fix pushes and nits.
+Your PR's checkers (its reviewer and tester) are yours to brief, as playbook's SESSIONS.md (Spawn) says: the spawn passes a filled copy of the template (`~/.playground/<name>-reviewer-<pr>.md`), never the bare template. A run your checker has already measured at the same head is not queued again: ask for its result and cite it.
 A run you repeat, such as a test loop of passes chasing a flake, takes one run-slot call per pass, so the queue moves between passes, and ops hears of any hold past 30 minutes while a waiter queues.
 
 **stop**: an urgent ticket gets the Mac, so on your lead's stop commit your work, stop your own queued and running slot tasks by their own handle (`TaskStop`), and go idle, with no new round, merge or spawn; on your lead's all-clear, carry on where you stopped. Only the urgent ticket's own session and its checkers keep working, the stop naming that session.

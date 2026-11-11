@@ -68,7 +68,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A lead's instruction or a reviewer's brief leaves any raise of a ratchet, or bend of a check whose own rule says it never rises, to that rule's owner, asked on the PR or directly, before the code relies on it, and lists one as agreed only with the owner's words quoted (23 Oct: a raise a brief listed as agreed reached 5/5, and the code owner blocked it).
    A worker started `--in` another repository takes that folder's MCP tools, so its brief names the capability it needs (search Slack, read Datadog logs) and has the worker find the tool with its own `ToolSearch` (21 Oct: a brief named a Slack tool by the factory's own server, and the worker found it under its folder's server).
    A worker briefs its checker by filling a template: it copies `~/.playground/handoffs/new-reviewer.md`, or `new-tester.md` for a Playground PR, to a file of its own under `~/.playground/`, since the linked template is the main checkout's file, fills each slot and passes that file to spawn.sh as `<brief>`.
-   The fill rule: a slot is a word of capitals and digits with two underscores on each side, in backticks since the formatter turns a bare one bold, such as `__NAME__` for the session's own name, and a fill replaces those tokens alone.
+   The fill rule: a slot is a word of capitals and digits with two underscores on each side, in backticks since the formatter turns a bare one bold, such as `__NAME__` for the session's own name, and a fill replaces those tokens alone, every one of them:
+   a `sed` fill takes `/g`, since a slot can sit twice on one line (`__PR__` does in both templates) and a bare `s/…/…/` fills only the first, which spawn.sh then refuses as a slot left.
    So `<owner>/<name>` and every other angle-bracket word stays as written for the reader (22 Oct: a fill of `<name>` by `sed` also rewrote `--repo <owner>/<name>`), and a brief or template that names a token in its own text spells it in words (two underscores, NAME, two underscores), so a fill leaves that text alone.
    Fill the brief and read it back in one call, then run spawn.sh in a later call, once the read shows every slot filled: spawn.sh refuses a brief still holding a slot of its role's template, naming each one, and a fill a hook refused in the same batch as the spawn would leave one.
    The template points at code-review-loop, dev and ui-verify for every step, so the filled brief adds only what its PR needs beyond them.
@@ -87,6 +88,16 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
 
 Send the brief with `notify_when_idle: true`, so its next idle arrives as a notice.
 Done when `ListAgents` shows the session busy on the brief and the roster shows the task.
+
+## Fix pushes and nits
+
+A reviewer's round sorts its findings into blocking, should-fix and nits; the worker's answer follows these rules, so a PR's rounds stay short and its nits land where they cost nothing.
+
+- A fix push carries only blocking and should-fix items, plus the `canary` merge the reviewer asks for (code-review-loop's step 8), and a body-only fix is a `gh pr edit` with no push, so a push always moves the head for a reason the reviewer named.
+- Keep a nit only if it fixes a wrong statement, a misleading name or comment, or a real readability problem; drop a style-only nit with a one-line note.
+- A head at 5/5 with green checks merges as it stands; fold each kept nit into the next PR that touches the same file, never a nits-only PR.
+- Post one sort comment per PR, naming each nit kept, with the PR it waits for, or dropped, with why.
+  Done when every finding of the round is fixed in the push, kept in the sort comment with its PR, or dropped there with its reason.
 
 ## Write a handoff
 
