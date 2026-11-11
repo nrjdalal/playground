@@ -309,7 +309,7 @@ const firstOfBurst = (trash: string, session: string, recent: TrashEntry[]): boo
     writeFileSync(told, "", { flag: "wx" })
     return true
   } catch (err) {
-    return (err as { code?: string }).code === "EEXIST" ? false : true
+    return (err as { code?: string }).code !== "EEXIST"
   }
 }
 
