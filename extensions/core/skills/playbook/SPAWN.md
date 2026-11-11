@@ -19,7 +19,7 @@ Read the section for the mode you start and for each flag you pass, and the sect
   "${PLAYGROUND_REPO:?}/scripts/spawn.sh" column <reviewer|tester|probe> <name> <reports-to> <the newest member's herdr pane id> <brief>
   ```
 
-  A reviewer or tester adds `--pr <pull url>`, the pull request it serves, so open the PR as a draft before its checkers ([scripts/README.md](../../../../scripts/README.md#spawnsh) holds the refusal and the row it writes).
+  A reviewer or tester adds `--pr <pull url>`, the pull request it serves, or `--pr <scope>/<kind>/<key>`, the extension item it scores, so open the PR as a draft before its checkers ([scripts/README.md](../../../../scripts/README.md#spawnsh) holds the refusal and the row it writes).
 
 - **A manager** opens the same way as a column in the `Managers` workspace, to the right of the newest manager, named once: `column <name> <pane> <brief>`.
   A name whose roster kind, else its name (an `<id>-<kind>`, a `sessions.names` name or a `sessions.aliases` one), is builder, ops or planner opens as a lead reporting to the first dispatcher (a new name gets its kind first, `scripts/roster.ts set <name> kind=builder task=<what it does>`, which writes a `starting` entry that `managerOf` keeps behind the live one until it answers);
@@ -88,7 +88,7 @@ Until phase 3 of the harness layer (the `plan-harness-layer` doc) lifts it, in t
 
 After a restart, `python3 scripts/ops/up.py --sessions` prints the `spawn.sh resume <name> <dir> <session-id>` line that brings each session back, with `--backend glm` for a session whose newest turn ran on GLM and, for a reviewer or tester, `--pr` with the PRs its roster row serves, its `pr` first;
 `--brief <file>`, with resume alone, makes the resumed session's first prompt tell it to read `~/.playground/<file>` and follow it, so it comes back working rather than idle.
-Without it, the first prompt has the session act on the `after-resume` hook's instruction (re-arm its background tasks, re-send its unanswered messages, the **context** rule), so a session idle at the restart still takes a turn, and names whom it reports to now, from its roster row ([scripts/README.md](../../../../scripts/README.md#spawnsh) holds the order).
+Without it, the first prompt has the session act on the `after-resume` hook's instruction (the **context** rule's re-arm and re-send, and a killed commit's edit put back), so a session idle at the restart still takes a turn, and names whom it reports to now, from its roster row ([scripts/README.md](../../../../scripts/README.md#spawnsh) holds the order).
 After a resume, restart any dev stack you served, then re-arm your watches: run CronList before CronCreate, since a resume keeps the session's crons and drops only its background tasks.
 Done when the restarted stack answers its `/api/health` and each watch is armed once.
 Before a close that a resume follows (an account move), wait until the session has no run-slot run in flight, since the close kills that run.

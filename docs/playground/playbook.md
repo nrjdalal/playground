@@ -10,6 +10,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
 | the dispatcher, the Planner, the Builder, Ops, the Optimizer, the Assistant, a worker, reviewer, tester, runner or probe | your role, who you report to and the rules you keep                                                                   |
 | Spawn, brief, rename, check or end a session                                                                             | the lifecycle (`LIFECYCLE.md`), the herdr commands (`SESSIONS.md`) and spawn.sh's modes, gates and flags (`SPAWN.md`) |
+| Answer a review round's findings                                                                                         | what a fix push carries and how nits are kept or dropped (`SESSIONS.md`, Fix pushes and nits)                         |
 | Update Claude Code                                                                                                       | the update steps in `LIFECYCLE.md`                                                                                    |
 | Route a new ask, or run a lead's sweep                                                                                   | `DISPATCH.md` and `SWEEP.md`                                                                                          |
 | Answer the owner's DM while Slack mode is on                                                                             | the `slack` skill (`extensions/slack`) and `playground dm send`                                                       |
@@ -20,7 +21,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | Ask the owner something, or pass on his override                                                                         | the **ask** and **override** rules                                                                                    |
 | File a Linear ticket                                                                                                     | the **tickets** rule                                                                                                  |
 | Write anything an org sees                                                                                               | the **classified** rule                                                                                               |
-| Post in the factory's channel, or take an ask from there                                                                 | the channel's lists and triage (`CHANNEL.md`)                                                                         |
+| Post in the factory's channel, or take an ask from there                                                                 | the org's `doc channel` (`playground ext show`)                                                                       |
 | Run a `vercel` command, a deploy among them                                                                              | the Vercel CLI's three traps (`VERCEL.md`)                                                                            |
 | Stop a process                                                                                                           | the **signal** rule                                                                                                   |
 | Hand off a build, a read or research                                                                                     | the **workers** rule                                                                                                  |
@@ -73,6 +74,7 @@ it counts no sessions, so Ops watches the live board, since cmux once stopped an
 A heavy run, such as a suite, takes one of a few run slots and gives it back when it ends, so nothing long-lived holds one.
 Nobody builds a demo stack for the owner: he tries changes on the live dashboard alone.
 A runner hosts long-running jobs and closes when none is left; the ops jobs Ops runs are scripts with no session and show on the Dashboard under Runners from the heartbeat each writes.
+A job launchd runs starts on the next pass after you turn it on in Settings > Jobs and stops after you turn it off, and one still down 3 passes in a row is told to Ops once, and again only after it has run healthy.
 One of them, ops-unstick, reads every session's screen every 2 minutes, clears a usage-limit dialog when there is room, takes one with no room on a probe to its spawner, names each capped account's live sessions to the builder and ops once a reset, and takes any other block no hook recorded to the session's manager,
 as the session-state hook does for one it did,
 and the Dashboard shows each one it finds as Stuck, with a red alarm, or as Paused · usage limit, with gray pause bars, when the usage limit alone holds it.
@@ -148,11 +150,7 @@ An org whose extension gates its Slack sends (`slack.gatedSends`) gets no such p
 The channel is where the owner's and the colleague's Playgrounds talk:
 a post there speaks as Playground and ends with an italic _Sent via Playground_, since it goes out through the owner's Slack account, and the hook refuses a Slack MCP chat post there without it, and refuses any curl write that names the channel.
 Its links go as link chips: rich text of plain words and links alone, each link labelled with its address and shortened, ending in the italic signature, and the hook refuses any other rich content there.
-An observer in the channel is answered directly when they write there.
-The dispatcher sorts each ask from the colleague, their Playground or the observer into three: it answers it; it takes a change that can be undone within Playground's own repo and changes no standing rule, recording why; or it puts a hard-to-undo change, any change to a standing rule, a looser guard or anything outside the repo to the owner first.
-The standing rules change only on the owner's own ask, so a colleague's ask that adds, tightens or loosens one always waits for the owner.
-The owner's asks always come first (`CHANNEL.md` beside the skill).
-A simple, working PR from the colleague that changes no standing rule is the dispatcher's to decide and record, and it merges as their own PR after a read-only review, so their name stays on the work; only a hard-to-undo change to how the owner works goes to the owner's Inbox.
+The channel's own lists, limits and triage are its org's, in that org's extension (`playground ext show <org> doc channel`).
 The hook also refuses a guarded org's write it cannot read.
 Like the ticket guard, a hook that cannot start refuses the call, and one that times out on a tool other than Bash lets it through, where the rule still binds the session.
 
@@ -183,7 +181,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A GLM session's commit or push that touches the app's pages, the factory's hooks, spawn.sh, the merge and verify scripts, the commit hooks or the CI workflows is refused by the `no-glm-heavy-path` hook, naming the files, so that work goes to a Claude worker.
   While the Mac's 5-minute load is over 15, the same hook also refuses a GLM session's installs, node_modules clones, commits and pushes, so it waits for the load to fall.
   The same hook refuses a GLM session's headless Claude run, its calls to an org's tracker, chat, docs and repos, its shell reads of an org's checkout and its database clients aimed off this machine, every MCP tool or resource read, and a Read, Grep or Glob of an org's checkout once its matcher takes them, so that work goes to a Claude worker.
-  A session resumed with `--brief <file>` starts by reading that brief; without one, its first prompt has it act on the after-resume hook's instruction, so it re-arms its background tasks and re-sends its unanswered messages.
+  A session resumed with `--brief <file>` starts by reading that brief; without one, its first prompt has it act on the after-resume hook's instruction, so it re-arms its background tasks, re-sends its unanswered messages and puts back an edit lefthook set aside when the restart killed a commit.
   A resumed session restarts any dev stack it served and re-arms its watches, CronList before CronCreate, since the resume kept its crons and dropped its background tasks.
   The factory no longer moves sessions to GLM at 98% usage (retired on Inbox #i827): the account rotation moves it between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
 - A session started with no `--runtime`, from any terminal, or with `--runtime herdr`, opens in herdr, in a pane labelled with its name, and its next resume opens there too.

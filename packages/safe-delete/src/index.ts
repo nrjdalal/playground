@@ -84,10 +84,13 @@ export const PURGE = { days: 7, minFree: 50e9 }
 // The cap's window, which a burst's recent moves read and a told mark outlives by at most: past it no try can meet the key again, since the key is a stamp that never recurs.
 const CAP_WINDOW_MS = 60_000
 
-// One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), each at most its files and bytes; the folder itself, its parent, a sibling and anything deeper stay protected.
-export type CarveOut = { bytes: number; files: number; folder: string }
+// One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), or in HOME with home set, each at most its files and bytes, and with name set only a plain file whose name it matches; the folder itself, its parent, a sibling and anything deeper stay protected.
+export type CarveOut = { bytes: number; files: number; folder: string; home?: true; name?: RegExp }
 
-// Each script's carve-out by the script's name, one entry per script, A to Z, which only that script passes as quarantine's carveOut; playground rm takes none.
+// The file name of a LaunchAgent that is Playground's own, which the jobs render installs and removes, and no other.
+export const PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/
+
+// Each script's carve-outs by the script's name, one entry per folder it removes from, A to Z, which only that script passes as quarantine's carveOut; playground rm takes none.
 export const CARVE_OUTS: Record<string, CarveOut> = {
   // scripts/ops/dashboard/supervisor.sh's production builds, one folder per head; one measured 2,251 files and 78 MB on 2 Nov
   "dashboard-supervisor": {
@@ -97,6 +100,14 @@ export const CARVE_OUTS: Record<string, CarveOut> = {
   },
   // packages/scripts/src/playground/jobs.ts's rendered LaunchAgent plists, one file each, for a job jobs.json no longer holds
   jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" },
+  // the same render's installed copies, for a launchd job now turned off: Playground's own plists alone, never another app's agent
+  "jobs-installed": {
+    bytes: 64 * 1024,
+    files: 1,
+    folder: "Library/LaunchAgents",
+    home: true,
+    name: PLAYGROUND_AGENT,
+  },
 }
 
 const HOME_DIRS = [".claude", ".config", ".gnupg", ".playground", ".ssh", "Library", "Music"]
@@ -192,11 +203,15 @@ const carveOutAt = (
 ): CarveOut | string => {
   const carve = Object.hasOwn(table, name) ? table[name]! : undefined
   if (!carve) return `no carve-out is named ${name}`
-  const folder = real(join(dirname(roots.trash), carve.folder))
+  const folder = real(join(carve.home ? roots.home : dirname(roots.trash), carve.folder))
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
   if (dirname(own) !== folder || dirname(real(abs)) !== folder)
     return `${abs} is not directly in ${folder}, the ${name} carve-out's folder`
+  // a restore checks a path that is gone, so only an entry that stands must be a plain file
+  const stat = lstat(own)
+  if (carve.name && (!carve.name.test(basename(own)) || (stat && !stat.isFile())))
+    return `${abs} is not a file the ${name} carve-out names`
   return whyHolds(own, roots) ?? carve
 }
 

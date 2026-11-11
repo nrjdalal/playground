@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { WAITING, deadline, machine, stop, within } from "./run-slot-fake"
 
-// the frozen pick, as Ops' A/B measured it live on v0.0.95 (17:04:36Z to 17:07:15Z): while a waiter behind the head watched only the next line, a freeing - a holder's end, a SIG change - with next unchanged left it asleep, and its look mark stayed frozen through the bump and the freed gate; the queue moved the second the walk's answer changed (44951 named and started within 1s). The fix reads the look signature in that same branch, so the pick looks on the freeing and starts within a poll, and a bump with next unchanged makes it look without starting (a look is not a start). The wall is a rank-1 ticket of a live process that never looks, so nothing rewrites next and the pick stays behind it.
+// the frozen pick: a waiter behind the head reads the look signature in the branch that watches the next line, so a freeing - a holder's end, a SIG change - with next unchanged makes the pick look and start within a poll, and a bump with next unchanged makes it look without starting (a look is not a start). The wall is a rank-1 ticket of a live process that never looks, so nothing rewrites next and the pick stays behind it.
 setDefaultTimeout(60_000)
 
 // three holds put five held units up: c=8 with the reserve 2 means the big wall needs h<=3 and the medium pick h<=4, so nothing fits until the freeing drops the held to 4, which fits the pick alone - the wall reads closed before and after, so next's content never changes
