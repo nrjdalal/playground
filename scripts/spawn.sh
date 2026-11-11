@@ -38,7 +38,8 @@ set -euo pipefail
 #      starts on the passing login next in the account split, else the one with the lowest week, naming it, and refuses
 #      only when every login is over, its pick kept off the resume record's exec line so a restore picks afresh; a login whose usage.accounts
 #      row is parked (parkedUntil a later time) counts as over, and an --account naming it is refused; --account skips the usage
-#      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; GLM reads zai-usage.json
+#      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; an --account naming
+#      this machine's own login starts there, the split skipped, judged and refused as that login is in a bare start; GLM reads zai-usage.json
 #      (the 5-hour window under 95% of its credits, with no week check, and no empty balance (its `balance`), valid only
 #      while the zai usage job's last beat is ok and within 3 cycles)
 #   The first dispatcher starts past every gate, by a manager start or a resume, so the owner always has one: the gates still read, a failure
@@ -62,7 +63,7 @@ set -euo pipefail
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
 #   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any but priority-start.json does; it is refused while none does.
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
-#   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, never this machine's own login, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; with --backend glm it takes a GLM row's label instead
+#   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
 #     The backend is recorded at the start in ~/.playground/backends/<name> and carried on its resume: a resume takes no --backend while a pin stands, and refuses with no pin and none given, or with a pin that reads as neither glm nor claude.
@@ -285,7 +286,7 @@ gate_capacity() {
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" "$OWN_LOGIN" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -295,7 +296,7 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed, session = sys.argv[1:16]
+data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed, session, own_pick = sys.argv[1:17]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -721,6 +722,12 @@ try:
             if detail is None:
                 known.add(email.lower())
         logins = [(email, name, acct, seen, detail or (f"it is parked until {parked[email.lower()]} (usage.accounts parkedUntil)" if email.lower() in parked else None)) for email, name, acct, seen, detail in logins]
+        # --account naming the own login: that login alone, judged as a bare start judges it, refused on its reading's failure and never split
+        if own_pick:
+            logins = logins[:1]
+            if logins[0][4]:
+                readings.update(logins[0][3])
+                refuse("usage", f"--account {own_pick}, this machine's own login: {logins[0][4]}")
         passing = [login for login in logins if login[4] is None]
         if not passing:
             readings.update(logins[0][3])
@@ -733,7 +740,7 @@ try:
         try:
             with open(os.path.join(flip_dir, "login-flip.json")) as f:
                 split = json.load(f)["split"]
-            shares = {a.lower(): v for a, v in split["shares"].items()} if now.timestamp() - split["at"] < 1800 else {}
+            shares = {a.lower(): v for a, v in split["shares"].items()} if now.timestamp() - split["at"] < 1800 and not own_pick else {}
         except Exception:
             shares = {}
         shared = {login[0]: shares[login[0].lower()] for login in passing if isinstance(shares.get(login[0].lower()), (int, float)) and shares[login[0].lower()] > 0}
@@ -783,6 +790,9 @@ for gate, detail in skips:
 why = f"next in the account split ({fmt(readings['share'] * 100)}% of new sessions)" if "share" in readings else "the login with the most room this week"
 if any(gate == "usage" for gate, _ in skips):
     print("ok")
+elif own_pick:
+    week = f"its week is at {fmt(readings['week'])}%" if "week" in readings else f"its usage {readings.get('usage', 'unread')}"
+    print(f"ok - --account {own_pick} is this machine's own login, so it starts there, the split skipped: {week} ({chosen[1]})")
 elif readings.get("account"):
     print(f"ok {readings['account']} no --account, so it starts on {readings['account']}, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif "logins" in readings:
@@ -1363,24 +1373,33 @@ esac
 # the Keychain service each account's long-lived token is kept under: usage.keychainService, else its default when the reader cannot answer
 KEYCHAIN=$(setting_text usage.keychainService)
 KEYCHAIN=${KEYCHAIN:-playground-claude-oauth}
-# An --account, or the login the usage gate picks for a bare spawn, is a second login whose Keychain item exists.
-check_account() {
-  # The email goes into the pane's command, so it is a plain local@domain: no quote, space or $.
-  [[ $ACCOUNT =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || refuse "--account takes a plain email, not $ACCOUNT"
-  OWN_CONFIG=$(own_config)
-  python3 -I - "$OWN_CONFIG" "$ACCOUNT" <<'PY' || refuse "--account $ACCOUNT is this machine's own Claude login, whose usage the session would share unchecked: name a second account"
+# Whether --account names the login the launch runs on with no --account, read from its config.
+own_login() {
+  python3 -I - "$(own_config)" "$ACCOUNT" <<'PY'
 import json, sys
 try:
     with open(sys.argv[1]) as f:
         email = (json.load(f).get("oauthAccount") or {}).get("emailAddress")
 except Exception:
-    sys.exit(0)
-sys.exit(1 if isinstance(email, str) and email.lower() == sys.argv[2].lower() else 0)
+    sys.exit(1)
+sys.exit(0 if isinstance(email, str) and email.lower() == sys.argv[2].lower() else 1)
 PY
+}
+# An --account, or the login the usage gate picks for a bare spawn, is a second login whose Keychain item exists.
+check_account() {
+  # The email goes into the pane's command, so it is a plain local@domain: no quote, space or $.
+  [[ $ACCOUNT =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || refuse "--account takes a plain email, not $ACCOUNT"
+  ! own_login || refuse "--account $ACCOUNT is this machine's own Claude login, whose usage the session would share unchecked: name a second account"
   # Only that the item exists: no -w, so the token is never read here.
   security find-generic-password -s "$KEYCHAIN" -a "$ACCOUNT" >/dev/null 2>&1 ||
     refuse "the Keychain holds no $KEYCHAIN item for $ACCOUNT"
 }
+# --account naming this machine's own login starts on it with no token, as a bare start does, its usage judged by that login's reading and the split skipped.
+OWN_LOGIN=
+if [ -n "$ACCOUNT" ] && [ "$BACKEND" != glm ] && own_login; then
+  OWN_LOGIN=$ACCOUNT
+  ACCOUNT=
+fi
 # --account names a GLM row's label on a GLM start, checked in its block below.
 [ -z "$ACCOUNT" ] || [ "$BACKEND" = glm ] || check_account
 if [ -n "$BACKEND" ]; then
@@ -1931,6 +1950,7 @@ except (ValueError, KeyError, TypeError):
   # A login the usage gate picked stays off the exec line, so a restore picks afresh, and on the account line, which ops-unstick and no-headless-login read.
   [ -n "$ACCOUNT" ] && [ -z "$PICKED" ] && record+="--account $ACCOUNT "
   [ -n "$GLM_GIVEN" ] && record+="--account $GLM_GIVEN "
+  [ -n "$OWN_LOGIN" ] && record+="--account $OWN_LOGIN "
   [ -n "$CLAUDE_MODEL" ] && record+="--model $CLAUDE_MODEL "
   [ -n "$EFFORT" ] && [ "$EFFORT" != high ] && record+="--effort $EFFORT "
   account_line=

@@ -14,6 +14,7 @@ A clone of a repo no org guards goes under `.claude/worktrees/<name>` in the Pla
 A scratch repo you make yourself, such as a test's throwaway checkout, goes in your own worktree or your own scratch folder, `~/.playground/scratch/<your name>/` (or `scratchpad/<your name>/` beside it), which `playground rm <path>` clears for you; it refuses every other path under `~/.playground`, another session's scratch included (safe-delete's protected `.playground`), so one made anywhere else there can never be cleaned up.
 
 CI starts only on a pull request into `canary`, so open your draft PR before you wait on CI, and cite a run by its run id or link when you report it: a pushed branch with no PR has no run. Record your branch at its first push (`bun "${PLAYGROUND_REPO:?}/scripts/roster.ts" set <your name> branch=<branch>`), so ops-sweep tells your lead when it goes 15 minutes with no PR.
+Push bare, then confirm the push with `git -C <your worktree> ls-remote origin refs/heads/<branch>`, which prints your local head's sha (`git -C <your worktree> rev-parse HEAD`) once it has landed; a piped push reads its last command's exit, and `no-false-green` refuses one with no pipefail.
 
 Every git call names its tree, `git -C <your worktree> ...`, so a shell left in another folder moves nothing there. Run spawn.sh by its absolute path, `"${PLAYGROUND_REPO:?}/scripts/spawn.sh"`, from your own folder.
 

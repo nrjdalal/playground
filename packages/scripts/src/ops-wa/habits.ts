@@ -84,28 +84,35 @@ export async function takeLock(
         .text()
         .catch(() => ""),
     ) || undefined
-  for (let tries = 0; tries < 3; tries++) {
-    try {
-      await writeFile(path, String(pid), { flag: "wx", mode: 0o600 })
-      return undefined
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+  // the pid is written whole before link puts the lock in place, so no start ever reads an empty lock as a gone holder's and moves it aside
+  const fresh = `${path}.${pid}.new`
+  await writeFile(fresh, String(pid), { mode: 0o600 })
+  try {
+    for (let tries = 0; tries < 3; tries++) {
+      try {
+        await link(fresh, path)
+        return undefined
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+      }
+      const holder = await pidIn(path)
+      if (holder && holder !== pid && holds(holder)) return `pid ${holder} holds the auth state`
+      const aside = `${path}.${pid}.gone`
+      if (
+        !(await rename(path, aside).then(
+          () => true,
+          () => false,
+        ))
+      )
+        continue
+      // another start took the lock between the read and the move, so its lock goes back
+      if ((await pidIn(aside)) !== holder) await link(aside, path).catch(() => {})
+      await unlink(aside).catch(() => {})
     }
-    const holder = await pidIn(path)
-    if (holder && holder !== pid && holds(holder)) return `pid ${holder} holds the auth state`
-    const aside = `${path}.${pid}.gone`
-    if (
-      !(await rename(path, aside).then(
-        () => true,
-        () => false,
-      ))
-    )
-      continue
-    // another start took the lock between the read and the move, so its lock goes back
-    if ((await pidIn(aside)) !== holder) await link(aside, path).catch(() => {})
-    await unlink(aside).catch(() => {})
+    return "another start is taking the auth state's lock"
+  } finally {
+    await unlink(fresh).catch(() => {})
   }
-  return "another start is taking the auth state's lock"
 }
 
 // The holder's own release, sync so it runs in an exit handler; another process's lock stays.
