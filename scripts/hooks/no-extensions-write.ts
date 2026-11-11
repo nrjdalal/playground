@@ -37,6 +37,7 @@ import {
   UNKNOWN,
   unreadWord,
   varsSince,
+  visible,
   type Visit,
   withDeadline,
   type Word,
@@ -47,6 +48,8 @@ import {
   heldWord,
   namings,
   NONE,
+  QUALIFIER,
+  quotedBodiesOut,
   singleQuotesOut,
   type Steady,
   steadyNames,
@@ -78,9 +81,9 @@ const refuse = (what: string) =>
 const refuseUnwritten = (what: string) =>
   `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`
 
-// a line whose text runs as code where the lexer reads a plain word, read past by the reader, so one naming the root may write there
+// text the shell runs as code where the lexer reads a plain word (evaluatedParts), read past by the reader, so code naming the root's folders may write there
 const EVALUATES_ROOT =
-  "text the shell runs as code (a glob qualifier, a parameter flag, a prompt expansion, arithmetic or a subscript) on a line that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates"
+  "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(…) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates"
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
 
@@ -738,13 +741,64 @@ function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
   )
 }
 
-// Whether text runs as code where the lexer reads a plain word: namings' blind (an e or + glob qualifier, an e or P parameter flag, @P, arithmetic over a name, a subscript, an indirection) or zsh's glob substitution (`${~…}`, `$~…`)
-const evaluates = (text: string) => namings(text).blind || /\$\{?~/.test(text)
-// Whether text outside single quotes and outside a double-quoted text with no $ evaluates, or holds zsh's `=(…)`, a command run into a file the lexer reads as a word, so a quoted jq filter's `((.a`, a python -c program's `a[0]` or a quoted `@P}` is no expansion; a shell -c script's own text is read when the walk reaches it
-const expands = (text: string) => {
-  const outside = singleQuotesOut(text).replace(/"(?:[^"\\$]|\\.)*"/g, "q")
-  return evaluates(outside) || /(?:^|[\s;&|(<>])=\(/.test(outside)
+// The line with each $'…' string outside quotes put as one letter, since it expands nothing and singleQuotesOut reads a line holding one as written, and a $ ending a single-quoted span put as a letter too
+function ansiOut(text: string): string {
+  let out = ""
+  let quote = ""
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (quote === "'") {
+      // a single-quoted span's last character a $ is text, put as a letter so singleQuotesOut reads the line
+      if (c === "$" && text[i + 1] === "'") {
+        out += "q"
+        continue
+      }
+      quote = c === "'" ? "" : quote
+    } else if (c === "\\") {
+      out += c + (text[i + 1] ?? "")
+      i++
+      continue
+    } else if (quote === "" && c === "$" && text[i + 1] === "'") {
+      for (i += 2; i < text.length && text[i] !== "'"; i++) if (text[i] === "\\") i++
+      out += "q"
+      continue
+    } else if (c === "'" && quote === "") quote = "'"
+    else if (c === '"') quote = quote === '"' ? "" : '"'
+    out += c
+  }
+  return out
 }
+
+// The parts of a line the shell runs as code where the lexer reads a plain word, found outside a quoted heredoc's body, single quotes and a double-quoted text with no $: a zsh e glob qualifier, an e or P parameter flag's expansion and a zsh =(…), each as written with its single-quoted spans collapsed; a prompt expansion (@P) or a glob substitution (`${~…}`, `$~…`), which runs a value set elsewhere, gives the whole line
+function evaluatedParts(text: string): string[] {
+  const unquoted = singleQuotesOut(quotedBodiesOut(ansiOut(text)))
+  // a double-quoted text right after an e may be a qualifier's code (`f(e"…")`), so it stays
+  const outside = unquoted.replace(/(?<!e)"(?:[^"\\$]|\\.)*"/g, "q")
+  if (/@P\}|\$\{?~/.test(outside)) return [text]
+  const parts: string[] = []
+  for (const [found, pattern] of [
+    [CODE_QUALIFIER, new RegExp(CODE_QUALIFIER.source, "g")],
+    [FLAG, FLAGS],
+    [FILE_RUN, FILE_RUNS],
+  ] as const)
+    if (found.test(outside)) {
+      const written = [...unquoted.matchAll(pattern)].map(([part]) => part)
+      parts.push(...(written.length > 0 ? written : [unquoted]))
+    }
+  return parts
+}
+// steady's QUALIFIER with an e's separator no letter, digit or _ (`:`, `{`, `"`) and its code on one line, as a session writes one, so a program's `d(open(…))` is none
+const CODE_QUALIFIER = new RegExp(
+  QUALIFIER.source
+    .replace("([^\\s[{<])[^]*?\\1", "([^\\s[{<\\w])[^\\n]*?\\1")
+    .replace("|\\+\\w+", ""),
+)
+// an e or P parameter flag's expansion, to its first closing brace
+const FLAG = /\$\{\([^)]*[eP]/
+const FLAGS = /\$\{\([^)]*[eP][^)]*\)[^}]*\}?/g
+// zsh's =(…), which runs its command into a file the word names
+const FILE_RUN = /(?:^|[\s;&|(<>])=\(/
+const FILE_RUNS = /=\([^)]*\)?/g
 
 // Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
@@ -1061,7 +1115,6 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   let steadyAt: (cmd: Command) => Steady = () => NONE
   let whole = false
   let rootLine = false
-  let evaluating = false
   let patterns = new Set<Command>()
   let lineWrites = false
   // how deep the walk is in a line read out of a quoted text (runsOf), whose commands no one typed
@@ -1089,21 +1142,19 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   const visit: Visit = async (cmd: Command, parsed, env) => {
     // a case pattern is matched, never run, so its words are no path and no program; a substitution in it is its own command
     if (patterns.has(cmd)) return
-    // the reader walks the script a shell or a source runs, so the hook judges only one it cannot read: a -c script it cannot read, as an eval's, or a file this line wrote with such text
+    // the reader walks the script a shell or a source runs, so the hook judges only one it cannot read: a -c script it reads none of, or a file this line wrote with such text
     if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
       const shellCall = SHELLS.has(parsed.name)
       const { inline, operand } = shellCall
         ? shellOperand(parsed.args, parsed.name)
         : { inline: false, operand: parsed.args[0] }
-      if (inline && operand && unreadWord(operand))
+      if (inline && operand && unreadWord(operand) && !/\S/.test(visible(operand.value)))
         return refuse(
           `a ${parsed.name} -c of ${shown({ ...operand, raw: operand.raw ?? operand.source })}, a script the hook cannot read; run its commands as calls of their own`,
         )
-      // a script that runs text as code reads as a line that does: no reader is spared in it, and one naming the root is refused
-      if (inline && operand && expands(operand.value)) {
-        if (touches(operand.value, env)) return refuse(EVALUATES_ROOT)
-        evaluating = true
-      }
+      // a script whose text runs as code is refused when that code names the root's folders
+      if (inline && operand && evaluatedParts(operand.value).some((part) => touches(part, env)))
+        return refuse(EVALUATES_ROOT)
       const path = !inline && operand ? pathOf(operand, env) : undefined
       const written = path === undefined ? undefined : env.files.get(path)
       if (written && (written.unknown || marked(written.value)))
@@ -1168,7 +1219,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       : undefined
     if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
-    const reader = !rootLine && !evaluating && ownFirst(cmd, first) && reads(parsed, env)
+    const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env)
     const fed = xargs ? await stdinOf(cmd, env) : undefined
     const stdinWords: Word[] = !fed
       ? []
@@ -1398,8 +1449,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
   rootLine = rooted(lexed.commands)
-  evaluating = expands(command)
-  if (evaluating && touches(command, env)) return refuse(EVALUATES_ROOT)
+  if (evaluatedParts(command).some((part) => touches(part, env))) return refuse(EVALUATES_ROOT)
   whole = rootLine || wholeLine(lexed.commands, env)
   patterns = casePatterns(lexed.commands)
   lineWrites = redirectsWrite(lexed.commands)

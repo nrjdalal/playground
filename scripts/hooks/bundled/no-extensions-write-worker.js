@@ -5239,6 +5239,7 @@ var slice = (word, from) => {
   const dropped = word.value.slice(0, from).split(READ).length - 1;
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
+var visible = (value) => value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ");
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
 var PLAIN = /^[\w./=,:@%-]$/;
 var unreadWord = (word) => {
@@ -7363,7 +7364,7 @@ var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings 
 var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
 var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
 var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
-var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a prompt expansion, arithmetic or a subscript) on a line that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
+var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(\u2026) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS = new Set([
   "[",
@@ -7912,11 +7913,57 @@ function perlReads({ args, local }, env) {
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
 }
-var evaluates = (text) => namings(text).blind || /\$\{?~/.test(text);
-var expands = (text) => {
-  const outside = singleQuotesOut(text).replace(/"(?:[^"\\$]|\\.)*"/g, "q");
-  return evaluates(outside) || /(?:^|[\s;&|(<>])=\(/.test(outside);
-};
+function ansiOut(text) {
+  let out = "";
+  let quote = "";
+  for (let i = 0;i < text.length; i++) {
+    const c = text[i];
+    if (quote === "'") {
+      if (c === "$" && text[i + 1] === "'") {
+        out += "q";
+        continue;
+      }
+      quote = c === "'" ? "" : quote;
+    } else if (c === "\\") {
+      out += c + (text[i + 1] ?? "");
+      i++;
+      continue;
+    } else if (quote === "" && c === "$" && text[i + 1] === "'") {
+      for (i += 2;i < text.length && text[i] !== "'"; i++)
+        if (text[i] === "\\")
+          i++;
+      out += "q";
+      continue;
+    } else if (c === "'" && quote === "")
+      quote = "'";
+    else if (c === '"')
+      quote = quote === '"' ? "" : '"';
+    out += c;
+  }
+  return out;
+}
+function evaluatedParts(text) {
+  const unquoted = singleQuotesOut(quotedBodiesOut(ansiOut(text)));
+  const outside = unquoted.replace(/(?<!e)"(?:[^"\\$]|\\.)*"/g, "q");
+  if (/@P\}|\$\{?~/.test(outside))
+    return [text];
+  const parts = [];
+  for (const [found, pattern] of [
+    [CODE_QUALIFIER, new RegExp(CODE_QUALIFIER.source, "g")],
+    [FLAG, FLAGS],
+    [FILE_RUN, FILE_RUNS]
+  ])
+    if (found.test(outside)) {
+      const written = [...unquoted.matchAll(pattern)].map(([part]) => part);
+      parts.push(...written.length > 0 ? written : [unquoted]);
+    }
+  return parts;
+}
+var CODE_QUALIFIER = new RegExp(QUALIFIER.source.replace("([^\\s[{<])[^]*?\\1", "([^\\s[{<\\w])[^\\n]*?\\1").replace("|\\+\\w+", ""));
+var FLAG = /\$\{\([^)]*[eP]/;
+var FLAGS = /\$\{\([^)]*[eP][^)]*\)[^}]*\}?/g;
+var FILE_RUN = /(?:^|[\s;&|(<>])=\(/;
+var FILE_RUNS = /=\([^)]*\)?/g;
 function narrow(cmd, env) {
   const parsed = parse3(cmd);
   const { args, first } = parsed;
@@ -8184,7 +8231,6 @@ async function inspect(raw, environment, unknown = false) {
   let steadyAt = () => NONE2;
   let whole = false;
   let rootLine = false;
-  let evaluating = false;
   let patterns = new Set;
   let lineWrites = false;
   let textDepth = 0;
@@ -8207,13 +8253,10 @@ async function inspect(raw, environment, unknown = false) {
     if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
       const shellCall = SHELLS.has(parsed.name);
       const { inline, operand } = shellCall ? shellOperand(parsed.args, parsed.name) : { inline: false, operand: parsed.args[0] };
-      if (inline && operand && unreadWord(operand))
+      if (inline && operand && unreadWord(operand) && !/\S/.test(visible(operand.value)))
         return refuse(`a ${parsed.name} -c of ${shown({ ...operand, raw: operand.raw ?? operand.source })}, a script the hook cannot read; run its commands as calls of their own`);
-      if (inline && operand && expands(operand.value)) {
-        if (touches(operand.value, env))
-          return refuse(EVALUATES_ROOT);
-        evaluating = true;
-      }
+      if (inline && operand && evaluatedParts(operand.value).some((part) => touches(part, env)))
+        return refuse(EVALUATES_ROOT);
       const path = !inline && operand ? pathOf(operand, env) : undefined;
       const written = path === undefined ? undefined : env.files.get(path);
       if (written && (written.unknown || marked(written.value)))
@@ -8257,7 +8300,7 @@ async function inspect(raw, environment, unknown = false) {
     const unplaced = env.cwdUnread ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd))) : undefined;
     if (unplaced?.target)
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
-    const reader = !rootLine && !evaluating && ownFirst(cmd, first) && reads(parsed, env);
+    const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env);
     const fed = xargs ? await stdinOf(cmd, env) : undefined;
     const stdinWords = !fed ? [] : fed.unknown ? [{ quoted: false, value: UNKNOWN }] : fed.value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
     const calls = reader ? [] : cliCalls(parsed, env);
@@ -8391,8 +8434,7 @@ async function inspect(raw, environment, unknown = false) {
     visitShells: true
   };
   rootLine = rooted(lexed.commands);
-  evaluating = expands(command);
-  if (evaluating && touches(command, env))
+  if (evaluatedParts(command).some((part) => touches(part, env)))
     return refuse(EVALUATES_ROOT);
   whole = rootLine || wholeLine(lexed.commands, env);
   patterns = casePatterns(lexed.commands);
