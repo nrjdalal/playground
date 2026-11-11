@@ -1,13 +1,14 @@
 #!/usr/bin/env -S bun --no-env-file
 import { spawnSync } from "node:child_process"
 import { readFileSync, readdirSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, relative, dirname, basename, isAbsolute } from "node:path"
 
 export const VERDICT = /^##\s*ReviewBot\s*·\s*round\s+(\d+):\s*(\d)\/5\s+at\s+`?([0-9a-f]{7,40})/i
 export const WAIT_SECONDS = 300
 
 export const PR_QUERY = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){
-number state isDraft headRefOid
+number state isDraft headRefOid body
 comments(last:100){pageInfo{hasPreviousPage} nodes{author{login} body createdAt url}}
 reviews(last:50){pageInfo{hasPreviousPage} nodes{author{login} body submittedAt state}}
 reviewThreads(first:100){pageInfo{hasNextPage} nodes{id isResolved path line originalLine
@@ -337,6 +338,7 @@ export const restPr = (
   reviews: Json[],
   reviewComments: Json[],
 ): Json => ({
+  body: view.body,
   comments: {
     nodes: comments.map((c) => ({
       author: author(c),
@@ -418,6 +420,7 @@ const exitWith = (message: string): never => {
 
 export const cmdPr = async (repo: string, n: string): Promise<void> => {
   const [owner, name] = splitRepo(repo)
+  const readAt = isoSeconds(io.time())
   let pr: Json
   try {
     pr = graphql(PR_QUERY, { name, n: number(n), owner }).pullRequest as Json
@@ -463,6 +466,52 @@ export const cmdPr = async (repo: string, n: string): Promise<void> => {
   const others = saidSince(comments, pr.reviews.nodes as Json[], since)
   console.log(`said since the verdict: ${others.length}`)
   for (const [at, who, line] of others) console.log(`  ${at} ${who}: ${line}`)
+  console.log(`read: ${readAt} ${bodyDigest(pr.body)}`)
+}
+
+const isoSeconds = (s: number): string =>
+  new Date(Math.floor(s) * 1000).toISOString().replace(".000Z", "Z")
+
+// The body as read, by its first 12 hex of sha256: REST gives no body-edit time, and its updated_at also moves on every comment and label.
+export const bodyDigest = (body: string | null | undefined): string =>
+  new Bun.CryptoHasher("sha256")
+    .update(body ?? "")
+    .digest("hex")
+    .slice(0, 12)
+
+// Exit 1 naming each change since pr's read line (the body, or a comment, thread reply or review posted or edited after it), else FRESH: chained before the verdict's post.
+export const cmdFresh = (repo: string, n: string, readAt: string, digest: string): void => {
+  splitRepo(repo)
+  number(n)
+  if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(readAt) || Number.isNaN(Date.parse(readAt)))
+    exitWith(`not a read time (state.ts pr's read line): ${readAt}`)
+  if (!/^[0-9a-f]{12}$/.test(digest))
+    exitWith(`not a body digest (state.ts pr's read line): ${digest}`)
+  const base = `repos/${repo}`
+  const view = JSON.parse(io.run("gh", "api", `${base}/pulls/${n}`)) as Json
+  const changed: string[] = []
+  const now = bodyDigest(view.body)
+  if (now !== digest) changed.push(`CHANGED body: ${digest} at the read, ${now} now`)
+  const after = (c: Json): boolean => Date.parse(c.updated_at) > Date.parse(readAt)
+  for (const [kind, path] of [
+    ["comment", `${base}/issues/${n}/comments`],
+    ["review comment", `${base}/pulls/${n}/comments`],
+  ] as const)
+    for (const c of rest(`${path}?since=${readAt}&per_page=100`).filter(after))
+      changed.push(
+        `CHANGED ${kind} ${c.html_url} by ${(c.user || {}).login} at ${c.updated_at}: ${firstLine(c.body)}`,
+      )
+  for (const r of rest(`${base}/pulls/${n}/reviews?per_page=100`))
+    if (r.submitted_at && Date.parse(r.submitted_at) > Date.parse(readAt) && (r.body || "").trim())
+      changed.push(
+        `CHANGED review ${r.html_url} by ${(r.user || {}).login} at ${r.submitted_at}: ${firstLine(r.body)}`,
+      )
+  if (!changed.length) {
+    console.log(`FRESH since ${readAt}`)
+    return
+  }
+  for (const line of changed) console.log(line)
+  process.exitCode = 1
 }
 
 export const cmdScan = async (repo: string): Promise<void> => {
@@ -525,6 +574,87 @@ export const cmdDelta = (worktree: string, base: string, old: string, neu: strin
 }
 
 const SCAN_TS = "ls-files|Bun\\.Glob|new Glob\\(|readdirSync|readdir\\("
+const SCAN_RE = new RegExp(SCAN_TS)
+const skipQuoted = (text: string, from: number, close: string): number => {
+  let j = from
+  while (j < text.length && text.charAt(j) !== "\n") {
+    if (text.charAt(j) === "\\") j += 2
+    else if (text.charAt(j) === close) return j + 1
+    else j += 1
+  }
+  return -1
+}
+const charBefore = (text: string, from: number): string => {
+  let j = from
+  while (j > 0 && /\s/.test(text.charAt(j - 1))) j -= 1
+  return text.charAt(j - 1)
+}
+const skipRegex = (text: string, from: number): number => {
+  let j = from
+  let inClass = false
+  while (j < text.length && text.charAt(j) !== "\n") {
+    const d = text.charAt(j)
+    if (d === "\\") j += 2
+    else if (inClass) {
+      if (d === "]") inClass = false
+      j += 1
+    } else if (d === "[") {
+      inClass = true
+      j += 1
+    } else if (d === "/") return j + 1
+    else j += 1
+  }
+  return -1
+}
+// a / after one of these opens a regex literal, never a comment or a division
+const REGEX_BEFORE = "([=:!&|?{};>,"
+// A scan word counts only where the test calls it, so what a string merely holds comes out before the regexes read: a string or template is kept by default and dropped only when it opens a value, straight after = : + ? or >, so fixture strings quoting readdirSync read as no scanner while a call, an argv element or a regex literal reads as one, a / after ( = : [ ! & | ? { } ; > or , opens a regex literal that stays whole, so a quote inside one cannot drop or pair, and a quote or template pairs on its own line alone, so a stray backtick in a comment cannot swallow one (PG-1651's reviewer, PG-1661, PG-1708's rounds 1 to 3)
+const stripValues = (text: string): string => {
+  let out = ""
+  let depth = 0
+  let i = 0
+  while (i < text.length) {
+    const c = text.charAt(i)
+    if (c === "[") {
+      depth += 1
+      out += c
+      i += 1
+    } else if (c === "]") {
+      depth = Math.max(0, depth - 1)
+      out += c
+      i += 1
+    } else if (
+      c === "/" &&
+      text.charAt(i + 1) !== "/" &&
+      text.charAt(i + 1) !== "*" &&
+      REGEX_BEFORE.includes(charBefore(text, i))
+    ) {
+      const end = skipRegex(text, i + 1)
+      if (end < 0) {
+        out += c
+        i += 1
+      } else {
+        out += text.slice(i, end)
+        i = end
+      }
+    } else if (c === "`" || c === '"' || c === "'") {
+      const prev = charBefore(text, i)
+      const keeps = depth > 0 || !["=", ":", "+", "?", ">"].includes(prev)
+      const end = skipQuoted(text, i + 1, c)
+      if (end < 0) {
+        out += c
+        i += 1
+      } else {
+        if (keeps) out += text.slice(i, end)
+        i = end
+      }
+    } else {
+      out += c
+      i += 1
+    }
+  }
+  return out
+}
 // A git grep run as a shell line or an argv, wrapped across lines or with options before the subcommand (PG-2323's old-proxy)
 const GIT_GREP =
   /\bgit["'`]?(?:[\s,\[]+(?:["']?-[\w-]+["']?|\$?\{?[\w.$]+\}?|["'][^"'\n]*["'])){0,3}?[\s,\[]+["'`]?grep\b/
@@ -699,12 +829,16 @@ export const cmdTouchedTests = (clone: string, base: string, head: string): void
   const nearTexts = readBlobs(clone, head, near)
   for (const [t, text] of Object.entries(nearTexts))
     if (changed.some((f) => spelledNear(text, f, t))) picked.add(t)
-  for (const f of grep(clone, head, "-E", [SCAN_TS])) if (!f.endsWith(".py")) picked.add(f)
+  const tsScanCandidates = [...grep(clone, head, "-E", [SCAN_TS])].filter((f) => !f.endsWith(".py"))
+  const tsScanTexts = readBlobs(clone, head, tsScanCandidates)
+  for (const [f, text] of Object.entries(tsScanTexts))
+    if (SCAN_RE.test(stripValues(text))) picked.add(f)
   const grepping = new Set(
     [...grep(clone, head, "-F", ["grep"])].filter((f) => tests.has(f) && !f.endsWith(".py")),
   )
   const grepTexts = readBlobs(clone, head, grepping)
-  for (const [f, text] of Object.entries(grepTexts)) if (GIT_GREP.test(text)) picked.add(f)
+  for (const [f, text] of Object.entries(grepTexts))
+    if (GIT_GREP.test(stripValues(text))) picked.add(f)
   if (python) {
     const scanners = [...grep(clone, head, "-E", [SCAN_PY])].filter(
       (f) => tests.has(f) && f.endsWith(".py"),
@@ -763,6 +897,8 @@ const watch = async (
   splitRepo(repo)
   number(n)
   if (!/^[0-9a-f]{7,40}$/.test(sha)) exitWith(`not a commit SHA: ${sha}`)
+  // a waiter outlives its round, so it leaves the folder it started in, which may be a review worktree the cleanup removes once the PR merges
+  process.chdir(tmpdir())
   let closed = false
   for (;;) {
     const view = await readRest(`repos/${repo}/pulls/${n}`, "{merged, sha: .head.sha, state}")
@@ -820,6 +956,7 @@ const COMMANDS: Record<string, { argc: number; run: (...args: string[]) => void 
   {
     checks: { argc: 3, run: cmdChecks },
     delta: { argc: 4, run: cmdDelta },
+    fresh: { argc: 4, run: cmdFresh },
     pr: { argc: 2, run: cmdPr },
     scan: { argc: 1, run: cmdScan },
     "touched-tests": { argc: 3, run: cmdTouchedTests },
@@ -831,6 +968,7 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts pr <owner/repo> <n>                          one PR: head, newest verdict, open (over REST, unknown) threads, what was said since
   state.ts scan <owner/repo>                            every open PR: is its head scored, and who holds it? (the recovery scan)
   state.ts delta <worktree> <base> <old head> <new head>  did a push change the PR's own work, or only merge the base?
+  state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
   state.ts checks <owner/repo> <n> <sha>                as wait, and also return once Audit, Lint, and Build and test each conclude at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules

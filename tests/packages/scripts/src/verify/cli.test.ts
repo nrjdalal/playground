@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test"
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { readCheck, strayRoutes } from "../../../../../packages/scripts/src/verify/checks"
@@ -69,4 +71,59 @@ test("no two checks in a run share a browser session", async () => {
   expect(names.length).toBeGreaterThanOrEqual(7)
   expect(new Set(names).size).toBe(names.length)
   expect(source).not.toMatch(/browse\(\s*at,\s*async/)
+})
+
+// A fake agent-browser first on PATH, logging each call: its sign-in wait hangs, or fails with "fail", and every other call answers success.
+const fakeBrowser = (wait: "hang" | "fail") => {
+  const dir = mkdtempSync(join(tmpdir(), "verify-close-"))
+  const log = join(dir, "calls.log")
+  const answer =
+    wait === "hang"
+      ? `sleep 30; echo '{"success":true,"data":{}}'`
+      : `echo '{"success":false,"error":"boom"}'`
+  writeFileSync(
+    join(dir, "agent-browser"),
+    `#!/bin/sh\necho "$*" >> "${log}"\ncase "$*" in *"wait --url"*) ${answer};; *) echo '{"success":true,"data":{"result":true}}';; esac\n`,
+  )
+  chmodSync(join(dir, "agent-browser"), 0o755)
+  return { dir, log, env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } }
+}
+const ROWS = ["bun", CLI, "rows", "--web", "http://127.0.0.1:9", "--api", "http://127.0.0.1:9"]
+const closesItsOwn = (calls: string) => {
+  const session = calls.match(/--session (verify-\d+-rows)/)?.[1]
+  expect(session).toBeDefined()
+  expect(calls).toMatch(new RegExp(`--session ${session} --json close`))
+}
+
+// An interrupt runs every open cleanup before it exits, so no browser session outlives the run.
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  test(`verify closes its browser session on ${signal}`, async () => {
+    const { dir, env, log } = fakeBrowser("hang")
+    try {
+      const run = Bun.spawn(ROWS, { env, stderr: "ignore", stdin: "ignore", stdout: "ignore" })
+      for (
+        let i = 0;
+        i < 200 && !(existsSync(log) && readFileSync(log, "utf8").includes("wait --url"));
+        i++
+      )
+        await Bun.sleep(50)
+      run.kill(signal)
+      expect(await run.exited).toBe(130)
+      closesItsOwn(readFileSync(log, "utf8"))
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  }, 20_000)
+}
+
+test("verify closes its browser session when a browser call fails", () => {
+  const { dir, env, log } = fakeBrowser("fail")
+  try {
+    const run = Bun.spawnSync(ROWS, { env, stdin: "ignore" })
+    expect(run.exitCode).toBe(1)
+    expect(run.stdout.toString()).toContain("boom")
+    closesItsOwn(readFileSync(log, "utf8"))
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
 })

@@ -15,12 +15,14 @@ import { dataDir } from "@packages/env/data-dir"
 import { readSessionNames } from "@packages/settings"
 
 import {
+  codexLaunches,
   herdrRecords,
   type HerdrWait,
   herdrWorkspaces,
   isHerdrSurface,
   readHerdr,
   readStates,
+  restoring,
   withHerdrState,
 } from "@/lib/dashboard/herdr"
 import {
@@ -428,6 +430,8 @@ export const answeredSince = (pickers: Pickers, at: string): boolean =>
 // partial: some herdr server's read was partial (ServerRead.partial).
 export type Live = {
   partial?: true
+  // a restore can still bring the dispatcher back (restoring() in herdr.ts)
+  restoring?: true
   surfaces: Map<string, string>
   transcripts: Map<string, string>
   workers: Worker[]
@@ -477,10 +481,13 @@ export const rosterFacts = (
 // What proves a session record live (herdr's, as herdrRecords() shapes it), read once per refresh: Claude's registry, when each registered pid's process started (null when ps could not be run), and the transcripts folder of the Claude config that registry belongs to.
 export type LiveProof = { projects: string; registry: Registry; starts: Map<number, string> | null }
 
-// Pure: whether a session record is a Claude session running now. A record outlives its session's end at the pid it stored, which macOS hands to the next process that starts (a record whose session ended yesterday read live as another program's pid, a needsInput row with a red light). Claude writes a registry file at its pid while it runs, naming its session and when its process started; a clean exit removes the file, a crash leaves it. So the record is live only when the file at its pid names its session and that pid's process started when the file says, which a reused pid's never did. A file mid-rewrite, a registry or ps that cannot be read (proof null with neither), or a session under another Claude config, whose registry this one cannot see, leaves the record's word standing.
+// Pure: whether a session record is a Claude or Codex session running now. A record outlives its session's end at the pid it stored, which macOS hands to the next process that starts (a record whose session ended yesterday read live as another program's pid, a needsInput row with a red light). Claude writes a registry file at its pid while it runs, naming its session and when its process started; a clean exit removes the file, a crash leaves it. So the record is live only when the file at its pid names its session and that pid's process started when the file says, which a reused pid's never did. A file mid-rewrite, a registry or ps that cannot be read (proof null with neither), or a session under another Claude config, whose registry this one cannot see, leaves the record's word standing.
 export function isLiveRecord(record: Json, proof: LiveProof | null): boolean {
   const sessionId = str(record.session_id)
-  if (!sessionId || record.stored_pid_exists !== true || record.agent !== "claude") return false
+  if (!sessionId || record.stored_pid_exists !== true) return false
+  // A Codex record's harness comes from its launch record (codexLaunches), and its proof is the codex process herdr found in its pane's foreground this read.
+  if (record.agent === "codex") return true
+  if (record.agent !== "claude") return false
   if (!proof || proof.registry === null) return true
   const transcript = str(record.transcript_path)
   if (transcript && !transcript.startsWith(`${proof.projects}/`)) return true
@@ -495,7 +502,7 @@ export function isLiveRecord(record: Json, proof: LiveProof | null): boolean {
 
 declare const LIVE: unique symbol
 
-// The session records with every one that is not a live Claude session left out. Only liveRecords() makes one, so a read that takes it (composeWorkers, tasksFor, sessionsRead) cannot be handed a raw list.
+// The session records with every one that is not a live Claude or Codex session left out. Only liveRecords() makes one, so a read that takes it (composeWorkers, tasksFor, sessionsRead) cannot be handed a raw list.
 export type LiveRecords = { readonly [LIVE]: true; sessions: Json[] }
 
 // Pure: a session list as LiveRecords. A null proof takes each record's word, as with no registry to read.
@@ -506,7 +513,7 @@ export const liveRecords = (sessions: unknown, proof: LiveProof | null): LiveRec
     ),
   }) as LiveRecords
 
-// Pure: the session records and workspace list in, one row per live Claude session out, the ones that need the owner first.
+// Pure: the session records and workspace list in, one row per live session out, the ones that need the owner first.
 export function composeWorkers(
   sessions: LiveRecords,
   workspaces: unknown,
@@ -731,7 +738,9 @@ export const unstickProblem = (now = Date.now()): string | null =>
 export async function listLive(): Promise<Live> {
   const [files, servers] = await Promise.all([readRegistry(), readHerdr()])
   const registry = registryOf(files)
-  const records = { sessions: herdrRecords(servers, registry, new Date().toISOString()) }
+  const records = {
+    sessions: herdrRecords(servers, registry, new Date().toISOString(), codexLaunches()),
+  }
   const workspaces = { workspaces: herdrWorkspaces(servers) }
   const starts = await processStarts(
     [...(registry ?? [])].flatMap(([pid, entry]) => (entry?.procStart ? [pid] : [])),
@@ -771,7 +780,10 @@ export async function listLive(): Promise<Live> {
   }))
   const marked = blockedSessions(blocked, held)
   unstickConflicts = { at: Date.now(), lines: marked.conflicts }
-  const shown = withHosted(withBlocked(live, marked.sessions, usage), hosted())
+  const shown = {
+    ...withHosted(withBlocked(live, marked.sessions, usage), hosted()),
+    ...(restoring({ dispatcher: DISPATCHER }) && { restoring: true as const }),
+  }
   return servers.some((read) => read.partial) ? { ...shown, partial: true } : shown
 }
 

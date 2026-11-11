@@ -51,6 +51,8 @@ const PATHS: Paths = {
   BARE: NONE,
   CLI_DIR: NONE,
   DATA: NONE,
+  FOREIGN_TREE: NONE,
+  FOREIGN_TREE_IN_MAIN: NONE,
   HOME: NONE,
   LINK: NONE,
   LIST: NONE,
@@ -71,6 +73,7 @@ const OWN_ROWS: Record<string, string[]> = {
   "no-ours-merge": ["git merge -s ours origin/canary"],
   "no-prompt-stop": ["rmdir $HOME/$s"],
   "no-public-leak": [`gh pr comment 1 --repo ${UNSET_REPOS.public[0]} --body "$X"`],
+  "no-raw-wa": [`cat ${join(dataDir(), "whatsapp", "made-up.json")}`],
   "no-unslotted-run": ["bun run test"],
 }
 

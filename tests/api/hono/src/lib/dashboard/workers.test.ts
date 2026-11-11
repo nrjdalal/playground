@@ -562,12 +562,12 @@ describe("composeWorkers", () => {
     expect(by.get("s-boss")).toMatchObject({ light: "needs-you", role: "dispatcher" })
   })
 
-  test("one row per live Claude session; dead and non-Claude sessions are left out", () => {
+  test("one row per live session of a harness; dead sessions and another agent's are left out", () => {
     const sessions = {
       sessions: [
         session({}),
         session({ session_id: "dead", stored_pid_exists: false }),
-        session({ session_id: "codex", agent: "codex" }),
+        session({ session_id: "gemini", agent: "gemini" }),
       ],
     }
     const { workers } = fromRecords(sessions, workspaces, new Map())
@@ -1299,7 +1299,7 @@ describe("isLiveRecord", () => {
 
   test("the record's own word still has to hold: a pid it saw end, or another agent, is never live", () => {
     expect(isLiveRecord({ ...running, stored_pid_exists: false }, proof())).toBe(false)
-    expect(isLiveRecord({ ...running, agent: "codex" }, proof())).toBe(false)
+    expect(isLiveRecord({ ...running, agent: "gemini" }, proof())).toBe(false)
     const registry = new Map([[95475, { procStart: STARTED, sessionId: "" }]])
     expect(isLiveRecord({ ...running, session_id: "" }, proof({ registry }))).toBe(false)
   })

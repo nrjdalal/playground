@@ -8,10 +8,12 @@ Work the steps in order.
 ## 1. Read what changed
 
 Run `playground sweep <your name>`.
-It prints only what changed since your last sweep, one line each: a new alert from `ops/alerts-pending.json`, the merge queue when it changes, load5 (the third field of `sysctl -n vm.loadavg`) crossing 15, the single-slot flag turning on or off, each of your roster rows whose ETA has passed, and for Ops, once an hour, each ops switch on with its age and reason;
+It prints only what changed since your last sweep, one line each: a new alert from `ops/alerts-pending.json`, the merge queue when it changes, load5 (the third field of `sysctl -n vm.loadavg`) crossing 15,
+the single-slot flag turning on or off or moving between held by load and lifted under the cap, each of your roster rows whose ETA has passed, and for Ops, once an hour, each ops switch on with its age and reason;
 its cursor is `sweep/<your name>.json` in the data folder.
 A parked row's passed ETA reads `parked past eta` where any other row's reads `eta passed`, and its `hold` ([ROSTER.md](ROSTER.md)) prints once when it has closed (`parked on closed hold`), and once when it reads as neither open nor closed (`parked hold unreadable`).
-For each `switch on:` line, Ops checks whether its reason still holds: one that does is set again with a fresh reason through `run-slot.sh set`, and any other is lifted by moving it to `<name>.lifted-<ts>` ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)); `run-slot.focus` alone ends with `playground focus off`, which lifts its merge hold too.
+For each `switch on:` line, Ops checks whether its reason still holds: one that does is set again with a fresh reason through `run-slot.sh set`, and any other is lifted by moving it to `<name>.lifted-<ts>` ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)); `run-slot.focus` ends only with `playground focus off`, which lifts its merge hold too.
+`run-slot.battery` is ops-awake's, so Ops leaves it standing, since ops-awake lifts it on the check that sees the charge rise.
 When it prints `quiet`, the Builder's sweep ends there, and Ops' goes on to step 2 and ends after it.
 
 Done when it printed `quiet` and your sweep has ended (Ops' after step 2), or you have each line it printed in hand for the steps below.
@@ -22,7 +24,7 @@ Ops' sweep takes every probe (its roster kind `probe`, else a `probe-*` or `<id>
 On a machine that runs the relay, runner-plain-relay (its roster row or its resume record), the outbox's ops lines reach their `to` through it,
 and it runs `outbox/relay.py` and owns its cursor ([LIFECYCLE.md](LIFECYCLE.md#starts-and-ends), ops-tick's relay watch and the line that starts "The relay, runner-plain-relay"), so the sweep runs neither relay.py nor `drain.py` beside it (`drain.py` fights relay.py's cursor and sends lines twice).
 On a machine with no `outbox/relay.py`, the sweep is the relay: it runs `bun run --cwd <main checkout> ops:outbox`, which prints each line queued since its last run as JSON, oldest first, and sends each one's `text` to its `to` with `SendMessage`; its first run prints nothing and starts the cursor at every queue's end, and it refuses an outbox where relay.py sits.
-ops-tick's relay watch times this sweep there and posts one Inbox alert when it runs late ([LIFECYCLE.md](LIFECYCLE.md#starts-and-ends), the relay watch).
+ops-tick's relay watch times this sweep there and tells Ops, then the dispatcher once Ops has not picked it up, when it runs late ([LIFECYCLE.md](LIFECYCLE.md#starts-and-ends), the relay watch).
 It also runs `python3 -I <main checkout>/scripts/ops/up.py --sessions` and sends each session that a `runs without the factory's hooks` line names (one resumed without its settings where its own folder's settings lack the hooks) to the one it reports to (the dispatcher's to Ops), to respawn by [SESSIONS.md](SESSIONS.md#spawn).
 
 Done when every probe is in step 3's list, every line `ops:outbox` printed has gone to its `to`, and every session a `runs without the factory's hooks` line names is with the one it reports to.
@@ -44,15 +46,17 @@ For every agent of yours that `ListAgents` lists, or the roster shows with a sta
 - **Down**: `ListAgents` lists no session by that name.
   Close what is left of it ([End](SESSIONS.md#end): by its surface, or by its workspace when it is the last one there), end it in the roster with the reason, and re-dispatch its chore when one is unfinished.
 - **Done**: its roster entry reads `ended`, or its PR has merged and its final report is in, and its session is still live.
-  Ending is automatic ([End](SESSIONS.md#end)); act on its `Not ended` line, then close it by hand, its checkers first.
+  Ending is automatic ([End](SESSIONS.md#end)); act on its `Not ended` line, then close it by hand, its checkers first, and on a `Kept` line reassign the worker or close it.
 
 Before you staff a fix this step turns up (an off-scope bug, a down worker's chore), run DISPATCH.md's **open-PR check** on it.
 
-When spawn.sh's load gate refuses a worker's new checker, give that PR to a reviewer already running (a done worker's, before you close it) as another PR in its own rounds, reporting to that PR's worker, since a running reviewer adds no load.
+When spawn.sh's load gate refuses a worker's new checker, give that PR to a reviewer already running, one `ListAgents` lists when you check it before the PR moves (a done worker's, before you close it), as another PR in its own rounds, reporting to that PR's worker, since a running reviewer adds no load.
 Move its roster row in the same step, by [ROSTER.md](ROSTER.md)'s `A checker takes another PR` row, so the sidebar nests it under its new worker and run-slot ranks its runs by that worker's size (a stale row once queued a reviewer's install 1,211 s for a 0 s run).
-With no reviewer running, that PR's checker is **held**: the worker reports the refusal to you, and you hold the PR on your list, since a refused start leaves only a `capacity.jsonl` row that names no session.
+`assign` on a checker whose row reads `ended` sets it to `working` and starts nothing itself: only while ops-herdr still owes that server a restore (`<server>.restore`, kept while any session waits) does its next cycle resume the checker from its record, within a minute when that resume passes its gate.
+So give the PR to one `ListAgents` lists, since one assign on an ended checker once left a PR with two reviewers; to bring an ended checker back on purpose, resume it by [SESSIONS.md](SESSIONS.md#end)'s `spawn.sh resume <name> <dir> --pr <its PR's URL>`, and it is back once `ListAgents` lists it.
+With no reviewer `ListAgents` lists, that PR's checker is **held**: the worker reports the refusal to you, and you hold the PR on your list, since a refused start leaves only a `capacity.jsonl` row, which names the session and starts nothing.
 When a slot opens, the held checker starts in it ahead of any dispatch ([ROSTER.md](ROSTER.md)'s step 1): tell its worker to spawn it again.
-Done when each held checker's roster row reads `working`.
+Done when each held checker's roster row reads `working` and `ListAgents` lists it.
 
 Done when every agent of yours is working, has reported, or has had its state acted on and recorded.
 

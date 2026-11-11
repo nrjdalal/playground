@@ -73,6 +73,7 @@ var SEATLESS = new Set(["ended", "parked"]);
 var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
 
 // scripts/hooks/shell.ts
+import { AsyncLocalStorage } from "async_hooks";
 import { homedir } from "os";
 import { basename, dirname, isAbsolute, resolve } from "path";
 var UNKNOWN = "\x00";
@@ -80,31 +81,28 @@ var READ = "\x01";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
-var deadline;
+var deadlines = new AsyncLocalStorage;
 async function withDeadline(budget, body) {
-  const outer = deadline;
-  deadline = performance.now() + budget;
-  try {
-    return await body();
-  } finally {
-    deadline = outer;
-  }
+  return await deadlines.run(performance.now() + budget, body);
+}
+function pastDeadline() {
+  const deadline = deadlines.getStore();
+  if (deadline !== undefined && performance.now() > deadline)
+    throw new RangeError("past the hook's time");
 }
 var steps = 0;
 function tick() {
-  if (++steps % 1024 !== 0 || deadline === undefined)
-    return;
-  if (performance.now() > deadline)
-    throw new RangeError("past the hook's time");
+  if (++steps % 1024 === 0)
+    pastDeadline();
 }
 function lexScript(value, env) {
-  if (deadline !== undefined && value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return lex(value, env.known);
 }
 function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
-  if (deadline !== undefined && script.length + count * value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
@@ -1756,7 +1754,7 @@ var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
   const scripts = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")];
-  if (deadline !== undefined && scripts.some((s) => s.unknown === LARGE))
+  if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;
 }
@@ -2016,6 +2014,7 @@ var DATA = new Set([
   "sed"
 ]);
 var isData = (name) => DATA.has(name) || /^python[\d.]*$/.test(name);
+var scriptStaysText = (cmd, args, browserOnly) => browserOnly.has(cmd) && args[0]?.value === "eval";
 var STARTERS = new Set(["screen", "tmux"]);
 var RM = new Set(["grm", "rm"]);
 var DEL = new Set(["del", "del-cli"]);
@@ -2146,6 +2145,8 @@ async function inspect(raw, environment) {
     process: environment,
     vars: new Map
   };
+  const lexed = lex(command, env.known);
+  const browserOnly = new Set(lexed.commands.every((c) => c.words[0]?.source === "agent-browser") ? lexed.commands : []);
   const line = (text, at) => run(lex(text, at.known), { ...at, vars: new Map(at.vars) }, visit);
   const visitAs = (reach) => async (cmd, parsed, at) => {
     const { args, name } = parsed;
@@ -2174,7 +2175,7 @@ async function inspect(raw, environment) {
         if (found)
           return found;
       }
-    if (isData(name))
+    if (isData(name) || scriptStaysText(cmd, args, browserOnly))
       return;
     const words = name === "git" ? gitCommand(args).aliases.flatMap((w) => /^alias\.[^=]*=!(.*)$/s.exec(w)?.[1] ?? []) : args.flatMap(({ value }) => [value, value.slice(value.indexOf("=") + 1)]);
     for (const text of new Set(words.map((w) => w.replace(/^!/, "")))) {
@@ -2261,7 +2262,7 @@ async function inspect(raw, environment) {
           return found;
       }
   };
-  return run(lex(command, env.known), env, visit);
+  return run(lexed, env, visit);
 }
 var bare = (command) => command.replace(/[\\'"]/g, "");
 var CANDIDATE = /rm|del|chflags|chmod|clean|worktree|rimraf|rsync|shred|\bg?tar\b|screen|tmux|\bat\b|batch|\$|`|[{*?[]/i;

@@ -197,6 +197,7 @@ function sessionOf(raw) {
 }
 
 // scripts/hooks/shell.ts
+import { AsyncLocalStorage } from "async_hooks";
 import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
@@ -204,22 +205,25 @@ var READ = "\x01";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
-var deadline;
-var steps = 0;
-function tick() {
-  if (++steps % 1024 !== 0 || deadline === undefined)
-    return;
-  if (performance.now() > deadline)
+var deadlines = new AsyncLocalStorage;
+function pastDeadline() {
+  const deadline = deadlines.getStore();
+  if (deadline !== undefined && performance.now() > deadline)
     throw new RangeError("past the hook's time");
 }
+var steps = 0;
+function tick() {
+  if (++steps % 1024 === 0)
+    pastDeadline();
+}
 function lexScript(value, env) {
-  if (deadline !== undefined && value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return lex(value, env.known);
 }
 function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
-  if (deadline !== undefined && script.length + count * value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
@@ -1864,7 +1868,7 @@ var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
   const scripts = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")];
-  if (deadline !== undefined && scripts.some((s) => s.unknown === LARGE))
+  if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;
 }
@@ -2238,6 +2242,19 @@ function scratchWorld(args, local, env) {
     return "a scratch herdr call that may start claude, which only spawn.sh starts";
   return true;
 }
+var HC_NAMES = new Set(["hc", "herdr-core"]);
+var HC_HEADS = new Set(["exec", "file", "keys", "send"]);
+var refuseHc = (what) => `no-raw-spawn hook refuses ${what}: herdr-core's socket has no access control and gives a caller exec, file and keys, and the factory runs its sessions in herdr, so a factory session runs only hc's --help and --version.`;
+function judgeHc(args) {
+  const given = args.map((a) => a.value);
+  const options = given.filter((v) => v.startsWith("-"));
+  if (options.length && options.every((v) => HELP.has(v)) && given.length - options.length <= 1)
+    return;
+  if (given.length === 1 && (given[0] === "--version" || given[0] === "-V"))
+    return;
+  const [head] = given.filter((v) => !v.startsWith("-"));
+  return refuseHc(`an hc ${head ?? "call with no command, which attaches"}`);
+}
 function judgeHerdr(args, local, env, program) {
   const given = herdrArgs(args);
   const options = given.filter((v) => v.startsWith("-"));
@@ -2290,11 +2307,20 @@ var visit = async (cmd, { args, first, local, name }, env) => {
     return refuseHerdr("herdr's agent skill, which teaches typing into other panes");
   if (TERMINAL.test(name))
     return judgeCmux(args);
+  if (HC_NAMES.has(name))
+    return judgeHc(args);
+  if (SHELLS.has(name) || name === "." || name === "source") {
+    const { inline, operand } = SHELLS.has(name) ? shellOperand(args, name) : { inline: false, operand: args[0] };
+    if (operand && !inline && HC_NAMES.has(program(operand.value)))
+      return judgeHc(args.slice(args.indexOf(operand) + 1));
+  }
   if (name === "herdr" || first?.variable === "HERDR_BIN_PATH")
     return judgeHerdr(args, local, env);
   if (first && (first.unknown || marked(first.value))) {
     if (HERDR_HEADS.has(herdrWords(args)[0] ?? ""))
       return judgeHerdr(args, local, env, first);
+    if (HC_HEADS.has(herdrWords(args)[0] ?? ""))
+      return refuseHc(`an ${herdrWords(args)[0]} whose program is ${first.unknown ?? "a word it cannot read"}, which it cannot tell from hc`);
     const [head] = positionals(beforeDashes(args));
     return head && HEADS.has(head) ? judgeCmux(args) : undefined;
   }
@@ -2302,10 +2328,10 @@ var visit = async (cmd, { args, first, local, name }, env) => {
     return refuse("a claude --resume or --continue");
 };
 var BARE = (command) => command.replace(/[\\'"]/g, "");
-var OPENS2 = new RegExp(`\\b(?:cmux|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH|${[...HEADS, ...HERDR_HEADS].join("|")})\\b`, "i");
+var OPENS2 = new RegExp(`\\b(?:cmux|hc|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH|${[...HEADS, ...HERDR_HEADS, ...HC_HEADS].join("|")})\\b`, "i");
 var REOPEN = /\bclaude\b[\s\S]*(?:\s-[cr]\b|--resume|--continue)/i;
 var candidate = (command) => command.includes("$'") || OPENS2.test(BARE(command)) || /\bcmux\b/i.test(BARE(command)) || REOPEN.test(BARE(command)) || UNIX.test(BARE(command));
-var spawnCall = (command) => /\b(?:herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/i.test(BARE(command)) || /\bcmux\b/i.test(BARE(command)) && /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(BARE(command)) || REOPEN.test(BARE(command));
+var spawnCall = (command) => /\b(?:hc|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/i.test(BARE(command)) || /\bcmux\b/i.test(BARE(command)) && /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(BARE(command)) || REOPEN.test(BARE(command));
 function commandOf(raw) {
   try {
     const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
@@ -2331,7 +2357,8 @@ async function inspect(raw, environment) {
     files: new Map,
     known: knownVariables(command, environment, directory),
     process: environment,
-    vars: new Map
+    vars: new Map,
+    visitShells: true
   };
   return run(lex(command, env.known), env, visit, true);
 }

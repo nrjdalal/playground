@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path"
 import { makeScratch, removeScratch } from "@packages/safe-delete"
 import { gateSettings, SCHEMA_VERSION } from "@packages/settings"
 
+import { gateLine } from "../pr-merge/ship-lines"
 import { GATE_LABEL, stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
@@ -15,6 +16,7 @@ const PROXY_PORT = "14155"
 const INSTALL_LIMIT_S = 1200
 const ROUTE_WAIT_MS = 180_000
 const SCRIPTS_WAIT_MS = 150_000
+const USAGE_WAIT_MS = 60_000
 const ROOM_WAIT_MS = 600_000
 // The box's PLAYGROUND_LOAD_MULT: the gate checks what a new user meets on a quiet Mac, so spawn.sh's load gate in the box allows this many times the cores and the host's other sessions never hold a start; its memory and usage gates stay as they are.
 export const BOX_LOAD_MULT = 10
@@ -28,13 +30,20 @@ export type Step = {
   shot?: string
 }
 
-// Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail, then the count.
+// The steps main checks, in order, so a run that stopped short of its last one is no pass.
+export const STEP_COUNT = 7
+
+// Pure: the gate's last line, which ship:merge reads in the ship PR's body: PASS only for a run that reached every step with none reading FAIL.
+export const resultLine = (sha: string, steps: Step[]): string =>
+  gateLine(sha, steps.length < STEP_COUNT || steps.some((s) => !s.ok && !s.inconclusive))
+
+// Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail and any shot it could not take, then the count.
 export const report = (steps: Step[]): string => {
   const unsure = steps.filter((s) => s.inconclusive).length
   return [
     ...steps.map(
       (s, i) =>
-        `${s.ok ? "PASS" : s.inconclusive ? "INCONCLUSIVE" : "FAIL"} ${i + 1}. ${s.name}${s.detail ? `: ${s.detail}` : ""}`,
+        `${s.ok ? "PASS" : s.inconclusive ? "INCONCLUSIVE" : "FAIL"} ${i + 1}. ${s.name}${s.detail ? `: ${s.detail}` : ""}${s.shot?.startsWith("no shot: ") ? ` (${s.shot})` : ""}`,
     ),
     `${steps.filter((s) => s.ok).length} of ${steps.length} passed${unsure ? `, ${unsure} inconclusive` : ""}`,
   ].join("\n")
@@ -256,6 +265,70 @@ const addAccount = (browser: Browser, box: string, home: string): string | null 
   return kept ? null : "Add account kept no token in the stand-in Keychain within 30s"
 }
 
+// The shot a step ends on, taken once the page settles: a settle or screenshot that fails is named in the shot's place, so the step's verdict stays its own check's.
+export const shotAfter = (take: () => string, settle?: () => void): string => {
+  try {
+    settle?.()
+    return take()
+  } catch (error) {
+    return `no shot: ${(error as Error).message}`
+  }
+}
+
+// A read a settle wait goes before: a wait that fails leaves the page not yet settled, so the read still runs and its text is what the step judges.
+export const readAfter = (settle: () => void, read: () => string): string => {
+  try {
+    settle()
+  } catch {}
+  return read()
+}
+
+// Step 1's check: install.sh's exit and its Left for you lines, judged before the shot's settle opens the page.
+export const installCheck = (out: string, shot: () => string): Omit<Step, "name"> => {
+  const left = leftForYou(out)
+  const code = Number(/install\.sh exit (\d+)/.exec(out)?.[1] ?? -1)
+  const ok = code === 0 && !left.length
+  return {
+    detail: ok ? "" : `exit ${code}${left.length ? `; left for you: ${left.join(" | ")}` : ""}`,
+    ok,
+    shot: shot(),
+  }
+}
+
+// Step 2's wait: the click can land before the button renders under load, so the click retries each poll until POSTGRES_URL lands, the way step 3 retries Continue; the button has buttonMs to show, after which the step gives up and names it, and the URL has urlMs, whose miss names it.
+export const databaseCheck = async (
+  click: () => boolean,
+  saved: () => boolean,
+  waits: { buttonMs: number; pollMs: number; urlMs: number } = {
+    buttonMs: 60_000,
+    pollMs: 2_000,
+    urlMs: 120_000,
+  },
+): Promise<Pick<Step, "detail" | "ok">> => {
+  let clicked = false
+  for (
+    const urlEnd = Date.now() + waits.urlMs, buttonEnd = Date.now() + waits.buttonMs;
+    Date.now() < urlEnd;
+    await Bun.sleep(waits.pollMs)
+  ) {
+    if (click()) clicked = true
+    if (saved()) return { detail: "", ok: true }
+    if (!clicked && Date.now() >= buttonEnd)
+      return {
+        detail: `the Start the database button never showed in ${waits.buttonMs / 1000}s`,
+        ok: false,
+      }
+  }
+  if (click()) clicked = true
+  if (saved()) return { detail: "", ok: true }
+  return {
+    detail: clicked
+      ? `no POSTGRES_URL in the desk's .env after ${waits.urlMs / 1000}s`
+      : `the Start the database button never showed in ${waits.buttonMs / 1000}s`,
+    ok: false,
+  }
+}
+
 // One agent-browser session for the run, its screenshots in the box.
 class Browser {
   readonly session = `pg-gate-${process.pid}`
@@ -278,10 +351,12 @@ class Browser {
   text(): string {
     return String(this.cmd("eval", "document.body.innerText").result ?? "")
   }
-  shot(name: string): string {
+  shot(name: string, settle?: () => void): string {
     const path = join(this.shots, `${name}.png`)
-    this.cmd("screenshot", "--full", path)
-    return path
+    return shotAfter(() => {
+      this.cmd("screenshot", "--full", path)
+      return path
+    }, settle)
   }
   // Clicks the button whose words are name once it is enabled; false while there is none.
   clickEnabled(name: string): boolean {
@@ -444,32 +519,20 @@ const main = async (args: string[]) => {
     // the bare name the live checkout aliases, as a new user opens it, on the box's own proxy
     const web = `http://playground.localhost:${PROXY_PORT}`
     await check("curl | bash exits 0 with no Left for you", async () => {
-      const left = leftForYou(out)
-      const code = Number(/install\.sh exit (\d+)/.exec(out)?.[1] ?? -1)
-      browser.cmd("open", `${web}/dashboard`)
-      browser.cmd("wait", "--load", "networkidle")
-      return {
-        detail:
-          code === 0 && !left.length
-            ? ""
-            : `exit ${code}${left.length ? `; left for you: ${left.join(" | ")}` : ""}`,
-        ok: code === 0 && !left.length,
-        shot: browser.shot("1-install"),
-      }
+      return installCheck(out, () =>
+        browser.shot("1-install", () => {
+          browser.cmd("open", `${web}/dashboard`)
+          browser.cmd("wait", "--load", "networkidle")
+        }),
+      )
     })
     await check("first run starts the database with one click", async () => {
-      browser.cmd("find", "role", "button", "click", "--name", "Start the database")
       const env = join(desk, ".env")
-      const saved = await waitFor(
+      const saved = await databaseCheck(
+        () => browser.clickEnabled("Start the database"),
         () => existsSync(env) && /^POSTGRES_URL=\S/m.test(readFileSync(env, "utf8")),
-        120_000,
       )
-      browser.cmd("wait", "--load", "networkidle")
-      return {
-        detail: saved ? "" : "no POSTGRES_URL in the desk's .env after 120s",
-        ok: saved,
-        shot: browser.shot("2-database"),
-      }
+      return { ...saved, shot: browser.shot("2-database") }
     })
     await check("the Dashboard shows Alpha", async () => {
       browser.cmd("open", `${web}/dashboard`)
@@ -540,9 +603,17 @@ const main = async (args: string[]) => {
       },
     )
     await check("Usage shows", async () => {
-      browser.cmd("open", `${web}/dashboard`)
-      browser.cmd("wait", "--load", "networkidle")
-      const words = usageWords(browser.text())
+      // a read can land before the machine's reading does, when the row still says Not read yet, so the last read is the one judged
+      let text = ""
+      await waitFor(() => {
+        browser.cmd("open", `${web}/dashboard`)
+        text = readAfter(
+          () => browser.cmd("wait", "--load", "networkidle"),
+          () => browser.text(),
+        )
+        return usageWords(text) !== null
+      }, USAGE_WAIT_MS)
+      const words = usageWords(text)
       return {
         detail: words ?? "no usage reading on the dispatcher's row",
         ok: words !== null,
@@ -555,8 +626,10 @@ const main = async (args: string[]) => {
       let text = ""
       await waitFor(() => {
         browser.cmd("open", `${web}/dashboard`)
-        browser.cmd("wait", "--load", "networkidle")
-        const read = browser.text()
+        const read = readAfter(
+          () => browser.cmd("wait", "--load", "networkidle"),
+          () => browser.text(),
+        )
         if (scriptsGroup(read) || !text) text = read
         return scriptsGroup(read) && !/\bFailing\b/.test(read)
       }, SCRIPTS_WAIT_MS)
@@ -611,6 +684,7 @@ const main = async (args: string[]) => {
       clean(box, home)
       console.log(`gate: screenshots and logs in ${shots}`)
     }
+    console.log(resultLine(full, steps))
   }
   return steps.every((s) => s.ok) ? 0 : 1
 }

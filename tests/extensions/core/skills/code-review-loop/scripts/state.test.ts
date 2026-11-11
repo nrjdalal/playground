@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -656,8 +656,57 @@ test("05u checks: a rate-limited check read waits for its reset, then reads agai
   expect(naps).toEqual([605])
 })
 
+test("05y checks: v0.0.82's ship pin holds while a red shard keeps Audit, Lint, and Build running, and an all-green pin ends green (#1650)", async () => {
+  const pin = [
+    run("Lint and Build", "success"),
+    run("test", "success"),
+    run("Suite (9)", "failure"),
+  ]
+  const [red, redNaps] = await checksThrough(
+    [still],
+    [runs(...pin, run(AUDIT, null)), runs(...pin, run(AUDIT, "failure"))],
+  )
+  expect(red).toBe(`CHECK failure ${AUDIT}\nCHECK success test`)
+  expect(redNaps).toEqual([300])
+  const [green, greenNaps] = await checksThrough(
+    [still],
+    [runs(run("Suite (9)", "success"), run("test", "success"), run(AUDIT, "success"))],
+  )
+  expect(green).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+  expect(greenNaps).toEqual([])
+})
+
 test("05v the checks it waits on are the gate's own (#1410)", () => {
   expect(state.GATE_CHECKS).toEqual(REQUIRED_CHECKS)
+})
+
+test("05z wait and checks run from the system tmp folder whatever folder they start in, so no waiter holds a review worktree", async () => {
+  const merged = `{"merged": true, "sha": "${HEAD}", "state": "closed"}`
+  const start = process.cwd()
+  try {
+    for (const cmd of [state.cmdWait, state.cmdChecks]) {
+      process.chdir(scratch())
+      let cwd = ""
+      await withIo(
+        () => {
+          cwd = process.cwd()
+          return response(merged)
+        },
+        async () => {
+          const realLog = console.log
+          console.log = () => {}
+          try {
+            await cmd("acme/archive", "160", HEAD)
+          } finally {
+            console.log = realLog
+          }
+        },
+      )
+      expect(realpathSync(cwd)).toBe(realpathSync(tmpdir()))
+    }
+  } finally {
+    process.chdir(start)
+  }
 })
 
 test("05i the comment and thread lists past a page are named as cut", () => {
@@ -1103,6 +1152,94 @@ test("10 touched-tests: the four rules on a scratch repository, printed one path
   expect(after.includes("tests/web/next/src/lib/outbox.test.ts")).toBe(false)
 })
 
+test("10 touched-tests: scan words inside fixture strings read as no scanner", () => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "api/hono/src/lib/sql.ts": "x\n",
+    "tests/changed.test.ts": "x\n",
+    "tests/fixture.test.ts":
+      "// the fixture's own text, not a scan this test runs\n" +
+      "const shape = 'readdirSync(\"skills\")'\n" +
+      'const tip = "run git grep -n over the repo first"\n' +
+      "const tag = `ls-files the whole repo`\n",
+  })
+  writeFiles(repo, { "api/hono/src/lib/sql.ts": "y\n", "tests/changed.test.ts": "y\n" })
+  git(repo, "commit", "-qam", "change")
+  const { code, listed, stderr } = touched(repo)
+  expect(code, stderr).toBe(0)
+  expect(listed).toContain("tests/changed.test.ts")
+  expect(listed).not.toContain("tests/fixture.test.ts")
+})
+
+test("10 touched-tests: a real scanner reads as one past a stray backtick or a call's argument", () => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "api/hono/src/lib/sql.ts": "x\n",
+    "tests/changed.test.ts": "x\n",
+    "tests/real.test.ts":
+      "// a stray backtick in a comment: `\n" +
+      "const re = /`x`/\n" +
+      'const found = execSync("git ls-files -z")\n' +
+      'const listed = spawnSync("git", ["grep", "-l", "x"])\n',
+  })
+  writeFiles(repo, { "api/hono/src/lib/sql.ts": "y\n", "tests/changed.test.ts": "y\n" })
+  git(repo, "commit", "-qam", "change")
+  const { code, listed, stderr } = touched(repo)
+  expect(code, stderr).toBe(0)
+  expect(listed).toContain("tests/real.test.ts")
+  expect(listed).toContain("tests/changed.test.ts")
+})
+
+test("10 touched-tests: a real scanner reads as one past a quote in a regex literal", () => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "api/hono/src/lib/sql.ts": "x\n",
+    "tests/changed.test.ts": "x\n",
+    "tests/caret.test.ts": 'const ok = /^"/.test(s) && readdirSync(dir).map((f) => "x")\n',
+    "tests/plain.test.ts": 'const ok = /"/.test(s) && readdirSync(dir).filter((f) => f !== "x")\n',
+    "tests/tick.test.ts": "if (/`/.test(s)) for (const f of readdirSync(d)) log(`${f}`)\n",
+  })
+  writeFiles(repo, { "api/hono/src/lib/sql.ts": "y\n", "tests/changed.test.ts": "y\n" })
+  git(repo, "commit", "-qam", "change")
+  const { code, listed, stderr } = touched(repo)
+  expect(code, stderr).toBe(0)
+  expect(listed).toContain("tests/caret.test.ts")
+  expect(listed).toContain("tests/plain.test.ts")
+  expect(listed).toContain("tests/tick.test.ts")
+  expect(listed).toContain("tests/changed.test.ts")
+})
+
+test("10 touched-tests: a real scanner reads as one past a value-shaped quote inside a regex", () => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "api/hono/src/lib/sql.ts": "x\n",
+    "tests/changed.test.ts": "x\n",
+    "tests/eqquote.test.ts": 'const ok = /a="/.test(s) && readdirSync(dir).map((f) => "x")\n',
+    "tests/keyquote.test.ts": "const ok = /key:'/.test(s) && readdirSync(dir).map((f) => 'x')\n",
+    "tests/gttick.test.ts": "const ok = />`/.test(s) && readdirSync(dir).map((f) => log(`${f}`))\n",
+  })
+  writeFiles(repo, { "api/hono/src/lib/sql.ts": "y\n", "tests/changed.test.ts": "y\n" })
+  git(repo, "commit", "-qam", "change")
+  const { code, listed, stderr } = touched(repo)
+  expect(code, stderr).toBe(0)
+  expect(listed).toContain("tests/eqquote.test.ts")
+  expect(listed).toContain("tests/keyquote.test.ts")
+  expect(listed).toContain("tests/gttick.test.ts")
+  expect(listed).toContain("tests/changed.test.ts")
+})
+
+// The empty diff leaves rule 4's whole-tree picks alone, so the row pins the repo's own scanners and the fixture-string rule at every head
+test("10 touched-tests: the repo's own scanners read as scanners and its fixture strings read as none", () => {
+  const out = runCli(["touched-tests", ROOT, "HEAD", "HEAD"])
+  const listed = out.stdout.split("\n").filter(Boolean)
+  expect(out.code, out.stderr).toBe(0)
+  expect(listed).toContain("tests/web/next/src/app/globals.test.ts")
+  expect(listed).toContain("tests/web/next/src/native-title.test.ts")
+  expect(listed).not.toContain(
+    "tests/extensions/core/skills/code-review-loop/scripts/state.test.ts",
+  )
+})
+
 test("10k a renamed file's old path still selects the test importing it", () => {
   const repo = scratch()
   scratchRepo(repo, {
@@ -1228,7 +1365,7 @@ test("10n a test reading a changed file by its src-relative path quoted whole, w
   ])
 })
 
-test("10o a test that runs git grep over the repo is listed, by argv or shell, wrapped or after -C", () => {
+test("10o a test that greps the repo is listed, by argv or shell, wrapped or after -C", () => {
   const repo = scratch()
   scratchRepo(repo, {
     "scripts/plain.sh": "x\n",
@@ -1297,4 +1434,163 @@ test("10r a dotfile or a dotted folder keeps its whole name as its stem, so its 
     "tests/.gitignore.test.ts",
     "tests/.gitignore.test.tsx",
   ])
+})
+
+// #1359: a fake GitHub of one PR whose body and comments the reviewer read at READ_AT.
+const READ_AT = "2026-11-08T19:00:00Z"
+const BODY = "## TL;DR\n\n- the body as read"
+const freshThrough = async (
+  body: string,
+  comments: object[],
+  reviewComments: object[] = [],
+  reviews: object[] = [],
+): Promise<[string, number, string[]]> => {
+  const paths: string[] = []
+  const lines: string[] = []
+  let code = 0
+  await withIo(
+    (...args: string[]) => {
+      const path = args.find((a) => a.startsWith("repos/"))!
+      paths.push(path)
+      if (path === "repos/acme/archive/pulls/160")
+        return JSON.stringify({ ...restView, body, updated_at: "2026-11-08T19:09:00Z" })
+      if (path.startsWith("repos/acme/archive/issues/160/comments"))
+        return JSON.stringify([comments])
+      if (path.startsWith("repos/acme/archive/pulls/160/comments"))
+        return JSON.stringify([reviewComments])
+      if (path.startsWith("repos/acme/archive/pulls/160/reviews")) return JSON.stringify([reviews])
+      throw new Error(path)
+    },
+    async () => {
+      const realLog = console.log
+      const realCode = process.exitCode
+      console.log = (line?: unknown) => {
+        lines.push(String(line))
+      }
+      process.exitCode = 0
+      try {
+        await state.cmdFresh("acme/archive", "160", READ_AT, state.bodyDigest(BODY))
+        code = Number(process.exitCode ?? 0)
+      } finally {
+        console.log = realLog
+        process.exitCode = realCode ?? 0
+      }
+    },
+  )
+  return [lines.join("\n"), code, paths]
+}
+
+const posted = (body: string, at: string, id = 7) => ({
+  body,
+  created_at: at,
+  html_url: `https://github.com/acme/archive/pull/160#issuecomment-${id}`,
+  id,
+  updated_at: at,
+  user: { login: "acme-owner" },
+})
+
+test("10a fresh refuses a body edited after the read, naming the body (#1359)", async () => {
+  const [out, code] = await freshThrough(`${BODY}\n- an edit after the read`, [])
+  expect(code).toBe(1)
+  expect(out).toContain(
+    `CHANGED body: ${state.bodyDigest(BODY)} at the read, ${state.bodyDigest(`${BODY}\n- an edit after the read`)} now`,
+  )
+})
+
+test("10b fresh refuses a comment posted after the read, naming it (#1359)", async () => {
+  const [out, code, paths] = await freshThrough(BODY, [
+    posted("an old note", "2026-11-08T18:00:00Z", 6),
+    posted("Before shot posted\n\nmore", "2026-11-08T19:04:00Z"),
+  ])
+  expect(code).toBe(1)
+  expect(out).toBe(
+    "CHANGED comment https://github.com/acme/archive/pull/160#issuecomment-7 by acme-owner at 2026-11-08T19:04:00Z: Before shot posted",
+  )
+  expect(paths).toContain(`repos/acme/archive/issues/160/comments?since=${READ_AT}&per_page=100`)
+})
+
+test("10c fresh refuses a thread reply posted after the read, naming it (#1359)", async () => {
+  const [out, code, paths] = await freshThrough(
+    BODY,
+    [],
+    [{ ...posted("fixed in abc", "2026-11-08T19:05:00Z", 9), html_url: "https://x/r9" }],
+  )
+  expect(code).toBe(1)
+  expect(out).toBe(
+    "CHANGED review comment https://x/r9 by acme-owner at 2026-11-08T19:05:00Z: fixed in abc",
+  )
+  expect(paths).toContain(`repos/acme/archive/pulls/160/comments?since=${READ_AT}&per_page=100`)
+})
+
+test("10d fresh passes an unchanged body with no comment after the read, one at the read itself included (#1359)", async () => {
+  const [out, code] = await freshThrough(BODY, [posted("at the read", READ_AT)])
+  expect(code).toBe(0)
+  expect(out).toBe(`FRESH since ${READ_AT}`)
+})
+
+test("10g fresh refuses a review submitted with a body after the read, naming it (#1359)", async () => {
+  const review = (body: string, at: string | null, id: number) => ({
+    body,
+    html_url: `https://github.com/acme/archive/pull/160#pullrequestreview-${id}`,
+    id,
+    submitted_at: at,
+    user: { login: "acme-owner" },
+  })
+  const [out, code, paths] = await freshThrough(
+    BODY,
+    [],
+    [],
+    [
+      review("an old summary", "2026-11-08T18:00:00Z", 1),
+      review("", "2026-11-08T19:06:00Z", 2),
+      review("a pending draft", null, 3),
+      review("Replies to round 1\n\nmore", "2026-11-08T19:07:00Z", 4),
+    ],
+  )
+  expect(code).toBe(1)
+  expect(out).toBe(
+    "CHANGED review https://github.com/acme/archive/pull/160#pullrequestreview-4 by acme-owner at 2026-11-08T19:07:00Z: Replies to round 1",
+  )
+  expect(paths).toContain("repos/acme/archive/pulls/160/reviews?per_page=100")
+})
+
+test("10e pr prints the read line fresh takes: its start time and the body's digest (#1359)", async () => {
+  const lines: string[] = []
+  await withIo(
+    (...args: string[]) => {
+      if (args.includes("graphql"))
+        throw new state.Called(args, "", "GraphQL: API rate limit already exceeded for user ID 1.")
+      if (args[2] === "user") return "acme-owner\n"
+      const path = args.find((a) => a.startsWith("repos/"))!
+      if (path.endsWith("/pulls/160")) return JSON.stringify({ ...restView, body: BODY })
+      return JSON.stringify([[]])
+    },
+    async () => {
+      const realLog = console.log
+      const realTime = state.io.time
+      state.io.time = () => Date.parse(READ_AT) / 1000
+      console.log = (line?: unknown) => {
+        lines.push(String(line))
+      }
+      try {
+        await state.cmdPr("acme/archive", "160")
+      } finally {
+        console.log = realLog
+        state.io.time = realTime
+      }
+    },
+  )
+  expect(lines.at(-1)).toBe(`read: ${READ_AT} ${state.bodyDigest(BODY)}`)
+  expect(state.PR_QUERY).toContain(" body ")
+})
+
+test("10f fresh refuses a read time or a digest it cannot use (#1359)", () => {
+  for (const args of [
+    ["fresh", "x/y", "1", "yesterday", "0123456789ab"],
+    ["fresh", "x/y", "1", READ_AT, "nothex"],
+  ]) {
+    const out = runCli(args)
+    expect(out.code, args.join(" ")).not.toBe(0)
+    expect(out.stderr).toMatch(/not a read time|not a body digest/)
+  }
 })

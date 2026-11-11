@@ -5,12 +5,17 @@ import { join } from "node:path"
 
 import { ROSTER_KINDS, ROSTER_ROLE_OF_KIND } from "../../../../packages/config/src/kinds"
 import {
+  CORE,
   readSessionNames,
   readSessionTemplates,
   readSetting,
+  sessionSettings,
   sessionTemplates,
+  settingsFor,
   setSetting,
+  storedTemplates,
   TEMPLATE_KINDS,
+  templateBackend,
 } from "../../../../packages/settings/src"
 
 const scratch = mkdtempSync(join(tmpdir(), "session-names-"))
@@ -90,6 +95,48 @@ describe("sessions.templates", () => {
     })
     expect(byId.get("second-dispatcher-claude")?.brief).toBe("dispatcher-2.md")
     expect(byId.get("second-dispatcher-glm")?.brief).toBe("dispatcher-2.md")
+  })
+})
+
+describe("a list saved before the harness split", () => {
+  const old = [
+    { backend: "claude", brief: "orchestrator.md", id: "o", kind: "orchestrator", label: "O" },
+    { backend: "glm", brief: "dispatcher-2.md", id: "g", kind: "dispatcher", label: "G" },
+  ]
+
+  test("reads each backend as Claude Code, with glm as a GLM row's model", () => {
+    expect(storedTemplates(old)).toEqual([
+      {
+        brief: "orchestrator.md",
+        harness: "claude-code",
+        id: "o",
+        kind: "orchestrator",
+        label: "O",
+      },
+      {
+        brief: "dispatcher-2.md",
+        harness: "claude-code",
+        id: "g",
+        kind: "dispatcher",
+        label: "G",
+        model: "glm",
+      },
+    ])
+    expect(
+      sessionSettings
+        .get(
+          settingsFor([{ key: "sessions.templates", scope: CORE, value: old }], "made-up-me"),
+          "sessions.templates",
+        )
+        .map(templateBackend),
+    ).toEqual(["claude", "glm"])
+  })
+
+  test("leaves a row in the new shape as it is, and one naming another backend for the schema to refuse", () => {
+    const [assistant] = readSessionTemplates(mkdtempSync(join(scratch, "templates-")))
+    expect(storedTemplates([assistant])).toEqual([assistant])
+    const other = storedTemplates([{ ...old[0], backend: "gpt" }])
+    expect(sessionTemplates.safeParse(other).success).toBe(false)
   })
 })
 

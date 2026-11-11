@@ -41,7 +41,7 @@
   Each row ends in its `ShelfMark` (`web/next/src/components/shelf-mark.tsx`) in place of the stock chevrons: a small circle on an empty row, else a right chevron turning down while open, on a muted square while the row is hovered ("show circle icon if no items in accordion, and right chevron on closed?", "and hover state like this").
   The open row reads Inbox and the open cards' count as the shelves' Badge, 0 included ("still keep showing counts", "all caught up to inbox then label count", "where is inbox zero"), the summary of the open cards, or All caught up, in an `sr-only` span, Inbox muted with the row disabled when none is open;
   the pill and Mark all as read (a single ✓ icon button, `RiCheckLine`, its Hint naming how many it reads, while anything is unread, else a muted ✓✓ named All read) sit over its right end, outside the trigger, so pressing one never folds the row.
-  Before the first read lands, the open row is already in its place, muted with a blank fixed-width count and the room for Mark all as read kept, with the Spinner under it and no shelf, so the read lands below it and moves nothing (`InboxLoading`).
+  Before the first read lands, the open row is already in its place, muted, its count shown only once the read lands (a Badge beside the Spinner counts nothing), and the room for Mark all as read kept, with the Spinner under it and no shelf, so the read lands below it and moves nothing (`InboxLoading`).
   A shelf's row is its icon, its name and its count as a mono outline Badge, every shelf counting what it holds, disabled and gray while empty (`ShelfLabel`): In progress holds a go its poster is carrying out, from its answer until its poster closes it or the owner presses its Done or Dismiss (`progress` in `inboxView`, the `sending` of `itemState`),
   offering no ✓ since its poster closes it;
   Later holds the open items and updates put away until a time still ahead, which the API returns apart from `items` as `snoozed` (`listItems`), since every other reader of `items` takes a row there as awake;
@@ -232,7 +232,7 @@
   ```
 
   `kind` is `decision` (left out, it is one), `draft` or `update`; `from` is the posting session's name as the Dashboard shows it, since the answer is typed into that session; `title` is one line.
-  A decision's `preview` is one of fourteen, each what Approve does except the `secret` ask and the `reveal` card (below), written in ELI5 / ASD-STE100 plain words: `accept` (`scope`, `kind`, `key`, `rev`, `why`, an optional `more` list, below), `apps` (`app`, `change`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
+  A decision's `preview` is one of fourteen, each what Approve does except the `secret` ask and the `reveal` card (below), written in plain words (the `plain-words` skill): `accept` (`scope`, `kind`, `key`, `rev`, `why`, an optional `more` list, below), `apps` (`app`, `change`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
   a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with its options labelled one line each, `options`, 1 to 5 rows of `{label, description?}`, one row for a yes or no and 2 or more for lettered choices, or the older `approve` alone, never both, and an optional `deny` naming the no-go row (Deny, or None of these past one option),
@@ -253,24 +253,27 @@
   It refuses, with one line naming the file, an unknown key, a relative path, a missing file, a file over the cap, and bytes that do not match the kind; it takes every kind (code, doc, html, image and pdf).
   `GET /api/v1/inbox/attachments/:id` serves a kept file behind `requireTrustedOrigin`, `requireLoopback` and the owner rung, so the web fetches it with its cookie into a blob URL (`useAttachment`), since an `<img>` sends no Origin.
   A 404 (a fixture stack's restart drops its files, or the week's sweep took one) settles as missing for the page's life, asked once and never retried, and the card shows Missing in the file's place, or a folded pair's before alone when its after is the one gone.
+  Any other failure (another status, a lost connection) retries as every read does, then shows Did not load in the same place, or the pair's before alone when its after is the one that failed.
   With `?download` it saves the file under its item's title, the file's own name after it when the item carries several, with the stored file's extension (`attachmentDownloadName`), in `Content-Disposition`'s `filename*` (`fileNameOf` and `attachmentDisposition` in `api/hono/src/lib/download.ts`), a header CORS exposes,
   so the card's Download fetches it with the cookie and saves it under that name (`saveFrom` in `web/next/src/lib/download.ts`).
   The card shows its files under the text gap-3 below the words:
-  a lone HTML page live at its full width through the viewer's own HTML view, links opening in a tab, never taking the focus, an `h-80` box with a floating bar in its corner holding Download and a square that opens it in an aside tab, or the viewer outside the aside (`LivePage`),
+  a lone HTML page live at its full width through the viewer's own HTML view, links opening in a tab, never taking the focus, an `h-80` box with a floating bar in its corner holding Download, Open in new tab, Open in side panel (in the aside alone, an aside tab of its own) and Full screen (the viewer), each named in a tooltip (`LivePage`),
   a lone before/after pair at its full width with Before above After, each in an `h-48` box, the picture `object-contain` (`WideSide`, Up and Down a side), else in a four-by-four grid of squares gap-3 apart, up to sixteen thumbnails or fifteen and a `+N` tile (`AttachmentThumbs` in `web/next/src/components/dashboard/viewer/thumbnails.tsx`),
   a kind with no `Thumb` a titled tile, its icon over its name,
   each tile but `+N` and each side of a lone pair with its own Download on the glass in its top-right corner (`TileDownload`, named `Download <file>`), shown while the tile is hovered or holds focus and always on a touch screen, saving its file, a folded pair's both, as the viewer's does (`saveItem` in `viewer.tsx`),
   the grid a group whose Left and Right move focus a tile and Up and Down a row, Home and End to its ends (`focusTarget`), stepping the tiles alone (`button[data-tile]`), never a tile's Download;
   a click, Enter or Space on a page, a markdown document or a PDF in the aside opens it in an aside tab of its own (`opensInAside` in `web/next/src/lib/aside-docs.ts`), as a Pages row's click opens its page (`.agents/dashboard/dashboard.md`):
   the tab, focused as it opens, is one square after the session's tabs named for its file, whose pane draws the file through its kind's renderer below (`AsideDocsPane` in `web/next/src/components/dashboard/aside-docs.tsx`), a kept page through the HTML view below as a card's page is, fetched with the owner's cookie into a blob URL (`pageQuery`),
-  in a bordered box with a floating bar in its corner holding Download, of the card's file or the kept page, and Close, the live page's look and size;
+  in a bordered box with a floating bar in its corner holding Download, of the card's file or the kept page, Open in new tab for a page, an image or a PDF, Full screen (the viewer, `docItem` giving a kept page its own addresses) and Close, each named in a tooltip, the live page's look and size;
   opening a file whose tab is open focuses that tab and adds none (`openDoc`), and the tabs last for the page's life.
   A click, Enter or Space on any other file (a picture, a before/after pair, a code file) opens the viewer (`Viewer` in `viewer.tsx`), full screen over the page, its own colours dark whatever the theme, on a see-through stage, the stock Dialog overlay's dim and blur, the file edge to edge, on the stock Dialog and Carousel, in Slider mode:
   one file a slide, Left and Up back, Right and Down on, past either end wrapping to the other with a jump (`wrapStep`), a swipe, the ‹ › buttons, Esc or X to close, a jump in place of the slide where motion is reduced.
-  One floating bar, the aside's own, holds ‹, `2 / 6`, ›, the file's name, Open in new tab, Download (`Download` in `viewer.tsx`: the shown file, or both sides of a before/after pair as two files, which a browser may ask once to allow, a failed save showing a warning in its place) and X, with no tooltips and the kind read to a screen reader alone;
+  One floating bar, the aside's own, holds ‹, `2 / 6`, ›, the file's name, Download (`Download` in `viewer.tsx`: the shown file, or both sides of a before/after pair as two files, which a browser may ask once to allow, a failed save showing a warning in its place),
+  Open in new tab, Open in side panel when the viewer opened from the aside (`onSidePanel`) and X, each named in a tooltip, the kind read to a screen reader alone;
   it rises while the pointer is within 96px of the bottom edge or a key has focus in it, and on a touch screen a tap on the picture shows or hides it, while an HTML page or a PDF, whose frame keeps a tap to itself, keeps it up (`pinsBars`); a thin strip along the bottom edge brings it up over an HTML or PDF frame, which keeps the pointer's moves to itself.
   A Close of its own stays shown at the top-right corner, one square on a floating bar of the same look.
-  Open in new tab opens an image or a PDF at full size in a browser tab (`OPENS_IN_TAB`), on a pair the Before, whose id the folded item keeps, never an HTML page, code or an SVG, since a blob URL runs with the Dashboard's origin.
+  Open in new tab opens an image or a PDF at full size in a browser tab as its blob (`OPENS_IN_TAB`, `tabHref`), on a pair the Before, whose id the folded item keeps, never code or an SVG, since a blob URL runs with the Dashboard's origin.
+  A kept page opens at its own Previews address, and a card's page as a blob holding it in an `<iframe sandbox="allow-scripts">` from `srcdoc`, under the page policy and with no script of its own (`pageTab` in `web/next/src/lib/viewer.ts`), since its route answers the Dashboard's own fetch alone.
   Each kind's renderer is one line of `VIEWERS` in `registry.tsx`; a renderer that keeps its own pointer or keys marks itself `data-viewer-owns-pointer` or `data-viewer-owns-keys`, and hands the arrows back with `onEdge`.
   An item's image `attachments` labelled `before` and `after` in one `group`, or both with no `group`, show as one slide in the viewer and one split tile on the card (`foldPairs` in `web/next/src/lib/pictures.ts`).
   That slide has one row of buttons floating at the stage's top over the whole-stage picture, Before, Side, Slider and After, Side and Slider joined in the middle, 3.5rem clear of each side on a narrow screen so the viewer's top-right Close never covers After; the row and the Side divider keep Left and Right and hand Up and Down back with `onEdge` (`handBack`).
@@ -283,7 +286,7 @@
   its fetch policy (`default-src 'none'`, inline script and styles, `data:` images and fonts) as a `<meta>` CSP ahead of its markup, since no header reaches a `srcdoc` page,
   and a script after it that posts Escape and a Left or Right the page left alone, read by `viewerFrameMessage`: one that changed nothing on the page by two frames on, so a deck that moves its slides without taking the key keeps it.
   The frame takes the focus once its page says it is ready, and again when its slide comes back, so the page's own arrows run it.
-  It runs in an `<iframe sandbox="allow-scripts">` from `srcdoc` alone; its blob is plain text, and it has no Open in new tab.
+  It runs in an `<iframe sandbox="allow-scripts">` from `srcdoc` alone, since its blob is plain text, and its Open in new tab holds it in the same sandbox (`pageTab`).
   A link clicked in it opens in a browser tab of its own, http or https alone (`viewer: "link"`), and one to a place on the page scrolls there with no load.
   Since a policy reaches no navigation, each load is judged by whether its page posted `viewer: "ready"` (`frameLoad`): a page a script or a refresh sent the frame off to is put back once, then stopped on a notice, each request that took it off having left.
   A `doc` renders through `TranscriptMarkdown` and a `code` file as one fenced block named by its extension (`fenced`), both in a region that keeps Up and Down for scrolling;
@@ -474,6 +477,7 @@
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
      Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from; a `diff` block's lines may run longer, since the card wraps them.
      A wider drawing still posts and shrinks to 10px, then scrolls, so the limit is a writing guide.
+     A note of one sentence on the point follows the picture, by the `plain-words` skill's owner style (`extensions/core/skills/plain-words/SKILL.md`).
   2. Short bullets, one fact each, an emoji as each one's marker.
   3. The options: for a true yes or no, one `options` row saying what Approve does, with `deny` beside it; for real alternatives, 2 to 5 rows, A to E, each a `label` and an optional `description`.
      The card shows them as its choices under the text, in place of its On Approve line.
@@ -494,9 +498,12 @@
   + const limit = rows.length
   ```
 
+  The export fix is ready to port to staging and main.
+
   - 🐛 The export ends at 100 rows.
   - ✅ The fix runs on dev since 24 Oct, with no errors.
   - ↩️ One commit reverts it.
+  - 🎯 It touches the export alone.
   ````
 
   Options: `Port the fix to staging, then main`; Deny: `Keep it on dev`.
@@ -512,6 +519,8 @@
   report to you
   ```
 
+  A dry run of the export job waits on your yes.
+
   - 📨 The web-api session asks for a dry run of the export job.
   - 🧪 The run is on dev only and writes no rows.
   - ⏱️ It takes about 10 minutes.
@@ -519,12 +528,16 @@
 
   Options: `Take the request and run the dry run`; Deny: `Turn the request down`.
 
-  The UI change leads with its before and after pictures, which join the ask as `attachments` (absolute paths on this Mac, each with its `label` and `group`, which `bun run ask new` copies in), and its card shows them under this text:
+  The UI change's before and after pictures join the ask as `attachments` (absolute paths on this Mac, each with its `label` and `group`, which `bun run ask new` copies in), and its card shows them under this text, which opens on its note:
 
   ````markdown
+  The Inbox card can show its pictures as one thumbnail row.
+
   - 🖼️ The Inbox card shows its pictures as a row of thumbnails.
   - 👆 A click opens the picture in the viewer.
   - 📱 The row scrolls sideways on a phone.
+  - ↩️ One revert puts the old card back.
+  - 🎯 It touches the Inbox card alone.
   ````
 
   Options: `Build the row as the after picture shows`; Deny: `Keep the card as it is`.

@@ -19,8 +19,7 @@ import {
 const FULL_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
 const READS = new Set(["list", "show"])
 const WRITES = new Set(["create", "store"])
-const INSTEAD =
-  "Every worktree shares one stash list, so a stash taken by position or without a name can be another session's work. Commit a WIP commit on your own branch instead (git commit -m 'chore: wip <what>'), or take before-shots from a separate worktree on origin/canary (git worktree add --detach .claude/worktrees/<name> origin/canary). git stash list, git stash show, git stash push -m <message> and git stash apply <full sha> stay allowed."
+const INSTEAD = `Every worktree shares one stash list, so a stash taken by position or without a name can be another session's work. Commit a WIP commit on your own branch instead (git commit -m 'chore: wip <what>'), or take before-shots from a separate worktree on origin/canary, made by absolute path under the main checkout so it nests in no other worktree (git worktree add --detach "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" origin/canary). git stash list, git stash show, git stash push -m <message> and git stash apply <full sha> stay allowed.`
 
 const refuse = (what: string, why: string) => `no-stash hook refuses ${what}: ${why}. ${INSTEAD}`
 

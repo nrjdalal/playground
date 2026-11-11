@@ -6,25 +6,26 @@ It lives in the repo rather than in one session's memory, so every session loads
 
 ## When to reach for it
 
-| You are, or you are about to                                                                                             | It gives you                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| the dispatcher, the Planner, the Builder, Ops, the Optimizer, the Assistant, a worker, reviewer, tester, runner or probe | your role, who you report to and the rules you keep                            |
-| Spawn, brief, rename, check or end a session                                                                             | the lifecycle (`LIFECYCLE.md`) and the herdr commands (`SESSIONS.md`)          |
-| Update Claude Code                                                                                                       | the update steps in `LIFECYCLE.md`                                             |
-| Route a new ask, or run a lead's sweep                                                                                   | `DISPATCH.md` and `SWEEP.md`                                                   |
-| Answer the owner's DM while Slack mode is on                                                                             | the `slack` skill (`extensions/slack`) and `playground dm send`                |
-| Merge a Playground PR, or release `canary` to `main`                                                                     | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release** |
-| Comment or review on a repo whose owner `release-owners.json` lists                                                      | the **comments** rule                                                          |
-| Touch the live dashboard or the roster                                                                                   | the **dashboard** and **roster** rules (`ROSTER.md`)                           |
-| Ask the owner something, or pass on his override                                                                         | the **ask** and **override** rules                                             |
-| File a Linear ticket                                                                                                     | the **tickets** rule                                                           |
-| Write anything an org sees                                                                                               | the **classified** rule                                                        |
-| Post in the factory's channel, or take an ask from there                                                                 | the channel's lists and triage (`CHANNEL.md`)                                  |
-| Run a `vercel` command, a deploy among them                                                                              | the Vercel CLI's three traps (`VERCEL.md`)                                     |
-| Stop a process                                                                                                           | the **signal** rule                                                            |
-| Hand off a build, a read or research                                                                                     | the **workers** rule                                                           |
-| Run long, spawn a reviewer again, or wait on something                                                                   | the **context**, **rounds** and **polling** rules                              |
-| Write a skill, an agent guide, a docs page, a handoff or a brief                                                         | the **writing** rule                                                           |
+| You are, or you are about to                                                                                             | It gives you                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| the dispatcher, the Planner, the Builder, Ops, the Optimizer, the Assistant, a worker, reviewer, tester, runner or probe | your role, who you report to and the rules you keep                                                                   |
+| Spawn, brief, rename, check or end a session                                                                             | the lifecycle (`LIFECYCLE.md`), the herdr commands (`SESSIONS.md`) and spawn.sh's modes, gates and flags (`SPAWN.md`) |
+| Update Claude Code                                                                                                       | the update steps in `LIFECYCLE.md`                                                                                    |
+| Route a new ask, or run a lead's sweep                                                                                   | `DISPATCH.md` and `SWEEP.md`                                                                                          |
+| Answer the owner's DM while Slack mode is on                                                                             | the `slack` skill (`extensions/slack`) and `playground dm send`                                                       |
+| Answer the owner's WhatsApp while WhatsApp mode is on                                                                    | the `whatsapp` skill (`extensions/whatsapp`) and `playground wa send`                                                 |
+| Merge a Playground PR, or release `canary` to `main`                                                                     | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release**                                        |
+| Comment or review on a repo whose owner `release-owners.json` lists                                                      | the **comments** rule                                                                                                 |
+| Touch the live dashboard or the roster                                                                                   | the **dashboard** and **roster** rules (`ROSTER.md`)                                                                  |
+| Ask the owner something, or pass on his override                                                                         | the **ask** and **override** rules                                                                                    |
+| File a Linear ticket                                                                                                     | the **tickets** rule                                                                                                  |
+| Write anything an org sees                                                                                               | the **classified** rule                                                                                               |
+| Post in the factory's channel, or take an ask from there                                                                 | the channel's lists and triage (`CHANNEL.md`)                                                                         |
+| Run a `vercel` command, a deploy among them                                                                              | the Vercel CLI's three traps (`VERCEL.md`)                                                                            |
+| Stop a process                                                                                                           | the **signal** rule                                                                                                   |
+| Hand off a build, a read or research                                                                                     | the **workers** rule                                                                                                  |
+| Run long, spawn a reviewer again, or wait on something                                                                   | the **context**, **rounds** and **polling** rules                                                                     |
+| Write a skill, an agent guide, a docs page, a handoff or a brief                                                         | the **writing** rule                                                                                                  |
 
 A factory session reaches for it on its own, and every brief tells the new session to load it.
 A session outside the factory has no reason to.
@@ -77,7 +78,12 @@ and the Dashboard shows each one it finds as Stuck, with a red alarm, or as Paus
 Each night at 3:00 am, ops-tick's nightly clean removes what no merge's cleanup reached: worktrees and branches of merged or closed PRs, exited containers of worktrees that are gone, Docker's dangling images and build cache, and turbo cache files over 2 days old.
 It keeps a worktree that another worktree or a scratch folder still links into, and names the first three links.
 A merged or closed PR's worktree goes to the trash whatever it holds, and one whose merge or close `playground rm` cannot confirm goes there too under the owner's standing approval, each move restorable with `playground rm --restore`.
+It spaces its deletes under `playground rm`'s limit of 3 a minute, so none is refused, and leaves what does not fit in a 10-minute wait for the next night.
+The same night it sweeps every other repo the factory works in: each checkout directly in the code root, or in `~/<org>` for an org `ext.links` guards.
+A worktree there goes by `git worktree remove`, its branch kept, only when its PR merged or closed (or it has none and every commit is pushed), it holds nothing but build output, and no live process or roster row has it; each one kept is named with why.
+It also moves to the trash each folder in the data folder's `scratch/` whose session is gone, with no live session and no roster row naming it that has not ended, each restorable with `playground rm --restore`.
 An unmerged branch's head is tagged `archive/<branch>` on origin before any delete, so the tag holds it and `git branch <name> archive/<branch>` brings the branch back; one whose tag cannot be made, or whose origin head is not the local head the tag would hold, stays, named in the log.
+A branch never pushed stays too, with a local `archive/<branch>` tag alone, since a push would publish commits no one has reviewed, and is named once, the night that tag is made or re-pointed to the branch's head.
 Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch.
 It posts an Inbox update when it freed 1 GB or more, and asks no decision: a container or unused volume over 1 GB that no rule takes is kept, and named as kept in the same log and outbox line, as is a container whose removal failed.
 A worker spawns its own reviewer and tester, each briefed from a template it fills in, and the Dashboard nests them under it; the reviewer scores the PR through [code-review-loop](./code-review-loop.md).
@@ -87,6 +93,7 @@ The dispatcher, the Planner and the two leads never close, except to be started 
 In herdr, sessions that work together share a workspace, each in a pane of its own: a checker opens as a column beside its worker's pane (`spawn.sh column`), and every other start opens a workspace of its own.
 A session ends when the one it reports to closes its pane, never the others.
 A finished worker, reviewer or tester also ends by itself: right after its PR merges, and from a check every 5 minutes, while one with work left unsaved stays open and its lead gets a `Not ended` line saying why, unless that work sits in one of Playground's own worktrees whose PR has merged or closed, which the cleanup moves to the trash.
+A worker whose last PR closed unmerged stays open too, and its lead gets a `Kept` line to reassign or end it.
 Sessions already running move at their next restart, so nothing is closed just to re-arrange it.
 
 The leads keep watch with a sweep: every 15 minutes each one runs `playground sweep`, which prints only what changed since its last sweep (new alerts, the merge queue, the load, ETAs that have passed, a parked row's hold that has closed, and for Ops, once an hour, each ops switch still on with its reason) or `quiet`,
@@ -104,7 +111,8 @@ For a focused stretch, such as a timed test, a demo or an hour of deep work, `pl
 While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep and that session's own reviewer and tester keep running.
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
 A priority start (spawn.sh's `--priority`) passes the load gate and a full run-slot queue at the slots gate while a priority file stands, and the memory gate still applies to it.
-It passes focus too on `priority.json` or an org's own `priority-<name>.json`, while a job's own `priority-start.json` never does.
+It passes focus too on `priority.json`, an org's own `priority-<name>.json` or a session's own window, while a job's own `priority-start.json` never does.
+A session's window opens only with `playground priority on <session> --reason "<why>"`, and a lead opens one only on the owner's or the dispatcher's word; `playground priority off <session> --reason "<why>"` lifts it, ops-tick lifts one left standing after a set age, and each opening and lift is a line in `ops/priority.log`.
 A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the load gate as well, as a Claude Code update's close and resume do, and the memory gate still applies to it.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
@@ -157,7 +165,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - No session waits on a prompt for a delete Claude Code stops on: an `rm` or `rmdir` whose target has two or more parts that start with an unguarded variable, or a name directly in `/`, is turned back with a fix (the `no-prompt-stop` hook), and the session runs it again as a literal path (`playground rm <literal path>` for anything outside its worktree and scratchpad),
   an `rmdir` with each variable guarded too,
   or in its own scratchpad.
-- A manager starts no hidden helper: the `no-manager-subagent` hook refuses it the Agent and Workflow tools, so every build, read or research it hands off shows as a worker in the sidebar.
+- A manager starts no hidden helper: its settings deny it the Agent and Workflow tools, so every build, read or research it hands off shows as a worker in the sidebar.
 - A heavy run in a worktree (an install, a `node_modules` copy, a build, a type check or the whole test suite) waits for a free run slot, so the machine runs a few at a time: the `no-unslotted-run` hook refuses one typed without `run-slot.sh`, naming the form to use.
   A docker image build waits too, from any folder, one at a time in a builder capped at half the Docker VM's memory, so a build that grows too big fails alone and the live dashboard's database keeps running.
 - No factory session starts unless the machine has room: `scripts/spawn.sh` refuses while the load is at or over the core count, while memory pressure is critical or free memory is under 8%, for a new worker while no run slot can take a run and other runs wait for one, or while the model's usage window is near its cap, naming what it read,
@@ -165,6 +173,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   and the `no-raw-spawn` hook refuses a session not started through it.
   A session started with `--account <email>` runs on that account, and its token shows in no command, message or log.
   A worker started with `--backend glm` runs on Z.ai's GLM model in place of Claude, with its key kept just as safe, and keeps that model when it is resumed; a reviewer or tester always runs on Claude.
+  The first dispatcher started with `--harness codex` runs in Codex in place of Claude Code, and keeps it when it is resumed; a Codex session whose safety guards fail to load is stopped within a minute of starting.
   A GLM session takes tiny mechanical work as well as docs, skill text, research reads and plan drafts, and stays on Playground's own work, an org's work staying on Claude.
   No guarded org's data reaches GLM: spawn.sh starts a session in a checkout of an org `ext.links` guards, or on a brief naming a word of the `glm-refused-sources` list, on Claude alone, and a job that reads an org's data starts its `claude` with GLM's settings cleared.
   For a smaller build task, Claude writes the plan and a GLM worker builds it: the plan names the files the worker may touch, the lead checks that list against the hook's refused paths, and anything outside it goes back before it is edited.
@@ -179,15 +188,16 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   spawn.sh opens every session in herdr: it refuses a `--runtime` other than herdr and a column started beside anything but a herdr pane, and every resume opens in herdr, whatever word its runtime pin held.
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
-  After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused, one that never got its first message included,
+  After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused (that row read again once its resume finds the session gone, so a session you closed stays down), one that never got its first message included,
+  the first dispatcher first and past the busy-machine check,
   on the account its start named, else the login with the most room, the model it started with, an effort other than high and, for a reviewer or tester, the PRs its roster row serves, and skips any still running.
-  It prints one line for each session it brings back, leaves down or cannot bring back, naming the reason, so a session the busy-machine check held back is named with the check's words.
+  It prints one line for each session it brings back, leaves down or cannot bring back, naming the reason, so a session the busy-machine check held back is named with the check's words, and counts as on its way back, not as a failure.
   A factory session can only read from herdr: the `no-raw-spawn` hook refuses any herdr call that types into, closes or speaks for another pane, since herdr lets anything on the machine control it.
   The one exception is a scratch herdr server the session starts for a test, its socket in the session's own temporary folder, which it can drive through that socket alone, but never to start Claude.
   So a herdr session ends through `spawn.sh close <name>`, which closes only the pane spawn.sh opened under that name, never the caller's own, and marks the session ended on the roster.
 - A new session's name reads like `k3m9px-worker`: a new 6-letter id, then what the session is, so no name is ever used twice, and its checkers get ids of their own, as `b7k2mq-reviewer` and `h4n8zt-tester`.
 - Every session starts at high effort; the owner picks a dispatcher's, the Assistant's or the hosted session's (the one the Dashboard runs on the Agent SDK) in the menu left of Send in its Dashboard composer.
-  A lead picks any other session's model by brief-rush's model classes and its effort, high by brief-rush's model rule, with spawn.sh's `--model` and `--effort` at a start or a resume, and the owner's word in the **override** shape outranks both.
+  A lead picks any other session's model and effort by brief-rush's model rule, with spawn.sh's `--model` and `--effort` at a start or a resume, and the owner's word in the **override** shape outranks both.
 - Every session runs on `models.default` (Opus) unless it was started on GLM or with spawn.sh's `--model` naming another of `models.claude`, and every subagent it starts for work runs on Sonnet unless its call names a model,
   from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approved #i492, 17 Oct; on GLM the alias maps to GLM), so a brief or subagent call that needs Opus names `model: opus`.
   The owner picks another model for a dispatcher, the Assistant or the hosted session in the menu left of Send in its Dashboard composer.
@@ -209,7 +219,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - Every Slack link in the Inbox opens in Slack's app: `playground ask` refuses an archives-style link, and an org extension's link script rewrites one from the org's workspace (another workspace's is named on stderr, left as it is).
 - Every mention in the Inbox reads as a name (@colleague, @platform-team): `playground ask` refuses Slack's raw tokens (`<@U...>`, `<!subteam^...>`, `<#C...>`, `<!here>`), and the poster resolves each name to its ID when it posts.
 - An ask that has the owner quit, restart, close or stop something says what still depends on it, since a quit of cmux once left the app not working: `playground ask` refuses it until it carries `checked`, one line from four checks (the ops jobs, the processes and sessions running under the target, and the Dashboard's health), `none` when nothing does.
-- An ask leads with a picture of the point (a diff or an ASCII flow; before and after pictures once the Inbox takes them), then short bullets, then what Approve does.
+- An ask leads with a picture of the point (a diff or an ASCII flow; before and after pictures once the Inbox takes them) and a one-sentence note ([plain-words](./plain-words.md)), then short bullets, then what Approve does.
   `playground ask example` prints a template for each, and `playground ask new` posts a wall of prose, an unlinked PR, ticket or commit, or a too-wide code line with a hint on how to shape it.
 - Each decision is one Inbox item, with its sub-choices inside it, and a changed plan closes its old item before the new one goes up.
 - Every session compacts itself in one 400k window, GLM's included, which spawn.sh sets on every start and resume (Inbox #i706), with a summary shaped by AGENTS.md's Compact Instructions.

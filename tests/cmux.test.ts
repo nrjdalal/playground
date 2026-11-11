@@ -6,6 +6,7 @@ const ROOT = join(import.meta.dir, "..")
 const HISTORY = "dated history"
 const GUARD =
   "one of the three guards against the cmux app (no-raw-spawn's cmux branch, the PATH shim filter, the CMUX_* env strip), or a doc stating it, live while cmux.app is installed (#1478)"
+const RUNNER = "the pre-commit job that runs this test, naming it by its path"
 const PROOF =
   "a doc stating a test that nothing calls, opens or types through the cmux app (herdr.test.ts's pane typing, fixture.test.ts, unstick's run.test.ts, cmux-open.test.ts), live while cmux.app is installed (#1478)"
 
@@ -20,7 +21,9 @@ const ALLOWED: Record<string, [number, string]> = {
   "api/hono/src/plugins/changelog/seed.json": [2, HISTORY],
   "docs/playground/playbook.md": [2, HISTORY],
   "extensions/core/skills/code-review-loop/SKILL.md": [1, HISTORY],
-  "extensions/core/skills/playbook/SESSIONS.md": [2, `${HISTORY}; ${GUARD}`],
+  "extensions/core/skills/playbook/SESSIONS.md": [1, GUARD],
+  "extensions/core/skills/playbook/SPAWN.md": [1, HISTORY],
+  "lefthook.yml": [1, RUNNER],
   "packages/scripts/src/ops-herdr/cli.ts": [1, GUARD],
   "packages/scripts/src/ops-herdr/herdr.ts": [1, GUARD],
   "packages/scripts/src/parity/replay/run.ts": [1, GUARD],

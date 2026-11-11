@@ -7,6 +7,7 @@ import { tmpdir } from "os";
 import { join as join5, resolve as resolve4, sep as sep2 } from "path";
 
 // scripts/hooks/shell.ts
+import { AsyncLocalStorage } from "async_hooks";
 import { homedir } from "os";
 import { basename, dirname, isAbsolute, resolve } from "path";
 var UNKNOWN = "\x00";
@@ -14,22 +15,25 @@ var READ = "\x01";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
-var deadline;
-var steps = 0;
-function tick() {
-  if (++steps % 1024 !== 0 || deadline === undefined)
-    return;
-  if (performance.now() > deadline)
+var deadlines = new AsyncLocalStorage;
+function pastDeadline() {
+  const deadline = deadlines.getStore();
+  if (deadline !== undefined && performance.now() > deadline)
     throw new RangeError("past the hook's time");
 }
+var steps = 0;
+function tick() {
+  if (++steps % 1024 === 0)
+    pastDeadline();
+}
 function lexScript(value, env) {
-  if (deadline !== undefined && value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return lex(value, env.known);
 }
 function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
-  if (deadline !== undefined && script.length + count * value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
@@ -1698,7 +1702,7 @@ var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
   const scripts = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")];
-  if (deadline !== undefined && scripts.some((s) => s.unknown === LARGE))
+  if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;
 }
@@ -7146,8 +7150,43 @@ function mainCheckout(dir) {
   } catch {}
   return dir;
 }
+function real(path) {
+  const found = resolved(path);
+  if (found !== undefined || !isAbsolute3(path))
+    return found ?? nearest(path);
+  const parts = normalize(path).split(sep).filter(Boolean);
+  let low = 0;
+  let high = parts.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (resolved(sep + parts.slice(0, mid).join(sep)) === undefined)
+      high = mid - 1;
+    else
+      low = mid;
+  }
+  return join4(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
+}
+var resolved = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return;
+  }
+};
+function nearest(path) {
+  const rest = [];
+  for (let dir = path;; dir = dirname2(dir)) {
+    const found = resolved(dir);
+    if (found !== undefined)
+      return join4(found, ...rest.reverse());
+    if (dir === dirname2(dir))
+      return path;
+    rest.push(basename2(dir));
+  }
+}
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
 var RUNNERS = new Set(["npx"]);
+var X = { quoted: false, value: "x" };
 var TOOLS = new Set(["lefthook", "turbo"]);
 function cwdFlag(args, env) {
   let cwd = env.cwd;
@@ -7162,27 +7201,41 @@ function cwdFlag(args, env) {
 }
 function bunCall(args, env) {
   let cwd = env.cwd;
+  let xCwd;
+  let chained = env.cwd;
   let filtered = false;
+  let sub = -1;
   const words = [];
   let k = 0;
   for (;k < args.length; k++) {
     const v = args[k].value;
-    if (v === "--cwd")
-      cwd = args[k + 1] && pathOf(args[++k], env);
-    else if (v.startsWith("--cwd="))
-      cwd = pathOf({ ...args[k], value: v.slice(6) }, env);
-    else if (v === "--filter" || v === "-F") {
+    const value = v === "--cwd" ? args[k + 1] : v.startsWith("--cwd=") ? { ...args[k], value: v.slice(6) } : undefined;
+    if (v === "--cwd" || v.startsWith("--cwd=")) {
+      if (v === "--cwd")
+        k++;
+      cwd = value && pathOf(value, env);
+      chained = value && pathOf(value, { ...env, cwd: chained });
+      if (words[0] === "x")
+        xCwd = { dir: cwd };
+    } else if (v === "--filter" || v === "-F") {
       filtered = true;
       k++;
     } else if (v.startsWith("--filter="))
       filtered = true;
+    else if (words[0] === "x" && RUNNER_TAKES.has(v))
+      k++;
     else if (!v.startsWith("-")) {
-      words.push(v);
+      if (v === "x" && words.length === 1 && words[0] === "x" && args[sub - 1]?.value.startsWith("-")) {
+        sub = k;
+        continue;
+      }
+      if (words.push(v) === 1)
+        sub = k;
       if (v !== "run" && v !== "x")
         break;
     }
   }
-  return { at: k, cwd, filtered, words };
+  return { at: k, chained, cwd, filtered, sub, words, xCwd };
 }
 var GIT_MOVES = new Set([
   "am",
@@ -7203,24 +7256,70 @@ var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
 function turboWords(name, args, env) {
   if (name === "turbo")
     return args;
-  if (RUNNERS.has(name) || name === "bunx") {
-    const at = runnerTarget(args);
-    return isTurbo(args[at]?.value) ? args.slice(at + 1) : undefined;
-  }
+  if (RUNNERS.has(name) || name === "bunx")
+    return runnerTurbo(args);
   if (name !== "bun")
     return;
-  const { at, words } = bunCall(args, env);
-  const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0];
+  const { at, sub, words } = bunCall(args, env);
+  if (words[0] === "x")
+    return runnerTurbo(args.slice(sub + 1));
+  const target = words[0] === "run" ? words[1] : words[0];
   return isTurbo(target) ? args.slice(at + 1) : undefined;
 }
-var RUNNER_TAKES = new Set(["--package", "-p"]);
+function runnerTurbo(args) {
+  const at = runnerTarget(args);
+  if (isTurbo(args[at]?.value))
+    return args.slice(at + 1);
+  return packagedTools(args).includes("turbo") ? args.slice(at) : undefined;
+}
+var RUNNER_TAKES = new Set([
+  "--ca",
+  "--cafile",
+  "--cwd",
+  "--env-file",
+  "--minimum-release-age",
+  "--package",
+  "--registry",
+  "-p"
+]);
+function packagedTools(args) {
+  const tools = [];
+  for (let k = 0;k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value;
+    if (v === "-p" || v === "--package")
+      tools.push(toolName(args[++k]?.value));
+    else if (v.startsWith("--package=") || v.startsWith("-p="))
+      tools.push(toolName(v.slice(v.indexOf("=") + 1)));
+    else if (RUNNER_TAKES.has(v))
+      k++;
+  }
+  return tools;
+}
+function runnerFolders(name, args, env, tool) {
+  if (name === "bunx")
+    return runnerFolders("bun", [X, ...args], env, tool);
+  if (name !== "bun")
+    return;
+  const { chained, words, xCwd } = bunCall(args, env);
+  if (words[0] !== "x")
+    return;
+  const folders = [cwdFlag(tool, { ...env, cwd: chained })];
+  return xCwd ? [...folders, xCwd.dir] : folders;
+}
 function runnerTarget(args) {
   let k = 0;
   while (k < args.length && args[k].value.startsWith("-"))
     k += RUNNER_TAKES.has(args[k].value) ? 2 : 1;
   return k;
 }
-var isTurbo = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, "")) === "turbo";
+var toolName = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""));
+var isTurbo = (word) => toolName(word) === "turbo";
+var withChained = (also, chained) => [...also ?? [], ...chained === undefined ? [undefined] : []];
+var ranIn = (dir, also) => [
+  dir,
+  ...also ?? []
+];
+var unreadFolder = (also) => also?.includes(undefined) ?? false;
 var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
 var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 if (false) {}
@@ -7347,7 +7446,6 @@ Fix the message by the gh-commit skill's Commit step, then commit again.`;
 var anywhere = (what, command) => `no-unslotted-run hook refuses ${what} on a line that names more folders than the hook carries, since it cannot rule out a worktree: every heavy run goes through run-slot (playbook's **slots**). Run it as ~/.playground/ops/run-slot.sh <your name> -- ${command}, or as a line of its own after a cd to a literal path.`;
 var BUN_SCRIPTS2 = new Set(["build", "check-types", "test"]);
 var RUNNERS2 = new Set(["bunx", "npx"]);
-var RUNNER_TAKES2 = new Set(["--package", "-p"]);
 var TEST_TAKES = new Set([
   "--conditions",
   "--console-depth",
@@ -7397,10 +7495,18 @@ var TEST_TAKES = new Set([
 ]);
 var TURBO_TASKS = new Set(["build", "check-types", "lint", "test"]);
 var TURBO_LIGHT = /^(?:--help|-h|--version|--dry(?:-run)?(?:=.*)?)$/;
+var lineWords = (values) => values.flatMap((v) => lex(v).commands.flatMap((c) => c.words.map((w) => w.value)));
+var nextBuild = (values) => lineWords(values).some((v, k, all) => program(v) === "next" && all[k + 1] === "build");
+var nextDir = (args, env) => {
+  const dir = args.find((a) => !a.value.startsWith("-"));
+  return dir ? [pathOf(dir, env)] : [];
+};
 function turboTask(words) {
-  if (words.some((w) => TURBO_LIGHT.test(w.value)))
+  const values = words.map((w) => w.value);
+  const beside = values[0] !== undefined && !values[0].startsWith("-") && values[0] !== "run" && !TURBO_TASKS.has(values[0]);
+  if (!beside && values.some((v) => TURBO_LIGHT.test(v)))
     return;
-  const tasks = words.map((w) => w.value).filter((v) => !v.startsWith("-"));
+  const tasks = (beside ? lineWords(values) : values).filter((v) => v !== "" && !v.startsWith("-"));
   return (tasks[0] === "run" ? tasks.slice(1) : tasks).find((t) => TURBO_TASKS.has(t));
 }
 var recursive2 = (args) => args.some((a) => /^-[a-zA-Z]*[Rra]/.test(a.value) || ["--archive", "--recursive"].includes(a.value));
@@ -7421,19 +7527,36 @@ function heavy(name, args, env) {
     return;
   }
   if (name === "next")
-    return args[0]?.value === "build" ? { dir: env.cwd, what: "next build" } : undefined;
+    return args[0]?.value === "build" ? { also: nextDir(args.slice(1), env), dir: env.cwd, what: "next build" } : undefined;
   const turbo = turboWords(name, args, env);
   if (turbo) {
     const task = turboTask(turbo);
-    return task ? { dir: cwdFlag(turbo, env), what: `turbo run ${task}` } : undefined;
+    return task ? {
+      also: runnerFolders(name, args, env, turbo),
+      dir: cwdFlag(turbo, env),
+      what: `turbo run ${task}`
+    } : undefined;
   }
   if (RUNNERS2.has(name)) {
-    const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES2.has(args[k - 1]?.value ?? ""));
-    return program(words[0]?.value ?? "") === "next" && words[1]?.value === "build" ? { dir: env.cwd, what: `${name} next build` } : undefined;
+    const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES.has(args[k - 1]?.value ?? ""));
+    const values = words.map((w) => w.value);
+    const base = name === "bunx" ? bunCall([X, ...args], env).chained : env.cwd;
+    if (program(values[0] ?? "") === "next" && values[1] === "build")
+      return {
+        also: [
+          ...runnerFolders(name, args, env, []) ?? [],
+          ...nextDir(words.slice(2), { ...env, cwd: base })
+        ],
+        dir: env.cwd,
+        what: `${name} next build`
+      };
+    if (packagedTools(args).includes("next") && nextBuild(values))
+      return { also: runnerFolders(name, args, env, []), dir: env.cwd, what: `${name} next build` };
+    return name === "bunx" ? heavy("bun", [X, ...args], env) : undefined;
   }
   if (name !== "bun")
     return;
-  const { at, cwd, filtered, words } = bunCall(args, env);
+  const { at, chained, cwd, filtered, sub, words } = bunCall(args, env);
   const rest = args.slice(at + 1);
   if (words[0] === "install" || words[0] === "i") {
     if (rest.some((a) => ["--dry-run", "--help", "-h"].includes(a.value)))
@@ -7441,7 +7564,25 @@ function heavy(name, args, env) {
     return { dir: cwdFlag(rest, { ...env, cwd }), what: "bun install" };
   }
   if (words[0] === "x" && program(words[1] ?? "") === "next" && rest[0]?.value === "build")
-    return { dir: cwd, what: "bun x next build" };
+    return {
+      also: [
+        ...runnerFolders(name, args, env, []) ?? [],
+        ...nextDir(rest.slice(1), { ...env, cwd: chained })
+      ],
+      dir: cwd,
+      what: "bun x next build"
+    };
+  if (words[0] === "x" && packagedTools(args.slice(sub + 1)).includes("next") && nextBuild([words[1] ?? "", ...rest.map((a) => a.value)]))
+    return { also: runnerFolders(name, args, env, []), dir: cwd, what: "bun x next build" };
+  if (words[0] === "x" && words[1] && args[at]?.value === words[1]) {
+    const ran = heavy(toolName(words[1]), rest, {
+      ...env,
+      cwd: chained
+    });
+    if (ran) {
+      return { ...ran, also: withChained(ran.also, chained), what: `bun x ${ran.what}` };
+    }
+  }
   const testFile = words[0] === "run" && words[1] === "test:file";
   if (words[0] === "test" || testFile) {
     if (rest.some((a) => a.value === "--help" || a.value === "-h"))
@@ -7473,8 +7614,11 @@ function inspect(raw, environment, main) {
   const command = toolInput?.command;
   if (typeof command !== "string")
     return;
-  const worktrees = join5(main, ".claude", "worktrees") + sep2;
-  const inWorktree = (dir) => dir !== undefined && resolve4(dir).startsWith(worktrees);
+  const worktrees = [
+    join5(main, ".claude", "worktrees"),
+    real(join5(main, ".claude", "worktrees"))
+  ].map((w) => w + sep2);
+  const inWorktree = (dir) => dir !== undefined && [resolve4(dir), real(resolve4(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
   const directory = typeof cwd === "string" ? cwd : undefined;
   let line = [];
   let wrote = false;
@@ -7515,12 +7659,12 @@ function inspect(raw, environment, main) {
       const line = words();
       if (found?.anywhere && line !== undefined)
         return refuseDocker(found.what, "", line, found.fix);
-      if (found && line !== undefined && (found.dir === undefined || inWorktree(found.dir)))
+      if (found && line !== undefined && ranIn(found.dir, found.also).some((dir) => dir === undefined || inWorktree(dir)))
         return anywhere(found.what, line);
     }
     for (const here of places(env)) {
       const found = heavy(name, args, here);
-      if (!found || !(found.anywhere || inWorktree(found.dir)))
+      if (!found || !(found.anywhere || unreadFolder(found.also) || ranIn(found.dir, found.also).some(inWorktree)))
         continue;
       const line = words();
       if (line === undefined)

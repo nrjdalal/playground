@@ -883,11 +883,11 @@ RECORD_ACCOUNT = (re.compile(r"^# account: (\S+)", re.M), re.compile(r"--account
 def session_account(name):
     """The account the named session runs on: the account line of its spawn.sh resume record, a login the usage gate picked included,
     else the record's --account, "glm" for a session spawn.sh pinned to
-    GLM (its backends/<name>), which no usage file reads, else the machine's own login: usage.json's storedLogin, else usage.json's
+    GLM (its backends/<name>, "glm" or "claude-code glm", packages/settings' readPin), which no usage file reads, else the machine's own login: usage.json's storedLogin, else usage.json's
     account."""
     try:
         with open(os.path.join(LW, "backends", name)) as f:
-            if f.read().strip() == "glm":
+            if f.read().split() in (["glm"], ["claude-code", "glm"]):
                 return "glm"
     except OSError:
         pass

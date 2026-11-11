@@ -117,8 +117,7 @@ export const FILE_TOOLS: Record<string, string> = {
   Write: "file_path",
 }
 
-const INSTEAD =
-  "the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under .claude/worktrees/ (git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does."
+const INSTEAD = `the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under the main checkout's .claude/worktrees/, made by absolute path so it nests in no other worktree (git worktree add --no-track "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.`
 
 const refuse = (what: string, fix = INSTEAD) => `no-main-checkout hook refuses ${what}: ${fix}`
 
@@ -137,7 +136,7 @@ const fixFor = (sure: boolean, own = INSTEAD) => (sure ? own : UNKNOWN_FIX)
 const BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"])
 const RUNNERS = new Set(["npx"])
 // bunx is bun x, read as one
-const X: Word = { quoted: false, value: "x" }
+export const X: Word = { quoted: false, value: "x" }
 const TOOLS = new Set(["lefthook", "turbo"])
 const DUPLICATE = /^(?:\d+|-)$/
 // The one turbo call the main checkout runs, after a pull that changes packages/ (the release skill's step 5): its CLI imports their dist
@@ -172,25 +171,59 @@ export function cwdFlag(args: Word[], env: Env): string | undefined {
 export function bunCall(
   args: Word[],
   env: Env,
-): { at: number; cwd: string | undefined; filtered: boolean; words: string[] } {
+): {
+  at: number
+  chained: string | undefined
+  cwd: string | undefined
+  filtered: boolean
+  sub: number
+  words: string[]
+  xCwd?: { dir: string | undefined }
+} {
   let cwd = env.cwd
+  // bun x's own last --cwd, read from the shell's folder
+  let xCwd: { dir: string | undefined } | undefined
+  // the folder bun runs in: each --cwd read from the one before, as bun does
+  let chained = env.cwd
   let filtered = false
+  let sub = -1
   const words: string[] = []
   let k = 0
   for (; k < args.length; k++) {
     const v = args[k].value
-    if (v === "--cwd") cwd = args[k + 1] && pathOf(args[++k], env)
-    else if (v.startsWith("--cwd=")) cwd = pathOf({ ...args[k], value: v.slice(6) }, env)
-    else if (v === "--filter" || v === "-F") {
+    const value =
+      v === "--cwd"
+        ? args[k + 1]
+        : v.startsWith("--cwd=")
+          ? { ...args[k], value: v.slice(6) }
+          : undefined
+    if (v === "--cwd" || v.startsWith("--cwd=")) {
+      if (v === "--cwd") k++
+      cwd = value && pathOf(value, env)
+      chained = value && pathOf(value, { ...env, cwd: chained })
+      if (words[0] === "x") xCwd = { dir: cwd }
+    } else if (v === "--filter" || v === "-F") {
       filtered = true
       k++
     } else if (v.startsWith("--filter=")) filtered = true
+    // bun x's options that take a value (-p, --registry), so the word after one is the tool
+    else if (words[0] === "x" && RUNNER_TAKES.has(v)) k++
     else if (!v.startsWith("-")) {
-      words.push(v)
+      // when bun reads an option's value as its subcommand, it drops the next word naming that subcommand, so the tool is the word after it
+      if (
+        v === "x" &&
+        words.length === 1 &&
+        words[0] === "x" &&
+        args[sub - 1]?.value.startsWith("-")
+      ) {
+        sub = k
+        continue
+      }
+      if (words.push(v) === 1) sub = k
       if (v !== "run" && v !== "x") break
     }
   }
-  return { at: k, cwd, filtered, words }
+  return { at: k, chained, cwd, filtered, sub, words, xCwd }
 }
 
 // git's subcommand and its words, and the tree it acts on: the checkout a --git-dir of `<checkout>/.git` names, whose HEAD and index move, else its --work-tree, else the folder its -C options name (each relative to the one before); each counts only before the subcommand.
@@ -244,8 +277,7 @@ const GIT_MOVES = new Set([
 const APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"])
 // The release skill's step 5 moves the main checkout by this fast-forward alone.
 const STEP_FIVE = /^(?:-q |--quiet )?--ff-only (?:-q |--quiet )?origin\/main$/
-const GIT_FIX =
-  "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made under .claude/worktrees/ by git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary."
+const GIT_FIX = `it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made by absolute path under the main checkout's .claude/worktrees/, so it nests in no other worktree, by git worktree add --no-track "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" -b <branch> origin/canary.`
 
 const LIVE_FIX =
   "it moves the live Dashboard's checkout, which serves the owner's Dashboard, and only the runner that holds it and the ops lead change it. Ask Ops: its supervisor rolls the checkout onto each canary head, and a change it needs goes through a PR into canary."
@@ -301,21 +333,63 @@ function gitMoves(sub: string, rest: string[]): boolean {
   return false
 }
 
-// turbo's own words, however it is called: by name or path, through npx, or through bun (runs reads bunx as bun x).
+// turbo's own words, however it is called: by name or path, through npx, bunx or bun x (runs reads bunx as bun x), as their tool or the package their -p names.
 export function turboWords(name: string, args: Word[], env: Env): Word[] | undefined {
   if (name === "turbo") return args
-  if (RUNNERS.has(name) || name === "bunx") {
-    const at = runnerTarget(args)
-    return isTurbo(args[at]?.value) ? args.slice(at + 1) : undefined
-  }
+  if (RUNNERS.has(name) || name === "bunx") return runnerTurbo(args)
   if (name !== "bun") return
-  const { at, words } = bunCall(args, env)
-  const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0]
+  const { at, sub, words } = bunCall(args, env)
+  if (words[0] === "x") return runnerTurbo(args.slice(sub + 1))
+  const target = words[0] === "run" ? words[1] : words[0]
   return isTurbo(target) ? args.slice(at + 1) : undefined
 }
 
-// npx's and bunx's options whose next word is their value
-const RUNNER_TAKES = new Set(["--package", "-p"])
+// A package runner's turbo words: after turbo as its tool, or from its tool on when its -p names turbo, since the runner then runs whatever it names with turbo on PATH.
+function runnerTurbo(args: Word[]): Word[] | undefined {
+  const at = runnerTarget(args)
+  if (isTurbo(args[at]?.value)) return args.slice(at + 1)
+  return packagedTools(args).includes("turbo") ? args.slice(at) : undefined
+}
+
+// npx's and bunx's options whose next word is their value (bun x --help, npx's -p)
+export const RUNNER_TAKES = new Set([
+  "--ca",
+  "--cafile",
+  "--cwd",
+  "--env-file",
+  "--minimum-release-age",
+  "--package",
+  "--registry",
+  "-p",
+])
+
+// The tools a package runner's -p or --package names among its options: it puts that package's programs on PATH and may run any program there (a shell, env), so naming the tool runs it.
+export function packagedTools(args: Word[]): string[] {
+  const tools: string[] = []
+  for (let k = 0; k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value
+    if (v === "-p" || v === "--package") tools.push(toolName(args[++k]?.value))
+    else if (v.startsWith("--package=") || v.startsWith("-p="))
+      tools.push(toolName(v.slice(v.indexOf("=") + 1)))
+    else if (RUNNER_TAKES.has(v)) k++
+  }
+  return tools
+}
+
+// The folders bunx or bun x may run its tool in, judged beside the one runs() reads: the folder bun runs it in (each --cwd among bun's own options and bun x's read from the one before, as only x chains them, then the tool's own --cwd from there), and bun x's last --cwd read from the shell's folder; an entry is undefined when a path cannot be read, and the call is undefined for any other program or subcommand.
+export function runnerFolders(
+  name: string,
+  args: Word[],
+  env: Env,
+  tool: Word[],
+): (string | undefined)[] | undefined {
+  if (name === "bunx") return runnerFolders("bun", [X, ...args], env, tool)
+  if (name !== "bun") return
+  const { chained, words, xCwd } = bunCall(args, env)
+  if (words[0] !== "x") return
+  const folders = [cwdFlag(tool, { ...env, cwd: chained })]
+  return xCwd ? [...folders, xCwd.dir] : folders
+}
 
 // The word a package runner runs, past its options and their values (-y, --yes, -p turbo).
 function runnerTarget(args: Word[]): number {
@@ -325,9 +399,10 @@ function runnerTarget(args: Word[]): number {
   return k
 }
 
-// turbo by name or path, or as a package at a version (turbo@latest)
-const isTurbo = (word: string | undefined) =>
-  program((word ?? "").replace(/(?<=.)@[^/]*$/, "")) === "turbo"
+// A tool by name or path, or as a package at a version (turbo@latest)
+export const toolName = (word: string | undefined) =>
+  program((word ?? "").replace(/(?<=.)@[^/]*$/, ""))
+const isTurbo = (word: string | undefined) => toolName(word) === "turbo"
 
 // Whether the build's settings reach turbo: from its own assignments or env wrapper, an export before it, or the session's environment.
 function validationOff(local: Map<string, Text>, env: Env): boolean {
@@ -336,26 +411,47 @@ function validationOff(local: Map<string, Text>, env: Env): boolean {
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true"
 }
 
+// The folders beside a program bun x runs: its own, and an unread one when the hook cannot read the folder bun's --cwd options chain to
+export const withChained = (
+  also: (string | undefined)[] | undefined,
+  chained: string | undefined,
+) => [...(also ?? []), ...(chained === undefined ? [undefined] : [])]
+
+// Every folder a hit runs in: its own, and those runnerFolders adds beside it.
+export const ranIn = (dir: string | undefined, also?: (string | undefined)[]) => [
+  dir,
+  ...(also ?? []),
+]
+
+// Whether a folder runnerFolders adds is one the hook cannot read, which could be any folder, so both hooks refuse it on every branch
+export const unreadFolder = (also?: (string | undefined)[]) => also?.includes(undefined) ?? false
+
 // What of the command would build, test, run lefthook or turbo, commit, or move the checkout with git, or undefined; fix, when set, replaces INSTEAD.
 function runs(
   name: string,
   args: Word[],
   local: Map<string, Text>,
   env: Env,
-): { cwd: string | undefined; fix?: string; what: string } | undefined {
+):
+  | { also?: (string | undefined)[]; cwd: string | undefined; fix?: string; what: string }
+  | undefined {
   if (name === "bunx") return runs("bun", [X, ...args], local, env)
   const turbo = turboWords(name, args, env)
   if (turbo && packagesBuild(turbo)) {
     if (validationOff(local, env)) return
     return {
+      also: runnerFolders(name, args, env, turbo),
       cwd: cwdFlag(turbo, env),
       fix: BUILD_FIX,
       what: "the packages build without NODE_ENV and SKIP_ENV_VALIDATION=true",
     }
   }
   if (TOOLS.has(name)) return { cwd: cwdFlag(args, env), what: name }
-  if (RUNNERS.has(name) && TOOLS.has(program(args[0]?.value ?? ""))) {
-    return { cwd: cwdFlag(args, env), what: `${name} ${program(args[0].value)}` }
+  if (RUNNERS.has(name)) {
+    const tool = [toolName(args[runnerTarget(args)]?.value), ...packagedTools(args)].find((t) =>
+      TOOLS.has(t),
+    )
+    if (tool) return { cwd: cwdFlag(args, env), what: `${name} ${tool}` }
   }
   if (name === "git") {
     const { cwd, rest, sub } = gitCall(args, env)
@@ -364,12 +460,15 @@ function runs(
     return sub && gitMoves(sub, rest) ? { cwd, fix: GIT_FIX, what: `git ${sub}` } : undefined
   }
   if (name !== "bun") return
-  const { at, cwd, filtered, words } = bunCall(args, env)
+  const { at, chained, cwd, filtered, sub, words } = bunCall(args, env)
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0]
-  // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name; a tool reads its own --cwd too, and bun x runs in the shell's folder whatever bun's --cwd says
-  if (TOOLS.has(program(target ?? ""))) {
+  const packaged = words[0] === "x" ? packagedTools(args.slice(sub + 1)) : []
+  const tool = [toolName(target), ...packaged].find((t) => TOOLS.has(t))
+  // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name; a tool reads its own --cwd too, and bun x is judged in the shell's folder and in every folder runnerFolders names (also)
+  if (tool) {
     const dir = words[0] === "x" ? env.cwd : cwd
     return {
+      also: runnerFolders(name, args, env, args.slice(at + 1)),
       cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: dir }),
       what: `bun ${words.join(" ")}`,
     }
@@ -380,6 +479,17 @@ function runs(
   // bare, a script name runs the script, but build is bun's own bundler unless a --filter names the packages whose script it runs
   if (target && BUN_SCRIPTS.has(target) && (words[0] === "run" || filtered || target !== "build"))
     return { cwd, what: `bun ${words.join(" ")}` }
+  // bun x runs any program in the folder its --cwd options chain to, so that program is read as the shell would read it there
+  if (words[0] === "x" && target && args[at]?.value === target) {
+    const ran = runs(toolName(target), args.slice(at + 1), local, { ...env, cwd: chained })
+    return (
+      ran && {
+        ...ran,
+        also: withChained(ran.also, chained),
+        what: `bun x ${ran.what}`,
+      }
+    )
+  }
 }
 
 // How sed and perl read each flag letter that is more than a switch: edit (in place, -i and BSD sed's -I), script (carries the script) and value, each holding the rest of its word, else the next word; rest, holding the rest of its word alone; digits, holding the octal or x-hex digits after it, then reading on
@@ -587,7 +697,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const blind: Env = { ...env, cwd: undefined }
       const ran = runs(name, args, local, blind)
       // a folder the command names itself is judged by that path, as everywhere else; one the shell gives it could be the main checkout
-      if (ran && (ran.cwd === undefined || inMain(ran.cwd))) return refuse(ran.what, ANYWHERE_FIX)
+      if (ran && ranIn(ran.cwd, ran.also).some((dir) => dir === undefined || inMain(dir)))
+        return refuse(ran.what, ANYWHERE_FIX)
       const blindWrite = writeTargets(cmd, name, args).find((t) => {
         const path = pathOf(t, blind)
         return path === undefined || inMain(path)
@@ -617,7 +728,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const script = await fedScript(cmd, here, sure, inMain, visit)
       if (script) return script
       const ran = runs(name, args, local, here)
-      if (ran && inMain(ran.cwd)) return refuse(ran.what, fixFor(sure, ran.fix))
+      if (ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)))
+        return refuse(ran.what, fixFor(sure, ran.fix))
       const moved =
         name === "git" ? await liveRefusal(args, here, inLive, fixFor(sure, LIVE_FIX)) : undefined
       if (moved) return moved

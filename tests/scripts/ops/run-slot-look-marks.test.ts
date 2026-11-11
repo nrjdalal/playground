@@ -10,7 +10,7 @@ import {
 } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, WAITING, machine } from "./run-slot-fake"
+import { SCRIPT, WAITING, machine, stop } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang: 60s, as run-slot.test.ts
 setDefaultTimeout(60_000)
@@ -72,5 +72,18 @@ describe("a look's marks are taken before its reads", () => {
     writeFileSync(gate, "")
     expect(await waiter.p.exited).toBe(0)
     expect(readFileSync(out, "utf8")).toBe(`worker-m\n--\ntouch\n${waiter.marker}\n`)
+  })
+
+  // #1378: a waiter a SIGKILL ended leaves its look mark, since free() never runs; a look sweeps a mark whose pid has ended
+  test("a look sweeps a look mark whose pid has ended", async () => {
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
+    const stale = join(m.ops, ".run-slot-ref-99999999")
+    writeFileSync(stale, "")
+    m.hold("run-slot", 3, "big")
+    m.hold("run-slot-2", 3, "big")
+    const run = m.start("worker-big", { RUN_SLOT_SIZE: "big" })
+    expect(await run.saw(WAITING)).toBe(true)
+    expect(existsSync(stale)).toBe(false)
+    await stop(run.p)
   })
 })

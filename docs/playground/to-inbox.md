@@ -1,16 +1,16 @@
 ## What it does
 
 `to-inbox` is how a factory session writes every message to the owner so the owner reads it at a glance: an Inbox item, a dispatcher's reply in chat, or a Slack or Yard DM.
-Each leads with a picture of the point, then a few bullets of plain words, and a card ends on what Approve does.
+Each leads with a picture of the point and a short note, then a few bullets in [plain words](./plain-words.md), and a card ends on what Approve does.
 The **talk** rule makes this the one shape for every word to the owner.
 It holds the words and pictures alone; the item's shape, its kinds and the `playground ask` commands stay in [.agents/dashboard/asks.md](../../.agents/dashboard/asks.md), which it points at rather than copies.
 
-The defining constraint is the card itself: it sits in the aside's narrow column and is read in seconds, so every drawing keeps within the card's width (`ASK_CODE_COLUMNS`), every sentence says one thing in ASD-STE100 Simplified Technical English, and a UI to be built goes in as a sketch, or as a page to click, never a paragraph about it.
+The defining constraint is the card itself: it sits in the aside's narrow column and is read in seconds, so every drawing keeps within the card's width (`ASK_CODE_COLUMNS`), every sentence passes [plain-words](./plain-words.md)' two rules, and a UI to be built goes in as a sketch, or as a page to click, never a paragraph about it.
 
 ## When to reach for it
 
 Agent-fired: a session loads it before every `playground ask new` and before it writes to the owner, and the owner can name it too.
-A message outside the Inbox takes the same picture, bullets, plain words, callout and fake-data check, and leaves out the card's choices and its post; a relay in chat, the dispatcher passing a session's message on, is one of them.
+A message outside the Inbox takes the same picture and note, bullets, plain words, callout and fake-data check, and leaves out the card's choices and its post; a relay in chat, the dispatcher passing a session's message on, is one of them.
 In chat the picture is a fenced block, since a table or a list of three or more numbered steps goes in an Inbox card, unless every row or step names an issue or PR.
 
 | You are posting                                               | What it leads with                                                      |
@@ -38,6 +38,7 @@ Until then an update stays editable, unless you dismiss it, so a card the sessio
 
 ```
 picture   diff, ASCII, shots, page
+note      one sentence on the point
 bullets   🐛 ✅ ⚠️ ↩️ 📨 🕐 ⏱️ 💰, one fact each
 links     each PR, ticket and page it names
 callout   one, only for what must not be missed
@@ -51,7 +52,7 @@ A whole patch can ride along as a file: a `.diff` or `.patch` attachment (`git d
 
 ## It's working if
 
-- You can say what an item asks, and what Approve does, before you read its second line.
+- You can say what an item asks from its picture and note, and what Approve does, before you read its bullets.
 - Every PR, ticket, commit, thread, doc and page a card names opens from the card in one click.
 - No drawing on a card shrinks or scrolls sideways.
 - An item from any session reads like one from any other.

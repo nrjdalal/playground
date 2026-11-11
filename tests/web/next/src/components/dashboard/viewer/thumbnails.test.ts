@@ -8,6 +8,7 @@ import {
   AttachmentThumbs,
   focusTarget,
 } from "../../../../../../../web/next/src/components/dashboard/viewer/thumbnails"
+import { attachmentQuery } from "../../../../../../../web/next/src/components/dashboard/viewer/use-attachment-url"
 import {
   saveItem,
   STEP_OF_KEY,
@@ -23,7 +24,10 @@ const { renderToStaticMarkup } = (await import(Bun.resolveSync("react-dom/server
 }
 const { QueryClient, QueryClientProvider } = (await import(
   Bun.resolveSync("@tanstack/react-query", web)
-)) as { QueryClient: new () => unknown; QueryClientProvider: unknown }
+)) as {
+  QueryClient: new (options?: unknown) => { prefetchQuery: (options: unknown) => Promise<void> }
+  QueryClientProvider: unknown
+}
 
 const items = (n: number, kind: InboxAttachment["kind"] = "image"): InboxAttachment[] =>
   Array.from({ length: n }, (_, i) => ({
@@ -158,15 +162,62 @@ describe("a tile shows its focus with no ring", () => {
   })
 })
 
+const PAGE: ViewerItem = {
+  id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000b1.html",
+  kind: "html",
+  name: "demo.html",
+}
+
+// the names of the buttons in the order they render
+const labels = (html: string) => [...html.matchAll(/aria-label="([^"]+)"/g)].map((m) => m[1])
+
 // a lone HTML page shows live in its card, as a demo
 describe("a lone HTML page", () => {
-  test("fills its card at full width, with a full-screen button in its corner, not a tile", () => {
-    const html = render([
-      { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000b1.html", kind: "html", name: "demo.html" },
-    ])
-    expect(html).toContain('aria-label="Open demo.html full screen"')
+  test("fills its card at full width, not a tile", () => {
+    const html = render([PAGE])
     expect(html).toContain("h-80")
     expect(html).not.toContain("grid-cols-4")
+  })
+
+  // #1716: the owner found no way to open a page big or in a tab
+  test("its bar holds Download, Open in new tab and Full screen, in that order, with no side panel outside the aside", () => {
+    expect(labels(render([PAGE]))).toEqual([
+      "Attached files",
+      "Download",
+      "Open in new tab",
+      "Full screen",
+    ])
+  })
+
+  test("in the aside its bar adds Open in side panel before Full screen", () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(AttachmentThumbs, { items: [PAGE], onOpen: () => {}, onSidePanel: () => {} }),
+      ),
+    )
+    expect(labels(html)).toEqual([
+      "Attached files",
+      "Download",
+      "Open in new tab",
+      "Open in side panel",
+      "Full screen",
+    ])
+  })
+
+  test("each of its squares names itself in a tooltip, and Full screen opens the viewer, never an aside tab", async () => {
+    const source = await Bun.file(
+      join(web, "src/components/dashboard/viewer/thumbnails.tsx"),
+    ).text()
+    expect(source).toContain("onFullScreen={view}")
+    expect(source).toContain("onFullScreen={() => (onFullScreen ?? onOpen)(0)}")
+    const viewer = await Bun.file(join(web, "src/components/dashboard/viewer/viewer.tsx")).text()
+    expect(viewer).toContain(
+      'content={state === "failed" ? "Download failed, try again" : "Download"}',
+    )
+    for (const words of ["Open in new tab", "Open in side panel", "Full screen"])
+      expect(viewer).toContain(`content="${words}" description={null}>`)
   })
 
   test("runs the page through the viewer's own HTML view, so a link in it opens and a page that leaves is put back", async () => {
@@ -180,11 +231,8 @@ describe("a lone HTML page", () => {
   })
 
   test("among other files stays a tile in the grid", () => {
-    const html = render([
-      { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000b1.html", kind: "html", name: "demo.html" },
-      ...items(1),
-    ])
-    expect(html).not.toContain("full screen")
+    const html = render([PAGE, ...items(1)])
+    expect(html).not.toContain("Full screen")
     expect(html).toContain("grid-cols-4")
   })
 })
@@ -255,4 +303,79 @@ describe("a tile's Download", () => {
       { download: "Weekly plan, updated draft.png", href: expect.stringMatching(/^blob:/) },
     ])
   })
+})
+
+// a file whose fetch fails says so in its place: a 404 reads Missing, as before, and any other failure reads Did not load, where a 500 or a lost connection once left the card blank (#1615)
+describe("a file whose fetch fails", () => {
+  const LOADS = {
+    "a 200": async () => new Response(new Blob(["x"]), { status: 200 }),
+    "a 404": async () => new Response("", { status: 404 }),
+    "a 500": async () => new Response("", { status: 500 }),
+    "a network error": async () => {
+      throw new TypeError("Failed to fetch")
+    },
+  }
+  type Outcome = keyof typeof LOADS
+  // the files' queries settled through the real fetch with no retry, then the card rendered from that cache, held there with no retry on mount, which would show a settled error as pending again until it failed once more; a pair's after takes afterOutcome when one is given
+  const settled = async (list: ViewerItem[], outcome: Outcome, afterOutcome = outcome) => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, retryOnMount: false } },
+    })
+    const loads = list.flatMap((item): [string, Outcome][] =>
+      item.pair
+        ? [
+            [item.pair.before.id, outcome],
+            [item.pair.after.id, afterOutcome],
+          ]
+        : [[item.id, outcome]],
+    )
+    for (const [id, load] of loads)
+      await client.prefetchQuery(attachmentQuery(id, true, LOADS[load] as unknown as typeof fetch))
+    return renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(AttachmentThumbs, { items: list, onOpen: () => {} }),
+      ),
+    )
+  }
+  const [before, after] = items(2)
+  const LAYOUTS: [string, ViewerItem[]][] = [
+    ["a grid tile", items(2)],
+    ["a before/after pair", [{ ...before!, pair: { after: after!, before: before! } }]],
+    [
+      "a lone HTML page",
+      [{ id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000b1.html", kind: "html", name: "demo.html" }],
+    ],
+  ]
+
+  for (const [layout, list] of LAYOUTS) {
+    test.each(["a 500", "a network error"] as const)(
+      `${layout} shows Did not load for %s`,
+      async (outcome) => {
+        expect(await settled(list, outcome)).toContain(">Did not load<")
+      },
+    )
+
+    test(`${layout} keeps Missing for a 404`, async () => {
+      const html = await settled(list, "a 404")
+      expect(html).toContain(">Missing<")
+      expect(html).not.toContain("Did not load")
+    })
+  }
+
+  // a folded pair whose after did not load shows its before alone, as one whose after is missing does
+  test.each(["a 500", "a network error"] as const)(
+    "a grid of folded pairs shows each before's picture when its after fails with %s",
+    async (outcome) => {
+      const [a0, a1, b0, b1] = items(4)
+      const pairs: ViewerItem[] = [
+        { ...a0!, pair: { after: a1!, before: a0! } },
+        { ...b0!, pair: { after: b1!, before: b0! } },
+      ]
+      const html = await settled(pairs, "a 200", outcome)
+      expect(html.match(/<img /g)?.length).toBe(2)
+      expect(html).not.toContain("Did not load")
+    },
+  )
 })

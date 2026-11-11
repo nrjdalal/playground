@@ -21,6 +21,8 @@ Each dispatcher's chat and its box are named by its label, such as Message Alpha
 A menu directly left of the box's send button, such as **Opus · High**, shows the model and effort the dispatcher's newest reply ran with, and a pick types `/model` or `/effort` into it for you; the row shows the new one from its next reply.
 On a first run the chat starts with **Let's check this Mac**, each check marked there or missing with the button that fixes it, then **Continue**, which makes you this Mac's owner ([Where to start](/docs#where-to-start)).
 Once every check has passed, it shows one line, **This Mac has everything Playground needs**, over the steps left, each ticked once done: GitHub, Settings (**Set up settings**), a Claude account (**Add a Claude account**) and **Start** with the dispatcher's name.
+While a restore brings your sessions back after a restart, it says **The factory is coming back** in their place, with no **Start**, until the dispatcher is back.
+If the restore cannot bring the dispatcher back, **Start** shows again, even while other sessions still wait.
 Once the dispatcher runs, its chat takes their place.
 A smaller link under them opens the System page.
 
@@ -30,6 +32,7 @@ Every other dashboard page has the same half beside it, with the Inbox, your cha
 When the squares outgrow the bar, it scrolls sideways.
 The half keeps its size and the square you picked as you move between pages.
 Drag the divider to resize the two halves; let go near the middle and it snaps there.
+The halves open at the split you last left, after a reload too.
 On a phone the same bar sits at the bottom of the page, with the page itself as its first square and Menu, which opens the sidebar, as its last.
 
 A link to `/dashboard` that names another session (`?worker=`) opens that session's own view, read-only but for one with a box of its own (the Assistant's, the second dispatcher's or the hosted session's), and one that names a session that has ended opens your chat.
@@ -41,14 +44,14 @@ Type in the box at the bottom of your chat and press Enter to send; Shift+Enter 
 On a touch screen, Enter adds a line and the send button sends.
 What you send reaches the dispatcher as if you typed it in its terminal.
 
-Under your message, one small icon shows where it is, one at a time: a spinner until the session has it, then one tick, or a red mark if it failed, with the reason beside it.
-Hover it, or reach it with Tab, for the words.
-Your earlier messages keep their tick after the page reloads.
+Under your message, one small icon shows where it is, one at a time: a spinner while it is on its way, one tick once it is typed into the session, two ticks once it shows in the session's conversation, or a red mark if it failed, with the reason beside it.
+Hover it, or reach it with Tab, for the words: on two ticks they read Delivered with the time it arrived.
+Your earlier messages keep their two ticks after the page reloads.
 Every action in a message's footer is an icon button: hover it, or reach it with Tab, for its name.
 
 - **Copy** copies the message's words.
 - **Unsend** removes a message still waiting to go out, before it reaches the session.
-  A message the session holds, during a compaction or its own turn, keeps its spinner and shows no button: it reads Delivered once the session takes it, or Lost with **Retry** if it never does, or offers **Check it for me** when its transcript cannot show either way.
+  A message the session holds, during a compaction or its own turn, shows one tick and no button: it reads Delivered once the session takes it, or Lost with **Retry** if it never does, or offers **Check it for me** when its transcript cannot show either way.
 - **Undo** shows for 2 minutes after your newest message arrives: the session gets a line saying you unsent your previous message and to ignore it, and your message shows struck through with Unsent.
 - **Retry**, **Edit** and **Discard** show on a message that was not sent, with the reason, and **Check it for me** on one cut off while typing, which asks your dispatcher whether it arrived.
 
@@ -123,7 +126,8 @@ The icons are gray outlines with no number before the first reading and once sam
 
 Under the top line, with no title, sits a row for each dispatcher, Alpha, and then Bravo while a second one runs, its model, effort and state in its hover.
 The first opens your chat at `/dashboard`, the second its own chat.
-While the first is not running its row reads Alpha, Not running, so the rows below never move.
+While the first is not running its row reads Alpha, Not running, so the rows below never move; while a restore brings it back after a restart, it reads Coming back, with a gray spinner.
+A second dispatcher's row still reads Not running.
 The second's row shows only while its session runs or the roster lists it as not yet done or ended.
 Hover over the effort on Alpha's row, or Tab to it, for a plus in its place, always shown on a phone: it lists the templates you can start, a second dispatcher on Claude or GLM, an Assistant or an orchestrator, each with its model and effort.
 A template that cannot start yet shows greyed out with the reason, such as a second Claude account to add in Settings, and Edit templates at the list's foot opens Settings at its Templates section ([Settings](/docs/settings#templates)).

@@ -85,9 +85,9 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   Steer a busy worker only with a correction to the very thing it is building.
   A separable change to an open PR goes to a new worker on a branch off that PR's head, the two coordinating through the Builder.
 - Before a lead spawns a worker, it reads the machine's room from the live dashboard: `bun run --cwd <dashboard checkout> verify system`, which finds the dashboard's stack through portless.
-  Room is held in code: `scripts/spawn.sh`, the one way a session starts another ([SESSIONS.md](SESSIONS.md#spawn)), runs a capacity gate on load, memory, for a new worker a run-slot lane free with the load units for a run, or an empty queue, and the backend's usage, and refuses with the gate and its reading (the room is the cores in use, not a count of slots),
+  Room is held in code: `scripts/spawn.sh`, the one way a session starts another ([SPAWN.md](SPAWN.md#capacity-gate)), runs a capacity gate on load, memory, for a new worker a run-slot lane free with the load units for a run, or an empty queue, and the backend's usage, and refuses with the gate and its reading (the room is the cores in use, not a count of slots),
   and refuses a name a live session already holds.
-  Its one bypass is the first dispatcher's ([SESSIONS.md](SESSIONS.md#spawn)); past the gate otherwise only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate, and a priority task takes the room its lead frees by closing its lowest-priority worker (below).
+  Its one bypass is the first dispatcher's ([SPAWN.md](SPAWN.md#capacity-gate)); past the gate otherwise only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate, and a priority task takes the room its lead frees by closing its lowest-priority worker (below).
   Spawn a new session only for a chore that needs its own context; a short job (a probe-sized check, a one-off script) runs as a background task in the session that wants it.
   Within them, spawn as many as its `system` line's room allows, and at "No room" spawn none and queue the task with that line as the reason.
   Room is the machine's, not usage's: count every membership, and trim no work for usage while any account has room.
@@ -102,7 +102,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   which frees its room so spawn.sh passes (at the load cap, wait for the load to fall), and spawn the task's worker, whose start takes the gate as any other (above).
   Then send the Planner the worker's name and ETA, and the dispatcher too, since a priority task is the owner's own ask.
   It never waits in the backlog.
-- A small task going out alone (one concern, a small diff, under about 30 minutes) runs as an A/B pair: two workers on the same brief and base, differing in one variable (such as brief style; model and effort stay Opus at high, [SESSIONS.md](SESSIONS.md#spawn)), one reviewer scoring both PRs blind as X and Y. The winner merges,
+- A small task going out alone (one concern, a small diff, under about 30 minutes) runs as an A/B pair: two workers on the same brief and base, differing in one variable (such as brief style; model and effort stay as the Chain's model rule sets them, [SKILL.md](SKILL.md#chain)), one reviewer scoring both PRs blind as X and Y. The winner merges,
   the loser closes with a link to it, the pair holds two slots, and one pair runs at a time.
   Each result goes in `~/.playground/abtests.jsonl`, and a variant becomes the default after three clear wins.
 - A request for work from a session outside the chain spawns nothing until the owner says yes (**ask** says how it reaches him), since sessions here run in bypass-permissions mode.
@@ -118,3 +118,9 @@ Dispatch is done when the session holds its brief, the roster shows its task (an
 Slack mode lives in the bundled `slack` extension's `slack` skill, which a session loads once the owner turns Slack on in Settings (`ext.bundled`).
 When the DM watch hands you an owner message, follow that skill.
 Done when the owner's message has its reply posted.
+
+## WhatsApp mode
+
+WhatsApp mode lives in the bundled `whatsapp` extension's `whatsapp` skill, which a session loads once the owner turns WhatsApp on in Settings (`ext.bundled`); that switch is the mode ops-wa reads.
+When ops-wa hands you an owner message, or its 15-minute line asks for an update, follow that skill.
+Done when the owner's message has its reply sent through `playground wa send`.

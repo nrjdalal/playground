@@ -51,7 +51,6 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
     "no-kill-by-name",
     "no-linear-ticket",
     "no-main-checkout",
-    "no-manager-subagent",
     "no-ours-merge",
     "no-playground-leak",
     "no-prompt-stop",
@@ -66,6 +65,18 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
     )
     expect(commands.some((c) => c.includes(`scripts/hooks/bundled/${name}.js`))).toBe(true)
   })
+
+  // spawn.sh's deny keeps a manager off the Agent and Workflow tools (tests/scripts/spawn-manager-deny.test.ts), so no hook guards them; the guard's script stays one ship past its registration, for a worktree whose settings still name it (scripts/hooks/README.md)
+  test.each([join("scripts", "factory-settings.json"), join(".claude", "settings.json")])(
+    "%s registers no no-manager-subagent hook",
+    async (file) => {
+      const hooks = await preToolUse(file)
+      expect(hooks.filter((h) => /Agent|Workflow/.test(h.matcher ?? ""))).toEqual([])
+      expect(hooks.flatMap((h) => h.hooks.map((x) => x.command)).join("\n")).not.toContain(
+        "no-manager-subagent",
+      )
+    },
+  )
 
   // a Write into the main checkout passed while no-main-checkout heard only Bash
   test.each(

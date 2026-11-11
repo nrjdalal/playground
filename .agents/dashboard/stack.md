@@ -52,6 +52,7 @@
   The pane draws a centred spinner (`CenterSpinner`) while it signs this Mac's owner in by itself and reads the checks, once per load, so a signed-out first visit reads as loading; a cookie that does not stick shows its reason with Try again.
   It then shows Let's check this Mac, each row's fix as a button the app runs (the Database row's is Start a local container), with Re-check and Continue, which makes and signs in the owner, or signs in the one already made (`POST /api/v1/onboard/finish`); it opens no WebSocket and reads nothing on the owner rung.
   The checks read writes the done mark the first time every row is ok or optional with a database, and once `done` reads true the home shows one ✓ line over the steps (GitHub, Settings, a Claude account, Start Alpha), which Alpha's chat replaces once it runs; the checks and the steps lead the home whatever the board holds (`homeOf()`), so a Mac that runs no session yet still sees them.
+  A restore that can still bring the dispatcher back takes the steps' place, with no Start, as dashboard.md's home says.
   The old first-run pages, `/onboard` and `/setup`, are gone, and their URLs redirect to `/dashboard` (`redirects` in `web/next/next.config.ts`).
 - ALWAYS: A person's stack reads their own machine; factory, test and `PLAYGROUND_FIXTURE` stacks read the fixture ([ADR 0008](../adr/0008-a-persons-stack-reads-their-own-machine.md), since a professional app shows real data, never made-up data).
   `dashboardSource()` in `api/hono/src/lib/dashboard/fixture.ts` takes the first rule that matches, from the checkout's branch and path and the API's settings: 0 a hosted build (`PLAYGROUND_HOSTED=1`) reads no machine, whatever else is set; 1 the live dashboard's checkout (branch `live.branch`) and 2 `PLAYGROUND_LIVE_READS=true` read the live machine and refuse `PLAYGROUND_FIXTURE`;
@@ -113,7 +114,8 @@
   With `KV_URL` set, an instance subscribes at its first socket, so the socket hears another instance's posts before its own has posted, as `tests/api/hono/src/lib/yard/socket.test.ts` checks across two instances.
   When Redis drops either of an instance's two connections, or a connect or fan-out passes its 2 s cap, the instance closes both and, while a socket is open, subscribes again after a backoff from 1 s to 30 s; a frame sent in that gap is lost, since pub/sub keeps no backlog, while its message stays readable.
   A frame reaches only the channel's members who still hold the member rung (`audienceOf`), so a banned member's open socket hears nothing.
-  A local stack reaches the hosted Yard as this Mac: `api/hono/src/routers/yard-local.ts` serves `/api/v1/yard` (channels, a channel's messages, a post and a read mark) on the owner rung, relaying each to `YARD_API_URL` with the `yard_` token the macOS Keychain keeps under `playground-yard` (`api/hono/src/lib/yard/keychain.ts`), which `playground yard login` writes, so no browser holds it.
+  A local stack reaches the hosted Yard as this Mac: `api/hono/src/routers/yard-local.ts` serves `/api/v1/yard` (channels, a channel's messages, a post, a read mark and who the token is, `/me`) on the owner rung, relaying each to `YARD_API_URL` with the `yard_` token the macOS Keychain keeps under `playground-yard` (`api/hono/src/lib/yard/keychain.ts`), which `playground yard login` writes,
+  so no browser holds it.
   With `YARD_API_URL` unset or no token in the Keychain it answers 404, which hides the sidebar's Yard groups.
   Once a minute it reads what waits on the owner from the hosted Yard's `GET /api/v1/yard/waiting` (`pollWaiting` in `api/hono/src/lib/yard/inbound.ts`, its mark in the data folder's `yard/mentions.json`) and posts each as one Inbox update, oldest first, the sender and their words fenced as someone else's:
   a mention, a thread's reply included, and a post of the owner's Yard holds for approval, from the sidebar, `playground yard post` or any device, whose Approve opens Yard's approve page at `YARD_WEB_URL` (asks.md).
@@ -164,7 +166,8 @@
 - ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, one zod schema over env with generic defaults: the owner (`PLAYGROUND_OWNER_NAME`, Owner) and the work queue, off by default (`WORK_GITHUB_ORG`, a GitHub login or none, and `WORK_LABEL`, Work; dashboard.md).
   The owner's name is the prefix Next up ranks second (roster.md).
   The API reads the config once as it starts (`api/hono/src/lib/org.ts`).
-  Slack is opted into in each machine's own job settings: ops-dm-watch by the `jobs.opsDmWatch` setting, off by default, which runs the bundled `slack` extension's script only while `ext.bundled` lists it, and ops-channel-watch by a row listed by hand in `jobs.json` (playbook's LIFECYCLE.md).
+  Slack is opted into in each machine's own job settings: ops-dm-watch by the `jobs.opsDmWatch` setting, off by default, which runs the bundled `slack` extension's script only while `ext.bundled` lists it, and ops-channel-watch by a row listed by hand in `jobs.json` (playbook's LIFECYCLE.md);
+  WhatsApp likewise, ops-wa by the `jobs.opsWa` setting, off by default, with `wa.owner` and `wa.device` set (ADR 0023).
   Every file the dashboard keeps outside the database sits in its data folder, `dataDir()` in `api/hono/src/lib/sessions/paths.ts` over `dataDirOf()` in `packages/env/src/data-dir.ts`: `PLAYGROUND_DATA_DIR` on a stack that reads this machine, else `~/.playground`,
   so every `playground/<path>` these rules name is under it;
   a fixture stack keeps to its fixture's `playground`.

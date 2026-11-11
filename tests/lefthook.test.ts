@@ -605,6 +605,74 @@ test("pre-push reads a pushed branch while the checked-out one has nothing new",
   }
 }, 60_000)
 
+// two tests scan the tracked tree's text, so a commit anywhere can break them, and with no hook to run them a break went red in CI minutes after its push
+const TREE_TEXT_TESTS = ["tests/cmux.test.ts", "tests/shell-read-redirect.test.ts"]
+
+test("one pre-commit job runs both whole-tree text tests, beside trace-count", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, { priority?: number; run: string }> }
+  }
+  const { commands } = config["pre-commit"]
+  const running = Object.entries(commands).filter(([, job]) =>
+    TREE_TEXT_TESTS.some((file) => job.run.includes(file)),
+  )
+  expect(running.map(([name]) => name)).toEqual(["text-tests"])
+  const job = running[0]![1]
+  expect(job.run).toStartWith("bun run test:file ")
+  for (const file of TREE_TEXT_TESTS) expect(job.run.split(/\s+/)).toContain(file)
+  expect(job.priority).toBe(commands["trace-count"]!.priority)
+})
+
+// lefthook 2.2.2 picks a job's files from its files: command only through a {files} in its run; without one it filters the staged files, so files: can only skip the job (measured)
+const filesWithoutTemplate = (node: unknown, path: string): string[] => {
+  if (Array.isArray(node))
+    return node.flatMap((item, i) => filesWithoutTemplate(item, `${path}[${i}]`))
+  if (typeof node !== "object" || node === null) return []
+  const job = node as Record<string, unknown>
+  const own =
+    "files" in job && typeof job.run === "string" && !job.run.includes("{files}") ? [path] : []
+  return [
+    ...own,
+    ...Object.entries(job).flatMap(([key, value]) => filesWithoutTemplate(value, `${path}.${key}`)),
+  ]
+}
+
+// YAML reads a space and # in a plain scalar as a comment, so an unquoted run drops the rest of its line, a {files} there included
+const unquotedHashRuns = (text: string, name: string): string[] =>
+  text.split("\n").flatMap((line, i) => {
+    const value = line.match(/^\s*(?:-\s+)?run:\s+(.*)$/)?.[1]
+    return value !== undefined && !/^["'>|]/.test(value) && /\s#/.test(value)
+      ? [`${name}:${i + 1}`]
+      : []
+  })
+
+const COMMENTED_FILES =
+  "pre-commit:\n  commands:\n    probe:\n      files: git ls-files\n      run: echo # {files}\n"
+
+test("every job with files: names {files} in its run", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text())
+  expect(filesWithoutTemplate(config, "lefthook.yml")).toEqual([])
+  expect(filesWithoutTemplate(Bun.YAML.parse(COMMENTED_FILES), "sample")).toEqual([
+    "sample.pre-commit.commands.probe",
+  ])
+  expect(
+    filesWithoutTemplate(
+      Bun.YAML.parse(COMMENTED_FILES.replace("echo # {files}", '"echo # {files}"')),
+      "sample",
+    ),
+  ).toEqual([])
+})
+
+test("every run holding a space and # is quoted", async () => {
+  expect(
+    unquotedHashRuns(await Bun.file(join(ROOT, "lefthook.yml")).text(), "lefthook.yml"),
+  ).toEqual([])
+  expect(unquotedHashRuns(COMMENTED_FILES, "sample")).toEqual(["sample:5"])
+  expect(
+    unquotedHashRuns(COMMENTED_FILES.replace("echo # {files}", '"echo # {files}"'), "sample"),
+  ).toEqual([])
+})
+
 // every worktree of a checkout shares one stash list, so the pre-commit's lint-staged keeps no backup there (PG-715)
 test("the pre-commit's lint-staged runs with --no-stash", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {

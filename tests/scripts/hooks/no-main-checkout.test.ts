@@ -5,6 +5,10 @@ import { join } from "node:path"
 
 import { check, mainCheckout } from "../../../scripts/hooks/no-main-checkout"
 
+// The worktree path every refusal gives: absolute, beside the main checkout's .git, so none nests in another worktree (AGENTS.md's Workflow rule).
+const ABS_WORKTREE =
+  '"$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>"'
+
 const root = join(import.meta.dir, "..", "..", "..")
 const script = join(root, "scripts", "hooks", "no-main-checkout.ts")
 // real directories, since the reader follows a cd only into one that exists
@@ -143,7 +147,7 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     expect(reason).toContain(".claude/worktrees/")
     // the worktree start it advises writes no branch config into the shared .git/config, which Claude Code's sandbox refuses
     expect(reason).toContain(
-      "git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary",
+      `git worktree add --no-track ${ABS_WORKTREE} -b <branch> origin/canary`,
     )
   })
 
@@ -599,7 +603,6 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     ["lefthook", "lefthook run pre-commit"],
     ["a redirect", "echo x > f"],
     ["a cd within it", "cd api/hono && bun test"],
-    ["bun x past a --cwd naming the main checkout", `bun --cwd=${MAIN} x turbo run build`],
   ])("in a worktree, %s", async (_name, command) => {
     expect(await bash(command, WORKTREE)).toBeUndefined()
   })
@@ -695,6 +698,10 @@ describe("a git command that moves the main checkout's HEAD, index or files is r
     const reason = await bash(`git ${words}`)
     expect(reason).toContain("no-main-checkout hook refuses")
     expect(reason).toContain("git -C <your worktree>")
+    // #1678: a relative worktree path made from inside another worktree nests in it
+    expect(reason).toContain(
+      `git worktree add --no-track ${ABS_WORKTREE} -b <branch> origin/canary`,
+    )
   })
 
   test.each(MOVES)("%s, by git -C from a worktree", async (_name, words) => {

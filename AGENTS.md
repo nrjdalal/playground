@@ -7,7 +7,8 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
 ## Workflow
 
 - ALWAYS: Do every change in its own git worktree, never on the primary checked-out branch.
-  Create it under `.claude/worktrees/` (repo-root relative, one directory per worktree; never `/tmp`, home, or a sibling of the repo), and fork its branch from the latest `canary`: fetch first, then branch from `origin/canary` (`git fetch origin canary && git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary`, then `bun install` in it, which its git hooks need,
+  Create it by absolute path under the main checkout's `.claude/worktrees/`, the folder beside the path `git rev-parse --path-format=absolute --git-common-dir` resolves to, so none nests in another worktree (one directory per worktree; never `/tmp`, home, or a sibling of the repo),
+  and fork its branch from the latest `canary`: fetch first, then branch from `origin/canary` (`git fetch origin canary && git worktree add --no-track "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" -b <branch> origin/canary`, then `bun install` in it, which its git hooks need,
   through `~/.playground/ops/run-slot.sh <your name> --` in a factory session), so the change builds on current main, and set up its `.env`, or none, by the `dev` skill's Start.
 - ALWAYS: Settle a new or altered database schema before generating or applying a migration: work goes ahead on its own, but a breaking change goes through the owner first.
   An additive change (a new table, a new nullable column, an index) goes ahead after its reviewer's shape review and a dump of the live dashboard's database; anything else is breaking (a drop, a rename, a type change of real rows) and waits for the owner's go through the Inbox.
@@ -144,7 +145,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - The factory's hooks: read a hook's section of [scripts/hooks/README.md](./scripts/hooks/README.md) before you change it, its tests or its registration, and when it refuses a call you did not expect, since the README holds each one in full and its reason names the fix.
   Five have their own lines above (`no-bare-slack-link`, `no-linear-ticket`, `no-playground-leak`, `no-raw-spawn`, `no-release-comment`);
   the rest are `after-compact`, `after-resume`, `no-chat-question`, `no-desktop-owner-app`, `no-env-dump`, `no-extension-repo-write`, `no-extensions-write`, `no-false-green`, `no-glm-heavy-path`, `no-headless-login`,
-  `no-kill-by-name`, `no-mac-web-build`, `no-main-checkout`, `no-manager-subagent`, `no-off-palette-label`, `no-ours-merge`, `no-prompt-stop`, `no-public-leak`, `no-raw-delete`, `no-stash`, `no-unslotted-run`, `rules`, `session-state` and `writing-first`.
+  `no-kill-by-name`, `no-mac-web-build`, `no-main-checkout`, `no-off-palette-label`, `no-ours-merge`, `no-prompt-stop`, `no-public-leak`, `no-raw-delete`, `no-raw-wa`, `no-stash`, `no-unslotted-run`, `rules`, `session-state` and `writing-first`.
 
 ### The factory
 
@@ -221,9 +222,10 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
    As part of that doc-sync pass, run the changed-term grep for each term whose meaning the diff changes (a behaviour, a rule, what a command does): `git grep -l <term>` over the agent-facing and web docs, then update every hit still describing the old meaning, since one PR took 7 rounds, each finding one more doc that did.
    After you merge `canary` into the branch, run that grep for what the incoming commits changed: list each term whose meaning they changed (`git log -p HEAD^1..HEAD^2` while the merge commit is `HEAD`), grep the PR's own changed docs for each,
    and fix every line still describing the old meaning in a commit after the merge before you ask for the next round, since one PR spent two docs-only rounds, about 24 minutes, on lines a merged change had made stale; done when no line of the PR's docs describes a meaning those commits changed.
-   Done when the body's Evidence names each touched doc and skill with its check, doc-sync's result and each list grep and changed-term grep with its hits, before the review's round 1 opens.
+   When the PR moves text out of a file, run `git grep -n <old file name>` over the whole repo too, code comments, `scripts/hooks/README.md` and `.agents/dashboard/` included, and check each hit against the moved text at the old base, since one PR's greps stayed inside the playbook folder and missed 7 hits outside it, which cost rounds 4 and 5.
+   Done when the body's Evidence names each touched doc and skill with its check, doc-sync's result and each list grep and changed-term grep with its hits, the moved-text grep's included, before the review's round 1 opens.
 2. Have a reviewer agent other than its author (a session started for the review, working in its own scratch clone, whose brief carries the signal rule from The factory, above) score it out of 5 through the [code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md) skill, and fix what it finds, until it scores 5/5 on the latest head,
-   GitHub Actions' `Audit, Lint, and Build` and `test` are green there, and nothing is left you would change.
+   GitHub Actions' `Audit, Lint, and Build` and `test` are green there, and nothing is left but nits, for the worker's follow-up PR.
 3. Mark it ready at 5/5 and merge it with `bun run pr:merge <n>` bare and unpiped, or let merge-on-ready land it (`bun run pr:train ready`): the only ways a Playground PR reaches `canary`.
    Their gates, the merge lock and the merge queue are written in [packages/scripts/src/pr-merge/README.md](./packages/scripts/src/pr-merge/README.md); read it before a merge or gate ruling.
 4. `main`, which the main checkout and so every installed skill follows, moves only through the `release` skill, run by Ops on the owner's standing go-ahead (playbook's **release** rule), whose step 5 then brings the main checkout up to it; say what landed.

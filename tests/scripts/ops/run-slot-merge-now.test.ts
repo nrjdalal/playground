@@ -9,7 +9,7 @@ import {
 } from "node:fs"
 import { join } from "node:path"
 
-import { machine, SCRIPT, stop, WAITING } from "./run-slot-fake"
+import { machine, SCRIPT, runSlot, stop, WAITING } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -63,7 +63,7 @@ describe("bun run pr:merge and pr:train through run-slot", () => {
     // the named run: this test's own live process, asked and not yet ended
     appendFileSync(log, `2026-11-05T22:00:00Z ask worker-x ${process.pid} bun run test\n`)
     const marker = join(m.root, "merged")
-    const p = Bun.spawn(
+    const p = runSlot(
       [
         "bash",
         SCRIPT,
@@ -77,7 +77,7 @@ describe("bun run pr:merge and pr:train through run-slot", () => {
         "5",
         marker,
       ],
-      { cwd: m.root, env: m.env(), stderr: "pipe" },
+      { cwd: m.root, env: m.env(), stderr: "pipe", ops: m.ops },
     )
     let err = ""
     const read = (async () => {
@@ -118,9 +118,9 @@ describe("a merge behind an env prefix or bun's own flags runs at once beside a 
   test("a piped call with the pipe outside run-slot runs at once", async () => {
     const m = busy()
     const marker = join(m.root, "piped-merge")
-    const p = Bun.spawn(
+    const p = runSlot(
       ["bash", "-c", `bash ${SCRIPT} worker-x -- bun run pr:merge 5 ${marker} | tail -1`],
-      { cwd: m.root, env: m.env(), stderr: "pipe" },
+      { cwd: m.root, env: m.env(), stderr: "pipe", ops: m.ops },
     )
     let err = ""
     const read = (async () => {

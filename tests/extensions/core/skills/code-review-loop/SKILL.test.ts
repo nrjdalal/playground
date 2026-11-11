@@ -4,6 +4,14 @@ import { join } from "node:path"
 const root = join(import.meta.dir, "../../../../..")
 const skill = () => Bun.file(join(root, "extensions/core/skills/code-review-loop/SKILL.md")).text()
 const page = () => Bun.file(join(root, "docs/playground/code-review-loop.md")).text()
+// step 4 is a block: its opening line, then one line a part, each with its own Done when
+const stepFour = async () =>
+  (await skill()).split(/^4\. \*\*Review on two axes\.\*\*/m)[1]?.split(/^5\. /m)[0] ?? ""
+// the line of step 4's part labelled `label`, split at its Done when
+const part = async (label: string) =>
+  ((await stepFour()).split("\n").find((l) => l.includes(`**${label}:**`)) ?? "").split(
+    "**Done when**",
+  )
 
 describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
   test("after a 5/5 the reviewer stays up until the PR merges", async () => {
@@ -54,9 +62,31 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(await page()).toContain("waits for CI still running at the head")
   })
 
+  test("step 7 posts the verdict behind fresh, which a body edit or a new comment stops (#1359)", async () => {
+    const step7 = (await skill()).split("7. **Post**")[1]?.split("\n")[0] ?? ""
+    expect(step7).toContain(
+      "`${CLAUDE_SKILL_DIR}/scripts/state.ts fresh <repo> <n> <read-at> <digest>`",
+    )
+    expect(step7).toContain("drop each finding they now answer")
+    expect(step7).toContain("post the verdict first, then the inline review")
+    expect(step7.split("**Done when**")[1] ?? "").toContain("behind a `fresh` that printed `FRESH`")
+    const comments = await Bun.file(
+      join(root, "extensions/core/skills/code-review-loop/references/COMMENTS.md"),
+    ).text()
+    expect(comments).toContain(
+      "state.ts fresh <repo> <n> <read-at> <digest> && gh api repos/<repo>/issues/<n>/comments",
+    )
+    expect(await page()).toContain("its post runs behind `state.ts fresh`")
+  })
+
   test("step 8 names the one waiter on the head's checks, which a re-run at the same head ends (#1410)", async () => {
     const step8 = (await skill()).split("8. **Report and wait.**")[1]?.split("\n")[0] ?? ""
-    expect(step8).toContain("`${CLAUDE_SKILL_DIR}/scripts/state.ts checks <repo> <n> <head>`")
+    expect(step8).toContain(
+      "`cd /private/tmp && ${CLAUDE_SKILL_DIR}/scripts/state.ts checks <repo> <n> <head>`",
+    )
+    expect(step8).toContain(
+      "`cd /private/tmp && ${CLAUDE_SKILL_DIR}/scripts/state.ts wait <repo> <n> <head>`",
+    )
     expect(step8).toContain(
       "start `checks` again at once, which waits past a red that concluded before it started",
     )
@@ -93,10 +123,12 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
   })
 
   test("a dependency bump's pinned advisory stands only after the audit skill's parent read (#1950)", async () => {
-    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    const step = await stepFour()
     expect(step).toContain("the audit skill's rung 2")
     expect(step).toContain("`npm view <parent> version dependencies`")
-    expect(step.split("**Done when**")[1] ?? "").toContain("for a dependency bump, the parent read")
+    expect((await part("Dependency bump"))[1] ?? "").toContain(
+      "for a dependency bump, the parent read",
+    )
     expect(await page()).toContain("the audit skill's rung 2")
   })
 
@@ -199,8 +231,8 @@ describe("the Review label carries its score's color (PG-157)", () => {
 
 describe("a diff holding a long-lived connection is reviewed by a lifecycle table", () => {
   test("step 4 asks for the table in the PR's Evidence, one row per path, and scores blocking until it is there", async () => {
-    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
-    const line = step.split("**Lifecycle table:**")[1]?.split("**Done when**")[0] ?? ""
+    const step = await stepFour()
+    const [line = "", done = ""] = await part("Lifecycle table")
     expect(line).toContain("a socket, a pub/sub subscriber, a retrying client")
     expect(line).toContain("in the PR's Evidence")
     expect(line).toContain(
@@ -208,7 +240,7 @@ describe("a diff holding a long-lived connection is reviewed by a lifecycle tabl
     )
     expect(line).toContain("the test that proves it, or the reason the path cannot happen")
     expect(line).toContain("blocking finding")
-    expect(step.split("**Done when**")[1] ?? "").toContain("lifecycle table")
+    expect(done).toContain("lifecycle table")
   })
 
   test("the docs page says a long-lived connection's lifecycle table holds the score down", async () => {
@@ -220,8 +252,8 @@ describe("a diff holding a long-lived connection is reviewed by a lifecycle tabl
 
 describe("a diff that loosens a guard is reviewed by a refusal table (PG-439)", () => {
   test("step 4 asks for a canary | head table from round 1, holds each canary refusal at the head, and its Done when checks it", async () => {
-    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
-    const line = step.split("**Refusal table:**")[1]?.split("**Done when**")[0] ?? ""
+    const step = await stepFour()
+    const [line = "", done = ""] = await part("Refusal table")
     expect(line).toContain("ask from round 1 for a `canary | head` table of refusal rows")
     expect(line).toContain("`tests/scripts/hooks/fixtures/refused-forms/`")
     expect(line).toContain(
@@ -232,7 +264,7 @@ describe("a diff that loosens a guard is reviewed by a refusal table (PG-439)", 
     )
     expect(line).toContain("each bypass the review finds that canary refuses")
     expect(line).toContain("blocking finding")
-    expect(step.split("**Done when**")[1] ?? "").toContain("refusal table")
+    expect(done).toContain("refusal table")
   })
 
   test("the docs page says a loosened guard's refusal table holds the score down", async () => {
@@ -262,7 +294,7 @@ describe("code-review-loop runs its newest text every round (PG-213)", () => {
 
 describe("code-review-loop's round 1 greps each changed term", () => {
   test("step 4 runs the changed-term grep in round 1, names its finding's shape and its Done when, with its measured case", async () => {
-    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    const step = await stepFour()
     expect(step).toContain(
       "the changed-term grep (`git grep -l <term>` over the agent-facing and web docs) for each term whose meaning the diff changes",
     )
@@ -270,7 +302,7 @@ describe("code-review-loop's round 1 greps each changed term", () => {
       "file every list or doc either leaves behind as one such finding, each as `file:line`",
     )
     expect(step).toContain("7 rounds")
-    expect(step.split("**Done when**")[1] ?? "").toContain(
+    expect((await part("Round 1 greps"))[1] ?? "").toContain(
       "its changed-term grep for each term whose meaning it changes",
     )
     expect(await page()).toContain("each term whose meaning the diff changes")
@@ -284,6 +316,44 @@ describe("code-review-loop's round 1 greps each changed term", () => {
     expect(line).toContain("each term whose meaning the diff changes")
     expect(agents).toContain("each list grep and changed-term grep with its hits")
   })
+
+  test("a PR that moves text out of a file greps the old file's name over the whole repo, on both sides (#1619)", async () => {
+    const moved =
+      "When the PR moves text out of a file, run `git grep -n <old file name>` over the whole repo too, code comments, `scripts/hooks/README.md` and `.agents/dashboard/` included, and check each hit against the moved text at the old base"
+    const [step, done] = await part("Round 1 greps")
+    expect(step).toContain(moved)
+    expect(step).toContain("rounds 4 and 5")
+    expect(done ?? "").toContain("each file the PR moves text out of grepped over the whole repo")
+    expect(await Bun.file(join(root, "AGENTS.md")).text()).toContain(moved)
+    expect(await page()).toContain("greps the old file's name over the whole repo")
+  })
+})
+
+describe("code-review-loop keeps its clone at the head and asks the lead on a trust-widening nit", () => {
+  test("step 4's sub-agents leave the clone as it stands, and its Done when checks HEAD after they return (#1624)", async () => {
+    const [step, done] = await part("Fresh read")
+    expect(step).toContain("with no merge, checkout or reset there")
+    expect(step).toContain("17 of `canary`'s files")
+    expect(done ?? "").toContain(
+      "`git -C <clone> rev-parse HEAD` printed the head after every `code-review` call",
+    )
+    expect(await page()).toContain("They leave the review clone as it stands")
+  })
+
+  test("step 6 sends a trust-widening nit to the lead before the 5/5, and The last 5/5 points to it (#1613)", async () => {
+    const text = await skill()
+    const step = text.split(/^6\. \*\*Score\*\*/m)[1]?.split(/^7\. /m)[0] ?? ""
+    expect(step).toContain("A **trust-widening nit**")
+    expect(step).toContain("goes first to your worker's lead")
+    expect(step).toContain("the 5/5 waits for the lead's ruling")
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "each trust-widening nit carries its lead's ruling",
+    )
+    const last = text.split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    expect(last).toContain("each trust-widening nit has its lead's ruling (step 6)")
+    expect(text.split("**trust-widening nit**")).toHaveLength(2)
+    expect(await page()).toContain("goes to the worker's lead first")
+  })
 })
 
 describe("code-review-loop checks its own fixes and a repo scanner's landing (PG-251)", () => {
@@ -292,7 +362,9 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
     expect(step).toContain(
       "a wording you suggest in a finding included, and run the checks its files call for (`bun run docs:wrap --check` on a wrapped doc, `bun run test:file tests/packages/scripts/src/trace-count/count.test.ts` and `scripts/check-em-dashes.sh` on any doc, the test that pins the wording, `bun run test:file` on the file's mirrored test",
     )
-    expect(step).toContain("post the patch or wording with those results")
+    expect(step).toContain(
+      "post the saved `fix.patch` inline as a `diff` block, pasted whole and unedited with every context line kept so `git apply` takes the block as it stands, or the wording, with those results in the verdict",
+    )
     expect(step.split("**Done when**")[1] ?? "").toContain("its checks' results posted with it")
     expect(await page()).toContain("runs the checks its files call for before it posts")
   })

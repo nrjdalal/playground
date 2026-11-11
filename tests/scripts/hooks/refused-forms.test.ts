@@ -8,11 +8,12 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 
 import { check as dispatch, GUARDS as DISPATCHED } from "../../../scripts/hooks/guards"
 import { check as desktopOwnerApp } from "../../../scripts/hooks/no-desktop-owner-app"
@@ -59,6 +60,8 @@ const PATHS: Paths = {
   BARE: join(SCRATCH, "bare"),
   CLI_DIR: join(CHECKOUT, "packages", "scripts", "src", "playground"),
   DATA,
+  FOREIGN_TREE: join(SCRATCH, "foreign-tree"),
+  FOREIGN_TREE_IN_MAIN: join(SCRATCH, "main", ".claude", "worktrees", "foreign"),
   HOME,
   LINK: join(HOME, "store"),
   LIST: join(ROOT, "hooks", "desktop-owner-apps.json"),
@@ -89,6 +92,12 @@ symlinkSync(DATA, join(HOME, "pg"))
 symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, "pc"))
 git(SCRATCH, "init", "-q", OTHER)
 git(OTHER, "remote", "add", "origin", "https://github.com/acme-labs/demo.git")
+// Another repository and two worktrees it lists, whose .git file and admin gitdir point at each other, for #1653's rows: one outside the main checkout and one under its .claude/worktrees.
+const FOREIGN = join(SCRATCH, "foreign")
+git(SCRATCH, "init", "-q", "-b", "canary", FOREIGN)
+git(FOREIGN, "commit", "-q", "--allow-empty", "-m", "base")
+for (const tree of [PATHS.FOREIGN_TREE, PATHS.FOREIGN_TREE_IN_MAIN])
+  git(FOREIGN, "worktree", "add", "-q", "--detach", tree)
 // A repo with a heavy path staged, as no-glm-heavy-path's own test stages one.
 const GLM_REPO = join(SCRATCH, "glm-repo")
 git(SCRATCH, "init", "-q", "-b", "canary", GLM_REPO)
@@ -601,6 +610,189 @@ describe("every refused form stays refused unless the allow list names it", () =
   test("every allow-list entry names a case", () => {
     for (const entry of ALLOWED)
       expect(CASES.some(({ id, key }) => entry === id || entry === key)).toBe(true)
+  })
+})
+
+// Each path flag a row names, listed once, with the joins its program reads between the flag and its folder: "=" joined, " " spaced, "" attached; git reads -C spaced alone.
+const PATH_FLAGS = [
+  { flag: "--cwd", joins: ["=", " "], program: "bun" },
+  { flag: "--cwd", joins: ["=", " "], program: "bunx" },
+  { flag: "--chdir", joins: ["=", " "], program: "env" },
+  { flag: "-C", joins: [" ", ""], program: "env" },
+  { flag: "-D", joins: [" ", ""], program: "gh" },
+  { flag: "-C", joins: [" "], program: "git" },
+  { flag: "--exec-path", joins: ["="], program: "git" },
+  { flag: "--git-dir", joins: ["=", " "], program: "git" },
+  { flag: "--work-tree", joins: ["=", " "], program: "git" },
+  { flag: "-C", joins: [" ", ""], program: "tar" },
+  { flag: "-d", joins: [" ", ""], program: "unzip" },
+] as const
+type PathFlag = (typeof PATH_FLAGS)[number]
+
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+// The program, the words before its flag, the join and a folder of plain characters alone, so a folder held in a variable, written from ~ or quoted stays as its row writes it
+const flagIn = ({ flag, joins, program }: PathFlag) =>
+  new RegExp(
+    `((?:^|[\\s;&|(])${escaped(program)}\\s(?:[^;&|\\n'"\`]*?\\s)?)${escaped(flag)}(${joins.map((j) => (j === " " ? "\\s+" : escaped(j))).join("|")})([\\w.,@+:/-]+)(?=$|[\\s;&|)])`,
+    "g",
+  )
+const LINKS = join(SCRATCH, "spelling-links")
+mkdirSync(LINKS)
+let links = 0
+const realOf = (path: string) => {
+  try {
+    return statSync(path).isDirectory() ? realpathSync(path) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// Each row and path flag that keeps its single spelling, with why: the row moves folders (cd, pushd, popd), or the flag names no folder; the pinned list below shows a row that stops being spelt
+const UNSPELT = new Set<string>()
+
+// Each other spelling of one path flag's folder in a case's call: its other joins, the folder relative from the case's own folder, a ./ hop, an <x>/../<x> hop and a link made in a scratch folder, each kept only where it names the folder the row's does, by its real path.
+function spellingsOf(call: Call, cwd: string, id: string): { spelling: string; text: string }[] {
+  if (typeof call !== "string" || !isAbsolute(cwd)) return []
+  const moves = /\b(?:cd|pushd|popd)\b/.test(call)
+  const found: { spelling: string; text: string }[] = []
+  for (const pathFlag of PATH_FLAGS)
+    for (const m of call.matchAll(flagIn(pathFlag))) {
+      const [all, before = "", glue = "", folder = ""] = m
+      const at = resolve(cwd, folder)
+      const real = moves ? undefined : realOf(at)
+      if (!real) {
+        UNSPELT.add(
+          `${id} | ${pathFlag.program} ${pathFlag.flag}, ${moves ? "it moves folders" : "no folder"}`,
+        )
+        continue
+      }
+      const own = /^\s+$/.test(glue) ? " " : glue
+      const rel = relative(cwd, at) || "."
+      const link = join(LINKS, `${++links}-${basename(at)}`)
+      symlinkSync(at, link)
+      const others: [string, string, string][] = [
+        ...pathFlag.joins
+          .filter((j) => j !== own)
+          .map((j) => [`${JSON.stringify(j)} join`, j, folder] as [string, string, string]),
+        ["relative from its folder", own, rel],
+        ["a ./ hop", own, `./${rel}`],
+        ["an <x>/../<x> hop", own, `${dirname(at)}/../${basename(dirname(at))}/${basename(at)}`],
+        ["a link in a scratch folder", own, link],
+      ]
+      for (const [spelling, j, path] of others) {
+        if (path === folder && j === own) continue
+        if (realOf(resolve(cwd, path)) !== real) continue
+        const text =
+          call.slice(0, m.index) +
+          before +
+          pathFlag.flag +
+          j +
+          path +
+          call.slice(m.index! + all.length)
+        found.push({ spelling: `${pathFlag.program} ${pathFlag.flag}, ${spelling}`, text })
+      }
+    }
+  return found
+}
+
+const SPELLINGS = CASES.flatMap((c) => {
+  const at = GUARDS[c.guard].folders[c.folder]
+  return at ? spellingsOf(c.call, at[0], c.id).map((s) => ({ ...c, ...s, at })) : []
+})
+
+describe("every spelling of a row's path flag keeps the row's verdict", () => {
+  // the row's own verdict, read once per case
+  const verdicts = new Map<string, string | undefined>()
+  const verdictOf = async (c: (typeof SPELLINGS)[number]) => {
+    if (!verdicts.has(c.key))
+      verdicts.set(c.key, await GUARDS[c.guard].run(input(c.call, c.at[0]), c.at[1]))
+    return verdicts.get(c.key)
+  }
+
+  test.each(SPELLINGS.map((s) => [`${s.key} | ${s.spelling}`, s] as const))(
+    "%s",
+    async (_, s) => {
+      const row = await verdictOf(s)
+      const spelt = await GUARDS[s.guard].run(input(s.text, s.at[0]), s.at[1])
+      expect({ refused: spelt !== undefined, text: s.text }).toEqual({
+        refused: row !== undefined,
+        text: s.text,
+      })
+      if (spelt !== undefined) expect(spelt).toContain(`${s.guard} hook `)
+    },
+    60_000,
+  )
+
+  test("the rows whose path flag keeps its single spelling are the ones pinned here", () => {
+    expect([...UNSPELT].sort()).toEqual([
+      // bunx's spelling takes the row's last --cwd, which bun reads from the --cwd=/ before it, so the row's own folder holds none
+      "#1732 a runner --cwd read from the one before it | bunx --cwd, no folder",
+      "#1732 turbo's relative --cwd read from the runner's | bunx --cwd, no folder",
+      "#1747 bunx running a commit in a --cwd read from the one before | bunx --cwd, no folder",
+      "#1747 bunx running bun's build in a --cwd in a worktree read from the one before | bunx --cwd, no folder",
+      "#1747 bunx running bun's build in a --cwd read from the one before | bunx --cwd, no folder",
+      "#466 git --work-tree with a subcommand for its value | git --work-tree, no folder",
+      "#466 git -C with a subcommand for its value | git -C, no folder",
+    ])
+  })
+
+  // Every flag a row gives a folder, joined by =, by spaces or attached as /… or ./…, read from the row's text wherever its program sits
+  const FLAG_FOLDER =
+    /(?<=^|[\s;&|(])(--?[A-Za-z][\w-]*?)(?:(?:=|\s+)([^\s;&|()'"`$\\]+)|([/.][^\s;&|()'"`$\\]*))(?=$|[\s;&|)])/g
+  test("every flag a row gives a folder is in PATH_FLAGS, or pinned here as no path flag", () => {
+    const left = new Set<string>()
+    for (const c of CASES) {
+      const at = GUARDS[c.guard].folders[c.folder]
+      if (typeof c.call !== "string" || !at) continue
+      const call = c.call
+      const listed = new Set(
+        PATH_FLAGS.flatMap((p) => [...call.matchAll(flagIn(p))].map((m) => `${p.flag} ${m[3]}`)),
+      )
+      for (const [, flag = "", spaced, attached] of call.matchAll(FLAG_FOLDER)) {
+        const value = spaced ?? attached ?? ""
+        if (realOf(resolve(at[0], value)) && !listed.has(`${flag} ${value}`))
+          left.add(`${c.id} | ${flag}`)
+      }
+    }
+    expect([...left].sort()).toEqual([
+      // GNU mv's target folder, on rows that cd to a variable first, so no spelling names the same folder
+      "#1173 GNU mv to the shell's folder attached to its short target option after a cd to a variable | -t",
+      "#1173 GNU mv to the shell's folder attached to its target option in a cluster after a cd to a variable | -ft",
+      "#1173 GNU mv to the shell's folder by its long target option after a cd to a variable | --target-directory",
+      "#1173 GNU mv to the shell's folder by its shortened long target option after a cd to a variable | --target",
+      // the --cwd=/ that bunx's spelling passes over for the row's last --cwd, read from it
+      "#1732 a runner --cwd read from the one before it | --cwd",
+      "#1732 turbo's relative --cwd read from the runner's | --cwd",
+      "#1747 bunx running a commit in a --cwd read from the one before | --cwd",
+      "#1747 bunx running bun's build in a --cwd in a worktree read from the one before | --cwd",
+      "#1747 bunx running bun's build in a --cwd read from the one before | --cwd",
+      // an option that takes no value, followed by an operand
+      "#356 a link to the data folder made in the same call | -s",
+      "#356 a write after a word with an unbalanced quote | -rf",
+      "#356 many variables ahead of a write | -rf",
+      "#356 rm -rf of the data folder above it | -rf",
+      "#356 rm -rf of the data folder in ${X:-…} | -rf",
+      "#356 rm -rf of the root | -rf",
+      "#402 rm of a glob with a .. after it | -rf",
+      "#402 rm of a link to the root through a missing folder and .. | -rf",
+      "#402 rm through a missing folder, .., then a link to the data folder | -rf",
+      "#402 rm through a missing folder, .., then a link to the root | -rf",
+      "#402 rm through two missing folders, .., .., then a link to the root | -rf",
+      // a folder flag inside a cluster (env -iP, sudo -sD) or behind a quoted program ('env' --ch), which its row holds in that one form
+      "#508 ext score behind env's -i grouped with -P | -iP",
+      "#533 a removal echoed to sudo's shell, its chdir value a path attached in the cluster | -sD",
+      "#716 a recursive delete echoed to sudo's shell in a quoted env's split string after an abbreviated chdir | --ch",
+    ])
+  })
+
+  test("each path flag is listed once, and each is spelt again on some row", () => {
+    const names = PATH_FLAGS.map(({ flag, program }) => `${program} ${flag}`)
+    expect(new Set(names).size).toBe(names.length)
+    for (const name of names)
+      expect({ name, spelt: SPELLINGS.some((s) => s.spelling.startsWith(`${name},`)) }).toEqual({
+        name,
+        spelt: true,
+      })
   })
 })
 
