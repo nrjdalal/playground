@@ -1,7 +1,7 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync } from "node:fs"
 
-import { WAITING, machine, shim, starts, stop, waiter } from "./run-slot-fake"
+import { WAITING, machine, shim, starts, stop, waiter, within } from "./run-slot-fake"
 
 // five waiters' first looks under xtrace and the shims, about 700 process starts each at a queue of 10 (issue 1612, measured), open the window, and this row took 52.8 s in CI and 55.5 to 61.8 s at load5 9.7 to 13.8 here (issue 1671, measured), so it has about 3 times its time
 setDefaultTimeout(180_000)
@@ -34,12 +34,18 @@ describe("waiters cost close to nothing while they wait", () => {
     for (const w of waiters) while (!waits.test(w.err)) await Bun.sleep(50)
     const looks = (w: (typeof waiters)[number]) =>
       (w.err.match(/^\++\d+ look_mark$/gm) ?? []).length
-    // the quiet rounds pass first, so the window's looks are the ask's alone
+    // the quiet rounds pass first, so the window's looks are the ask's alone: a whole poll with no new look
     await Bun.sleep(11_000)
     const before = waiters.map((w) => looks(w))
     // the ask: a later ticket of a live process, one that never fits, so no verdict or next line moves
     m.ticket(6, "worker-late", "0 23 3 big", 0)
-    await Bun.sleep(12_000)
+    // each waiter's one look lands within a poll, whenever the box gets to it, and one more poll adds no second look
+    await within(
+      () => waiters.every((w, i) => looks(w) - before[i]! >= 1),
+      "each waiter to look once the ask landed",
+      m,
+    )
+    await Bun.sleep(6_000)
     const woke = waiters.map((w, i) => looks(w) - before[i]!)
     expect(woke.every((n) => n === 1)).toBe(true)
     expect(waiters.every((w) => !existsSync(w.marker))).toBe(true)
