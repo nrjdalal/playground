@@ -49,7 +49,14 @@ export type Holders = {
 export const isAgentBrowser = (command: string): boolean =>
   /^agent-browser(?:-[\w-]+)?$/.test(basename(command.split(" ")[0]!))
 
-export type Quarantined = { files: number; id: string; size: number; to: string }
+export type Quarantined = {
+  files: number
+  id: string
+  size: number
+  stripFailed?: string
+  stripped?: number
+  to: string
+}
 
 // A worktree's git record, kept in the trash since the prune after its move deletes it: its branch (null when detached), record folder and commit.
 export type WorktreeGit = { branch: string | null; gitdir: string; sha: string }
@@ -64,6 +71,7 @@ export type TrashEntry = {
   reason: string
   session: string
   size: number
+  stripped?: number
 }
 
 // The file makeScratch leaves in each folder it makes, which removeScratch requires.
@@ -71,7 +79,7 @@ export const MARKER = ".safe-delete-scratch"
 
 export const LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 }
 
-export const PURGE = { days: 7, floor: 5e9, minFree: 50e9 }
+export const PURGE = { days: 7, minFree: 50e9 }
 
 // One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), each at most its files and bytes; the folder itself, its parent, a sibling and anything deeper stay protected.
 export type CarveOut = { bytes: number; files: number; folder: string }
@@ -140,23 +148,36 @@ const whyHolds = (path: string, roots: Roots): string | null => {
   return null
 }
 
-const whyProtected = (path: string, roots: Roots): string | null => {
+// The caller's own scratch folders in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved, none for a name no session may hold.
+const ownScratchOf = (home: string, session: string): string[] =>
+  SESSION.test(session)
+    ? [
+        join(home, ".playground", "scratch", session),
+        join(home, ".playground", "scratchpad", session),
+      ].map(real)
+    : []
+
+const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string | null => {
   const held = whyHolds(path, roots)
   if (held) return held
   const main = real(roots.main)
   const subtrees = subtreesOf(real(roots.home), real(roots.trash))
   for (const root of subtrees)
-    if (inside(path, root)) return `${path} is inside the protected ${root}`
+    if (inside(path, root)) {
+      if (ownScratch.some((own) => inside(path, own))) return null
+      return `${path} is inside the protected ${root}`
+    }
   if (inside(path, main) && !path.startsWith(worktreesOf(roots) + sep))
     return `${path} is inside the main checkout ${main}`
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target.
-export function isProtected(path: string, roots: Roots): string | null {
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, and nothing else.
+export function isProtected(path: string, roots: Roots, session?: string): string | null {
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
-  return whyProtected(own, roots) ?? whyProtected(real(abs), roots)
+  const scratch = session === undefined ? [] : ownScratchOf(real(roots.home), session)
+  return whyProtected(own, roots, scratch) ?? whyProtected(real(abs), roots, scratch)
 }
 
 // The carve-out named name when path is an entry directly in its folder, symlinks resolved, that is not and holds no protected root; else the refusal's text.
@@ -182,8 +203,9 @@ const carveOutOf = (
   carveOut: string | undefined,
   roots: Roots,
   table: Record<string, CarveOut>,
+  session?: string,
 ): CarveOut | Refusal | null => {
-  const why = isProtected(path, roots)
+  const why = isProtected(path, roots, session)
   if (!why) return null
   const found = carveOut === undefined ? why : carveOutAt(path, carveOut, roots, table)
   return typeof found === "string"
@@ -191,15 +213,27 @@ const carveOutOf = (
     : found
 }
 
-// The files and bytes under a path, symlinks not followed; the walk stops once either passes its limit.
-const measure = (path: string, limits = { bytes: Infinity, files: Infinity }) => {
+// The files and bytes under a path, symlinks not followed; the walk stops once either passes its limit, and a folder skip names, by its path relative to the tree, is neither entered nor counted.
+const measure = (
+  path: string,
+  io: {
+    limits?: { bytes: number; files: number }
+    skip?: (rel: string, name: string) => boolean
+  } = {},
+) => {
+  const limits = io.limits ?? { bytes: Infinity, files: Infinity }
   let files = 0
   let size = 0
-  const stack = [path]
+  const stack: [string, string][] = [[path, ""]]
   while (stack.length && files <= limits.files && size <= limits.bytes) {
-    const at = stack.pop()!
+    const [at, rel] = stack.pop()!
     const info = lstatSync(at)
-    if (info.isDirectory()) for (const name of readdirSync(at)) stack.push(join(at, name))
+    if (info.isDirectory())
+      for (const entry of readdirSync(at, { withFileTypes: true })) {
+        const next = rel ? join(rel, entry.name) : entry.name
+        if (entry.isDirectory() && io.skip?.(next, entry.name)) continue
+        stack.push([join(at, entry.name), next])
+      }
     else {
       files++
       size += info.size
@@ -288,7 +322,7 @@ export function quarantine(
   if (!SESSION.test(opts.session))
     return refused(`the session name ${opts.session} is not a word of letters, digits and hyphens`)
   if (!lstat(abs)) return refused(`no such path ${abs}`)
-  const carve = carveOutOf(abs, opts.carveOut, roots, io.carveOuts ?? CARVE_OUTS)
+  const carve = carveOutOf(abs, opts.carveOut, roots, io.carveOuts ?? CARVE_OUTS, opts.session)
   if (carve && "refused" in carve) return carve
   const isWorktree = inWorktrees(abs, roots)
   if (isWorktree && !opts.worktree)
@@ -307,8 +341,12 @@ export function quarantine(
       `${opts.session} quarantined ${recent.length} paths in the last minute, the most one session may`,
       firstOfBurst(trash, opts.session, recent) ? "tripwire" : "refused",
     )
+  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole.
   const cap = carve ?? LIMITS
-  const { files, size } = measure(abs, opts.worktree ? undefined : cap)
+  const { files, size } = measure(abs, {
+    limits: opts.worktree ? undefined : cap,
+    skip: carve ? undefined : isRebuildable,
+  })
   if (!opts.worktree && (files > cap.files || size > cap.bytes))
     return refused(
       carve
@@ -339,6 +377,16 @@ export function quarantine(
         : `${abs} did not move: ${code ?? (error as Error).message}`,
     )
   }
+  // The tree's rebuildable folders go once the move is past every refusal, and the strip never throws past this line: a strip that stops partway names its error and leaves the entry unmarked, so the hourly strip's pass reaches the item and takes the rest. An install or a build puts what it removed back.
+  let stripped: string[] = []
+  let stripFailed: string | null = null
+  if (!carve) {
+    try {
+      stripped = stripRebuildable(to)
+    } catch (error) {
+      stripFailed = (error as Error).message
+    }
+  }
   const id = `${batch}/${n}`
   const entry: TrashEntry = {
     at: now.toISOString(),
@@ -350,9 +398,17 @@ export function quarantine(
     reason: opts.reason,
     session: opts.session,
     size,
+    ...(stripped.length ? { stripped: stripped.length } : {}),
   }
   appendFileSync(join(trash, batch, "manifest.jsonl"), `${JSON.stringify(entry)}\n`)
-  return { files, id, size, to }
+  return {
+    files,
+    id,
+    size,
+    ...(stripFailed ? { stripFailed } : {}),
+    ...(stripped.length ? { stripped: stripped.length } : {}),
+    to,
+  }
 }
 
 // Every item still in the trash, oldest first.
@@ -375,7 +431,7 @@ export function restore(
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
-  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts)
+  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts, entry.session)
   if (carve && "refused" in carve) return carve
   if (lstat(entry.path)) return refused(`${entry.path} already exists; move it aside first`)
   if (!existsSync(dirname(entry.path)))
@@ -583,15 +639,14 @@ export function removeScratch(dir: string, tmp = tmpdir()): string | null {
   return null
 }
 
-// The one recursive delete of the trash: each batch over 7 days old, then the oldest while free space is under 50 GB, every batch taken only while load5 is under run-slot.load5-cap's cap (22 while it is off), or while the disk is under the floor (5 GB, about two trashed worktrees), where space wins over load; a batch whose real path is not a folder directly in the trash root is skipped, and one the load held comes back in leftForLoad so the log can name it.
+// The one recursive delete of the trash: each batch over 7 days old, then the oldest while free space is under 50 GB; deleting the trash is cheap, so no load holds either, and a batch whose real path is not a folder directly in the trash root is skipped.
 export function purgeTrash(
   trash: string,
-  io: { free: () => number; load?: () => number; loadCap?: number; now: Date },
-): { removed: string[]; skipped: string[]; leftForLoad: string[] } {
+  io: { free: () => number; now: Date },
+): { removed: string[]; skipped: string[] } {
   const root = real(trash)
   const removed: string[] = []
   const skipped: string[] = []
-  const leftForLoad: string[] = []
   const remove = (batch: string) => {
     const at = join(root, batch)
     if (!lstat(at)?.isDirectory() || dirname(real(at)) !== root) {
@@ -601,21 +656,89 @@ export function purgeTrash(
     rmSync(at, { force: true, recursive: true })
     removed.push(batch)
   }
-  const mayGo = () =>
-    io.free() < PURGE.floor || io.loadCap === undefined || (io.load?.() ?? 0) < io.loadCap
   const cutoff = io.now.getTime() - PURGE.days * 86_400_000
-  const left: string[] = []
+  const young: string[] = []
   for (const batch of batches(root))
-    if (stampMs(BATCH.exec(batch)![1]!) < cutoff) {
-      if (mayGo()) remove(batch)
-      else leftForLoad.push(batch)
-    } else left.push(batch)
-  while (left.length && io.free() < PURGE.minFree) {
-    if (!mayGo()) {
-      leftForLoad.push(...left)
-      break
+    if (stampMs(BATCH.exec(batch)![1]!) < cutoff) remove(batch)
+    else young.push(batch)
+  while (young.length && io.free() < PURGE.minFree) remove(young.shift()!)
+  return { removed, skipped }
+}
+
+// The wait between two item strips, so the strip's deletions never run back to back.
+const STRIP_PACE_MS = 250
+
+// Whether a tree folder is one an install or a build rebuilds: a node_modules folder, at any depth, and web/next/.next.
+const isRebuildable = (rel: string, name: string): boolean =>
+  name === "node_modules" || rel === join("web", "next", ".next")
+
+// Removes a tree's node_modules folders, at any depth, and its web/next/.next, the folders an install or a build rebuilds, and returns the removed paths relative to the tree; a symlink is not followed, so a link named node_modules stays.
+const stripRebuildable = (tree: string): string[] => {
+  const removed: string[] = []
+  const walk = (dir: string, base: string): void => {
+    for (const entry of entriesOf(dir)) {
+      if (!entry.isDirectory()) continue
+      const rel = base ? join(base, entry.name) : entry.name
+      if (isRebuildable(rel, entry.name)) {
+        rmSync(join(dir, entry.name), { force: true, recursive: true })
+        removed.push(rel)
+      } else walk(join(dir, entry.name), rel)
     }
-    remove(left.shift()!)
   }
-  return { removed, skipped, leftForLoad }
+  walk(tree, "")
+  return removed.sort()
+}
+
+// Strips every batch in the trash, oldest first and paced, of the folders an install or a build rebuilds, at any load; what it leaves is the tree's code, which the 7-day restore brings back, so no batch goes whole. An entry whose item it stripped gains the folder count on stripped, which the restore line names the install from, an entry a carve-out let through or one already marked keeps its item whole, and a manifest it cannot rewrite or an item it cannot finish names its batch in failed.
+export async function stripTrash(
+  trash: string,
+  io: { sleep?: (ms: number) => Promise<void> } = {},
+): Promise<{ batches: string[]; failed: string[]; folders: number }> {
+  const root = real(trash)
+  const sleep = io.sleep ?? ((ms: number) => Bun.sleep(ms))
+  const done: string[] = []
+  const failed: string[] = []
+  let folders = 0
+  for (const batch of batches(root)) {
+    const at = join(root, batch)
+    if (!lstat(at)?.isDirectory() || dirname(real(at)) !== root) continue
+    const entries = manifestOf(root, batch)
+    let changed = false
+    let held = 0
+    for (const slot of dirsIn(at)
+      .map((dir) => basename(dir))
+      .filter((name) => /^\d+$/.test(name))
+      .sort((a, b) => Number(a) - Number(b))) {
+      const entry = entries.find((line) => line.id === `${batch}/${slot}`)
+      if (entry?.stripped || entry?.carveOut) continue
+      const item = dirsIn(join(at, slot))
+      if (item.length !== 1) continue
+      let stripped: string[]
+      try {
+        stripped = stripRebuildable(item[0]!)
+      } catch {
+        failed.push(batch)
+        continue
+      }
+      if (!stripped.length) continue
+      folders += stripped.length
+      held += stripped.length
+      await sleep(STRIP_PACE_MS)
+      if (entry) {
+        entry.stripped = (entry.stripped ?? 0) + stripped.length
+        changed = true
+      }
+    }
+    if (changed) {
+      const tmp = join(at, "manifest.jsonl.strip")
+      try {
+        writeFileSync(tmp, `${entries.map((line) => JSON.stringify(line)).join("\n")}\n`)
+        renameSync(tmp, join(at, "manifest.jsonl"))
+      } catch {
+        failed.push(batch)
+      }
+    }
+    if (held) done.push(batch)
+  }
+  return { batches: done, failed: [...new Set(failed)], folders }
 }

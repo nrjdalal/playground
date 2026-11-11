@@ -6001,7 +6001,7 @@ var contentFields = {
   value: union([array(unknown()), record(string2(), unknown())]).nullable()
 };
 // packages/settings/src/ext.ts
-var BUNDLED_EXTENSIONS = ["slack"];
+var BUNDLED_EXTENSIONS = ["slack", "whatsapp"];
 var extSettings = defineSettings({
   "ext.bundled": {
     default: [],

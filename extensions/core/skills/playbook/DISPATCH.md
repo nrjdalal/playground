@@ -118,3 +118,9 @@ Dispatch is done when the session holds its brief, the roster shows its task (an
 Slack mode lives in the bundled `slack` extension's `slack` skill, which a session loads once the owner turns Slack on in Settings (`ext.bundled`).
 When the DM watch hands you an owner message, follow that skill.
 Done when the owner's message has its reply posted.
+
+## WhatsApp mode
+
+WhatsApp mode lives in the bundled `whatsapp` extension's `whatsapp` skill, which a session loads once the owner turns WhatsApp on in Settings (`ext.bundled`); that switch is the mode ops-wa reads.
+When ops-wa hands you an owner message, or its 15-minute line asks for an update, follow that skill.
+Done when the owner's message has its reply sent through `playground wa send`.
