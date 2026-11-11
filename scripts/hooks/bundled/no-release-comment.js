@@ -1777,7 +1777,7 @@ async function chdirTo(name, cmd, parsed, env) {
   env.cwdUnread = env.cwdUnread || unread || from.length === 0 && paths.length === 0;
 }
 var negated = (cmd) => markers(cmd.words).filter((word) => word === "!").length % 2 === 1;
-var EXITS = new Set(["exit", "return"]);
+var EXITS = new Set(["exit"]);
 function orElse(cmd, env) {
   const or = env.cwdOr;
   if (!or || cmd.chain === or.orChain)

@@ -2101,10 +2101,10 @@ type CdOr = {
   scope: number
 }
 
-// The words that end the line where they run, so a cd's `||` that runs one leaves the commands after it where the cd landed
-const EXITS = new Set(["exit", "return"])
+// The words that end the line where they run, so a cd's `||` that runs one leaves the commands after it where the cd landed; a top-level `return` is not one, since bash -c fails it and carries on
+const EXITS = new Set(["exit"])
 
-// What an `||` after a sure cd's run runs may run where the cd failed, so it and its own run, a subshell, a substitution or a script it holds included, are judged in the folders from before the cd too, beside where the shell was. The commands after that run keep both when the `||` follows the cd itself (`cd <path> || echo no; git commit`), and return to the folder the cd named when the `||` follows a later command of the cd's run, or what it runs is an exit or a return in the line's own shell, which ends the line where the cd failed; one in a subshell or a pipeline ends that alone.
+// What an `||` after a sure cd's run runs may run where the cd failed, so it and its own run, a subshell, a substitution or a script it holds included, are judged in the folders from before the cd too, beside where the shell was. The commands after that run keep both when the `||` follows the cd itself (`cd <path> || echo no; git commit`), and return to the folder the cd named when the `||` follows a later command of the cd's run, or what it runs is an exit in the line's own shell, which ends the line where the cd failed; one in a subshell or a pipeline ends that alone.
 function orElse(cmd: Command, env: Env): void {
   const or = env.cwdOr
   if (!or || cmd.chain === or.orChain) return
