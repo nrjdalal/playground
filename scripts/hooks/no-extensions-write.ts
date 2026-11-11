@@ -449,8 +449,8 @@ function scoreAsOther(words: Word[], cmd: Command, parsed: Parsed, env: Env): bo
 }
 
 const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
-// what lets an awk program run a command or write a file: system(), getline, a > redirect or an @ directive, and a | pipe outside the literals awkPipe allows
-const AWK_RUNS = /system|getline|[>@]/
+// what lets an awk program run a command or write a file: system(), a > redirect or an @ directive, and a | pipe outside the literals awkPipe allows, the one way a getline runs a command
+const AWK_RUNS = /system|[>@]/
 // a regex literal where awk reads only a pattern: at the program's start or after {, }, ;, !, (, ,, ~, &&, || or a newline, holding no quote, no [ and no newline, so a > in it (`/^>>>>>>> /`) is a character it matches, never a redirect
 const AWK_PATTERN = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.)*\//g
 const awkRuns = (program: string) =>
@@ -705,7 +705,10 @@ function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
   )
 }
 
-// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
+// the shells whose -c script the lexer reads as they do
+const BASH_LIKE = new Set(["bash", "sh", "zsh"])
+
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, date, echo, false, git, grep, head, jq, lsof, perl, sed, sort, tail, true, uniq or wc, a bash, sh or zsh -c whose script is read call by call, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
   const { args, first } = parsed
@@ -725,12 +728,25 @@ function narrow(cmd: Command, env: Env): boolean {
     const programs = awkPrograms(args)
     return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))
   }
-  if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
+  if (["cat", "grep", "head", "jq", "tail", "wc"].includes(base)) return reads(parsed, env)
   // a git reader with a word the hook cannot read keeps canary's reading, since that word may be an option that writes or runs (`--output=…`)
   if (base === "git") return reads(parsed, env) && !args.some(({ value }) => marked(value))
   if (SEDS.has(base)) return sedReads(args)
   if (base === "perl") return perlReads(parsed, env)
   if (base === "cut" || base === "echo" || base === "lsof") return true
+  // date, true and false print or exit and run nothing, so `sed -n '/{/p' f; date` keeps the reader's reading
+  if (base === "date" || base === "false" || base === "true") return true
+  // a shell given a script by -c alone runs that script, so it is narrow when its script is a line read call by call (wholeLine), which counts it only as its line's one command
+  if (BASH_LIKE.has(base)) {
+    const [flag, script] = args
+    return (
+      args.length === 2 &&
+      flag.value === "-c" &&
+      script.quoted &&
+      !marked(script.value) &&
+      !wholeLine(lex(script.value, env.known).commands, env)
+    )
+  }
   // a read-only gh call is narrow when its jq filter is the only word that holds a space
   if (base === "gh") {
     const filters = ghFilters(parsed)
@@ -785,6 +801,9 @@ function wholeLine(commands: Command[], env: Env): boolean {
     if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
     const parsed = parse(cmd)
+    // a shell's -c is narrow only as its line's one command, so a shell beside another call keeps canary's reading
+    if (commands.length > 1 && parsed.first && BASH_LIKE.has(program(parsed.first.value)))
+      return true
     return writes || !(narrow(cmd, env) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed))
   })
 }

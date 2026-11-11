@@ -7755,7 +7755,7 @@ function scoreAsOther(words, cmd, parsed, env) {
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at));
 }
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
-var AWK_RUNS = /system|getline|[>@]/;
+var AWK_RUNS = /system|[>@]/;
 var AWK_PATTERN = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.)*\//g;
 var awkRuns = (program) => AWK_RUNS.test(program.replace(AWK_PATTERN, "$1$2RE")) || awkPipe(program);
 var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
@@ -7984,6 +7984,7 @@ function perlReads({ args, local }, env) {
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
 }
+var BASH_LIKE = new Set(["bash", "sh", "zsh"]);
 function narrow(cmd, env) {
   const parsed = parse3(cmd);
   const { args, first } = parsed;
@@ -7997,7 +7998,7 @@ function narrow(cmd, env) {
     const programs = awkPrograms(args);
     return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value));
   }
-  if (["cat", "grep", "head", "tail", "wc"].includes(base))
+  if (["cat", "grep", "head", "jq", "tail", "wc"].includes(base))
     return reads(parsed, env);
   if (base === "git")
     return reads(parsed, env) && !args.some(({ value }) => marked(value));
@@ -8007,6 +8008,12 @@ function narrow(cmd, env) {
     return perlReads(parsed, env);
   if (base === "cut" || base === "echo" || base === "lsof")
     return true;
+  if (base === "date" || base === "false" || base === "true")
+    return true;
+  if (BASH_LIKE.has(base)) {
+    const [flag, script] = args;
+    return args.length === 2 && flag.value === "-c" && script.quoted && !marked(script.value) && !wholeLine(lex(script.value, env.known).commands, env);
+  }
   if (base === "gh") {
     const filters = ghFilters(parsed);
     return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value));
@@ -8041,6 +8048,8 @@ function wholeLine(commands, env) {
       return true;
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
     const parsed = parse3(cmd);
+    if (commands.length > 1 && parsed.first && BASH_LIKE.has(program(parsed.first.value)))
+      return true;
     return writes || !(narrow(cmd, env) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed));
   });
 }
