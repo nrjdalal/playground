@@ -124,13 +124,16 @@ export function newestRuns(checks: Check[]): Check[] {
   return [...newest.values()]
 }
 
-// Pure: the run id of a required check's workflow once every job it ran passed, its check still missing: GitHub ended the run without creating the job, and a rerun brings it; null while a job is unfinished or red, or none ran.
+// Pure: the run id of a required check's workflow once every job it ran passed, its check still missing: GitHub ended the run without creating the job, and a rerun brings it; null while a job is unfinished or red, or none ran. The largest id is the newest run's, since a second run on the head with fewer shards leaves the first run's extra shard listed.
 function endedRun(checks: Check[], name: string): string | null {
   const jobs = checks.filter((check) => check.workflowName === REQUIRED_WORKFLOWS[name])
   const done = (check: Check) =>
     check.status?.toUpperCase() === "COMPLETED" && PASSED.has(check.conclusion?.toUpperCase() ?? "")
   if (!jobs.length || !jobs.every(done)) return null
-  return /\/actions\/runs\/(\d+)\//.exec(jobs[0]!.detailsUrl ?? "")?.[1] ?? null
+  const run = Math.max(
+    ...jobs.map((job) => Number(/\/actions\/runs\/(\d+)\//.exec(job.detailsUrl ?? "")?.[1] ?? 0)),
+  )
+  return run > 0 ? String(run) : null
 }
 
 // Pure: the head's GitHub checks as one gate: every check's newest run finished and passed, each required name among them. gitGuardian refuses a head with no GitGuardian check.

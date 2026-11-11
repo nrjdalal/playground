@@ -258,6 +258,27 @@ describe("gatesOf", () => {
     })
   })
 
+  test("a second run on the head with fewer shards names its own run id, not the first run's", () => {
+    const job = (run: number, name: string) => ({
+      conclusion: "SUCCESS",
+      detailsUrl: `https://github.com/nrjdalal/playground/actions/runs/${run}/job/${name.length}`,
+      name,
+      startedAt: run === 42670675952 ? "2026-11-09T18:04:17Z" : "2026-11-09T17:40:00Z",
+      status: "COMPLETED",
+      workflowName: "auto-check-build",
+    })
+    const test = { ...job(42670675952, "test"), workflowName: "auto-test" }
+    const checks = [
+      job(42668000001, "Suite (15)"),
+      job(42670675952, "Lint and Build"),
+      job(42670675952, "Suite (1)"),
+      test,
+    ]
+    expect(ciGate(checks, { required: REQUIRED_CHECKS }).detail).toContain(
+      "`gh run rerun 42670675952`",
+    )
+  })
+
   test("an older cancelled run beside a newer pass of the same check passes", () => {
     expect(ciGate([CANCELLED, PASSED_RUN])).toEqual({
       detail: "1 check passed",
