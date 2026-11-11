@@ -103,7 +103,7 @@
   Move back (`RiInboxUnarchiveLine`; the action `unarchive`) returns an archived item to the list as it was, and takes one set aside (`cleared`) back to `open` with no answer, from Archive or Done, so it is answered again;
   it types nothing into its poster, since nothing was decided, and the card takes the list's top as it arrives rather than waiting behind the pill, since the click was the owner's own (`back` in `Inbox`); the API refuses it on anything neither archived nor set aside.
   Dismiss (`RiCloseLine`; the action `dismiss`) sends a card to Done marked dismissed (`answer.dismissed`); on what still waits, a secret ask and an archived one included, it records a set-aside with it (status `cleared`, choice `clear`, neither a deny nor a discard and never a go).
-  Its poster gets the `set-aside` verb: whatever is already in motion stays in motion, only the new step the item asks for waits, and the owner picks the talk up again; its read (`bun run ask get --ack`) closes it, as a deny's does, and the action `clear` still sets an open item aside the same way for an old caller.
+  Its poster gets the `set-aside` verb: whatever is already in motion stays in motion, only the new step the item asks for waits, and the owner picks the talk up again; its read (`playground ask get --ack`) closes it, as a deny's does, and the action `clear` still sets an open item aside the same way for an old caller.
   On anything else (an answered, working or failed item, a reply, an update, or a card on Done not yet dismissed) Dismiss marks it dismissed, keeping when it first went to Done, and reads an update.
   Its poster gets the `dismiss` verb, drop it (`closedPayload`), with the `close` that closes a card it has not closed yet; a card its poster already closed, or an update Done already told, is typed nothing again.
   Done (`RiCheckDoubleLine`, `POST /api/v1/inbox/dismiss`, `dismissItems()`) sends an update or an answered card to Done unmarked, waking one put off or archived, so Done's own Dismiss stays on it until the owner dismisses it.
@@ -164,7 +164,8 @@
   with nothing open or running it reads Idle (playbook's **ask** rule).
   The answer is recorded in one write that holds only while the item is open at the version read, then typed into the posting session through `deliver()` as one line, `[inbox-answer] {json}` (`answerPayload` and `answerLine` in `inbox.ts`), and the item records how that delivery went.
   The JSON is `answerPayloadSchema` in `@packages/config/inbox` (`payloadOf` parses a line): the item's `ref`, `id`, `title`, `kind` and a decision's preview `type`; the `verb` (`ANSWER_VERBS`: `pick` an option, `send`, `draft`, `discard`, `set-aside`, `submit`, and `dismiss` and `done` for a card the owner closed, below); `go`, whether to carry it out; `next`, `carry-out`, `close` or `nothing`;
-  and `close`, the exact command that closes the item, naming `--no-link "<why>"` beside `--link` for a go that may leave no page (a decision whose preview names no `link`, a Save as draft), and left out where nothing is left to close: an update, or a card its poster already closed.
+  and `close`, the exact command that closes the item, a `playground ask ack` or `playground ask get --ack` that runs from any worktree (on a live-reads test stack that checkout's own `bun run --cwd <checkout> ask`, `askCli` in `inbox.ts`),
+  naming `--no-link "<why>"` beside `--link` for a go that may leave no page (a decision whose preview names no `link`, a Save as draft), and left out where nothing is left to close: an update, or a card its poster already closed.
   A pick names its `option`, the row the card showed, by `index`, `letter` and `label` (`choicesOf`): a yes or no's Approve is A and its Deny B, and a lettered ask's None of these takes the letter after its last option.
   A multi-question ask's payload names `picks` instead, one entry per question with its `question` and the same three fields (`picksOf`).
   His comment rides as `comment`, a changed draft's words as `text`, a Slack draft's link command as `linkConverter`, what the dashboard ran on Approve as `accepted` (an accept),
@@ -176,7 +177,7 @@
   A poster that has ended (the delivery reads `NOT_FOUND` with deliver.ts's reason `No live session is named <poster>.` or `<poster>'s Claude is not running in its pane any more.`; `posterGone` in `inbox.ts`) hands the answer to the dispatcher instead (`DISPATCHER`, which the router passes to `answerItem` and `retryDelivery`; `textsOf`).
   Any other `NOT_FOUND` (`now names another session`, `has no terminal to type into`) comes from a live session and stays failed, so the go is never carried out twice.
   A sessions read that was cut short (`Live.partial`, herdr.md) that misses the poster is read once more, fresh rather than the hub's board, and still missing it reads `SESSIONS_FAILED`, never `NOT_FOUND`, so a live poster's answer is never relayed (`target()` in `deliver.ts`).
-  The dispatcher is typed the same line with `relay: {for: <poster>, why: "poster-ended"}`, and reads the preview with `bun run ask get`: a `next` of `carry-out` it carries out in the poster's place, a sent message through the MCP server `slack.sendServer` names (else its Slack tool), then runs `close`; `close` or `nothing` has nothing to carry out, only the `close` to run.
+  The dispatcher is typed the same line with `relay: {for: <poster>, why: "poster-ended"}`, and reads the preview with `playground ask get`: a `next` of `carry-out` it carries out in the poster's place, a sent message through the MCP server `slack.sendServer` names (else its Slack tool), then runs `close`; `close` or `nothing` has nothing to carry out, only the `close` to run.
   That delivery records `delivered` with `to`, the session that took it: the dispatcher here, the poster otherwise.
   A row from before `to` was recorded has none and reads as its poster (`takenBy` in `web/next/src/lib/inbox.ts`).
   The card names that session where the answer waits on it or may not have reached it (`Queued for <dispatcher>`, `Send unconfirmed: whether <dispatcher> has it is not known`).
@@ -203,7 +204,8 @@
   Before that it refuses, naming both ports, a `POSTGRES_URL` whose port is not the one in the `.env` of the checkout `dashboard-ask.ts` lives in (`checkoutMismatch` in `api/hono/src/lib/sessions/guard.ts`): a run by path from another checkout, or a URL exported in the shell over the `.env`.
   A test run (`NODE_ENV=test`) passes its own container's URL on purpose, and the check skips it.
   Run it in the checkout that serves the dashboard, from anywhere with `bun run --cwd <checkout> ask`: any other checkout has its own database, which the live dashboard never shows, and says so on stderr.
-  From a worktree, run `playground ask <verb>`, which runs `bun run ask <verb>` in the Dashboard's checkout with every word and stdin passed on (`verb` in `packages/scripts/src/playground/cli.ts`), so `playground ask new < item.json` posts there; `bun run ask` in a worktree whose `.env` lacks the dashboard's values exits 1 on `Invalid environment variables` (measured on 11 Nov).
+  From a worktree, run `playground ask <verb>`, the short form of the line above, which runs `bun run ask <verb>` in the Dashboard's checkout with every word and stdin passed on (`verb` in `packages/scripts/src/playground/cli.ts`), so `playground ask new < item.json` posts there.
+  `bun run ask` in a worktree whose `.env` lacks the dashboard's values exits 1 on `Invalid environment variables` (measured on 11 Nov).
   From a user install's clone root with no `POSTGRES_URL`, `bun run ask` runs as the Dashboard's checkout's, the worktree on `live.branch` wherever it sits (`dashboardCheckout()`), whose `.env` holds the database, through `api/hono/src/bin/ask-from-clone.ts`; from any other worktree it runs as that worktree's own.
   A fresh worktree runs it once its `.env` is set up (the `dev` skill's Start) and its shared packages are built (`~/.playground/ops/run-slot.sh <your name> -- bunx turbo run build --filter='./packages/*'`), since a cloned `node_modules` alone leaves `@packages/db` unresolved.
   Before every `playground ask new`, run `playground ask open` and read what is already open: when an open item asks the same thing, name its `#iN` in chat and post nothing, since two sessions once posted one question as two items.
@@ -328,9 +330,9 @@
   `status` reads `open` until the owner answers or its poster settles it (`done`, answer `{at, by, choice: "settled", link?, linkLabel?, note?}`, its card reading Decided by the poster with no buttons, nothing delivered, and one the owner answered refused,
   a reply included once its poster acked it, since a settle replaces the whole answer; a reply not yet acked still settles), then `approved` (Approve, with `answer.option`, the go row's index from 0, which a lettered decision's Approve requires and its Edit has none of, or `answer.options`, one index per question a multi-question ask's Approve requires, or Edit with `answer.editedText`), `denied`,
   `sent` or `drafted` (Draft; each with `editedText` when the owner changed the draft), `discarded`, `cleared` (a decision's or draft's set-aside, by a Dismiss while it waited or the old `clear`, neither yes nor no), or `provided` (a secret ask's Submit, below); an update is `done` from the start, read once `readAt` is set, and its answer is `{dismissedAt}` once the owner dismisses it.
-  Delivery is `pending`, then `delivered` (`via: "session"` with `to`, the session that took it), `queued` (Claude Code holds it, above) or `failed` with the adapter's code; when it fails, or to collect the answer without waiting, the poster polls `bun run ask get <id> --ack` until `status` is not `open`, and `--ack` records `{at, status: "delivered", via: "cli"}` (`readAnswer`),
+  Delivery is `pending`, then `delivered` (`via: "session"` with `to`, the session that took it), `queued` (Claude Code holds it, above) or `failed` with the adapter's code; when it fails, or to collect the answer without waiting, the poster polls `playground ask get <id> --ack` until `status` is not `open`, and `--ack` records `{at, status: "delivered", via: "cli"}` (`readAnswer`),
   the first delivery recorded standing.
-  A go (Approve, Edit, Send, Draft) closes only once carried out, with where it landed, whatever its kind of link: `bun run ask ack <id> --link <https url>` (the Slack message, the pull request, issue or comment,
+  A go (Approve, Edit, Send, Draft) closes only once carried out, with where it landed, whatever its kind of link: `playground ask ack <id> --link <https url>` (the Slack message, the pull request, issue or comment,
   the Linear ticket or comment) or `--no-link "<why>"` for a go with no page (a budget, an accept, an apps change, a grant, a guard setting, an own account change) or a Draft Slack refused (`draft_already_exists`), which `ack` refuses to go without, and one way alone: `--no-link` fits a go with no link recorded, and `--link` one not closed with no link;
   a deny, a clear, a discard or a provided secret closes when read, by `get --ack` or a bare `ack`.
   Closing stamps `answer.ackedAt`, the first close's time, even after a delivery to the session, and records `answer.link` or `answer.noLink`; until then a go's card names its pick alone under a blue light;
@@ -350,7 +352,7 @@
   A keychain sink instead hands the value to `keychainItem(<item>).write` (`api/hono/src/lib/keychain.ts`), which checks it against the item's shape and writes it through `security -i` on stdin, so no argv holds it; its one result is `{environment: "Keychain", exitCode, line}`, `line` reading `saved` or the refusal's first line with the value cut out.
   Only a stack that reads the live machine runs the sink; a fixture or test stack runs nothing and records exit 0 (`runSink`, `saveToKeychain`).
   The agent sign-in's account is refused with a 403 after the owner rung (`refuseAgent` in `api/hono/src/middlewares/dashboard.ts`), since it holds the owner rung, so only the owner's own click submits a value.
-  The item turns `provided`, its answer `{at, choice: "provided", results: [{environment, exitCode, line?}]}` (`exitCode` null once stopped by a signal, 127 when `vercel` could not start), and its poster gets the `submit` verb with each environment's result and the `bun run ask get --ack` that closes it, which `bun run ask stale` chases until it does.
+  The item turns `provided`, its answer `{at, choice: "provided", results: [{environment, exitCode, line?}]}` (`exitCode` null once stopped by a signal, 127 when `vercel` could not start), and its poster gets the `submit` verb with each environment's result and the `playground ask get --ack` that closes it, which `bun run ask stale` chases until it does.
   The card reads `Provided` and each environment's mark, `<env> ✓`, or `<env> ✗` with its result's `line` (its exit status when it gave none), green once every environment took it, red while any did not, whether or not its poster was told;
   a value the sink refused takes a new ask, and so does one whose card still reads sending after the sink's minute an environment, since the API restarted mid-run and no exit status came back.
   A telling that failed leaves that colour as it is and draws `Not told to <taker> yet: <reason>` muted under the result (`deliveryNote`), with a Retry that types the same line again and runs no sink (`retryDelivery`).
@@ -390,7 +392,7 @@
   one fixed argv a proposal (`acceptArgs`), no shell, no `PLAYGROUND_ROLE`, against the stack's data folder, a fixture stack's own.
   A list stops at its first failed accept and leaves the rest untried (`acceptAll`).
   The answer keeps `accepted: {exitCode, line}`: for one proposal the CLI's first line or its error; for a list `accepted <kind> <key> in <scope>, …`, or on a failure the ones accepted, the failed one with its reason, then `not tried:` and the rest.
-  The card reads `Accepted: <line>` green or `Accept failed (exit N): <line>` red, and the poster, or the dispatcher in an ended poster's place, is typed that result with nothing left to carry out, closing it with `bun run ask ack #iN --no-link "<why>"`.
+  The card reads `Accepted: <line>` green or `Accept failed (exit N): <line>` red, and the poster, or the dispatcher in an ended poster's place, is typed that result with nothing left to carry out, closing it with `playground ask ack #iN --no-link "<why>"`.
   Deny, Archive and Dismiss run nothing; a failed accept takes a new decision for the proposals still unaccepted, each at its current rev.
 
   ```bash
@@ -419,7 +421,7 @@
   It reads the login scope's own list as accepted, adds or removes the app matched as the hook matches it (`appsChange`),
   and runs `ext put <login> list desktop-owner-apps - --reason "the owner approved it in the Inbox (#iN)"` with the new list on its stdin (`appsArgs`, `ownerApps` in `api/hono/src/lib/store/extensions.ts`), no shell, no `PLAYGROUND_ROLE`.
   An app already on the list, one to remove that the login's list lacks, or a list that is not names writes nothing.
-  The answer keeps `listed: {exitCode, line}`, and the card reads `Your apps: <line>` green or `Apps change failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`, and after a failed one, whose list stays as it was, tells its lead.
+  The answer keeps `listed: {exitCode, line}`, and the card reads `Your apps: <line>` green or `Apps change failed (exit N): <line>` red; the poster closes it with `playground ask ack #iN --no-link "<why>"`, and after a failed one, whose list stays as it was, tells its lead.
 
   ```bash
   bun run ask new <<'EOF'
@@ -452,7 +454,7 @@
   a job's `enabled` or `config` goes over the row its scope holds, never the registry's fields, so a registry job keeps the registry's command and schedule (`settingsFor`'s merge, `.agents/dashboard/dashboard.md`'s Jobs),
   an org's own job's merged row is checked as a whole row is, and refused with `<key> has no row at <scope> to change` while its scope holds none,
   an org's own job's whole row replaces the row its scope holds, and a value its scope already holds writes nothing and reads `<key> at <scope> is already <value>, so nothing changed`.
-  The answer keeps `set: {exitCode, line}`, and the card reads `Guard setting: <line>` green or `Guard setting failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`, and after a failed one tells its lead.
+  The answer keeps `set: {exitCode, line}`, and the card reads `Guard setting: <line>` green or `Guard setting failed (exit N): <line>` red; the poster closes it with `playground ask ack #iN --no-link "<why>"`, and after a failed one tells its lead.
 
   ```bash
   bun run ask new <<'EOF'
@@ -468,7 +470,7 @@
   a key that names no Claude row in `usage.accounts` at that scope (a GLM row's label included) is refused as it is posted or edited, and Edit is refused.
   The card shows the email, the scope and the change, Own off to on or on to off.
   Approve takes `seen` as a guard setting's does, then reads the list, sets or drops `own` on that one row through `withOwn` (`@packages/config/accounts`), every other row and field as it was, and writes the list through `setSetting`, its reason `the owner approved it in the Inbox (#iN)`; a row already in the asked state writes nothing.
-  The answer keeps `owned: {exitCode, line}`, the line naming the state Approve found, and the card reads `Own account: <line>` green or `Own account change failed (exit N): <line>` red, and Settings > Accounts reads its switch again (`ACCOUNTS_QUERY_KEY`); the poster closes it with `bun run ask ack #iN --no-link "<why>"`.
+  The answer keeps `owned: {exitCode, line}`, the line naming the state Approve found, and the card reads `Own account: <line>` green or `Own account change failed (exit N): <line>` red, and Settings > Accounts reads its switch again (`ACCOUNTS_QUERY_KEY`); the poster closes it with `playground ask ack #iN --no-link "<why>"`.
 
   ```bash
   bun run ask new <<'EOF'
