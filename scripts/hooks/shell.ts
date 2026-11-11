@@ -1830,7 +1830,7 @@ function again(lexed: Lexed, cmd: Command, parsed: Parsed): Lexed {
 async function nested<T>(cmd: Command, env: Env, body: () => Promise<T>): Promise<T> {
   const chain = env.cwdChain
   const token = env.cwdChainToken
-  // the script's commands carry runs of their own, so a cd's `||` the line holds stays where it was until the line's next command
+  // the script's commands carry runs of their own, so a cd's `||` the line holds stays where it was until the line's next command, and a sure cd the script ends on is the line's, under the reading command's run
   const or = env.cwdOr
   env.cwdChain = []
   env.cwdChainToken = undefined
@@ -1838,7 +1838,10 @@ async function nested<T>(cmd: Command, env: Env, body: () => Promise<T>): Promis
   try {
     return await body()
   } finally {
-    env.cwdOr = or
+    // the body moved it, which the narrowing after `env.cwdOr = undefined` above cannot see
+    const own = env.cwdOr as CdOr | undefined
+    env.cwdOr =
+      own && own.orChain === undefined ? { ...own, cdChain: cmd.chain, scope: cmd.scope } : or
     const left = [...new Set([...(chain ?? []), ...(env.cwdChain ?? [])])]
     env.cwdChain = keep(left, env)
     env.cwdChainToken = left.length > 0 ? (chain?.length ? token : cmd.chain) : undefined
@@ -1985,13 +1988,9 @@ function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: s
   return { back: dirs.length > 1, paths: [...paths], unread }
 }
 
-// Whether a cd or pushd is physical (`cd -P`), changing into the folder a link names before a `..` after it, as the kernel does, where a plain one folds the `..` by text; the last of -L and -P wins
+// Whether a cd or pushd is physical (`cd -P`), changing into the folder a link names before a `..` after it, as the kernel does, where a plain one folds the `..` by text; any -P among its options counts, whatever else is there (`-qP`, `-PL`, `-P -L`), since zsh lands physical for each and a guard fails closed
 const physicalCd = (args: Word[]): boolean =>
-  args
-    .filter((a) => /^-[LPe@]+$/.test(a.value))
-    .map((a) => a.value.replace(/[^LP]/g, ""))
-    .join("")
-    .endsWith("P")
+  args.some((a) => /^-[^-]/.test(a.value) && a.value.includes("P"))
 
 // Where a physical cd from `base` lands on a word it has read as `lexical`: the kernel's path, each link followed, else `lexical` when it is not there
 function kernelPath(word: Word, base: string | undefined, lexical: string): string {
@@ -2090,14 +2089,14 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
 const negated = (cmd: Command): boolean =>
   markers(cmd.words).filter((word) => word === "!").length % 2 === 1
 
-// `before` the folders from before the cd, `cdChain` its run's token, `joined` once a later command joins that run, `orChain` the token of the run the `||` opened, `landed` the folders the shell was in as that run began, `resumes` whether the commands after that run go back to them, `scope` the cd's own
+// `before` the folders from before the cd, `cdChain` its run's token, `exits` whether the `||`'s run is an exit in the line's own shell, `joined` once a later command joins the cd's run, `landed` the folders the shell was in as the `||`'s run began, `orChain` that run's token, `scope` the cd's own
 type CdOr = {
   before: string[]
   cdChain: number | undefined
+  exits?: boolean
   joined?: boolean
   landed?: { maybe: string[]; sure?: string }
   orChain?: number
-  resumes?: boolean
   scope: number
 }
 
@@ -2107,7 +2106,12 @@ const EXITS = new Set(["exit"])
 // What an `||` after a sure cd's run runs may run where the cd failed, so it and its own run, a subshell, a substitution or a script it holds included, are judged in the folders from before the cd too, beside where the shell was. The commands after that run keep both when the `||` follows the cd itself (`cd <path> || echo no; git commit`), and return to the folder the cd named when the `||` follows a later command of the cd's run, or what it runs is an exit in the line's own shell, which ends the line where the cd failed; one in a subshell or a pipeline ends that alone.
 function orElse(cmd: Command, env: Env): void {
   const or = env.cwdOr
-  if (!or || cmd.chain === or.orChain) return
+  if (!or) return
+  if (cmd.chain === or.orChain) {
+    // a pipeline stage or a background runs in a subshell, a brace group's `}` among them, so an exit in that run ends that alone
+    if (or.exits && cmd.detached) env.cwdOr = { ...or, exits: false }
+    return
+  }
   if (cmd.chain === or.cdChain) {
     if (!or.joined) env.cwdOr = { ...or, joined: true }
     return
@@ -2115,15 +2119,15 @@ function orElse(cmd: Command, env: Env): void {
   if (or.orChain === undefined && cmd.orRun) {
     env.cwdOr = {
       ...or,
+      exits: EXITS.has(parse(cmd).name) && !cmd.detached && cmd.scope === or.scope,
       landed: { maybe: env.cwdMaybe ?? [], sure: env.cwdSure },
       orChain: cmd.chain,
-      resumes: or.joined || (EXITS.has(parse(cmd).name) && !cmd.detached && cmd.scope === or.scope),
     }
     env.cwdMaybe = keep([...new Set([...startFolders(env), ...or.before])], env)
     env.cwdSure = undefined
     return
   }
-  if (or.resumes && or.landed) {
+  if ((or.joined || or.exits) && or.landed) {
     env.cwdMaybe = or.landed.maybe
     env.cwdSure = or.landed.sure
   }

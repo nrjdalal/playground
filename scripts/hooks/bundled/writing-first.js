@@ -6363,7 +6363,8 @@ async function nested(cmd, env, body) {
   try {
     return await body();
   } finally {
-    env.cwdOr = or;
+    const own = env.cwdOr;
+    env.cwdOr = own && own.orChain === undefined ? { ...own, cdChain: cmd.chain, scope: cmd.scope } : or;
     const left = [...new Set([...chain ?? [], ...env.cwdChain ?? []])];
     env.cwdChain = keep(left, env);
     env.cwdChainToken = left.length > 0 ? chain?.length ? token : cmd.chain : undefined;
@@ -6458,7 +6459,7 @@ function cdTargets(name, cmd, parsed, env, from) {
   }
   return { back: dirs.length > 1, paths: [...paths], unread };
 }
-var physicalCd = (args) => args.filter((a) => /^-[LPe@]+$/.test(a.value)).map((a) => a.value.replace(/[^LP]/g, "")).join("").endsWith("P");
+var physicalCd = (args) => args.some((a) => /^-[^-]/.test(a.value) && a.value.includes("P"));
 function kernelPath(word, base, lexical) {
   try {
     return realpathSync.native(isAbsolute3(word.value) ? word.value : `${base}/${word.value}`);
@@ -6526,8 +6527,13 @@ var negated = (cmd) => markers(cmd.words).filter((word) => word === "!").length 
 var EXITS = new Set(["exit"]);
 function orElse(cmd, env) {
   const or = env.cwdOr;
-  if (!or || cmd.chain === or.orChain)
+  if (!or)
     return;
+  if (cmd.chain === or.orChain) {
+    if (or.exits && cmd.detached)
+      env.cwdOr = { ...or, exits: false };
+    return;
+  }
   if (cmd.chain === or.cdChain) {
     if (!or.joined)
       env.cwdOr = { ...or, joined: true };
@@ -6536,15 +6542,15 @@ function orElse(cmd, env) {
   if (or.orChain === undefined && cmd.orRun) {
     env.cwdOr = {
       ...or,
+      exits: EXITS.has(parse3(cmd).name) && !cmd.detached && cmd.scope === or.scope,
       landed: { maybe: env.cwdMaybe ?? [], sure: env.cwdSure },
-      orChain: cmd.chain,
-      resumes: or.joined || EXITS.has(parse3(cmd).name) && !cmd.detached && cmd.scope === or.scope
+      orChain: cmd.chain
     };
     env.cwdMaybe = keep([...new Set([...startFolders(env), ...or.before])], env);
     env.cwdSure = undefined;
     return;
   }
-  if (or.resumes && or.landed) {
+  if ((or.joined || or.exits) && or.landed) {
     env.cwdMaybe = or.landed.maybe;
     env.cwdSure = or.landed.sure;
   }
