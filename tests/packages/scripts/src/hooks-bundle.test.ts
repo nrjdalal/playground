@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { isBuiltin } from "node:module"
@@ -491,6 +492,44 @@ describe("--check reads a tree git holds, never the working files", () => {
     git("checkout", "-q", "main")
     // the checkout drops canary's committed link, so the head's own is back before the read
     link()
+    const merged = run("--check", "--merged", "canary")
+    expect(merged.code).toBe(0)
+    expect(merged.stderr).toBe("")
+  })
+
+  test("--merged resolves a workspace package's own tsconfig the merged tree changes, reached by its bare name", () => {
+    const { git, root, run, side, write } = checkout()
+    // a made-up workspace package, linked as an install links one, whose own tsconfig only the merged tree's copy may rule the build
+    const sd = join(root, "pkgs", "sd")
+    mkdirSync(join(sd, "src"), { recursive: true })
+    writeFileSync(join(sd, "package.json"), `${JSON.stringify({ name: "@w/sd" })}\n`)
+    writeFileSync(
+      join(sd, "tsconfig.json"),
+      `${JSON.stringify({ compilerOptions: { paths: { "@s/*": ["./src/*"] } } })}\n`,
+    )
+    writeFileSync(join(sd, "src", "kind.ts"), 'export const kind = "one"\n')
+    writeFileSync(
+      join(sd, "index.ts"),
+      'import { kind } from "@s/kind"\n\nexport const sd = kind\n',
+    )
+    mkdirSync(join(root, "node_modules", "@w"), { recursive: true })
+    symlinkSync(sd, join(root, "node_modules", "@w", "sd"))
+    git("add", "-A")
+    git("commit", "-q", "--no-verify", "-m", "sd")
+    side("canary", () => {
+      write("lib.ts", 'import { sd } from "@w/sd"\n\nexport const lib = `two ${sd}`\n')
+      writeFileSync(
+        join(sd, "tsconfig.json"),
+        `${JSON.stringify({ compilerOptions: { paths: { "@s/*": ["./src/*"], "@cfg/*": ["./src/cfg/*"] } } })}\n`,
+      )
+      writeFileSync(
+        join(sd, "index.ts"),
+        'import { kind } from "@cfg/kind"\n\nexport const sd = `cfg ${kind}`\n',
+      )
+      mkdirSync(join(sd, "src", "cfg"), { recursive: true })
+      writeFileSync(join(sd, "src", "cfg", "kind.ts"), 'export const kind = "cfg"\n')
+    })
+    side("main", () => write("a-guard.ts", guard('console.log("head")\n')))
     const merged = run("--check", "--merged", "canary")
     expect(merged.code).toBe(0)
     expect(merged.stderr).toBe("")
