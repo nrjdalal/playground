@@ -414,7 +414,7 @@ export const GUARD_KEYS = new Set([
 // An ops job's setting turns it on or moves what it runs, so every jobs.<name> is refused, a name the registry lacks included: only the owner's Approve of a guard decision, or Settings > Jobs, sets one.
 const JOB_PREFIX = "jobs."
 const BY_APPROVE =
-  "a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it"
+  "a key only the owner sets: post a guard decision with playground ask new (.agents/dashboard/asks.md), whose Approve writes it"
 // ext verbs that change a scope's lists or settings, or which scopes the lists and policy.json render from
 const EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"])
 // the ext verbs whose --dry-run writes nothing
@@ -1043,7 +1043,7 @@ function cliWrite(words: Word[]): string | undefined {
         : `playground settings ${verb} of ${key}, a key a guard reads`
   }
   if (verb === "accept")
-    return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set"
+    return "playground ext accept, the owner's own call: post it as an accept decision with playground ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set"
   if (verb === "put")
     return unread || positional[1] === "list"
       ? "playground ext put of a list, or with a word it cannot read, which may render into a guard's list"
