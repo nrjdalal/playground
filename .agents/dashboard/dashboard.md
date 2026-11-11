@@ -61,7 +61,7 @@
   `agentLabel` reads a name by its roster kind once the agents read has given one (`setRosterKinds`, from `fetchAgents`), so an `assistant` row under a worker's name reads Assistant in its chat's heading, its composer and the Inbox.
   A cell too narrow for a label passes `AgentLink` its `truncate`, which cuts a title or first ask and keeps the kind after it whole (`labelSplit`: `Review the pull… · reviewer`).
   An agent's name opens `/dashboard?worker=<session>`, that session's own view: its stream from the top of the page, with no header, beside its aside window, the Inbox, Playground's chat and Pages tabs (your chat's has no Chat tab, being it; the Inbox, Changelog and Documents alone),
-  in the Changelog's resizable halves the dashboard's layout draws once around every dashboard page.
+  in the Changelog's resizable halves the dashboard's layout draws once around every dashboard page, opening at the split the owner last let go of: each let-go writes the page's width to the `dashboard.aside.split` cookie after the snap to the middle, and the layout reads it on the server (`aside-split.ts`), so a reload paints that split.
   Every other dashboard page's aside has the Inbox and Playground's chat alone of these (`DashboardAside`, `asideView` and `asideTabs` in `web/next/src/components/dashboard/dashboard-aside.tsx`); every view adds your app squares after the Inbox and the chat and the Apps tab last (`.agents/dashboard/apps.md`).
   On a phone the page's own square comes first, then the aside's, the composer on the page's square or Chat alone.
   Its label is the page's heading for screen readers alone, since the view has no header.
@@ -143,7 +143,8 @@
     A fixture stack fetches nothing: it reports the fixture's `update` (the shipped one 3 behind on canary).
   - `usage`: the usage windows (`five_hour`, `seven_day`: used share and reset time), read by `api/hono/src/lib/usage/window.ts` from `~/.playground/usage.json`, stale past 10 minutes.
     The ops-usage job (`scripts/ops/usage/run.py`, run through its link in `~/.playground/ops/usage/`) writes it every 5 minutes (a temp file, then a rename); the dashboard only reads the file.
-    It reads the factory account's rate-limit headers while login-flip names one (the stored login's `/api/oauth/usage` when that factory is the stored login), else the first account the Dashboard's Add a Claude account keeps (`usage.accounts`, its token under `usage.keychainService`) through the same headers,
+    It reads the factory account's rate-limit headers while login-flip's `factory` resolves to one, itself while the rotation pool lists it and its token still reads, else the pool account the split gives the best share
+    (the stored login's `/api/oauth/usage` when that factory is the stored login), else the first account the Dashboard's Add a Claude account keeps (`usage.accounts`, its token under `usage.keychainService`) through the same headers,
     else the stored login's `/api/oauth/usage` (Claude Code's own `Claude Code-credentials` Keychain item).
     A write can hold one window and not the other, since the job leaves out a window the endpoint gives no numbers for (a reset one stays in, at 0 with no reset time),
     so the sampler remembers each window it read (`withSeen` over `seenWindows`, kept on `globalThis` so a `bun --hot` reload keeps it) and shows a window the file lacks as the last one it saw, with `seenAt` (when that file was written), never a number it did not read,

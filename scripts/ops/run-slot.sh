@@ -22,6 +22,13 @@ case "${RUN_SLOT_ASKED:-}" in
   *) ASKED=$RUN_SLOT_ASKED; REREAD=1 ;;
 esac
 unset RUN_SLOT_ASKED
+# the clone ticket's sort key, second.nanoseconds from one clock read (issues 1619, 1688: seconds alone tied and the name's glob fell to the pid, which does not track ask order); a reread hands it on, so the ticket keeps its name
+ASK_STAMP=""
+case ${RUN_SLOT_ASK_STAMP:-} in
+  *[!0-9.]*) ;;
+  *[0-9].[0-9]*) ASK_STAMP=$RUN_SLOT_ASK_STAMP; REREAD=1 ;;
+esac
+unset RUN_SLOT_ASK_STAMP
 # the command reads run-slot's own stdin through fd 3, since bash gives a script's background job /dev/null (a heredoc ran as an empty
 # program and exited 0); a closed stdin gives it /dev/null, as before
 { exec 3<&0; } 2>/dev/null || exec 3</dev/null
@@ -1479,7 +1486,7 @@ reread() {
   [ -r "$SELF" ] || return
   echo "run-slot.sh: $SELF changed while $WHO waited; running the new copy" >&2
   [ -n "$TICKET" ] && rm -f "$TICKET"
-  RUN_SLOT_ASKED=$ASKED exec bash "$SELF" "${ARGS[@]}"
+  RUN_SLOT_ASKED=$ASKED RUN_SLOT_ASK_STAMP=$ASK_STAMP exec bash "$SELF" "${ARGS[@]}"
 }
 # A waiter's idle poll starts one process, its sleep (issue 1338, 7 Nov: sixteen waiters started about 60 processes a second between them, which held load5
 # between 30 and 42 on 15 cores with the CPU half idle, so the slots they waited for stayed shut): it reads what its last look read through bash builtins
@@ -2211,10 +2218,13 @@ if [ -n "$KIND" ]; then
     [ -n "$(memstat level)" ] || { mem_unread clone "run-slot.clone-off holds this clone until it expires or run-slot.clone-allow names $WHO"; return 0; }
     ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
   }
-  # a clone waiter's place, run-slot.clone-waiters/<class>-<asked>-<pid>-<who> (below), keeps its name across a reread's exec, so a new copy a gate holds drops it until the gates pass (review round 1: it held back every clone clone-allow let through), and one no gate holds keeps its place
+  # a clone waiter's place, run-slot.clone-waiters/<class>-<asked second>.<nanoseconds>-<pid>-<who>, keeps its name across a reread's exec, so a new copy a gate holds drops it until the gates pass (review round 1: it held back every clone clone-allow let through), and one no gate holds keeps its place; the nanoseconds keep two clones that ask in one second in ask order, where seconds alone tied and the glob fell to the pid (issues 1619, 1688)
   CLONE_QUEUE="$OPS/run-slot.clone-waiters"
   if [ "$KIND" = clone ]; then
-    CLONE_TICKET="$CLONE_QUEUE/$CLASS-$ASKED-$$-$WHO"
+    # the whole stamp from one read, since a second from one read and nanoseconds from another straddle the second between them and stamp an earlier ask after a newer one; where the read is refused, $ASKED.0 names the ticket, takes the earliest place in its second, and hands the same name through a reread
+    [ -n "$ASK_STAMP" ] || ASK_STAMP=$(python3 -I -c 'import time; t = time.time_ns(); print(f"{t // 10**9}.{t % 10**9:09d}")' 2>/dev/null)
+    [ -n "$ASK_STAMP" ] || ASK_STAMP="$ASKED.0"
+    CLONE_TICKET="$CLONE_QUEUE/$CLASS-$ASK_STAMP-$$-$WHO"
     # the second, on this image's clock, past which this clone passes the big-run hold (CLONE_WAIT_MAX)
     CLONE_PASS_AT=$((SECONDS + ASKED + CLONE_WAIT_MAX - $(date +%s)))
   fi
@@ -2280,7 +2290,7 @@ if [ -n "$KIND" ]; then
     s=$(LC_ALL=C TZ=UTC ps -o lstart= -p "$1" 2>/dev/null) || s=$(python3 -I "$(dirname "$(realpath "$SELF")")/ptable.py" started "$1" 2>/dev/null | cut -d' ' -f2-)
     echo $s
   }
-  # FIRST: the entry of the clone waiter that goes next, by the glob's order (a 1-digit class, then a 10-digit ask time), dropping each one before it whose pid is gone, or every 12th poll, the full reread's beat, whose pid shows another start time, since a waiter can die without its exit (issue 1316) and a read of the start time starts ps (issue 1338)
+  # FIRST: the entry of the clone waiter that goes next, by the glob's order (a 1-digit class, then the asked second.nanoseconds), dropping each one before it whose pid is gone, or every 12th poll, the full reread's beat, whose pid shows another start time, since a waiter can die without its exit (issue 1316) and a read of the start time starts ps (issue 1338)
   clone_first() {
     local t n pid st c
     FIRST=
