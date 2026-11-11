@@ -7150,6 +7150,40 @@ function mainCheckout(dir) {
   } catch {}
   return dir;
 }
+function real(path) {
+  const found = resolved(path);
+  if (found !== undefined || !isAbsolute3(path))
+    return found ?? nearest(path);
+  const parts = normalize(path).split(sep).filter(Boolean);
+  let low = 0;
+  let high = parts.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (resolved(sep + parts.slice(0, mid).join(sep)) === undefined)
+      high = mid - 1;
+    else
+      low = mid;
+  }
+  return join4(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
+}
+var resolved = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return;
+  }
+};
+function nearest(path) {
+  const rest = [];
+  for (let dir = path;; dir = dirname2(dir)) {
+    const found = resolved(dir);
+    if (found !== undefined)
+      return join4(found, ...rest.reverse());
+    if (dir === dirname2(dir))
+      return path;
+    rest.push(basename2(dir));
+  }
+}
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
 var RUNNERS = new Set(["npx"]);
 var TOOLS = new Set(["lefthook", "turbo"]);
@@ -7243,12 +7277,33 @@ function packagedTools(args) {
     const v = args[k].value;
     if (v === "-p" || v === "--package")
       tools.push(toolName(args[++k]?.value));
-    else if (v.startsWith("--package="))
-      tools.push(toolName(v.slice("--package=".length)));
+    else if (v.startsWith("--package=") || v.startsWith("-p="))
+      tools.push(toolName(v.slice(v.indexOf("=") + 1)));
     else if (RUNNER_TAKES.has(v))
       k++;
   }
   return tools;
+}
+function runnerCwd(name, args, env) {
+  let options = args;
+  if (name === "bun") {
+    const { sub, words } = bunCall(args, env);
+    if (words[0] !== "x")
+      return;
+    options = args.slice(sub + 1);
+  } else if (name !== "bunx")
+    return;
+  let found;
+  for (let k = 0;k < options.length && options[k].value.startsWith("-"); k++) {
+    const v = options[k].value;
+    if (v === "--cwd")
+      found = { dir: options[k + 1] && pathOf(options[++k], env) };
+    else if (v.startsWith("--cwd="))
+      found = { dir: pathOf({ ...options[k], value: v.slice("--cwd=".length) }, env) };
+    else if (RUNNER_TAKES.has(v))
+      k++;
+  }
+  return found;
 }
 function runnerTarget(args) {
   let k = 0;
@@ -7440,6 +7495,7 @@ function turboTask(words) {
   return (tasks[0] === "run" ? tasks.slice(1) : tasks).find((t) => TURBO_TASKS.has(t));
 }
 var recursive2 = (args) => args.some((a) => /^-[a-zA-Z]*[Rra]/.test(a.value) || ["--archive", "--recursive"].includes(a.value));
+var ranIn = (found) => found.also ? [found.dir, found.also.dir] : [found.dir];
 function heavy(name, args, env) {
   const compose = portlessCompose(name, args);
   if (DOCKERS.has(name) || compose) {
@@ -7461,7 +7517,7 @@ function heavy(name, args, env) {
   const turbo = turboWords(name, args, env);
   if (turbo) {
     const task = turboTask(turbo);
-    return task ? { dir: cwdFlag(turbo, env), what: `turbo run ${task}` } : undefined;
+    return task ? { also: runnerCwd(name, args, env), dir: cwdFlag(turbo, env), what: `turbo run ${task}` } : undefined;
   }
   if (RUNNERS2.has(name)) {
     const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES.has(args[k - 1]?.value ?? ""));
@@ -7509,8 +7565,11 @@ function inspect(raw, environment, main) {
   const command = toolInput?.command;
   if (typeof command !== "string")
     return;
-  const worktrees = join5(main, ".claude", "worktrees") + sep2;
-  const inWorktree = (dir) => dir !== undefined && resolve4(dir).startsWith(worktrees);
+  const worktrees = [
+    join5(main, ".claude", "worktrees"),
+    real(join5(main, ".claude", "worktrees"))
+  ].map((w) => w + sep2);
+  const inWorktree = (dir) => dir !== undefined && [resolve4(dir), real(resolve4(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
   const directory = typeof cwd === "string" ? cwd : undefined;
   let line = [];
   let wrote = false;
@@ -7551,12 +7610,12 @@ function inspect(raw, environment, main) {
       const line = words();
       if (found?.anywhere && line !== undefined)
         return refuseDocker(found.what, "", line, found.fix);
-      if (found && line !== undefined && (found.dir === undefined || inWorktree(found.dir)))
+      if (found && line !== undefined && ranIn(found).some((dir) => dir === undefined || inWorktree(dir)))
         return anywhere(found.what, line);
     }
     for (const here of places(env)) {
       const found = heavy(name, args, here);
-      if (!found || !(found.anywhere || inWorktree(found.dir)))
+      if (!found || !(found.anywhere || ranIn(found).some(inWorktree)))
         continue;
       const line = words();
       if (line === undefined)

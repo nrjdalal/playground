@@ -56,6 +56,34 @@ export const groups: Group[] = [
       ["npx -p turbo then -c", "npx -p turbo -c 'turbo run build'"],
       ["npx -p turbo then --call", "npx -p turbo --call 'turbo run build'"],
       ["npx -p turbo then sh -c", "npx -p turbo sh -c 'turbo run build'"],
+      ["bunx -p= naming turbo then sh -c", "bunx -p=turbo sh -c 'turbo run build'"],
+    ],
+  },
+  // bunx and bun x run their tool in the --cwd among their own options, so one naming the main checkout is judged there wherever the line starts
+  {
+    folders: ["checkout", "home"],
+    guards: ["no-main-checkout"],
+    rows: ({ MAIN }) => [
+      [
+        "bunx -p turbo with its --cwd at the main checkout",
+        `bunx -p turbo --cwd=${MAIN} turbo run build`,
+      ],
+      [
+        "bun x -p turbo with its --cwd at the main checkout",
+        `bun x -p turbo --cwd=${MAIN} turbo run build`,
+      ],
+      [
+        "bun x -p lefthook with its --cwd at the main checkout",
+        `bun x -p lefthook --cwd=${MAIN} lefthook install`,
+      ],
+      [
+        "bunx -p turbo with its --cwd at the main checkout then sh -c",
+        `bunx -p turbo --cwd=${MAIN} sh -c 'turbo run build'`,
+      ],
+      [
+        "bunx with its --cwd at the main checkout before -p",
+        `bunx --cwd ${MAIN} -p turbo turbo run build`,
+      ],
     ],
   },
   // a worktree's turbo run takes a run-slot, whichever package runner and package option names it
@@ -70,6 +98,29 @@ export const groups: Group[] = [
       ["npx with -p naming turbo", "npx -p turbo turbo run build"],
       ["bun x --package turbo then env", "bun x --package turbo env turbo run build"],
       ["bun x -p turbo running its run task", "bun x -p turbo run build"],
+    ],
+  },
+  // a runner's --cwd into a worktree takes its build there, from wherever the line starts
+  {
+    folders: ["main checkout"],
+    guards: ["no-unslotted-run"],
+    rows: ({ MAIN }) => [
+      [
+        "bun x -p turbo with its --cwd in a worktree",
+        `bun x -p turbo --cwd=${MAIN}/.claude/worktrees/a turbo run build`,
+      ],
+      [
+        "bun x -p turbo running its run task with its --cwd in a worktree",
+        `bun x -p turbo --cwd=${MAIN}/.claude/worktrees/a run build`,
+      ],
+      [
+        "bunx -p turbo with its --cwd in a worktree",
+        `bunx -p turbo --cwd=${MAIN}/.claude/worktrees/a turbo run build`,
+      ],
+      [
+        "bunx with its --cwd in a worktree before -p",
+        `bunx --cwd=${MAIN}/.claude/worktrees/a -p turbo turbo run build`,
+      ],
     ],
   },
 ]

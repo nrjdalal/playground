@@ -4,7 +4,15 @@ import { tmpdir } from "node:os"
 import { join, resolve, sep } from "node:path"
 
 import { atOnce, buildName, DOCKERS, dockerBuild, portlessCompose } from "./docker-build"
-import { bunCall, cwdFlag, mainCheckout, RUNNER_TAKES, turboWords } from "./no-main-checkout"
+import {
+  bunCall,
+  cwdFlag,
+  mainCheckout,
+  real,
+  RUNNER_TAKES,
+  runnerCwd,
+  turboWords,
+} from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
   ASSIGN,
@@ -244,12 +252,24 @@ const recursive = (args: Word[]) =>
     (a) => /^-[a-zA-Z]*[Rra]/.test(a.value) || ["--archive", "--recursive"].includes(a.value),
   )
 
+// Every folder a heavy run runs in: its own, and a package runner's --cwd beside it.
+const ranIn = (found: { also?: { dir: string | undefined }; dir: string | undefined }) =>
+  found.also ? [found.dir, found.also.dir] : [found.dir]
+
 // What of the command is a heavy run, and the directory it runs in or writes to, or undefined.
 function heavy(
   name: string,
   args: Word[],
   env: Env,
-): { anywhere?: true; dir: string | undefined; fix?: string; what: string } | undefined {
+):
+  | {
+      also?: { dir: string | undefined }
+      anywhere?: true
+      dir: string | undefined
+      fix?: string
+      what: string
+    }
+  | undefined {
   const compose = portlessCompose(name, args)
   if (DOCKERS.has(name) || compose) {
     const build = compose
@@ -276,7 +296,9 @@ function heavy(
   const turbo = turboWords(name, args, env)
   if (turbo) {
     const task = turboTask(turbo)
-    return task ? { dir: cwdFlag(turbo, env), what: `turbo run ${task}` } : undefined
+    return task
+      ? { also: runnerCwd(name, args, env), dir: cwdFlag(turbo, env), what: `turbo run ${task}` }
+      : undefined
   }
   if (RUNNERS.has(name)) {
     const words = args.filter(
@@ -330,9 +352,14 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   if (tool !== "Bash") return
   const command = (toolInput as { command?: unknown } | null)?.command
   if (typeof command !== "string") return
-  const worktrees = join(main, ".claude", "worktrees") + sep
+  const worktrees = [
+    join(main, ".claude", "worktrees"),
+    real(join(main, ".claude", "worktrees")),
+  ].map((w) => w + sep)
+  // a link into a worktree runs its build there, so the path is judged as written and with its links followed
   const inWorktree = (dir: string | undefined) =>
-    dir !== undefined && resolve(dir).startsWith(worktrees)
+    dir !== undefined &&
+    [resolve(dir), real(resolve(dir))].some((d) => worktrees.some((w) => d.startsWith(w)))
   const directory = typeof cwd === "string" ? cwd : undefined
   // the line's own commands, set once it is read below
   let line: Command[] = []
@@ -384,13 +411,17 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
       const line = words()
       if (found?.anywhere && line !== undefined)
         return refuseDocker(found.what, "", line, found.fix)
-      if (found && line !== undefined && (found.dir === undefined || inWorktree(found.dir)))
+      if (
+        found &&
+        line !== undefined &&
+        ranIn(found).some((dir) => dir === undefined || inWorktree(dir))
+      )
         return anywhere(found.what, line)
     }
     // every folder the shell may be in, so a heavy run after a cd the reader cannot be sure of is caught wherever that cd may have left it
     for (const here of places(env)) {
       const found = heavy(name, args, here)
-      if (!found || !(found.anywhere || inWorktree(found.dir))) continue
+      if (!found || !(found.anywhere || ranIn(found).some(inWorktree))) continue
       // run-slot execs the first word after its --, so the fix keeps the program, its words and every assignment before it behind env, and drops every wrapper (exec, timeout, env's own options)
       const line = words()
       if (line === undefined) return

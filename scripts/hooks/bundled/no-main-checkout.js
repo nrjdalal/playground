@@ -7612,12 +7612,33 @@ function packagedTools(args) {
     const v = args[k].value;
     if (v === "-p" || v === "--package")
       tools.push(toolName(args[++k]?.value));
-    else if (v.startsWith("--package="))
-      tools.push(toolName(v.slice("--package=".length)));
+    else if (v.startsWith("--package=") || v.startsWith("-p="))
+      tools.push(toolName(v.slice(v.indexOf("=") + 1)));
     else if (RUNNER_TAKES.has(v))
       k++;
   }
   return tools;
+}
+function runnerCwd(name, args, env) {
+  let options = args;
+  if (name === "bun") {
+    const { sub, words } = bunCall(args, env);
+    if (words[0] !== "x")
+      return;
+    options = args.slice(sub + 1);
+  } else if (name !== "bunx")
+    return;
+  let found;
+  for (let k = 0;k < options.length && options[k].value.startsWith("-"); k++) {
+    const v = options[k].value;
+    if (v === "--cwd")
+      found = { dir: options[k + 1] && pathOf(options[++k], env) };
+    else if (v.startsWith("--cwd="))
+      found = { dir: pathOf({ ...options[k], value: v.slice("--cwd=".length) }, env) };
+    else if (RUNNER_TAKES.has(v))
+      k++;
+  }
+  return found;
 }
 function runnerTarget(args) {
   let k = 0;
@@ -7631,6 +7652,7 @@ function validationOff(local, env) {
   const read = (key) => local.get(key)?.value ?? env.vars.get(key)?.value ?? env.process[key];
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true";
 }
+var ranIn = (ran) => ran.also ? [ran.cwd, ran.also.dir] : [ran.cwd];
 function runs(name, args, local, env) {
   if (name === "bunx")
     return runs("bun", [X, ...args], local, env);
@@ -7639,6 +7661,7 @@ function runs(name, args, local, env) {
     if (validationOff(local, env))
       return;
     return {
+      also: runnerCwd(name, args, env),
       cwd: cwdFlag(turbo, env),
       fix: BUILD_FIX,
       what: "the packages build without NODE_ENV and SKIP_ENV_VALIDATION=true"
@@ -7668,6 +7691,7 @@ function runs(name, args, local, env) {
   if (tool) {
     const dir = words[0] === "x" ? env.cwd : cwd;
     return {
+      also: runnerCwd(name, args, env),
       cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: dir }),
       what: `bun ${words.join(" ")}`
     };
@@ -7854,7 +7878,7 @@ async function inspect(raw, environment, main) {
     if (env.cwdAnywhere) {
       const blind = { ...env, cwd: undefined };
       const ran = runs(name, args, local, blind);
-      if (ran && (ran.cwd === undefined || inMain(ran.cwd)))
+      if (ran && ranIn(ran).some((dir) => dir === undefined || inMain(dir)))
         return refuse(ran.what, ANYWHERE_FIX);
       const blindWrite = writeTargets(cmd, name, args).find((t) => {
         const path = pathOf(t, blind);
@@ -7880,7 +7904,7 @@ async function inspect(raw, environment, main) {
       if (script)
         return script;
       const ran = runs(name, args, local, here);
-      if (ran && inMain(ran.cwd))
+      if (ran && ranIn(ran).some((dir) => inMain(dir)))
         return refuse(ran.what, fixFor2(sure, ran.fix));
       const moved = name === "git" ? await liveRefusal(args, here, inLive, fixFor2(sure, LIVE_FIX)) : undefined;
       if (moved)
@@ -7928,6 +7952,7 @@ export {
   liveCheckout,
   mainCheckout,
   real,
+  runnerCwd,
   turboWords,
   writeTargets
 };

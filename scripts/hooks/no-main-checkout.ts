@@ -338,10 +338,34 @@ function packagedTools(args: Word[]): string[] {
   for (let k = 0; k < args.length && args[k].value.startsWith("-"); k++) {
     const v = args[k].value
     if (v === "-p" || v === "--package") tools.push(toolName(args[++k]?.value))
-    else if (v.startsWith("--package=")) tools.push(toolName(v.slice("--package=".length)))
+    else if (v.startsWith("--package=") || v.startsWith("-p="))
+      tools.push(toolName(v.slice(v.indexOf("=") + 1)))
     else if (RUNNER_TAKES.has(v)) k++
   }
   return tools
+}
+
+// A package runner's own --cwd among its options, the folder bunx and bun x run their tool in, judged beside the shell's folder: { dir } when one is named (dir undefined when its path cannot be read), else undefined.
+export function runnerCwd(
+  name: string,
+  args: Word[],
+  env: Env,
+): { dir: string | undefined } | undefined {
+  let options = args
+  if (name === "bun") {
+    const { sub, words } = bunCall(args, env)
+    if (words[0] !== "x") return
+    options = args.slice(sub + 1)
+  } else if (name !== "bunx") return
+  let found: { dir: string | undefined } | undefined
+  for (let k = 0; k < options.length && options[k].value.startsWith("-"); k++) {
+    const v = options[k].value
+    if (v === "--cwd") found = { dir: options[k + 1] && pathOf(options[++k], env) }
+    else if (v.startsWith("--cwd="))
+      found = { dir: pathOf({ ...options[k], value: v.slice("--cwd=".length) }, env) }
+    else if (RUNNER_TAKES.has(v)) k++
+  }
+  return found
 }
 
 // The word a package runner runs, past its options and their values (-y, --yes, -p turbo).
@@ -363,18 +387,25 @@ function validationOff(local: Map<string, Text>, env: Env): boolean {
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true"
 }
 
+// Every folder a runs() hit runs in: its own, and a package runner's --cwd beside it.
+const ranIn = (ran: { also?: { dir: string | undefined }; cwd: string | undefined }) =>
+  ran.also ? [ran.cwd, ran.also.dir] : [ran.cwd]
+
 // What of the command would build, test, run lefthook or turbo, commit, or move the checkout with git, or undefined; fix, when set, replaces INSTEAD.
 function runs(
   name: string,
   args: Word[],
   local: Map<string, Text>,
   env: Env,
-): { cwd: string | undefined; fix?: string; what: string } | undefined {
+):
+  | { also?: { dir: string | undefined }; cwd: string | undefined; fix?: string; what: string }
+  | undefined {
   if (name === "bunx") return runs("bun", [X, ...args], local, env)
   const turbo = turboWords(name, args, env)
   if (turbo && packagesBuild(turbo)) {
     if (validationOff(local, env)) return
     return {
+      also: runnerCwd(name, args, env),
       cwd: cwdFlag(turbo, env),
       fix: BUILD_FIX,
       what: "the packages build without NODE_ENV and SKIP_ENV_VALIDATION=true",
@@ -398,10 +429,11 @@ function runs(
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0]
   const packaged = words[0] === "x" ? packagedTools(args.slice(sub + 1)) : []
   const tool = [toolName(target), ...packaged].find((t) => TOOLS.has(t))
-  // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name; a tool reads its own --cwd too, and bun x runs in the shell's folder whatever bun's --cwd says
+  // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name; a tool reads its own --cwd too, and bun x is judged in the shell's folder and in the --cwd among its own options (also)
   if (tool) {
     const dir = words[0] === "x" ? env.cwd : cwd
     return {
+      also: runnerCwd(name, args, env),
       cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: dir }),
       what: `bun ${words.join(" ")}`,
     }
@@ -619,7 +651,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const blind: Env = { ...env, cwd: undefined }
       const ran = runs(name, args, local, blind)
       // a folder the command names itself is judged by that path, as everywhere else; one the shell gives it could be the main checkout
-      if (ran && (ran.cwd === undefined || inMain(ran.cwd))) return refuse(ran.what, ANYWHERE_FIX)
+      if (ran && ranIn(ran).some((dir) => dir === undefined || inMain(dir)))
+        return refuse(ran.what, ANYWHERE_FIX)
       const blindWrite = writeTargets(cmd, name, args).find((t) => {
         const path = pathOf(t, blind)
         return path === undefined || inMain(path)
@@ -649,7 +682,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const script = await fedScript(cmd, here, sure, inMain, visit)
       if (script) return script
       const ran = runs(name, args, local, here)
-      if (ran && inMain(ran.cwd)) return refuse(ran.what, fixFor(sure, ran.fix))
+      if (ran && ranIn(ran).some((dir) => inMain(dir)))
+        return refuse(ran.what, fixFor(sure, ran.fix))
       const moved =
         name === "git" ? await liveRefusal(args, here, inLive, fixFor(sure, LIVE_FIX)) : undefined
       if (moved) return moved
