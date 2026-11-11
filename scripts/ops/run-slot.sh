@@ -1576,8 +1576,8 @@ gate_sig() { G=shut; lanes_open && G=open; switch_on run-slot.single && ! lifted
 # whenever a fresh reading of them moves the line its verdict came from, its stamp apart (a `-nt` against the look's mark and a builtin compare, no
 # process of their own, so a flip lands with the reading that moved it, issue 1477, and rewrites run-slot.next within a poll; memory's pressure and free
 # share move without the cache, and a fresh reader's own lanes read names them); any other, which a new waiter or a run's end never moves to the head,
-# looks on the look signature too, so a freeing or an ask wakes it within a poll (issue 1818: Ops' A/B measured the pick asleep through a freed gate),
-# and once it is the oldest or next_sig changes, so the queue's waiters look once when the oldest names another rather than each time the folder changes
+# looks on the look signature too, so a freeing, a run's end or a new ask wakes it once per change within a poll (issue 1818: Ops' A/B measured the pick
+# asleep through a freed gate), and once it is the oldest or next_sig changes; the load's, merge queue's, clock's and gauges' reads stay the head's alone
 cheap_idle() {
   local a pid l=
   self_changed && return 1
@@ -1680,6 +1680,8 @@ battery_holds() {
   switch_on run-slot.battery || return 1
   case "$WHO" in ops-dashboard | ops-tick) return 1 ;; esac
 }
+# whether a hold the wait list obeys first stands, the one check the verdict reads share, so they cannot drift apart
+verdict_holds() { battery_holds || focus_holds; }
 prio_for() { local h; h=$(prio_holder) && [ -n "$h" ] && [ "$(owner_of "$1")" = "$h" ]; }
 # the oldest live ticket the priority holder owns, its worktree's commit steps' included: the one of its tickets that skips the queue, so its runs go in the order it asked for them (4 Nov: a merge asked later took a slot before the same session's older merge)
 prio_first() {
@@ -2286,7 +2288,7 @@ if [ -n "$KIND" ]; then
     [ -n "$last" ] && echo "${CLONE_GAP}s past the last clone's end at $last"
   }
   # a commit's build, a merge or a clone is heavy, so it waits under focus or the battery's red mark; the quick slot's short runs go on
-  while [ "$KIND" != quick ] && { battery_holds || focus_holds; }; do
+  while [ "$KIND" != quick ] && { verdict_holds; }; do
     [ -z "$CLONE_TICKET" ] || rm -f "$CLONE_TICKET"
     reread
     hold_wait
@@ -2421,7 +2423,7 @@ if [ -n "$ROOM_ONLY" ]; then
   free=0
   waiters=$(ordered_waiters | grep -c .)
   # the free lanes are the ones the queue's next run can take: first_waiter's own units, none while no waiter can start, a medium's with no waiter; none while a hold stands, since it holds the queue's next run (issue 1818)
-  if ! battery_holds && ! focus_holds; then
+  if ! verdict_holds; then
     t=$(first_waiter)
     if [ -n "$t" ]; then
       set -- $(cat "$QUEUE/$t" 2>/dev/null)
@@ -2444,7 +2446,7 @@ if [ -n "$CAN_TAKE" ]; then
     waited=$((($(date +%s) - ${CAN_TICKET%%-*} / 1000000000)))
   fi
   # the holds the wait loop obeys first (its hold check) answer here too, so a held run reads closed to the verdict while it holds (issue 1818)
-  if battery_holds || focus_holds; then exit 1; fi
+  if verdict_holds; then exit 1; fi
   reclaim "$OPS/$CAN_TAKE"
   [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" && ! burst_held > /dev/null || exit 1
   unit_fits "$CLASS$UNITS" "$UNITS" "$SIZE" "$WHO"
@@ -2497,7 +2499,7 @@ while :; do
     continue
   fi
   # under the battery's red mark or focus a run keeps its place in the queue and takes no slot
-  if battery_holds || focus_holds; then
+  if verdict_holds; then
     hold_wait
     continue
   fi
