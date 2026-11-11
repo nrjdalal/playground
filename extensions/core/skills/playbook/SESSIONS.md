@@ -93,9 +93,9 @@ Done when `ListAgents` shows the session busy on the brief and the roster shows 
 
 A reviewer's round sorts its findings into blocking, should-fix and nits; the worker's answer follows these rules, so a PR's rounds stay short and its nits land where they cost nothing.
 
-- A fix push carries only blocking and should-fix items, and a body-only fix is a `gh pr edit` with no push, so a push always moves the head for a reason the reviewer named.
+- A fix push carries only blocking and should-fix items, plus the `canary` merge the reviewer asks for (code-review-loop's step 8), and a body-only fix is a `gh pr edit` with no push, so a push always moves the head for a reason the reviewer named.
 - Keep a nit only if it fixes a wrong statement, a misleading name or comment, or a real readability problem; drop a style-only nit with a one-line note.
-- Fold each kept nit into the next PR that touches the same file, never a nits-only PR.
+- A head at 5/5 with green checks merges as it stands; fold each kept nit into the next PR that touches the same file, never a nits-only PR.
 - Post one sort comment per PR, naming each nit kept, with the PR it waits for, or dropped, with why.
   Done when every finding of the round is fixed in the push, kept in the sort comment with its PR, or dropped there with its reason.
 

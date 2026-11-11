@@ -220,12 +220,11 @@ playground ext reject <scope> <kind> <key> <sha> --reason "<why>"
 
 - Read a proposal before you judge it with `playground ext show <scope> <kind> <key> --rev <sha>`, the sha `playground ext why` lists: it prints the files that revision holds and the state that revision was written in, `proposed`, `accepted` or `rejected`, and a reject's sha prints the proposal it removed.
   `playground ext show` without `--rev` gives the item's state now.
-- A score below 5 is recorded as a commit of its own and leaves the proposal for a later revision or another score; a 5 accepts it.
+- A score below 5 is recorded as a commit of its own and leaves the proposal for a later revision or another score; a 5 accepts it (`judgeItem` in `packages/settings/src/items.ts`), so no `accept` card follows it.
 - A proposal is scored by another session, or by you: a score from the proposal's own author is refused.
 - An accepted proposal moves out of `proposed/` over the accepted copy, and sessions read it at once.
 - `accept` is your own call: the CLI refuses it whenever `PLAYGROUND_ROLE` is set.
-  A 5 from another session is the accept itself (`judgeItem` in `packages/settings/src/items.ts`), so no `accept` card follows it; the card is for a proposal you accept below 5.
-  A session asks for one as an `accept` decision in your Inbox, naming the proposal's scope, kind, key and sha: your Approve has the dashboard run the accept itself, with no role and the sha as you read it, and the card shows what it gave.
+  For a proposal no 5 has accepted, a session asks for one as an `accept` decision in your Inbox, naming the proposal's scope, kind, key and sha: your Approve has the dashboard run the accept itself, with no role and the sha as you read it, and the card shows what it gave.
   One card can hold a set of up to 21 proposals that land as one change: your Approve accepts them in the order listed and stops at the first that fails, and the card names which were accepted and which were not tried.
 - `reject` removes the proposal.
 - Each judges only the proposal the sha names: one rewritten since is refused, so read it again first.
