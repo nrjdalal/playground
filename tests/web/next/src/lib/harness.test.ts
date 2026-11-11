@@ -5,6 +5,8 @@ import {
   canStart,
   type HarnessCard,
   harnessesOf,
+  type SwitchRead,
+  switchMessage,
 } from "../../../../../web/next/src/lib/harness"
 import { deviceLabel, fixJobOf } from "../../../../../web/next/src/lib/onboard"
 
@@ -67,5 +69,26 @@ describe("the harness cards (#1835)", () => {
     ).toEqual(job.device)
     expect(deviceLabel("claude-login")).toBe("Open the sign-in page")
     expect(deviceLabel("gh-login")).toBe("Open GitHub")
+  })
+})
+
+describe("Switch Alpha's message (#1835)", () => {
+  const read: SwitchRead = {
+    ask: "Switch Alpha to Codex: write your handoff now",
+    harness: "codex",
+    reason: null,
+    state: "running",
+    step: "Waiting for Alpha's handoff",
+    to: "dispatcher",
+  }
+
+  test("sends the running dispatcher its handoff ask through the outbox", () => {
+    expect(switchMessage(read)).toEqual({ text: read.ask!, to: "dispatcher" })
+  })
+
+  test("sends nothing when the switch asks nothing, or is no longer running", () => {
+    expect(switchMessage({ ...read, ask: null, to: null })).toBeNull()
+    expect(switchMessage({ ...read, state: "ok" })).toBeNull()
+    expect(switchMessage({ ...read, state: "failed" })).toBeNull()
   })
 })

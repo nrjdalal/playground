@@ -16,11 +16,17 @@ export type HarnessCard = {
 }
 
 export type SwitchRead = {
+  ask: string | null
   harness: HarnessId | null
   reason: string | null
   state: "failed" | "idle" | "ok" | "running"
   step: string | null
+  to: string | null
 }
+
+// Pure: the message Switch Alpha's click sends through the outbox, the running dispatcher asked for its handoff, or null when the switch asks nothing.
+export const switchMessage = (read: SwitchRead): { text: string; to: string } | null =>
+  read.state === "running" && read.ask && read.to ? { text: read.ask, to: read.to } : null
 
 export const ALPHA_KEY = "harness.alpha"
 export const HARNESSES_QUERY_KEY = ["onboard", "harnesses"] as const

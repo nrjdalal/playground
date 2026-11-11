@@ -20,10 +20,12 @@ import { invalid } from "@/routers/store"
 // The home's Start <dispatcher>, for a dashboard with an account and no dispatcher, and Settings' Switch Alpha, which moves it to the other harness: dashboard writes, behind the write guards and the owner rung.
 
 const switchRead = z.object({
+  ask: z.string().nullable(),
   harness: z.enum(["claude-code", "codex"]).nullable(),
   reason: z.string().nullable(),
   state: z.enum(["failed", "idle", "ok", "running"]),
   step: z.string().nullable(),
+  to: z.string().nullable(),
 })
 const switchAnswer = (status: 200 | 202) => ({
   [status]: {
@@ -86,7 +88,7 @@ export const dispatcherRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Switch Alpha to a harness: saves harness.alpha, then starts the dispatcher on it when none runs, or asks the running one for its handoff, closes it once the handoff is written, and starts it again on the new harness from it. Refused while a switch runs, and for Codex on the live data folder.",
+        "Switch Alpha to a harness: saves harness.alpha, then starts the dispatcher on it when none runs; for a running one the answer's ask holds the words that ask it for its handoff, which Settings sends through the outbox, and once the handoff is written the switch closes it and starts it again on the new harness from it. Refused while a switch runs, and for Codex on the live data folder.",
       responses: {
         ...switchAnswer(202),
         ...authErrorResponses,
@@ -96,11 +98,10 @@ export const dispatcherRouter = new Hono<{ Variables: Session }>()
       },
     }),
     sValidator("json", z.strictObject({ harness: z.enum(["claude-code", "codex"]) }), invalid),
-    (c) => {
-      const user = c.get("user")
-      const begun = dispatcherSwitch.begin(
+    async (c) => {
+      const begun = await dispatcherSwitch.begin(
         c.req.valid("json").harness,
-        switchDeps({ email: user.email, id: user.id }),
+        switchDeps({ id: c.get("user").id }),
       )
       if (typeof begun === "string") throw new ApiError(409, "CONFLICT", begun)
       return c.json({ data: dispatcherSwitch.read() }, 202)

@@ -33,7 +33,8 @@ export const dispatcherArgv = (
 export const alphaHarness = (): HarnessId =>
   (readSetting(dataDir(), "harness.alpha")?.value as HarnessId | undefined) ?? "claude-code"
 
-const run: Run = async (argv) => {
+// One fixed argv run to its end, its output read whole; Switch Alpha's close runs through it too.
+export const runCommand: Run = async (argv) => {
   const child = Bun.spawn(argv, {
     env: spawnEnv(),
     stderr: "pipe",
@@ -59,7 +60,7 @@ export async function startDispatcher({
   live = readsLive(),
   name = DISPATCHER,
   root = checkoutRoot(),
-  run: runCli = run,
+  run: runCli = runCommand,
 }: {
   brief?: string
   dir?: string

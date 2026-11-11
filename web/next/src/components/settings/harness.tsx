@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
 import { ConfirmDialog } from "@/components/common/confirm-dialog"
+import { useDashboard } from "@/components/dashboard/dashboard"
 import { HarnessCards } from "@/components/first-run/harness-cards"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -16,13 +17,15 @@ import {
   readHarnesses,
   readSwitch,
   startSwitch,
+  switchMessage,
 } from "@/lib/harness"
 
 const POLL_MS = 2_000
 
-// Settings > Harness: the same cards first run picks from, the radio on the harness Alpha runs on, and Switch Alpha once another card is picked and ready, behind a confirm, since it ends the running Alpha: Alpha writes its handoff, and the new Alpha starts on the other harness from it. While it runs the step it is on shows, and a failure says why.
+// Settings > Harness: the same cards first run picks from, the radio on the harness Alpha runs on, and Switch Alpha once another card is picked and ready, behind a confirm, since it ends the running Alpha: Alpha is asked for its handoff through the outbox, as this click, and the new Alpha starts on the other harness from it. While it runs the step it is on shows, and a failure says why.
 export function Harness() {
   const queryClient = useQueryClient()
+  const { outbox } = useDashboard()
   const alpha = useQuery({ queryFn: readAlpha, queryKey: ALPHA_QUERY_KEY })
   const harnesses = useQuery({ queryFn: readHarnesses, queryKey: HARNESSES_QUERY_KEY })
   const [pick, setPick] = useState<HarnessId>()
@@ -36,6 +39,8 @@ export function Harness() {
     mutationFn: startSwitch,
     onSuccess: (read) => {
       setConfirming(false)
+      const message = switchMessage(read)
+      if (message) outbox.send(message.to, { attachments: [], text: message.text })
       queryClient.setQueryData(["dispatcher", "switch"], read)
       void queryClient.invalidateQueries({ queryKey: ALPHA_QUERY_KEY })
     },

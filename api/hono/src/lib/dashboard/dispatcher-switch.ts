@@ -1,23 +1,25 @@
 import { statSync } from "node:fs"
 import { join } from "node:path"
 
-import { spawnEnv } from "@packages/env/api-hono"
 import { type HarnessId, loginOf, setSetting } from "@packages/settings"
 
-import { deliver } from "@/lib/dashboard/deliver"
-import { type Run, type Started, startDispatcher } from "@/lib/dashboard/dispatcher-start"
+import { runCommand, type Started, startDispatcher } from "@/lib/dashboard/dispatcher-start"
 import { checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
 import { DISPATCHER } from "@/lib/dashboard/workers"
 import { CODEX_LIVE_REFUSAL, isLiveFolder } from "@/lib/onboard/harness"
 import { dataDir } from "@/lib/sessions/paths"
 
-// Settings' Switch Alpha, on the owner's own click: harness.alpha takes the other harness, then a dispatcher that is not running starts on it; a running one is asked, in the owner's words, to write its handoff to a fixed file and stop, and once that file is written and still, spawn.sh closes it and the CLI starts it again on the new harness from that handoff. One switch at a time; a Codex switch on the live data folder is refused before anything changes, as Start is.
+// Settings' Switch Alpha, on the owner's own click: harness.alpha takes the other harness, then a dispatcher that is not running starts on it; for a running one the answer carries the words that ask it to write its handoff to a fixed file and stop, which Settings sends through the dashboard's outbox as that same click, and once that file is written and still, spawn.sh closes it and the CLI starts it again on the new harness from that handoff. One switch at a time; a Codex switch on the live data folder is refused before anything changes, as Start is.
 
 export type SwitchRead = {
+  // The words Settings sends the running dispatcher through the outbox while the switch waits for its handoff, else null.
+  ask: string | null
   harness: HarnessId | null
   reason: string | null
   state: "failed" | "idle" | "ok" | "running"
   step: string | null
+  // The dispatcher the ask goes to, else null.
+  to: string | null
 }
 
 const LABELS: Record<HarnessId, string> = { "claude-code": "Claude Code", codex: "Codex" }
@@ -30,8 +32,6 @@ export const handoffAsk = (path: string, name: string, harness: HarnessId) =>
   `Switch Alpha to ${LABELS[harness]}: write your handoff now to ${path}, as the playbook's SESSIONS.md says (Write a handoff), then stop. Once it is written, the Dashboard closes this session and starts ${name} again on ${LABELS[harness]} from it.`
 
 export type SwitchDeps = {
-  // The dispatcher asked, by deliver(); false when it was not reached.
-  ask: (name: string, text: string) => Promise<boolean>
   close: (name: string) => Promise<string | null>
   data: string
   env: Record<string, string | undefined>
@@ -45,21 +45,6 @@ export type SwitchDeps = {
   waitMs: number
 }
 
-const runOut: Run = async (argv) => {
-  const child = Bun.spawn(argv, {
-    env: spawnEnv(),
-    stderr: "pipe",
-    stdin: "ignore",
-    stdout: "pipe",
-  })
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ])
-  return { code, stderr, stdout }
-}
-
 const mtimeOf = (path: string): number | null => {
   try {
     return statSync(path).mtimeMs
@@ -68,14 +53,15 @@ const mtimeOf = (path: string): number | null => {
   }
 }
 
-// The real switch's parts: deliver() as the owner's click, spawn.sh close from the API's checkout, harness.alpha at the login's scope.
-export const switchDeps = (actor: { email: string; id: string }): SwitchDeps => ({
-  ask: async (name, text) => (await deliver({ actor, text, to: name })).ok,
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+// The real switch's parts: spawn.sh close from the API's checkout, harness.alpha at the login's scope.
+export const switchDeps = (actor: { id: string }): SwitchDeps => ({
   close: async (name) => {
     const root = checkoutRoot()
     if (!readsLive()) return null
     if (!root) return "this API has no checkout to close it from"
-    const result = await runOut([join(root, "scripts", "spawn.sh"), "close", name])
+    const result = await runCommand([join(root, "scripts", "spawn.sh"), "close", name])
     return result.code === 0
       ? null
       : result.stderr.trim().split("\n").at(-1) || `spawn.sh close exited ${result.code}`
@@ -100,51 +86,81 @@ export const switchDeps = (actor: { email: string; id: string }): SwitchDeps => 
 })
 
 export const createSwitch = () => {
-  let current: SwitchRead = { harness: null, reason: null, state: "idle", step: null }
+  let current: SwitchRead = {
+    ask: null,
+    harness: null,
+    reason: null,
+    state: "idle",
+    step: null,
+    to: null,
+  }
 
-  const run = async (to: HarnessId, deps: SwitchDeps, job: SwitchRead) => {
-    const fail = (reason: string) => {
-      job.state = "failed"
-      job.reason = reason
-    }
-    const first = await deps.start(to)
-    if (first.status === "started") return void (job.state = "ok")
-    if (first.status !== "running") return fail(first.detail)
+  const fail = (job: SwitchRead, reason: string) => {
+    job.ask = null
+    job.reason = reason
+    job.state = "failed"
+  }
+
+  // Waits for the handoff, then closes the dispatcher and starts it again from it. The handoff counts once it is newer than the ask and unchanged over one wait, so a file still being written is never read.
+  const handover = async (to: HarnessId, deps: SwitchDeps, job: SwitchRead, asked: number) => {
     const path = join(deps.data, switchBrief(deps.name))
-    const asked = deps.now()
-    job.step = "Waiting for Alpha's handoff"
-    if (!(await deps.ask(deps.name, handoffAsk(path, deps.name, to))))
-      return fail(`${deps.name} could not be asked for its handoff, so it still runs as before`)
-    // The handoff counts once it is newer than the ask and unchanged over one wait, so a file still being written is never read.
     let seen: number | null = null
     for (let waited = 0; ; waited += deps.pollMs) {
       if (waited >= deps.waitMs)
-        return fail(`${deps.name} wrote no handoff in time, so it still runs as before`)
+        return fail(job, `${deps.name} wrote no handoff in time, so it still runs as before`)
       await deps.sleep(deps.pollMs)
       const at = deps.mtime(path)
       if (at !== null && at >= asked && at === seen) break
       seen = at
     }
+    job.ask = null
     job.step = `Starting ${deps.name} on ${LABELS[to]}`
     const closed = await deps.close(deps.name)
-    if (closed) return fail(closed)
+    if (closed) return fail(job, closed)
     const again = await deps.start(to, switchBrief(deps.name))
     if (again.status === "started") return void (job.state = "ok")
-    fail(again.status === "running" ? `${deps.name} is still running` : again.detail)
+    fail(job, again.status === "running" ? `${deps.name} is still running` : again.detail)
   }
 
-  // Starts a switch to harness to; the refusal's words while one runs, for Codex on the live data folder, or when harness.alpha does not save.
-  const begin = (to: HarnessId, deps: SwitchDeps): { done: Promise<void> } | string => {
+  // Starts a switch to harness to: the refusal's words while one runs, for Codex on the live data folder, or when harness.alpha does not save; else done, which settles once the switch has.
+  const begin = async (
+    to: HarnessId,
+    deps: SwitchDeps,
+  ): Promise<{ done: Promise<void> } | string> => {
     if (current.state === "running") return "A switch is already running"
     if (to === "codex" && isLiveFolder(deps.env)) return CODEX_LIVE_REFUSAL
     const unsaved = deps.save(to)
     if (unsaved) return unsaved
-    const job: SwitchRead = { harness: to, reason: null, state: "running", step: null }
+    const job: SwitchRead = {
+      ask: null,
+      harness: to,
+      reason: null,
+      state: "running",
+      step: null,
+      to: null,
+    }
     current = job
-    const done = run(to, deps, job).catch((error: unknown) => {
-      job.state = "failed"
-      job.reason = error instanceof Error ? error.message : String(error)
-    })
+    const settled = { done: Promise.resolve() }
+    const first = await deps.start(to).catch((error: unknown): Started => ({
+      detail: messageOf(error),
+      name: deps.name,
+      status: "failed",
+    }))
+    if (first.status === "started") {
+      job.state = "ok"
+      return settled
+    }
+    if (first.status !== "running") {
+      fail(job, first.detail)
+      return settled
+    }
+    const asked = deps.now()
+    job.ask = handoffAsk(join(deps.data, switchBrief(deps.name)), deps.name, to)
+    job.step = "Waiting for Alpha's handoff"
+    job.to = deps.name
+    const done = handover(to, deps, job, asked).catch((error: unknown) =>
+      fail(job, messageOf(error)),
+    )
     return { done }
   }
 

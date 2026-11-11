@@ -11,9 +11,8 @@ type Started = import("../../../../../../api/hono/src/lib/dashboard/dispatcher-s
 const DATA = "/scratch/data"
 const HANDOFF = join(DATA, "handoffs", "dispatcher-switch.md")
 
-// Every part faked: the dispatcher's answers to each start in order, whether the ask reaches it, and the handoff's mtime by poll; each call recorded in order, so no session is asked, closed or started.
+// Every part faked: the dispatcher's answers to each start in order and the handoff's mtime by poll; each call recorded in order, so no session is closed or started.
 const world = ({
-  ask = true,
   handoff = [null, 2000, 2000] as (number | null)[],
   starts = [{ name: "dispatcher", status: "running" }] as Started[],
 } = {}) => {
@@ -21,10 +20,6 @@ const world = ({
   let clock = 1000
   let polls = 0
   const deps: SwitchDeps = {
-    ask: async (name, text) => {
-      calls.push(`ask ${name}: ${text}`)
-      return ask
-    },
     close: async (name) => {
       calls.push(`close ${name}`)
       return null
@@ -55,18 +50,24 @@ const world = ({
 }
 
 describe("Switch Alpha (#1835)", () => {
-  test("a running dispatcher is asked for its handoff, closed once it is written and still, then started on the new harness from it", async () => {
+  test("a running dispatcher's answer carries the handoff ask for the outbox; it is closed once the handoff is written and still, then started on the new harness from it", async () => {
     const { calls, deps } = world()
     const sw = createSwitch()
-    const begun = sw.begin("codex", deps)
+    const begun = await sw.begin("codex", deps)
     expect(typeof begun).not.toBe("string")
-    expect(sw.read()).toMatchObject({ harness: "codex", state: "running" })
+    expect(sw.read()).toEqual({
+      ask: handoffAsk(HANDOFF, "dispatcher", "codex"),
+      harness: "codex",
+      reason: null,
+      state: "running",
+      step: "Waiting for Alpha's handoff",
+      to: "dispatcher",
+    })
     await (begun as { done: Promise<void> }).done
-    expect(sw.read()).toMatchObject({ reason: null, state: "ok" })
+    expect(sw.read()).toMatchObject({ ask: null, reason: null, state: "ok" })
     expect(calls).toEqual([
       "save codex",
       "start codex",
-      `ask dispatcher: ${handoffAsk(HANDOFF, "dispatcher", "codex")}`,
       `mtime ${HANDOFF}`,
       `mtime ${HANDOFF}`,
       `mtime ${HANDOFF}`,
@@ -79,8 +80,8 @@ describe("Switch Alpha (#1835)", () => {
   test("a handoff older than the ask does not count, and none in time fails with the dispatcher left running", async () => {
     const { calls, deps } = world({ handoff: [500] })
     const sw = createSwitch()
-    await (sw.begin("claude-code", deps) as { done: Promise<void> }).done
-    expect(sw.read()).toMatchObject({ state: "failed" })
+    await ((await sw.begin("claude-code", deps)) as { done: Promise<void> }).done
+    expect(sw.read()).toMatchObject({ ask: null, state: "failed" })
     expect(sw.read().reason).toContain("still runs as before")
     expect(calls).not.toContain("close dispatcher")
   })
@@ -88,23 +89,27 @@ describe("Switch Alpha (#1835)", () => {
   test("a dispatcher that is not running starts on the new harness at once, asking nothing", async () => {
     const { calls, deps } = world({ starts: [{ name: "dispatcher", status: "started" }] })
     const sw = createSwitch()
-    await (sw.begin("claude-code", deps) as { done: Promise<void> }).done
-    expect(sw.read().state).toBe("ok")
+    await ((await sw.begin("claude-code", deps)) as { done: Promise<void> }).done
+    expect(sw.read()).toMatchObject({ ask: null, state: "ok", to: null })
     expect(calls).toEqual(["save claude-code", "start claude-code"])
   })
 
-  test("an ask that does not reach the dispatcher closes nothing", async () => {
-    const { calls, deps } = world({ ask: false })
+  test("a first start that fails asks nothing and closes nothing", async () => {
+    const { calls, deps } = world({
+      starts: [{ detail: "the load gate refused", name: "dispatcher", status: "refused" }],
+    })
     const sw = createSwitch()
-    await (sw.begin("codex", deps) as { done: Promise<void> }).done
-    expect(sw.read().state).toBe("failed")
-    expect(calls.filter((c) => c.startsWith("close") || c.startsWith("mtime"))).toEqual([])
+    await ((await sw.begin("codex", deps)) as { done: Promise<void> }).done
+    expect(sw.read()).toMatchObject({ ask: null, reason: "the load gate refused", state: "failed" })
+    expect(calls).toEqual(["save codex", "start codex"])
   })
 
-  test("Codex on the live data folder is refused before anything is saved or asked", () => {
+  test("Codex on the live data folder is refused before anything is saved or asked", async () => {
     const { calls, deps } = world()
     const sw = createSwitch()
-    expect(sw.begin("codex", { ...deps, env: { HOME: "/scratch/home" } })).toBe(CODEX_LIVE_REFUSAL)
+    expect(await sw.begin("codex", { ...deps, env: { HOME: "/scratch/home" } })).toBe(
+      CODEX_LIVE_REFUSAL,
+    )
     expect(calls).toEqual([])
     expect(sw.read().state).toBe("idle")
   })
@@ -112,8 +117,8 @@ describe("Switch Alpha (#1835)", () => {
   test("a second switch while one runs is refused", async () => {
     const { deps } = world()
     const sw = createSwitch()
-    const first = sw.begin("codex", deps) as { done: Promise<void> }
-    expect(sw.begin("claude-code", deps)).toBe("A switch is already running")
-    await first.done
+    const first = sw.begin("codex", deps)
+    expect(await sw.begin("claude-code", deps)).toBe("A switch is already running")
+    await ((await first) as { done: Promise<void> }).done
   })
 })
