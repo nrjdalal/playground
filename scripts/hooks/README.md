@@ -221,6 +221,11 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   When no named item reads a status that counts, one it cannot read included, the reply fails closed, the reason saying what each item read as.
   It judges the hook input's `last_assistant_message`, since the transcript can lag the turn's last message (ADR 0001), and fails open on an input it cannot read, as a Stop hook that cannot start or times out does.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
+- ALWAYS: A session with a manager asks it by `SendMessage`, since an `AskUserQuestion` picker in its pane waits on a key no one can press: `playground picker` answers permission prompts alone, and the **voice** rule keeps every other key out of another session's pane.
+  The same script runs as a PreToolUse guard on `^AskUserQuestion$`, registered with one command in both settings files and run from its bundle, and refuses the picker with exit 2 to a probe, reviewer, runner, tester or worker,
+  placed as the gate places a manager (`PLAYGROUND_ROLE`, else the roster's kind for its registry name, else that name), with the reason `Send the question to your manager (your brief names it) with SendMessage`.
+  The dispatcher, the leads (the Assistant among them), a session with no role and no factory name, and the hosted session keep the picker; the hosted session runs under `PLAYGROUND_ROLE` `probe` (`hostedEnv` in `api/hono/src/lib/dashboard/sdk.ts`), and passes by the `CLAUDE_CODE_ENTRYPOINT` `sdk-ts` the Agent SDK sets, since the owner answers its pickers on the Dashboard.
+  Its tests are in `bun run test:file tests/scripts/hooks/no-chat-question.test.ts`.
 
 ## no-desktop-owner-app
 
