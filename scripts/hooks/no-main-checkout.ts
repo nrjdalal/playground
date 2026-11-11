@@ -136,7 +136,7 @@ const fixFor = (sure: boolean, own = INSTEAD) => (sure ? own : UNKNOWN_FIX)
 const BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"])
 const RUNNERS = new Set(["npx"])
 // bunx is bun x, read as one
-const X: Word = { quoted: false, value: "x" }
+export const X: Word = { quoted: false, value: "x" }
 const TOOLS = new Set(["lefthook", "turbo"])
 const DUPLICATE = /^(?:\d+|-)$/
 // The one turbo call the main checkout runs, after a pull that changes packages/ (the release skill's step 5): its CLI imports their dist
@@ -209,6 +209,16 @@ export function bunCall(
     // bun x's options that take a value (-p, --registry), so the word after one is the tool
     else if (words[0] === "x" && RUNNER_TAKES.has(v)) k++
     else if (!v.startsWith("-")) {
+      // when bun reads an option's value as its subcommand, it drops the next word naming that subcommand, so the tool is the word after it
+      if (
+        v === "x" &&
+        words.length === 1 &&
+        words[0] === "x" &&
+        args[sub - 1]?.value.startsWith("-")
+      ) {
+        sub = k
+        continue
+      }
       if (words.push(v) === 1) sub = k
       if (v !== "run" && v !== "x") break
     }
@@ -390,7 +400,8 @@ function runnerTarget(args: Word[]): number {
 }
 
 // A tool by name or path, or as a package at a version (turbo@latest)
-const toolName = (word: string | undefined) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""))
+export const toolName = (word: string | undefined) =>
+  program((word ?? "").replace(/(?<=.)@[^/]*$/, ""))
 const isTurbo = (word: string | undefined) => toolName(word) === "turbo"
 
 // Whether the build's settings reach turbo: from its own assignments or env wrapper, an export before it, or the session's environment.
@@ -399,6 +410,12 @@ function validationOff(local: Map<string, Text>, env: Env): boolean {
     local.get(key)?.value ?? env.vars.get(key)?.value ?? env.process[key]
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true"
 }
+
+// The folders beside a program bun x runs: its own, and an unread one when the hook cannot read the folder bun's --cwd options chain to
+export const withChained = (
+  also: (string | undefined)[] | undefined,
+  chained: string | undefined,
+) => [...(also ?? []), ...(chained === undefined ? [undefined] : [])]
 
 // Every folder a hit runs in: its own, and those runnerFolders adds beside it.
 export const ranIn = (dir: string | undefined, also?: (string | undefined)[]) => [
@@ -443,7 +460,7 @@ function runs(
     return sub && gitMoves(sub, rest) ? { cwd, fix: GIT_FIX, what: `git ${sub}` } : undefined
   }
   if (name !== "bun") return
-  const { at, cwd, filtered, sub, words } = bunCall(args, env)
+  const { at, chained, cwd, filtered, sub, words } = bunCall(args, env)
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0]
   const packaged = words[0] === "x" ? packagedTools(args.slice(sub + 1)) : []
   const tool = [toolName(target), ...packaged].find((t) => TOOLS.has(t))
@@ -462,6 +479,17 @@ function runs(
   // bare, a script name runs the script, but build is bun's own bundler unless a --filter names the packages whose script it runs
   if (target && BUN_SCRIPTS.has(target) && (words[0] === "run" || filtered || target !== "build"))
     return { cwd, what: `bun ${words.join(" ")}` }
+  // bun x runs any program in the folder its --cwd options chain to, so that program is read as the shell would read it there
+  if (words[0] === "x" && target && args[at]?.value === target) {
+    const ran = runs(toolName(target), args.slice(at + 1), local, { ...env, cwd: chained })
+    return (
+      ran && {
+        ...ran,
+        also: withChained(ran.also, chained),
+        what: `bun x ${ran.what}`,
+      }
+    )
+  }
 }
 
 // How sed and perl read each flag letter that is more than a switch: edit (in place, -i and BSD sed's -I), script (carries the script) and value, each holding the rest of its word, else the next word; rest, holding the rest of its word alone; digits, holding the octal or x-hex digits after it, then reading on
