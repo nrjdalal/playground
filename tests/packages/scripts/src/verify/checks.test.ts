@@ -7,6 +7,7 @@ import {
   Browser,
   checkPage,
   cursorResult,
+  DATA_READY,
   ended,
   endedResult,
   fixtureDirOf,
@@ -354,18 +355,28 @@ describe("systemResults", () => {
 
 // Network idle ignores the board's WebSocket frames, so a page counts as drawn only once its own ready marker shows.
 describe("screenshot", () => {
-  // A browser that records each command, whose wait for the page's marker answers after a beat or times out.
+  // A browser that records each command, whose waits for the page's marker and for its data answer after a beat or time out.
   class FakeBrowser extends Browser {
     calls: string[][] = []
-    constructor(private marker: "late" | "never") {
+    constructor(
+      private marker: "late" | "never",
+      private data: "late" | "never" = "late",
+    ) {
       super()
     }
     override async run(...args: string[]): Promise<Record<string, unknown>> {
       this.calls.push(args)
-      if (args[0] === "wait" && args[1] === READY["/dashboard/system"]![0]) {
+      const waitsOn =
+        args[0] !== "wait"
+          ? null
+          : args[1] === READY["/dashboard/system"]![0]
+            ? this.marker
+            : args[2] === DATA_READY[1]
+              ? this.data
+              : null
+      if (waitsOn) {
         await Bun.sleep(20)
-        if (this.marker === "never")
-          throw new Error(`agent-browser ${args.join(" ")}: Wait timed out`)
+        if (waitsOn === "never") throw new Error(`agent-browser ${args.join(" ")}: Wait timed out`)
       }
       return {}
     }
@@ -468,15 +479,66 @@ describe("screenshot", () => {
     const sidebar = verbs.indexOf(`wait ${SIDEBAR_READY[0]}`)
     expect(marker).toBeGreaterThan(verbs.indexOf("open http://web/dashboard/system"))
     expect(sidebar).toBeGreaterThan(marker)
-    expect(verbs.indexOf("screenshot --full")).toBeGreaterThan(sidebar)
+    const data = browser.calls.findIndex((args) => args[0] === "wait" && args[2] === DATA_READY[1])
+    expect(data).toBeGreaterThan(sidebar)
+    expect(verbs.indexOf("screenshot --full")).toBeGreaterThan(data)
   })
 
-  test("a page whose marker never comes fails its shot, and no shot is taken", async () => {
-    const browser = new FakeBrowser("never")
-    const result = await shoot(browser)
+  test("a route READY does not name is shot once its data is in", async () => {
+    const browser = new FakeBrowser("late")
+    await screenshot(
+      browser,
+      at,
+      "/somewhere",
+      SHOT_VIEWPORTS[0]!,
+      "/tmp/shots",
+      "after",
+      "light",
+      warmNone,
+    )
+    const data = browser.calls.findIndex((args) => args[0] === "wait" && args[2] === DATA_READY[1])
+    expect(data).toBeGreaterThan(-1)
+    expect(browser.calls.findIndex((args) => args[0] === "screenshot")).toBeGreaterThan(data)
+  })
+
+  test("a wait that runs out still takes the shot, and its result names that wait", async () => {
+    const marker = new FakeBrowser("never")
+    const late = await shoot(marker)
+    expect(late.ok).toBe(false)
+    expect(late.detail).toContain("the page's ready marker")
+    expect(late.detail).toContain("Wait timed out")
+    expect(late.detail).toContain("/tmp/shots/after-dashboard-system-1280x800.png")
+    expect(marker.calls.some((args) => args[0] === "screenshot")).toBe(true)
+    const data = new FakeBrowser("late", "never")
+    const result = await shoot(data)
     expect(result.ok).toBe(false)
-    expect(result.detail).toContain("Wait timed out")
-    expect(browser.calls.some((args) => args[0] === "screenshot")).toBe(false)
+    expect(result.detail).toContain("the page's data")
+    expect(result.detail).not.toContain("the page's ready marker")
+    expect(data.calls.some((args) => args[0] === "screenshot")).toBe(true)
+  })
+
+  // The data wait's expression, run against a page holding only the given busy regions, each in the sidebar or outside it.
+  const dataIn = (busy: ("aside" | "sidebar")[]) => {
+    const element = (where: "aside" | "sidebar") => ({
+      closest: (selector: string) =>
+        selector === "[data-sidebar]" && where === "sidebar" ? {} : null,
+    })
+    const document = {
+      querySelectorAll: (selector: string) =>
+        selector === '[aria-busy="true"]' ? busy.map(element) : [],
+    }
+    return new Function("document", `return ${DATA_READY[1]}`)(document)
+  }
+
+  // On 7 Nov a shot of `/dashboard#needs-you-<done card>` caught the Inbox before its data, so it missed the Done shelf its first data render opens.
+  test("a page's data counts as in once no region outside the sidebar reads busy", () => {
+    expect(DATA_READY[0]).toBe("--fn")
+    expect(dataIn([])).toBe(true)
+    // the Inbox's section reads busy until its first data render
+    expect(dataIn(["aside"])).toBe(false)
+    // a stored sidebar menu stays busy while it shows stored rows, and SIDEBAR_READY covers the sidebar
+    expect(dataIn(["sidebar"])).toBe(true)
+    expect(dataIn(["sidebar", "aside"])).toBe(false)
   })
 
   // The sidebar wait's expression, run against a page holding only the given menus at the given width.
