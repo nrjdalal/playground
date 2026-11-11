@@ -30,7 +30,7 @@ import { engineDataOf } from "../ops-job/job"
 import { dashboardPath } from "./probe"
 
 const USAGE =
-  "usage: bun packages/scripts/src/playground/jobs.ts render --jobs <jobs.json> [--launch-agents <dir>] [--data <dir>]"
+  "usage: bun packages/scripts/src/playground/jobs.ts render --jobs <jobs.json> [--launch-agents <dir>] [--install <dir>] [--data <dir>]"
 
 const CHECKOUT = resolve(import.meta.dir, "../../../..")
 
@@ -74,9 +74,63 @@ const installScripts = async (
   return changed
 }
 
-// The ops runner's render, at the top of each pass: jobs.json and each enabled launchd job's plist from the store's policy.json and each org's own job rows (orgJobs), and each org's script folders installed under ops; each org row refused is a `jobs: refused` line on stderr, and when the orgs cannot be read their jobs stay as jobs.json had them, said in a `jobs: kept` line, the render exiting 1 with everything else written. Exits 3 with jobs.json untouched on a machine with no store whose jobs.json is there (a fresh one gets the registry's defaults, the Dashboard's job and the usage read on, as does a store with no policy.json yet), and 2 on stderr when policy.json or jobs.json does not parse, so the runner keeps the last jobs.json and logs why. Plists go only into the folder it is handed; one for a job now off moves to the trash through the jobs carve-out, and one the trash refuses stays, named on stderr, the render exiting 1 with everything else written.
+// The folder launchd loads each agent from at login (HOME's LaunchAgents), its gui domain's uid and the launchctl that loads into it, which a test fakes.
+export type Install = {
+  agents: string
+  launchctl: (args: string[]) => Promise<{ code: number; out: string }>
+  uid: number
+}
+
+// Each enabled launchd job with no plist in install's folder gets its rendered plist there and is bootstrapped, and each turned-off one whose plist is there is booted out and its plist moved to the trash through the jobs-installed carve-out. A plist already there stays as it stands, since its PATH line differs with each shell the runner starts from and a rewrite would restart the job.
+const installAgents = async (
+  install: Install,
+  jobs: Record<string, unknown>[],
+  plists: Map<string, string>,
+  roots: Roots,
+  changed: string[],
+  err: (line: string) => void,
+): Promise<number> => {
+  let code = 0
+  const domain = `gui/${install.uid}`
+  for (const job of jobs) {
+    const label = job.launchd
+    if (typeof label !== "string") continue
+    const path = join(install.agents, `${label}.plist`)
+    const text = plists.get(label)
+    if (text && job.disabled !== true && !existsSync(path)) {
+      writeIfChanged(path, text)
+      const loaded = await install.launchctl(["bootstrap", domain, path])
+      if (loaded.code === 0) changed.push(`+${label}`)
+      else {
+        err(`jobs: refused bootstrap of ${label}, exit ${loaded.code}: ${loaded.out.trim()}`)
+        code = 1
+      }
+    } else if (job.disabled === true && existsSync(path)) {
+      await install.launchctl(["bootout", `${domain}/${label}`])
+      const moved = quarantine(
+        path,
+        { carveOut: "jobs-installed", reason: "its launchd job is turned off", session: "jobs" },
+        roots,
+      )
+      if ("refused" in moved) {
+        err(`jobs: kept ${path}: ${moved.refused}`)
+        code = 1
+      } else changed.push(`-${label}`)
+    }
+  }
+  return code
+}
+
+// The ops runner's render, at the top of each pass: jobs.json and each enabled launchd job's plist from the store's policy.json and each org's own job rows (orgJobs), and each org's script folders installed under ops; each org row refused is a `jobs: refused` line on stderr, and when the orgs cannot be read their jobs stay as jobs.json had them, said in a `jobs: kept` line, the render exiting 1 with everything else written. Exits 3 with jobs.json untouched on a machine with no store whose jobs.json is there (a fresh one gets the registry's defaults, the Dashboard's job and the usage read on, as does a store with no policy.json yet), and 2 on stderr when policy.json or jobs.json does not parse, so the runner keeps the last jobs.json and logs why. Plists go only into the folder it is handed; one for a job now off moves to the trash through the jobs carve-out, and one the trash refuses stays, named on stderr, the render exiting 1 with everything else written. With install, each launchd job turned on or off is installed or removed there too (installAgents).
 export const renderJobsFile = async (
-  options: { data: string; fill: Fill; jobs: string; launchAgents?: string; roots: Roots },
+  options: {
+    data: string
+    fill: Fill
+    install?: Install
+    jobs: string
+    launchAgents?: string
+    roots: Roots
+  },
   out: (line: string) => void,
   err: (line: string) => void,
 ): Promise<number> => {
@@ -132,6 +186,11 @@ export const renderJobsFile = async (
         } else changed.push(`-${file}`)
       }
   }
+  if (options.install)
+    code = Math.max(
+      code,
+      await installAgents(options.install, jobs, plists, options.roots, changed, err),
+    )
   const lines = changed.filter(Boolean)
   out(lines.length ? `jobs: rendered ${lines.join(", ")}` : "jobs: unchanged")
   return code
@@ -181,6 +240,7 @@ export const jobsExit = async (
       args: argv,
       options: {
         data: { type: "string" },
+        install: { type: "string" },
         jobs: { type: "string" },
         "launch-agents": { type: "string" },
       },
@@ -209,6 +269,19 @@ export const jobsExit = async (
         data: found.data,
         path: environment.PATH ?? "/usr/bin:/bin",
       },
+      install: values.install
+        ? {
+            agents: values.install,
+            launchctl: async (args) => {
+              const done = Bun.spawnSync(["launchctl", ...args])
+              return {
+                code: done.exitCode,
+                out: `${done.stdout.toString()}${done.stderr.toString()}`,
+              }
+            },
+            uid: process.getuid!(),
+          }
+        : undefined,
       jobs: values.jobs,
       launchAgents: values["launch-agents"],
       roots: {

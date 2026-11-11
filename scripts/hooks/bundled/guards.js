@@ -2726,7 +2726,14 @@ var CARVE_OUTS = {
     files: 4000,
     folder: "ops/dashboard/builds"
   },
-  jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" }
+  jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" },
+  "jobs-installed": {
+    bytes: 64 * 1024,
+    files: 1,
+    folder: "Library/LaunchAgents",
+    home: true,
+    name: /^com\.playground\.[\w.-]+\.plist$/
+  }
 };
 
 // packages/settings/src/folder.ts

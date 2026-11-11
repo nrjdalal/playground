@@ -41,7 +41,9 @@ When that render cannot be trusted, the runner keeps the last `jobs.json` and wr
 A job the registry does not know, such as one of your own scripts, stays in `jobs.json` as it is, unless an org's own job of its name ([below](#an-orgs-own-job)) replaces it.
 Each `script` item an org holds as a folder is installed into `<data>/ops/<key>/` in the same pass, beside the state its job keeps there, which the render never touches.
 
-launchd reads `~/Library/LaunchAgents`, not `<data>/ops/launch-agents`: at the switch to settings, each rendered plist is copied into `~/Library/LaunchAgents` and loaded with one `launchctl bootstrap` per plist, by its own label, in place of the plists kept by hand.
+launchd reads `~/Library/LaunchAgents`, not `<data>/ops/launch-agents`, so the same pass installs each launchd job you turn on: its rendered plist is copied into `~/Library/LaunchAgents` and loaded with `launchctl bootstrap`, and a plist already there stays as it is.
+A launchd job you turn off is unloaded with `launchctl bootout`, and its plist in `~/Library/LaunchAgents` moves to the trash under the `jobs-installed` carve-out.
+A launchd job still down after 3 passes in a row is told to Ops once, and again only after it has run healthy in between.
 
 ## Bring an existing jobs.json in
 

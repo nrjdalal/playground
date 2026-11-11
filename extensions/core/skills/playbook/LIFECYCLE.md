@@ -44,6 +44,9 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   named `ops-*.json` so the Dashboard finds a new job by its file alone,
   in the shape `heartbeatSchema` in `api/hono/src/lib/dashboard/ops.ts` reads (`job`, `pid`, `startedAt`, `lastBeatAt`, `lastResult`, `cycleSeconds`), written atomically each beat by a loop that does not wait on the work.
   The Dashboard lists each under Scripts, by its plain name and its `jobs.json` `schedule`: Running while `lastResult` is `ok` and the beat is within three cycles, Waiting while it starts `waiting: ` (a job with nothing to read yet, muted and not broken), Failing on any other result, Down once the beat goes stale, the pid goes or the loop writes `loop exited <code>` or `supervisor exited`.
+  A launchd job (one with a `launchd` label) turned on in Settings > Jobs is installed on the next ops-up pass: the render writes its plist into `~/Library/LaunchAgents` and runs `launchctl bootstrap`, and leaves a plist already there as it stands.
+  One turned off is booted out and its plist there goes to the trash through safe-delete's `jobs-installed` carve-out, which moves Playground's own `com.playground.*.plist` files alone.
+  A launchd job still unhealthy 3 passes in a row is told to ops once, and told again only after a healthy pass, since launchd alone brings it back.
   ops-dashboard runs the dashboard checkout's own `scripts/ops/dashboard/`, swapping onto it in the same pid at each start and after a roll that changes it (`.agents/dashboard/live.md`).
   ops-merge-train is merge-on-ready, a job and never a worker: every 60 seconds it reads the open PRs' heads and checks, and on any change runs `bun run pr:train ready`, which merges the first PR in queue order whose every gate passes; its beat's `lastResult` is `ok` or the command that failed and why.
   ops-unstick (`scripts/ops/unstick/run.py`) watches for stuck sessions, by the **unstick** rule.
