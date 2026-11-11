@@ -2,24 +2,27 @@ import { unlink } from "node:fs/promises"
 import { join } from "node:path"
 
 import { managerOf } from "@packages/config/kinds"
-import { readPolicy, whatsappSettings } from "@packages/settings"
+import { configDirOf } from "@packages/env/data-dir"
+import { extSettings, readPolicy, whatsappSettings } from "@packages/settings"
 import makeWASocket, { Browsers, type SocketConfig, useMultiFileAuthState } from "baileys"
 
+import { assistantOf, busyOf, stuckOf } from "../ops-job/dispatcher"
 import { engineData, REPO, run, sendAs } from "../ops-job/job"
 import { beat, CYCLE_SECONDS } from "../ops-tick/tick"
 import { dashboardCheckout } from "../playground/probe"
-import { attach, type Sock, sender } from "./bridge"
+import { bridge, type Sock, sender } from "./bridge"
 import { keepAlive, ownFolder, releaseLock, SOCKET, takeLock } from "./habits"
-import { life, type LinkSock, unguarded } from "./life"
+import { life, type LinkSock, PAIRING, unguarded } from "./life"
 import { socketPath, serve } from "./server"
 
-// ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while it runs and, once stopped, beats why, idle, so up.py does not start it again and its row reads the reason.
+// ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so up.py does not start it again and its row reads the reason.
 process.umask(0o077)
 const data = engineData("ops-wa")
 const dir = join(data, "whatsapp")
 const ops = join(data, "ops")
 const startedAt = new Date()
-let result = "ok"
+const CONNECTING = "waiting: connecting to WhatsApp"
+let result = CONNECTING
 const pulse = () =>
   beat(join(ops, "ops-wa.json"), startedAt, new Date(), result, "ops-wa").catch((e) =>
     console.error(e),
@@ -106,6 +109,29 @@ const main = async () => {
   await unlink(path).catch(() => {})
   serve(path, send)
   const relay = sendAs("wa", true, true)
+  const seconds = () => Date.now() / 1000
+  const config = configDirOf(process.env)
+  const watched = bridge({
+    assistant: () => assistantOf(data),
+    busy: () => busyOf("dispatcher", data, config, seconds()),
+    dir,
+    log: (line) => console.log(line),
+    now: Date.now,
+    // WhatsApp mode is the bundled whatsapp extension's switch, read afresh for each message
+    on: async () => {
+      const read = await readPolicy(data)
+      return (
+        read.refusal === undefined &&
+        extSettings.get(read.settings, "ext.bundled").includes("whatsapp")
+      )
+    },
+    owner,
+    relay: (to, text) => relay(to, text),
+    reply: send,
+    sleep: Bun.sleep,
+    stuck: () => stuckOf("dispatcher", data, config, seconds()),
+  })
+  const passes = setInterval(() => watched.pass(), 30_000)
   const reminder = setInterval(
     () =>
       void keepAlive(dir, Date.now(), () =>
@@ -128,11 +154,11 @@ const main = async () => {
   }
   const why = await life({
     alert: (text) => post("ops-wa needs a look", text, "alert"),
-    card: (code) =>
-      post(
-        `Link WhatsApp: code ${code.slice(0, 4)}-${code.slice(4)}`,
-        "On the spare phone: Settings, Linked devices, Link a device, Link with phone number instead, then type this code.",
-      ),
+    card: (code) => {
+      result = "waiting: the pairing code waits to be typed on the spare phone"
+      void pulse()
+      return post(`Link WhatsApp: code ${code.slice(0, 4)}-${code.slice(4)}`, PAIRING)
+    },
     connect: async () => {
       const sock = makeWASocket({
         auth: state,
@@ -148,21 +174,19 @@ const main = async () => {
     linked: async (id) => ask(["resolve", id, "--by", await by(), "--note", "linked"]),
     listen: (sock) => {
       current = sock
-      attach({
-        dir,
-        now: Date.now,
-        owner,
-        relay: (text) => relay("dispatcher", text),
-        sleep: Bun.sleep,
-        sock,
-      })
+      watched.attach(sock)
     },
     now: Date.now,
     owner,
     sleep: Bun.sleep,
+    up: (open) => {
+      result = open ? "ok" : CONNECTING
+      void pulse()
+    },
   })
   current = undefined
   clearInterval(reminder)
+  clearInterval(passes)
   stop(why)
 }
 
