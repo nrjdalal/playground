@@ -1551,7 +1551,7 @@ gate_sig() { G=shut; lanes_open && G=open; switch_on run-slot.single && ! mem_ok
 # head of either order, or the oldest) looks again on anything its last look decides by: a file it read (SIG, merge-queue.json), the load's whole numbers,
 # the clock's next turn (due_at), the burst's minute while one held it, and the gauges every poll while they shut a slot and every fourth poll while they
 # open one (gate_sig, whose verdict a look's fit reads through capacity's slot count, so a flip either way rewrites run-slot.next within four polls, issue
-# 1477, and keeps run-slot.lanes fresh for room and can-take); any other, which a new waiter or a run's end never moves to the head, looks once it is the
+# 1477, and keeps run-slot.lanes fresh for room and can-take while they shut a slot, the open verdict's own read landing once in GATE_EVERY polls); any other, which a new waiter or a run's end never moves to the head, looks once it is the
 # oldest or next_sig changes, so the queue's waiters look once when the oldest names another rather than each time the folder changes
 cheap_idle() {
   local a pid
@@ -1897,7 +1897,7 @@ load1_max() {
 # counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither
 lanes_open() {
   local idle swap tps mbs load need="" verdict=shut why="" seen free level
-  # a read subcommand takes the verdict a waiter wrote in the last 30 s (the head rewrites it each poll while the gauges shut a slot, and its every fourth poll opens it under gate_sig), so room, can-take and head see the lanes as the queue's head saw them, since the CPU gate can flip between two readings seconds apart (issue 1216: 55% then 33% idle); with none that fresh it reads the gauges itself
+  # a read subcommand takes the verdict a waiter wrote in the last 30 s (the head rewrites it each poll while the gauges shut a slot and every fourth poll while they open one, gate_sig), so room, can-take and head see the lanes as the queue's head saw them, since the CPU gate can flip between two readings seconds apart (issue 1216: 55% then 33% idle); with none that fresh it reads the gauges itself
   if [ -n "$CAN_TAKE" ] && seen=$(fresh_lanes); then [ "$seen" = open ]; return; fi
   read -r idle swap tps mbs _ <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
