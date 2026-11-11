@@ -3784,6 +3784,13 @@
           }
         },
         {
+          "heartbeat": "ops-wa",
+          "name": "ops-wa",
+          "schedule": {
+            "always": true
+          }
+        },
+        {
           "disabled": true,
           "disabledWhy": "Fixture: paused on purpose",
           "heartbeat": "ops-zai-usage",
@@ -4365,6 +4372,14 @@
       "lastBeatAt": "2026-01-01T11:59:00.000Z",
       "lastResult": "ok",
       "pid": 900052,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/ops-wa.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-wa",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "waiting: the pairing code waits to be typed on the spare phone",
+      "pid": 900060,
       "startedAt": "2026-01-01T08:00:00.000Z"
     },
     "sessions/900019.json": {
@@ -5277,6 +5292,10 @@
     "900013": {
       "command": "claude -n worker-bright-lark",
       "start": "Thu Jan  1 07:30:00 2026"
+    },
+    "900060": {
+      "command": "bun --no-env-file packages/scripts/src/ops-wa/cli.ts --data /fixture/playground",
+      "start": "Thu Jan  1 08:00:00 2026"
     },
     "900030": {
       "command": "python3 ops/loop.py ops-checks",

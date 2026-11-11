@@ -14,7 +14,7 @@ import {
   SOCKET,
   takeLock,
 } from "../../../../../packages/scripts/src/ops-wa/habits"
-import { life, unguarded } from "../../../../../packages/scripts/src/ops-wa/life"
+import { life, PAIRING, unguarded } from "../../../../../packages/scripts/src/ops-wa/life"
 import { fakeSocket, OWNER, SPARE } from "./fake-socket"
 
 const dirs: string[] = []
@@ -190,6 +190,19 @@ describe("ops-wa's ban-safety habits", () => {
     const command = "bun --no-env-file scripts/hooks/bundled/no-raw-wa.js"
     await Bun.write(settings, JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command }] }] } }))
     expect(await unguarded(settings)).toBeUndefined()
+  })
+
+  test("pairs now: the factory's own settings register no-raw-wa", async () => {
+    const settings = join(import.meta.dir, "../../../../../scripts/factory-settings.json")
+    expect(await unguarded(settings)).toBeUndefined()
+  })
+
+  test("the pairing card walks WhatsApp Business to Link with phone number instead, with no QR, and keeps the profile unverified", () => {
+    expect(PAIRING).toContain("WhatsApp Business")
+    expect(PAIRING).toContain("Linked devices")
+    expect(PAIRING).toContain("Link with phone number instead")
+    expect(PAIRING).toContain("no Meta Verified")
+    expect(PAIRING).not.toMatch(/\bQR\b|scan/i)
   })
 
   test("refuses to run with the spare number as the owner's, since a self-chat number is banned fast", async () => {

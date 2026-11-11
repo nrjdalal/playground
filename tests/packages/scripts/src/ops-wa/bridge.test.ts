@@ -3,11 +3,15 @@ import { mkdtempSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { type Stuck } from "../../../../../packages/scripts/src/ops-job/dispatcher"
 import {
-  attach,
+  bridge,
+  OFF,
   REPLY,
   sender,
   toWhatsApp,
+  UPDATE,
+  UPDATE_MS,
 } from "../../../../../packages/scripts/src/ops-wa/bridge"
 import { SEND } from "../../../../../packages/scripts/src/ops-wa/habits"
 import { fakeSocket, groupJid, jid, OWNER, STRANGER } from "./fake-socket"
@@ -19,29 +23,49 @@ afterAll(() => {
 
 const HOUR = 3_600_000
 const START = Date.parse("2026-11-11T03:00:00Z")
+const ASSISTANT = "k3m9px-worker"
 
-// One bridge over a fake socket in a scratch data folder: the relay's lines, the waits it asked for and a clock the waits move.
+// One bridge over a fake socket in a scratch data folder: the relay's lines and who each went to, the waits it asked for and a clock the waits move; WhatsApp mode is on, the dispatcher idle and the assistant seat ASSISTANT's unless the test says otherwise.
 const harness = () => {
   const dir = join(mkdtempSync(join(tmpdir(), "ops-wa-")), "whatsapp")
   dirs.push(dir)
   const fake = fakeSocket()
   const relayed: string[] = []
+  const routed: { text: string; to: string }[] = []
+  const logs: string[] = []
   const waits: number[] = []
+  const mode = {
+    busy: false,
+    on: true,
+    seat: ASSISTANT as string | undefined,
+    stuck: null as Stuck,
+  }
   let now = START
   fake.setClock(() => now)
-  const io = {
+  const base = {
     dir,
     now: () => now,
     owner: OWNER,
-    relay: async (text: string) => void relayed.push(text),
     sleep: async (ms: number) => {
       waits.push(ms)
       now += ms
     },
-    sock: fake.sock,
   }
-  const idle = attach(io)
-  const send = sender(io)
+  const send = sender({ ...base, sock: fake.sock })
+  const watched = bridge({
+    ...base,
+    assistant: async () => mode.seat,
+    busy: async () => mode.busy,
+    log: (line) => logs.push(line),
+    on: async () => mode.on,
+    relay: async (to: string, text: string) => {
+      routed.push({ text, to })
+      if (to === "dispatcher") relayed.push(text)
+    },
+    reply: send,
+    stuck: async () => mode.stuck,
+  })
+  watched.attach(fake.sock)
   return {
     advance: (ms: number) => (now += ms),
     dir,
@@ -54,10 +78,18 @@ const harness = () => {
         .split("\n")
         .filter(Boolean),
     fake,
+    logs,
+    mode,
+    // one failover and update pass, waited out
+    pass: async () => {
+      watched.pass()
+      await watched.idle()
+    },
     relayed,
+    routed,
     send,
     // the handlers queue on the emitter's turn and each writes a file, so a test waits for the queue to empty before it reads
-    settle: idle,
+    settle: watched.idle,
     waits,
   }
 }
@@ -251,6 +283,93 @@ describe("ops-wa's bridge", () => {
     expect(statSync(h.dir).mode & 0o777).toBe(0o700)
     for (const file of ["dropped.log", "owner.json", "sends.json"])
       expect(statSync(join(h.dir, file)).mode & 0o777).toBe(0o600)
+  })
+})
+
+describe("WhatsApp mode", () => {
+  test("while it is off, an owner message goes no further and gets one reply an hour saying so", async () => {
+    const h = harness()
+    h.mode.on = false
+    h.fake.upsert([h.fake.message(jid(OWNER), "status?"), h.fake.message(jid(OWNER), "hello?")])
+    await h.settle()
+    expect(h.routed).toEqual([])
+    expect(h.fake.sent.map((s) => s.content.text)).toEqual([OFF])
+    h.advance(HOUR)
+    h.fake.upsert([h.fake.message(jid(OWNER), "now?")])
+    await h.settle()
+    expect(h.fake.sent).toHaveLength(2)
+  })
+
+  test("hands a message with no reply in 3 minutes to the assistant seat too, once", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "is it green?")])
+    await h.settle()
+    h.advance(2 * 60_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
+    h.advance(60_000)
+    await h.pass()
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", ASSISTANT])
+    expect(h.routed[1]!.text).toStartWith("Handed on since no reply has gone out in 3 minutes.")
+    expect(h.routed[1]!.text).toContain("is it green?")
+  })
+
+  test("a reply sent in time keeps the message with the dispatcher, and a dispatcher mid-turn holds the hand-on", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "one")])
+    await h.settle()
+    await h.send("on it")
+    h.advance(5 * 60_000)
+    await h.pass()
+    h.mode.busy = true
+    h.fake.upsert([h.fake.message(jid(OWNER), "two")])
+    await h.settle()
+    h.advance(5 * 60_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", "dispatcher"])
+    h.mode.busy = false
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", "dispatcher", ASSISTANT])
+  })
+
+  test("a stuck dispatcher hands on at once, and with no assistant seat the log says it stays", async () => {
+    const h = harness()
+    h.mode.stuck = { at: "2026-11-11T02:55:00.000Z", state: "stuck" }
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
+    await h.settle()
+    await h.pass()
+    expect(h.routed[1]!.text).toStartWith(
+      "Handed on since the dispatcher has read stuck since 2026-11-11T02:55:00.000Z.",
+    )
+    const alone = harness()
+    alone.mode.seat = undefined
+    alone.fake.upsert([alone.fake.message(jid(OWNER), "hi")])
+    await alone.settle()
+    alone.advance(3 * 60_000)
+    await alone.pass()
+    expect(alone.routed.map((r) => r.to)).toEqual(["dispatcher"])
+    expect(alone.logs.join("\n")).toContain("stays with the dispatcher alone")
+  })
+
+  test("asks the dispatcher for an update every 15 minutes while the owner has written in the last 24 hours", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "keep me posted")])
+    await h.settle()
+    await h.send("will do")
+    const updates = () => h.routed.filter((r) => r.text === UPDATE).length
+    h.advance(UPDATE_MS - 1)
+    await h.pass()
+    expect(updates()).toBe(0)
+    h.advance(1)
+    await h.pass()
+    expect(updates()).toBe(1)
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(2)
+    h.advance(24 * HOUR)
+    await h.pass()
+    expect(updates()).toBe(2)
   })
 })
 

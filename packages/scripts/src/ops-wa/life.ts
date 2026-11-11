@@ -44,6 +44,10 @@ export type LifeIo<S extends LinkSock> = {
 
 export const RELINK = "playground wa relink"
 
+// The pairing card's steps, for the spare phone's WhatsApp Business: the code, never a QR, and a profile kept unverified, since a verified business account has been banned at the link.
+export const PAIRING =
+  "On the spare phone, open WhatsApp Business. On Android tap ⋮ then Linked devices; on iPhone tap Settings then Linked devices. Tap Link a device, then Link with phone number instead, and type this code.\n\nKeep the Business profile unverified, with no Meta Verified: a verified business account has been banned when it linked a device."
+
 // Pairing waits for no-raw-wa's registration in the factory's settings, so no auth state exists while a session could still reach it.
 export async function unguarded(settings: string): Promise<string | undefined> {
   const text = await Bun.file(settings)
