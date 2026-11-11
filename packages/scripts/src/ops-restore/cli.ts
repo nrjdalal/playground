@@ -63,10 +63,10 @@ const gitIn = (main: string, ...args: string[]) => [
   ...args,
 ]
 
-// The tracked files git status reads as modified in the work tree, the index or both; an untracked file, an add, a delete and a rename stay as they are. Read outside ctx.run, as missingGuards reads the disk, since every healthy look reads it.
+// The tracked files git status reads as modified in the work tree, the index or both; an untracked file, an add, a delete and a rename stay as they are. Read outside ctx.run, as missingGuards reads the disk, since every healthy look reads it, and with no optional lock, so the read never holds index.lock against an upkeep's git.
 const modifiedFiles = async (main: string): Promise<string[]> => {
   const status = await run(
-    gitIn(main, "status", "--porcelain", "-z", "--untracked-files=no"),
+    gitIn(main, "--no-optional-locks", "status", "--porcelain", "-z", "--untracked-files=no"),
     30_000,
   )
   if (status.code !== 0) return []
