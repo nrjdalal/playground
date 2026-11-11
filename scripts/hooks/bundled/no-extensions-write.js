@@ -7874,7 +7874,7 @@ function scoreAsOther(words, cmd, parsed, env) {
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at));
 }
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
-var AWK_RUNS = /system|getline|[>@]/;
+var AWK_RUNS = /system|[>@]/;
 var AWK_PATTERN = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.)*\//g;
 var awkRuns = (program) => AWK_RUNS.test(program.replace(AWK_PATTERN, "$1$2RE")) || awkPipe(program);
 var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
@@ -8175,8 +8175,12 @@ function narrow(cmd, env) {
     return sedReads(args);
   if (base === "perl")
     return perlReads(parsed, env);
-  if (base === "cut" || base === "echo" || base === "lsof")
+  if (base === "cut" || base === "date" || base === "echo" || base === "lsof")
     return true;
+  if (base === "bash") {
+    const [flag, script] = args;
+    return args.length === 2 && flag.value === "-c" && script.quoted && !marked(script.value) && !wholeLine(lex(script.value, env.known).commands, env, true);
+  }
   if (base === "gh") {
     const filters = ghFilters(parsed);
     const texts = filters.size > 0 ? filters : ghTexts(parsed);
@@ -8209,20 +8213,30 @@ function quietCommit(cmd, parsed, env) {
     return false;
   return args.every((word, at) => !/\s/.test(word.value) || word.quoted && !marked(word.value) && (/^(?:-[a-zA-Z]*m|--message)$/.test(args[at - 1]?.value ?? "") || word.value.startsWith("--message=")));
 }
-function wholeLine(commands, env) {
+function wholeLine(commands, env, readsOnly = false) {
+  const edited = !readsOnly && commands.some((cmd) => edits(cmd, parse3(cmd), env));
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])];
-    if (words.some((word) => word.procs && wholeLine(word.procs, env)))
+    if (words.some((word) => word.procs && wholeLine(word.procs, env, readsOnly)))
       return true;
     const parsed = parse3(cmd);
-    const slot = slotWords(parsed);
-    const commit = slot ? { ...cmd, words: slot } : cmd;
-    if (quietCommit(commit, slot ? parse3(commit) : parsed, env))
+    const base = parsed.first && program(parsed.first.value);
+    if (base === "bash" && commands.length > 1)
+      return true;
+    if (edited && base === "date")
+      return true;
+    if (!readsOnly && quietRun(cmd, parsed, env))
       return false;
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
-    return writes || !(narrow(cmd, env) || sedInPlace(cmd, parsed));
+    return writes || !(narrow(cmd, env) || !readsOnly && sedInPlace(cmd, parsed));
   });
 }
+function quietRun(cmd, parsed, env) {
+  const slot = slotWords(parsed);
+  const commit = slot ? { ...cmd, words: slot } : cmd;
+  return quietCommit(commit, slot ? parse3(commit) : parsed, env);
+}
+var edits = (cmd, parsed, env) => quietRun(cmd, parsed, env) || sedInPlace(cmd, parsed) !== undefined;
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
 var SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g;
 var SHELL_WORD = /(["']?)\bshell\b\1(\s*:\s*false\b(?=\s*[,})]))?/g;
