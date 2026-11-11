@@ -19,15 +19,21 @@ const runOf = (headSha: string, status: string, event: string, id: number): Held
   status,
 })
 
-// A stub Run that answers gh reads from a map by path and records every call, so a test can assert which approve went out.
+// A run as GitHub's list returns it, whose head_sha the script maps onto HeldRun.
+const wireOf = (headSha: string, status: string, event: string, id: number) => ({
+  event,
+  head_sha: headSha,
+  id,
+  status,
+})
+
+// A stub Run that answers gh reads from a map keyed by the call's first two arguments and records every call, so a test can assert which approve went out.
 const fakeRun = (answers: Record<string, string>): { run: Run; calls: string[] } => {
   const calls: string[] = []
   const run: Run = async (args) => {
-    const rest = args[0] === "api" ? args.slice(1) : args
-    const path = rest.filter((arg) => !["-X", "POST", "--jq", "--paginate"].includes(arg))[0] ?? ""
-    const key = rest.slice(0, 2).join(" ")
-    const answer = answers[key] ?? answers[path] ?? ""
-    calls.push(rest.join(" "))
+    const key = args.slice(0, 2).join(" ")
+    const answer = answers[key] ?? ""
+    calls.push(args.join(" "))
     const result: RunResult = { code: 0, stderr: "", stdout: answer }
     return result
   }
@@ -40,12 +46,14 @@ const prAnswer = JSON.stringify({
   state: "open",
 })
 
+const runsKey = `api repos/o/r/actions/runs?event=pull_request&head_sha=${HEAD}&per_page=100&status=action_required`
+
 const heldAtHead = JSON.stringify({
   workflow_runs: [
-    runOf(HEAD, "action_required", "pull_request", 101),
-    runOf(OTHER, "action_required", "pull_request", 202),
-    runOf(HEAD, "completed", "pull_request", 303),
-    runOf(HEAD, "action_required", "push", 404),
+    wireOf(HEAD, "action_required", "pull_request", 101),
+    wireOf(OTHER, "action_required", "pull_request", 202),
+    wireOf(HEAD, "completed", "pull_request", 303),
+    wireOf(HEAD, "action_required", "push", 404),
   ],
 })
 
@@ -81,18 +89,18 @@ describe("approveHeld", () => {
   test("a held run at the head is approved", async () => {
     const { calls, run } = fakeRun({
       "api repos/o/r/pulls/5": prAnswer,
-      "api repos/o/r/actions/runs?head_sha": heldAtHead,
+      [runsKey]: heldAtHead,
     })
     const lines = await approveHeld(run, "o/r", 5)
     const approves = calls.filter((call) => call.includes("/approve"))
-    expect(approves).toEqual(["-X POST repos/o/r/actions/runs/101/approve"])
+    expect(approves).toEqual(["api -X POST repos/o/r/actions/runs/101/approve"])
     expect(lines.join("\n")).toContain("101")
   })
   test("a held run at another sha is left alone", async () => {
     const { calls, run } = fakeRun({
       "api repos/o/r/pulls/5": prAnswer,
-      "api repos/o/r/actions/runs?head_sha": JSON.stringify({
-        workflow_runs: [runOf(OTHER, "action_required", "pull_request", 202)],
+      [runsKey]: JSON.stringify({
+        workflow_runs: [wireOf(OTHER, "action_required", "pull_request", 202)],
       }),
     })
     const lines = await approveHeld(run, "o/r", 5)
@@ -102,8 +110,8 @@ describe("approveHeld", () => {
   test("a run that is not held is left alone", async () => {
     const { calls, run } = fakeRun({
       "api repos/o/r/pulls/5": prAnswer,
-      "api repos/o/r/actions/runs?head_sha": JSON.stringify({
-        workflow_runs: [runOf(HEAD, "completed", "pull_request", 303)],
+      [runsKey]: JSON.stringify({
+        workflow_runs: [wireOf(HEAD, "completed", "pull_request", 303)],
       }),
     })
     await approveHeld(run, "o/r", 5)
