@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs"
@@ -15,11 +16,13 @@ import { join } from "node:path"
 
 import {
   BUNDLED,
+  bundle,
   entries,
   FIX,
   HOOKS,
   ROOT,
   stale,
+  treeAt,
 } from "../../../../packages/scripts/src/hooks-bundle"
 
 test("every bundle in scripts/hooks/bundled is what a fresh build of its source writes", async () => {
@@ -595,5 +598,31 @@ describe("--check reads a tree git holds, never the working files", () => {
     expect(merged.code).toBe(0)
     expect(merged.stderr).toContain(`conflicts with canary outside ${BUNDLED}`)
     expect(merged.stderr).toContain(join(HOOKS, "lib.ts"))
+  })
+
+  // A source whose name is longer than the filesystem takes makes the mirror's write throw, and the mirror goes with it; the wait rides out a mirror another test's check holds up at the same moment
+  test("a throw while the mirror is written leaves no temp folder behind", async () => {
+    const { root } = checkout()
+    const mirrors = () =>
+      readdirSync(realpathSync(tmpdir())).filter((name) => name.startsWith("hooks-bundle-merged-"))
+    const before = new Set(mirrors())
+    const blob = Bun.spawnSync(["git", "-C", root, "hash-object", "-w", "--stdin"], {
+      stdin: new TextEncoder().encode("export const big = 1\n"),
+    })
+      .stdout.toString()
+      .trim()
+    const oid = Bun.spawnSync(["git", "-C", root, "mktree"], {
+      stdin: new TextEncoder().encode(`100644 blob ${blob}\t${"n".repeat(300)}.ts\n`),
+    })
+      .stdout.toString()
+      .trim()
+    expect(oid).toMatch(/^[0-9a-f]{40,64}$/)
+    await expect(bundle(root, treeAt(root, oid))).rejects.toThrow()
+    let extra = mirrors().filter((name) => !before.has(name))
+    for (let tick = 0; tick < 100 && extra.length; tick++) {
+      await Bun.sleep(50)
+      extra = mirrors().filter((name) => !before.has(name))
+    }
+    expect(extra).toEqual([])
   })
 })
