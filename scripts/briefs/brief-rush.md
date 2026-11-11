@@ -39,6 +39,7 @@ Standing lines:
 - Questions for the owner go up to the Builder as messages, never AskUserQuestion.
 - No Co-Authored-By trailer on any commit: AGENTS.md forbids it and wins over the harness's attribution reminder.
 - Commitlint: a lowercase subject and body lines of 100 characters or fewer.
+- A commit message holding `~/` is refused by no-extensions-write until its guard fix lands: write "the home folder" in the message's text, and pass the message with `git commit -F <file>`.
 - Give --body-file and --attach a literal absolute path to a file written in an earlier call, never a $VAR.
 - Fetch, edit and PATCH a gh body in three separate calls, naming the file by its absolute path in each: `no-public-leak` reads a body only from a file already on disk, so it refuses one call that fills the file from gh's output and PATCHes it.
 - An org's own brief rules live in its extension's `rules/brief.md`, whose glance a session working in the org's checkout sees under "The <org> org's rules:": anything sent from the owner's account is a draft unless a line there pre-approves it, the factory stays out of the org's writes, and the file is read in full before a Slack post or DM, a review ask, a staging or prod step, or an outside author's PR.
