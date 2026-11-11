@@ -31,6 +31,15 @@ the group's redirect taking the place of a pipe into the group (`<reader> | { sh
 It reads a here-string's `$(echo …)` of words it can read as those words, zsh's `\n` a line break and any other backslash unread, and a here-string of one variable the line set earlier (`S='…'; sh <<< "$S"`) as that variable's value.
 It follows no descriptor an `exec` feeds, which it reads as unfed, and no variable set other than by a plain assignment, which it reads as that assignment's value.
 
+## Plan a hook's ships
+
+Plan the ships before you build a guard, since every wrapper runs its script from the main checkout, which follows `main` ([Registered in both settings files](#registered-in-both-settings-files)):
+
+1. Look for a hook script on `main` whose role read or input fits the new rule (`git show origin/main:scripts/hooks/<hook>.ts`), and extend it there: a new event or tool on a script `main` already holds lands in one PR and goes live with the next ship, as no-chat-question's PreToolUse path on `AskUserQuestion` beside its Stop gate and writing-first's events do, each branching on `hook_event_name`.
+2. When no script fits, plan a new hook file as two PRs: the script and its tests in one ship, then its registration in both settings files and its bundle in a later one, since `bun run test:skills`'s hooks-on-main step fails a wrapper whose script `origin/main` lacks.
+
+Done when your plan names the hook script, whether it is on `origin/main`, and the ships the guard needs to go live: one, or two.
+
 ## Registered in both settings files
 
 - A session resumed without its `--settings` or `PLAYGROUND_ROLE` (a bare `claude --resume`, or herdr's own resume, which ops-herdr's `config.toml` keeps off: playbook's SPAWN.md, Role and settings) still loads the checkout's project settings, so `.claude/settings.json` registers every PreToolUse hook `scripts/factory-settings.json` does, with the same matcher and the same command string,
@@ -482,10 +491,13 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 
 ## no-false-green
 
-- A factory session's test run keeps its own exit status: `scripts/hooks/no-false-green.ts`, registered beside no-stash, refuses bun with an option given its value as the next word (`--cwd <dir>`, `--env-file <file>`, `--preload <file>`) before its `run` or `test` (bun then prints its usage and exits 0, or runs package.json's `test` script with the paths appended in place of the tests;
+- A factory session's test run and git push keep their own exit status: `scripts/hooks/no-false-green.ts`, registered beside no-stash, refuses bun with an option given its value as the next word (`--cwd <dir>`, `--env-file <file>`, `--preload <file>`) before its `run` or `test`
+  (bun then prints its usage and exits 0, or runs package.json's `test` script with the paths appended in place of the tests;
   `--opt=value` there, as `bun --cwd=<dir> run test:file <files>` and `bun run --cwd <dir> <script>` work), and a test run (`bun test`, a `test` or `check-types` script, vitest or jest, pytest, ty or ruff, bare, through `uv run`, `uv tool run`, `uvx` or `python -m`,
   through run-slot.sh or a shell's `-c` too) piped into another command while the script holding the pipe sets no `pipefail` and reads no pipe status of its own shell (`PIPESTATUS` in bash, `pipestatus` in zsh, the Bash tool's shell here; a pipefail outside a `bash -c` script never reaches the pipes inside it),
   since the pipeline's exit is its last command's (a red test once read 0 through `| tail`).
+  A `git push` piped the same way is refused by the same rule, read past git's global options (`git -C <dir>`, `git -c <key=value>`, `GIT_TAKES` in `scripts/hooks/shell.ts`) and through run-slot or a shell's `-c` too, since a failed push then reads 0 (one once read as landed through `| grep error` and cost a review round on a head GitHub never had);
+  its reason names the fix: push bare, then check with `git ls-remote origin refs/heads/<branch>`, which prints the local head's sha once the push has landed.
   A run-slot call, typed bare or as a shell's script (`bash <path>/run-slot.sh <who> -- <command>`, `shellSlot`), is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, shared with no-glm-heavy-path and no-main-checkout), and a call with no `--`, or nothing after it, runs nothing (run-slot exits 2 on it), so nothing in it is judged.
   A piped subshell or brace group, `(bun test x) | tail`, is not read.
   It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too.
