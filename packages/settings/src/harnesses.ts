@@ -8,8 +8,6 @@ export type Harness = (typeof HARNESSES)[number]
 export type HarnessId = Harness["id"]
 export type Backend = Harness["backends"][number]
 
-export const HARNESS_IDS = HARNESSES.map((harness) => harness.id) as [HarnessId, ...HarnessId[]]
-
 // The model a template names for GLM, which spawn.sh's --backend glm runs on models.glm.
 export const GLM_MODEL = "glm"
 

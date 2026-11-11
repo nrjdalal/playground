@@ -6307,11 +6307,6 @@ var gateSettings = defineSettings({
   }
 });
 // packages/settings/src/harnesses.ts
-var HARNESSES = [
-  { backends: ["claude", "glm"], id: "claude-code", label: "Claude Code" },
-  { backends: ["openai"], id: "codex", label: "Codex" }
-];
-var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
 var GLM_MODEL = "glm";
 // packages/settings/src/models.ts
 var id = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id, such as claude-opus-5-5");
