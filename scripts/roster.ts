@@ -30,7 +30,7 @@ export const USAGE = `Usage:
   roster.ts who <kind>                              (prints the name holding a manager kind's seat; writes nothing)
   roster.ts who dispatcher [1|2]                    (prints the dispatcher in slot 1, Alpha, by default, or 2, Bravo; writes nothing)
   roster.ts who assistant                           (prints the live session the roster gives the assistant kind, else exits 1; writes nothing)
-A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, and a PR not yet opened goes in as its issue's URL.
+A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, and a PR not yet opened goes in as its issue's URL; a checker whose worker is unset or ended takes a new PR through assign with a live worker= alone.
 Times always come from the UTC clock; titles are capped at 40 chars.`
 
 type Agent = Record<string, unknown> & { name: string }
