@@ -59,6 +59,7 @@
     "rename": "bun packages/scripts/src/rename/cli.ts",
     "serve": "bun --no-env-file api/hono/src/bin/dev-running.ts start && bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun --no-env-file api/hono/src/bin/dev.ts --serve",
     "shadcn:update": "bun packages/scripts/src/shadcn-update.ts && bun i",
+    "ship:approve-held": "bun packages/scripts/src/verify/prebuild.ts ship && bun --no-env-file packages/scripts/src/ship/approve-held.ts",
     "ship:freeze": "bun packages/scripts/src/verify/prebuild.ts pr-merge && bun --no-env-file packages/scripts/src/pr-merge/freeze-cli.ts",
     "ship:merge": "bun packages/scripts/src/verify/prebuild.ts pr-merge && bun --no-env-file packages/scripts/src/pr-merge/ship-merge.ts",
     "start": "turbo run start",
