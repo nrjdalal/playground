@@ -273,7 +273,7 @@ function checkRetask(
   const newPr =
     pairs.some(([k, v]) => (k === "prs" || k === "prs+") && v.trim()) ||
     (next.pr !== undefined && next.pr !== entry.pr)
-  if (gone && newPr && !restart)
+  if (gone && newPr)
     throw new Refusal(
       `roster.ts: ${entry.name} is a checker whose worker ${worker ? `${worker} has ended` : "is not set"}, so the checker reaper would end it: give it the PR with roster.ts assign ${entry.name} <title> <task> worker=<live worker> pr=<n>`,
       1,
