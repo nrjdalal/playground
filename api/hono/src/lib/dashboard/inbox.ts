@@ -449,6 +449,9 @@ const askOption = z.strictObject({
   label: oneLine(LIMITS.line),
 })
 
+// Whose work an ask or an update is about: FACTORY_SCOPE, or an org's name; only a factory card goes to WhatsApp (ADR 0024).
+const scope = oneLine(LIMITS.name).optional()
+
 // The most and fewest questions one ask holds.
 export const MAX_QUESTIONS = 20
 export const MIN_QUESTIONS = 2
@@ -488,6 +491,7 @@ export const previewSchema = z.discriminatedUnion("type", [
       .min(MIN_QUESTIONS, QUESTIONS_MESSAGE)
       .max(MAX_QUESTIONS, QUESTIONS_MESSAGE)
       .optional(),
+    scope,
     text: words,
     type: z.literal("ask"),
   }),
@@ -567,6 +571,7 @@ export const updateSchema = z.strictObject({
   attachments,
   link,
   outcome: z.enum(OUTCOMES),
+  scope,
   text: words.optional(),
 })
 

@@ -989,7 +989,7 @@ describe("deliver with attachments", () => {
   })
 })
 
-// deliver() types into a session's pane as if the owner typed it, so only the owner's own clicks reach it, and nothing else speaks for the owner: the composer, the owner's answer to an inbox item or his comment through its Reply, and his answer to a card from WhatsApp, which ask whatsapp reads from ops-wa's own folder (ADR 0024). An ops job, a script or any other route sends through SendMessage instead.
+// deliver() types into a session's pane as if the owner typed it, so only the owner's own acts reach it, and nothing else speaks for the owner: the composer, the owner's answer to an inbox item or his comment through its Reply, and his answer to a card from WhatsApp, which ask whatsapp reads from ops-wa's own folder (ADR 0024). An ops job, a script or any other route sends through SendMessage instead.
 const ROOT = join(import.meta.dir, "../../../../../..")
 const DELIVER = "api/hono/src/lib/dashboard/deliver.ts"
 const CALLERS = [

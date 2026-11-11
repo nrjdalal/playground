@@ -25,5 +25,5 @@ It turns markdown into WhatsApp's marks (`*bold*`, a link as its text and URL) a
 
 ## Inbox cards on WhatsApp
 
-ops-wa sends the owner the open factory `ask` decisions and updates from the Inbox itself, each once, redacted, its choices numbered, and every other card as one `N cards wait in the Inbox` line ([ADR 0024](../../../../.agents/adr/0024-the-owners-whatsapp-answers-an-inbox-card.md)); leave a card's words out of a `wa send`, since ops-wa's copy is the one that went through the allowlist.
+ops-wa sends the owner the open `ask` decisions and updates posted with `scope: "factory"` from the Inbox itself, each once, redacted, its choices numbered, and every other card as one `N cards wait in the Inbox` line ([ADR 0024](../../../../.agents/adr/0024-the-owners-whatsapp-answers-an-inbox-card.md)); leave a card's words out of a `wa send`, since ops-wa's copy is the one that went through the allowlist.
 The owner's reply naming a card (`1 #i12`) goes to ops-wa alone, never to you: it answers the card through `bun run ask whatsapp`, and its poster reads the answer as any Inbox answer, with `via: "whatsapp"` on it.

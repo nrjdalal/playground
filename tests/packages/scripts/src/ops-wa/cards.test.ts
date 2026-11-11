@@ -27,7 +27,7 @@ const ask = (over: Partial<Card> = {}, preview: Partial<Card["preview"]> = {}): 
   from: "builder",
   id: "00000000-0000-4000-8000-000000000012",
   kind: "decision",
-  preview: { text: "Merge the fix tonight?", type: "ask", ...preview },
+  preview: { scope: "factory", text: "Merge the fix tonight?", type: "ask", ...preview },
   ref: 12,
   status: "open",
   title: "Merge tonight",
@@ -58,6 +58,15 @@ describe("which cards go to WhatsApp", () => {
     ["a multi-question ask", { preview: { questions: [{}, {}], text: "two", type: "ask" } }],
   ] as [string, Partial<Card>][])("%s stays in the Inbox", (_, over) => {
     expect(goesOut({ ...ask(), ...over } as Card, TERMS)).toBe(false)
+  })
+
+  // door 2, failing closed: the poster's scope says whose work it is, so a card goes only when it names the factory's
+  test.each([
+    ["no scope", { scope: undefined }],
+    ["an org's scope, though its words hold no listed term", { scope: "zyx-org" }],
+  ])("a card with %s stays", (_, preview) => {
+    expect(goesOut(ask({}, preview), TERMS)).toBe(false)
+    expect(goesOut(ask({ kind: "update" }, { ...preview, type: undefined }), TERMS)).toBe(false)
   })
 
   test("a card from a session that is no factory session's, as an org's own job posts, stays", () => {

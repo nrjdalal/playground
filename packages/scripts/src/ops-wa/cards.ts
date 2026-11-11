@@ -1,4 +1,4 @@
-import { type ChoicePreview, choicesOf } from "@packages/config/inbox"
+import { type ChoicePreview, choicesOf, FACTORY_SCOPE } from "@packages/config/inbox"
 import { roleOfName } from "@packages/config/kinds"
 import { hideSecrets } from "@packages/settings"
 
@@ -15,6 +15,7 @@ export type Card = {
     deny?: string
     options?: { description?: string; label: string }[]
     questions?: unknown[]
+    scope?: string
     text?: string
     type?: string
   }
@@ -63,10 +64,11 @@ const holds = (text: string, res: RegExp[]) =>
     return re.test(text)
   })
 
-// Pure: whether a card goes to WhatsApp, door 2's allowlist: an open single-question ask decision or an update, posted by a factory session, holding no org's term; every other card stays in the Inbox.
+// Pure: whether a card goes to WhatsApp, door 2's allowlist, failing closed: an open single-question ask decision or an update, posted by a factory session with the factory's scope, holding no org's term; every other card stays in the Inbox.
 export const goesOut = (card: Card, terms: Terms): boolean =>
   card.status === "open" &&
   roleOfName(card.from) !== "" &&
+  card.preview.scope === FACTORY_SCOPE &&
   (card.kind === "update" ||
     (card.kind === "decision" && card.preview.type === "ask" && !card.preview.questions)) &&
   !holds(wordsOf(card), terms.org)

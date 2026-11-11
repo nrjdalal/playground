@@ -158,6 +158,7 @@ describe.skipIf(!dockerUp())("an answer from WhatsApp, on the inbox store", () =
     const item = await post({
       approve: "Merge it",
       deny: "Hold it",
+      scope: "factory",
       text: "Merge the fix?",
       type: "ask",
     })
@@ -176,7 +177,7 @@ describe.skipIf(!dockerUp())("an answer from WhatsApp, on the inbox store", () =
   })
 
   test("a deny denies it", async () => {
-    const item = await post({ text: "Merge the fix?", type: "ask" })
+    const item = await post({ scope: "factory", text: "Merge the fix?", type: "ask" })
     const { data, write } = scratch()
     await whatsappAnswer(db, write({ action: "deny", id: item.id }), { data, deliver })
     expect((await store.getItem(db, item.id))?.status).toBe("denied")
@@ -186,13 +187,15 @@ describe.skipIf(!dockerUp())("an answer from WhatsApp, on the inbox store", () =
     ["a delete", { type: "delete", what: "/tmp/made-up", why: "old" }],
     ["a budget", { amount: "$5", type: "budget", why: "a run" }],
     ["a schema", { shape: "a table", type: "schema" }],
+    ["an unscoped ask", { text: "Merge the fix?", type: "ask" }],
+    ["an org-scoped ask", { scope: "zyx-org", text: "Merge the fix?", type: "ask" }],
   ])("%s decision takes no answer from WhatsApp, whatever the file says", async (_, preview) => {
     const item = await post(preview)
     const { data, write } = scratch()
     expect(
       await whatsappAnswer(db, write({ action: "approve", id: item.id }), { data, deliver }),
     ).toEqual({
-      message: "only an ask decision with one question takes an answer from WhatsApp",
+      message: "only a factory-scoped ask decision with one question takes an answer from WhatsApp",
       ok: false,
     })
     expect((await store.getItem(db, item.id))?.status).toBe("open")

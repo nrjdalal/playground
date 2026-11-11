@@ -441,6 +441,7 @@ const card = (
   preview: {
     approve: "Merge it",
     deny: "Hold it",
+    scope: "factory",
     text: "Merge tonight?",
     type: "ask",
     ...preview,
@@ -489,6 +490,16 @@ describe("Inbox cards on WhatsApp", () => {
     ])
     await h.pass()
     expect(h.texts()).toHaveLength(1)
+  })
+
+  test("a card with no scope or an org's scope stays in the Inbox and counts in the waiting line, failing closed", async () => {
+    const h = await withCards([
+      card(12, {}, { scope: undefined }),
+      card(13, {}, { scope: "zyx-org" }),
+    ])
+    expect(h.texts()).toEqual([waitingLine(2)])
+    expect(await say(h, "1 #i13")).toEqual([notSent(13)])
+    expect(h.answers).toEqual([])
   })
 
   test("no card goes before the owner has written, since ops-wa never starts a chat", async () => {

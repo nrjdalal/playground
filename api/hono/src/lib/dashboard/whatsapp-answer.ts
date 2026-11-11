@@ -1,6 +1,7 @@
 import { lstat, readFile, realpath, unlink } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
+import { FACTORY_SCOPE } from "@packages/config/inbox"
 import type { Database } from "@packages/db"
 import { z } from "zod"
 
@@ -18,7 +19,7 @@ const answerFile = z.strictObject({
 type Answered = { line: string; ok: true } | { message: string; ok: false }
 const refuse = (message: string): Answered => ({ message, ok: false })
 
-// `bun run ask whatsapp <file>`: the owner's answer from WhatsApp, read from a file ops-wa wrote and deleted once read, so it answers once, through answerItem and deliver() as the Inbox's own Approve and Deny do, recorded as from WhatsApp; only an ask decision with one question takes one.
+// `bun run ask whatsapp <file>`: the owner's answer from WhatsApp, read from a file ops-wa wrote and deleted once read, so it answers once, through answerItem and deliver() as the Inbox's own Approve and Deny do, recorded as from WhatsApp; only a factory-scoped ask decision with one question takes one.
 export async function whatsappAnswer(
   db: Database,
   path: string,
@@ -46,8 +47,15 @@ export async function whatsappAnswer(
   }
   const item = await getItem(db, parsed.id)
   if (!item) return refuse("no inbox item with that id")
-  if (item.kind !== "decision" || item.preview.type !== "ask" || item.preview.questions)
-    return refuse("only an ask decision with one question takes an answer from WhatsApp")
+  if (
+    item.kind !== "decision" ||
+    item.preview.type !== "ask" ||
+    item.preview.questions ||
+    item.preview.scope !== FACTORY_SCOPE
+  )
+    return refuse(
+      "only a factory-scoped ask decision with one question takes an answer from WhatsApp",
+    )
   const result = await answerItem(
     db,
     item.id,

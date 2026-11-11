@@ -9,8 +9,9 @@ An Inbox answer is typed into its poster through `deliver()`, whose rule allowed
 - **The owner's WhatsApp answer counts as the owner's click on the card.** `deliver()` takes it beside the composer and the Inbox's own answer and Reply. A reply such as `1 #i12` from `wa.owner`'s own 1:1 chat answers that card. A stranger's reply is dropped as any stranger's message is, and gets no answer back.
 - **An allowlist decides what goes out.** ops-wa (`packages/scripts/src/ops-wa/cards.ts`) sends a card only when all of these hold:
   - it is an open `ask` decision with one question, or an update;
-  - a factory session posted it;
+  - a factory session posted it, with the factory's `scope` (`factory`), set when it is posted;
   - it holds no org's term.
+  The Inbox kept no poster's scope before this, so the scope is a field the poster sets, and the check fails closed: by the Builder's ruling on door 2 (factory status only), a card with no scope or an org's scope stays in the Inbox, and the org-term check stays as a second layer.
   Every other card stays in the Inbox, a delete, secret, reveal, budget, ship, schema, ticket, Slack decision or draft whatever its words, and they count in one line, `N cards wait in the Inbox`.
 - **A redactor runs before each send.** It writes `[hidden]` for every kind no-public-leak refuses, read from that guard's own list, and for every token shape (`hideSecrets`). A card's files stay in the Inbox, and its text says so. While the list cannot be read, no card goes out.
 - **ops-wa sends each card once.** It numbers the card's choices with its id (`Reply 1 #i12 to …`) and records each card it sent in `<data>/whatsapp/cards.json`. A reply naming no id, an id it never sent, or a number past the card's choices answers nothing, and gets one line back saying so.
@@ -18,7 +19,7 @@ An Inbox answer is typed into its poster through `deliver()`, whose rule allowed
   That verb (`api/hono/src/lib/dashboard/whatsapp-answer.ts`) checks the file:
   - its real path is in that folder;
   - it is a regular file, mode 600, this user's.
-  It then deletes the file, so the file answers once. It answers only an `ask` decision with one question. The answer goes through `answerItem()` and `deliver()` as the card's own button does, with `via: "whatsapp"` on it and `WhatsApp` as the actor.
+  It then deletes the file, so the file answers once. It answers only a `factory`-scoped `ask` decision with one question. The answer goes through `answerItem()` and `deliver()` as the card's own button does, with `via: "whatsapp"` on it and `WhatsApp` as the actor.
 
 ## Consequences
 
