@@ -320,6 +320,39 @@ describe("collect: live sessions with nothing to do", () => {
     expect(whys(closed)).toEqual([["checker-pr-done (closed)"]])
   })
 
+  // #1762: the PR that closed last names the how; an older merged PR on the list does not
+  test("checker-pr-done: the how reads from the PR that closed last, not from an older merged one", async () => {
+    const sessions = {
+      "tester-mild-cove": entry({ name: "tester-mild-cove", sessionId: "sess-mc" }),
+      "worker-mild-cove": entry({ name: "worker-mild-cove" }),
+    }
+    const rows = await collect(
+      deps({
+        prState: async (url) =>
+          url.endsWith("/1")
+            ? {
+                head: "aaa1111",
+                mergeSha: "meeeee1000",
+                mergedAt: "2026-11-01T00:10:00Z",
+                state: "merged",
+                verdicts: [],
+              }
+            : {
+                closedAt: "2026-11-01T03:00:00Z",
+                head: "bbb2222",
+                state: "closed",
+                verdicts: [],
+              },
+        sessions,
+        workerPrs: async (name) =>
+          name.startsWith("tester-")
+            ? ["https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"]
+            : [],
+      }),
+    )
+    expect(whys(rows)).toEqual([["checker-pr-done (closed)"]])
+  })
+
   test("checker-nothing: the head scored lists at 30+ quiet minutes, not at 15", async () => {
     const base = {
       prState: async () => ({ head: "abc1234567890", state: "open", verdicts: ["abc1234"] }),
