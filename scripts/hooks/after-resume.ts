@@ -36,7 +36,40 @@ async function tail(path: unknown): Promise<string> {
   return file.slice(Math.max(0, file.size - TAIL)).text()
 }
 
-// Each patch lefthook left in the shared git folder when a restart killed a commit mid pre-commit, the unstaged half of a partly staged file, which nothing puts back, with the folder it belongs in: lefthook names it by the worktree's folder, and with no name in a main checkout (measured on lefthook 2.2.2), and a resume's cwd is the folder the session started in, the main checkout for a worker, so a worktree's patch is the session's when it resumed there or its transcript's tail names that folder.
+type Entry = { cwd?: unknown; message?: { content?: unknown } }
+
+// Where the transcript's tail shows the session at work: each entry's own cwd, and each command it ran that commits, whose `git -C <folder>` names the folder; a folder a message or another command mentions belongs to someone else, a lead's worker most often.
+function workedIn(transcript: string): { commits: string[]; cwds: string[] } {
+  const cwds: string[] = []
+  const commits: string[] = []
+  for (const line of transcript.split("\n")) {
+    let entry: Entry
+    try {
+      entry = JSON.parse(line) as Entry
+    } catch {
+      continue
+    }
+    if (typeof entry?.cwd === "string") cwds.push(entry.cwd)
+    const content = entry?.message?.content
+    if (!Array.isArray(content)) continue
+    for (const block of content as { input?: { command?: unknown } }[]) {
+      const command = block?.input?.command
+      if (typeof command === "string" && /\bcommit\b/.test(command)) commits.push(command)
+    }
+  }
+  return { commits, cwds }
+}
+
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+// Whether the patch would apply in the folder, forward or reversed: an edit not yet back applies forward and not reversed, so a patch restored or outlived by a later commit is named no more, with nothing written.
+async function applies(folder: string, patch: string, reverse: boolean): Promise<boolean> {
+  const args = ["git", "-C", folder, "apply", "--check", "--unidiff-zero", patch]
+  if (reverse) args.push("--reverse")
+  return (await Bun.spawn(args, { stderr: "ignore", stdout: "ignore" }).exited) === 0
+}
+
+// Each patch lefthook left in the shared git folder when a restart killed a commit mid pre-commit, the unstaged half of a partly staged file, which nothing puts back, with the folder it belongs in: lefthook names it by the worktree's folder, and with no name in a main checkout (measured on lefthook 2.2.2), and a resume's cwd is the folder the session started in, the main checkout for a worker, so a worktree's patch is the session's when it resumed there or the transcript's tail shows it working there.
 export async function leftPatches(
   cwd: unknown,
   transcript: string,
@@ -48,21 +81,25 @@ export async function leftPatches(
   )
   const [common, own] = (await new Response(git.stdout).text()).trim().split("\n")
   if ((await git.exited) !== 0 || !common || !own) return []
+  const { commits, cwds } = workedIn(transcript)
   const found: { folder: string; patch: string }[] = []
   const info = join(common, "info")
   for await (const file of new Bun.Glob("lefthook-unstaged.*patch").scan(info)) {
     const name = file.slice("lefthook-unstaged.".length, -".patch".length)
     const patch = join(info, file)
-    if (!name) {
-      if (own === common) found.push({ folder: dirname(common), patch })
-      continue
-    }
-    const gitdir = Bun.file(join(common, "worktrees", name, "gitdir"))
-    if (!(await gitdir.exists())) continue
-    const folder = dirname((await gitdir.text()).trim())
-    const escaped = folder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    const named = new RegExp(`${escaped}(?![\\w.-])`).test(transcript)
-    if (own === join(common, "worktrees", name) || named) found.push({ folder, patch })
+    let folder = dirname(common)
+    if (name) {
+      const gitdir = Bun.file(join(common, "worktrees", name, "gitdir"))
+      if (!(await gitdir.exists())) continue
+      folder = dirname((await gitdir.text()).trim())
+      const committed = new RegExp(`-C\\s+["']?${escape(folder)}["']?(?![\\w./-])`)
+      const ran =
+        cwds.some((at) => at === folder || at.startsWith(`${folder}/`)) ||
+        commits.some((command) => committed.test(command))
+      if (own !== join(common, "worktrees", name) && !ran) continue
+    } else if (own !== common) continue
+    if ((await applies(folder, patch, false)) && !(await applies(folder, patch, true)))
+      found.push({ folder, patch })
   }
   return found
 }
