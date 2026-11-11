@@ -1583,9 +1583,9 @@ cheap_idle() {
   self_changed && return 1
   a=("$QUEUE"/*)
   if [ -e "${a[0]}" ]; then pid=${a[0]##*/}; pid=${pid#*-}; pid=${pid%%-*}; alive "$pid" || return 1; fi
+  cheap_sig $PEERS
+  [ "$SIG" = "$SIG0" ] || return 1
   if [ "$LOOKER" = 1 ]; then
-    cheap_sig $PEERS
-    [ "$SIG" = "$SIG0" ] || return 1
     [ -e "$MQ" ] && ! [ "$MQ" -ot "$REF" ] && return 1
     [ -z "$DUE" ] || [ "$SECONDS" -lt "$DUE" ] || return 1
     cheap_load
@@ -1602,8 +1602,6 @@ cheap_idle() {
     G0_CACHE=$l
   else
     [ "${a[0]}" = "$TICKET" ] && return 1
-    cheap_sig $PEERS
-    [ "$SIG" = "$SIG0" ] || return 1
     next_sig
     [ "$NSIG" = "$NSIG0" ]
   fi
@@ -1969,7 +1967,7 @@ lanes_open() {
   read -r idle swap tps mbs _ <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
   case "$idle" in
-    -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut" ;;
+    -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so the lanes go by the load and memory alone" ;;
     busy) told busy "$BUSY_TOLD" ;;
   esac
   if [ "${load%.*}" -lt "$(load1_max)" ] 2>/dev/null; then need=$(idle_min); fi
@@ -2288,7 +2286,7 @@ if [ -n "$KIND" ]; then
     [ -n "$last" ] && echo "${CLONE_GAP}s past the last clone's end at $last"
   }
   # a commit's build, a merge or a clone is heavy, so it waits under focus or the battery's red mark; the quick slot's short runs go on
-  while [ "$KIND" != quick ] && { verdict_holds; }; do
+  while [ "$KIND" != quick ] && verdict_holds; do
     [ -z "$CLONE_TICKET" ] || rm -f "$CLONE_TICKET"
     reread
     hold_wait

@@ -153,7 +153,11 @@ describe("the gauges", () => {
     chmodSync(join(m.bin, "top"), 0o755)
     const { err, slots } = look(m)
     expect(slots).toBe("4\n")
-    expect(err.match(/^run-slot\.sh: cannot read the CPU's idle share /gm)).toHaveLength(1)
+    expect(
+      err.match(
+        /^run-slot\.sh: cannot read the CPU's idle share \(top -l 2 -n 0\), so the lanes go by the load and memory alone$/gm,
+      ),
+    ).toHaveLength(1)
   })
 
   // top's first sample reads since boot, so a top that prints it alone gives no idle share, rather than its 98%, which no longer counts as busy (issue 1818)
