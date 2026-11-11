@@ -465,7 +465,7 @@ async function firstLine(bytes: Bytes, size: number): Promise<Record<string, unk
   }
 }
 
-// Reads one Codex rollout as ingestFile reads a transcript, into the session its session_meta line names (threadOf), so a rollout and its compressed copy are one session and a second read adds nothing. A compressed rollout is written once, so it is read whole once per inode; a rollout that is not Playground's own is skipped as a transcript is.
+// Reads one Codex rollout as ingestFile reads a transcript, into the session its session_meta line names (threadOf), so a rollout and its compressed copy are one session and a second read adds nothing. A compressed rollout is written once, so it is read whole once per inode, in one chunk: its read row then lands only with all its lines, and a stop or a crash part way leaves none, so the next pass reads it again. A rollout that is not Playground's own is skipped as a transcript is.
 export async function ingestRollout(
   db: Database,
   sessions: string,
@@ -483,14 +483,16 @@ export async function ingestRollout(
   const sameInode = known && known.dev === stat.dev && known.ino === stat.ino
   if (sameInode && isCompressed(path)) return { entries: 0, id: known.sessionId }
   let bytes = sliceOf(path)
+  let read = options
   if (isCompressed(path)) {
     const text = Bun.zstdDecompressSync(await Bun.file(path).bytes())
     bytes = async (start, end) => text.subarray(start, end)
     stat = { ...stat, size: text.length }
+    read = { ...options, chunkBytes: Math.max(1, text.length) }
   }
   const id = (sameInode && known.sessionId) || threadOf((await firstLine(bytes, stat.size)) ?? {})
   if (!id || !isOwnSession(id)) return null
-  return readInto(db, rolloutFile(sessions, path, id), path, stat, bytes, ROLLOUT, null, options)
+  return readInto(db, rolloutFile(sessions, path, id), path, stat, bytes, ROLLOUT, null, read)
 }
 
 async function readInto(
