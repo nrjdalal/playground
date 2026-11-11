@@ -6988,7 +6988,16 @@ var GIT_MOVES = new Set([
   "update-ref"
 ]);
 var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
-var RUNNER_TAKES = new Set(["--package", "-p"]);
+var RUNNER_TAKES = new Set([
+  "--ca",
+  "--cafile",
+  "--cwd",
+  "--env-file",
+  "--minimum-release-age",
+  "--package",
+  "--registry",
+  "-p"
+]);
 var LETTERS = {
   perl: {
     "0": "digits",

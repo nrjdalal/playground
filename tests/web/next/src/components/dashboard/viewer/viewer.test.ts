@@ -15,17 +15,83 @@ import {
   OpenInNewTab,
   OPENS_IN_TAB,
   pinsBars,
+  saveItem,
+  tabHref,
   wrapStep,
 } from "../../../../../../../web/next/src/components/dashboard/viewer/viewer"
+import { pageTab } from "../../../../../../../web/next/src/lib/viewer"
 
-describe("Open in new tab opens a blob URL with the Dashboard's origin, so only a file that runs no script", () => {
-  test("it opens an image or a PDF, and an HTML page, code and a doc have no button", () => {
-    expect([...OPENS_IN_TAB]).toEqual(["image", "pdf"])
+describe("Open in new tab opens a blob URL with the Dashboard's origin only for a file that runs no script", () => {
+  test("it opens an image, a PDF or an HTML page, and code and a doc have no button", () => {
+    expect([...OPENS_IN_TAB]).toEqual(["html", "image", "pdf"])
     expect(INBOX_ATTACHMENT_KINDS.filter((kind) => !OPENS_IN_TAB.includes(kind))).toEqual([
       "code",
       "doc",
-      "html",
     ])
+  })
+
+  const CARD_PAGE = {
+    id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.html",
+    kind: "html",
+    name: "demo.html",
+  } as const
+  const KEPT_PAGE = {
+    id: "page-sidebar-mock.html",
+    kind: "html",
+    name: "Sidebar spacing",
+    page: {
+      download: "https://api.test/api/v1/apps/previews/sidebar-mock.html?download=1",
+      url: "https://api.test/api/v1/apps/previews/sidebar-mock.html",
+    },
+  } as const
+
+  test("a kept page opens at its own address on Previews, which serves it sandboxed", () => {
+    expect(tabHref(KEPT_PAGE, null, null)).toBe(KEPT_PAGE.page.url)
+  })
+
+  // the builder's ruling on #1716: the tab's blob takes the Dashboard's origin, so the page runs only in a frame with no same-origin
+  test("a card's page opens as a blob that holds it in a sandboxed frame, and runs no script of its own", () => {
+    expect(tabHref(CARD_PAGE, "blob:x", null)).toBeNull()
+    expect(tabHref(CARD_PAGE, "blob:x", "blob:framed")).toBe("blob:framed")
+    const tab = pageTab("demo.html", "<script>alert(1)</script><p>hi</p>")
+    expect(tab).toContain(
+      '<iframe sandbox="allow-scripts" srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;&lt;p&gt;hi&lt;/p&gt;"',
+    )
+    expect(tab).not.toContain("allow-same-origin")
+    expect(tab).not.toContain("<script")
+  })
+
+  test("an image or a PDF opens its own blob", () => {
+    expect(tabHref({ ...CARD_PAGE, kind: "pdf", name: "a.pdf" }, "blob:pdf", null)).toBe("blob:pdf")
+  })
+
+  // a reviewer: the framed page's blob URL held the whole page for the dashboard tab's life
+  test("the framed page's blob URL is freed once its square goes", async () => {
+    const source = await Bun.file(
+      join(
+        import.meta.dir,
+        "../../../../../../../web/next/src/components/dashboard/viewer/viewer.tsx",
+      ),
+    ).text()
+    expect(source).toMatch(/return \(\) => \{\s+URL\.revokeObjectURL\(href\)/)
+  })
+
+  test("a kept page saves from its own download address", async () => {
+    const fetched: string[] = []
+    const scope = globalThis as { document?: unknown; fetch: typeof fetch }
+    const [realFetch, realDocument] = [scope.fetch, scope.document]
+    scope.fetch = (async (url: string) => {
+      fetched.push(String(url))
+      return new Response("<p>page</p>")
+    }) as typeof fetch
+    scope.document = { createElement: () => ({ click: () => {}, download: "", href: "" }) }
+    try {
+      await saveItem(KEPT_PAGE)
+    } finally {
+      scope.fetch = realFetch
+      scope.document = realDocument
+    }
+    expect(fetched).toEqual([KEPT_PAGE.page.download])
   })
 
   test("an image is never an SVG, and no file is served as HTML or SVG, whatever it holds", () => {
@@ -79,7 +145,7 @@ describe("the bar holds one width from slide to slide", () => {
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(OpenInNewTab, { item }),
+        createElement(OpenInNewTab, { item, keepRoom: true }),
       ),
     ) as string
   }
@@ -92,8 +158,9 @@ describe("the bar holds one width from slide to slide", () => {
   })
 
   test("a kind with no Open in new tab keeps a square's room in its place", async () => {
-    expect(await render("html")).toBe('<span aria-hidden="true" class="size-8 shrink-0"></span>')
+    expect(await render("code")).toBe('<span aria-hidden="true" class="size-8 shrink-0"></span>')
     expect(await render("image")).toContain('aria-label="Open in new tab"')
+    expect(await render("html")).toContain('aria-label="Open in new tab"')
   })
 })
 
@@ -186,5 +253,46 @@ describe("the viewer's Close", () => {
     expect(source).toContain('<RiArrowLeftSLine className="size-5" />')
     expect(source).toContain('<RiArrowRightSLine className="size-5" />')
     expect(source).not.toContain('<RiCloseLine className="size-5" />')
+  })
+})
+
+// #1716: the full-screen viewer's bar holds the page bars' squares in their order, each named in a tooltip
+describe("the viewer's bar", () => {
+  const viewer = () =>
+    Bun.file(
+      join(
+        import.meta.dir,
+        "../../../../../../../web/next/src/components/dashboard/viewer/viewer.tsx",
+      ),
+    ).text()
+
+  test("holds the name, then Download, Open in new tab, Open in side panel from the aside, and Close", async () => {
+    const source = await viewer()
+    const at = (part: string) => {
+      const index = source.indexOf(part)
+      expect(index).toBeGreaterThan(-1)
+      return index
+    }
+    const order = [
+      at("<DialogTitle className={BAR_NAME}>"),
+      at("<Download item={item} />"),
+      at("<OpenInNewTab item={item} keepRoom />"),
+      at("<SidePanel onClick={() => onSidePanel(item)} />"),
+      at('<Hint content="Close" description={null}>'),
+    ]
+    expect(order).toEqual([...order].sort((a, b) => a - b))
+  })
+
+  // the stock Dialog closes on Escape, and a page in its frame sends Escape out to it
+  test("Escape closes it, from the page too", async () => {
+    const source = await viewer()
+    expect(source).not.toContain("onEscapeKeyDown")
+    const documents = await Bun.file(
+      join(
+        import.meta.dir,
+        "../../../../../../../web/next/src/components/dashboard/viewer/documents.tsx",
+      ),
+    ).text()
+    expect(documents).toContain('message?.viewer === "escape"')
   })
 })

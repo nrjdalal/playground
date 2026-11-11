@@ -15,10 +15,11 @@ const PatchView = dynamic(() => import("@/components/dashboard/viewer/patch-view
   ssr: false,
 })
 
-// The file's text, read from the blob the viewer fetched it into; null while it loads, and false when it cannot be read.
-function useText(url: string): string | null | false {
+// The file's text, read from the blob the viewer fetched it into; null while it loads or while there is no blob yet, and false when it cannot be read.
+export function useText(url: string | null): string | null | false {
   const [text, setText] = useState<{ url: string; text: string | false } | null>(null)
   useEffect(() => {
+    if (!url) return
     let cancelled = false
     const show = (next: string | false) => {
       if (!cancelled) setText({ url, text: next })
@@ -35,7 +36,7 @@ function useText(url: string): string | null | false {
 
 const LOAD_GRACE_MS = 300
 
-// An HTML page runs in a frame whose sandbox allows its own script and nothing else: no same-origin, so it reads none of the Dashboard's cookies or storage, and no popups, forms or top navigation. It is handed in as srcdoc alone; its blob is plain text, and it has no Open in new tab (OPENS_IN_TAB). Keys pressed in it stay in it, but for Escape, which closes the viewer, and Left or Right where the page does nothing with them, which move to the next attachment (the keys script asViewerPage puts after the page sends both, beside the policy that lets it fetch nothing). A link clicked in it opens in a tab of its own, http or https alone, and one to a place on the page scrolls there, so the frame stays on the page; a load whose page never said it was ready (a script or a refresh sent the frame off) puts the page back once, then stops on a notice, though each request that took it off has left. The frame mounts once the text has arrived, since a sandboxed frame handed its srcdoc after an empty one can stay blank.
+// An HTML page runs in a frame whose sandbox allows its own script and nothing else: no same-origin, so it reads none of the Dashboard's cookies or storage, and no popups, forms or top navigation. It is handed in as srcdoc alone, since its blob is plain text, and its Open in new tab holds it in the same sandbox (pageTab). Keys pressed in it stay in it, but for Escape, which closes the viewer, and Left or Right where the page does nothing with them, which move to the next attachment (the keys script asViewerPage puts after the page sends both, beside the policy that lets it fetch nothing). A link clicked in it opens in a tab of its own, http or https alone, and one to a place on the page scrolls there, so the frame stays on the page; a load whose page never said it was ready (a script or a refresh sent the frame off) puts the page back once, then stops on a notice, though each request that took it off has left. The frame mounts once the text has arrived, since a sandboxed frame handed its srcdoc after an empty one can stay blank.
 function HtmlView({ active, item, onEdge, url }: ViewProps) {
   const frame = useRef<HTMLIFrameElement>(null)
   const page = useText(url)

@@ -14,7 +14,6 @@ import {
   iconTabName,
   pageIcon,
   pageName,
-  snapsToMiddle,
 } from "../../../../../../web/next/src/components/dashboard/dashboard-aside"
 import { APP_SQUARE, dashboardApps, shownApps } from "../../../../../../web/next/src/lib/apps"
 import { BAR_ITEM, FLOATING_BAR, GLASS } from "../../../../../../web/next/src/lib/floating-bar"
@@ -348,12 +347,5 @@ describe("the aside's tabs", () => {
     expect(iconTabName("Inbox", [false, "new"])).toBe("Inbox · new")
     expect(iconTabName("Inbox", ["3 waiting", false])).toBe("Inbox · 3 waiting")
     expect(iconTabName("Inbox", ["3 waiting", "new"])).toBe("Inbox · 3 waiting · new")
-  })
-})
-
-describe("the split between the page and the aside", () => {
-  test(`snaps to the middle when a drag is let go within 5% of it`, () => {
-    expect([45.1, 47, 52, 54.9].every(snapsToMiddle)).toBe(true)
-    expect([30, 45, 50, 55, 70].some(snapsToMiddle)).toBe(false)
   })
 })
