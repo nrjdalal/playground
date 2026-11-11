@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -678,6 +678,35 @@ test("05y checks: v0.0.82's ship pin holds while a red shard keeps Audit, Lint, 
 
 test("05v the checks it waits on are the gate's own (#1410)", () => {
   expect(state.GATE_CHECKS).toEqual(REQUIRED_CHECKS)
+})
+
+test("05z wait and checks run from the system tmp folder whatever folder they start in, so no waiter holds a review worktree", async () => {
+  const merged = `{"merged": true, "sha": "${HEAD}", "state": "closed"}`
+  const start = process.cwd()
+  try {
+    for (const cmd of [state.cmdWait, state.cmdChecks]) {
+      process.chdir(scratch())
+      let cwd = ""
+      await withIo(
+        () => {
+          cwd = process.cwd()
+          return response(merged)
+        },
+        async () => {
+          const realLog = console.log
+          console.log = () => {}
+          try {
+            await cmd("acme/archive", "160", HEAD)
+          } finally {
+            console.log = realLog
+          }
+        },
+      )
+      expect(realpathSync(cwd)).toBe(realpathSync(tmpdir()))
+    }
+  } finally {
+    process.chdir(start)
+  }
 })
 
 test("05i the comment and thread lists past a page are named as cut", () => {
