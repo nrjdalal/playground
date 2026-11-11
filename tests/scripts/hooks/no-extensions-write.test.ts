@@ -592,6 +592,39 @@ describe("a quoted argument is read as a command line only where a program runs 
     expect(await bash(command)).toBeUndefined()
   })
 
+  // #1799: a quiet commit's message names the home by ~/ as text, under run-slot and with its own log redirect too; the real home, since the shell reads ~ as the process's home
+  const atHome = (command: string) =>
+    check(JSON.stringify({ cwd: tmpdir(), tool_input: { command }, tool_name: "Bash" }), {
+      HOME: homedir(),
+    })
+  const log = join(tmpdir(), "commit.log")
+  test.each([
+    [
+      "under run-slot, with its log redirect",
+      `~/.playground/ops/run-slot.sh w -- git commit -q -m "fix(x): reads each checkout in ~/<org>" > ${log} 2>&1`,
+    ],
+    [
+      "under run-slot",
+      `~/.playground/ops/run-slot.sh w -- git commit -q -m "fix(x): files in ~/ stay"`,
+    ],
+    ["with its log redirect", `git commit -q -m "fix(x): files in ~/ stay" > ${log} 2>&1`],
+  ])("a quiet commit whose message names ~/ runs %s", async (_, command) => {
+    expect(await atHome(command)).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "a substitution in its message writes into the root",
+      `~/.playground/ops/run-slot.sh w -- git commit -q -m "fix(x): $(touch ~/.playground/extensions/f)" > ${log} 2>&1`,
+    ],
+    [
+      "its redirect writes into the root",
+      `git commit -q -m "fix(x): y" > ~/.playground/extensions/f`,
+    ],
+  ])("a quiet commit stays refused when %s", async (_, command) => {
+    expect(await atHome(command)).toContain("no-extensions-write hook refuses")
+  })
+
   test("a gated call after a quiet commit stays refused", async () => {
     expect(await bash("git commit -m 'fix: x' && playground migrate")).toContain(
       "playground migrate",
@@ -1659,8 +1692,8 @@ describe("a quoted argument is read as a command line only where a program runs 
       `git commit -m "fix(x): y"; sh -c 'true'`,
     ],
     [
-      "a redirect that writes a file, dropping its redirect guard runs it",
-      `git commit -m "fix(x): y" > f`,
+      "a redirect that writes a file from another call on the line, dropping its redirect guard runs it",
+      `git commit -m "fix(x): y"; echo x > f`,
     ],
     [
       "a message holding the root's path as text, dropping its text guard runs it",

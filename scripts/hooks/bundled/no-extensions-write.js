@@ -8147,9 +8147,13 @@ function wholeLine(commands, env) {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])];
     if (words.some((word) => word.procs && wholeLine(word.procs, env)))
       return true;
-    const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
     const parsed = parse3(cmd);
-    return writes || !(narrow(cmd, env) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed));
+    const slot = slotWords(parsed);
+    const commit = slot ? { ...cmd, words: slot } : cmd;
+    if (quietCommit(commit, slot ? parse3(commit) : parsed, env))
+      return false;
+    const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
+    return writes || !(narrow(cmd, env) || sedInPlace(cmd, parsed));
   });
 }
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
