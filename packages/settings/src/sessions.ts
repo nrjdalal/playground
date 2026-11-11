@@ -2,7 +2,7 @@ import type { RosterKind } from "@packages/config/kinds"
 import { z } from "zod"
 
 import { type Account, accountKey, accountsOf } from "@/accounts"
-import { type Backend, GLM_MODEL, HARNESS_IDS } from "@/harnesses"
+import { type Backend, GLM_MODEL } from "@/harnesses"
 import { readPolicyOrDefaults } from "@/rendered"
 import { defineSettings, type Refusal } from "@/settings"
 
@@ -37,7 +37,8 @@ export const sessionTemplate = z
       .regex(BRIEF_NAME, "a brief is a file name, with no /")
       .refine((brief) => !brief.includes(".."), "a brief is a file name, with no .."),
     effort: z.enum(EFFORTS).optional(),
-    harness: z.enum(HARNESS_IDS),
+    // Claude Code's alone: Codex starts only the first dispatcher, which no template starts.
+    harness: z.literal("claude-code"),
     id: name,
     kind: z.enum(TEMPLATE_KINDS),
     label: z.string().min(1).max(40),

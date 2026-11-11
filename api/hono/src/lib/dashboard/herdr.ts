@@ -11,6 +11,7 @@ import {
   type SessionState,
 } from "@packages/config/session-state"
 import { dataDirOf } from "@packages/env/data-dir"
+import { readPin } from "@packages/settings"
 import { z } from "zod"
 
 import {
@@ -302,6 +303,7 @@ const STATUSES = ["idle", "working", "blocked", "done", "unknown"] as const
 export const paneSchema = z.object({
   agent_session: z.object({ kind: z.string(), value: z.string() }).nullish(),
   agent_status: z.enum(STATUSES).catch("unknown"),
+  label: z.string().nullish(),
   pane_id: z.string().regex(new RegExp(`^${PANE_ID}$`)),
   scroll: z.object({ offset_from_bottom: z.number() }).nullish(),
   terminal_id: z.string(),
@@ -434,18 +436,32 @@ const FILED: Record<SessionState["state"], string> = {
 }
 
 // Pure but for the change times (state.changed: when each session's herdr state last changed, as this process saw it, by its terminal and session, which a move does not change; herdr keeps no such time, and answeredSince() compares a picker's answer with it): every server's panes as the session records liveRecords() and composeWorkers() read. A pane holds a session when a process in its foreground has a registry file naming one, so a pane whose Claude has exited, or one never registered, is no session (St3); a file mid-rewrite leaves herdr's own agent_session, when it has one.
-export function herdrRecords(reads: ServerRead[], registry: Registry, now: string): Json[] {
+// A Codex session writes no Claude registry file, so its pane holds it when the pane's label has a Codex launch record (codexLaunches) and a codex process runs in its foreground.
+export function herdrRecords(
+  reads: ServerRead[],
+  registry: Registry,
+  now: string,
+  codex: CodexLaunches = new Map(),
+): Json[] {
   const changes = new Map<string, Change>()
   const records = reads.flatMap((read) =>
     read.panes.flatMap((pane) => {
-      const registered = pane.processes.find((p) => registry?.get(p.pid))
-      const unread = pane.processes.find((p) => registry === null || registry.get(p.pid) === null)
-      const proc = registered ?? unread
-      const sessionId = registered
-        ? (registry?.get(registered.pid)?.sessionId ?? "")
-        : unread && pane.agent_session?.kind === "id"
-          ? pane.agent_session.value
-          : ""
+      const thread = pane.label ? codex.get(pane.label) : undefined
+      const codexProc = thread
+        ? pane.processes.find((p) => (p.argv ?? []).some((word) => /(^|\/)codex$/.test(word)))
+        : undefined
+      const registered = codexProc ? undefined : pane.processes.find((p) => registry?.get(p.pid))
+      const unread = codexProc
+        ? undefined
+        : pane.processes.find((p) => registry === null || registry.get(p.pid) === null)
+      const proc = codexProc ?? registered ?? unread
+      const sessionId = codexProc
+        ? (thread ?? "")
+        : registered
+          ? (registry?.get(registered.pid)?.sessionId ?? "")
+          : unread && pane.agent_session?.kind === "id"
+            ? pane.agent_session.value
+            : ""
       if (!proc || !sessionId) return []
       const key = `${read.server}:${pane.terminal_id}:${sessionId}`
       const known = state.changed.get(key)
@@ -459,7 +475,7 @@ export function herdrRecords(reads: ServerRead[], registry: Registry, now: strin
       const cwd = proc.cwd ?? ""
       return [
         {
-          agent: "claude",
+          agent: codexProc ? "codex" : "claude",
           agent_lifecycle: LIFECYCLE[pane.agent_status],
           cwd,
           herdr_seen_at: seen ? at : null,
@@ -471,7 +487,7 @@ export function herdrRecords(reads: ServerRead[], registry: Registry, now: strin
           started_at: null,
           stored_pid_exists: true,
           surface_id: herdrSurface(read.server, pane.pane_id),
-          transcript_path: cwd ? transcriptPath(claudeDir(), cwd, sessionId) : "",
+          transcript_path: !codexProc && cwd ? transcriptPath(claudeDir(), cwd, sessionId) : "",
           updated_at: at,
           workspace_id: herdrSurface(read.server, pane.workspace_id),
         },
@@ -484,6 +500,31 @@ export function herdrRecords(reads: ServerRead[], registry: Registry, now: strin
     if (!whole.has(change.server) && !changes.has(key)) changes.set(key, change)
   state.changed = changes
   return records
+}
+
+// The sessions spawn.sh started in Codex, by name: each one whose backend pin names the codex harness, with the thread its resume record's exec line names (spawn.sh resume <name> <folder> <thread>).
+export type CodexLaunches = Map<string, string>
+
+export function codexLaunches(data = dataDir()): CodexLaunches {
+  const out: CodexLaunches = new Map()
+  let names: string[] = []
+  try {
+    names = readdirSync(join(data, "backends"))
+  } catch {
+    return out
+  }
+  for (const name of names) {
+    try {
+      if (readPin(readFileSync(join(data, "backends", name), "utf8"))?.harness !== "codex") continue
+      const exec = readFileSync(join(data, "resume", `${name}.sh`), "utf8")
+        .split("\n")
+        .find((line) => line.startsWith("exec "))
+      const words = exec?.split(" ") ?? []
+      const thread = words[3] === name ? words[5] : undefined
+      if (thread && /^[0-9a-f-]{36}$/.test(thread)) out.set(name, thread)
+    } catch {}
+  }
+  return out
 }
 
 // Pure: every server's workspaces in the board's workspace list, each id its ref too.

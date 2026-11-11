@@ -89,20 +89,21 @@ describe("spawn.sh's launch lines stay byte for byte the same", () => {
   })
 })
 
-// A pin in the new shape, each harness then each of its backends, resumes as the old pin of its backend does.
+// A pin in the new shape, Claude Code then each of its backends, resumes as the old pin of its backend does.
 describe("a resume from a pin naming its harness runs the old pin's launch line", () => {
-  test.each(HARNESSES.flatMap((h) => h.backends.map((backend) => [h.id, backend] as const)))(
-    "%s %s",
-    async (harness, backend) => {
-      const label = `a resume pinned on ${backend === "glm" ? "GLM" : "Claude"}`
-      const c = CASES[label]!
-      const r = await spawn(c.args, [], {}, undefined, {
-        name: c.name,
-        backend: pinText(harness, backend),
-      })
-      expect(r.err).toBe("")
-      expect(r.code).toBe(0)
-      expect(launch(r, c.name)).toBe(EXPECTED[label]!)
-    },
-  )
+  test.each(
+    HARNESSES.filter((h) => h.id === "claude-code").flatMap((h) =>
+      h.backends.map((backend) => [h.id, backend] as const),
+    ),
+  )("%s %s", async (harness, backend) => {
+    const label = `a resume pinned on ${backend === "glm" ? "GLM" : "Claude"}`
+    const c = CASES[label]!
+    const r = await spawn(c.args, [], {}, undefined, {
+      name: c.name,
+      backend: pinText(harness, backend),
+    })
+    expect(r.err).toBe("")
+    expect(r.code).toBe(0)
+    expect(launch(r, c.name)).toBe(EXPECTED[label]!)
+  })
 })

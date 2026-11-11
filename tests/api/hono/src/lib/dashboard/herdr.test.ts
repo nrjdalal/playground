@@ -14,6 +14,7 @@ import { join } from "node:path"
 import {
   answerKeys,
   bringsBack,
+  codexLaunches,
   FIXTURE_SOCKET,
   HerdrDown,
   herdrEvents,
@@ -325,6 +326,57 @@ describe("readServer and herdrRecords", () => {
       session_id: SESSION,
     })
     expect(herdrRecords([read], null, "t")[0]).toMatchObject({ session_id: SESSION })
+  })
+
+  test("a Codex pane holds the session its launch record names, live with no Claude registry file (#1794)", () => {
+    const THREAD = "0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b"
+    const pane = (label: string, argv: string[]): ServerRead => ({
+      panes: [
+        {
+          ...paneSchema.parse({ ...PANE, agent: null, agent_session: null, label }),
+          processes: [{ argv, cwd: "/tmp/leads", pid: 5151 }],
+        },
+      ],
+      server: "playground",
+      workspaces: [],
+    })
+    const codex = new Map([["dispatcher", THREAD]])
+    const running = pane("dispatcher", ["/opt/codex/bin/codex", "--dangerously-bypass-hook-trust"])
+    const [record, ...rest] = herdrRecords([running], registered([]), "t", codex)
+    expect(rest).toEqual([])
+    expect(record).toMatchObject({
+      agent: "codex",
+      pid: 5151,
+      session_id: THREAD,
+      surface_id: "herdr:playground:w1:p1",
+      transcript_path: "",
+    })
+    expect(liveRecords({ sessions: [record] }, null).sessions).toHaveLength(1)
+    // the pane's codex has exited to its shell, or the label has no Codex launch record
+    expect(herdrRecords([pane("dispatcher", ["/bin/zsh"])], registered([]), "t", codex)).toEqual([])
+    expect(herdrRecords([running], registered([]), "t")).toEqual([])
+    expect(herdrRecords([pane("builder", ["codex"])], registered([]), "t", codex)).toEqual([])
+  })
+
+  test("the Codex launch records are the sessions whose pin names codex, with their resume record's thread", () => {
+    const data = mkdtempSync(join(tmpdir(), "codex-launch-"))
+    cleanups.push(() => rmSync(data, { force: true, recursive: true }))
+    mkdirSync(join(data, "backends"))
+    mkdirSync(join(data, "resume"))
+    const THREAD = "0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b"
+    const record = (name: string, pin: string, thread = THREAD) => {
+      writeFileSync(join(data, "backends", name), `${pin}\n`)
+      writeFileSync(
+        join(data, "resume", `${name}.sh`),
+        `#!/bin/bash\n# server: playground\nexec /x/scripts/spawn.sh resume ${name} /x/leads ${thread}\n`,
+      )
+    }
+    record("dispatcher", "codex openai")
+    record("builder", "claude-code claude")
+    record("planner", "codex openai", "not-a-thread")
+    writeFileSync(join(data, "backends", "ops"), "codex openai\n")
+    expect(codexLaunches(data)).toEqual(new Map([["dispatcher", THREAD]]))
+    expect(codexLaunches(join(data, "none"))).toEqual(new Map())
   })
 
   test("a board that reads no herdr server, or not every one, keeps the others' change times", () => {
