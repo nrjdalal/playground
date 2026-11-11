@@ -78,6 +78,7 @@ That `CODEX_HOME` is the data folder's `codex/`, whose `config.toml` (the login 
 since Codex silently drops a hook with no recorded trust.
 It fails closed: the SessionStart hook writes a beat naming the session's thread, and a start or resume whose beat does not land within 60 seconds has its pane closed and is refused, with no new pin, resume record or roster row (a resume keeps its earlier pin and record, so a later resume tries again), so a Codex session whose guards did not load is stopped within a minute of starting;
 when herdr will not close that pane, the refusal names the pane, since the session may still run, for you to close it yourself;
+a Codex start also stops when PowerShell is installed: the beat's hook names a `pwsh` or `powershell` on `PATH`, or `/usr/local/bin/pwsh`, in place of the thread, and spawn.sh closes the pane and refuses the start or resume at once, naming it, with the same pin, record and roster row as above;
 its brief rides the launch as Codex's first prompt, so it may work on that brief until then.
 The beat's thread is the session id its resume record keeps, and it takes the session's name through `codex app-server`'s `thread/name/set`.
 Its `hooks.json` carries the factory's guards beside the beat (`scripts/hooks/README.md`, A Codex session's calls).

@@ -96,7 +96,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 - A Codex session (spawn.sh's `--harness codex`) loads the factory's guards from the `hooks.json` spawn.sh writes at each launch: `codexHooks()` in `packages/scripts/src/codex-hooks.ts` renders it from `scripts/factory-settings.json`, each handler in its group on each event Codex has (it has no Notification, PermissionDenied, PostToolUseFailure or StopFailure),
   and spawn.sh adds the SessionStart beat beside them.
   Each group keeps its matcher, but for a hook `CODEX_MATCHERS` names (writing-first, below), and each hook `LEFT_OUT` names is left out.
-  session-state is left out, so a Codex session writes no state record, and the Dashboard's light reads it as idle, since `lightOf()` in `api/hono/src/lib/dashboard/workers.ts` reads a session with no record and no question as idle.
+  session-state is left out, so a Codex session writes no state record, and the Dashboard reads its light as State unknown where it would read idle (`codexLight()` in `api/hono/src/lib/dashboard/workers.ts`, sidebar.md's Worker Lights).
   Codex runs each command in the call's folder with `$PLAYGROUND_REPO` set by the launch, so every wrapper finds the main checkout as it does for Claude Code.
 - A Codex input carries a `turn_id`, which Claude Code's lacks (codex-cli 0.167.1).
   It sends a shell call as Bash with its `command` and an MCP call by its `mcp__` name and arguments, both in Claude Code's shape, so every guard reads them as it reads Claude Code's.
