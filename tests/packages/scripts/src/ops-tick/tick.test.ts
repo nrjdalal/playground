@@ -202,6 +202,12 @@ describe("roll gate", () => {
 // #1779: a run-slot hold past 30 minutes while a waiter queues is told to ops once per hold.
 describe("run-slot hold", () => {
   const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z")
+  // A pid known dead: a child spawned and awaited is gone by the time it returns
+  const deadPid = async (): Promise<number> => {
+    const child = Bun.spawn(["true"])
+    await child.exited
+    return child.pid
+  }
   const hold = (
     ops: string,
     slot: string,
@@ -226,7 +232,7 @@ describe("run-slot hold", () => {
     hold(ops, "run-slot", "g7wkr2-worker", process.pid, since, [
       `1760000000-${process.pid}-y8wqk2-worker`,
     ])
-    hold(ops, "run-slot-2", "k3v9q2-worker", 4311, now.getTime() - 10 * 60_000, [])
+    hold(ops, "run-slot-2", "k3v9q2-worker", process.pid, now.getTime() - 10 * 60_000, [])
     const { ctx, sent } = fake(ops, now)
     await runSlotHold(ctx)
     expect(sent).toEqual([
@@ -240,8 +246,9 @@ describe("run-slot hold", () => {
   test("a hold past 30 minutes with no live waiter queued tells ops nothing", async () => {
     const ops = scratch()
     const now = at(13, 10)
+    const dead = await deadPid()
     hold(ops, "run-slot", "g7wkr2-worker", process.pid, now.getTime() - 40 * 60_000, [
-      "1760000000-4311-y8wqk2-worker",
+      `1760000000-${dead}-y8wqk2-worker`,
     ])
     const { ctx, sent } = fake(ops, now)
     await runSlotHold(ctx)
