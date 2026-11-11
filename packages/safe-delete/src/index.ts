@@ -17,7 +17,7 @@ import {
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve, sep } from "node:path"
 
-import { placedKindOf, ROSTER_ROLE_OF_KIND } from "@packages/config/kinds"
+import { hasManagerRole, placedKindOf } from "@packages/config/kinds"
 
 // The folders a delete starts from, passed in so a test builds them on a mkdtemp root of its own.
 export type Roots = { home: string; main: string; trash: string }
@@ -539,7 +539,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const name = agent.name.toLowerCase()
     // a manager seat names the work it routes, never a worktree, so its name alone holds none; its branch and PR still do
     const kind = placedKindOf(agent.name, agent.kind)
-    const seat = kind !== null && ROSTER_ROLE_OF_KIND[kind] === "manager"
+    const seat = kind !== null && hasManagerRole(kind)
     const byName = !seat && slugs.some((s) => s === name || s.startsWith(`${name}-`))
     const id = name.split("-")[0]!
     const byId = /\d/.test(id) && where.includes(id)

@@ -88,13 +88,14 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
   A patch to a promoted skill's `SKILL.md` also greps each changed term over that skill's docs page and every README that lists it, and patches every hit.
 - When a round leaves only fixes the next push can close, the reviewer asks the worker to merge canary in with that push, so the 5/5 candidate scores a head canary has not moved past.
 - After a compaction, a resume, or a notice that background tasks did not finish before the previous session ended, the reviewer runs `state.ts pr` for each PR it holds and re-arms a waiter wherever none is running, `state.ts checks` on a head whose two gate checks are not both green and `state.ts wait` on the rest, since an account flip kills the waiters with no notice.
+- A waiter starts from the tmp folder, and `state.ts wait` and `checks` move there as they start, so a waiter that outlives its PR holds no review worktree from the cleanup.
 - A finding that asks for a behaviour states the behaviour wanted, not only the defect.
 - On a collaborator's org PR whose review ask came to you, the session that posts your review turns at once to the work org's extension (triage-and-implement's PR.md) for what follows a review you were asked for.
 - A reviewer agrees with an author's reply only once it has reproduced the author's reason with one command, named in its reply.
 - A 5/5 verdict says the fresh full read found nothing blocking or should-fix and `bun run check-types` ran green, or green CI at the head stood in for it; a red run is a blocking finding.
 - Before a 5/5 posts, `bun run pr:merge <n> --explain`, bare and unpiped, reads ✓ on every gate but ready, ci and review, since the body gate also needs a doc that a reviewer's patch or the last commit changed named in the Evidence; a ✗ is a finding for the worker.
 - The reviewer posts the 5/5 verdict and its `Review • 5/5` label; GitHub's two checks green at the head are the next gate, never an input to the score, and a run cited where CI stands in is evidence of the touched tests and check-types alone.
-- A round left with only nits scores 5/5: the reviewer lists them, or hands the small edit over as a patch, for the worker's follow-up PR, since the 5/5 head merges as it stands and a push after it would need a fresh full read.
+- A round left with only nits scores 5/5: the reviewer lists them, or hands the small edit over as a patch, for the worker's follow-up PR, opened once the 5/5 head merges, since that head merges as it stands and a push after it would need a fresh full read.
   A nit that would widen a permission, a setting or a guard's reach if a rare event happens goes to the worker's lead first, and the 5/5 waits for the lead's ruling, since a worker can merge seconds after a 5/5 posts.
 - A PR body with no `test:skills` result in it is a nit, since GitHub Actions runs the suite at the head.
 - When the ticket carries samples, the verdict holds a samples table, and a sample left unhandled holds the score down.
