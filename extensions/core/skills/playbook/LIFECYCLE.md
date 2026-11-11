@@ -184,6 +184,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   The dispatcher spawns a manager under its fixed name when `ListAgents` lists none.
   A fresh the dispatcher session, after a restart, reads the previous the dispatcher transcript and re-checks its open items against the roster and the managers before it answers the owner.
   A session resumed after any restart, an account switch included, re-arms its background tasks and re-sends its unanswered messages first, by the **context** rule ([rules/context.md](../../rules/context.md)), which the `after-resume` hook puts in front of it.
+  When the restart killed a commit mid pre-commit, the same hook names the patch lefthook left in the shared git folder for the session's worktree, `info/lefthook-unstaged.<worktree folder>.patch`, and the session restores it with `git apply --unidiff-zero <patch>` before any commit ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#after-resume)).
   No session reports Playground as running until its own `ListAgents` lists a session named `dispatcher`; a roster entry, a resume record or a Dashboard row does not count.
   Ops' sweep has each factory session resumed without the factory's hooks respawned with its settings ([SWEEP.md](SWEEP.md)).
 

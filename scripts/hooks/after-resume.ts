@@ -1,5 +1,7 @@
 // SessionStart hook, matcher "resume": after any restart that resumes a factory session, it tells the session to re-arm what the restart ended and re-send what went unanswered (playbook's **context** rule), since an account switch restarts every session, and a watch, a loop or a round request it held is otherwise lost.
 
+import { basename, join } from "node:path"
+
 import { WAITER } from "./after-compact"
 import { fromFactory, MANAGER_ROLES, sessionOf, sessionRole } from "./role"
 
@@ -29,6 +31,24 @@ export function rearm(stopped: Date | undefined, now: Date): string {
   return `This session was restarted and resumed at ${minute(now)}, and the restart ended every background task, loop and watch it was running. Before you act: 1. Re-arm every background loop and watch you had running, and each cron CronList no longer shows, started again the way you started it. 2. Re-send each message to another session that got no reply in the 10 minutes before ${before}, marked as a re-send. Then carry on. Done when each one runs again and each re-send has gone, or you have found none.`
 }
 
+// The patch lefthook left in the shared git folder when a restart killed a commit mid pre-commit, the unstaged half of a partly staged file, which nothing puts back: lefthook names it by the worktree's folder, and with no name in a main checkout (measured on lefthook 2.2.2).
+export async function leftPatch(cwd: unknown): Promise<string | undefined> {
+  if (typeof cwd !== "string" || !cwd) return undefined
+  const git = Bun.spawn(
+    ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"],
+    { stderr: "ignore", stdout: "pipe" },
+  )
+  const [common, own] = (await new Response(git.stdout).text()).trim().split("\n")
+  if ((await git.exited) !== 0 || !common || !own) return undefined
+  const name =
+    own === common ? "lefthook-unstaged.patch" : `lefthook-unstaged.${basename(own)}.patch`
+  const path = join(common, "info", name)
+  return (await Bun.file(path).exists()) ? path : undefined
+}
+
+export const restore = (patch: string) =>
+  `The restart killed a commit after lefthook had set aside the unstaged half of a partly staged file, so that edit is missing from the working tree: before any commit, put it back with \`git apply --unidiff-zero ${patch}\`, since plain \`git apply\` fails on its patch with no context lines. Done when \`git diff\` shows the edit again.`
+
 // The hook's output, or nothing for a session outside the factory: the owner's own sessions load this hook too, from the project settings, and need no instruction. Fails open, so a resume never waits on this hook.
 export async function check(
   raw: string,
@@ -37,10 +57,11 @@ export async function check(
 ): Promise<string | undefined> {
   try {
     if (!(await fromFactory(raw, environment))) return undefined
-    const input = JSON.parse(raw) as { transcript_path?: unknown }
+    const input = JSON.parse(raw) as { cwd?: unknown; transcript_path?: unknown }
     const stopped = await lastEntry(input.transcript_path, now).catch(() => undefined)
     const manager = MANAGER_ROLES.has(await sessionRole(environment, sessionOf(raw)))
-    const text = rearm(stopped, now)
+    const patch = await leftPatch(input.cwd).catch(() => undefined)
+    const text = patch ? `${rearm(stopped, now)} ${restore(patch)}` : rearm(stopped, now)
     return JSON.stringify({
       hookSpecificOutput: {
         additionalContext: manager ? `${text} ${WAITER}` : text,
