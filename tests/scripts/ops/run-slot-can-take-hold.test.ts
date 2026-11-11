@@ -1,10 +1,10 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, machine, stop, within } from "./run-slot-fake"
+import { SCRIPT, machine, slots, stop, within } from "./run-slot-fake"
 
-// the verdicts answer for the holds the wait loop obeys: battery_holds and focus_holds gate the wait loop first (run-slot.sh's hold check) and can-take and room never read them, so a hold reads as a free lane to can-take and room while it keeps a fitting head waiter from taking (issue 1818, the 12:52:45Z can-take 0 beside a waiter that took nothing)
+// the verdicts answer for the holds the wait loop obeys: battery_holds and focus_holds gate the wait loop first (run-slot.sh's hold check) and can-take and room never read them, so a hold reads as a free lane to can-take and room while it keeps a fitting head waiter from taking (issue 1818, the 12:52:45Z can-take 0 beside a waiter that took nothing); an idle share that reads - is a dark sensor, not a busy CPU, so it keeps the slots open too (issue 1818, the 15:20Z lanes shut with why=cpu idle=-% on an idle machine)
 setDefaultTimeout(60_000)
 
 // the battery switch, held for the row: its line's third field is its expiry, a day out
@@ -17,6 +17,12 @@ const battery = (m: ReturnType<typeof machine>) =>
 // what `run-slot.sh room` prints: "<lanes> <held> <free> <waiters>"
 const room = (m: ReturnType<typeof machine>) =>
   Bun.spawnSync(["bash", SCRIPT, "room"], { cwd: m.root, env: m.env() }).stdout.toString().trim()
+
+// a fake top that prints no CPU usage line, so the gauges' idle share reads -
+const darkTop = (m: ReturnType<typeof machine>) => {
+  writeFileSync(join(m.bin, "top"), "#!/bin/bash\necho no cpu usage reading\n")
+  chmodSync(join(m.bin, "top"), 0o755)
+}
 
 describe("a hold the wait loop obeys", () => {
   test("can-take and room answer open while a fitting head waiter takes no lane", async () => {
@@ -45,5 +51,11 @@ describe("a hold the wait loop obeys", () => {
     await within(() => existsSync(w.marker), "the run to start once the battery hold lifted", m)
     await w.p.exited
     expect(existsSync(w.marker)).toBe(true)
+  })
+
+  test("an idle share that reads - keeps slots 2 to 4 open on an idle machine", () => {
+    const m = machine()
+    darkTop(m)
+    expect(slots(m)).toBe("4\n")
   })
 })
