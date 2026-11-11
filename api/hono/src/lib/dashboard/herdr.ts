@@ -435,6 +435,12 @@ const FILED: Record<SessionState["state"], string> = {
   working: "running",
 }
 
+// Pure: the program an argv runs is codex, run directly or as npm's launcher under node.
+const runsCodex = (argv: string[]) => {
+  const program = /(^|\/)node$/.test(argv[0] ?? "") ? argv[1] : argv[0]
+  return /(^|\/)codex$/.test(program ?? "")
+}
+
 // The session a pane holds, its agent and the process that runs it, or null. A Codex session writes no Claude registry file, so its pane holds it when the pane's label has a Codex launch record (codexLaunches) and a codex process runs in its foreground.
 function paneSession(
   pane: Pane,
@@ -442,9 +448,7 @@ function paneSession(
   codex: CodexLaunches,
 ): { agent: "claude" | "codex"; proc: Pane["processes"][number]; sessionId: string } | null {
   const thread = pane.label ? codex.get(pane.label) : undefined
-  const codexProc = thread
-    ? pane.processes.find((p) => (p.argv ?? []).some((word) => /(^|\/)codex$/.test(word)))
-    : undefined
+  const codexProc = thread ? pane.processes.find((p) => runsCodex(p.argv ?? [])) : undefined
   if (thread && codexProc) return { agent: "codex", proc: codexProc, sessionId: thread }
   const registered = pane.processes.find((p) => registry?.get(p.pid))
   const registeredId = registered && registry?.get(registered.pid)?.sessionId
