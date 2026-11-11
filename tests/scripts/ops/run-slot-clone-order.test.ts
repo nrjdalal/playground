@@ -198,8 +198,7 @@ describe("the clone lane", () => {
     expect(started(m)[0]).toBe("ops-dashboard")
   })
 
-  // issue 1722, 11 Nov: a ship's runs took class 2, so its gate, rehearsal and update waited behind workers' runs and focus held the floor for them
-  // while it waits it prints either the lane's line or, once the worker's ticket leads, the behind line, so the row reads both and the start order alone decides
+  // issue 1722: the class decides the line a waiting ship's clone prints, so the row reads either and the start order decides
   test("and a ship's clone, class 0 as ops-ship, goes before an older worker's", async () => {
     const m = machine()
     m.hold("run-slot-clone", 1, "small")
