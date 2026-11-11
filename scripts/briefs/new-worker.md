@@ -18,6 +18,7 @@ CI starts only on a pull request into `canary`, so open your draft PR before you
 Push bare, then confirm the push with `git -C <your worktree> ls-remote origin refs/heads/<branch>`, which prints your local head's sha (`git -C <your worktree> rev-parse HEAD`) once it has landed; a piped push reads its last command's exit, and `no-false-green` refuses one with no pipefail.
 
 Every git call names its tree, `git -C <your worktree> ...`, so a shell left in another folder moves nothing there. Run spawn.sh by its absolute path, `"${PLAYGROUND_REPO:?}/scripts/spawn.sh"`, from your own folder.
+After a resume your shell starts in the folder you launched in, the main checkout, so `cd` to your worktree by its absolute path before any write.
 
 Answer each review round by playbook's SESSIONS.md, Fix pushes and nits.
 Your PR's checkers (its reviewer and tester) are yours to brief, as playbook's SESSIONS.md (Spawn) says: the spawn passes a filled copy of the template (`~/.playground/<name>-reviewer-<pr>.md`), never the bare template. A run your checker has already measured at the same head is not queued again: ask for its result and cite it.

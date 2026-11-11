@@ -78,6 +78,8 @@ An org runs a job of its own, one the registry does not know, by shipping its sc
 - the script as `<org>/scripts/<key>/`, which each pass installs into `<data>/ops/<key>/`;
 - the row as `jobs.<camelName>` in `<org>/settings.json`, with every field a job has: `callsModel`, `command`, `description`, `enabled`, `heartbeat` and `schedule`, and `cwd` and `config` when it needs them.
 
+Its `description`, which every row needs, is the line the Dashboard shows for what the job does, since core names no org's job.
+
 You place the row, turn the job on or off and change its `config` with `playground settings set jobs.<camelName> '<row>' --scope <org> --reason "<why>"`, or by approving a guard decision that carries the row, or its `enabled` or `config` alone over the row the org holds; Settings > Jobs' switch and config card change the job in place, and take it out with `playground settings reset jobs.<camelName> --scope <org>`.
 The write checks the row as the render reads it (below), against the script folders that org's extensions hold at the time, and refuses it at your login's scope or when another org already adds the job.
 

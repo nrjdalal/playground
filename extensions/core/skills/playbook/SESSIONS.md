@@ -137,13 +137,13 @@ Done when the send, or its one re-send, returns success.
 
 ## A headless run
 
-A Claude session whose own toolset holds no Notion tools writes Notion through headless `claude -p` runs from `~`, which loads `notion-shared` (the path is a Claude session's alone, the **glm** rule).
+A Claude session whose own toolset lacks a docs tool's MCP server writes that tool's pages through headless `claude -p` runs from `~`, which loads the server (`<server>` below, with its `<fetch>` and `<update>` tools; the path is a Claude session's alone, the **glm** rule).
 Every run takes the shape the [no-headless-login](../../../../scripts/hooks/README.md#no-headless-login) hook's refusal gives: `CLAUDE_CODE_OAUTH_TOKEN` read from the Keychain item its account names, `PLAYGROUND_ROLE=<your role>` and `env -u CLAUDE_CONFIG_DIR -u ANTHROPIC_API_KEY`.
 Every run also carries `--permission-mode dontAsk`, since the machine's bypass default leaves `--allowedTools` blocking nothing, and puts `--allowedTools` last, after the prompt, since that flag takes every word after it.
 A run from `~` loads none of the factory's hooks, so `dontAsk` with `--allowedTools` is the only limit on what the run writes.
-The write run's `--allowedTools` is `"mcp__notion-shared__notion-fetch,mcp__notion-shared__notion-update-*"`, and its prompt tells the run not to quote the page text in its reply, which a safety-classifier cut-off otherwise stops mid-way.
-Before the write, the worker takes the backup itself, in a first, fetch-only run whose `--allowedTools` carries `mcp__notion-shared__notion-fetch` alone and whose prompt calls `notion-fetch` on the page and replies with nothing, on `--output-format stream-json --verbose`:
-the worker copies that call's `tool_result` content into `<scratchpad>/notion-backup-<page id>-<utc>.md`, reading the page into neither its own context nor a message, and the model never repeats the page, so a reply cut-off has nothing to stop.
+The write run's `--allowedTools` is `"mcp__<server>__<fetch>,mcp__<server>__<update>"`, and its prompt tells the run not to quote the page text in its reply, which a safety-classifier cut-off otherwise stops mid-way.
+Before the write, the worker takes the backup itself, in a first, fetch-only run whose `--allowedTools` carries `mcp__<server>__<fetch>` alone and whose prompt calls `<fetch>` on the page and replies with nothing, on `--output-format stream-json --verbose`:
+the worker copies that call's `tool_result` content into `<scratchpad>/backup-<page id>-<utc>.md`, reading the page into neither its own context nor a message, and the model never repeats the page, so a reply cut-off has nothing to stop.
 The backup outlives a stop because the worker writes the file, not the run.
 The worker writes nothing until the fetch call's `tool_result` carries no error and the file passes `test -s` and a grep for the page's id; a cut-off, an empty file or a missing id means no write, and the worker reports it.
 After the write, a second fetch-only run copies the page to an after-file the same way, and the worker checks the after-file with a grep for the change.
@@ -207,6 +207,7 @@ A Monitor or watch script runs under zsh, which does not word-split `$list`: loo
 Run each measurement as its own background task, since a chained task signals only when the whole chain ends, and a stall in its first stage once stayed hidden for 41 minutes.
 A wait on an owner step starts with two checks: the step's card is open in the Inbox as an ask the owner can answer, and its precondition can come true (whatever writes the file or state it waits on is running).
 When either check fails, report it to your lead at once, since a dead waiter, one whose condition can never come true, waits for good: one sat about 3 hours on a file only a job that was off could write.
+Wait on CI with `gh run watch <run id> --interval 300`; `gh pr checks --watch --required` exits 1 here, since the repo reports no required checks.
 Before you report CI green, read the check-runs at the head sha once in the foreground (`gh api repos/<repo>/commits/<head sha>/check-runs`).
 A background or Monitor event alone is not a green.
 Done when every wait ends on a signal, each background task holds one measurement, every wait on an owner step has its open card and a precondition that can come true, every CI green you report was read in the foreground at the head, and every gap you name is checked against the sleep log.

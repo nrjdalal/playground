@@ -86,7 +86,7 @@ Model- or user-reachable.
 Reached only by typing them.
 
 - **[core-audit](./extensions/core/skills/core-audit/SKILL.md)**: Check that Playground's core holds nothing beyond its generic self: no linked org's terms, read at run time from the extensions, and no value or process shaped like one org's. Report each hit by its place and kind, never its text, then fix them in one PR and keep the run as an audit doc.
-- **[setup](./extensions/core/skills/setup/SKILL.md)**: Check and set up what the skills need on this machine: the command-line tools and the gh login, the home skill set, the Linear connection, and each extension's own needs through its setup check. Run once on a new machine, or when a skill fails for a missing tool or connection.
+- **[setup](./extensions/core/skills/setup/SKILL.md)**: Check and set up what the skills need on this machine: the command-line tools and the gh login, the home skill set, and each extension's own needs through its setup check. Run once on a new machine, or when a skill fails for a missing tool or connection.
 
 ## Development
 

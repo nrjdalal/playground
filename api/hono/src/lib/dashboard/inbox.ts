@@ -42,6 +42,7 @@ import { z } from "zod"
 import { fileNameOf } from "../download"
 import { KEYCHAIN_ITEM_NAMES, keychainSpec, PLAYGROUND_SERVICE } from "../keychain-items"
 import { ID_PATTERN } from "./attachments"
+import { checkoutRoot, currentSource, type DashboardSource } from "./fixture"
 import { OWNER_APPS } from "./owner-apps"
 
 // Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, an apps change's, a grant's, a guard setting's or an own account change's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
@@ -1057,13 +1058,26 @@ export function getPickLine(item: InboxItem): string | null {
   return single ? `${single.letter}: ${single.label}` : null
 }
 
+// The ask CLI a close line names: a live-reads test stack's own checkout's, since its test items sit in its own database and a probe must never close the live Inbox's item of that number; else playground ask, which runs in the Dashboard's checkout from any folder.
+export const askCli = (
+  source: DashboardSource = currentSource(),
+  root: string | null = checkoutRoot(),
+): string =>
+  source.kind === "live" && source.rule === "live-reads" && root
+    ? `bun run --cwd ${root} ask`
+    : "playground ask"
+
 // Pure: what an answer tells its poster, as data: the verb, whether to carry it out, the next step and the exact command that closes the item; the owner's comment in his words, a changed draft's text, a step's or a secret sink's results, never a secret's value; an update takes no answer.
-export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvided): AnswerPayload {
+export function answerPayload(
+  item: InboxItem,
+  answer: InboxAnswer | InboxProvided,
+  ask = "playground ask",
+): AnswerPayload {
   if (item.kind === "update") throw new Error("An update takes no answer")
   const tag = itemTag(item.ref)
-  const ack = `bun run ask ack ${tag} --link <https url>`
+  const ack = `${ask} ack ${tag} --link <https url>`
   const ackOrWhy = `${ack}, or --no-link "<why>" when it leaves no page`
-  const read = `bun run ask get ${tag} --ack`
+  const read = `${ask} get ${tag} --ack`
   const head = {
     at: answer.at,
     id: item.id,
@@ -1103,7 +1117,7 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
           ...head,
           ...comment,
           ...ran,
-          close: `bun run ask ack ${tag} --no-link "<why>"`,
+          close: `${ask} ack ${tag} --no-link "<why>"`,
           go: true,
           next: answer.opened?.exitCode === 0 ? "carry-out" : "nothing",
           option: optionOf(item, answer),
@@ -1159,6 +1173,7 @@ export function closedPayload(
   item: InboxItem,
   verb: "dismiss" | "done",
   at: string,
+  ask = "playground ask",
 ): AnswerPayload {
   const tag = itemTag(item.ref)
   const head = {
@@ -1182,10 +1197,10 @@ export function closedPayload(
     return { ...head, next: "nothing" }
   }
   const close = isGo(answer.choice)
-    ? `bun run ask ack ${tag} --no-link "<why>"`
+    ? `${ask} ack ${tag} --no-link "<why>"`
     : answer.choice === "replied"
-      ? `bun run ask ack ${tag}`
-      : `bun run ask get ${tag} --ack`
+      ? `${ask} ack ${tag}`
+      : `${ask} get ${tag} --ack`
   return { ...head, close, next: "close" }
 }
 
@@ -1209,7 +1224,7 @@ async function tellClosed(
   ) {
     return item
   }
-  const payload = closedPayload(item, verb, telling.now.toISOString())
+  const payload = closedPayload(item, verb, telling.now.toISOString(), askCli())
   return send(
     db,
     item,
@@ -1227,12 +1242,12 @@ type Telling = Omit<Sending, "upload">
 export const answerLine = (payload: AnswerPayload): string =>
   `${ANSWER_LEAD} ${JSON.stringify(answerPayloadSchema.parse(payload))}`
 
-// Pure: the line for the poster and, once it has ended, the same line for the dispatcher with relay set, which reads the item's preview with bun run ask get.
+// Pure: the line for the poster and, once it has ended, the same line for the dispatcher with relay set, which reads the item's preview with playground ask get.
 const textsOf = (
   item: InboxItem,
   answer: InboxAnswer | InboxProvided,
 ): { relay: string; text: string } => {
-  const payload = answerPayload(item, answer)
+  const payload = answerPayload(item, answer, askCli())
   return {
     relay: answerLine({ ...payload, relay: { for: item.from, why: "poster-ended" } }),
     text: answerLine(payload),
