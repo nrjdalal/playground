@@ -17,7 +17,7 @@ import {
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve, sep } from "node:path"
 
-import { placedKindOf, ROSTER_ROLE_OF_KIND } from "../../config/src/kinds"
+import { placedKindOf, ROSTER_ROLE_OF_KIND } from "@packages/config/kinds"
 
 // The folders a delete starts from, passed in so a test builds them on a mkdtemp root of its own.
 export type Roots = { home: string; main: string; trash: string }
