@@ -139,6 +139,21 @@ test("runRm moves a path, lists it and restores it, telling no one", async () =>
   expect(told).toEqual([])
 })
 
+test("runRm tells the dispatcher once when a session hits the per-minute cap, however many tries it refuses", async () => {
+  const { deps, home, told } = machine()
+  const paths = Array.from({ length: 14 }, (_, i) => {
+    const path = join(home, `old-${i}.txt`)
+    writeFileSync(path, "x")
+    return path
+  })
+  const codes: number[] = []
+  for (const path of paths) codes.push(await runRm([path], deps))
+  expect(codes).toEqual([0, 0, 0, ...Array(11).fill(1)])
+  expect(told).toEqual([
+    "j6rjgy-worker: j6rjgy-worker quarantined 3 paths in the last minute, the most one session may",
+  ])
+})
+
 test("runRm tells the dispatcher of a protected path, and not of a missing one", async () => {
   const { deps, home, told } = machine()
   expect(await runRm([home], deps)).toBe(1)

@@ -150,7 +150,7 @@ It refuses, before moving anything:
 
 - HOME, any folder that holds it, and `~/.config`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/Library`, `~/Music` and `~/.playground` with everything in them, checked after symlinks resolve.
 - The main checkout and everything in it but the worktrees under `.claude/worktrees/`.
-- A path over 5,000 files or 2 GB, and a fourth delete within a minute from one session; these and a protected path are also sent to the dispatcher.
+- A path over 5,000 files or 2 GB, and a fourth delete within a minute from one session; these and a protected path are also sent to the dispatcher, a session at the per-minute limit once for each burst, however many deletes it then tries.
 - A move to another disk, since that would copy rather than rename.
 
 A script of the factory's own may take one carve-out from the protected list (`CARVE_OUTS` in `packages/safe-delete`), which `playground rm` never takes: it moves an entry directly in its one folder in the data folder (`~/.playground`, or `PLAYGROUND_DATA_DIR`), under the carve-out's own file and size cap, and the folder itself, its parent, a sibling and anything deeper stay refused.
