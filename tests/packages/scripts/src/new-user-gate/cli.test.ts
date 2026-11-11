@@ -177,34 +177,36 @@ describe("step 2's database click", () => {
     expect(polls).toBe(3)
   })
 
-  test("a fake browser that never shows the button fails with the button's deadline, not the URL's", async () => {
+  test("a fake browser that never shows the button gives up at the button's deadline, before the URL's", async () => {
+    const started = Date.now()
     const got = await databaseCheck(
       () => false,
       () => false,
       {
-        buttonMs: 60_000,
+        buttonMs: 100,
         pollMs: 1,
-        urlMs: 60,
+        urlMs: 2_000,
       },
     )
     expect(got).toEqual({
-      detail: "the Start the database button never showed in 60s",
+      detail: "the Start the database button never showed in 0.1s",
       ok: false,
     })
+    expect(Date.now() - started).toBeLessThan(2_000)
   })
 
-  test("a shown button whose URL never lands names the URL's deadline, not the button's", async () => {
+  test("a shown button whose URL never lands waits the URL's deadline out and names it", async () => {
     const got = await databaseCheck(
       () => true,
       () => false,
       {
-        buttonMs: 60_000,
+        buttonMs: 100,
         pollMs: 1,
-        urlMs: 60,
+        urlMs: 2_000,
       },
     )
     expect(got).toEqual({
-      detail: "no POSTGRES_URL in the desk's .env after 120s",
+      detail: "no POSTGRES_URL in the desk's .env after 2s",
       ok: false,
     })
   })

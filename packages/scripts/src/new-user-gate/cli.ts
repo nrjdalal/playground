@@ -295,7 +295,7 @@ export const installCheck = (out: string, shot: () => string): Omit<Step, "name"
   }
 }
 
-// Step 2's wait: the click can land before the button renders under load, so the click retries each poll until POSTGRES_URL lands, the way step 3 retries Continue; a miss names the deadline that passed, the button's 60s or the URL's 120s.
+// Step 2's wait: the click can land before the button renders under load, so the click retries each poll until POSTGRES_URL lands, the way step 3 retries Continue; the button has buttonMs to show, after which the step gives up and names it, and the URL has urlMs, whose miss names it.
 export const databaseCheck = async (
   click: () => boolean,
   saved: () => boolean,
@@ -305,17 +305,26 @@ export const databaseCheck = async (
     urlMs: 120_000,
   },
 ): Promise<Pick<Step, "detail" | "ok">> => {
-  let showed = false
-  for (const end = Date.now() + waits.urlMs; Date.now() < end; await Bun.sleep(waits.pollMs)) {
-    if (click()) showed = true
+  let clicked = false
+  for (
+    const urlEnd = Date.now() + waits.urlMs, buttonEnd = Date.now() + waits.buttonMs;
+    Date.now() < urlEnd;
+    await Bun.sleep(waits.pollMs)
+  ) {
+    if (click()) clicked = true
     if (saved()) return { detail: "", ok: true }
+    if (!clicked && Date.now() >= buttonEnd)
+      return {
+        detail: `the Start the database button never showed in ${waits.buttonMs / 1000}s`,
+        ok: false,
+      }
   }
-  if (click()) showed = true
+  if (click()) clicked = true
   if (saved()) return { detail: "", ok: true }
   return {
-    detail: showed
-      ? "no POSTGRES_URL in the desk's .env after 120s"
-      : "the Start the database button never showed in 60s",
+    detail: clicked
+      ? `no POSTGRES_URL in the desk's .env after ${waits.urlMs / 1000}s`
+      : `the Start the database button never showed in ${waits.buttonMs / 1000}s`,
     ok: false,
   }
 }
