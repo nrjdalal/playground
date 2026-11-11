@@ -263,6 +263,8 @@ if [ "${1:-}" = set ]; then
   ends=$(iso $((at + n * unit)))
   mkdir -p "$(dirname "$OPS/$path")"
   { echo "$who $(iso "$at") $ends $(printf '%s' "$reason" | tr '\n' ' ')"; [ -z "$value" ] || echo "$value"; } > "$OPS/$path.set-$$" && mv "$OPS/$path.set-$$" "$OPS/$path" || exit 1
+  # a load throttle set now holds for lifted's full 5 minutes under the cap
+  case "$name" in 3-off|4-off|single) rm -f "$OPS/run-slot.under" ;; esac
   echo "run-slot.sh: $path is on until $ends"
   exit 0
 fi
@@ -1345,6 +1347,10 @@ CHILD=""
 POLL=${RUN_SLOT_POLL:-15}
 # the longest a commit or quick start waits on load5 (issue 1385)
 LOAD_WAIT=${RUN_SLOT_LOAD_WAIT:-300}
+# the seconds load5 reads under load_line's cap before single, 3-off and 4-off lift (lifted), the longest gap between two readings the hold counts across, and the file holding the second of the first reading under and of the last
+LIFT_HOLD=300
+LIFT_GAP=90
+UNDER="$OPS/run-slot.under"
 # the wait past which a waiter counts as a backlog the burst hold keeps spaced, small runs included (issue 1417): a queue that releases starts its small runs all at once, and load5 reads them only about a minute later (7 Nov 13:10 to 13:15Z: 12 queued runs started on run-slot and run-slot-2, and load5 crossed 15 at 13:16:08Z), so a small run that has waited this long also waits for burst_held to clear; a fresh small run starts at once (the tests shorten it; a waiter's waited count is the real seconds since its wait began, so the line reads in seconds whatever RUN_SLOT_POLL is)
 BACKLOG_WAIT=${RUN_SLOT_BACKLOG_WAIT:-300}
 CLONE_POLL=${RUN_SLOT_POLL:-5}
@@ -1553,7 +1559,7 @@ due_at() {
 }
 # G: the gauges' verdict the slots a look counts open on, open while they shut none: the lanes (lanes_open, which rewrites run-slot.lanes), and in
 # single-slot mode memory's room, which opens run-slot-2 alone
-gate_sig() { G=shut; lanes_open && G=open; switch_on run-slot.single && ! mem_ok && G="$G nomem"; return 0; }
+gate_sig() { G=shut; lanes_open && G=open; switch_on run-slot.single && ! lifted && ! mem_ok && G="$G nomem"; return 0; }
 # whether this waiter may sleep again with no look: its script is unchanged and the oldest waiter alive. A waiter at the head (one with no ticket, the
 # head of either order, or the oldest) looks again on anything its last look decides by: a file it read (SIG, merge-queue.json), the load's whole numbers,
 # the clock's next turn (due_at), the burst's minute while one held it, and the gauges: every poll while they shut a slot, and while they open one,
@@ -1573,6 +1579,7 @@ cheap_idle() {
     [ -z "$DUE" ] || [ "$SECONDS" -lt "$DUE" ] || return 1
     cheap_load
     [ "$LOAD" = "$LOAD0" ] || return 1
+    under_seen || return 1
     [ -z "$BURST" ] || burst_held > /dev/null || return 1
     if [ "$G0" = open ]; then
       [ "$OPS/run-slot.gauges" -ot "$REF" ] && return 0
@@ -1598,11 +1605,13 @@ look_mark() {
   SIG0=$SIG
   next_sig
   NSIG0=$NSIG
-  LOOKED=1 DUE= BURST=
+  LOOKED=1 DUE= BURST= LIFT_AT=
   cheap_load
   LOAD0=$LOAD
   d=$(due_at)
-  [ -z "$d" ] || DUE=$((SECONDS + d - $(date +%s)))
+  # the clock's second, read once a look while a turn is due or a lift mark stands (under_seen)
+  { [ -z "$d" ] && ! [ -e "$UNDER" ]; } || LIFT_AT=$(date +%s) LIFT_S=$SECONDS
+  [ -z "$d" ] || DUE=$((SECONDS + d - LIFT_AT))
   read -r _ G0_CACHE 2>/dev/null < "$OPS/run-slot.gauges"
   gate_sig
   G0=$G
@@ -1694,6 +1703,8 @@ free() {
   [ -n "${MEM_TOLD:-}" ] && rm -f "$MEM_TOLD-suite" "$MEM_TOLD-clone" "$MEM_TOLD-idle" "$MEM_TOLD-swap" "$MEM_TOLD-busy"
 }
 trap 'free' EXIT
+# a wait loop bash dropped with no slot taken stops the run with 143 and says why, so its caller runs it again (issue 1641): bash 5.2 drops a loop when a TERM lands while it expands a "$(...)" and the trap below fails to parse, so the stop it was sent still ends the run; free, the EXIT trap, gives back its place in the queue
+dropped() { echo "run-slot.sh: the $1 wait loop ended with no slot taken (bash drops a loop when a signal lands mid-expansion), so $WHO stops with 143: run it again" >&2; exit 143; }
 trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; [ -n "$CHILD" ] && { reap "$CHILD"; rlog end "rc=143 ran=$(($(date +%s) - TOOK))s"; }; exit 143' TERM INT HUP
 
 # process group $1's members, a `<pid> <command>` line each: from ps, else from the kernel's process table (ptable.py), since Claude Code's sandbox refuses the setuid ps
@@ -1862,6 +1873,34 @@ load5_held() {
   [ "${HELD5-}" = unread ] && HELD5=$h
   [ "$h" = 1 ]
 }
+# whether single, 3-off and 4-off stand lifted: load5 has read under load_line's cap for LIFT_HOLD s, from the first of readings UNDER holds no more than LIFT_GAP s apart (issue 1737, 11 Nov: single and a cap of 14 stood by timer at load5 5.6, and eight runs queued behind one lane); a reading at or over the cap removes UNDER, so the throttle holds again until its end time, and a reading under after a longer gap, which may have hidden one over, starts the hold again
+lifted() {
+  local l5= since= last= now s0
+  read -r _ _ l5 _ <<< "$(loadavg)"; l5=${l5%%.*}
+  case "$l5" in '' | *[!0-9]*) return 1 ;; esac
+  if [ "$l5" -ge "$(load_line)" ]; then
+    [ ! -e "$UNDER" ] || rm -f "$UNDER"
+    return 1
+  fi
+  read -r since last 2>/dev/null < "$UNDER"
+  now=$(date +%s) s0="$since $last"
+  case "$since $last" in *[!0-9\ ]* | ' ' | *' ') since=$now ;; *) [ $((now - last)) -le "$LIFT_GAP" ] || since=$now ;; esac
+  [ "$since $now" = "$s0" ] || under_write "$since $now"
+  [ $((now - since)) -ge "$LIFT_HOLD" ]
+}
+# a waiting head's idle poll, with builtins alone but for its write, at most once in 30 s, while its load reads as its look read it: false once the hold in UNDER has ended since that look, so the head looks again and the throttle lifts on time, a hold restarted in place included; else it writes the poll's second as UNDER's last again, at most every 30 s, so the hold counts across polls with no look of their own (a reading at or over the cap moves the load's whole numbers, so the head looks instead)
+under_seen() {
+  local first= last= now
+  [ -n "$LIFT_AT" ] || return 0
+  read -r first last 2>/dev/null < "$UNDER" || return 0
+  case "$first $last" in *[!0-9\ ]* | ' '* | *' ') return 0 ;; esac
+  now=$((LIFT_AT + SECONDS - LIFT_S))
+  [ "$LIFT_AT" -lt $((first + LIFT_HOLD)) ] && [ "$now" -ge $((first + LIFT_HOLD)) ] && return 1
+  [ $((now - last)) -lt 30 ] || under_write "$first $now"
+  return 0
+}
+# UNDER's line written whole: to a dotted file of this run's, which cheap_sig's run-slot* glob never reads, then moved over it, so another run's read never meets the empty file a truncating write leaves for a moment
+under_write() { echo "$1" > "$OPS/.run-slot.under.$$" && mv -f "$OPS/.run-slot.under.$$" "$UNDER"; }
 # whether the load rules open slot $1 to this run now
 slot_open() {
   local s=$1
@@ -1870,20 +1909,20 @@ slot_open() {
   # #i162: in single-slot mode run-slot-2 still opens for a second suite; since 13 Oct (dispatcher, so work runs while the
   # machine allows) it opens on memory: free share 40% or more (ops, 19 Oct 01:16Z, from the optimizer: 9 Mac-only waiters at
   # pressure 1 with 43% free), pressure normal and swap-ins under SWAPINS_MAX (mem_ok), and the 5-minute load under 22 as a backstop
-  if [ "$s" != run-slot ] && switch_on run-slot.single && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ]; then
+  if [ "$s" != run-slot ] && switch_on run-slot.single && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && ! lifted; then
     if [ "$s" = run-slot-2 ] && [ "$(load5)" -lt "$(load_line)" ] && mem_ok; then :; else return 1; fi
   elif [ "$s" != run-slot ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && { load5_held || { [ "$s" = run-slot-2 ] && ! lanes_now; }; }; then
     return 1
   fi
   # a third slot, approved by dispatcher (8 Oct), opens only while lanes_open does; a holder that took it finishes either way
   # run-slot.3-off closes it too (dispatcher, 18 Oct: the owner's machine loud at load1 29.6; two slots until load5 holds under 12 for 10 minutes)
-  if [ "$s" = run-slot-3 ] && { switch_on run-slot.3-off || ! lanes_now; }; then
+  if [ "$s" = run-slot-3 ] && { { switch_on run-slot.3-off && ! lifted; } || ! lanes_now; }; then
     return 1
   fi
   # a fourth slot, dispatcher's factory call (18 Oct, a two-way door: 14 waiters at 12:40Z, 5/5 PRs to merge within 30 minutes): it opens
   # only while lanes_open does and run-slot.4-off is absent; Ops creates run-slot.4-off when load5 holds over 25 for
   # 10 minutes or the owner's dictation shows a delay
-  if [ "$s" = run-slot-4 ] && { switch_on run-slot.4-off || ! lanes_now; }; then
+  if [ "$s" = run-slot-4 ] && { { switch_on run-slot.4-off && ! lifted; } || ! lanes_now; }; then
     return 1
   fi
   return 0
@@ -2255,7 +2294,7 @@ if [ -n "$KIND" ]; then
       sleep "$POLL"
     done
     # a loop bash dropped mid-expansion (the rule above) set no flag, so the waiter stops rather than run
-    [ -n "$LDONE" ] || exit 143
+    [ -n "$LDONE" ] || dropped "load5"
   fi
   # clone waiters take the lane in the heavy queue's order, class then ask time (issue 1317, 7 Nov: the first mkdir won, and a clone waited 13385 s while five asked after it passed): each leaves its place in CLONE_QUEUE holding its start time
   # pid $1's start time, from ps, else from the kernel's process table, since Claude Code's sandbox refuses the setuid ps
@@ -2307,7 +2346,10 @@ if [ -n "$KIND" ]; then
   : > "$REF" 2>/dev/null
   GOT=
   polls=0
+  LOOPS_LEFT=${RUN_SLOT_TEST_LOOP_END:-0}
   while :; do
+    # RUN_SLOT_TEST_LOOP_END ends this loop once with no lane taken, the way bash 5.2's loop drop (the rule at the load5 wait) does, so a test can hold the guard after it to its contract
+    [ "$LOOPS_LEFT" -gt 0 ] && { LOOPS_LEFT=$((LOOPS_LEFT - 1)); break; }
     spaced=
     waited=$((SECONDS - WAIT_FROM))
     self_changed && reread
@@ -2331,7 +2373,7 @@ if [ -n "$KIND" ]; then
     fi
     sleep "$CLONE_POLL"
   done
-  [ -n "$GOT" ] || exit 143
+  [ -n "$GOT" ] || dropped "$KIND lane's"
   [ -n "$CLONE_TICKET" ] && rm -f "$CLONE_TICKET" && CLONE_TICKET=""
   SLOT="$OPS/run-slot-$KIND"
   ends=""
@@ -2472,7 +2514,7 @@ while :; do
   sleep "$POLL"
 done
 
-[ -n "$SLOT" ] || exit 143
+[ -n "$SLOT" ] || dropped "run slot's"
 echo "run-slot.sh: $WHO holds $(basename "$SLOT")" >&2
 TOOK=$(date +%s); rlog start "$(basename "$SLOT") waited=$((TOOK - ASKED))s"
 run_command "$@"

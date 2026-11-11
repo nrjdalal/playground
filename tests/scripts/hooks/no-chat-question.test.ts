@@ -749,3 +749,69 @@ describe("the dashboard read's time limits (#1269)", () => {
     }
   })
 })
+
+describe("a session with a manager asks it by SendMessage, never by an AskUserQuestion picker (#1758)", () => {
+  const call = (tool = "AskUserQuestion") =>
+    JSON.stringify({
+      hook_event_name: "PreToolUse",
+      session_id: "s-1",
+      tool_input: { questions: [{ options: [], question: "Which one?" }] },
+      tool_name: tool,
+    })
+  const picker = (env: Record<string, string>, name?: string, tool?: string) =>
+    check(
+      call(tool),
+      { CLAUDE_CONFIG_DIR: config, PLAYGROUND_DATA_DIR: join(config, "playground"), ...env },
+      { itemStatus: fakeDashboard(), ownerNames: async () => OWNER, sessionName: () => name },
+    )
+  const refused = (reason: string | undefined) => {
+    expect(reason).toContain("AskUserQuestion")
+    expect(reason).toContain("SendMessage")
+  }
+
+  test.each(["probe", "reviewer", "runner", "tester", "worker"])(
+    "refused: a %s by its PLAYGROUND_ROLE",
+    async (role) => refused(await picker({ PLAYGROUND_ROLE: role })),
+  )
+
+  test.each(["q7w2zk-probe", "k3m9px-worker", "b7k2mq-reviewer"])(
+    "refused: %s by its session name, resumed with no role",
+    async (name) => refused(await picker({}, name)),
+  )
+
+  test.each(["dispatcher", "lead", "manager"])(
+    "allowed: a %s by its PLAYGROUND_ROLE",
+    async (role) => expect(await picker({ PLAYGROUND_ROLE: role })).toBeUndefined(),
+  )
+
+  test("allowed: the dispatcher and a lead by their session names", async () => {
+    for (const name of [OLD.dispatcher, "x7mh4d-builder"])
+      expect(await picker({}, name)).toBeUndefined()
+  })
+
+  test("allowed: a session with no role and no roster name, as the owner's own", async () => {
+    expect(await picker({})).toBeUndefined()
+    expect(await picker({}, "my-notes")).toBeUndefined()
+  })
+
+  test("allowed: the hosted session, a probe by role the Agent SDK starts", async () => {
+    expect(
+      await picker({ CLAUDE_CODE_ENTRYPOINT: "sdk-ts", PLAYGROUND_ROLE: "probe" }),
+    ).toBeUndefined()
+  })
+
+  test("allowed: a worker's other tools", async () => {
+    expect(await picker({ PLAYGROUND_ROLE: "worker" }, undefined, "Bash")).toBeUndefined()
+  })
+
+  test("run as Claude Code runs it, a worker's picker is refused with exit 2 and the reason", async () => {
+    const run = Bun.spawn(["bun", "--no-env-file", script], {
+      env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli", PLAYGROUND_ROLE: "worker" },
+      stderr: "pipe",
+      stdin: new Blob([call()]),
+      stdout: "pipe",
+    })
+    expect(await run.exited).toBe(2)
+    refused(await new Response(run.stderr).text())
+  })
+})
