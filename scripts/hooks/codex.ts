@@ -1,7 +1,7 @@
 // How a guard reads a Codex session's hook input (codex-cli 0.167.1, its turn_id telling it from Claude Code's): a shell call comes as Bash with its command and an MCP call by its mcp__ name and arguments, both in Claude Code's shape, and an edit comes in two shapes, an apply_patch call whose command is the patch, or an apply_patch command run in the shell. Each edit is read into one Write per file its patch adds, updates, deletes or moves to, which every edit guard judges as it judges Claude Code's.
 import { isAbsolute, resolve } from "node:path"
 
-// The patch's file headers, read from a line with its ends trimmed, as Codex's parser reads them (codex-rs/apply-patch/src/streaming_parser.rs).
+// The patch's file headers in the patch format's own order, read from a line with its ends trimmed, as Codex's parser reads them (codex-rs/apply-patch/src/streaming_parser.rs).
 const HEADERS = ["*** Add File: ", "*** Delete File: ", "*** Update File: ", "*** Move to: "]
 // apply_patch, or its other name applypatch, as the program a shell command runs, past any assignments ahead of it.
 const SHELL_PATCH =
