@@ -34,3 +34,10 @@ test("a set factory.publicRepo wins over the origin", () => {
   })
   expect(repos.public).toEqual(["acme/site", "acme/yard"])
 })
+
+test("a one-repo factory.publicRepo, as a list of one or a bare string, guards that repo alone", () => {
+  for (const value of [["Acme/Site"], "Acme/Site"])
+    expect(reposOf({ schemaVersion: 1, values: { "factory.publicRepo": value } }).public).toEqual([
+      "acme/site",
+    ])
+})
