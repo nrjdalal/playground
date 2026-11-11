@@ -137,6 +137,23 @@ describe("the clone lane", () => {
     expect(started(m)[0]).toBe("worker-older")
   })
 
+  // review round 1, should-fix 2: the stamp intake takes digits and dots alone, as RUN_SLOT_ASKED's does, so a value with /, - or a space cannot name a ticket; the waiter stamps itself fresh instead
+  test("and takes no ask stamp that holds a character outside digits and dots", async () => {
+    const m = machine()
+    m.hold("run-slot-clone", 1, "small")
+    const run = m.start("worker-stamped", { RUN_SLOT_ASK_STAMP: "a9.1b -c" }, SCRIPT, [
+      "cp",
+      "-R",
+      "node_modules",
+    ])
+    expect(await run.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
+    const mine = readdirSync(join(m.ops, "run-slot.clone-waiters")).find((n) =>
+      n.endsWith("-worker-stamped"),
+    )!
+    await stop(run.p)
+    expect(mine.split("-")[1]).toMatch(/^\d+\.\d{9}$/)
+  })
+
   test("but the Dashboard roll's clone, class 0, goes before an older worker's", async () => {
     const m = machine()
     m.hold("run-slot-clone", 1, "small")
