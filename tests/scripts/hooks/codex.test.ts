@@ -94,3 +94,17 @@ describe("a Codex edit reaches the guards as one Write per file its patch names"
     expect(seen).toHaveLength(2)
   })
 })
+
+// Each edit guard names itself in the refusal of a patch it cannot read, so a guard renamed without its eachInput call turns this red.
+test("every edit guard refuses, in its own name, an apply_patch that names no file", async () => {
+  const unread = codex("apply_patch", "*** Begin Patch\n*** End Patch")
+  const env = { HOME: "/made-up-home", PLAYGROUND_ROLE: "worker" }
+  const guards = {
+    "no-extensions-write": (await import("../../../scripts/hooks/no-extensions-write")).check,
+    "no-linear-ticket": (await import("../../../scripts/hooks/no-linear-ticket")).check,
+    "no-main-checkout": (await import("../../../scripts/hooks/no-main-checkout")).check,
+    "no-raw-wa": (await import("../../../scripts/hooks/no-raw-wa")).check,
+  }
+  for (const [guard, check] of Object.entries(guards))
+    expect(await check(unread, env)).toContain(`${guard} hook refuses an apply_patch`)
+})
