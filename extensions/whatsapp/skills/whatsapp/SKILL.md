@@ -10,7 +10,7 @@ While this extension is on, the owner's WhatsApp is a chat with the factory: ops
 A message with no reply in 3 minutes while the dispatcher is not mid-turn, or any message while the dispatcher has read stuck or failed, also goes to the session in the assistant seat (`roster.ts who assistant`); with no session there, it stays with the dispatcher alone and ops-wa's log says so.
 While the extension is off, ops-wa hands nothing on and answers the owner, at most once an hour, that WhatsApp mode is off.
 
-What goes over WhatsApp is factory status alone: the state of the factory's own work, never org work, a secret or customer data (door 2).
+What goes over WhatsApp is factory status alone: the state of the factory's own work, never org work, a secret or customer data, as the owner decided at door 2 of [ADR 0023](../../../../.agents/adr/0023-the-owners-whatsapp-chat-is-the-owners-words.md).
 
 1. Answer every owner message ops-wa hands you, even a one-word one: write the reply to a file and run `playground wa send <absolute path>`.
    The Assistant answers only what ops-wa hands it, the same way, and routes nothing.
