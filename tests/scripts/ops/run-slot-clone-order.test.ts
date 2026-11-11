@@ -1,5 +1,6 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -46,6 +47,18 @@ const ordered = (m: Machine) => {
     names.map((n) => n.split("-").slice(3).join("-")).join(",") === "worker-older,worker-newer"
   )
 }
+// each wait ends within 10 s, failing with the waiters' names and the start lines, so a hang says what it waited on (issue 1723, run 42891811978: both waits hung to bun's 60 s timeout saying nothing)
+const within = async (ok: () => boolean, what: string, m: Machine) => {
+  const end = Date.now() + 10_000
+  while (!ok() && Date.now() < end) await Bun.sleep(50)
+  if (ok()) return
+  const waiters = existsSync(join(m.ops, "run-slot.clone-waiters"))
+    ? readdirSync(join(m.ops, "run-slot.clone-waiters")).sort()
+    : []
+  throw new Error(
+    `${what} within 10s; waiters: ${waiters.join(", ") || "none"}; starts: ${started(m).join(", ") || "none"}`,
+  )
+}
 
 // issue 1314, 7 Nov: after a ship the Dashboard roll's clone waited about 17 minutes behind a worker's big test run on run-slot-2, so the live Dashboard stayed on the old version
 describe("a big run on a CPU slot", () => {
@@ -88,11 +101,88 @@ describe("the clone lane", () => {
     expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
     const newer = cloning(m, "worker-newer")
     // the order is decided once both places are listed, the older's ask time first, so the lane frees with the order decided
-    while (!ordered(m)) await Bun.sleep(50)
+    await within(() => ordered(m), "both waiters listed, the older first", m)
     m.release("run-slot-clone")
-    while (started(m).length === 0) await Bun.sleep(50)
+    await within(() => started(m).length > 0, "a clone started", m)
     await Promise.all([stop(older.p), stop(newer.p)])
     expect(started(m)[0]).toBe("worker-older")
+  })
+
+  // issues 1619 and 1688: the ask field was second-resolved, so two clones that asked in one second tied and the name's glob fell to the pid, which does not track ask order
+  test("and one that asked later within the same second waits behind the earlier one", async () => {
+    const m = machine()
+    m.hold("run-slot-clone", 1, "small")
+    const older = cloning(m, "worker-older")
+    expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
+    const mine = readdirSync(join(m.ops, "run-slot.clone-waiters")).find((n) =>
+      n.endsWith("-worker-older"),
+    )!
+    const [seconds, ns] = mine.split("-")[1]!.split(".")
+    // the same second, just after the older's ask, in the format the asker writes its asked field
+    const later =
+      ns === undefined
+        ? seconds!
+        : ns === "999999999"
+          ? `${Number(seconds!) + 1}.000000000`
+          : `${seconds}.${String(Number(ns) + 1).padStart(9, "0")}`
+    // pid 1 always sorts ahead of a real waiter's pid at the same asked field, so a second-resolved ask hands the lane to this later one
+    const one = Bun.spawnSync(["ps", "-o", "lstart=", "-p", "1"], {
+      env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+    })
+      .stdout.toString()
+      .trim()
+    writeFileSync(join(m.ops, "run-slot.clone-waiters", `2-${later}-1-worker-later`), `${one}\n`)
+    m.release("run-slot-clone")
+    await within(() => started(m).length > 0, "a clone started", m)
+    await stop(older.p)
+    expect(started(m)[0]).toBe("worker-older")
+  })
+
+  // the stamp intake takes digits and dots alone, as RUN_SLOT_ASKED's does, so a value with /, - or a space cannot name a ticket; the waiter stamps itself fresh instead
+  test("and takes no ask stamp that holds a character outside digits and dots", async () => {
+    const m = machine()
+    m.hold("run-slot-clone", 1, "small")
+    const run = m.start("worker-stamped", { RUN_SLOT_ASK_STAMP: "a9.1b -c" }, SCRIPT, [
+      "cp",
+      "-R",
+      "node_modules",
+    ])
+    expect(await run.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
+    const mine = readdirSync(join(m.ops, "run-slot.clone-waiters")).find((n) =>
+      n.endsWith("-worker-stamped"),
+    )!
+    await stop(run.p)
+    expect(mine.split("-")[1]).toMatch(/^\d+\.\d{9}$/)
+  })
+
+  // a clock read that fails at the first ask still hands the reread a stamp, so the new copy names the ticket as the first copy did and no waiter waits behind one of its own names
+  test("and a waiter whose first clock read fails keeps its one ticket across a reread", async () => {
+    const m = machine()
+    const armed = join(m.root, "python-armed")
+    writeFileSync(
+      join(m.bin, "python3"),
+      `#!/bin/bash\n[ -e "${armed}" ] || exit 1\nexec ${Bun.which("python3")} "$@"\n`,
+    )
+    chmodSync(join(m.bin, "python3"), 0o755)
+    m.hold("run-slot-clone", 1, "small")
+    const copy = join(m.root, "run-slot.sh")
+    copyFileSync(SCRIPT, copy)
+    const older = m.start("worker-clocked", {}, copy, ["cp", "-R", "node_modules"])
+    expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
+    const queue = join(m.ops, "run-slot.clone-waiters")
+    const first = readdirSync(queue)
+    expect(first).toHaveLength(1)
+    writeFileSync(armed, "")
+    copyFileSync(SCRIPT, `${copy}.new`)
+    // copyFileSync keeps the source's mtime on macOS, so the copy takes the moment it lands, as a pull's write does
+    utimesSync(`${copy}.new`, new Date(), new Date())
+    renameSync(`${copy}.new`, copy)
+    expect(await older.saw(/running the new copy/g)).toBe(true)
+    // the new copy's own waiting line comes after its ticket is written, so the count below reads both copies' tickets and cannot pass before the reread's write
+    expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm, 2)).toBe(true)
+    await within(() => readdirSync(queue).length === 1, "one ticket across the reread", m)
+    expect(readdirSync(queue)).toEqual(first)
+    await stop(older.p)
   })
 
   test("but the Dashboard roll's clone, class 0, goes before an older worker's", async () => {
@@ -103,7 +193,7 @@ describe("the clone lane", () => {
     const roll = cloning(m, "ops-dashboard")
     expect(await roll.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
     m.release("run-slot-clone")
-    while (started(m).length === 0) await Bun.sleep(50)
+    await within(() => started(m).length > 0, "a clone started", m)
     await Promise.all([stop(worker.p), stop(roll.p)])
     expect(started(m)[0]).toBe("ops-dashboard")
   })
@@ -132,13 +222,13 @@ describe("the clone lane", () => {
     const older = cloning(m, "worker-older", copy)
     expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
     const newer = cloning(m, "worker-newer")
-    while (!ordered(m)) await Bun.sleep(50)
+    await within(() => ordered(m), "both waiters listed, the older first", m)
     copyFileSync(SCRIPT, `${copy}.new`)
     utimesSync(`${copy}.new`, new Date(), new Date())
     renameSync(`${copy}.new`, copy)
     expect(await older.saw(/running the new copy/g)).toBe(true)
     m.release("run-slot-clone")
-    while (started(m).length === 0) await Bun.sleep(50)
+    await within(() => started(m).length > 0, "a clone started", m)
     await Promise.all([stop(older.p), stop(newer.p)])
     expect(started(m)[0]).toBe("worker-older")
   })

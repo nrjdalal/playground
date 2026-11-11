@@ -71,6 +71,7 @@
     "trace-count": "bun packages/scripts/src/trace-count/cli.ts",
     "vendor:upstream": "bun packages/scripts/src/vendor-upstream/cli.ts",
     "verify": "bun packages/scripts/src/verify/prebuild.ts && bun packages/scripts/src/verify/cli.ts",
+    "wa": "bun --no-env-file packages/scripts/src/wa/cli.ts",
     "wispr:latest": "bun packages/scripts/src/wispr/latest.ts"
   },
   "devDependencies": {
@@ -153,6 +154,7 @@
     "ai": "^7.0.128",
     "auth": "^1.7.12",
     "babel-plugin-react-compiler": "^1.0.0",
+    "baileys": "^7.0.0-rc14",
     "better-auth": "^1.7.12",
     "class-variance-authority": "^0.7.1",
     "cmdk": "^1.1.1",
