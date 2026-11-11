@@ -1580,7 +1580,9 @@ cheap_idle() {
       [ "$l" = "$G0_CACHE" ] && return 0
     fi
     gate_sig
-    [ "$G" = "$G0" ]
+    [ "$G" = "$G0" ] || return 1
+    # the same verdict's read is the reading the next compare holds, so a moved line that moved nothing re-baselines here
+    read -r _ G0_CACHE 2>/dev/null < "$OPS/run-slot.gauges"
   else
     [ "${a[0]}" = "$TICKET" ] && return 1
     next_sig

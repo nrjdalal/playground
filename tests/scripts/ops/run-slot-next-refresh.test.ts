@@ -1,11 +1,11 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, machine, runSlot, stop } from "./run-slot-fake"
+import { SCRIPT, WAITING, machine, runSlot, shim, starts, stop, waiter } from "./run-slot-fake"
 
-// a check waits on its run's exit, so the timeout only catches a hang
-setDefaultTimeout(60_000)
+// a check waits on its run's exit, so the timeout only catches a hang, and the drift row runs a cost window like the reads family's
+setDefaultTimeout(180_000)
 
 // issue 1477, 7 Nov: a ticket sat 30 minutes while every fresh head read named it, because the oldest's look had named a bigger ticket under its own frozen lanes verdict and never looked again; capacity counts the slots the lanes open, and a waiter behind the head wakes on run-slot.next alone, so these rows hold the oldest to naming, within a poll, whoever a fresh read names
 type Machine = ReturnType<typeof machine>
@@ -78,5 +78,36 @@ describe("the oldest names the queue's fresh pick through a lanes flip", () => {
     expect(await head(m)).toBe(t2)
     expect(existsSync(join(m.ops, "run-slot.holder"))).toBe(false)
     await stop(w.p)
+  })
+})
+
+// canary's reads row under readings that drift, as a real top's do: the idle share moves between 78 and 84 with the lanes open, and an outside reading lands at 3 s, so a watch that re-read the gauges on every moved line would cost like the unconditional read it replaced; the head re-baselines its compare after a same-verdict read instead
+describe("the head's watch under drifting readings", () => {
+  test("five queue waiters across 25 polls start fewer than 2 processes a poll each while the idle share drifts", async () => {
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
+    m.hold("run-slot", 3, "big")
+    m.hold("run-slot-2", 3, "big")
+    writeFileSync(
+      join(m.bin, "top"),
+      `#!/bin/bash\necho "$*" >> ${join(m.root, "top.log")}\ni=$((78 + RANDOM % 7))\necho "CPU usage: 1.00% user, 1.00% sys, 98.00% idle "\necho "CPU usage: 5.00% user, 5.00% sys, $i.00% idle "\n`,
+    )
+    chmodSync(join(m.bin, "top"), 0o755)
+    const { count, path } = shim(m)
+    const waiters = Array.from({ length: 5 }, (_, i) =>
+      waiter(m, path, `worker-${i}`, ["touch"], { RUN_SLOT_POLL: "1" }),
+    )
+    const outside = async () => {
+      await Bun.sleep(3_000)
+      writeFileSync(join(m.ops, "run-slot.gauges"), "0 81 0 120 3.50\n")
+      await runSlot(["bash", SCRIPT, "slots"], {
+        cwd: m.root,
+        env: m.env(),
+        stdout: "ignore",
+        stderr: "ignore",
+        ops: m.ops,
+      }).exited
+    }
+    const rate = await starts(count, waiters, new RegExp(WAITING.source, "m"), 25, outside)
+    expect(rate / waiters.length).toBeLessThan(2)
   })
 })
