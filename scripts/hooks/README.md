@@ -47,11 +47,11 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   That one command finds the checkout with no `$HOME` in it: `$PLAYGROUND_REPO`, which spawn.sh's launch exports as its main checkout, else the main checkout git names for `$CLAUDE_PROJECT_DIR` (`--git-common-dir`, so a session in a worktree runs the main checkout's guards); when neither names a folder holding the hook's script, it runs nothing and exits 0.
 - A hook's script lands on `main` in one ship and its registration in a later one, since every wrapper runs its script from the main checkout, which follows `main`, and a factory session on `canary` loses the hook's tool the moment `canary` registers a script `main` lacks.
   A hook leaves in the reverse order: its registration in one ship and its script in a later one, since a worktree branched before the first still registers the hook in its `.claude/settings.json`, and its wrapper refuses every call the hook guards once the main checkout lacks the script.
-  Its bundle goes with its registration, since `bun run hooks:bundle` builds only the guards `scripts/factory-settings.json` registers and those `ALWAYS` names ([guards](#guards)), and the wrapper runs the script in the bundle's place.
+  Its bundle goes with its registration, since `bun run hooks:bundle` builds only the guards `scripts/factory-settings.json` registers, and the wrapper runs the script in the bundle's place.
   `bun run test:skills`'s hooks-on-main step (`packages/scripts/src/hooks-on-main.ts`, CI's `test` check) holds every tracked `*.json` file and `SKILL.md` frontmatter outside `tests/` that runs a hook script to it: it fails naming each wrapper none of whose scripts (both of a bundle-then-source wrapper's) `origin/main` holds, and fails when `origin/main` does not read, after fetching it.
 - A PreToolUse guard fails closed, since Claude Code blocks a call only on exit 2: its wrapper turns any other exit but 0 (a crash, a damaged bundle, Bun missing) into exit 2, its refusal naming the hook, the code and `bun install` in the checkout,
   and under `PLAYGROUND_ROLE` a missing script or an unresolved checkout refuses too, naming the restore route (ops-restore puts the checkout back, else Ops by playbook's LIFECYCLE.md, Restoring the main checkout); with no role it runs nothing and exits 0, as above.
-  A timeout still lets the call run, since Claude Code treats a hook timeout as a non-blocking error.
+  A timeout lets the call run, since Claude Code treats a hook timeout as a non-blocking error, but on Bash: guards' `onFailure: "block"` refuses a Bash call whose guards time out or fail to start ([guards](#guards)).
   Every other wrapper (SessionStart, Stop, PostToolUse and the rest) stays open on a crash, since a Stop hook at exit 2 keeps its session going and a crashing one would loop it.
   `tests/scripts/hooks-abs-path.test.ts` holds both shapes and runs them over stub guards.
 - A PreToolUse guard's wrapper runs its bundle, `scripts/hooks/bundled/<hook>.js`, which `bun run hooks:bundle` (`packages/scripts/src/hooks-bundle.ts`) builds from `scripts/hooks/<hook>.ts` with everything it imports, so the guard starts with a missing or damaged `node_modules`; every other hook runs its source.
@@ -202,13 +202,14 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## guards
 
-- Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names with the gate and the entry its own main block runs (`fromFactory` or none; `check`, or `guarded` for no-extensions-write's Worker and `refusal` for no-glm-heavy-path), all at once.
+- Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
+  Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
-  `GUARDS` holds every guard each settings file registers on Bash, which a test reads from both files, so a guard registered on Bash later runs here once it joins `GUARDS`.
-  `bun run hooks:bundle` builds it as `scripts/hooks/bundled/guards.js` whether or not the settings register it yet (`ALWAYS` in `packages/scripts/src/hooks-bundle.ts`), so its bundle reaches `main` a ship before its registration.
-  Its registration in both settings files, in place of each Bash guard's own Bash entry, lands in a later ship than its script, as [Registered in both settings files](#registered-in-both-settings-files) says.
+  Both settings files register it once on Bash, with `onFailure: "block"`, in place of each Bash guard's own Bash entry, and a guard that also guards another tool keeps its own entry for that tool.
+  A test holds each file to that one Bash entry, so a guard a later PR registers on Bash fails it until the guard joins `GUARDS`.
+  A Codex session renders the same entry with no `onFailure`, which Codex's hooks.json lacks, so there a timeout lets the call run ([A Codex session's calls](#a-codex-sessions-calls)).
   Its tests are `bun run test:file tests/scripts/hooks/guards.test.ts tests/scripts/hooks/refused-forms.test.ts`, the second feeding each Bash row of a guard it runs through its `check()`.
 
 ## no-bare-slack-link
@@ -656,7 +657,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A declaration that does not read refuses every such write, on any server named for Slack and by curl, with the fix; with none, Slack reads as above.
   The hook reads the declaration alone, and the extension's own gate stays the one check of a message's words.
   A Slack upload from a path that holds a factory term (the scratchpad folder's name does) is refused, so copy the file first to `/private/tmp/claude-501/<topic>/`, a `<topic>` that names no session and holds no term.
-  When it cannot start it refuses and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)), and its two lists are read as [Guard lists](#guard-lists) says.
+  When it cannot start it refuses and a timeout acts as [Registered in both settings files](#registered-in-both-settings-files) says, and its two lists are read as [Guard lists](#guard-lists) says.
   It shares `scripts/hooks/shell.ts` and `scripts/hooks/github.ts` (the repository resolver) with the other hooks, and its tests are in `bun run test:file tests/scripts/hooks`.
   Its term pattern also reads a public post's draft for `bun run ask new` and `edit`, through `factoryTerms` ([The public-draft check](#the-public-draft-check)).
 
@@ -716,7 +717,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Only the dispatcher's refusal names that path and the approval's shape, `{"ask": "<the Inbox decision's id>", "titles": ["<title>"]}` adding each title approved for that team that day, so the dispatcher writes the approval from its refusal.
   Its `<team>` is the team as `save_issue` names it, lowercased with each run of other characters one hyphen (`AI Platform` is `ai-platform`).
   Any other role is refused a Write, Edit, MultiEdit or NotebookEdit into that folder, or a Bash command with a word that names a path in it; an interpreter's code that builds the path itself is not read.
-  It fails closed on any call that reads as filing a ticket, a Linear API call whose body it cannot read included; when it cannot start it refuses, and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)).
+  It fails closed on any call that reads as filing a ticket, a Linear API call whose body it cannot read included; when it cannot start it refuses, and a timeout acts as [Registered in both settings files](#registered-in-both-settings-files) says.
   The refusal of a body it cannot read names the fix, the query written with the Write tool first and named by its literal absolute path in a call of its own (`curl -d @/abs/query.json`, `gh api --input /abs/query.json`), and says none of the call's commands ran.
   The refusal of an endpoint or URL it cannot read names its fix, that endpoint written out literally (`gh api https://api.linear.app/graphql`).
   It reads Bash through `scripts/hooks/shell.ts`, the reader it shares with the release hook, and its tests are in `bun run test:file tests/scripts/hooks` too.
@@ -906,7 +907,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   An `--attach` reads only what gh posts, its alt text after `#`, else its file's name, so a path built from a variable (`"$S/after.png#After"`) passes when the variable sits before the alt's first `#`, or, with no `#`, before the name's last `/`.
   Its refusal gives the way out for a file, rule or patch that holds the word: name the file or rule by what it is ("the ship rule") with its line number, and keep the patch out of the comment.
   Write the patch to a file in your scratchpad, send its absolute path to the PR's worker by SendMessage, and say in the comment that a patch went to the author, since gh's `--attach` uploads only images and video (gh 2.103.3: "supported: png, jpg, jpeg, gif, webp, svg, mp4, mov, webm").
-  It fails closed only on a call that reads as a comment; when it cannot start it refuses, and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)).
+  It fails closed only on a call that reads as a comment; when it cannot start it refuses, and a timeout acts as [Registered in both settings files](#registered-in-both-settings-files) says.
   A PR body or a commit message is not a comment.
   The owners it guards are its `release-owners` list, A to Z, read as [Guard lists](#guard-lists) says; core's `release-owners.json` names none, so a fresh clone guards no owner until one is added.
   Its tests are `bun run test:file tests/scripts/hooks`, which `bun run test` runs rather than `test:skills`; run them before pushing a change to the hook.
