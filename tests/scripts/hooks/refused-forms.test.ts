@@ -15,6 +15,7 @@ import {
 import { homedir, tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 
+import { check as dispatch, GUARDS as DISPATCHED } from "../../../scripts/hooks/guards"
 import { check as desktopOwnerApp } from "../../../scripts/hooks/no-desktop-owner-app"
 import { check as envDump } from "../../../scripts/hooks/no-env-dump"
 import { check as extensionRepoWrite } from "../../../scripts/hooks/no-extension-repo-write"
@@ -510,13 +511,23 @@ describe("each no-extensions-write refusal of a #1428 row names the call as one 
   })
 })
 
+// A Bash row of a guard guards.ts runs reaches it through guards.ts's check(), gated as a factory session's call, with the guard set up as its own test sets it up.
+const dispatched = (guard: Guard) => DISPATCHED.find((g) => g.name === guard)
+const verdict = (c: (typeof CASES)[number], cwd: string, home: string) => {
+  const entry = dispatched(c.guard)
+  if (typeof c.call !== "string" || !entry) return GUARDS[c.guard].run(input(c.call, cwd), home)
+  return dispatch(input(c.call, cwd), { PLAYGROUND_ROLE: "worker" }, [
+    { ...entry, run: (raw) => GUARDS[c.guard].run(raw, home) },
+  ])
+}
+
 describe("every refused form stays refused unless the allow list names it", () => {
   test.each(CASES.map((c) => [c.key, c] as const))(
     "%s",
     async (_, c) => {
       const at = GUARDS[c.guard].folders[c.folder]
       if (!at) throw new Error(`${c.guard} has no ${c.folder} folder`)
-      const reason = await GUARDS[c.guard].run(input(c.call, at[0]), at[1])
+      const reason = await verdict(c, at[0], at[1])
       if (allowed(c)) expect(reason).toBeUndefined()
       else expect(reason).toContain(`${c.guard} hook `)
     },

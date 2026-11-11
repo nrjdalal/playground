@@ -35,6 +35,18 @@ test("scripts/hooks/bundled holds one bundle per PreToolUse guard and per worker
   expect(readdirSync(join(ROOT, BUNDLED)).sort()).toEqual(names)
 })
 
+// --check builds from a tree (the index, or the merged head), so guards.ts is bundled when that tree holds it, whatever the working copy holds.
+test("an always-bundled entry is built when the tree --check reads holds its source", async () => {
+  const tree = (paths: string[]) => ({
+    names: () => [],
+    paths: () => paths,
+    text: (path: string) => (paths.includes(path) ? "" : undefined),
+  })
+  const scratch = mkdtempSync(join(tmpdir(), "hooks-bundle-always-"))
+  expect(await entries(scratch, tree([join(HOOKS, "guards.ts")]))).toContain("guards")
+  expect(await entries(ROOT, tree([]))).not.toContain("guards")
+})
+
 // A guard that imports another guard keeps that guard's main block live when both are entry points of one build, and the imported block then reads stdin first and judges the call by its own rules.
 test("each guard bundle runs one main block, its own, and the worker bundle none", async () => {
   for (const name of await entries(ROOT)) {

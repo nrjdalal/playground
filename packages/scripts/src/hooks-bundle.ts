@@ -163,9 +163,19 @@ const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
   }
 }
 
+// guards.ts runs every Bash guard in one process, bundled wherever its source is (the tree's, when one is given) before the settings register it, so its bundle reaches main a ship before its registration.
+const ALWAYS = ["guards"]
+
 export const entries = async (root: string, tree?: Tree): Promise<string[]> => [
-  ...(tree ? guardsIn(tree.text(SETTINGS) ?? '{"hooks":{}}') : await preToolUseGuards(root)),
-  ...WORKERS,
+  ...new Set([
+    ...(tree ? guardsIn(tree.text(SETTINGS) ?? '{"hooks":{}}') : await preToolUseGuards(root)),
+    ...ALWAYS.filter((name) =>
+      tree
+        ? tree.text(join(HOOKS, `${name}.ts`)) !== undefined
+        : existsSync(join(root, HOOKS, `${name}.ts`)),
+    ),
+    ...WORKERS,
+  ]),
 ]
 
 // Each bundle's file name and text, built from root's sources, or the tree's through its mirror when one is given, one build per entry point: Bun compiles an imported module's `if (import.meta.main)` to `if (false)` only when that module is no entry point of the same build, and a guard imports other guards.
