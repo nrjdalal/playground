@@ -68,9 +68,12 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It reads the tree `git merge-tree --write-tree HEAD origin/canary` writes and names the rebuild on the merged tree.
   A merge that conflicts in `scripts/hooks/bundled/` alone is read with its conflict markers, which read stale, and one that conflicts elsewhere prints the paths and passes, since pr:merge's merged-tree gate (`packages/scripts/src/pr-merge/README.md`) reports it.
   Limits: `origin/canary` is the local ref as the last fetch left it, so a push after canary moved checks the older canary, and pr:merge's gate covers the fresh one; a package's import (zod's) resolves from the checkout's `node_modules`, so a `bun.lock` change `canary` brings in is not in the merged read.
-  Bun resolves every import from the working files, whatever its specifier (relative, `@/`, `@packages/*`), so a merged tree that reaches a source only it holds, one `canary` adds, fails to build: `--check --merged` then refuses, naming the sources the checkout lacks, the build's first error and the fix, merge `canary` in first, so no bundle passes unread.
-  The working files still decide what an import resolves to, so an imported file or guard deleted from disk alone fails `--check`'s build (`Could not resolve`), and an untracked file that shadows an import is refused as not in the tree: restore the file, or stage the change.
-  A source `canary` deletes that the head's guard still imports resolves from the working file and reads no text in the tree, so the check refuses naming that file (`is not in the tree --check reads`) rather than a bundle; and the job merges the checked-out `HEAD`, so a push of another ref is judged by `HEAD`'s tree, and pr:merge's gate by the PR's own.
+  `--check` builds its tree in the mirror, a temp folder it removes afterwards, which holds a copy of every source, `tsconfig.json` and `package.json` file the tree holds, in the tree's own layout.
+  So every import the tree reaches resolves as a build of that tree would, whatever its specifier (relative, `@/`, `@packages/*`) and whichever folder it starts from, with the tree's own tsconfigs: a source only `canary` adds, and a path mapping only its tsconfig holds, build and pass.
+  Only `node_modules` entries are links: each to the checkout's own, and a workspace package's to the mirror's same path, so a bare `@packages/<name>` import reads the tree's copy of that package with its own tsconfig.
+  An import the tree cannot resolve fails the build, exit 1 with Bun's error (`Could not resolve`), so no bundle passes unread: a source `canary` deletes that the head's guard still imports is one, since the mirror lacks it.
+  The working files decide nothing the tree holds, so an imported file deleted from disk alone, or an untracked file beside an import, leaves the check as the tree reads.
+  The job merges the checked-out `HEAD`, so a push of another ref is judged by `HEAD`'s tree, and pr:merge's gate by the PR's own.
   Write mode also removes a bundle no build writes, a removed guard's: each `.js` file directly in `scripts/hooks/bundled/` that no build writes, one file at a time, and nothing else there.
   The bundles are committed, so a git restore of a deleted checkout brings them back with no install (so a guard that cannot start needs its bundle back, by `git checkout` or `bun run hooks:bundle`, where the wrapper's refusal still reads `bun install`).
   Two branches that both change a shared hook file conflict there, so merge `canary` into a hook PR with `bun run hooks:merge-canary` (`packages/scripts/src/hooks-merge-canary.ts`), from a clean tree.
@@ -87,6 +90,21 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   and no-raw-delete guards every session's deletes, since a delete is final whoever runs it.
   Every other factory hook acts for a factory session alone, `PLAYGROUND_ROLE` or else its name in Claude Code's registry, placed by the roster's `kind` for that name and then by the factory's names (`scripts/hooks/role.ts`), so a session the owner opens in the factory's checkout passes them untouched.
   Claude Code loads project settings from the session's own folder alone, so a factory session restored where they lack the hooks (another checkout, an older one, a subfolder) is respawned with its settings (playbook's SPAWN.md, Role and settings), and `scripts/ops/up.py --sessions`, which reads each session's command line and its own folder's `.claude/settings.json`, names each one.
+
+## A Codex session's calls
+
+- A Codex session (spawn.sh's `--harness codex`) loads the factory's guards from the `hooks.json` spawn.sh renders from `scripts/factory-settings.json` at each launch: every handler, with its matcher, on each event Codex has (it has no Notification, PermissionDenied, PostToolUseFailure or StopFailure), and the SessionStart beat beside them.
+  session-state is left out, so a Codex session writes no state record, and the Dashboard's light reads it as idle, since `lightOf()` in `api/hono/src/lib/dashboard/workers.ts` reads every state but running as idle.
+  Codex runs each command in the call's folder with `$PLAYGROUND_REPO` set by the launch, so every wrapper finds the main checkout as it does for Claude Code.
+- A Codex input carries a `turn_id`, which Claude Code's lacks (codex-cli 0.167.1).
+  It sends a shell call as Bash with its `command` and an MCP call by its `mcp__` name and arguments, both in Claude Code's shape, so every guard reads them as it reads Claude Code's.
+- Codex sends an edit in two shapes: an apply_patch call, or an apply_patch command run in the shell.
+  Its matcher takes Edit and Write as apply_patch's names, so the factory's edit matchers reach both.
+  `guardInputs()` in `scripts/hooks/codex.ts` reads either into one Write per file the patch adds, updates, deletes or moves to, its path resolved from the call's folder and its content the whole patch, and the shell form also keeps its Bash call.
+  Each edit guard (no-extensions-write, no-linear-ticket, no-main-checkout, no-raw-wa) judges each of them through `eachInput()`, which refuses an apply_patch whose patch names no file; writing-first judges them too and lets such a patch run, since it fails open.
+- A Codex session resumed with no `PLAYGROUND_ROLE` takes its role from its thread's name: `codexName()` in `scripts/hooks/role.ts` reads the last `thread_name` that `$CODEX_HOME/session_index.jsonl` holds for its id.
+- Codex has no Skill tool, so for writing-first a Codex Bash call that reads the skill's `SKILL.md` (`cat`, `head`, `sed` and the other readers in its `READS`) is the load, and its rendered matcher is `^(Bash|Edit|MultiEdit|Write)$`.
+- Its tests are `bun run test:file tests/scripts/hooks/codex.test.ts tests/scripts/hooks/refused-forms.test.ts tests/scripts/hooks/role.test.ts tests/scripts/hooks/writing-first.test.ts tests/scripts/spawn-codex.test.ts`.
 
 ## Guard lists
 
@@ -723,6 +741,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   `npx` or `bun x` (a package runner, read as below) (but for turbo's packages build, below), `git commit` (it runs pre-commit), `bun run build`, `bun run check-types`,
   `bun run test`, `bun run test:file` and `bun test` while the command's directory ([The folder a hook reads](#the-folder-a-hook-reads), and a `git -C` or `bun --cwd` in it, each `~-` and `~+` expanded as that section says) is the main checkout and not a worktree under `.claude/worktrees/`,
   and a write into the main checkout from anywhere (a redirect, `cp`, `mv`, `touch`, `tee`, curl's `-c` or `-o`, the files `sed -i`, BSD's `sed -I`, `sed --in-place` or `perl -i` edits in place, or a file tool's path), naming the fix: run it in your own worktree.
+  It refuses an `agent-browser screenshot` or `agent-browser pdf` with a relative path or none from any folder, since agent-browser saves a relative path in the folder its browser started in, which can be the main checkout, where `playground rm` cannot clean it; the reason names an absolute path under the session's scratchpad or its worktree.
+  It reads one in the form [no-raw-delete](#no-raw-delete)'s `scriptStaysText` reads `eval` by, one of the call's own commands on a call whose every command opens with the bare word `agent-browser`, and lets it run once a word after the subcommand reads as an absolute path, so `--session <name>`, `--full` and a selector stand anywhere (`browserPathless`).
   A package runner is read past its options and the values `RUNNER_TAKES` lists, such as `--registry` and `--env-file`, and runs the tool its `-p` or `--package` names too, since it puts that package's programs on `PATH` and may run any program there.
   `bunx` and `bun x` are judged in the shell's folder and in every folder `runnerFolders` names: the one bun runs the tool in (each `--cwd` among bun's own options and the runner's, read from the one before, then the tool's own `--cwd` from there), and the runner's last `--cwd`; a runner folder the hook cannot read is refused as one in the main checkout.
   A program `bunx` or `bun x` runs is read as that program typed bare in the folder bun runs it in, and when bun reads an option's value as its subcommand, it drops the next word naming that subcommand and runs the word after it.
@@ -946,6 +966,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 ## session-state
 
 - `scripts/hooks/session-state.ts` writes every session's own state to `session-state/<session id>.json` in the data folder, which ops-session-resume reads and the Dashboard is to read.
+  A Codex session's `hooks.json` leaves it out ([A Codex session's calls](#a-codex-sessions-calls)), so a Codex session writes none.
   Registered on Notification, PermissionDenied, PermissionRequest, PostToolUse, PostToolUseFailure, SessionEnd, Stop, StopFailure and UserPromptSubmit with one command in `.claude/settings.json` and `scripts/factory-settings.json`,
   it writes the shape `sessionStateSchema` in `packages/config/src/session-state.ts` checks (`agentId?`, `at`, `event`, `reason?`, `resetsAt?`, `sessionId`, `state`, `tool?`; `state` is `failed`, `idle`, `stuck`, `usage-limit` or `working`),
   whose `stateNow()` reads a stuck, failed or usage-limit record as over once the transcript holds a turn after it,
@@ -994,5 +1015,6 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   the root `AGENTS.md` and `CLAUDE.md`, `scripts/README.md` and `scripts/hooks/README.md`, and `docs/`; and anywhere, a handoff under the data folder's `handoffs/`.
   A Skill call or a typed `/writing-for-agents`, bare or a plugin's or folder's scoped copy (`ws-home:writing-for-agents`), leaves a mark under the data folder's `writing-first/`, a subagent's apart from its parent's, since a subagent's hook input carries its parent's session id beside its own `agent_id`; a compaction clears the session's marks.
   With the skill installed nowhere (the config folder's `skills/`, the checkout's `.claude/skills/`, or a plugin `plugins/installed_plugins.json` lists, installed for the user and enabled in the user settings or installed for the session's project) it lets every write through, and it fails open on a call it cannot read.
+  A Codex session's load and edits are in [A Codex session's calls](#a-codex-sessions-calls).
   Its refusal names the bare skill or the scoped name the session's skill list shows, since a factory session loads its org's set through `--plugin-dir` under a name the hook cannot see.
   Its tests are in `bun run test:file tests/scripts/hooks` too.

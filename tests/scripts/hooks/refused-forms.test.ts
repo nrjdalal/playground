@@ -613,6 +613,82 @@ describe("every refused form stays refused unless the allow list names it", () =
   })
 })
 
+// A Codex session's hook input (codex-cli 0.167.1): its own fields beside Claude Code's, a shell call as Bash with its command, an MCP call by its mcp__ name and arguments, and an edit in two shapes, an apply_patch call whose command is the patch, or an apply_patch command run in the shell.
+const THREAD = "0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b"
+const CODEX_FIELDS = {
+  model: "gpt-made-up",
+  permission_mode: "bypassPermissions",
+  session_id: THREAD,
+  tool_use_id: "call-made-up",
+  transcript_path: null,
+  turn_id: "turn-made-up",
+}
+const EDITS = new Set(["Edit", "MultiEdit", "NotebookEdit", "Write"])
+const added = (text: string) =>
+  text
+    .split("\n")
+    .map((line) => `+${line}`)
+    .join("\n")
+// The patch Codex sends for an edit row: a Write adds its file, every other edit updates it.
+const patchOf = ({ input }: { input: Record<string, unknown> }) => {
+  const path = String(input.file_path ?? input.notebook_path)
+  const body =
+    typeof input.content === "string"
+      ? `*** Add File: ${path}\n${added(input.content)}`
+      : `*** Update File: ${path}\n@@\n-${String(input.old_string ?? "x")}\n${added(String(input.new_string ?? "y"))}`
+  return `*** Begin Patch\n${body}\n*** End Patch`
+}
+type Shape = { input: Record<string, unknown>; shape: string; tool: string }
+// Each Codex shape of a row; a read by Read, Glob or Grep has none, since Codex reads through the shell.
+const codexShapes = (call: Call): Shape[] => {
+  if (typeof call === "string") return [{ input: { command: call }, shape: "shell", tool: "Bash" }]
+  if (call.tool.startsWith("mcp__")) return [{ input: call.input, shape: "mcp", tool: call.tool }]
+  if (!EDITS.has(call.tool)) return []
+  const patch = patchOf(call)
+  return [
+    { input: { command: patch }, shape: "apply_patch call", tool: "apply_patch" },
+    {
+      input: { command: `apply_patch <<'EOF'\n${patch}\nEOF` },
+      shape: "apply_patch in the shell",
+      tool: "Bash",
+    },
+  ]
+}
+const codexInput = ({ input, tool }: Shape, cwd: string) =>
+  JSON.stringify({
+    ...CODEX_FIELDS,
+    cwd,
+    hook_event_name: "PreToolUse",
+    tool_input: input,
+    tool_name: tool,
+  })
+const CODEX_CASES = CASES.flatMap((c) =>
+  codexShapes(c.call).map((shape) => ({ ...c, codex: shape, key: `${c.key} | ${shape.shape}` })),
+)
+
+describe("every refused form stays refused in its Codex shape", () => {
+  test.each(CODEX_CASES.map((c) => [c.key, c] as const))(
+    "%s",
+    async (_, c) => {
+      const at = GUARDS[c.guard].folders[c.folder] as [string, string]
+      const reason = await GUARDS[c.guard].run(codexInput(c.codex, at[0]), at[1])
+      if (allowed(c)) expect(reason).toBeUndefined()
+      else expect(reason).toContain(`${c.guard} hook `)
+    },
+    60_000,
+  )
+
+  test("every edit row has both Codex edit shapes", () => {
+    const edits = CASES.filter((c) => typeof c.call !== "string" && EDITS.has(c.call.tool))
+    expect(edits.length).toBeGreaterThan(0)
+    for (const c of edits)
+      expect(codexShapes(c.call).map((s) => s.shape)).toEqual([
+        "apply_patch call",
+        "apply_patch in the shell",
+      ])
+  })
+})
+
 // Each path flag a row names, listed once, with the joins its program reads between the flag and its folder: "=" joined, " " spaced, "" attached; git reads -C spaced alone.
 const PATH_FLAGS = [
   { flag: "--cwd", joins: ["=", " "], program: "bun" },
