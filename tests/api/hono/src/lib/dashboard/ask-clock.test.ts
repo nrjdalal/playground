@@ -29,7 +29,7 @@ describe("fillNow", () => {
 describe("futureNowTimes", () => {
   test("names a measured or now time ahead of the clock, as the 31 Oct card's 7:28 am IST at 7:13", () => {
     const at = new Date("2026-10-31T01:43:00Z")
-    expect(futureNowTimes({ text: "now 7:28 am IST" }, at, "UTC")).toEqual([
+    expect(futureNowTimes({ text: "now 7:28 am IST" }, at, "Asia/Kolkata")).toEqual([
       '"now 7:28 am IST": 15 min ahead',
     ])
     expect(futureNowTimes(["measured 01:57Z"], at, "Asia/Kolkata")).toEqual([
