@@ -10243,7 +10243,7 @@ async function eachInput(raw, guard, judge) {
 }
 
 // scripts/hooks/no-main-checkout.ts
-import { existsSync as existsSync7, readdirSync as readdirSync3, readFileSync as readFileSync4, realpathSync as realpathSync3 } from "fs";
+import { existsSync as existsSync7, readdirSync as readdirSync3, readFileSync as readFileSync4, realpathSync as realpathSync3, statSync as statSync3 } from "fs";
 import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute4, join as join10, normalize, resolve as resolve5, sep } from "path";
 
 // packages/settings/src/live.ts
@@ -10892,8 +10892,15 @@ function inWorktree(path, worktrees) {
   if (!path.startsWith(worktrees))
     return false;
   const tree = join10(worktrees, path.slice(worktrees.length).split(sep)[0]);
-  return existsSync7(join10(tree, ".git")) || !existsSync7(tree);
+  return existsSync7(join10(tree, ".git")) || !isFolder2(tree);
 }
+var isFolder2 = (path) => {
+  try {
+    return statSync3(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
 function real(path) {
   const found = resolved(path);
   if (found !== undefined || !isAbsolute4(path))

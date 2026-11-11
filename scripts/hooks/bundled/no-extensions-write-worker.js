@@ -2,7 +2,7 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-extensions-write.ts
-import { existsSync as existsSync2, statSync } from "fs";
+import { existsSync as existsSync2, statSync as statSync2 } from "fs";
 import { homedir as homedir3 } from "os";
 import { dirname as dirname3, join as join5, resolve as resolve5, sep as sep2 } from "path";
 
@@ -116,7 +116,7 @@ async function eachInput(raw, guard, judge) {
 }
 
 // scripts/hooks/no-main-checkout.ts
-import { existsSync, readdirSync, readFileSync, realpathSync as realpathSync2 } from "fs";
+import { existsSync, readdirSync, readFileSync, realpathSync as realpathSync2, statSync } from "fs";
 import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute4, join as join4, normalize, resolve as resolve4, sep } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
@@ -7778,7 +7778,7 @@ function isCli(word, dirs) {
     return false;
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir }));
   if (program(word.value) === "playground")
-    return !word.value.includes("/") || !paths.some((path) => !!path && existsSync2(path) && statSync(path).isDirectory());
+    return !word.value.includes("/") || !paths.some((path) => !!path && existsSync2(path) && statSync2(path).isDirectory());
   const cli = (sep2 + CLI).toLowerCase();
   return paths.some((path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
 }

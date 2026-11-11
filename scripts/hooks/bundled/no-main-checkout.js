@@ -2,7 +2,7 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-main-checkout.ts
-import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, realpathSync as realpathSync2 } from "fs";
+import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, realpathSync as realpathSync2, statSync } from "fs";
 import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute4, join as join5, normalize, resolve as resolve4, sep } from "path";
 
 // packages/env/src/aliases.ts
@@ -7502,8 +7502,15 @@ function inWorktree(path, worktrees) {
   if (!path.startsWith(worktrees))
     return false;
   const tree = join5(worktrees, path.slice(worktrees.length).split(sep)[0]);
-  return existsSync2(join5(tree, ".git")) || !existsSync2(tree);
+  return existsSync2(join5(tree, ".git")) || !isFolder2(tree);
 }
+var isFolder2 = (path) => {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
 function real(path) {
   const found = resolved(path);
   if (found !== undefined || !isAbsolute4(path))
