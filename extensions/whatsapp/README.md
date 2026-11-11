@@ -11,7 +11,8 @@ Open Settings, then Extensions, and turn on **WhatsApp** under **Bundled with Pl
 The switch adds `whatsapp` to `ext.bundled` at your login's scope (`playground settings set ext.bundled '["slack","whatsapp"]' --reason "<why>"` does the same from a terminal, keeping Slack on beside it), and that is WhatsApp mode: ops-wa hands your messages to the dispatcher only while it is on, and answers once an hour that it is off otherwise.
 Sessions started after that read its skills after your own extensions and before core.
 
-ops-wa also needs `wa.owner` (your own number, the one it answers) and `wa.device` (the spare number) set, and its job turned on; the spare phone then links by the pairing card the Inbox shows.
+ops-wa also needs its two numbers and its job turned on: type them into the WhatsApp card's **Device number** (`wa.device`, the spare number) and **Your number** (`wa.owner`, the one it answers), each `+` and 8 to 15 digits, and Save.
+A saved number shows by its last 4 digits alone, and an empty field keeps it; the spare phone then links by the pairing card the Inbox shows.
 
 ## Inbox cards on WhatsApp
 

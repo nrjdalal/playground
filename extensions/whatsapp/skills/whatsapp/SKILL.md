@@ -9,6 +9,7 @@ license: Complete terms in the repository's NOTICE
 While this extension is on, the owner's WhatsApp is a chat with the factory: ops-wa, linked as a device on a spare number, hands each 1:1 message from the owner's number (`wa.owner`) to the dispatcher in full ([ADR 0023](../../../../.agents/adr/0023-the-owners-whatsapp-chat-is-the-owners-words.md)).
 A message with no reply in 3 minutes while the dispatcher is not mid-turn, or any message while the dispatcher has read stuck or failed, also goes to the session in the assistant seat (`roster.ts who assistant`); with no session there, it stays with the dispatcher alone and ops-wa's log says so.
 While the extension is off, ops-wa hands nothing on and answers the owner, at most once an hour, that WhatsApp mode is off.
+The owner sets both numbers in Settings, Extensions, on the WhatsApp card (**Device number** for `wa.device`, **Your number** for `wa.owner`), which shows a saved one by its last 4 digits alone; when one is unset, point the owner to that card.
 
 What goes over WhatsApp is factory status alone: the state of the factory's own work, never org work, a secret or customer data, as the owner decided at door 2 of [ADR 0023](../../../../.agents/adr/0023-the-owners-whatsapp-chat-is-the-owners-words.md).
 
