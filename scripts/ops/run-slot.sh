@@ -2442,9 +2442,12 @@ if [ -n "$CAN_TAKE" ]; then
     # the ticket's own wait, its ask's time_ns in its name, so a small one past the backlog line answers for the hold the queue holds it under (issue 1417); a session-name ask has no wait to read and reads as fresh
     waited=$((($(date +%s) - ${CAN_TICKET%%-*} / 1000000000)))
   fi
-  # the holds the wait loop obeys first (verdict_holds, its hold check) answer here too, so a held run reads closed to the verdict while it holds (issue 1818), and the stderr line names the hold, the battery's first as hold_wait names it, for ops-unstick's slot-stuck alert (issue 1842); each hold is read once, so a lapse between two reads prints no empty name (issue 1647)
-  if battery_holds; then echo "run-slot.sh: held by run-slot.battery" >&2; exit 1; fi
-  if focus_holds; then echo "run-slot.sh: held by run-slot.focus for $FOCUS_HOLDER" >&2; exit 1; fi
+  # the holds the wait loop obeys first (its hold check) answer here too, so a held run reads closed to the verdict while it holds (issue 1818), and the stderr line names the hold, the battery's first as hold_wait names it, for ops-unstick's slot-stuck alert (issue 1842); the line comes from the reads verdict_holds made, FOCUS_HOLDER set only when the battery did not hold, so a lapse between two reads prints no empty name (issue 1647)
+  FOCUS_HOLDER=
+  if verdict_holds; then
+    if [ -n "$FOCUS_HOLDER" ]; then echo "run-slot.sh: held by run-slot.focus for $FOCUS_HOLDER" >&2; else echo "run-slot.sh: held by run-slot.battery" >&2; fi
+    exit 1
+  fi
   reclaim "$OPS/$CAN_TAKE"
   [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" && ! burst_held > /dev/null || exit 1
   unit_fits "$CLASS$UNITS" "$UNITS" "$SIZE" "$WHO"
