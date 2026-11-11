@@ -45,7 +45,7 @@ For every agent of yours that `ListAgents` lists, or the roster shows with a sta
 - **Down**: `ListAgents` lists no session by that name.
   Close what is left of it ([End](SESSIONS.md#end): by its surface, or by its workspace when it is the last one there), end it in the roster with the reason, and re-dispatch its chore when one is unfinished.
 - **Done**: its roster entry reads `ended`, or its PR has merged and its final report is in, and its session is still live.
-  Ending is automatic ([End](SESSIONS.md#end)); act on its `Not ended` line, then close it by hand, its checkers first.
+  Ending is automatic ([End](SESSIONS.md#end)); act on its `Not ended` line, then close it by hand, its checkers first, and on a `Kept` line reassign the worker or close it.
 
 Before you staff a fix this step turns up (an off-scope bug, a down worker's chore), run DISPATCH.md's **open-PR check** on it.
 
