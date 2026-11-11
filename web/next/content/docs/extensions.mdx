@@ -223,6 +223,7 @@ playground ext reject <scope> <kind> <key> <sha> --reason "<why>"
 - A proposal is scored by another session, or by you: a score from the proposal's own author is refused.
 - An accepted proposal moves out of `proposed/` over the accepted copy, and sessions read it at once.
 - `accept` is your own call: the CLI refuses it whenever `PLAYGROUND_ROLE` is set.
+  A 5 from another session is the accept itself (`judgeItem` in `packages/settings/src/items.ts`), so no `accept` card follows it; the card is for a proposal you accept below 5.
   A session asks for one as an `accept` decision in your Inbox, naming the proposal's scope, kind, key and sha: your Approve has the dashboard run the accept itself, with no role and the sha as you read it, and the card shows what it gave.
   One card can hold a set of up to 21 proposals that land as one change: your Approve accepts them in the order listed and stops at the first that fails, and the card names which were accepted and which were not tried.
 - `reject` removes the proposal.
