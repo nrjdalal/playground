@@ -596,7 +596,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
       )
       expect(r.code).not.toBe(0)
       expect(placing(r)).toEqual([])
-      expect(r.err).toContain("own@example.com")
+      expect(r.err).toContain("--account own@example.com, this machine's own login: ")
     },
   )
 
