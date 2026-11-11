@@ -1357,6 +1357,9 @@ if [ "$MODE" = resume ]; then
   if [ -e "$PINS/$NAME" ]; then
     [ -z "$BACKEND$HARNESS" ] || refuse "the pin decides how $NAME runs; --backend or --harness would change it mid-life. Close it and start it again instead."
     pin=$(cat "$PINS/$NAME") || refuse "it cannot read the backend pin for $NAME"
+    # Its words, one space apart, as readPin() reads them, so a hand edit's spacing changes nothing.
+    read -ra pin_words <<<"$pin" || true
+    pin=${pin_words[*]+"${pin_words[*]}"}
     # A pin names its harness, then its backend (HARNESSES in packages/settings/src/harnesses.ts); one written before the harness split names its backend alone.
     case "$pin" in
       glm | "claude-code glm") BACKEND=glm ;;

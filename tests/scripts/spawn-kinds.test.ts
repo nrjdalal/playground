@@ -209,6 +209,16 @@ describe("the backend pin carries a start onto its resume", () => {
     expect(r.security).toEqual(["find-generic-password -s playground-glm -a zai"])
   })
 
+  test("a hand-edited pin reads by its words, whatever the spacing between them", async () => {
+    const r = await spawn(["resume", "worker-brave-otter", root], [], {}, undefined, {
+      name: "worker-brave-otter",
+      backend: "claude-code  glm\t",
+    })
+    expect(r.err).not.toContain("refuses")
+    expect(r.code).toBe(0)
+    expect(command(r)).toContain(" --model 'glm-5.3-flash[1m]' ")
+  })
+
   test("a resume whose pin says claude stays on Claude", async () => {
     const r = await spawn(["resume", "worker-brave-otter", root], [], {}, undefined, {
       name: "worker-brave-otter",
