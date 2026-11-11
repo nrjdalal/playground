@@ -361,7 +361,7 @@ export function quarantine(
         : `${abs} did not move: ${code ?? (error as Error).message}`,
     )
   }
-  // The tree's rebuildable folders go once the move is past every refusal, and the strip never throws past this line: a strip that stops partway names its error and leaves the entry unmarked, so the hourly strip's pass reaches the item and takes the rest, while the count it already removed stays on the result. An install or a build puts what it removed back.
+  // The tree's rebuildable folders go once the move is past every refusal, and the strip never throws past this line: a strip that stops partway names its error and leaves the entry unmarked, so the hourly strip's pass reaches the item and takes the rest. An install or a build puts what it removed back.
   let stripped: string[] = []
   let stripFailed: string | null = null
   if (!carve) {
@@ -382,7 +382,7 @@ export function quarantine(
     reason: opts.reason,
     session: opts.session,
     size,
-    ...(stripped.length && !stripFailed ? { stripped: stripped.length } : {}),
+    ...(stripped.length ? { stripped: stripped.length } : {}),
   }
   appendFileSync(join(trash, batch, "manifest.jsonl"), `${JSON.stringify(entry)}\n`)
   return {
