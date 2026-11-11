@@ -48,6 +48,8 @@ export type Field<S extends z.ZodType = z.ZodType> = {
   against?(value: z.output<S>, read: (key: string) => unknown): Refusal[]
   default: z.output<S>
   description: string
+  // A value the API gives the page by its last 4 characters alone, so it never reaches a browser whole (a phone number).
+  masked?: boolean
   // A row holding some of the value's fields, read over the default, so the rest still follow the default as it changes (a job's row, which may hold its enabled field alone).
   merge?: boolean
   schema: S
@@ -209,5 +211,10 @@ export const settingsFor = (
   }
 }
 
-// A value as the page reads it.
-export const shownValue = (_key: string, value: unknown): unknown => value
+// A value as the API gives it to the page: a masked key's non-empty string as its last 4 characters behind dots, anything else as it stands.
+export const shownValue = (key: string, value: unknown): unknown => {
+  const name = resolveKey(key)
+  return name && fields.get(name)?.masked && typeof value === "string" && value
+    ? `••••${value.slice(-4)}`
+    : value
+}
