@@ -223,7 +223,7 @@ test("a factory that has left the pool falls back to the pool account with the b
 })
 
 test("a pool factory whose token is gone from the Keychain falls back to the best tokened share", () => {
-  // pride@ holds a reading but no Keychain item: the login resolves to own@ (its 0.3 share over nd941z@'s 0.2), which the due state already names, so the run says the factory is now on own@. run.test.ts feeds this same fixture to run.py's resolved_factory and expects the same answer
+  // pride@ holds a reading but no Keychain item: the login resolves to own@ (its 0.3 share over nd@'s 0.2, the other three spent or given no share), which the due state already names, so the run says the factory is now on own@. run.test.ts feeds this same fixture to run.py's resolved_factory and expects the same answer
   const seen = {
     LW: { ...spent.LW },
     ND: { ...spent.ND },

@@ -196,9 +196,9 @@ def resolved_factory(flip):
     return factory_login(flip.get("factory"), [e["account"] for e in pool["pool"]] if pool else None, (flip.get("split") or {}).get("shares") or {}, SERVICE)
 
 
-def factory_reading(stored, flip, accounts):
-    """usage.json's data for the factory login resolved_factory resolves, when that is not the stored login and usage.accounts still lists it; else None."""
-    factory = resolved_factory(flip)
+def factory_reading(stored, flip, accounts, resolved=None):
+    """usage.json's data for the factory login resolved_factory resolves (the cycle hands one resolution in, so a cycle resolves once), when that is not the stored login and usage.accounts still lists it; else None."""
+    factory = resolved_factory(flip) if resolved is None else resolved
     if not factory or (stored and factory == stored["account"]) or (accounts is not None and factory not in accounts):
         return None
     now = time.time()
@@ -268,12 +268,13 @@ while True:
         no_login = isinstance(e, NoLogin)
         problems.append(f"stored login: {type(e).__name__}: {e}")
     flip = flip_file() or {}
+    resolved = resolved_factory(flip)
     try:
-        data = factory_reading(stored, flip, FACTORY)
+        data = factory_reading(stored, flip, FACTORY, resolved)
     except Exception as e:
         problems.append(f"factory account: {type(e).__name__}: {e}")
     # the factory login, resolved through the pool rule, is the account the sessions run on, so the added ones are read only while it resolves to none
-    if not data and not resolved_factory(flip):
+    if not data and not resolved:
         try:
             data = added_reading(stored, flip, FACTORY or [])
         except Exception as e:

@@ -802,16 +802,40 @@ test("a factory that has left the pool falls back to the pool account the split 
   ).toEqual({ factory: "spare@example.test", probes: [] })
 })
 
-// the same fixture login-flip.test.ts's token-gone row feeds its reader: both resolve to the best tokened share
+// the same fixture login-flip.test.ts's token-gone row feeds its reader: five accounts, four tokens, the same shares, and both readers resolve to the best tokened share
 test("a pool factory whose token reads no more falls back to the pool account the split gives the best share (#1751)", () => {
   expect(
     runPool("pool-token-gone", {
-      accounts: ["own@example.test", "pride@example.test"],
+      accounts: [
+        "lw@example.test",
+        "nd@example.test",
+        "own@example.test",
+        "own2@example.test",
+        "pride@example.test",
+      ],
       factory: "pride@example.test",
-      pool: ["own@example.test", "pride@example.test"],
-      seen: { "own@example.test": {} },
-      shares: { "own@example.test": 0.3, "pride@example.test": 0.5 },
-      tokens: ["own@example.test"],
+      pool: [
+        "lw@example.test",
+        "nd@example.test",
+        "own@example.test",
+        "own2@example.test",
+        "pride@example.test",
+      ],
+      seen: {
+        "lw@example.test": { week: 100 },
+        "nd@example.test": { week: 100 },
+        "own@example.test": {},
+        "own2@example.test": { week: 100 },
+        "pride@example.test": { week: 50 },
+      },
+      shares: {
+        "lw@example.test": 0,
+        "nd@example.test": 0.2,
+        "own@example.test": 0.3,
+        "own2@example.test": 0,
+        "pride@example.test": 0.5,
+      },
+      tokens: ["lw@example.test", "nd@example.test", "own@example.test", "own2@example.test"],
     }),
   ).toEqual({ factory: "own@example.test", probes: [] })
 })
