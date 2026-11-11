@@ -103,19 +103,19 @@ export async function sessionPrs(
   ]
 }
 
-// The PR's worker: a live worker session whose workerPrs (its roster pr and open branch PRs) holds an open PR of the checker's list; read only once the checker's own worker is found gone, so the extra reads wait for that.
+// The PR's worker: a live worker session whose workerPrs (its roster pr and open branch PRs) holds an open PR of the checker's list; read only once the checker's own worker is found gone, each worker's PRs once per call.
 export async function servesLiveWorker(
   input: CollectInput,
   prs: string[],
   states: (PrState | null)[],
 ): Promise<boolean> {
   const { roster, sessions, workerPrs } = input
-  for (let i = 0; i < states.length; i++) {
-    if (states[i]?.state !== "open") continue
-    for (const w of Object.keys(sessions)) {
-      if (kindOf(w, roster[w]?.kind) !== "worker") continue
-      if ((await workerPrs(w)).includes(prs[i])) return true
-    }
+  const open = states.flatMap((s, i) => (s?.state === "open" ? [prs[i]] : []))
+  if (open.length === 0) return false
+  for (const w of Object.keys(sessions)) {
+    if (kindOf(w, roster[w]?.kind) !== "worker") continue
+    const served = await workerPrs(w)
+    if (open.some((url) => served.includes(url))) return true
   }
   return false
 }
