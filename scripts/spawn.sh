@@ -1730,8 +1730,8 @@ def write(name, text):
 # The login stays in CODEX_HOME's auth.json, no update check or self-update runs mid-session, and the session's folder is trusted, so no prompt waits on the owner.
 write("config.toml", f'cli_auth_credentials_store = "file"\ncheck_for_update_on_startup = false\n\n[projects.{json.dumps(folder)}]\ntrust_level = "trusted"\n')
 write(os.path.join("app-server-daemon", "settings.json"), json.dumps({"autoUpdateEnabled": False}) + "\n")
-# The beat lands whole: written beside its path, then moved onto it, so the wait never reads half of it.
-beat = {"hooks": [{"command": 'f="$SPAWN_CODEX_BEAT"; cat > "$f.tmp" && mv "$f.tmp" "$f"', "timeout": 10, "type": "command"}], "matcher": ""}
+# The beat lands whole: written beside its path, then moved onto it, so the wait never reads half of it. A Codex start stops when PowerShell is installed, so the beat names a pwsh or powershell on PATH, or at /usr/local/bin/pwsh, where Codex also looks (shell_detect.rs, codex-cli 0.167.1), in place of the thread.
+beat = {"hooks": [{"command": 'f="$SPAWN_CODEX_BEAT"; p=$(command -v pwsh || command -v powershell || { [ -x /usr/local/bin/pwsh ] && echo /usr/local/bin/pwsh; }); if [ -n "$p" ]; then printf \'{"powershell":"%s"}\\n\' "$p" > "$f.tmp"; else cat > "$f.tmp"; fi && mv "$f.tmp" "$f"', "timeout": 10, "type": "command"}], "matcher": ""}
 hooks = json.loads(guards)
 hooks.setdefault("SessionStart", []).append(beat)
 write("hooks.json", json.dumps({"hooks": hooks}, indent=2) + "\n")
@@ -2014,16 +2014,19 @@ except (ValueError, KeyError, TypeError):
       [ -s "$BEAT" ] && break
       sleep 0.5
     done
-    SID=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["session_id"])' "$BEAT" 2>/dev/null) || SID=
+    # the beat names the thread, or the PowerShell the start stops on
+    SID=$(python3 -I -c 'import json, sys; b = json.load(open(sys.argv[1])); print("powershell " + b["powershell"] if "powershell" in b else b["session_id"])' "$BEAT" 2>/dev/null) || SID=
     rm -f -- "$BEAT"
     if ! [[ $SID =~ ^[0-9a-f-]{36}$ ]]; then
       rm -f -- "$LAUNCH_FILE"
+      why="Codex's SessionStart hook wrote no beat within 60 seconds, so its guards may not have loaded"
+      [[ $SID != "powershell "* ]] || why="a Codex start stops when PowerShell is installed, and ${SID#powershell } is"
       hr pane close "$PANE" >/dev/null 2>&1 ||
-        refuse "Codex's SessionStart hook wrote no beat within 60 seconds, so its guards may not have loaded, and herdr would not close $NAME's pane $PANE, so the session may still run: close that pane yourself"
+        refuse "$why, and herdr would not close $NAME's pane $PANE, so the session may still run: close that pane yourself"
       # A resume's pin and record stand from its last start, so a later resume tries again.
       left="no pin, record or roster row was written"
       [ "$MODE" != resume ] || left="no new pin, record or roster row was written, so its earlier pin and resume record stand"
-      refuse "Codex's SessionStart hook wrote no beat within 60 seconds, so its guards may not have loaded: $NAME's pane $PANE is closed, and $left"
+      refuse "$why: $NAME's pane $PANE is closed, and $left"
     fi
     # The thread takes the session's name through the app-server's thread/name/set, so Codex's own lists and resume by name find it.
     python3 -I - "$CODEX" "$CODEX_HOME" "$SID" "$NAME" <<'PY' || echo "spawn.sh: $NAME started in Codex, but its thread $SID kept no name" >&2
