@@ -1227,19 +1227,39 @@ var positionals = (args) => {
   }
   return out;
 };
-function runsTests(cmd) {
-  const parsed = parse(cmd);
+function inner2(cmd, parsed) {
   const { args, name } = parsed;
   const slot = slotWords(parsed);
   if (slot)
-    return slot.length === 0 ? false : runsTests({ ...cmd, scope: 0, words: slot });
-  if (SHELLS.has(name)) {
-    const script = shellSlot(args, name);
-    if (script)
-      return runsTests({ ...cmd, scope: 0, words: script });
-    const { inline, operand } = shellOperand(args, name);
-    return inline && operand !== undefined && lex(operand.value).commands.some(runsTests);
-  }
+    return slot.length === 0 ? [] : [{ ...cmd, scope: 0, words: slot }];
+  if (!SHELLS.has(name))
+    return;
+  const script = shellSlot(args, name);
+  if (script)
+    return [{ ...cmd, scope: 0, words: script }];
+  const { inline, operand } = shellOperand(args, name);
+  return inline && operand !== undefined ? lex(operand.value).commands : [];
+}
+function pushes(cmd) {
+  const parsed = parse(cmd);
+  const commands = inner2(cmd, parsed);
+  if (commands)
+    return commands.some(pushes);
+  const { args, name } = parsed;
+  if (name !== "git")
+    return false;
+  let k = 0;
+  for (;k < args.length && args[k].value.startsWith("-"); k++)
+    if (GIT_TAKES.has(args[k].value))
+      k++;
+  return args[k]?.value === "push";
+}
+function runsTests(cmd) {
+  const parsed = parse(cmd);
+  const commands = inner2(cmd, parsed);
+  if (commands)
+    return commands.some(runsTests);
+  const { args, name } = parsed;
   if (TEST_BINS.has(name) || PY_TOOLS.has(name.replace(/@.*$/, "")))
     return true;
   const python = pythonModule(name, args);
@@ -1310,13 +1330,15 @@ function judgeCommand(cmd, guarded) {
     return `no-false-green hook refuses bun ${flag}: bun then misreads the subcommand (run prints its usage and exits 0, test runs package.json's test script with the paths appended in place of the tests), so its exit says nothing about the tests. Join the value with = (--opt=value) or put the option after the subcommand: bun --cwd=<dir> run test:file <files>, or bun run --cwd <dir> <script>.`;
   if (!guarded && cmd.stdin && runsTests(cmd.stdin))
     return `no-false-green hook refuses a test run piped into ${name || "a command group"} with no pipefail: a pipeline's exit status is its last command's, so a failing run reads 0. Drop the pipe (the Bash tool keeps long output), or set pipefail inside the script that holds the pipe (set -o pipefail; first, inside the quotes of a bash -c script) so the test's own exit status comes through.`;
+  if (!guarded && cmd.stdin && pushes(cmd.stdin))
+    return `no-false-green hook refuses a git push piped into ${name || "a command group"} with no pipefail: a pipeline's exit status is its last command's, so a failed push reads 0. Push bare (the Bash tool keeps its output), then check it with git ls-remote origin refs/heads/<branch>, which prints the local head's sha once the push has landed.`;
 }
 async function inspect(raw, shell) {
   const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
   const { command } = toolInput;
-  const words = /\b(?:bun|bunx|jest|npm|npx|pnpm|pnpx|pytest|ruff|ty|vitest|yarn)\b/;
+  const words = /\b(?:bun|bunx|git|jest|npm|npx|pnpm|pnpx|pytest|ruff|ty|vitest|yarn)\b/;
   if (!words.test(command.replace(/["'\\]/g, "")))
     return;
   return judge(command, dialect(shell));

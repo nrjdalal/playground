@@ -38,7 +38,8 @@ set -euo pipefail
 #      starts on the passing login next in the account split, else the one with the lowest week, naming it, and refuses
 #      only when every login is over, its pick kept off the resume record's exec line so a restore picks afresh; a login whose usage.accounts
 #      row is parked (parkedUntil a later time) counts as over, and an --account naming it is refused; --account skips the usage
-#      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; GLM reads zai-usage.json
+#      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; an --account naming
+#      this machine's own login starts there, the split skipped, judged and refused as that login is in a bare start; GLM reads zai-usage.json
 #      (the 5-hour window under 95% of its credits, with no week check, and no empty balance (its `balance`), valid only
 #      while the zai usage job's last beat is ok and within 3 cycles)
 #   The first dispatcher starts past every gate, by a manager start or a resume, so the owner always has one: the gates still read, a failure
@@ -53,7 +54,7 @@ set -euo pipefail
 #   spawn.sh column    <reviewer|tester|probe|lead|dispatcher> <name> <reports-to> <pane> <brief>
 #                      a column right of a herdr pane id (w1:p2), its spawner's own being $HERDR_PANE_ID
 #   spawn.sh column    <manager> <pane> <brief>        a manager's column names it once: a lead (sessions.names' builder, ops or planner, an <id>-builder, -ops or -planner, or a name the roster kinds) reports to the first dispatcher, and the first dispatcher (sessions.names' dispatcher or an <id>-dispatcher) is briefed by the session running spawn.sh
-#   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside; with --runtime hc, a terminal in hc's trial world instead
+#   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
 #   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again once its resume finds the session gone so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
@@ -62,7 +63,7 @@ set -euo pipefail
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
 #   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any but priority-start.json does; it is refused while none does.
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
-#   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, never this machine's own login, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; with --backend glm it takes a GLM row's label instead
+#   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
 #     The backend is recorded at the start in ~/.playground/backends/<name> and carried on its resume: a resume takes no --backend while a pin stands, and refuses with no pin and none given, or with a pin that reads as neither glm nor claude.
@@ -75,7 +76,6 @@ set -euo pipefail
 #   --memory <dir>     with any mode but restore or close, anywhere among its words: the launch runs with Claude Code's auto-memory on, writing to <dir>, an absolute folder: its built settings file, one of its own (factory-settings-...-memory-<name>.json), sets autoMemoryEnabled and autoMemoryDirectory, while every other launch's file stays as it is, for the auto-memory trial; --memory off launches with memory off on the shared file, whatever arm the role or the row would take
 #   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
 #     With no --runtime, every start and resume opens in herdr, whatever terminal its spawner runs in.
-#   --runtime hc       with probe alone, for the herdr-core trial: the probe opens as a terminal named for it in hc's trial world, <data>/hc-trial, built on its first start from herdr-core's pinned tarball and run only by its wrapper, <data>/hc-trial/hc; it writes no resume record, and hc kill <name> through that wrapper ends it.
 #     The runtime is recorded at every start and resume in ~/.playground/runtimes/<name>, a resume rewriting whatever word the pin held.
 #
 # <name> is lowercase words joined by hyphens that give its kind: a new one from `bun run name <kind>` (<id>-<kind>), an old `<kind>-<words>` one, or a manager's own; the mode gives the kind, and a name that gives none or another is refused, but on a resume.
@@ -286,7 +286,7 @@ gate_capacity() {
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" "$OWN_LOGIN" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -296,7 +296,7 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed, session = sys.argv[1:16]
+data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed, session, own_pick = sys.argv[1:17]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -722,6 +722,12 @@ try:
             if detail is None:
                 known.add(email.lower())
         logins = [(email, name, acct, seen, detail or (f"it is parked until {parked[email.lower()]} (usage.accounts parkedUntil)" if email.lower() in parked else None)) for email, name, acct, seen, detail in logins]
+        # --account naming the own login: that login alone, judged as a bare start judges it, refused on its reading's failure and never split
+        if own_pick:
+            logins = logins[:1]
+            if logins[0][4]:
+                readings.update(logins[0][3])
+                refuse("usage", f"--account {own_pick}, this machine's own login: {logins[0][4]}")
         passing = [login for login in logins if login[4] is None]
         if not passing:
             readings.update(logins[0][3])
@@ -734,7 +740,7 @@ try:
         try:
             with open(os.path.join(flip_dir, "login-flip.json")) as f:
                 split = json.load(f)["split"]
-            shares = {a.lower(): v for a, v in split["shares"].items()} if now.timestamp() - split["at"] < 1800 else {}
+            shares = {a.lower(): v for a, v in split["shares"].items()} if now.timestamp() - split["at"] < 1800 and not own_pick else {}
         except Exception:
             shares = {}
         shared = {login[0]: shares[login[0].lower()] for login in passing if isinstance(shares.get(login[0].lower()), (int, float)) and shares[login[0].lower()] > 0}
@@ -784,6 +790,9 @@ for gate, detail in skips:
 why = f"next in the account split ({fmt(readings['share'] * 100)}% of new sessions)" if "share" in readings else "the login with the most room this week"
 if any(gate == "usage" for gate, _ in skips):
     print("ok")
+elif own_pick:
+    week = f"its week is at {fmt(readings['week'])}%" if "week" in readings else f"its usage {readings.get('usage', 'unread')}"
+    print(f"ok - --account {own_pick} is this machine's own login, so it starts there, the split skipped: {week} ({chosen[1]})")
 elif readings.get("account"):
     print(f"ok {readings['account']} no --account, so it starts on {readings['account']}, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif "logins" in readings:
@@ -898,8 +907,8 @@ while [ $# -gt 0 ]; do
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RUNTIME" ] || usage
     case "$2" in
       --*) usage "--runtime needs a value; \"$2\" starts with --" ;;
-      herdr | hc) ;;
-      *) usage "--runtime takes herdr or hc, not \"$2\"" ;;
+      herdr) ;;
+      *) usage "--runtime takes herdr alone, not \"$2\"" ;;
     esac
     RUNTIME=$2
     shift 2
@@ -924,35 +933,6 @@ while [ $# -gt 0 ]; do
   fi
 done
 set -- ${words[@]+"${words[@]}"}
-
-# hc's trial world, as the herdr-core research's isolation table sets it: herdr-core 0.1.20's bare binary from the core manifest's tarball, checked by that tarball's sha256, with its own state and config folders under <data>/hc-trial,
-# run only by the wrapper beside them (scripts/hc-trial.sh), which hashes the binary against the pin this build writes before every call. Its config turns hc's notes off, so hc types nothing into a terminal on its own.
-HC_TARBALL=https://releases.herdr.dev/core/0.1.20/herdr-core-macos-aarch64.tar.gz
-HC_TARBALL_SHA256=e58985d3fef6e909f33d3c5a4426e4898c81564a557d4636591cec9e3a06af26
-hc_world() {
-  HC_WORLD=$DATA/hc-trial
-  (umask 077 && mkdir -p "$HC_WORLD/bin" "$HC_WORLD/config/herdr-core" "$HC_WORLD/state") || refuse "it cannot prepare $HC_WORLD"
-  # A world built from another tarball, or never finished, is built again, so a bump of HC_TARBALL_SHA256 reaches every world.
-  if [ ! -f "$HC_WORLD/pin" ] || [ "$(cat "$HC_WORLD/tarball" 2>/dev/null)" != "$HC_TARBALL_SHA256" ]; then
-    local get found
-    get=$(mktemp -d) || refuse "it cannot make a folder for hc's download"
-    # The download's folder goes with every refusal, so a failed build leaves nothing in the temp folder.
-    built() { rm -f -- "$get/hc.tar.gz" "$get/herdr-core" && rmdir "$get"; }
-    curl -fsSL -o "$get/hc.tar.gz" "$HC_TARBALL" || { built; refuse "it could not download $HC_TARBALL"; }
-    found=$(shasum -a 256 "$get/hc.tar.gz")
-    [ "${found%% *}" = "$HC_TARBALL_SHA256" ] ||
-      { built; refuse "$HC_TARBALL hashes to ${found%% *}, not the core manifest's $HC_TARBALL_SHA256"; }
-    rm -f -- "$HC_WORLD/pin" "$HC_WORLD/tarball"
-    tar -xzf "$get/hc.tar.gz" -C "$get" herdr-core && mv "$get/herdr-core" "$HC_WORLD/bin/herdr-core" ||
-      { built; refuse "it could not unpack herdr-core from $HC_TARBALL"; }
-    built
-    found=$(shasum -a 256 "$HC_WORLD/bin/herdr-core") && printf '%s\n' "${found%% *}" > "$HC_WORLD/pin" &&
-      printf '%s\n' "$HC_TARBALL_SHA256" > "$HC_WORLD/tarball" || refuse "it cannot write $HC_WORLD/pin"
-  fi
-  printf 'notes = false\n' > "$HC_WORLD/config/herdr-core/config.toml" || refuse "it cannot write $HC_WORLD/config/herdr-core/config.toml"
-  cp "$REPO/scripts/hc-trial.sh" "$HC_WORLD/hc" && chmod 700 "$HC_WORLD/hc" || refuse "it cannot write $HC_WORLD/hc"
-  found=$("$HC_WORLD/hc" --version 2>&1) || refuse "the trial world's hc does not run: $found"
-}
 
 # herdr runs by the absolute path herdr's pin names, never a bare herdr, and only while that file is the pinned version and hash and the server $1 is running; hr then speaks to that server.
 herdr_ready() {
@@ -1187,12 +1167,8 @@ except Exception:
     set -- lead "$NAME" "$(dispatcher_of 1)" "$2" "$3"
   fi
 fi
-# Every start opens in herdr, but a probe's in hc's trial world.
-if [ "$RUNTIME" = hc ]; then
-  [ "$MODE" = probe ] || usage "--runtime hc starts a probe alone (spawn.sh probe <name> <reports-to> <brief> --runtime hc), since hc runs only in its trial world"
-elif [ "$MODE" != resume ]; then
-  RUNTIME=herdr
-fi
+# Every start opens in herdr.
+[ "$MODE" = resume ] || RUNTIME=herdr
 SURFACE=
 # The first dispatcher, started by manager, works with the owner and reports to no session.
 FIRST=
@@ -1388,33 +1364,42 @@ if [ "$MODE" = resume ]; then
     refuse "no backend pin for $NAME: it cannot know how $NAME ran. Resume it with --backend glm or --backend claude, whichever it ran on, which records the pin."
   fi
 fi
-# Every start and resume runs in herdr, but an hc probe in the trial world: a resume reads no pin, and the write below rewrites it whatever word it held.
+# Every start and resume runs in herdr, the one runtime: a resume reads no pin, and the write below rewrites it whatever word it held.
 RUNTIMES="$DATA/runtimes"
 case "${RUNTIME:=herdr}" in
-  herdr | hc) ;;
-  *) refuse "--runtime takes herdr or hc, not $RUNTIME" ;;
+  herdr) ;;
+  *) refuse "--runtime takes herdr, not $RUNTIME" ;;
 esac
 # the Keychain service each account's long-lived token is kept under: usage.keychainService, else its default when the reader cannot answer
 KEYCHAIN=$(setting_text usage.keychainService)
 KEYCHAIN=${KEYCHAIN:-playground-claude-oauth}
-# An --account, or the login the usage gate picks for a bare spawn, is a second login whose Keychain item exists.
-check_account() {
-  # The email goes into the pane's command, so it is a plain local@domain: no quote, space or $.
-  [[ $ACCOUNT =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || refuse "--account takes a plain email, not $ACCOUNT"
-  OWN_CONFIG=$(own_config)
-  python3 -I - "$OWN_CONFIG" "$ACCOUNT" <<'PY' || refuse "--account $ACCOUNT is this machine's own Claude login, whose usage the session would share unchecked: name a second account"
+# Whether --account names the login the launch runs on with no --account, read from its config.
+own_login() {
+  python3 -I - "$(own_config)" "$ACCOUNT" <<'PY'
 import json, sys
 try:
     with open(sys.argv[1]) as f:
         email = (json.load(f).get("oauthAccount") or {}).get("emailAddress")
 except Exception:
-    sys.exit(0)
-sys.exit(1 if isinstance(email, str) and email.lower() == sys.argv[2].lower() else 0)
+    sys.exit(1)
+sys.exit(0 if isinstance(email, str) and email.lower() == sys.argv[2].lower() else 1)
 PY
+}
+# An --account, or the login the usage gate picks for a bare spawn, is a second login whose Keychain item exists.
+check_account() {
+  # The email goes into the pane's command, so it is a plain local@domain: no quote, space or $.
+  [[ $ACCOUNT =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || refuse "--account takes a plain email, not $ACCOUNT"
+  ! own_login || refuse "--account $ACCOUNT is this machine's own Claude login, whose usage the session would share unchecked: name a second account"
   # Only that the item exists: no -w, so the token is never read here.
   security find-generic-password -s "$KEYCHAIN" -a "$ACCOUNT" >/dev/null 2>&1 ||
     refuse "the Keychain holds no $KEYCHAIN item for $ACCOUNT"
 }
+# --account naming this machine's own login starts on it with no token, as a bare start does, its usage judged by that login's reading and the split skipped.
+OWN_LOGIN=
+if [ -n "$ACCOUNT" ] && [ "$BACKEND" != glm ] && own_login; then
+  OWN_LOGIN=$ACCOUNT
+  ACCOUNT=
+fi
 # --account names a GLM row's label on a GLM start, checked in its block below.
 [ -z "$ACCOUNT" ] || [ "$BACKEND" = glm ] || check_account
 if [ -n "$BACKEND" ]; then
@@ -1532,10 +1517,6 @@ if [ "$RUNTIME" = herdr ]; then
   # herdr names an agent by [a-z][a-z0-9_-]{0,31}, so a longer name could never name the session's agent there.
   [ "${#NAME}" -le 32 ] || refuse "herdr names an agent with at most 32 characters, and $NAME has ${#NAME}"
   herdr_ready "${PLAYGROUND_HERDR_SESSION:-${DESK_HERDR_SESSION:-playground}}"
-else
-  # hc names a terminal by 1 to 32 of a-z 0-9 - _, so a longer name could never name the probe's terminal.
-  [ "${#NAME}" -le 32 ] || refuse "hc names a terminal with at most 32 characters, and $NAME has ${#NAME}"
-  hc_world
 fi
 if [ -n "$CHECK" ]; then
   echo "ok: $NAME can start"
@@ -1656,9 +1637,9 @@ FLAGS+=" --plugin-dir $(printf %q "$PLUGIN")"
 READ="Load the playbook skill first. Your brief is in $SHOWN/$BRIEF: read it in full and follow it."
 # Two GLM workers searched ToolSearch for Read, Bash and Skill, found none since it lists only deferred tools, and stopped as if they had none.
 [ "$BACKEND" = glm ] && READ="$READ Skill, Read, Bash, Edit and Write are already loaded; ToolSearch lists only deferred tools."
-# A herdr or hc start names its session id up front, so a herdr resume record can resume exactly that session, and the launch's --session-id always holds one.
+# A herdr start names its session id up front, so its resume record can resume exactly that session.
 SID=${SESSION:-}
-if [[ $RUNTIME =~ ^(hc|herdr)$ ]] && [ "$MODE" != resume ]; then
+if [ "$RUNTIME" = herdr ] && [ "$MODE" != resume ]; then
   SID=$(uuidgen | tr 'A-F' 'a-f') || refuse "it cannot make a session id (uuidgen)"
 fi
 if [ "$MODE" = resume ]; then
@@ -1710,7 +1691,7 @@ mkdir -p "$LAUNCH_DIR" && chmod 700 "$LAUNCH_DIR" || refuse "it cannot prepare $
 LAUNCH_FILE="$LAUNCH_DIR/$NAME.sh"
 # The factory's hooks read PLAYGROUND_REPO before the session's own folder, so the launch file's second line exports this script's main checkout: a session in a worktree, or outside any Playground checkout, runs the main checkout's guards.
 HEAD_LINES=
-if [ "$RUNTIME" = herdr ] || [ "$RUNTIME" = hc ]; then
+if [ "$RUNTIME" = herdr ]; then
   CWD=${DIR:-}
   [ "$MODE" = column ] && CWD=$REPO
   mkdir -p "$RESUME_DIR" && chmod 700 "$RESUME_DIR" || refuse "it cannot prepare $RESUME_DIR"
@@ -1719,8 +1700,6 @@ if [ "$RUNTIME" = herdr ] || [ "$RUNTIME" = hc ]; then
   # A herdr server hands its panes the shell basics alone, so the launch gives the session the user's temp folder, keeping one already set.
   HEAD_LINES+='export TMPDIR="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR)}"'$'\n'
   [ "$MODE" = resume ] && HEAD_LINES+="date -u +%FT%TZ >> $(printf %q "$RESUME_DIR/$NAME.ran")"$'\n'
-  # hc's terminals take the wrapper's world variables, so the probe drops them and runs with the user's own folders.
-  [ "$RUNTIME" = hc ] && HEAD_LINES+='unset SSH_CONNECTION XDG_CONFIG_HOME XDG_RUNTIME_DIR XDG_STATE_HOME'$'\n'
 fi
 (umask 077 && printf 'rm -f -- "$0"\n%sexport PLAYGROUND_REPO=%q\n%s' "$HEAD_LINES" "$MAIN" "$COMMAND" > "$LAUNCH_FILE" && chmod 700 "$LAUNCH_FILE") ||
   refuse "it cannot write $LAUNCH_FILE"
@@ -1971,6 +1950,7 @@ except (ValueError, KeyError, TypeError):
   # A login the usage gate picked stays off the exec line, so a restore picks afresh, and on the account line, which ops-unstick and no-headless-login read.
   [ -n "$ACCOUNT" ] && [ -z "$PICKED" ] && record+="--account $ACCOUNT "
   [ -n "$GLM_GIVEN" ] && record+="--account $GLM_GIVEN "
+  [ -n "$OWN_LOGIN" ] && record+="--account $OWN_LOGIN "
   [ -n "$CLAUDE_MODEL" ] && record+="--model $CLAUDE_MODEL "
   [ -n "$EFFORT" ] && [ "$EFFORT" != high ] && record+="--effort $EFFORT "
   account_line=
@@ -1981,16 +1961,6 @@ except (ValueError, KeyError, TypeError):
   [ "$MODE" = resume ] || (umask 077 && printf '%s\n' "$PROMPT" > "$RESUME_DIR/$NAME.prompt") ||
     echo "spawn.sh: $NAME started, but its prompt record write failed, so a restore before its first turn starts it without its brief" >&2
   herdr_answer || true
-else
-  # The world's core starts with its first call, and the probe runs as a terminal named for it with no parent, so no caller's exit ends it.
-  # The wrapper runs a start only with the one-time word this start writes beside it, so no other route to the wrapper starts one.
-  token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n') && (umask 077 && printf '%s\n' "$token" > "$HC_WORLD/start") ||
-    { rm -f -- "$LAUNCH_FILE"; refuse "it cannot write $HC_WORLD/start"; }
-  if ! said=$(HC_TRIAL_START=$token "$HC_WORLD/hc" run --bg --no-parent --name "$NAME" --cwd "$DIR" bash "$LAUNCH_FILE" 2>&1); then
-    rm -f -- "$LAUNCH_FILE"
-    refuse "hc opened no session for $NAME ($(tr -s '\n' ' ' <<<"$said")), so nothing was started and no pin was written"
-  fi
-  echo "hc terminal $NAME in $HC_WORLD; read it with $HC_WORLD/hc read $NAME"
 fi
 
 # The pin lands only once herdr has the session; a healed resume records the backend it was given.

@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -30,6 +31,7 @@ import {
   removeScratch,
   restore,
   type Roots,
+  stripTrash,
   worktreeRefusal,
 } from "../../../../packages/safe-delete/src"
 
@@ -115,6 +117,38 @@ describe("isProtected", () => {
     expect(isProtected(join(roots.main, ".claude", "worktrees", "wt"), roots)).toBeNull()
     expect(isProtected(join(roots.main, ".claude", "worktrees", "wt", ".next"), roots)).toBeNull()
   })
+
+  test("lets the caller's own scratch and scratchpad folders go", () => {
+    const roots = machine()
+    const own = join(roots.home, ".playground", "scratch", opts.session)
+    const pad = join(roots.home, ".playground", "scratchpad", opts.session)
+    expect(isProtected(own, roots, opts.session)).toBeNull()
+    expect(isProtected(join(own, "build"), roots, opts.session)).toBeNull()
+    expect(isProtected(join(pad, "notes"), roots, opts.session)).toBeNull()
+  })
+
+  test("refuses another session's scratch folder and a .. escape out of the own one", () => {
+    const roots = machine()
+    const own = join(roots.home, ".playground", "scratch", opts.session)
+    const other = join(roots.home, ".playground", "scratch", "a4b5c6-worker")
+    expect(isProtected(other, roots, opts.session)).toBeString()
+    expect(isProtected(`${own}/../a4b5c6-worker`, roots, opts.session)).toBeString()
+  })
+
+  test("holds the exemption closed for a session name no session may hold", () => {
+    const roots = machine()
+    const inside = join(roots.home, ".playground", "scratch", "a", "b")
+    expect(isProtected(inside, roots, "a/b")).toBeString()
+    expect(isProtected(inside, roots)).toBeString()
+  })
+
+  test("refuses a symlink inside the own scratch that points out of it", () => {
+    const roots = machine()
+    const own = join(roots.home, ".playground", "scratch", opts.session)
+    mkdirSync(own, { recursive: true })
+    symlinkSync(join(roots.home, ".ssh"), join(own, "keys"))
+    expect(isProtected(join(own, "keys"), roots, opts.session)).toBeString()
+  })
 })
 
 describe("quarantine, listTrash and restore", () => {
@@ -152,6 +186,17 @@ describe("quarantine, listTrash and restore", () => {
     quarantine(file(join(roots.home, "one")), opts, roots, { now: NOW })
     const second = quarantine(file(join(roots.home, "two")), opts, roots, { now: NOW })
     expect(second).toMatchObject({ id: "20261102T120000Z-j6rjgy-worker/2" })
+  })
+
+  test("restore moves an own-scratch item back into the folder that owns it", () => {
+    const roots = machine()
+    const own = join(roots.home, ".playground", "scratch", opts.session)
+    const path = file(join(own, "tmp", "work.txt"))
+    const moved = quarantine(path, opts, roots)
+    if (!("id" in moved)) throw new Error(moved.refused)
+    expect(restore(moved.id, roots)).toEqual({ path })
+    expect(existsSync(path)).toBe(true)
+    expect(listTrash(roots.trash)).toEqual([])
   })
 
   test("restore refuses when something stands at the original path, or the id is unknown", () => {
@@ -937,51 +982,182 @@ describe("purgeTrash", () => {
     expect(purgeTrash(trash, { free: () => 0, now: NOW }).removed).toEqual([])
   })
 
-  // the load cap (#1413): free between the floor and 50 GB, so only the cap decides; at or over it nothing goes, and the batches it left come back named
-  test("removes no batch at or over the load cap, and names what it left", () => {
+  // deleting the trash is cheap, so no load holds a batch, whatever the cap reads
+  test("removes its batches at any load", () => {
     const { trash } = machine()
     const old = batchAt(trash, new Date(NOW.getTime() - 8 * DAY))
-    const done = purgeTrash(trash, {
-      free: () => 20 * GB,
-      load: () => 15,
-      loadCap: 15,
-      now: NOW,
-    })
-    expect(done.removed).toEqual([])
-    expect(done.leftForLoad).toEqual([old])
-    expect(existsSync(join(trash, old))).toBe(true)
+    const done = purgeTrash(trash, { free: () => 20 * GB, now: NOW })
+    expect(done).toEqual({ removed: [old], skipped: [] })
+    expect(existsSync(join(trash, old))).toBe(false)
+  })
+})
+
+describe("stripTrash", () => {
+  const DAY = 86_400_000
+  const batchTree = (roots: Roots, at: Date, session: string) => {
+    const stamp = at.toISOString().replace(/[-:]|\.\d{3}/g, "")
+    const batch = `${stamp}-${session}`
+    const tree = join(roots.trash, batch, "1", "review-clone")
+    file(join(tree, "node_modules", "left-pad", "index.js"))
+    file(join(tree, "packages", "web", "node_modules", "react", "index.js"))
+    file(join(tree, "web", "next", ".next", "build-manifest.json"))
+    file(join(tree, "src", "index.ts"))
+    writeFileSync(
+      join(roots.trash, batch, "manifest.jsonl"),
+      `${JSON.stringify({
+        at: at.toISOString(),
+        files: 4,
+        id: `${batch}/1`,
+        path: join(roots.home, "review-clone"),
+        reason: "playground rm",
+        session,
+        size: 40,
+      })}\n`,
+    )
+    return batch
+  }
+
+  test("strips node_modules (root and a workspace's) and web/next/.next from a trashed batch, keeps the rest and the manifest, and a restore still works", async () => {
+    const roots = machine()
+    const old = batchTree(roots, new Date(NOW.getTime() - 2 * DAY), "s")
+    const young = batchTree(roots, new Date(NOW.getTime() - DAY), "t")
+    const slept: number[] = []
+    const done = await stripTrash(roots.trash, { sleep: async (ms) => void slept.push(ms) })
+    expect(done.batches).toEqual([old, young])
+    expect(done.folders).toBe(6)
+    expect(slept).toHaveLength(2)
+    for (const batch of [old, young]) {
+      const tree = join(roots.trash, batch, "1", "review-clone")
+      expect(existsSync(join(tree, "node_modules"))).toBe(false)
+      expect(existsSync(join(tree, "packages", "web", "node_modules"))).toBe(false)
+      expect(existsSync(join(tree, "web", "next", ".next"))).toBe(false)
+      expect(existsSync(join(tree, "src", "index.ts"))).toBe(true)
+      const entry = JSON.parse(
+        readFileSync(join(roots.trash, batch, "manifest.jsonl"), "utf8").trim(),
+      ) as { stripped?: number }
+      expect(entry.stripped).toBe(3)
+    }
+    expect(restore(`${old}/1`, roots)).toEqual({ path: join(roots.home, "review-clone") })
+    expect(existsSync(join(roots.home, "review-clone", "src", "index.ts"))).toBe(true)
   })
 
-  test("stops between batches when the load reaches the cap mid-purge", () => {
-    const { trash } = machine()
-    const first = batchAt(trash, new Date(NOW.getTime() - 9 * DAY), "a")
-    const second = batchAt(trash, new Date(NOW.getTime() - 8 * DAY), "b")
-    const third = batchAt(trash, new Date(NOW.getTime() - 8 * DAY), "c")
-    let reads = 0
-    const load = () => (reads++ < 2 ? 10 : 15)
-    const done = purgeTrash(trash, {
-      free: () => 20 * GB,
-      load,
-      loadCap: 15,
-      now: NOW,
-    })
-    expect(done.removed).toEqual([first, second])
-    expect(done.leftForLoad).toEqual([third])
-    expect(existsSync(join(trash, third))).toBe(true)
+  test("a manifest it cannot rewrite leaves the strip's folders gone and names the batch in failed", async () => {
+    const roots = machine()
+    const batch = batchTree(roots, new Date(NOW.getTime() - DAY), "s")
+    chmodSync(join(roots.trash, batch), 0o555)
+    const done = await stripTrash(roots.trash, { sleep: async () => {} })
+    chmodSync(join(roots.trash, batch), 0o755)
+    expect(done.failed).toEqual([batch])
+    expect(done.folders).toBe(3)
+    expect(existsSync(join(roots.trash, batch, "1", "review-clone", "node_modules"))).toBe(false)
   })
 
-  test("removes batches at any load when the disk is under the hard floor", () => {
-    const { trash } = machine()
-    const old = batchAt(trash, new Date(NOW.getTime() - 8 * DAY))
-    const young = batchAt(trash, new Date(NOW.getTime() - 2 * DAY))
-    const done = purgeTrash(trash, {
-      free: () => 4 * GB,
-      load: () => 20,
-      loadCap: 15,
-      now: NOW,
-    })
-    expect(done.removed).toEqual([old, young])
-    expect(done.leftForLoad).toEqual([])
-    expect(existsSync(join(trash, young))).toBe(false)
+  test("a batch the strip cannot finish names itself in failed and holds no later batch back", async () => {
+    const roots = machine()
+    const bad = batchTree(roots, new Date(NOW.getTime() - 2 * DAY), "s")
+    file(join(roots.trash, bad, "1", "review-clone", "node_modules", "locked", "child.js"))
+    chmodSync(join(roots.trash, bad, "1", "review-clone", "node_modules", "locked"), 0o555)
+    const good = batchTree(roots, new Date(NOW.getTime() - DAY), "t")
+    const done = await stripTrash(roots.trash, { sleep: async () => {} })
+    expect(done.batches).toEqual([good])
+    expect(done.folders).toBe(3)
+    expect(done.failed).toEqual([bad])
+    expect(existsSync(join(roots.trash, bad, "1", "review-clone", "node_modules", "locked"))).toBe(
+      true,
+    )
+    expect(existsSync(join(roots.trash, good, "1", "review-clone", "node_modules"))).toBe(false)
+    const entry = JSON.parse(
+      readFileSync(join(roots.trash, bad, "manifest.jsonl"), "utf8").trim(),
+    ) as { stripped?: number }
+    expect(entry.stripped).toBeUndefined()
+    chmodSync(join(roots.trash, bad, "1", "review-clone", "node_modules", "locked"), 0o755)
   })
+
+  test("a carve-out batch keeps its tree whole at the strip", async () => {
+    const roots = machine()
+    const batch = batchTree(roots, new Date(NOW.getTime() - DAY), "s")
+    const manifest = JSON.parse(
+      readFileSync(join(roots.trash, batch, "manifest.jsonl"), "utf8").trim(),
+    ) as { carveOut?: string }
+    manifest.carveOut = "dashboard-supervisor"
+    writeFileSync(join(roots.trash, batch, "manifest.jsonl"), `${JSON.stringify(manifest)}\n`)
+    const done = await stripTrash(roots.trash, { sleep: async () => {} })
+    expect(done.batches).toEqual([])
+    expect(done.folders).toBe(0)
+    expect(existsSync(join(roots.trash, batch, "1", "review-clone", "node_modules"))).toBe(true)
+  })
+
+  test("the strip skips an item its entry marks stripped", async () => {
+    const roots = machine()
+    const batch = batchTree(roots, new Date(NOW.getTime() - DAY), "s")
+    const manifest = JSON.parse(
+      readFileSync(join(roots.trash, batch, "manifest.jsonl"), "utf8").trim(),
+    ) as { stripped?: number }
+    manifest.stripped = 3
+    writeFileSync(join(roots.trash, batch, "manifest.jsonl"), `${JSON.stringify(manifest)}\n`)
+    const done = await stripTrash(roots.trash, { sleep: async () => {} })
+    expect(done.batches).toEqual([])
+    expect(done.folders).toBe(0)
+    expect(existsSync(join(roots.trash, batch, "1", "review-clone", "node_modules"))).toBe(true)
+  })
+
+  test("an rm refused at the tripwire leaves node_modules in place", () => {
+    const roots = machine()
+    const tree = join(roots.home, "review-clone")
+    file(join(tree, "node_modules", "left-pad", "index.js"))
+    for (let i = 0; i < LIMITS.files + 1; i++) file(join(tree, "src", `f${i}`))
+    const done = quarantine(tree, opts, roots)
+    expect("refused" in done && done.refused).toContain("tripwire")
+    expect(existsSync(join(tree, "node_modules", "left-pad", "index.js"))).toBe(true)
+  })
+
+  test("a tree that passes the tripwire only because its node_modules is skipped still moves", () => {
+    const roots = machine()
+    const tree = join(roots.home, "review-clone")
+    for (let i = 0; i < LIMITS.files - 1; i++) file(join(tree, "src", `f${i}`))
+    for (let i = 0; i < 100; i++) file(join(tree, "node_modules", `f${i}`))
+    const done = quarantine(tree, opts, roots)
+    if (!("id" in done)) throw new Error(`quarantine refused: ${done.refused}`)
+    const [batch] = done.id.split("/")
+    expect(existsSync(join(roots.trash, batch, "1", "review-clone", "src", "f0"))).toBe(true)
+  })
+
+  test("a strip that throws leaves the item reachable, its entry unmarked, and names the failure", () => {
+    const roots = machine()
+    const tree = join(roots.home, "review-clone")
+    file(join(tree, "node_modules", "locked", "child.js"))
+    file(join(tree, "node_modules", "ok", "child.js"))
+    file(join(tree, "src", "index.ts"))
+    chmodSync(join(tree, "node_modules", "locked"), 0o555)
+    const done = quarantine(tree, opts, roots)
+    if (!("id" in done)) throw new Error(`quarantine refused: ${done.refused}`)
+    expect(typeof done.stripFailed).toBe("string")
+    expect("stripped" in done).toBe(false)
+    const [batch] = done.id.split("/")
+    const entry = JSON.parse(
+      readFileSync(join(roots.trash, batch, "manifest.jsonl"), "utf8").trim(),
+    ) as { stripped?: number }
+    expect(entry.stripped).toBeUndefined()
+    expect(existsSync(join(roots.trash, batch, "1", "review-clone", "src", "index.ts"))).toBe(true)
+    expect(
+      existsSync(join(roots.trash, batch, "1", "review-clone", "node_modules", "locked")),
+    ).toBe(true)
+    chmodSync(join(roots.trash, batch, "1", "review-clone", "node_modules", "locked"), 0o755)
+  })
+})
+
+test("a path outside a tree's node_modules and web/next/.next is never removed outright", () => {
+  const roots = machine()
+  const tree = join(roots.home, "review-clone")
+  file(join(tree, "node_modules", "left-pad", "index.js"))
+  file(join(tree, "web", "next", ".next", "build-manifest.json"))
+  file(join(tree, "web", "next", ".next-cache", "y.js"))
+  file(join(tree, "packages", "app", ".next", "y.js"))
+  file(join(tree, "src", "index.ts"))
+  const done = quarantine(tree, opts, roots)
+  if (!("id" in done)) throw new Error(`quarantine refused: ${done.refused}`)
+  expect(restore(done.id, roots)).toEqual({ path: tree })
+  expect(existsSync(join(tree, "web", "next", ".next-cache", "y.js"))).toBe(true)
+  expect(existsSync(join(tree, "packages", "app", ".next", "y.js"))).toBe(true)
+  expect(existsSync(join(tree, "src", "index.ts"))).toBe(true)
 })
