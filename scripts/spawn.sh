@@ -1711,9 +1711,9 @@ if [ "$HARNESS" = codex ]; then
   CODEX_HOME="$DATA/codex"
   BEAT="$DATA/launch/$NAME.beat"
   mkdir -p "$CODEX_HOME/app-server-daemon" || refuse "it cannot prepare $CODEX_HOME"
-  python3 -I - "$CODEX_HOME" "$(cd -P "$OWN" && pwd -P)" <<'PY' || refuse "it cannot write $CODEX_HOME's config.toml and hooks.json"
+  python3 -I - "$CODEX_HOME" "$(cd -P "$OWN" && pwd -P)" "$REPO/scripts/factory-settings.json" <<'PY' || refuse "it cannot write $CODEX_HOME's config.toml and hooks.json"
 import json, os, sys
-home, folder = sys.argv[1:3]
+home, folder, factory = sys.argv[1:4]
 def write(name, text):
     tmp = os.path.join(home, f"{name}.{os.getpid()}.tmp")
     with open(tmp, "w") as f:
@@ -1724,7 +1724,27 @@ write("config.toml", f'cli_auth_credentials_store = "file"\ncheck_for_update_on_
 write(os.path.join("app-server-daemon", "settings.json"), json.dumps({"autoUpdateEnabled": False}) + "\n")
 # The beat lands whole: written beside its path, then moved onto it, so the wait never reads half of it.
 beat = {"hooks": [{"command": 'f="$SPAWN_CODEX_BEAT"; cat > "$f.tmp" && mv "$f.tmp" "$f"', "timeout": 10, "type": "command"}], "matcher": ""}
-write("hooks.json", json.dumps({"hooks": {"SessionStart": [beat]}}, indent=2) + "\n")
+# The factory's guards on each event Codex has (it has no Notification, PermissionDenied, PostToolUseFailure or StopFailure); session-state stays out, so no record reads a Codex session's state, and writing-first matches Bash, where Codex reads a skill and may run apply_patch.
+EVENTS = {"PermissionRequest", "PostToolUse", "PreToolUse", "SessionEnd", "SessionStart", "Stop", "UserPromptSubmit"}
+with open(factory) as f:
+    settings = json.load(f)["hooks"]
+hooks = {}
+for event, groups in settings.items():
+    if event not in EVENTS:
+        continue
+    kept = []
+    for group in groups:
+        handlers = [h for h in group["hooks"] if "session-state" not in h["command"]]
+        if not handlers:
+            continue
+        group = {**group, "hooks": handlers}
+        if "Skill" in group.get("matcher", "") and any("writing-first" in h["command"] for h in handlers):
+            group["matcher"] = "^(Bash|Edit|MultiEdit|Write)$"
+        kept.append(group)
+    if kept:
+        hooks[event] = kept
+hooks.setdefault("SessionStart", []).append(beat)
+write("hooks.json", json.dumps({"hooks": hooks}, indent=2) + "\n")
 PY
   LAUNCH="env ${UNSET}${CARRY}PLAYGROUND_ROLE=$ROLE CODEX_HOME=$(printf %q "$CODEX_HOME") SPAWN_CODEX_BEAT=$(printf %q "$BEAT") $(printf %q "$CODEX")"
   if [ "$MODE" = resume ]; then
