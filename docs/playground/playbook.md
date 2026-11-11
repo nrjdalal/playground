@@ -88,8 +88,8 @@ The dispatcher, the Planner and the two leads never close, except to be started 
 
 In herdr, sessions that work together share a workspace, each in a pane of its own: a checker opens as a column beside its worker's pane (`spawn.sh column`), and every other start opens a workspace of its own.
 A session ends when the one it reports to closes its pane, never the others.
-A finished worker, reviewer or tester also ends by itself: right after its PR merges, and from a check every 5 minutes, while one with work left unsaved stays open and its lead gets a `Not ended` line saying why,
-and a worker whose last PR closed unmerged stays open and its lead gets a `Kept` line to reassign or end it, unless that work sits in one of Playground's own worktrees whose PR has merged or closed, which the cleanup moves to the trash.
+A finished worker, reviewer or tester also ends by itself: right after its PR merges, and from a check every 5 minutes, while one with work left unsaved stays open and its lead gets a `Not ended` line saying why, unless that work sits in one of Playground's own worktrees whose PR has merged or closed, which the cleanup moves to the trash.
+A worker whose last PR closed unmerged stays open too, and its lead gets a `Kept` line to reassign or end it.
 Sessions already running move at their next restart, so nothing is closed just to re-arrange it.
 
 The leads keep watch with a sweep: every 15 minutes each one runs `playground sweep`, which prints only what changed since its last sweep (new alerts, the merge queue, the load, ETAs that have passed, a parked row's hold that has closed, and for Ops, once an hour, each ops switch still on with its reason) or `quiet`,
