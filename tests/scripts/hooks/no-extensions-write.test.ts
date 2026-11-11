@@ -1692,8 +1692,8 @@ describe("a quoted argument is read as a command line only where a program runs 
       `git commit -m "fix(x): y"; sh -c 'true'`,
     ],
     [
-      "a redirect that writes a file, dropping its redirect guard runs it",
-      `git commit -m "fix(x): y" > f`,
+      "a redirect that writes a file from another call on the line, dropping its redirect guard runs it",
+      `git commit -m "fix(x): y"; echo x > f`,
     ],
     [
       "a message holding the root's path as text, dropping its text guard runs it",
