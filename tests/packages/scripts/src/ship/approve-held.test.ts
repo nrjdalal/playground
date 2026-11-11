@@ -12,15 +12,23 @@ import {
 const HEAD = "abc123def456abc123def456abc123def456a"
 const OTHER = "9999999999999999999999999999999999999"
 
-const runOf = (headSha: string, status: string, event: string, id: number): HeldRun => ({
+const runOf = (headSha: string, status: string, conclusion: string, event: string, id: number) => ({
+  conclusion,
   event,
   headSha,
   id,
   status,
 })
 
-// A run as GitHub's list returns it, whose head_sha the script maps onto HeldRun.
-const wireOf = (headSha: string, status: string, event: string, id: number) => ({
+// A run as GitHub's list returns it, whose head_sha and conclusion the script maps onto HeldRun: a held run reads status completed with conclusion action_required.
+const wireOf = (
+  headSha: string,
+  status: string,
+  conclusion: string,
+  event: string,
+  id: number,
+) => ({
+  conclusion,
   event,
   head_sha: headSha,
   id,
@@ -50,10 +58,10 @@ const runsKey = `api repos/o/r/actions/runs?event=pull_request&head_sha=${HEAD}&
 
 const heldAtHead = JSON.stringify({
   workflow_runs: [
-    wireOf(HEAD, "action_required", "pull_request", 101),
-    wireOf(OTHER, "action_required", "pull_request", 202),
-    wireOf(HEAD, "completed", "pull_request", 303),
-    wireOf(HEAD, "action_required", "push", 404),
+    wireOf(HEAD, "completed", "action_required", "pull_request", 101),
+    wireOf(OTHER, "completed", "action_required", "pull_request", 202),
+    wireOf(HEAD, "completed", "success", "pull_request", 303),
+    wireOf(HEAD, "completed", "action_required", "push", 404),
   ],
 })
 
@@ -76,10 +84,10 @@ describe("heldRefusals", () => {
 describe("heldRuns", () => {
   test("keeps only a held run at the head", () => {
     const runs = [
-      runOf(HEAD, "action_required", "pull_request", 101),
-      runOf(OTHER, "action_required", "pull_request", 202),
-      runOf(HEAD, "completed", "pull_request", 303),
-      runOf(HEAD, "action_required", "push", 404),
+      runOf(HEAD, "completed", "action_required", "pull_request", 101),
+      runOf(OTHER, "completed", "action_required", "pull_request", 202),
+      runOf(HEAD, "completed", "success", "pull_request", 303),
+      runOf(HEAD, "completed", "action_required", "push", 404),
     ]
     expect(heldRuns(runs, HEAD).map((r) => r.id)).toEqual([101])
   })
@@ -100,18 +108,18 @@ describe("approveHeld", () => {
     const { calls, run } = fakeRun({
       "api repos/o/r/pulls/5": prAnswer,
       [runsKey]: JSON.stringify({
-        workflow_runs: [wireOf(OTHER, "action_required", "pull_request", 202)],
+        workflow_runs: [wireOf(OTHER, "completed", "action_required", "pull_request", 202)],
       }),
     })
     const lines = await approveHeld(run, "o/r", 5)
     expect(calls.filter((call) => call.includes("/approve"))).toEqual([])
     expect(lines.join("\n")).toContain("none held")
   })
-  test("a run that is not held is left alone", async () => {
+  test("a completed run whose conclusion is success is left alone", async () => {
     const { calls, run } = fakeRun({
       "api repos/o/r/pulls/5": prAnswer,
       [runsKey]: JSON.stringify({
-        workflow_runs: [wireOf(HEAD, "completed", "pull_request", 303)],
+        workflow_runs: [wireOf(HEAD, "completed", "success", "pull_request", 303)],
       }),
     })
     await approveHeld(run, "o/r", 5)
