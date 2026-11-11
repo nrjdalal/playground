@@ -1717,10 +1717,10 @@ def write(name, text):
 # The login stays in CODEX_HOME's auth.json, no update check or self-update runs mid-session, and the session's folder is trusted, so no prompt waits on the owner.
 write("config.toml", f'cli_auth_credentials_store = "file"\ncheck_for_update_on_startup = false\n\n[projects.{json.dumps(folder)}]\ntrust_level = "trusted"\n')
 write(os.path.join("app-server-daemon", "settings.json"), json.dumps({"autoUpdateEnabled": False}) + "\n")
-beat = {"hooks": [{"command": 'cat > "$PLAYGROUND_CODEX_BEAT"', "timeout": 10, "type": "command"}], "matcher": ""}
+beat = {"hooks": [{"command": 'cat > "$SPAWN_CODEX_BEAT"', "timeout": 10, "type": "command"}], "matcher": ""}
 write("hooks.json", json.dumps({"hooks": {"SessionStart": [beat]}}, indent=2) + "\n")
 PY
-  LAUNCH="env ${UNSET}${CARRY}PLAYGROUND_ROLE=$ROLE CODEX_HOME=$(printf %q "$CODEX_HOME") PLAYGROUND_CODEX_BEAT=$(printf %q "$BEAT") $(printf %q "$CODEX")"
+  LAUNCH="env ${UNSET}${CARRY}PLAYGROUND_ROLE=$ROLE CODEX_HOME=$(printf %q "$CODEX_HOME") SPAWN_CODEX_BEAT=$(printf %q "$BEAT") $(printf %q "$CODEX")"
   if [ "$MODE" = resume ]; then
     COMMAND="$LAUNCH resume --dangerously-bypass-hook-trust $SESSION"
   else

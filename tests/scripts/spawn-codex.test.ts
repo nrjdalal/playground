@@ -81,14 +81,14 @@ describe("spawn.sh --harness codex starts the dispatcher in Codex, failing close
     expect(r.code).toBe(0)
     const launch = launchText(r)
     expect(launch).toContain(`CODEX_HOME=${lw(r.home, "codex")}`)
-    expect(launch).toContain(`PLAYGROUND_CODEX_BEAT=${lw(r.home, "launch", `${NAME}.beat`)}`)
+    expect(launch).toContain(`SPAWN_CODEX_BEAT=${lw(r.home, "launch", `${NAME}.beat`)}`)
     expect(launch).toContain(
       `${join(r.home, "fakebin", "codex")} --dangerously-bypass-hook-trust "`,
     )
     expect(launch).not.toContain(" claude ")
     // the launch's own CODEX_HOME trusts the folder, keeps the login in a file, and its hooks write the beat
     expect(read(r, ".playground", "codex", "config.toml")).toContain(`[projects."`)
-    expect(read(r, ".playground", "codex", "hooks.json")).toContain("PLAYGROUND_CODEX_BEAT")
+    expect(read(r, ".playground", "codex", "hooks.json")).toContain("SPAWN_CODEX_BEAT")
     expect(read(r, "codex-app-server.log")).toContain(
       `"method":"thread/name/set","params":{"name":"${NAME}","threadId":"${THREAD}"}`,
     )
