@@ -17,6 +17,7 @@ import { refusalOf } from "../../../../packages/scripts/src/playground/prompt"
 import { callKey, transcriptOf } from "../../../../packages/scripts/src/stuck-alert"
 import { OLD_NAMES } from "../../../session-names"
 import { storeWith } from "../../hooks/render-set"
+import { machine } from "../run-slot-fake"
 
 // ops-unstick is Python waiting for its TypeScript port, so these drive its pure readers through a Python of 3.13 (uv, as test:skills runs), else the runner's python3.
 const RUN_PY = join(import.meta.dir, "../../../../scripts/ops/unstick/run.py")
@@ -618,19 +619,18 @@ run.cycle(state)
 alerts = json.load(open(os.path.join(run.OPS, "alerts-pending.json")))["alerts"]
 print(json.dumps({"alerts": [a for a in alerts if a["kind"] == "slot-stuck"], "sent": sent}))
 `
-  const held = async (file: string, line: string) => {
+  // two cycles over an ops folder `setup` fills, with `path` ahead of the run's PATH for a fake machine's load
+  const cycled = async (setup: (ops: string) => void, path?: string) => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
     mkdirSync(join(ops, "run-slot.waiters"), { recursive: true })
-    for (const off of ["run-slot.3-off", "run-slot.4-off"]) writeFileSync(join(ops, off), "")
-    writeFileSync(join(ops, file), line)
-    writeFileSync(join(ops, "run-slot.waiters", `2-${process.pid}-worker-m`), "s2 22 2 medium\n")
+    setup(ops)
     const proc = Bun.spawn([...PYTHON, "-I", "-c", HOLD, RUN_PY], {
       env: {
         CLAUDE_CONFIG_DIR: config,
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: process.env.HOME,
-        PATH: process.env.PATH,
+        PATH: path ? `${path}:${process.env.PATH}` : process.env.PATH,
         RUN_SLOT_SIZE: "medium",
         TZ: "UTC",
         UV_CACHE_DIR: process.env.UV_CACHE_DIR,
@@ -650,6 +650,38 @@ print(json.dumps({"alerts": [a for a in alerts if a["kind"] == "slot-stuck"], "s
       sent: [string, string][]
     }
   }
+  const held = (file: string, line: string) =>
+    cycled((ops) => {
+      for (const off of ["run-slot.3-off", "run-slot.4-off"]) writeFileSync(join(ops, off), "")
+      writeFileSync(join(ops, file), line)
+      writeFileSync(join(ops, "run-slot.waiters", `2-${process.pid}-worker-m`), "s2 22 2 medium\n")
+    })
+  // issue 1647: a fresh medium head beside run-slot-2's medium run, at the load5 given, fits only while slots 3 and 4 open, which the load brake shuts at the cap; `run-slot.sh head` names no waiter that does not fit, and the brake lapses LOAD_WAIT s after the oldest ask, well before a ticket pins at AGED, so a waiter the brake holds is never the head this check watches
+  const braked = (load5: number) =>
+    cycled((ops) => {
+      mkdirSync(join(ops, "run-slot-2"))
+      writeFileSync(
+        join(ops, "run-slot-2.holder"),
+        `worker-s ${process.pid} 2026-11-11T12:00:00Z 2 medium\n`,
+      )
+      writeFileSync(
+        join(ops, "run-slot.waiters", `${Date.now()}000000-${process.pid}-worker-m`),
+        "s2 22 2 medium\n",
+      )
+    }, machine({ load5 }).bin)
+
+  test("lists and sends nothing for a head the load brake holds", async () => {
+    expect(await braked(30)).toEqual({ alerts: [], sent: [] })
+  })
+
+  test("still sends the could-take line for the same head with load5 under the cap", async () => {
+    const { alerts, sent } = await braked(2)
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0].case).toBe("could-take")
+    expect(alerts[0].name).toBe("worker-m")
+    expect(sent).toHaveLength(1)
+    expect(sent[0][1]).toContain("could take it and takes nothing")
+  })
 
   test("names the battery's hold and sends no stall line", async () => {
     const { alerts, sent } = await held(

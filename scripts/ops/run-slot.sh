@@ -1652,11 +1652,10 @@ focus_holder() {
   read -r h _ 2>/dev/null < "$OPS/run-slot.focus"
   [ -n "$h" ] && printf '%s\n' "$h"
 }
-# true while focus holds this run: a heavy lane waits for every session but the focus one and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov)
+# true while focus holds this run: a heavy lane waits for every session but the focus one and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov); FOCUS_HOLDER keeps the name it read, so can-take prints the holder that held (issue 1647)
 focus_holds() {
-  local h
-  h=$(focus_holder) || return 1
-  ! focus_spares "$h" "$WHO"
+  FOCUS_HOLDER=$(focus_holder) || return 1
+  ! focus_spares "$FOCUS_HOLDER" "$WHO"
 }
 # the wait under the battery's red mark or focus, its line naming the battery's first
 hold_wait() {
@@ -2443,9 +2442,10 @@ if [ -n "$CAN_TAKE" ]; then
     # the ticket's own wait, its ask's time_ns in its name, so a small one past the backlog line answers for the hold the queue holds it under (issue 1417); a session-name ask has no wait to read and reads as fresh
     waited=$((($(date +%s) - ${CAN_TICKET%%-*} / 1000000000)))
   fi
-  # the holds the wait loop obeys first (its hold check) answer here too, so a held run reads closed to the verdict while it holds (issue 1818), and the stderr line names the hold, the battery's first as hold_wait names it, for ops-unstick's slot-stuck alert (issue 1842)
+  # the holds the wait loop obeys first (its hold check) answer here too, so a held run reads closed to the verdict while it holds (issue 1818), and the stderr line names the hold, the battery's first as hold_wait names it, for ops-unstick's slot-stuck alert (issue 1842); the line comes from the reads verdict_holds made, FOCUS_HOLDER set only when the battery did not hold, so a lapse between two reads prints no empty name (issue 1647)
+  FOCUS_HOLDER=
   if verdict_holds; then
-    if battery_holds; then echo "run-slot.sh: held by run-slot.battery" >&2; else echo "run-slot.sh: held by run-slot.focus for $(focus_holder)" >&2; fi
+    if [ -n "$FOCUS_HOLDER" ]; then echo "run-slot.sh: held by run-slot.focus for $FOCUS_HOLDER" >&2; else echo "run-slot.sh: held by run-slot.battery" >&2; fi
     exit 1
   fi
   reclaim "$OPS/$CAN_TAKE"

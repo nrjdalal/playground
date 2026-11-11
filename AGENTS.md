@@ -123,7 +123,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - A new worktree takes a full `bun install` through run-slot, 2 to 4 s on the warm cache, and clones a sibling's `node_modules` only on a cold cache ([scripts/README.md](./scripts/README.md#a-worktrees-node_modules)).
   Remove worktrees one at a time, never in parallel, and keep one review worktree across a PR's rounds.
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry: set work aside with a commit, and take a before-shot from a separate worktree on `origin/canary`.
-- Commit before a red-first swap and restore with `git checkout HEAD -- <file>` ([.agents/testing.md](./.agents/testing.md#traps)); squash by the `gh-commit` skill's Notes.
+- Commit before a red-first swap, a chain stopping if it fails (`git commit ... || exit 1`), and restore with `git checkout HEAD -- <file>` ([.agents/testing.md](./.agents/testing.md#traps)); squash by the `gh-commit` skill's Notes.
 - When the owner asks to see a draft, a tree or a restructure, show it in chat and change no file until told to apply it.
 - Run inscope as `npx -y inscope@latest <command>`; it is not on `PATH`.
 - Format with `bun run format` (oxfmt, `.oxfmtrc.jsonc`), not prettier, whose semicolons and 80-column wraps survive an oxfmt pass.
@@ -199,7 +199,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
   - ALWAYS: Keep the dashboard map current.
     `packages/scripts/src/verify/dashboard-map.json` changes in the same PR as a dashboard page, a sidebar group or an owner-rung API route.
 - Sidebar: read `.agents/dashboard/sidebar.md` before you change the sidebar's rows, groups or lights, the Scripts group, the managers' order, its header's icons, the tab's favicon dot or the user menu.
-- Asks: read `.agents/dashboard/asks.md` before you change the Inbox or the aside window's tab squares, and before you run `bun run ask` or `bun run thread`.
+- Asks: read `.agents/dashboard/asks.md` before you change the Inbox or the aside window's tab squares, and before you run `playground ask` or `bun run thread`.
 - Apps: read `.agents/dashboard/apps.md` before you change an app under `/dashboard/apps`: Changelog, or the parked Plan, Previews and Usage.
 - Dashboard: read `.agents/dashboard/dashboard.md` before you change `/dashboard`'s chat, an agent's view with its Pages tab, the System or Settings page, or `GET /api/v1/agents` and `GET /api/v1/system`.
 - Roster: read `.agents/dashboard/roster.md` before you change the roster's shape or its reader, `api/hono/src/lib/dashboard/roster.ts`.
@@ -218,12 +218,12 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
    The Changelog (`api/hono/src/plugins/changelog/sources.ts`) reads a body's `Outcome:` line, else the TL;DR's first bullet or a prose TL;DR's first sentence.
    Before the review's round 1, settle in your own pass what a round should never spend its turn on (most late findings were docs, skill, body and wording ones): run doc-sync over the change, give each touched doc and skill a writing-for-agents read (a completion criterion on every step, positive phrasing, reference disclosed into sibling files, one meaning in one place),
    and fill the template above; the reviewer still judges everything.
-   When the diff adds a member to an enumerated kind (a status, a type, a choice, a button), grep the repo for the wording of every list that names that kind's members (`git grep -n "Later, Archive"`) and update each hit: one such grep once found what six review rounds had found piece by piece.
+   When the diff adds a member to an enumerated kind (a status, a type, a choice, a button), grep the repo for the wording of every list that names that kind's members (`git grep -n "Later, Archive"`) and update each hit: one such grep once found what six rounds had found.
    As part of that doc-sync pass, run the changed-term grep for each term whose meaning the diff changes (a behaviour, a rule, what a command does): `git grep -l <term>` over the agent-facing and web docs, then update every hit still describing the old meaning, since one PR took 7 rounds, each finding one more doc that did.
    After you merge `canary` into the branch, run that grep for what the incoming commits changed: list each term whose meaning they changed (`git log -p HEAD^1..HEAD^2` while the merge commit is `HEAD`), grep the PR's own changed docs for each,
-   and fix every line still describing the old meaning in a commit after the merge before you ask for the next round, since one PR spent two docs-only rounds, about 24 minutes, on lines a merged change had made stale; done when no line of the PR's docs describes a meaning those commits changed.
-   When the PR moves text out of a file, run `git grep -n <old file name>` over the whole repo too, code comments, `scripts/hooks/README.md` and `.agents/dashboard/` included, and check each hit against the moved text at the old base, since one PR's greps stayed inside the playbook folder and missed 7 hits outside it, which cost rounds 4 and 5.
-   Done when the body's Evidence names each touched doc and skill with its check, doc-sync's result and each list grep and changed-term grep with its hits, the moved-text grep's included, before the review's round 1 opens.
+   and fix every line still describing the old meaning in a commit after the merge before you ask for the next round, since stale lines from a merge once cost two docs-only rounds; done when no line of the PR's docs describes a meaning those commits changed.
+   When the PR moves text out of a file, run `git grep -n <old file name>` over the whole repo too, code comments, `scripts/hooks/README.md` and `.agents/dashboard/` included, and check each hit against the moved text at the old base, since one PR's greps kept to one folder and missed 7 hits, which cost two rounds.
+   Done when the body's Evidence names each touched doc and skill by its full repo path with its check, doc-sync's result and each list grep and changed-term grep with its hits, the moved-text grep's included, before the review's round 1 opens.
 2. Have a reviewer agent other than its author (a session started for the review, working in its own scratch clone, whose brief carries the signal rule from The factory, above) score it out of 5 through the [code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md) skill, and fix what it finds, until it scores 5/5 on the latest head,
    GitHub Actions' `Audit, Lint, and Build` and `test` are green there, and only nits are left (SESSIONS.md, Fix pushes and nits).
 3. Mark it ready at 5/5 and merge it with `bun run pr:merge <n>` bare and unpiped, or let merge-on-ready land it (`bun run pr:train ready`): the only ways a Playground PR reaches `canary`.

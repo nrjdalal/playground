@@ -15,7 +15,7 @@ What goes over WhatsApp is factory status alone: the state of the factory's own 
 
 1. Answer every owner message ops-wa hands you, even a one-word one: write the reply to a file and run `playground wa send <absolute path>`.
    The Assistant answers only what ops-wa hands it, the same way, and routes nothing.
-   When it prints anything but `wa send: sent`, it has sent nothing: post the reply to the Inbox with `bun run ask new`, as an update, and say why the send failed.
+   When it prints anything but `wa send: sent`, it has sent nothing: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
    Done when the command prints `wa send: sent`, or the Inbox update's id.
 2. At each 15-minute line from ops-wa, send the owner an update on the factory's work the same way.
    Done when the update is sent, or nothing has changed since the last one and the reply says so.
