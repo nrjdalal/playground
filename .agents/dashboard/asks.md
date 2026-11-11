@@ -222,13 +222,14 @@
    "preview": {"outcome": "merged", "link": "https://github.com/acme/app/pull/270"}}
   EOF
   bun run ask new --thread <id> < item.json   # routes the item to that thread (bun run thread), refused when no thread has the id
-  bun run ask open --from builder   # each open item, oldest first, one line each: its #iN, kind, sender and title; --from keeps one sender's, and --since and --until (ISO times) those posted in that window
-  bun run ask get <id|#i41> --ack   # the item, with answer {at, choice, option?, options?, editedText?, link?, linkLabel?, noLink?, ackedAt?} once the owner answers (options is one index per question for a multi-question ask; the picked option's letter and label on stderr, each question's pick for a multi-question answer, `ask: picked A: Staging first · B: After the next ship`), marked read (which closes a deny, a clear, a discard or a provided secret, not a go)
+  bun run ask open --from builder   # each open item, oldest first, one line each: its #iN, kind, sender and title; --from keeps one sender's, and --since and --until (ISO times) those posted in that window; --json prints each item whole, one JSON line each, as ops-wa reads them
+  bun run ask get <id|#i41> --ack   # the item, with answer {at, choice, option?, options?, editedText?, link?, linkLabel?, noLink?, ackedAt?, via?} once the owner answers (via: "whatsapp" when the owner answered from WhatsApp) (options is one index per question for a multi-question ask; the picked option's letter and label on stderr, each question's pick for a multi-question answer, `ask: picked A: Staging first · B: After the next ship`), marked read (which closes a deny, a clear, a discard or a provided secret, not a go)
   bun run ask ack <id|#i41> --link https://app.slack.com/client/<team>/<channel>/thread/<channel>-1700000000.000100   # once carried out, a go closes with where (a Slack link in its app.slack.com/client form, which reads Open thread, so no --label), which its card links to by the label, or --no-link "<why>" when it has no page or Slack refused a Draft
   bun run ask edit <id|#i41> < item.json   # the poster replaces its own item's title and preview in place, until it closes, checked and its files copied as new does; the card redraws on the next 5s poll
   bun run ask settle <id|#i41> --note "Shipped by hand"   # the poster closes its own open decision or draft, decided another way; an update asks nothing, so settle refuses it
   bun run ask resolve <id|#i41> --by builder --note "The loop recovered on its own"   # the poster closes its own update once it has settled (a cleared alert, a finished progress card); until then it stays editable by its poster, unless the owner presses its Done or Dismiss
   bun run ask stale --minutes 15   # ops-sweep's chase: each answer given in the last 24h (--since <iso> moves that) its poster has not closed within 15 minutes
+  bun run ask whatsapp <file>   # ops-wa's alone: the owner's answer to a card from WhatsApp, read from a file in <data>/whatsapp/answers/ and typed into its poster as the card's own answer is (ADR 0024)
   ```
 
   `kind` is `decision` (left out, it is one), `draft` or `update`; `from` is the posting session's name as the Dashboard shows it, since the answer is typed into that session; `title` is one line.
