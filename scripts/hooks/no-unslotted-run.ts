@@ -14,6 +14,7 @@ import {
   ranIn,
   runnerFolders,
   turboWords,
+  unreadFolder,
 } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
@@ -242,8 +243,9 @@ const TEST_TAKES = new Set([
 const TURBO_TASKS = new Set(["build", "check-types", "lint", "test"])
 const TURBO_LIGHT = /^(?:--help|-h|--version|--dry(?:-run)?(?:=.*)?)$/
 
-// A program's words as a shell line splits them, so a script word (sh -c '<script>') shows the commands in it
-const lineWords = (values: string[]) => values.flatMap((v) => v.split(/[\s;&|()`]+/))
+// A program's words as the shell reads each one as a line, its quotes removed and its redirects dropped, so a script word (sh -c '<script>') shows the words of every command in it
+const lineWords = (values: string[]) =>
+  values.flatMap((v) => lex(v).commands.flatMap((c) => c.words.map((w) => w.value)))
 
 // Whether a program a runner's -p puts next beside (sh -c '<script>', env) runs next build among its words.
 const nextBuild = (values: string[]) =>
@@ -444,9 +446,14 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     // every folder the shell may be in, so a heavy run after a cd the reader cannot be sure of is caught wherever that cd may have left it
     for (const here of places(env)) {
       const found = heavy(name, args, here)
-      // a runner folder the hook cannot read could be a worktree
-      const unread = found?.also?.includes(undefined)
-      if (!found || !(found.anywhere || unread || ranIn(found.dir, found.also).some(inWorktree)))
+      if (
+        !found ||
+        !(
+          found.anywhere ||
+          unreadFolder(found.also) ||
+          ranIn(found.dir, found.also).some(inWorktree)
+        )
+      )
         continue
       // run-slot execs the first word after its --, so the fix keeps the program, its words and every assignment before it behind env, and drops every wrapper (exec, timeout, env's own options)
       const line = words()

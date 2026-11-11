@@ -7455,6 +7455,7 @@ function cwdFlag(args, env) {
 }
 function bunCall(args, env) {
   let cwd = env.cwd;
+  let xCwd;
   let chained = env.cwd;
   let filtered = false;
   let sub = -1;
@@ -7468,6 +7469,8 @@ function bunCall(args, env) {
         k++;
       cwd = value && pathOf(value, env);
       chained = value && pathOf(value, { ...env, cwd: chained });
+      if (words[0] === "x")
+        xCwd = { dir: cwd };
     } else if (v === "--filter" || v === "-F") {
       filtered = true;
       k++;
@@ -7482,7 +7485,7 @@ function bunCall(args, env) {
         break;
     }
   }
-  return { at: k, chained, cwd, filtered, sub, words };
+  return { at: k, chained, cwd, filtered, sub, words, xCwd };
 }
 function gitCall(args, env) {
   let cwd = env.cwd;
@@ -7627,22 +7630,11 @@ function runnerFolders(name, args, env, tool) {
     return runnerFolders("bun", [X, ...args], env, tool);
   if (name !== "bun")
     return;
-  const { chained, sub, words } = bunCall(args, env);
+  const { chained, words, xCwd } = bunCall(args, env);
   if (words[0] !== "x")
     return;
   const folders = [cwdFlag(tool, { ...env, cwd: chained })];
-  const options = args.slice(sub + 1);
-  let own;
-  for (let k = 0;k < options.length && options[k].value.startsWith("-"); k++) {
-    const v = options[k].value;
-    if (v === "--cwd")
-      own = { dir: options[k + 1] && pathOf(options[++k], env) };
-    else if (v.startsWith("--cwd="))
-      own = { dir: pathOf({ ...options[k], value: v.slice("--cwd=".length) }, env) };
-    else if (RUNNER_TAKES.has(v))
-      k++;
-  }
-  return own ? [...folders, own.dir] : folders;
+  return xCwd ? [...folders, xCwd.dir] : folders;
 }
 function runnerTarget(args) {
   let k = 0;
@@ -7660,6 +7652,7 @@ var ranIn = (dir, also) => [
   dir,
   ...also ?? []
 ];
+var unreadFolder = (also) => also?.includes(undefined) ?? false;
 function runs(name, args, local, env) {
   if (name === "bunx")
     return runs("bun", [X, ...args], local, env);
@@ -7911,7 +7904,7 @@ async function inspect(raw, environment, main) {
       if (script)
         return script;
       const ran = runs(name, args, local, here);
-      if (ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || ran.also?.includes(undefined)))
+      if (ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)))
         return refuse(ran.what, fixFor2(sure, ran.fix));
       const moved = name === "git" ? await liveRefusal(args, here, inLive, fixFor2(sure, LIVE_FIX)) : undefined;
       if (moved)
@@ -7963,5 +7956,6 @@ export {
   real,
   runnerFolders,
   turboWords,
+  unreadFolder,
   writeTargets
 };

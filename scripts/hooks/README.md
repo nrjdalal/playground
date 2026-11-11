@@ -847,9 +847,10 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 ## no-unslotted-run
 
 - A factory session runs every heavy run in a worktree through run-slot: `scripts/hooks/no-unslotted-run.ts`, registered beside no-stash, refuses `bun install`, a recursive `cp` of a `node_modules` folder, `bun run build`, `bun run check-types`, `bun run test`, a `bun test` or `bun run test:file` that names no file, `next build`,
-  and turbo running `build`, `check-types`, `lint` or `test` (`turbo run <task>` or `turbo <task>`), by name, path or versioned package (`turbo@latest`), through a package runner read as [no-main-checkout](#no-main-checkout) reads it, with each word of a program its `-p` puts turbo or next beside (`sh -c '<script>'`, `env`) read for the task or for `next build`, but for `--help`,
+  and turbo running `build`, `check-types`, `lint` or `test` (`turbo run <task>` or `turbo <task>`), by name, path or versioned package (`turbo@latest`), through a package runner read as [no-main-checkout](#no-main-checkout) reads it, with each word of a program its `-p` puts turbo or next beside (`sh -c '<script>'`, `env`) read as the shell reads a line, quotes and redirects included,
+  for the task or for `next build`, but for `--help`,
   `--version` and `--dry-run` on turbo's own words,
-  whose directory (every folder the shell may be in, [The folder a hook reads](#the-folder-a-hook-reads), or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd`, every folder `runnerFolders` names for `bunx` and `bun x` ([no-main-checkout](#no-main-checkout)), or turbo's `--cwd`, so one typed from anywhere counts,
+  whose directory (every folder the shell may be in, [The folder a hook reads](#the-folder-a-hook-reads), or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd`, every folder `runnerFolders` names for `bunx` and `bun x` ([no-main-checkout](#no-main-checkout)), refused as a worktree when the hook cannot read it, or turbo's `--cwd`, so one typed from anywhere counts,
   and a clone's destination) is inside a worktree under `.claude/worktrees/`,
   as written or with its links followed,
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).

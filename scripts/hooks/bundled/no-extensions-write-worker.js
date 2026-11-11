@@ -7271,6 +7271,7 @@ var RUNNERS = new Set(["npx"]);
 var TOOLS = new Set(["lefthook", "turbo"]);
 function bunCall(args, env) {
   let cwd = env.cwd;
+  let xCwd;
   let chained = env.cwd;
   let filtered = false;
   let sub = -1;
@@ -7284,6 +7285,8 @@ function bunCall(args, env) {
         k++;
       cwd = value && pathOf(value, env);
       chained = value && pathOf(value, { ...env, cwd: chained });
+      if (words[0] === "x")
+        xCwd = { dir: cwd };
     } else if (v === "--filter" || v === "-F") {
       filtered = true;
       k++;
@@ -7298,7 +7301,7 @@ function bunCall(args, env) {
         break;
     }
   }
-  return { at: k, chained, cwd, filtered, sub, words };
+  return { at: k, chained, cwd, filtered, sub, words, xCwd };
 }
 function gitCall(args, env) {
   let cwd = env.cwd;

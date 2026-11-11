@@ -7201,6 +7201,7 @@ function cwdFlag(args, env) {
 }
 function bunCall(args, env) {
   let cwd = env.cwd;
+  let xCwd;
   let chained = env.cwd;
   let filtered = false;
   let sub = -1;
@@ -7214,6 +7215,8 @@ function bunCall(args, env) {
         k++;
       cwd = value && pathOf(value, env);
       chained = value && pathOf(value, { ...env, cwd: chained });
+      if (words[0] === "x")
+        xCwd = { dir: cwd };
     } else if (v === "--filter" || v === "-F") {
       filtered = true;
       k++;
@@ -7228,7 +7231,7 @@ function bunCall(args, env) {
         break;
     }
   }
-  return { at: k, chained, cwd, filtered, sub, words };
+  return { at: k, chained, cwd, filtered, sub, words, xCwd };
 }
 var GIT_MOVES = new Set([
   "am",
@@ -7293,22 +7296,11 @@ function runnerFolders(name, args, env, tool) {
     return runnerFolders("bun", [X, ...args], env, tool);
   if (name !== "bun")
     return;
-  const { chained, sub, words } = bunCall(args, env);
+  const { chained, words, xCwd } = bunCall(args, env);
   if (words[0] !== "x")
     return;
   const folders = [cwdFlag(tool, { ...env, cwd: chained })];
-  const options = args.slice(sub + 1);
-  let own;
-  for (let k = 0;k < options.length && options[k].value.startsWith("-"); k++) {
-    const v = options[k].value;
-    if (v === "--cwd")
-      own = { dir: options[k + 1] && pathOf(options[++k], env) };
-    else if (v.startsWith("--cwd="))
-      own = { dir: pathOf({ ...options[k], value: v.slice("--cwd=".length) }, env) };
-    else if (RUNNER_TAKES.has(v))
-      k++;
-  }
-  return own ? [...folders, own.dir] : folders;
+  return xCwd ? [...folders, xCwd.dir] : folders;
 }
 function runnerTarget(args) {
   let k = 0;
@@ -7322,6 +7314,7 @@ var ranIn = (dir, also) => [
   dir,
   ...also ?? []
 ];
+var unreadFolder = (also) => also?.includes(undefined) ?? false;
 var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
 var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 if (false) {}
@@ -7497,7 +7490,7 @@ var TEST_TAKES = new Set([
 ]);
 var TURBO_TASKS = new Set(["build", "check-types", "lint", "test"]);
 var TURBO_LIGHT = /^(?:--help|-h|--version|--dry(?:-run)?(?:=.*)?)$/;
-var lineWords = (values) => values.flatMap((v) => v.split(/[\s;&|()`]+/));
+var lineWords = (values) => values.flatMap((v) => lex(v).commands.flatMap((c) => c.words.map((w) => w.value)));
 var nextBuild = (values) => lineWords(values).some((v, k, all) => program(v) === "next" && all[k + 1] === "build");
 function turboTask(words) {
   const values = words.map((w) => w.value);
@@ -7632,8 +7625,7 @@ function inspect(raw, environment, main) {
     }
     for (const here of places(env)) {
       const found = heavy(name, args, here);
-      const unread = found?.also?.includes(undefined);
-      if (!found || !(found.anywhere || unread || ranIn(found.dir, found.also).some(inWorktree)))
+      if (!found || !(found.anywhere || unreadFolder(found.also) || ranIn(found.dir, found.also).some(inWorktree)))
         continue;
       const line = words();
       if (line === undefined)

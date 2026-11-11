@@ -178,8 +178,11 @@ export function bunCall(
   filtered: boolean
   sub: number
   words: string[]
+  xCwd?: { dir: string | undefined }
 } {
   let cwd = env.cwd
+  // bun x's own last --cwd, read from the shell's folder
+  let xCwd: { dir: string | undefined } | undefined
   // the folder bun runs in: each --cwd read from the one before, as bun does
   let chained = env.cwd
   let filtered = false
@@ -198,6 +201,7 @@ export function bunCall(
       if (v === "--cwd") k++
       cwd = value && pathOf(value, env)
       chained = value && pathOf(value, { ...env, cwd: chained })
+      if (words[0] === "x") xCwd = { dir: cwd }
     } else if (v === "--filter" || v === "-F") {
       filtered = true
       k++
@@ -209,7 +213,7 @@ export function bunCall(
       if (v !== "run" && v !== "x") break
     }
   }
-  return { at: k, chained, cwd, filtered, sub, words }
+  return { at: k, chained, cwd, filtered, sub, words, xCwd }
 }
 
 // git's subcommand and its words, and the tree it acts on: the checkout a --git-dir of `<checkout>/.git` names, whose HEAD and index move, else its --work-tree, else the folder its -C options name (each relative to the one before); each counts only before the subcommand.
@@ -371,19 +375,10 @@ export function runnerFolders(
 ): (string | undefined)[] | undefined {
   if (name === "bunx") return runnerFolders("bun", [X, ...args], env, tool)
   if (name !== "bun") return
-  const { chained, sub, words } = bunCall(args, env)
+  const { chained, words, xCwd } = bunCall(args, env)
   if (words[0] !== "x") return
   const folders = [cwdFlag(tool, { ...env, cwd: chained })]
-  const options = args.slice(sub + 1)
-  let own: { dir: string | undefined } | undefined
-  for (let k = 0; k < options.length && options[k].value.startsWith("-"); k++) {
-    const v = options[k].value
-    if (v === "--cwd") own = { dir: options[k + 1] && pathOf(options[++k], env) }
-    else if (v.startsWith("--cwd="))
-      own = { dir: pathOf({ ...options[k], value: v.slice("--cwd=".length) }, env) }
-    else if (RUNNER_TAKES.has(v)) k++
-  }
-  return own ? [...folders, own.dir] : folders
+  return xCwd ? [...folders, xCwd.dir] : folders
 }
 
 // The word a package runner runs, past its options and their values (-y, --yes, -p turbo).
@@ -410,6 +405,9 @@ export const ranIn = (dir: string | undefined, also?: (string | undefined)[]) =>
   dir,
   ...(also ?? []),
 ]
+
+// Whether a folder runnerFolders adds is one the hook cannot read, which could be any folder, so both hooks refuse it on every branch
+export const unreadFolder = (also?: (string | undefined)[]) => also?.includes(undefined) ?? false
 
 // What of the command would build, test, run lefthook or turbo, commit, or move the checkout with git, or undefined; fix, when set, replaces INSTEAD.
 function runs(
@@ -702,11 +700,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const script = await fedScript(cmd, here, sure, inMain, visit)
       if (script) return script
       const ran = runs(name, args, local, here)
-      // a runner folder the hook cannot read could be the main checkout
-      if (
-        ran &&
-        (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || ran.also?.includes(undefined))
-      )
+      if (ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)))
         return refuse(ran.what, fixFor(sure, ran.fix))
       const moved =
         name === "git" ? await liveRefusal(args, here, inLive, fixFor(sure, LIVE_FIX)) : undefined
