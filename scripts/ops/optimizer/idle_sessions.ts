@@ -103,15 +103,9 @@ export async function sessionPrs(
   ]
 }
 
-// The PR's worker: a live worker session whose workerPrs (its roster pr and open branch PRs) holds an open PR of the checker's list; read only once the checker's own worker is found gone, each worker's PRs once per call.
-export async function servesLiveWorker(
-  input: CollectInput,
-  prs: string[],
-  states: (PrState | null)[],
-): Promise<boolean> {
+// True when a live worker session serves an open PR of the list, as workerPrs (its roster pr and open branch PRs) reads them; called only once the checker's own worker is found gone, each worker's PRs once per call.
+export async function servesLiveWorker(input: CollectInput, open: string[]): Promise<boolean> {
   const { roster, sessions, workerPrs } = input
-  const open = states.flatMap((s, i) => (s?.state === "open" ? [prs[i]] : []))
-  if (open.length === 0) return false
   for (const w of Object.keys(sessions)) {
     if (kindOf(w, roster[w]?.kind) !== "worker") continue
     const served = await workerPrs(w)
@@ -221,11 +215,12 @@ export async function collect(input: CollectInput): Promise<Row[]> {
     if (checker || kind === "worker") {
       const prs = await sessionPrs(input, name, worker, d.sessionId)
       const states = await Promise.all(prs.map((url) => prState(url)))
+      const open = states.flatMap((s, i) => (s?.state === "open" ? [prs[i]] : []))
       if (
         worker &&
         !(worker in sessions) &&
         !Object.keys(sessions).some((s) => s.startsWith("worker-") && s.startsWith(worker)) &&
-        !(await servesLiveWorker(input, prs, states))
+        !(await servesLiveWorker(input, open))
       )
         why.push(`checker-worker-gone (${worker})`)
       refs = states.flatMap((s) => (s?.ref ? [s.ref] : []))
