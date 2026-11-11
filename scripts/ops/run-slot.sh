@@ -1877,7 +1877,7 @@ lifted() {
   [ "$since $now" = "$s0" ] || under_write "$since $now"
   [ $((now - since)) -ge "$LIFT_HOLD" ]
 }
-# a waiting head's idle poll, with builtins alone, while its load reads as its look read it: false once the hold in UNDER has ended since that look, so the head looks again and the throttle lifts on time, a hold restarted in place included; else it writes the poll's second as UNDER's last again, at most every 30 s, so the hold counts across polls with no look of their own (a reading at or over the cap moves the load's whole numbers, so the head looks instead)
+# a waiting head's idle poll, with builtins alone but for its write, at most once in 30 s, while its load reads as its look read it: false once the hold in UNDER has ended since that look, so the head looks again and the throttle lifts on time, a hold restarted in place included; else it writes the poll's second as UNDER's last again, at most every 30 s, so the hold counts across polls with no look of their own (a reading at or over the cap moves the load's whole numbers, so the head looks instead)
 under_seen() {
   local first= last= now
   [ -n "$LIFT_AT" ] || return 0
