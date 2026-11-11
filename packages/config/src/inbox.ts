@@ -100,6 +100,13 @@ export type Choices = { rows: ChoiceRow[]; shape: "letters" | "yes-no" }
 // The scope a poster gives an ask or an update about the factory's own work, the one scope whose card may leave the Mac, on WhatsApp (ADR 0024); an org's work names its org, and a card with none stays in the Inbox.
 export const FACTORY_SCOPE = "factory"
 
+// Pure: the one decision WhatsApp may carry and answer (ADR 0024), checked by ops-wa before a card goes and by ask whatsapp before an answer lands: an ask with one question, on the factory's own work.
+export const factoryAsk = (item: { kind: string; preview: Record<string, unknown> }): boolean =>
+  item.kind === "decision" &&
+  item.preview.type === "ask" &&
+  !item.preview.questions &&
+  item.preview.scope === FACTORY_SCOPE
+
 // The most go rows a decision offers, A to E.
 export const MAX_OPTIONS = 5
 

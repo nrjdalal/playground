@@ -17,6 +17,8 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 - A `secret` ask carries only its key and sink, which the card words itself: its title takes step 5, then step 9; the value itself is the owner's to type into the card, so it appears nowhere in the item.
 - A `reveal` card carries only the item's full `service` and a `why`, a plain line: its title takes step 5, then step 9; the card fetches the value on the owner's own click, so it appears nowhere in the item either.
 
+An `ask` or an update about the factory's own work carries `scope: "factory"`, so it can reach the owner on WhatsApp too; an org's work names its org, and a card with no scope stays in the Inbox alone (asks.md, ADR 0024).
+
 Every decision and draft then takes step 10 once the owner answers; an update gets no answer, so it ends at step 9.
 
 A message outside the Inbox, a dispatcher's reply in chat or a Slack or Yard DM, takes steps 2 to 6 and 8, since Choices and Post belong to a card alone; a relay in chat, the dispatcher passing a session's message on to the owner, is one such message, its picture, note and bullets the session's point in the owner's words.

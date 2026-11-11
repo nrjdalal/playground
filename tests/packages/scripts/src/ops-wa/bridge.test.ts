@@ -7,6 +7,7 @@ import { type Stuck } from "../../../../../packages/scripts/src/ops-job/dispatch
 import {
   bridge,
   type Inbox,
+  type Media,
   OFF,
   REPLY,
   sender,
@@ -36,7 +37,7 @@ const START = Date.parse("2026-11-11T03:00:00Z")
 const ASSISTANT = "k3m9px-worker"
 
 // One bridge over a fake socket in a scratch data folder: the relay's lines and who each went to, the waits it asked for and a clock the waits move; WhatsApp mode is on, the dispatcher idle and the assistant seat ASSISTANT's unless the test says otherwise.
-const harness = (inbox?: Inbox) => {
+const harness = (inbox?: Inbox, media?: Media) => {
   const dir = join(mkdtempSync(join(tmpdir(), "ops-wa-")), "whatsapp")
   dirs.push(dir)
   const fake = fakeSocket()
@@ -78,6 +79,7 @@ const harness = (inbox?: Inbox) => {
     reply: send,
     stuck: async () => mode.stuck,
     inbox,
+    media,
   })
   watched.attach(fake.sock)
   return {
@@ -536,6 +538,21 @@ describe("Inbox cards on WhatsApp", () => {
     expect(h.answers.at(-1)).toEqual({ answer: { action: "approve", option: 1 }, id: "id-7" })
   })
 
+  test("a bare number or id, while no card that went out waits on its rows, goes to the dispatcher", async () => {
+    const h = await withCards([card(12, { kind: "update" }, { type: undefined })])
+    expect(await say(h, "2")).toEqual([])
+    expect(await say(h, "#i12")).toEqual([])
+    expect(h.relayed.filter((line) => /reads: (2|#i12)\n/.test(line))).toHaveLength(2)
+    expect(h.answers).toEqual([])
+  })
+
+  test("a bare number after its card is answered goes to the dispatcher", async () => {
+    const h = await withCards([card(12)])
+    await say(h, "1 #i12")
+    expect(await say(h, "2")).toEqual([])
+    expect(h.relayed.filter((line) => line.includes("reads: 2\n"))).toHaveLength(1)
+  })
+
   test("a reply with no card id answers nothing and says so", async () => {
     const h = await withCards([card(12)])
     expect(await say(h, "1")).toEqual([NO_ID])
@@ -629,5 +646,115 @@ describe("Inbox cards on WhatsApp", () => {
     const h = await withCards([card(12)])
     await say(h, "is #i12 merged?")
     expect(h.relayed.at(-1)).toContain("is #i12 merged?")
+  })
+})
+
+// A media folder beside the scratch whatsapp/, a download that hands back made-up bytes, and a transcriber that reads them as words unless the test says it cannot.
+const withMedia = (words: string | null = "merge the fix tonight") => {
+  const root = mkdtempSync(join(tmpdir(), "ops-wa-media-"))
+  dirs.push(root)
+  const calls = { download: 0, transcribe: [] as string[] }
+  const media: Media = {
+    dir: join(root, "wa", "media"),
+    download: async () => {
+      calls.download++
+      return new TextEncoder().encode("made-up bytes")
+    },
+    transcribe: async (path) => {
+      calls.transcribe.push(path)
+      return words ?? undefined
+    },
+  }
+  const h = harness(undefined, media)
+  return { ...h, calls, media }
+}
+const photo = (h: ReturnType<typeof harness>, caption?: string, from = OWNER) => ({
+  ...h.fake.message(jid(from), ""),
+  message: { imageMessage: { caption, mimetype: "image/jpeg" } },
+})
+const voice = (h: ReturnType<typeof harness>) => ({
+  ...h.fake.message(jid(OWNER), ""),
+  message: { audioMessage: { mimetype: "audio/ogg; codecs=opus", ptt: true } },
+})
+const keptPath = (line: string) => line.match(/kept at (\S+?)(?:,|\n|$)/)?.[1] ?? ""
+
+describe("photos and voice notes", () => {
+  test("a photo is kept in the media folder, the owner's alone, and the dispatcher's line names its path and caption", async () => {
+    const h = withMedia()
+    h.fake.upsert([photo(h, "the build page")])
+    await h.settle()
+    expect(h.relayed).toHaveLength(1)
+    const path = keptPath(h.relayed[0]!)
+    expect(path.startsWith(h.media.dir)).toBe(true)
+    expect(path.endsWith(".jpg")).toBe(true)
+    expect(h.relayed[0]).toContain("holds a photo, kept at")
+    expect(h.relayed[0]).toContain("with the words: the build page")
+    expect(await Bun.file(path).text()).toBe("made-up bytes")
+    expect(statSync(path).mode & 0o777).toBe(0o600)
+    expect(statSync(h.media.dir).mode & 0o777).toBe(0o700)
+    expect(path.includes("/whatsapp/")).toBe(false)
+  })
+
+  test("a photo with no caption names its path alone", async () => {
+    const h = withMedia()
+    h.fake.upsert([photo(h)])
+    await h.settle()
+    expect(h.relayed[0]).toMatch(/holds a photo, kept at \S+\.jpg\n/)
+    expect(h.calls.transcribe).toEqual([])
+  })
+
+  test("a voice note is read on this Mac, and the dispatcher reads its words", async () => {
+    const h = withMedia()
+    h.fake.upsert([voice(h)])
+    await h.settle()
+    const path = keptPath(h.relayed[0]!)
+    expect(path.endsWith(".ogg")).toBe(true)
+    expect(h.calls.transcribe).toEqual([path])
+    expect(h.relayed[0]).toContain("holds a voice note, kept at")
+    expect(h.relayed[0]).toContain("which says: merge the fix tonight")
+  })
+
+  test("a voice note no tool can read goes on as not transcribed, with its path", async () => {
+    const h = withMedia(null)
+    h.fake.upsert([voice(h)])
+    await h.settle()
+    expect(h.relayed[0]).toMatch(/holds a voice note, not transcribed, kept at \S+\.ogg\n/)
+  })
+
+  test("a download that fails is logged, and the dispatcher hears the kind alone", async () => {
+    const h = withMedia()
+    h.media.download = async () => {
+      throw new Error("media gone")
+    }
+    h.fake.upsert([photo(h, "x")])
+    await h.settle()
+    expect(h.relayed[0]).toContain("holds an image, which ops-wa does not read yet")
+    expect(h.logs.some((l) => l.includes("not kept: media gone"))).toBe(true)
+  })
+
+  test("a stranger's photo is dropped and never downloaded", async () => {
+    const h = withMedia()
+    h.fake.upsert([photo(h, "x", STRANGER)])
+    await h.settle()
+    expect(h.calls.download).toBe(0)
+    expect(h.relayed).toEqual([])
+    expect(await h.dropped()).toHaveLength(1)
+  })
+
+  test("while WhatsApp mode is off, nothing is downloaded", async () => {
+    const h = withMedia()
+    h.mode.on = false
+    h.fake.upsert([photo(h, "x")])
+    await h.settle()
+    expect(h.calls.download).toBe(0)
+    expect(h.relayed).toEqual([])
+  })
+
+  test("any other kind still reaches the dispatcher by its kind alone", async () => {
+    const h = withMedia()
+    h.fake.upsert([{ ...h.fake.message(jid(OWNER), ""), message: { stickerMessage: {} } }])
+    await h.settle()
+    expect(h.calls.download).toBe(0)
+    expect(h.relayed[0]).toContain("holds a sticker, which ops-wa does not read yet")
   })
 })

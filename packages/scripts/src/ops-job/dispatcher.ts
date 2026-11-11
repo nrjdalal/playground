@@ -19,7 +19,7 @@ export const WAIT_S = 180
 
 export type Stuck = { at: string; state: string } | null
 
-// Pure: the hand-on step both relays share: the waiting messages due for the assistant seat, any while the dispatcher reads stuck or failed, else each unanswered for WAIT_S while it is not mid-turn, and the why their line gives.
+// Pure: the hand-on step both relays share, the WhatsApp bridge and the Slack DM watch, so its why reads the same on both ("no reply has gone out"): the waiting messages due for the assistant seat, any while the dispatcher reads stuck or failed, else each unanswered for WAIT_S while it is not mid-turn.
 export function handOn<T>(
   waiting: T[],
   waitedS: (message: T) => number,
