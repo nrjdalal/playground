@@ -193,7 +193,7 @@ A Monitor or watch script runs under zsh, which does not word-split `$list`: loo
 Run each measurement as its own background task, since a chained task signals only when the whole chain ends, and a stall in its first stage once stayed hidden for 41 minutes.
 A wait on an owner step starts with two checks: the step's card is open in the Inbox as an ask the owner can answer, and its precondition can come true (whatever writes the file or state it waits on is running).
 When either check fails, report it to your lead at once, since a dead waiter, one whose condition can never come true, waits for good: one sat about 3 hours on a file only a job that was off could write.
-Before you report CI green, read it once in the foreground at the head (`gh pr checks <n>`, or REST check-runs).
+Before you report CI green, read the check-runs at the head sha once in the foreground (`gh api repos/<repo>/commits/<head sha>/check-runs`).
 A background or Monitor event alone is not a green.
 Done when every wait ends on a signal, each background task holds one measurement, every wait on an owner step has its open card and a precondition that can come true, every CI green you report was read in the foreground at the head, and every gap you name is checked against the sleep log.
 
