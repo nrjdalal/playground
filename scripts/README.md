@@ -26,7 +26,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`),
   and for a fresh worker start alone swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), refusing when vm_stat gives no reading, since free memory counts compressible pages and read 62% on 7 Nov while 150 pages swapped in a second; every other start keeps its pass, as at the slots gate;
   for a fresh worker start alone, room for its runs:
-  `scripts/ops/run-slot.sh room`'s lanes, held lanes, free lanes (open and unheld while the queue's next run fits its load units by run-slot's one gate, `unit_fits`, or a medium run with no waiter, `slots.peers`' holders counted) and live waiters, refusing while no lane is free and a run waits in the queue, or when room gives no reading, so a new worker never joins a queue it has no room in,
+  `scripts/ops/run-slot.sh room`'s lanes, held lanes, free lanes (open and unheld while the queue's next run fits its load units by run-slot's one gate, `unit_fits`, or a medium run with no waiter, `slots.peers`' holders counted; none while the battery's or focus's hold stands, which the wait loop obeys too) and live waiters, refusing while no lane is free and a run waits in the queue,
+  or when room gives no reading, so a new worker never joins a queue it has no room in,
   while a `--priority` start passes a full queue with a priority file standing, as it passes the load gate, its row's `readings.priority` naming the file, and a reviewer, tester
   or resume skips it and work already admitted finishes; and the launching backend's usage:
   Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, which never sits below one day's share of 14.3 points, so a week that has just reset passes its first day,

@@ -21,6 +21,7 @@ import {
   waitingLine,
 } from "./cards"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, writeOwn } from "./habits"
+import { keep } from "./media"
 
 type Key = {
   fromMe?: boolean | null
@@ -58,6 +59,15 @@ export type Mode = {
   stuck: () => Promise<Stuck>
   // the Inbox, for its cards on WhatsApp; a bridge with none sends none
   inbox?: Inbox
+  // where a photo or voice note is kept and how it is read; a bridge with none names only its kind
+  media?: Media
+}
+export type Media = {
+  // <data>/wa/media
+  dir: string
+  download: (m: Incoming) => Promise<Uint8Array>
+  // a voice note's words, or undefined when it cannot be read on this Mac
+  transcribe: (path: string) => Promise<string | undefined>
 }
 export type Inbox = {
   // the answer recorded through the Inbox's own route, or why not
@@ -154,13 +164,47 @@ async function inbound(io: Io & Mode, m: Incoming) {
     return
   }
   const reply = io.inbox && text ? replyOf(text) : null
-  if (reply) return answerCard(io, io.inbox!, reply)
+  if (reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true))
+    return answerCard(io, io.inbox!, reply)
   const when = new Date(at).toISOString()
   const line = text
     ? `The owner's WhatsApp at ${when} reads: ${text}\n${REPLY}`
-    : `The owner's WhatsApp at ${when} holds ${media}, which ops-wa does not read yet: say so to the owner.\n${REPLY}`
+    : `The owner's WhatsApp at ${when} ${(await saved(io, m, message, at)) ?? `holds ${media}, which ops-wa does not read yet: say so to the owner.`}\n${REPLY}`
   await io.relay("dispatcher", line)
   await writeOwn(handedFile(io.dir), { ...watch, handed: [...(watch.handed ?? []), { at, line }] })
+}
+
+// A photo or voice note kept in the media folder, and what the dispatcher hears of it: the path, a photo's caption, a voice note's words or that it was not transcribed; undefined for any other kind, or when it could not be kept.
+async function saved(io: Io & Mode, m: Incoming, message: Record<string, unknown>, at: number) {
+  const kind = message.imageMessage ? "image" : message.audioMessage ? "audio" : undefined
+  if (!io.media || !kind) return undefined
+  const part = (message.imageMessage ?? message.audioMessage) as {
+    caption?: unknown
+    mimetype?: string
+  }
+  let path: string
+  try {
+    path = await keep(io.media.dir, at, part.mimetype, await io.media.download(m))
+  } catch (error) {
+    io.log(`ops-wa: a photo or voice note was not kept: ${(error as Error).message}`)
+    return undefined
+  }
+  if (kind === "image")
+    return typeof part.caption === "string" && part.caption
+      ? `holds a photo, kept at ${path}, with the words: ${part.caption}`
+      : `holds a photo, kept at ${path}`
+  const words = await io.media.transcribe(path).catch(() => undefined)
+  return words
+    ? `holds a voice note, kept at ${path}, which says: ${words}`
+    : `holds a voice note, not transcribed, kept at ${path}`
+}
+
+// A reply with no card id or no number is a card's only while some open card that went out waits on its rows, so the owner's "2" to the dispatcher's own question reaches the dispatcher.
+const bare = (reply: Reply) => reply.ref === undefined || reply.number === undefined
+async function rowsWait(io: Io & Mode, inbox: Inbox): Promise<boolean> {
+  const sent = (await readOwn<Cards>(cardsFile(io.dir), {})).sent ?? {}
+  const open = await inbox.open().catch(() => [])
+  return open.some((card) => sent[card.ref]?.id === card.id && sent[card.ref]!.rows.length > 0)
 }
 
 // An owner's reply naming a card: it answers the card only when the card went out here and the number is one of its rows, else one line back says why it answers nothing.

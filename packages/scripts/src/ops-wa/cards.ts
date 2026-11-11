@@ -1,4 +1,4 @@
-import { type ChoicePreview, choicesOf, FACTORY_SCOPE } from "@packages/config/inbox"
+import { type ChoicePreview, choicesOf, FACTORY_SCOPE, factoryAsk } from "@packages/config/inbox"
 import { roleOfName } from "@packages/config/kinds"
 import { hideSecrets } from "@packages/settings"
 
@@ -68,9 +68,7 @@ const holds = (text: string, res: RegExp[]) =>
 export const goesOut = (card: Card, terms: Terms): boolean =>
   card.status === "open" &&
   roleOfName(card.from) !== "" &&
-  card.preview.scope === FACTORY_SCOPE &&
-  (card.kind === "update" ||
-    (card.kind === "decision" && card.preview.type === "ask" && !card.preview.questions)) &&
+  (card.kind === "update" ? card.preview.scope === FACTORY_SCOPE : factoryAsk(card)) &&
   !holds(wordsOf(card), terms.org)
 
 // Pure: the text with every term no-public-leak refuses and every token shape written as [hidden].

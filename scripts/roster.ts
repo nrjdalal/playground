@@ -30,7 +30,7 @@ export const USAGE = `Usage:
   roster.ts who <kind>                              (prints the name holding a manager kind's seat; writes nothing)
   roster.ts who dispatcher [1|2]                    (prints the dispatcher in slot 1, Alpha, by default, or 2, Bravo; writes nothing)
   roster.ts who assistant                           (prints the live session the roster gives the assistant kind, else exits 1; writes nothing)
-A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, and a PR not yet opened goes in as its issue's URL.
+A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, and a PR not yet opened goes in as its issue's URL; a checker whose worker is unset or ended takes a new PR through assign with a live worker= alone.
 Times always come from the UTC clock; titles are capped at 40 chars.`
 
 type Agent = Record<string, unknown> & { name: string }
@@ -245,6 +245,7 @@ function parkHold(entry: Agent, pairs: [string, string][], moved: boolean): void
 
 // A checker moved by halves keeps its old worker or pr, and the sidebar nests it under that worker's ended row.
 function checkRetask(
+  roster: Roster,
   entry: Agent,
   pairs: [string, string][],
   factoryRepo: string,
@@ -264,6 +265,17 @@ function checkRetask(
   )
     throw new Refusal(
       `roster.ts: ${entry.name} is a checker, so it moves to another PR through roster.ts assign ${entry.name} <title> <task> worker=<worker> pr=<url> [repo=<owner>/<name>], which sets its worker, pr, repo and title together`,
+      1,
+    )
+  // the checker reaper ends a checker whose worker has gone (checker-worker-gone), so a new PR on a live row names a live worker
+  const worker = next.worker as string | undefined
+  const gone = !worker || roster.agents.find((a) => a.name === worker)?.status === "ended"
+  const newPr =
+    pairs.some(([k, v]) => (k === "prs" || k === "prs+") && v.trim()) ||
+    (next.pr !== undefined && next.pr !== entry.pr)
+  if (gone && newPr)
+    throw new Refusal(
+      `roster.ts: ${entry.name} is a checker whose worker ${worker ? `${worker} has ended` : "is not set"}, so the checker reaper would end it: give it the PR with roster.ts assign ${entry.name} <title> <task> worker=<live worker> pr=<n>`,
       1,
     )
 }
@@ -307,7 +319,7 @@ async function main(argv: string[]): Promise<void> {
     const pairs = pairsOf(rest)
     checkPairs(name!, pairs)
     const entry = agent(roster, name!, pairs)
-    checkRetask(entry, pairs, factoryRepo)
+    checkRetask(roster, entry, pairs, factoryRepo)
     // A new task on an agent holding a pr would show the old PR beside it, so it goes through assign; a title alone renames the row.
     if (entry.pr && pairs.some(([k]) => k === "task"))
       throw new Refusal(
@@ -322,7 +334,7 @@ async function main(argv: string[]): Promise<void> {
     const pairs = pairsOf(more)
     checkPairs(name!, pairs)
     const entry = agent(roster, name!, pairs)
-    checkRetask(entry, pairs, factoryRepo)
+    checkRetask(roster, entry, pairs, factoryRepo)
     entry.lastReport = text
     entry.lastReportAt = now()
     apply(entry, pairs, factoryRepo)
@@ -333,7 +345,7 @@ async function main(argv: string[]): Promise<void> {
     const pairs = pairsOf(more)
     checkPairs(name!, pairs)
     const entry = agent(roster, name!, pairs, task)
-    checkRetask(entry, pairs, factoryRepo, true)
+    checkRetask(roster, entry, pairs, factoryRepo, true)
     // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end holds it while any is open.
     const checker = ["reviewer", "tester"].includes(kindOf(entry.name, entry.kind) ?? "")
     const served =

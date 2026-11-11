@@ -269,7 +269,7 @@ if [ "${1:-}" = set ]; then
   exit 0
 fi
 # every read subcommand below sets CAN_TAKE, so quick_kind never sends its bare true down the quick lane (run-slot-can-take.test.ts runs each)
-# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules and burst_held open it, and unit_fits passes (the
+# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules, the battery's and focus's holds and burst_held open it, and unit_fits passes (the
 # session's units and reserve, or a queue ticket's own when <who> names one, as ops-unstick asks for the head), else 1, so a script that takes its
 # slot itself reads them as every run here does (localci and the merge train still take theirs by their own mkdir for now); it reads no queue order and no other waiter, only the ticket it is given, and run-slot.priority only through may_reserve's reserve
 CAN_TAKE=
@@ -287,7 +287,7 @@ if [ "${1:-}" = slots ]; then
   SLOTS_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
-# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many the queue's next run can take now (the open, unheld ones while unit_fits passes for first_waiter's ticket, or a medium with no waiter; none while waiters wait and none can start), and the live tickets in the queue, which spawn.sh's slots gate reads
+# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many the queue's next run can take now (the open, unheld ones while unit_fits passes for first_waiter's ticket, or a medium with no waiter; none while waiters wait and none can start, and none while the battery's or focus's hold stands), and the live tickets in the queue, which spawn.sh's slots gate reads
 # run-slot.sh kind -- <command>: print the lane run-slot picks for that command (refuse for a run it refuses, docker for a docker build, else quick_kind's clone, commit, quick, or nothing for the queue) and exit, with no ask line, ticket or holder and nothing run, so a lane question reads run-slot's own pick
 KIND_ONLY=
 if [ "${1:-}" = kind ]; then
@@ -1576,15 +1576,16 @@ gate_sig() { G=shut; lanes_open && G=open; switch_on run-slot.single && ! lifted
 # whenever a fresh reading of them moves the line its verdict came from, its stamp apart (a `-nt` against the look's mark and a builtin compare, no
 # process of their own, so a flip lands with the reading that moved it, issue 1477, and rewrites run-slot.next within a poll; memory's pressure and free
 # share move without the cache, and a fresh reader's own lanes read names them); any other, which a new waiter or a run's end never moves to the head,
-# looks once it is the oldest or next_sig changes, so the queue's waiters look once when the oldest names another rather than each time the folder changes
+# looks on the look signature too, so a freeing, a run's end or a new ask wakes it once per change within a poll (issue 1818: Ops' A/B measured the pick
+# asleep through a freed gate), and once it is the oldest or next_sig changes; the load's, merge queue's, clock's and gauges' reads stay the head's alone
 cheap_idle() {
   local a pid l=
   self_changed && return 1
   a=("$QUEUE"/*)
   if [ -e "${a[0]}" ]; then pid=${a[0]##*/}; pid=${pid#*-}; pid=${pid%%-*}; alive "$pid" || return 1; fi
+  cheap_sig $PEERS
+  [ "$SIG" = "$SIG0" ] || return 1
   if [ "$LOOKER" = 1 ]; then
-    cheap_sig $PEERS
-    [ "$SIG" = "$SIG0" ] || return 1
     [ -e "$MQ" ] && ! [ "$MQ" -ot "$REF" ] && return 1
     [ -z "$DUE" ] || [ "$SECONDS" -lt "$DUE" ] || return 1
     cheap_load
@@ -1677,6 +1678,8 @@ battery_holds() {
   switch_on run-slot.battery || return 1
   case "$WHO" in ops-dashboard | ops-tick) return 1 ;; esac
 }
+# whether a hold the wait list obeys first stands, the one check the verdict reads share, so they cannot drift apart
+verdict_holds() { battery_holds || focus_holds; }
 prio_for() { local h; h=$(prio_holder) && [ -n "$h" ] && [ "$(owner_of "$1")" = "$h" ]; }
 # the oldest live ticket the priority holder owns, its worktree's commit steps' included: the one of its tickets that skips the queue, so its runs go in the order it asked for them (4 Nov: a merge asked later took a slot before the same session's older merge)
 prio_first() {
@@ -1955,7 +1958,8 @@ load1_max() {
 # with the CPU about half idle, and heavy runs waited up to 122 minutes); the load1 stop stays a hard stop for the spikes, load1 64 after a burst
 # of starts and 73 after a clone; a run's verdict that differs from the last, run-slot.lanes, is a lanes line in run-slot.runs.log with the
 # gauges, mem_ok's free share and pressure level and, when shut, why: the first of load1, cpu and mem that shut it (dispatcher, 5 Nov: retro 39
-# counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither
+# counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither; an idle share that reads
+# - is a dark sensor, not a busy CPU, so it opens under the load stop and memory, and only a reading that says busy, or one below the bar, shuts (issue 1818)
 lanes_open() {
   local idle swap tps mbs load need="" verdict=shut why="" seen free level
   # a read subcommand takes the verdict a waiter wrote in the last 30 s (the head rewrites it each poll while the gauges shut a slot, and, while they open one, whenever a fresh reading moves the readings past their stamp, gate_sig), so room, can-take and head see the lanes as the queue's head saw them, since the CPU gate can flip between two readings seconds apart (issue 1216: 55% then 33% idle); with none that fresh it reads the gauges itself
@@ -1963,13 +1967,13 @@ lanes_open() {
   read -r idle swap tps mbs _ <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
   case "$idle" in
-    -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut" ;;
+    -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so the lanes go by the load and memory alone" ;;
     busy) told busy "$BUSY_TOLD" ;;
   esac
   if [ "${load%.*}" -lt "$(load1_max)" ] 2>/dev/null; then need=$(idle_min); fi
   if [ -z "$need" ]; then
     why=load1
-  elif [ "$idle" = - ] || [ "$idle" = busy ] || ! [ "${idle%.*}" -ge "$need" ] 2>/dev/null; then
+  elif [ "$idle" = busy ] || { [ "$idle" != - ] && ! [ "${idle%.*}" -ge "$need" ]; } 2>/dev/null; then
     why=cpu
   elif ! mem_ok; then
     why=mem
@@ -2282,7 +2286,7 @@ if [ -n "$KIND" ]; then
     [ -n "$last" ] && echo "${CLONE_GAP}s past the last clone's end at $last"
   }
   # a commit's build, a merge or a clone is heavy, so it waits under focus or the battery's red mark; the quick slot's short runs go on
-  while [ "$KIND" != quick ] && { battery_holds || focus_holds; }; do
+  while [ "$KIND" != quick ] && verdict_holds; do
     [ -z "$CLONE_TICKET" ] || rm -f "$CLONE_TICKET"
     reread
     hold_wait
@@ -2416,13 +2420,15 @@ if [ -n "$ROOM_ONLY" ]; then
   c=$(capacity)
   free=0
   waiters=$(ordered_waiters | grep -c .)
-  # the free lanes are the ones the queue's next run can take: first_waiter's own units, none while no waiter can start, a medium's with no waiter
-  t=$(first_waiter)
-  if [ -n "$t" ]; then
-    set -- $(cat "$QUEUE/$t" 2>/dev/null)
-    unit_fits "${2:-22}" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" && free=$((c / 2 - held))
-  elif [ "$waiters" = 0 ]; then
-    unit_fits 22 2 medium "" "$c" && free=$((c / 2 - held))
+  # the free lanes are the ones the queue's next run can take: first_waiter's own units, none while no waiter can start, a medium's with no waiter; none while a hold stands, since it holds the queue's next run (issue 1818)
+  if ! verdict_holds; then
+    t=$(first_waiter)
+    if [ -n "$t" ]; then
+      set -- $(cat "$QUEUE/$t" 2>/dev/null)
+      unit_fits "${2:-22}" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" && free=$((c / 2 - held))
+    elif [ "$waiters" = 0 ]; then
+      unit_fits 22 2 medium "" "$c" && free=$((c / 2 - held))
+    fi
   fi
   echo "$((c / 2)) $held $free $waiters"
   exit 0
@@ -2437,6 +2443,8 @@ if [ -n "$CAN_TAKE" ]; then
     # the ticket's own wait, its ask's time_ns in its name, so a small one past the backlog line answers for the hold the queue holds it under (issue 1417); a session-name ask has no wait to read and reads as fresh
     waited=$((($(date +%s) - ${CAN_TICKET%%-*} / 1000000000)))
   fi
+  # the holds the wait loop obeys first (its hold check) answer here too, so a held run reads closed to the verdict while it holds (issue 1818)
+  if verdict_holds; then exit 1; fi
   reclaim "$OPS/$CAN_TAKE"
   [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" && ! burst_held > /dev/null || exit 1
   unit_fits "$CLASS$UNITS" "$UNITS" "$SIZE" "$WHO"
@@ -2489,7 +2497,7 @@ while :; do
     continue
   fi
   # under the battery's red mark or focus a run keeps its place in the queue and takes no slot
-  if battery_holds || focus_holds; then
+  if verdict_holds; then
     hold_wait
     continue
   fi

@@ -1,7 +1,7 @@
 import { lstat, readFile, realpath, unlink } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
-import { FACTORY_SCOPE } from "@packages/config/inbox"
+import { factoryAsk } from "@packages/config/inbox"
 import type { Database } from "@packages/db"
 import { z } from "zod"
 
@@ -47,12 +47,7 @@ export async function whatsappAnswer(
   }
   const item = await getItem(db, parsed.id)
   if (!item) return refuse("no inbox item with that id")
-  if (
-    item.kind !== "decision" ||
-    item.preview.type !== "ask" ||
-    item.preview.questions ||
-    item.preview.scope !== FACTORY_SCOPE
-  )
+  if (!factoryAsk(item))
     return refuse(
       "only a factory-scoped ask decision with one question takes an answer from WhatsApp",
     )
