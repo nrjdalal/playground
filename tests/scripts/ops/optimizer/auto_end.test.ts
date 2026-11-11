@@ -313,6 +313,38 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     )
     expect([closed, lines]).toEqual([[], []])
   })
+
+  // GitHub closes a PR's issue a beat after its merge, so the issue never counts as the last close
+  test("a merged PR beside the issue it closes, closed a beat later, still ends the worker as merged", async () => {
+    const { closed, deps, reported } = fakes()
+    const ISSUE = "https://github.com/o/r/issues/2112"
+    const lines = await sweep(
+      input({
+        prState: async (url) =>
+          url === NEXT
+            ? { ...MERGED, mergedAt: "2026-11-01T03:00:00Z" }
+            : url === ISSUE
+              ? { closedAt: "2026-11-01T03:00:01Z", head: "", state: "closed", verdicts: [] }
+              : null,
+        roster: {
+          "n8vtrw-worker": { kind: "worker", name: "n8vtrw-worker", pr: NEXT, prs: [NEXT, ISSUE] },
+        },
+        sessions: { "n8vtrw-worker": live("n8vtrw-worker") },
+        workerPrs: async (name) => (name === "n8vtrw-worker" ? [NEXT] : []),
+      }),
+      deps,
+    )
+    expect(closed).toEqual(["n8vtrw-worker"])
+    expect(reported).toEqual([
+      ["n8vtrw-worker", "ended automatically: worker-prs-done (merged), #2111 merged as daaac8e"],
+    ])
+    expect(lines).toEqual([
+      {
+        text: "Ended n8vtrw-worker: worker-prs-done (merged), #2111 merged as daaac8e",
+        to: "builder",
+      },
+    ])
+  })
 })
 
 describe("guards", () => {
