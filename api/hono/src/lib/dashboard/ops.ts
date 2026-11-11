@@ -55,10 +55,10 @@ export const RUNNER_NAMES: Record<string, string> = {
   "ops-zai-usage": "GLM usage readings",
 }
 
-// Pure: a job's shown name: RUNNER_NAMES's, else its id without the prefix, in words (ops-new-thing reads New thing), so a new job never shows "ops".
 // The hover line of a job outside the registry whose own setting gives no description.
 export const NO_DESCRIPTION = "No description in this job's settings"
 
+// Pure: a job's shown name: RUNNER_NAMES's, else its id without the prefix, in words (ops-new-thing reads New thing), so a new job never shows "ops".
 export const jobName = (job: string): string => {
   const named = RUNNER_NAMES[job]
   if (named) return named

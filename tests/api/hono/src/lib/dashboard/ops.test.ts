@@ -297,11 +297,6 @@ describe("job names and schedules", () => {
     fixture.files["playground/roster.json"] as { agents: { role: string; title?: string }[] }
   ).agents.filter((agent) => agent.role === "runner")
 
-  test("every job in the shipped fixture has a plain name", () => {
-    for (const { name } of fixtureJobs)
-      expect([name, jobName(name)]).toEqual([name, expect.any(String)])
-  })
-
   test("a fixture job outside core's registry is labelled by its own jobs.json row, with one set and one on the generic line (#1866)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "dashboard-ops-fixture-"))
     writeFileSync(join(dir, "jobs.json"), JSON.stringify(fixture.files["playground/ops/jobs.json"]))
