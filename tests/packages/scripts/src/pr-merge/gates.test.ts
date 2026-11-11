@@ -228,6 +228,36 @@ describe("gatesOf", () => {
     })
   })
 
+  // #1676: run 42670675952 ended failure with every job it ran green and no gate job at all
+  test("a run that finished green without its gate job names the rerun, while one still running waits", () => {
+    const job = (name: string, status = "COMPLETED") => ({
+      conclusion: status === "COMPLETED" ? "SUCCESS" : null,
+      detailsUrl: `https://github.com/nrjdalal/playground/actions/runs/42670675952/job/${name.length}`,
+      name,
+      startedAt: "2026-11-09T18:04:17Z",
+      status,
+      workflowName: "auto-check-build",
+    })
+    const test = { ...job("test"), workflowName: "auto-test" }
+    expect(
+      ciGate([job("Lint and Build"), job("Suite (1)"), test], { required: REQUIRED_CHECKS }),
+    ).toEqual({
+      detail:
+        "no Audit, Lint, and Build check on the head, though every job of its auto-check-build run passed: GitHub ended that run without creating it; rerun it with `gh run rerun 42670675952`",
+      name: "ci",
+      ok: false,
+    })
+    expect(
+      ciGate([job("Lint and Build"), job("Suite (1)", "IN_PROGRESS"), test], {
+        required: REQUIRED_CHECKS,
+      }),
+    ).toEqual({
+      detail: "no Audit, Lint, and Build check on the head yet: GitHub runs it on every push",
+      name: "ci",
+      ok: false,
+    })
+  })
+
   test("an older cancelled run beside a newer pass of the same check passes", () => {
     expect(ciGate([CANCELLED, PASSED_RUN])).toEqual({
       detail: "1 check passed",
