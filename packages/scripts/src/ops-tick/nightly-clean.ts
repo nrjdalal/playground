@@ -108,6 +108,15 @@ export const rosterNames = (roster: unknown): { branches: Set<string>; texts: st
   return { branches, texts }
 }
 
+// The roster's names for one step, whole or the rows a filter keeps, or null when the file cannot be read.
+const readRoster = async (data: string, keep?: (rows: unknown[]) => unknown[]) =>
+  Bun.file(join(data, "roster.json"))
+    .json()
+    .then(
+      (r: { agents?: unknown[] }) => rosterNames(keep ? keep(r.agents ?? []) : r),
+      () => null,
+    )
+
 // Pure: the folders the factory works in, as spawn.sh trusts them: the code root, and ~/<org> for each org ext.links guards.
 export const rootsOf = (settings: Settings, checkout: string, home: string): string[] => [
   codeRoot(settings, checkout),
@@ -383,9 +392,7 @@ export const nightlyClean =
         .filter((l) => l.startsWith("n/"))
         .map((l) => l.slice(1))
       if (!cwds.length) return "lsof unreadable, none removed"
-      const roster = await Bun.file(join(data, "roster.json"))
-        .json()
-        .then(rosterNames, () => null)
+      const roster = await readRoster(data)
       if (roster === null) return "the roster unreadable, none removed"
       const out: string[] = []
       for (const repo of repos) {
@@ -453,13 +460,9 @@ export const nightlyClean =
       const entries = await readdir(dir, { withFileTypes: true }).catch(() => null)
       if (!entries) return "none: the data folder holds no folder of theirs"
       // a row whose status is ended holds no folder
-      const roster = await Bun.file(join(data, "roster.json"))
-        .json()
-        .then(
-          (r: { agents?: { status?: unknown }[] }) =>
-            rosterNames((r.agents ?? []).filter((row) => row?.status !== "ended")),
-          () => null,
-        )
+      const roster = await readRoster(data, (rows) =>
+        rows.filter((row) => (row as { status?: unknown })?.status !== "ended"),
+      )
       if (roster === null) return "the roster unreadable, none removed"
       const idOf = (name: string) => name.split("-")[0]!
       const live = new Set((await deps.live()).map(idOf))
