@@ -9,7 +9,7 @@ import { pastDeadline, withDeadline } from "../../../scripts/hooks/shell"
 const ROOT = join(import.meta.dir, "..", "..", "..")
 const HOOKS = join(ROOT, "scripts", "hooks")
 
-// The guards both settings files register on Bash, one entry each, which guards.ts runs in one process.
+// Every Bash guard, which guards.ts runs in one process.
 const BASH_GUARDS = [
   "no-desktop-owner-app",
   "no-env-dump",
@@ -57,19 +57,28 @@ describe("guards.ts runs every Bash guard", () => {
     expect(GUARDS.map((g) => g.name)).toEqual(BASH_GUARDS)
   })
 
-  // Until guards.ts takes their place, each settings file's Bash entries are the list, so a guard a later PR registers on Bash fails here until GUARDS runs it.
+  // Each settings file runs a Bash call's guards through guards.ts alone, so a guard a later PR registers on Bash fails here until GUARDS runs it.
   test.each(["scripts/factory-settings.json", ".claude/settings.json"])(
-    "the Bash guards %s registers are the list",
+    "%s registers guards.ts once on Bash, blocking on a failure, and no other Bash guard",
     async (file) => {
       const settings = (await Bun.file(join(ROOT, file)).json()) as {
-        hooks: { PreToolUse: { hooks: { command: string }[]; matcher: string }[] }
+        hooks: {
+          PreToolUse: {
+            hooks: { command: string; onFailure?: string; timeout?: number }[]
+            matcher: string
+          }[]
+        }
       }
       const registered = settings.hooks.PreToolUse.filter(({ matcher }) =>
         new RegExp(matcher).test("Bash"),
       ).flatMap(({ hooks }) =>
-        hooks.flatMap(({ command }) => command.match(/bundled\/([a-z-]+)\.js/)?.[1] ?? []),
+        hooks.map(({ command, onFailure, timeout }) => ({
+          hook: command.match(/bundled\/([a-z-]+)\.js/)?.[1],
+          onFailure,
+          timeout,
+        })),
       )
-      expect([...new Set(registered)].sort()).toEqual(BASH_GUARDS)
+      expect(registered).toEqual([{ hook: "guards", onFailure: "block", timeout: 15 }])
     },
   )
 
