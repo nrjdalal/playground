@@ -105,6 +105,7 @@ export async function sessionPrs(
 
 // True when a live worker session serves an open PR of the list, as workerPrs (its roster pr and open branch PRs) reads them; called only once the checker's own worker is found gone, each worker's PRs once per call.
 export async function servesLiveWorker(input: CollectInput, open: string[]): Promise<boolean> {
+  if (open.length === 0) return false
   const { roster, sessions, workerPrs } = input
   for (const w of Object.keys(sessions)) {
     if (kindOf(w, roster[w]?.kind) !== "worker") continue
