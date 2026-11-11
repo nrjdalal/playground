@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -152,6 +153,31 @@ test("runRm tells the dispatcher once when a session hits the per-minute cap, ho
   expect(told).toEqual([
     "j6rjgy-worker: j6rjgy-worker quarantined 3 paths in the last minute, the most one session may",
   ])
+})
+
+test("runRm clears the caller's own scratch folder", async () => {
+  const { deps, home } = machine()
+  const scratch = join(home, ".playground", "scratch", "j6rjgy-worker")
+  mkdirSync(join(scratch, "tmp"), { recursive: true })
+  writeFileSync(join(scratch, "tmp", "work.txt"), "x")
+  expect(await runRm([scratch], deps)).toBe(0)
+  expect(existsSync(scratch)).toBe(false)
+})
+
+test("runRm refuses another session's scratch folder, a .. escape out of the own one and a link out of it", async () => {
+  const { deps, home } = machine()
+  const scratch = join(home, ".playground", "scratch", "j6rjgy-worker")
+  const other = join(home, ".playground", "scratch", "a4b5c6-worker")
+  mkdirSync(other, { recursive: true })
+  expect(await runRm([other], deps)).toBe(1)
+  expect(existsSync(other)).toBe(true)
+  expect(await runRm([join(scratch, "..", "a4b5c6-worker")], deps)).toBe(1)
+
+  mkdirSync(join(home, ".ssh"), { recursive: true })
+  mkdirSync(scratch, { recursive: true })
+  symlinkSync(join(home, ".ssh"), join(scratch, "keys"))
+  expect(await runRm([join(scratch, "keys")], deps)).toBe(1)
+  expect(existsSync(join(scratch, "keys"))).toBe(true)
 })
 
 test("runRm tells the dispatcher of a protected path, and not of a missing one", async () => {

@@ -115,6 +115,31 @@ describe("isProtected", () => {
     expect(isProtected(join(roots.main, ".claude", "worktrees", "wt"), roots)).toBeNull()
     expect(isProtected(join(roots.main, ".claude", "worktrees", "wt", ".next"), roots)).toBeNull()
   })
+
+  test("lets the caller's own scratch and scratchpad folders go", () => {
+    const roots = machine()
+    const own = join(roots.home, ".playground", "scratch", opts.session)
+    const pad = join(roots.home, ".playground", "scratchpad", opts.session)
+    expect(isProtected(own, roots, opts.session)).toBeNull()
+    expect(isProtected(join(own, "build"), roots, opts.session)).toBeNull()
+    expect(isProtected(join(pad, "notes"), roots, opts.session)).toBeNull()
+  })
+
+  test("refuses another session's scratch folder and a .. escape out of the own one", () => {
+    const roots = machine()
+    const own = join(roots.home, ".playground", "scratch", opts.session)
+    const other = join(roots.home, ".playground", "scratch", "a4b5c6-worker")
+    expect(isProtected(other, roots, opts.session)).toBeString()
+    expect(isProtected(join(own, "..", "a4b5c6-worker"), roots, opts.session)).toBeString()
+  })
+
+  test("refuses a symlink inside the own scratch that points out of it", () => {
+    const roots = machine()
+    const own = join(roots.home, ".playground", "scratch", opts.session)
+    mkdirSync(own, { recursive: true })
+    symlinkSync(join(roots.home, ".ssh"), join(own, "keys"))
+    expect(isProtected(join(own, "keys"), roots, opts.session)).toBeString()
+  })
 })
 
 describe("quarantine, listTrash and restore", () => {
