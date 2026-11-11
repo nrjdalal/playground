@@ -879,14 +879,18 @@ function quietCommit(cmd: Command, parsed: Parsed, env: Env): boolean {
   )
 }
 
-// Whether a line is read whole, as canary read it, every spaced text of every program but a reader a command line; a line is read call by call only when every command, its substitutions' included, is narrow or a quiet commit and no redirect writes a file
+// Whether a line is read whole, as canary read it, every spaced text of every program but a reader a command line; a line is read call by call only when every command, its substitutions' included, is narrow or a quiet commit, and no redirect but a quiet commit's own writes a file
 function wholeLine(commands: Command[], env: Env): boolean {
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
     if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
-    const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
     const parsed = parse(cmd)
-    return writes || !(narrow(cmd, env) || quietCommit(cmd, parsed, env) || sedInPlace(cmd, parsed))
+    // a quiet commit run-slot runs is read as the commit (slotWords), and its own redirect takes what git prints, never its message, judged by where it writes as every redirect is
+    const slot = slotWords(parsed)
+    const commit = slot ? { ...cmd, words: slot } : cmd
+    if (quietCommit(commit, slot ? parse(commit) : parsed, env)) return false
+    const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
+    return writes || !(narrow(cmd, env) || sedInPlace(cmd, parsed))
   })
 }
 
