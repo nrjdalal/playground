@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -995,6 +996,55 @@ describe("stripTrash", () => {
     }
     expect(restore(`${old}/1`, roots)).toEqual({ path: join(roots.home, "review-clone") })
     expect(existsSync(join(roots.home, "review-clone", "src", "index.ts"))).toBe(true)
+  })
+
+  test("a manifest it cannot rewrite leaves the strip's folders gone and names the batch in failed", async () => {
+    const roots = machine()
+    const batch = batchTree(roots, new Date(NOW.getTime() - DAY), "s")
+    chmodSync(join(roots.trash, batch), 0o555)
+    const done = await stripTrash(roots.trash, { sleep: async () => {} })
+    chmodSync(join(roots.trash, batch), 0o755)
+    expect(done.failed).toEqual([batch])
+    expect(done.folders).toBe(3)
+    expect(existsSync(join(roots.trash, batch, "1", "review-clone", "node_modules"))).toBe(false)
+  })
+
+  test("a carve-out batch keeps its tree whole at the strip", async () => {
+    const roots = machine()
+    const batch = batchTree(roots, new Date(NOW.getTime() - DAY), "s")
+    const manifest = JSON.parse(
+      readFileSync(join(roots.trash, batch, "manifest.jsonl"), "utf8").trim(),
+    ) as { carveOut?: string }
+    manifest.carveOut = "dashboard-supervisor"
+    writeFileSync(join(roots.trash, batch, "manifest.jsonl"), `${JSON.stringify(manifest)}\n`)
+    const done = await stripTrash(roots.trash, { sleep: async () => {} })
+    expect(done.batches).toEqual([])
+    expect(done.folders).toBe(0)
+    expect(existsSync(join(roots.trash, batch, "1", "review-clone", "node_modules"))).toBe(true)
+  })
+
+  test("the strip skips an item its entry marks stripped", async () => {
+    const roots = machine()
+    const batch = batchTree(roots, new Date(NOW.getTime() - DAY), "s")
+    const manifest = JSON.parse(
+      readFileSync(join(roots.trash, batch, "manifest.jsonl"), "utf8").trim(),
+    ) as { stripped?: number }
+    manifest.stripped = 3
+    writeFileSync(join(roots.trash, batch, "manifest.jsonl"), `${JSON.stringify(manifest)}\n`)
+    const done = await stripTrash(roots.trash, { sleep: async () => {} })
+    expect(done.batches).toEqual([])
+    expect(done.folders).toBe(0)
+    expect(existsSync(join(roots.trash, batch, "1", "review-clone", "node_modules"))).toBe(true)
+  })
+
+  test("an rm refused at the tripwire leaves node_modules in place", () => {
+    const roots = machine()
+    const tree = join(roots.home, "review-clone")
+    file(join(tree, "node_modules", "left-pad", "index.js"))
+    for (let i = 0; i < LIMITS.files + 1; i++) file(join(tree, "src", `f${i}`))
+    const done = quarantine(tree, opts, roots)
+    expect("refused" in done && done.refused).toContain("tripwire")
+    expect(existsSync(join(tree, "node_modules", "left-pad", "index.js"))).toBe(true)
   })
 })
 
