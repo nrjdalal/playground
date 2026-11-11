@@ -646,4 +646,19 @@ describe("--check reads a tree git holds, never the working files", () => {
     }
     expect(extra).toEqual([])
   })
+
+  // A dangling entry in the checkout's own node_modules, one nothing imports, links through as it does at the base, where the entry's own read fails soft
+  test("a dangling node_modules entry no import reaches leaves both checks green", () => {
+    const { git, root, run } = checkout()
+    mkdirSync(join(root, "node_modules", "@w"), { recursive: true })
+    symlinkSync(
+      join(root, "node_modules", "gone-package"),
+      join(root, "node_modules", "@w", "gone"),
+    )
+    git("add", "-A")
+    git("commit", "-q", "--no-verify", "-m", "dangling")
+    git("branch", "canary")
+    expect(run("--check")).toEqual({ code: 0, stderr: "" })
+    expect(run("--check", "--merged", "canary")).toEqual({ code: 0, stderr: "" })
+  })
 })

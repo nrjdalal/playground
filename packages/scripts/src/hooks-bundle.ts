@@ -138,7 +138,11 @@ const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
           await linkModules(at, name)
           continue
         }
-        const rel = relative(realRoot, realpathSync(at))
+        // a dangling entry reads nowhere, so it links to the checkout's own, as the base linked it; only a found workspace path points at the mirror
+        let rel = ""
+        try {
+          rel = relative(realRoot, realpathSync(at))
+        } catch {}
         symlinkSync(
           rel && !rel.startsWith("..") && !rel.includes("node_modules/") ? join(mirror, rel) : at,
           name,
