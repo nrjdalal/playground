@@ -361,14 +361,13 @@ export function quarantine(
         : `${abs} did not move: ${code ?? (error as Error).message}`,
     )
   }
-  // The tree's rebuildable folders go once the move is past every refusal, and the strip never throws past this line: a strip that stops partway names its error and leaves the entry unmarked, so the hourly strip's pass reaches the item and takes the rest. An install or a build puts what it removed back.
+  // The tree's rebuildable folders go once the move is past every refusal, and the strip never throws past this line: a strip that stops partway names its error and leaves the entry unmarked, so the hourly strip's pass reaches the item and takes the rest, while the count it already removed stays on the result. An install or a build puts what it removed back.
   let stripped: string[] = []
   let stripFailed: string | null = null
   if (!carve) {
     try {
       stripped = stripRebuildable(to)
     } catch (error) {
-      stripped = []
       stripFailed = (error as Error).message
     }
   }
@@ -383,7 +382,7 @@ export function quarantine(
     reason: opts.reason,
     session: opts.session,
     size,
-    ...(stripped.length ? { stripped: stripped.length } : {}),
+    ...(stripped.length && !stripFailed ? { stripped: stripped.length } : {}),
   }
   appendFileSync(join(trash, batch, "manifest.jsonl"), `${JSON.stringify(entry)}\n`)
   return {
@@ -665,7 +664,7 @@ const stripRebuildable = (tree: string): string[] => {
   return removed.sort()
 }
 
-// Strips every batch in the trash, oldest first and paced, of the folders an install or a build rebuilds, at any load; what it leaves is the tree's code, which the 7-day restore brings back, so no batch goes whole. An entry whose item it stripped gains the folder count on stripped, which the restore line names the install from, an entry a carve-out let through or one already marked keeps its item whole, and a manifest it cannot rewrite names its batch in failed.
+// Strips every batch in the trash, oldest first and paced, of the folders an install or a build rebuilds, at any load; what it leaves is the tree's code, which the 7-day restore brings back, so no batch goes whole. An entry whose item it stripped gains the folder count on stripped, which the restore line names the install from, an entry a carve-out let through or one already marked keeps its item whole, and a manifest it cannot rewrite or an item it cannot finish names its batch in failed.
 export async function stripTrash(
   trash: string,
   io: { sleep?: (ms: number) => Promise<void> } = {},
@@ -689,7 +688,13 @@ export async function stripTrash(
       if (entry?.stripped || entry?.carveOut) continue
       const item = dirsIn(join(at, slot))
       if (item.length !== 1) continue
-      const stripped = stripRebuildable(item[0]!)
+      let stripped: string[]
+      try {
+        stripped = stripRebuildable(item[0]!)
+      } catch {
+        failed.push(batch)
+        continue
+      }
       if (!stripped.length) continue
       folders += stripped.length
       held += stripped.length
@@ -710,5 +715,5 @@ export async function stripTrash(
     }
     if (held) done.push(batch)
   }
-  return { batches: done, failed, folders }
+  return { batches: done, failed: [...new Set(failed)], folders }
 }
