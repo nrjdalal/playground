@@ -386,7 +386,7 @@ export function restore(
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
-  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts, entry.session)
+  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts)
   if (carve && "refused" in carve) return carve
   if (lstat(entry.path)) return refused(`${entry.path} already exists; move it aside first`)
   if (!existsSync(dirname(entry.path)))

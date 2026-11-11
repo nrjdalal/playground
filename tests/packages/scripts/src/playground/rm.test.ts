@@ -171,7 +171,8 @@ test("runRm refuses another session's scratch folder, a .. escape out of the own
   mkdirSync(other, { recursive: true })
   expect(await runRm([other], deps)).toBe(1)
   expect(existsSync(other)).toBe(true)
-  expect(await runRm([join(scratch, "..", "a4b5c6-worker")], deps)).toBe(1)
+  expect(await runRm([`${scratch}/../a4b5c6-worker`], deps)).toBe(1)
+  expect(existsSync(other)).toBe(true)
 
   mkdirSync(join(home, ".ssh"), { recursive: true })
   mkdirSync(scratch, { recursive: true })
