@@ -3,7 +3,7 @@
 // Ported from ~/.playground/ops/optimizer/idle_sessions.py; a session's PRs are its roster pr and prs list, its worker's, every open one on its branch and every one its transcript links, so a checker serving a second PR is never listed while that one is open.
 // Flags, from Claude's session registry (live pid, status, statusUpdatedAt), roster.json and GitHub REST reads per PR (an open PR cached 5 minutes, a merged or closed one for good):
 // Every flag needs 10+ minutes not busy, so a session finishing a step is never listed. ops-tick's auto-end beat ends what auto_end.ts takes of it.
-//   checker-worker-gone  a reviewer or tester whose worker has no live session
+//   checker-worker-gone  a reviewer or tester whose worker has no live session, with no open PR of a live worker on its prs list
 //   checker-pr-done      a reviewer or tester whose PRs are all merged or closed
 //   checker-nothing      a reviewer or tester not busy for 30+ minutes whose every PR head carries its verdict or is closed
 //   worker-prs-done      a worker whose roster holds a pr, and whose PRs are all merged or closed
@@ -202,14 +202,20 @@ export async function collect(input: CollectInput): Promise<Row[]> {
     let mergedPr: string | undefined
     let sha: string | undefined
     if (checker || kind === "worker") {
+      const prs = await sessionPrs(input, name, worker, d.sessionId)
+      const states = await Promise.all(prs.map((url) => prState(url)))
       if (
         worker &&
         !(worker in sessions) &&
-        !Object.keys(sessions).some((s) => s.startsWith("worker-") && s.startsWith(worker))
+        !Object.keys(sessions).some((s) => s.startsWith("worker-") && s.startsWith(worker)) &&
+        // an open PR whose roster worker row names a live session keeps the checker on
+        !states.some((s, i) => {
+          if (s?.state !== "open") return false
+          const owner = Object.values(roster).find((r) => r.kind === "worker" && r.pr === prs[i])
+          return owner?.name !== undefined && owner.name in sessions
+        })
       )
         why.push(`checker-worker-gone (${worker})`)
-      const prs = await sessionPrs(input, name, worker, d.sessionId)
-      const states = await Promise.all(prs.map((url) => prState(url)))
       refs = states.flatMap((s) => (s?.ref ? [s.ref] : []))
       // The PR that merged last, by its merged_at, so an older linked PR never names the merge: a state cached without one sorts oldest, and a tie keeps the later in the list.
       let newest: number | undefined
