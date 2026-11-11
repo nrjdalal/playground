@@ -28,13 +28,13 @@ CANARY=$(gh api repos/{owner}/{repo}/branches/canary --jq .commit.sha)
 A ship still short of step 4 as the freeze nears its lapse ([pr-merge's Holds and rulings](../../../packages/scripts/src/pr-merge/README.md#holds-and-rulings)) runs `bun run ship:freeze vX.Y.Z` again, which restarts it.
 A ship that stops before its tag ends the freeze with `bun run ship:freeze --end`, so the held PRs merge again.
 
-Run the new-user gate on it, `bun run gate:new-user "$CANARY"` (`.agents/testing.md`, End-to-end tests). Its last line, `New-user gate at <sha>: PASS` or `New-user gate at <sha>: FAIL`, goes into the ship PR's body on a line of its own, for step 3's `ship:merge` to read, with each FAIL and INCONCLUSIVE line it printed named below it.
+Run the new-user gate on it through run-slot as `ops-ship`, `~/.playground/ops/run-slot.sh ops-ship -- bun run gate:new-user "$CANARY"` (`.agents/testing.md`, End-to-end tests), so it runs at class 0, beside the runs that gate a merge, and a ship needs no focus. Its last line, `New-user gate at <sha>: PASS` or `New-user gate at <sha>: FAIL`, goes into the ship PR's body on a line of its own, for step 3's `ship:merge` to read, with each FAIL and INCONCLUSIVE line it printed named below it.
 
 Done when `bun run ship:freeze status` prints the `"*"` line naming `vX.Y.Z` (step 3's `ship:merge` refuses a line Ops wrote by hand, so ask Ops to lift one), `CANARY` holds the SHA you mean to ship and the gate's last line for it is in hand. When `canary` moves before step 3, read it again.
 
 ## Rehearse an invitee's update
 
-When the candidate changes the update path anything in the ship's step 5 runs (`update.ts` itself, `link-skills.sh`, an ops job, the Dashboard roll), rehearse the update an invitee runs, from the last tag to the candidate, before the ship's step 3: a machine whose own checkout cannot take the update yet still gets the proof. The whole rehearsal lives in one scratch folder, and nothing outside it changes. A `--to` run stops before the Dashboard roll, which `playground update` reaches only without a tag, and with no `jobs.json` in the throwaway data folder its ops-restart step restarts nothing, so the rehearsal proves the checkout-side path: the fetch, the tag checkout, `link-skills.sh`, the install and the build. The roll proves itself on a dashboard stack of its own; an ops job's restart proves itself in the ship's step 5, on the machine that holds the jobs.
+When the candidate changes the update path anything in the ship's step 5 runs (`update.ts` itself, `link-skills.sh`, an ops job, the Dashboard roll), rehearse the update an invitee runs, from the last tag to the candidate, before the ship's step 3: a machine whose own checkout cannot take the update yet still gets the proof. The whole rehearsal lives in one scratch folder, and nothing outside it changes. A `--to` run stops before the Dashboard roll, which `playground update` reaches only without a tag, and with no `jobs.json` in the throwaway data folder its ops-restart step restarts nothing, so the rehearsal proves the checkout-side path: the fetch, the tag checkout, `link-skills.sh`, the install and the build. The roll proves itself on a dashboard stack of its own; an ops job's restart proves itself in the ship's step 5, on the machine that holds the jobs. The rehearsal's install, build and `playground update` each run through run-slot as `ops-ship`, by run-slot's real absolute path (`<real home>/.playground/ops/run-slot.sh ops-ship -- <command>`), since the throwaway `HOME` holds no ops folder; the containment of step b stays on the command after `--`.
 
 a. **Mirror.** Give the rehearsal an origin of its own: clone the repository bare into the scratch folder, then clone that mirror and, in the clone, fetch the pinned `$CANARY` from the repository, merge it into `main` with `--no-ff` (the merge commit a ship makes), and tag the merge with the tag this ship will cut.
    Clone the mirror with `-b main`, since the mirror's HEAD is `canary`, where the merge is a no-op (`Already up to date.`) and the tag lands on the candidate itself (the v0.0.29 rehearsal).
@@ -54,6 +54,8 @@ a. **Mirror.** Give the rehearsal an origin of its own: clone the repository bar
 
 b. **Contain.** Run every later command under `env -i`, so the run inherits nothing from the real environment, `PLAYGROUND_REPO` included, with `HOME` at a throwaway folder inside the scratch folder.
    Put `PATH` together for the run: the stub folder first, then the throwaway `HOME`'s `.bun/bin`, then a folder holding the real `bun`, `bunx` and `node` alone, the runtimes the install, the build and the `playground` command run on (`bunx` since `bun install` runs the checkout's `prepare` script), then the system basics; the real `HOME`'s own bin stays off `PATH`, since its `playground` link points at the real checkout.
+   Seed the throwaway `HOME`'s bun cache by an APFS clone, `cp -c -R ~/.bun/install/cache <scratch>/home/.bun/install/cache`, so the install reads packages it already has; the clone writes only the copy, so the before-state check still holds.
+   The realism it trades: the clone can hold packages an invitee's cache lacks, so the rehearsal no longer shows a package missing from a fresh cache.
    Put a stub on `PATH` for each side-effecting tool the update can call, one that logs each call and refuses; read `update.ts`, `ops-restart/cli.ts` and what they call for the list.
    Write each stub's link with its literal target path, one `ln -s` a line (`ln -s _stub <scratch>/stubs/gh`), since no-extensions-write refuses a link whose target holds a loop variable, and the whole call with it ([scripts/hooks/README.md](../../../scripts/hooks/README.md#no-extensions-write)).
    Leave `claude` off `PATH` altogether: `link-skills`' `orgs home` step waits for an absent `claude` and fails a stub that refuses.
@@ -128,7 +130,7 @@ Done when `gh release list -L 1` shows `vX.Y.Z` marked Latest, its page opens wi
 Run `playground update` (`packages/scripts/src/playground/update.ts`) in a run slot; the command is the main checkout's own, linked into `~/.bun/bin`:
 
 ```bash
-~/.playground/ops/run-slot.sh <your name> -- playground update
+~/.playground/ops/run-slot.sh ops-ship -- playground update
 ```
 
 It runs each step below and stops at the first that fails, naming it.
