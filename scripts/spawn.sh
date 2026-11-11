@@ -932,15 +932,22 @@ HC_TARBALL_SHA256=e58985d3fef6e909f33d3c5a4426e4898c81564a557d4636591cec9e3a06af
 hc_world() {
   HC_WORLD=$DATA/hc-trial
   (umask 077 && mkdir -p "$HC_WORLD/bin" "$HC_WORLD/config/herdr-core" "$HC_WORLD/state") || refuse "it cannot prepare $HC_WORLD"
-  if [ ! -f "$HC_WORLD/pin" ]; then
+  # A world built from another tarball, or never finished, is built again, so a bump of HC_TARBALL_SHA256 reaches every world.
+  if [ ! -f "$HC_WORLD/pin" ] || [ "$(cat "$HC_WORLD/tarball" 2>/dev/null)" != "$HC_TARBALL_SHA256" ]; then
     local get found
     get=$(mktemp -d) || refuse "it cannot make a folder for hc's download"
-    curl -fsSL -o "$get/hc.tar.gz" "$HC_TARBALL" || refuse "it could not download $HC_TARBALL"
+    # The download's folder goes with every refusal, so a failed build leaves nothing in the temp folder.
+    built() { rm -f -- "$get/hc.tar.gz" "$get/herdr-core" && rmdir "$get"; }
+    curl -fsSL -o "$get/hc.tar.gz" "$HC_TARBALL" || { built; refuse "it could not download $HC_TARBALL"; }
     found=$(shasum -a 256 "$get/hc.tar.gz")
-    [ "${found%% *}" = "$HC_TARBALL_SHA256" ] || refuse "$HC_TARBALL hashes to ${found%% *}, not the core manifest's $HC_TARBALL_SHA256"
-    tar -xzf "$get/hc.tar.gz" -C "$get" herdr-core && mv "$get/herdr-core" "$HC_WORLD/bin/herdr-core" || refuse "it could not unpack herdr-core from $HC_TARBALL"
-    rm -f -- "$get/hc.tar.gz" && rmdir "$get"
-    found=$(shasum -a 256 "$HC_WORLD/bin/herdr-core") && printf '%s\n' "${found%% *}" > "$HC_WORLD/pin" || refuse "it cannot write $HC_WORLD/pin"
+    [ "${found%% *}" = "$HC_TARBALL_SHA256" ] ||
+      { built; refuse "$HC_TARBALL hashes to ${found%% *}, not the core manifest's $HC_TARBALL_SHA256"; }
+    rm -f -- "$HC_WORLD/pin" "$HC_WORLD/tarball"
+    tar -xzf "$get/hc.tar.gz" -C "$get" herdr-core && mv "$get/herdr-core" "$HC_WORLD/bin/herdr-core" ||
+      { built; refuse "it could not unpack herdr-core from $HC_TARBALL"; }
+    built
+    found=$(shasum -a 256 "$HC_WORLD/bin/herdr-core") && printf '%s\n' "${found%% *}" > "$HC_WORLD/pin" &&
+      printf '%s\n' "$HC_TARBALL_SHA256" > "$HC_WORLD/tarball" || refuse "it cannot write $HC_WORLD/pin"
   fi
   printf 'notes = false\n' > "$HC_WORLD/config/herdr-core/config.toml" || refuse "it cannot write $HC_WORLD/config/herdr-core/config.toml"
   cp "$REPO/scripts/hc-trial.sh" "$HC_WORLD/hc" && chmod 700 "$HC_WORLD/hc" || refuse "it cannot write $HC_WORLD/hc"

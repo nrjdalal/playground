@@ -3,13 +3,14 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   writeFileSync,
 } from "node:fs"
 import { join } from "node:path"
 
-import { launchOf, lw, placing, root, spawn } from "./spawn-fake"
+import { bin, launchOf, lw, placing, root, spawn } from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them; one took 19.9s on the loaded runner box, so each gets twice that.
 setDefaultTimeout(40_000)
@@ -33,11 +34,26 @@ const world =
       lw(home, "hc-trial", "pin"),
       `${new Bun.CryptoHasher("sha256").update(FAKE_HC).digest("hex")}\n`,
     )
+    writeFileSync(lw(home, "hc-trial", "tarball"), `${TARBALL_SHA}\n`)
     // The socket folder the wrapper reuses while it stands, made in the case's home so none lands in the user's temp folder.
     mkdirSync(join(home, "hc-run"))
     writeFileSync(lw(home, "hc-trial", "runtime-dir"), `${join(home, "hc-run")}\n`)
     if (changed) writeFileSync(binary, `${FAKE_HC}# swapped\n`)
   }
+// The tarball sha256 spawn.sh pins, so a seeded world reads as built from it.
+const TARBALL_SHA = readFileSync(join(root, "scripts", "spawn.sh"), "utf8").match(
+  /^HC_TARBALL_SHA256=([0-9a-f]{64})$/m,
+)?.[1]
+// A fake curl that serves a tarball of other bytes and logs its call, on a PATH of the case's own; its temp folder is the case's own too.
+const badCurl = (home: string) => {
+  mkdirSync(join(home, "fakebin"), { recursive: true })
+  mkdirSync(join(home, "tmp"), { recursive: true })
+  writeFileSync(
+    join(home, "fakebin", "curl"),
+    `#!/bin/bash\necho curl >> "$HOME/curl.calls"\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && printf 'not the tarball' > "$2"; shift; done\n`,
+  )
+  chmodSync(join(home, "fakebin", "curl"), 0o755)
+}
 const hcCalls = (r: { home: string }): string[][] => {
   const f = join(r.home, "hc.calls")
   if (!existsSync(f)) return []
@@ -108,6 +124,46 @@ describe("a probe starts in hc's trial world with --runtime hc (#1715)", () => {
   })
 
   const PROBE_ALONE = "--runtime hc starts a probe alone"
+  test("a first start whose download does not hash to the pin is refused, writing no pin or binary and leaving no download behind", async () => {
+    const r = await spawn(
+      ["probe", "probe-hc-a", "worker-x", "b.md", "--runtime", "hc"],
+      [],
+      { PATH: `{home}/fakebin:${bin}:${process.env.PATH}`, TMPDIR: "{home}/tmp" },
+      undefined,
+      undefined,
+      badCurl,
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(
+      `hashes to ${new Bun.CryptoHasher("sha256").update("not the tarball").digest("hex")}`,
+    )
+    expect(readFileSync(join(r.home, "curl.calls"), "utf8")).toBe("curl\n")
+    expect(existsSync(lw(r.home, "hc-trial", "pin"))).toBe(false)
+    expect(existsSync(lw(r.home, "hc-trial", "bin", "herdr-core"))).toBe(false)
+    expect(readdirSync(join(r.home, "tmp"))).toEqual([])
+    expect(hcCalls(r)).toEqual([])
+  })
+
+  test("a world built from another tarball is built again, and a refused rebuild keeps the old binary unrun", async () => {
+    const r = await spawn(
+      ["probe", "probe-hc-a", "worker-x", "b.md", "--runtime", "hc"],
+      [],
+      { PATH: `{home}/fakebin:${bin}:${process.env.PATH}`, TMPDIR: "{home}/tmp" },
+      undefined,
+      undefined,
+      (home) => {
+        world()(home)
+        writeFileSync(lw(home, "hc-trial", "tarball"), `${"0".repeat(64)}\n`)
+        badCurl(home)
+      },
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain("not the core manifest's")
+    expect(readFileSync(join(r.home, "curl.calls"), "utf8")).toBe("curl\n")
+    expect(existsSync(lw(r.home, "hc-trial", "pin"))).toBe(true)
+    expect(hcCalls(r)).toEqual([])
+  })
+
   test.each([
     ["a worker", ["worker", "worker-x", "b.md", "--title", "Plain test work"], PROBE_ALONE],
     ["a runner", ["runner", "runner-x", "b.md"], PROBE_ALONE],
