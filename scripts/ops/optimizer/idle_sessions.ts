@@ -231,6 +231,8 @@ export async function collect(input: CollectInput): Promise<Row[]> {
       let newest: number | undefined
       let newestAt: string | undefined
       states.forEach((s, i) => {
+        // An issue URL never counts as the last close: GitHub closes a PR's issue a beat after its merge, and the PR it closes decides instead.
+        if (!PR_URL.test(prs[i] ?? "")) return
         const at =
           s?.state === "merged"
             ? (s.mergedAt ?? "")
