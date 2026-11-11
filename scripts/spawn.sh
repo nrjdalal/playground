@@ -2022,8 +2022,13 @@ except (ValueError, KeyError, TypeError):
     python3 -I - "$CODEX" "$CODEX_HOME" "$SID" "$NAME" <<'PY' || echo "spawn.sh: $NAME started in Codex, but its thread $SID kept no name" >&2
 import json, os, signal, subprocess, sys
 codex, home, thread, name = sys.argv[1:5]
-signal.alarm(20)
 server = subprocess.Popen([codex, "app-server"], env={**os.environ, "CODEX_HOME": home}, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+# An app-server that answers nothing in 20 seconds is ended with the naming, so none outlives the start.
+def give_up(*_):
+    server.kill()
+    sys.exit(1)
+signal.signal(signal.SIGALRM, give_up)
+signal.alarm(20)
 def call(id, method, params):
     server.stdin.write(json.dumps({"id": id, "method": method, "params": params}, separators=(",", ":"), sort_keys=True) + "\n")
     server.stdin.flush()
