@@ -1,5 +1,5 @@
 // PreToolUse hook: refuses a build, a test run, lefthook, turbo (but for the packages build a pull needs, run with env validation off), a git command that moves HEAD, the index or the files (but for the release skill's step 5 fast-forward and the keep reset off a stray local commit; a worker's hard reset there ran another branch's code under every hook for 3.5 minutes) or a file write (a Bash command's, or a Write, Edit, MultiEdit or NotebookEdit), run-slot.sh's command read as typed bare, in the main checkout, which every installed skill follows and so stays clean (a reviewer's `lefthook run pre-commit` from the Bash tool's default cwd rebuilt packages' dist and wrote .turbo/runs there). It also refuses a git write in the live Dashboard's checkout to every factory session but its runner and the ops lead, since that checkout serves the owner's Dashboard.
-import { readdirSync, readFileSync, realpathSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
@@ -72,6 +72,21 @@ export function liveCheckout(
     } catch {
       // a worktree whose files went with it
     }
+  }
+}
+
+// Whether a path under the worktrees folder sits in one worktree: inside a folder there that holds a .git, or one not there yet, which the line may make into a new worktree (`git worktree add <path> && cd <path>`), or a file there, which nothing walks up from; the worktrees folder itself and a plain folder in it hold no checkout of their own, so git, turbo and bun walk up from there to the main checkout.
+function inWorktree(path: string, worktrees: string): boolean {
+  if (!path.startsWith(worktrees)) return false
+  const tree = join(worktrees, path.slice(worktrees.length).split(sep)[0])
+  return existsSync(join(tree, ".git")) || !isFolder(tree)
+}
+
+const isFolder = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
   }
 }
 
@@ -227,7 +242,18 @@ export function bunCall(
   return { at: k, chained, cwd, filtered, sub, words, xCwd }
 }
 
-// git's subcommand and its words, and the tree it acts on: the checkout a --git-dir of `<checkout>/.git` names, whose HEAD and index move, else its --work-tree, else the folder its -C options name (each relative to the one before); each counts only before the subcommand.
+// Where git lands on a path, read as the kernel reads it: a link is followed before a `..` after it, so `<link>/..` is the folder above the link's target; a path that is not there yet is read by real().
+const landing = (word: Word | undefined, env: Env, from: string | undefined) => {
+  if (!word || pathOf(word, { ...env, cwd: from }) === undefined) return undefined
+  const path = isAbsolute(word.value) ? word.value : `${from}${sep}${word.value}`
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return real(resolve(path))
+  }
+}
+
+// git's subcommand and its words, and the tree it acts on: the checkout a --git-dir of `<checkout>/.git` names, whose HEAD and index move, else its --work-tree, else the folder its -C options name (each from where the one before lands, by landing()); each counts only before the subcommand.
 export function gitCall(
   args: Word[],
   env: Env,
@@ -242,15 +268,15 @@ export function gitCall(
   let k = 0
   for (; k < args.length && args[k].value.startsWith("-"); k++) {
     const v = args[k].value
-    if (v === "-C") cwd = args[k + 1] && pathOf(args[++k], { ...env, cwd })
+    if (v === "-C") cwd = args[k + 1] && landing(args[++k], env, cwd)
     else if (v === "--git-dir" || v.startsWith("--git-dir=")) {
       const word = value(k, "--git-dir")
       if (v === "--git-dir") k++
-      gitDir = word && pathOf(word, { ...env, cwd })
+      gitDir = landing(word, env, cwd)
     } else if (v === "--work-tree" || v.startsWith("--work-tree=")) {
       const word = value(k, "--work-tree")
       if (v === "--work-tree") k++
-      workTree = word && pathOf(word, { ...env, cwd })
+      workTree = landing(word, env, cwd)
     } else if (GIT_TAKES.has(v)) k++
   }
   const repo = gitDir?.replace(/\/+$/, "")
@@ -655,7 +681,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     return (
       path !== undefined &&
       (path === checkout || path.startsWith(checkout + sep)) &&
-      !(path + sep).startsWith(worktrees)
+      !inWorktree(path, worktrees)
     )
   }
   // the live checkout is read only for a Bash call, so a file tool's write pays nothing for it

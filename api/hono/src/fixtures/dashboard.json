@@ -3819,19 +3819,19 @@
           "description": "Runs a Dashboard on made-up data for checks",
           "disabled": true,
           "disabledWhy": "Fixture: paused on purpose",
-          "heartbeat": "ops-fixture",
-          "name": "ops-fixture",
+          "heartbeat": "ops-dm-watch",
+          "name": "ops-dm-watch",
           "schedule": {
-            "always": true
+            "cron": "*/2 * * * *"
           }
         },
         {
           "disabled": true,
           "disabledWhy": "Fixture: paused on purpose",
-          "heartbeat": "ops-linear-dm",
-          "name": "ops-linear-dm",
+          "heartbeat": "ops-fixture",
+          "name": "ops-fixture",
           "schedule": {
-            "cron": "*/2 * * * *"
+            "always": true
           }
         },
         {

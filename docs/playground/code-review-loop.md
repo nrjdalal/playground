@@ -1,7 +1,7 @@
 ## What it does
 
 `code-review-loop` is how a reviewer session scores one PR out of 5, round by round, until nothing but nits is left to change.
-Each round reads what was asked (the plan item and the brief for a Playground PR, the Linear ticket and its comments for an org's one), reviews the change on two axes, posts a verdict and inline comments, and closes the threads the new head settles.
+Each round reads what was asked (the plan item and the brief for a Playground PR, the ticket and its comments for an org's one), reviews the change on two axes, posts a verdict and inline comments, and closes the threads the new head settles.
 
 It treats a review as a **subscription**, not a one-off: every push gets a round, a finding stays open until a round sees it fixed in the code, and a faultless push does not raise the score while anyone's finding is still open.
 The score is the PR's, never the delta's.
@@ -24,7 +24,7 @@ It is model-invoked: a reviewer session loads it from its brief, and you can typ
 
 ## Two axes
 
-The review itself is core's `code-review`, loaded by name and never copied: a **Spec** axis (is this the right thing: every requirement delivered, nothing unasked, and in an org's PR nothing beyond its ticket and the Product team's answers) and a **Standards** axis (is it built well, against AGENTS.md, the skills it touches and the reviewer's brief).
+The review itself is core's `code-review`, loaded by name and never copied: a **Spec** axis (is this the right thing: every requirement delivered, nothing unasked, and in an org's PR nothing beyond its ticket and the answers of the people its ticket skill names) and a **Standards** axis (is it built well, against AGENTS.md, the skills it touches and the reviewer's brief).
 A changed skill, agent guide or docs page is also held to core's `writing-for-agents`, which the reviewer loads first, so an agent doc that sprawls or leaves a step with no completion criterion costs the score as code would.
 The two stay apart in the verdict, so a well-built change that misses the ask cannot hide behind its quality.
 Its two sub-agents start with no memory of earlier rounds, which is what makes the read before the last 5/5 fresh.
@@ -90,7 +90,7 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
 - After a compaction, a resume, or a notice that background tasks did not finish before the previous session ended, the reviewer runs `state.ts pr` for each PR it holds and re-arms a waiter wherever none is running, `state.ts checks` on a head whose two gate checks are not both green and `state.ts wait` on the rest, since an account flip kills the waiters with no notice.
 - A waiter starts from the tmp folder, and `state.ts wait` and `checks` move there as they start, so a waiter that outlives its PR holds no review worktree from the cleanup.
 - A finding that asks for a behaviour states the behaviour wanted, not only the defect.
-- On a collaborator's org PR whose review ask came to you, the session that posts your review turns at once to the work org's extension (triage-and-implement's PR.md) for what follows a review you were asked for.
+- On a collaborator's org PR whose review ask came to you, the session that posts your review turns at once to the work org's ticket skill, in its extension, for what follows a review you were asked for.
 - A reviewer agrees with an author's reply only once it has reproduced the author's reason with one command, named in its reply.
 - A 5/5 verdict says the fresh full read found nothing blocking or should-fix and `bun run check-types` ran green, or green CI at the head stood in for it; a red run is a blocking finding.
 - Before a 5/5 posts, `bun run pr:merge <n> --explain`, bare and unpiped, reads ✓ on every gate but ready, ci and review, since the body gate also needs a doc that a reviewer's patch or the last commit changed named in the Evidence; a ✗ is a finding for the worker.
