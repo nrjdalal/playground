@@ -6,8 +6,8 @@
 //   checker-worker-gone  a reviewer or tester whose worker has no live session, with no open PR a live worker serves among its PRs
 //   checker-pr-done      a reviewer or tester whose PRs are all merged or closed
 //   checker-nothing      a reviewer or tester not busy for 30+ minutes whose every PR head carries its verdict or is closed
-//   worker-prs-done      a worker whose roster holds a pr, and whose PRs are all merged or closed
-//   worker-pr-closed     a worker whose PR that closed last closed unmerged; its lead is asked to reassign or end it
+//   worker-prs-done      a worker whose roster holds a pr, whose PRs are all merged or closed, and whose /pull/ PR that closed last merged
+//   worker-pr-closed     a worker whose /pull/ PR that closed last closed unmerged; its lead is asked to reassign or end it
 //   roster-says-<status> any session whose roster entry reads paused or ended
 // A session whose status is `shell` (a background command still running) is not busy, and is marked `+bg`, since its watcher keeps waking it.
 // Prints one line per flagged session and a total; reads only, signals nothing.
