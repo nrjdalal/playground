@@ -163,6 +163,38 @@ describe("collect: live sessions with nothing to do", () => {
     expect(kept).toEqual([])
   })
 
+  // the reads wait for the gone worker and cost one GitHub read per live worker, whatever the open PR count
+  test("checker-worker-gone: servesLiveWorker reads each live worker's PRs once per call", async () => {
+    const OPEN = "https://github.com/o/r/pull/2131"
+    const OTHER = "https://github.com/o/r/pull/2133"
+    let reads = 0
+    const rows = await collect(
+      deps({
+        prState: async () => ({ head: "ddd4444", state: "open", verdicts: [] }),
+        roster: {
+          "e6h8j3-reviewer": {
+            kind: "reviewer",
+            name: "e6h8j3-reviewer",
+            prs: [OPEN, OTHER],
+            worker: "b4w2k8-worker",
+          },
+          "f7k9l4-worker": { kind: "worker", name: "f7k9l4-worker" },
+        },
+        sessions: {
+          "e6h8j3-reviewer": entry({ name: "e6h8j3-reviewer" }),
+          // busy, so collect skips its own row and the count holds servesLiveWorker's reads alone
+          "f7k9l4-worker": entry({ name: "f7k9l4-worker", status: "busy" }),
+        },
+        workerPrs: async (name) => {
+          if (name === "f7k9l4-worker") reads++
+          return [OTHER]
+        },
+      }),
+    )
+    expect(rows).toEqual([])
+    expect(reads).toBe(1)
+  })
+
   test("checker-worker-gone: a live worker does not keep a checker whose PR to it is closed or merged", async () => {
     const DONE = "https://github.com/o/r/pull/2131"
     const roster = {
