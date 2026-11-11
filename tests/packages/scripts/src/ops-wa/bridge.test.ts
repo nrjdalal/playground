@@ -3,7 +3,12 @@ import { mkdtempSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { attach, sender, toWhatsApp } from "../../../../../packages/scripts/src/ops-wa/bridge"
+import {
+  attach,
+  REPLY,
+  sender,
+  toWhatsApp,
+} from "../../../../../packages/scripts/src/ops-wa/bridge"
 import { SEND } from "../../../../../packages/scripts/src/ops-wa/habits"
 import { fakeSocket, groupJid, jid, OWNER, STRANGER } from "./fake-socket"
 
@@ -35,7 +40,7 @@ const harness = () => {
     },
     sock: fake.sock,
   }
-  attach(io)
+  const idle = attach(io)
   const send = sender(io)
   return {
     advance: (ms: number) => (now += ms),
@@ -51,8 +56,8 @@ const harness = () => {
     fake,
     relayed,
     send,
-    // the handlers run on the emitter's turn, and each writes a file, so a test waits a beat before it reads
-    settle: () => Bun.sleep(20),
+    // the handlers queue on the emitter's turn and each writes a file, so a test waits for the queue to empty before it reads
+    settle: idle,
     waits,
   }
 }
@@ -64,8 +69,34 @@ describe("ops-wa's bridge", () => {
     await h.settle()
     expect(h.relayed).toHaveLength(1)
     expect(h.relayed[0]).toContain("is the train moving?\nsecond line")
-    expect(h.relayed[0]).toContain("Answer through playground wa send <file>.")
+    expect(h.relayed[0]).toContain(REPLY)
     expect(await h.dropped()).toEqual([])
+  })
+
+  test("tells the dispatcher to answer with factory status alone, door 2's line", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "status?")])
+    await h.settle()
+    expect(h.relayed[0]).toEndWith(
+      "Answer with factory status alone, no org work, secret or customer data, through playground wa send <file>.",
+    )
+  })
+
+  test("keeps every send and the owner's last message when both land at once, so the hourly cap counts them all", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "go")])
+    await h.settle()
+    const sends = [1, 2, 3, 4, 5].map((n) => {
+      h.fake.upsert([h.fake.message(jid(OWNER), `more ${n}`)])
+      return h.send(`part ${n}`)
+    })
+    await Promise.all(sends)
+    await h.settle()
+    const kept = (await Bun.file(join(h.dir, "sends.json")).json()) as { sends: number[] }
+    expect(kept.sends).toHaveLength(5)
+    const owner = (await Bun.file(join(h.dir, "owner.json")).json()) as { ownerAt: number }
+    expect(owner.ownerAt).toBeGreaterThanOrEqual(START)
+    expect(h.relayed).toHaveLength(6)
   })
 
   test("sends the reply to the owner's number alone, with no link preview", async () => {
@@ -216,9 +247,10 @@ describe("ops-wa's bridge", () => {
     const h = harness()
     h.fake.upsert([h.fake.message(jid(OWNER), "hi"), h.fake.message(jid(STRANGER), "x")])
     await h.settle()
+    await h.send("ok")
     expect(statSync(h.dir).mode & 0o777).toBe(0o700)
-    expect(statSync(join(h.dir, "dropped.log")).mode & 0o777).toBe(0o600)
-    expect(statSync(join(h.dir, "state.json")).mode & 0o777).toBe(0o600)
+    for (const file of ["dropped.log", "owner.json", "sends.json"])
+      expect(statSync(join(h.dir, file)).mode & 0o777).toBe(0o600)
   })
 })
 

@@ -44,6 +44,15 @@ export type LifeIo<S extends LinkSock> = {
 
 export const RELINK = "playground wa relink"
 
+// Pairing waits for no-raw-wa's registration in the factory's settings, so no auth state exists while a session could still reach it.
+export async function unguarded(settings: string): Promise<string | undefined> {
+  const text = await Bun.file(settings)
+    .text()
+    .catch(() => "")
+  if (/no-raw-wa\.(?:js|ts)/.test(text)) return undefined
+  return "no-raw-wa is not registered in scripts/factory-settings.json, and WhatsApp's phase 2 registers it, so ops-wa pairs no device until then"
+}
+
 // ops-wa's connection, kept by the ban-safety habits: at most 20 connects an hour, a backoff from 2 s to 30 s between tries, a stop after 12 failed tries in a row, and a stop on a logout that stays until the owner links again; it answers why it stopped.
 export async function life<S extends LinkSock>(io: LifeIo<S>): Promise<string> {
   const digits = (n: string) => n.replace(/\D/g, "")

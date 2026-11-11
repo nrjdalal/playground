@@ -29,9 +29,8 @@ if (
   process.exit(2)
 }
 const body = (await Bun.file(file).text()).trimEnd()
-const reply = refusalOf(body)
-  ? { refusal: refusalOf(body) }
-  : await request(socketPath(dataDir()), body)
+const refusal = refusalOf(body)
+const reply = refusal ? { refusal } : await request(socketPath(dataDir()), body)
 if (reply.refusal) {
   console.error(`wa send: ${reply.refusal}`)
   process.exit(1)

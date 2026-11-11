@@ -3,7 +3,7 @@ import { join } from "node:path"
 
 import { secretIn } from "@packages/settings"
 
-import { OWNER_WINDOW_MS, ownFolder, readOwn, SEND, writeOwn } from "./habits"
+import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, writeOwn } from "./habits"
 
 type Key = {
   fromMe?: boolean | null
@@ -30,15 +30,16 @@ export type Io = {
   sleep: (ms: number) => Promise<void>
   sock: Sock
 }
-type State = { ownerAt?: number; sends: number[] }
-
-const HOUR = 3_600_000
-export const REPLY = "Answer through playground wa send <file>."
+// Door 2: what goes back over WhatsApp is factory status alone.
+export const REPLY =
+  "Answer with factory status alone, no org work, secret or customer data, through playground wa send <file>."
 
 // A number's chat id, as Baileys names a phone number's 1:1 chat.
 export const jidOf = (e164: string) => `${e164.replace(/^\+/, "")}@s.whatsapp.net`
 
-const stateOf = (dir: string) => readOwn<State>(join(dir, "state.json"), { sends: [] })
+// Each state file has one writer: owner.json the listener's queue, sends.json the sender's chain, so neither write drops the other's.
+const ownerFile = (dir: string) => join(dir, "owner.json")
+const sendsFile = (dir: string) => join(dir, "sends.json")
 
 // The kind of chat a message came from that is no 1:1 chat, which ops-wa drops.
 const chatKind = (jid: string): string | undefined => {
@@ -91,7 +92,7 @@ async function inbound(io: Io, m: Incoming) {
   if (!text && !media) return
   const at = io.now()
   await ownFolder(io.dir)
-  await writeOwn(join(io.dir, "state.json"), { ...(await stateOf(io.dir)), ownerAt: at })
+  await writeOwn(ownerFile(io.dir), { ownerAt: at })
   const when = new Date(at).toISOString()
   await io.relay(
     text
@@ -100,8 +101,8 @@ async function inbound(io: Io, m: Incoming) {
   )
 }
 
-// Listens on the socket: each new 1:1 message from the owner goes to the relay, every other message and every call is dropped and logged, one at a time in the order they came.
-export function attach(io: Io) {
+// Listens on the socket: each new 1:1 message from the owner goes to the relay, every other message and every call is dropped and logged, one at a time in the order they came; it answers a wait for the queue to empty.
+export function attach(io: Io): () => Promise<void> {
   let chain = Promise.resolve()
   const queue = (job: () => Promise<unknown>) => {
     chain = chain.then(job).then(
@@ -116,6 +117,7 @@ export function attach(io: Io) {
   io.sock.ev.on("call", (calls) => {
     for (const c of calls) if (c.status === "offer") queue(() => drop(io, "call", c.from))
   })
+  return () => chain
 }
 
 // Markdown as WhatsApp marks it: headings and bold as *bold*, __x__ as _x_, a link as its text and URL; a fenced block stays as it is.
@@ -160,14 +162,16 @@ export function sender(io: Omit<Io, "relay">) {
   const sendNow = async (body: string): Promise<string> => {
     const refusal = refusalOf(body)
     if (refusal) throw new Error(refusal)
-    const state = await stateOf(io.dir)
+    const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
     const now = io.now()
-    if (state.ownerAt === undefined || now - state.ownerAt > OWNER_WINDOW_MS)
+    if (ownerAt === undefined || now - ownerAt > OWNER_WINDOW_MS)
       throw new Error(
         "the owner has not written in the last 24 hours, and ops-wa never starts a chat",
       )
     const parts = split(toWhatsApp(body))
-    const sends = state.sends.filter((at) => now - at < HOUR)
+    const sends = (
+      await readOwn<{ sends: number[] }>(sendsFile(io.dir), { sends: [] })
+    ).sends.filter((at) => now - at < HOUR)
     if (sends.length + parts.length > SEND.perHour) {
       const frees = new Date(Math.min(...sends, now) + HOUR).toISOString().slice(11, 16)
       throw new Error(`the hourly cap of ${SEND.perHour} sends is reached until ${frees}Z`)
@@ -178,7 +182,7 @@ export function sender(io: Omit<Io, "relay">) {
       await io.sock.sendMessage(jidOf(io.owner), { linkPreview: null, text: part })
       last = io.now()
       sends.push(last)
-      await writeOwn(join(io.dir, "state.json"), { ...(await stateOf(io.dir)), sends })
+      await writeOwn(sendsFile(io.dir), { sends })
     }
     return "sent"
   }

@@ -34,6 +34,35 @@ const wa = async (data: string, args: string[]) => {
   return { code, out: (out + err).trim() }
 }
 
+describe("ops-wa's socket", () => {
+  test("sends one connection's body once, whatever bytes follow its line", async () => {
+    const { data } = machine("")
+    const got: string[] = []
+    const server = serve(socketPath(data), async (b) => {
+      got.push(b)
+      return "sent"
+    })
+    try {
+      const answer = Promise.withResolvers<string>()
+      let text = ""
+      const socket = await Bun.connect({
+        socket: {
+          close: () => answer.resolve(text),
+          data: (_, chunk) => void (text += chunk.toString()),
+        },
+        unix: socketPath(data),
+      })
+      socket.write('{"body":"first"}\n')
+      await Bun.sleep(5)
+      socket.write('{"body":"second"}\n')
+      expect(await answer.promise).toBe('{"sent":true}\n')
+      expect(got).toEqual(["first"])
+    } finally {
+      server.stop(true)
+    }
+  })
+})
+
 describe("playground wa send", () => {
   test("takes a body by its absolute path alone", async () => {
     const { data } = machine("hi")

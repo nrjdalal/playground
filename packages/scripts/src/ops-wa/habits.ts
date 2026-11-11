@@ -1,4 +1,5 @@
-import { chmod, mkdir } from "node:fs/promises"
+import { readFileSync, unlinkSync } from "node:fs"
+import { chmod, mkdir, unlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import { writeAtomic } from "../write-atomic"
@@ -10,7 +11,7 @@ export const SEND = { gapMs: 1_000, partChars: 3_500, partGapMs: 300, perHour: 6
 export const OWNER_WINDOW_MS = 24 * 3_600_000
 export const KEEP_ALIVE_DAYS = 12
 
-const HOUR = 3_600_000
+export const HOUR = 3_600_000
 
 // The wait before connect try n (1 the first retry): doubling from 2 s to 30 s, spread by up to a quarter either way and kept inside the two.
 export const backoffMs = (attempt: number, random: () => number = Math.random): number => {
@@ -69,4 +70,39 @@ export async function keepAlive(dir: string, now: number, remind: () => Promise<
   if (since === undefined || now - since < KEEP_ALIVE_DAYS * 24 * HOUR) return
   await remind()
   await writeOwn(path, { ...link, remindedAt: now })
+}
+
+// One process holds the auth state: the lock is created exclusively with the holder's pid, taken over only from a holder that is gone, and removed by its holder on exit; it answers the live holder's pid when another holds it.
+export async function takeLock(
+  path: string,
+  pid: number,
+  holds: (pid: number) => boolean,
+): Promise<number | undefined> {
+  for (let tries = 0; tries < 2; tries++) {
+    try {
+      await writeFile(path, String(pid), { flag: "wx", mode: 0o600 })
+      return undefined
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+    }
+    const holder = Number(
+      await Bun.file(path)
+        .text()
+        .catch(() => ""),
+    )
+    if (holder && holder !== pid && holds(holder)) return holder
+    await unlink(path).catch(() => {})
+  }
+  return Number(
+    await Bun.file(path)
+      .text()
+      .catch(() => ""),
+  )
+}
+
+// The holder's own release, sync so it runs in an exit handler; another process's lock stays.
+export function releaseLock(path: string, pid: number) {
+  try {
+    if (readFileSync(path, "utf8") === String(pid)) unlinkSync(path)
+  } catch {}
 }

@@ -10,9 +10,11 @@ import {
   KEEP_ALIVE_DAYS,
   keepAlive,
   mayConnect,
+  releaseLock,
   SOCKET,
+  takeLock,
 } from "../../../../../packages/scripts/src/ops-wa/habits"
-import { life } from "../../../../../packages/scripts/src/ops-wa/life"
+import { life, unguarded } from "../../../../../packages/scripts/src/ops-wa/life"
 import { fakeSocket, OWNER, SPARE } from "./fake-socket"
 
 const dirs: string[] = []
@@ -143,6 +145,36 @@ describe("ops-wa's ban-safety habits", () => {
     expect(h.sockets[0]!.pairings).toEqual([SPARE.slice(1)])
     expect(h.cards).toEqual(["ABCD1234"])
     expect(h.linked).toEqual(["card-1"])
+  })
+
+  test("holds the auth state in one process: an exclusive lock a live holder keeps and a gone one gives up", async () => {
+    const dir = scratch()
+    await Bun.write(join(dir, "x"), "")
+    const lock = join(dir, "lock")
+    expect(await takeLock(lock, 101, () => true)).toBeUndefined()
+    expect(await takeLock(lock, 202, (pid) => pid === 101)).toBe(101)
+    expect(await takeLock(lock, 202, () => false)).toBeUndefined()
+    expect(await Bun.file(lock).text()).toBe("202")
+    releaseLock(lock, 101)
+    expect(await Bun.file(lock).exists()).toBe(true)
+    releaseLock(lock, 202)
+    expect(await Bun.file(lock).exists()).toBe(false)
+  })
+
+  test("refuses to pair while no-raw-wa is not registered in the factory's settings", async () => {
+    const settings = join(scratch(), "factory-settings.json")
+    await Bun.write(settings, JSON.stringify({ hooks: { PreToolUse: [] } }))
+    expect(await unguarded(settings)).toContain("phase 2 registers it")
+    expect(await unguarded(join(scratch(), "missing.json"))).toContain(
+      "no-raw-wa is not registered",
+    )
+  })
+
+  test("pairs once no-raw-wa is registered in the factory's settings", async () => {
+    const settings = join(scratch(), "factory-settings.json")
+    const command = "bun --no-env-file scripts/hooks/bundled/no-raw-wa.js"
+    await Bun.write(settings, JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command }] }] } }))
+    expect(await unguarded(settings)).toBeUndefined()
   })
 
   test("refuses to run with the spare number as the owner's, since a self-chat number is banned fast", async () => {

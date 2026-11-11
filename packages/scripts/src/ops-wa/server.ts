@@ -7,11 +7,14 @@ export const socketPath = (data: string) => join(data, "whatsapp", "wa.sock")
 type Reply = { refusal?: string; sent?: true }
 
 export function serve(path: string, send: (body: string) => Promise<string>) {
-  const server = Bun.listen<{ text: string }>({
+  const server = Bun.listen<{ done: boolean; text: string }>({
     socket: {
       data: (socket, chunk) => {
+        // one request per connection: bytes after its line never send again
+        if (socket.data.done) return
         socket.data.text += chunk.toString()
         if (!socket.data.text.includes("\n")) return
+        socket.data.done = true
         const answer = (reply: Reply) => {
           socket.write(`${JSON.stringify(reply)}\n`)
           socket.end()
@@ -27,7 +30,7 @@ export function serve(path: string, send: (body: string) => Promise<string>) {
         )
       },
       open: (socket) => {
-        socket.data = { text: "" }
+        socket.data = { done: false, text: "" }
       },
     },
     unix: path,
@@ -39,7 +42,11 @@ export function serve(path: string, send: (body: string) => Promise<string>) {
 // wa send's side: the body to ops-wa and its one-line answer, or why ops-wa did not answer.
 export async function request(path: string, body: string, timeoutMs = 600_000): Promise<Reply> {
   if (!existsSync(path)) return { refusal: "ops-wa is not running: its job is off or stopped" }
-  const { promise, resolve } = Promise.withResolvers<Reply>()
+  const answered = Promise.withResolvers<Reply>()
+  const resolve = (reply: Reply) => {
+    clearTimeout(timer)
+    answered.resolve(reply)
+  }
   let text = ""
   const timer = setTimeout(
     () => resolve({ refusal: "ops-wa did not answer in 10 minutes" }),
@@ -48,7 +55,6 @@ export async function request(path: string, body: string, timeoutMs = 600_000): 
   await Bun.connect({
     socket: {
       close: () => {
-        clearTimeout(timer)
         try {
           resolve(JSON.parse(text) as Reply)
         } catch {
@@ -65,5 +71,5 @@ export async function request(path: string, body: string, timeoutMs = 600_000): 
     },
     unix: path,
   }).catch(() => resolve({ refusal: "ops-wa is not running: its socket refuses the connect" }))
-  return promise
+  return answered.promise
 }
