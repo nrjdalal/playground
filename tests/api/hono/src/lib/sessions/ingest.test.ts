@@ -1331,6 +1331,24 @@ describe.skipIf(!dockerUp())("ingest", () => {
     expect((await sessionRow(SESSION)).harness).toBe("claude-code")
   })
 
+  test("a compressed rollout whose read is stopped part way ends up whole on the next pass", async () => {
+    const CUT = "019a7c00-0000-7000-8000-00000000c07a"
+    writeFileSync(rolloutPath(CUT, ".zst"), Bun.zstdCompressSync(rollout(CUT)))
+    const { ingestRollout: read } =
+      await import("../../../../../../api/hono/src/lib/sessions/ingest")
+    let checks = 0
+    const stopAfterOne = {
+      get aborted() {
+        checks += 1
+        return checks > 1
+      },
+    }
+    const sessions = join(root, "codex", "sessions")
+    await read(db, sessions, rolloutPath(CUT, ".zst"), { chunkBytes: 512, signal: stopAfterOne })
+    await read(db, sessions, rolloutPath(CUT, ".zst"))
+    expect(await entryCount(CUT)).toBe(9)
+  })
+
   test("a stack that reads this machine skips a rollout that is not Playground's own, unread", async () => {
     const FOREIGN = "019a7c00-0000-7000-8000-00000000f00d"
     writeFileSync(rolloutPath(FOREIGN), rollout(FOREIGN))
