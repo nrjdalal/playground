@@ -6307,11 +6307,6 @@ var gateSettings = defineSettings({
   }
 });
 // packages/settings/src/harnesses.ts
-var HARNESSES = [
-  { backends: ["claude", "glm"], id: "claude-code", label: "Claude Code" },
-  { backends: ["openai"], id: "codex", label: "Codex" }
-];
-var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
 var GLM_MODEL = "glm";
 // packages/settings/src/models.ts
 var id = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id, such as claude-opus-5-5");
@@ -6462,11 +6457,12 @@ var storedTemplates = (value) => Array.isArray(value) ? value.map((row) => {
   if (typeof row !== "object" || row === null || !("backend" in row) || "harness" in row)
     return row;
   const { backend, ...rest } = row;
-  return {
-    ...rest,
-    harness: "claude-code",
-    ...backend === "glm" ? { model: GLM_MODEL } : backend === "claude" ? {} : { backend }
-  };
+  const { model, ...modelless } = rest;
+  if (backend === "glm")
+    return { ...rest, harness: "claude-code", model: GLM_MODEL };
+  if (backend !== "claude")
+    return { ...rest, backend, harness: "claude-code" };
+  return { ...model === GLM_MODEL ? modelless : rest, harness: "claude-code" };
 }) : value;
 var sessionTemplates = array(sessionTemplate).refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "each id is listed once");
 var unknownAccounts = (templates, accounts) => {
@@ -8927,6 +8923,23 @@ async function registryName(sessionId, environment = process.env) {
     } catch {}
   }
 }
+async function codexName(sessionId, environment = process.env) {
+  if (!environment.CODEX_HOME)
+    return;
+  let name;
+  try {
+    const index = await Bun.file(join4(environment.CODEX_HOME, "session_index.jsonl")).text();
+    for (const line of index.split(`
+`)) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.id === sessionId && typeof entry.thread_name === "string")
+          name = entry.thread_name;
+      } catch {}
+    }
+  } catch {}
+  return name;
+}
 async function rosterKind(name, environment = process.env) {
   const path = join4(dataDirOf(environment), "roster.json");
   try {
@@ -8947,7 +8960,7 @@ async function sessionRole(environment, sessionId) {
   if (typeof sessionId !== "string")
     return "";
   try {
-    const name = await registryName(sessionId, environment) ?? "";
+    const name = await registryName(sessionId, environment) ?? await codexName(sessionId, environment) ?? "";
     const role = name && await rosterRole(name, environment);
     if (role)
       return role;

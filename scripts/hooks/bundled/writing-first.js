@@ -4,7 +4,7 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 // scripts/hooks/writing-first.ts
 import { existsSync, readdirSync, realpathSync, unlinkSync } from "fs";
 import { homedir as homedir4 } from "os";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join4, relative, resolve as resolve3, sep } from "path";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute4, join as join4, relative, resolve as resolve4, sep } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -166,6 +166,23 @@ async function registryName(sessionId, environment = process.env) {
     } catch {}
   }
 }
+async function codexName(sessionId, environment = process.env) {
+  if (!environment.CODEX_HOME)
+    return;
+  let name;
+  try {
+    const index = await Bun.file(join2(environment.CODEX_HOME, "session_index.jsonl")).text();
+    for (const line of index.split(`
+`)) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.id === sessionId && typeof entry.thread_name === "string")
+          name = entry.thread_name;
+      } catch {}
+    }
+  } catch {}
+  return name;
+}
 async function rosterKind(name, environment = process.env) {
   const path = join2(dataDirOf(environment), "roster.json");
   try {
@@ -186,7 +203,7 @@ async function sessionRole(environment, sessionId) {
   if (typeof sessionId !== "string")
     return "";
   try {
-    const name = await registryName(sessionId, environment) ?? "";
+    const name = await registryName(sessionId, environment) ?? await codexName(sessionId, environment) ?? "";
     const role = name && await rosterRole(name, environment);
     if (role)
       return role;
@@ -219,6 +236,45 @@ var UPSTREAM_SKILLS = [
   "to-spec",
   "writing-for-agents"
 ];
+
+// scripts/hooks/codex.ts
+import { isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
+var HEADERS = ["*** Add File: ", "*** Delete File: ", "*** Update File: ", "*** Move to: "];
+var SHELL_PATCH = /(?:^|[\n;&|(`]|\$\()\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:\S*\/)?(?:apply_patch|applypatch)(?=$|[\s;&|)<>'"`])/;
+var patchPaths = (text) => text.split(`
+`).flatMap((line) => {
+  const trimmed = line.trim();
+  const header = HEADERS.find((h) => trimmed.startsWith(h));
+  return header && trimmed.length > header.length ? [trimmed.slice(header.length)] : [];
+});
+var writeOf = (input, path, patch) => {
+  const cwd = typeof input.cwd === "string" ? input.cwd : "/";
+  return JSON.stringify({
+    ...input,
+    tool_input: { content: patch, file_path: isAbsolute2(path) ? path : resolve2(cwd, path) },
+    tool_name: "Write"
+  });
+};
+function guardInputs(raw) {
+  let input;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return [raw];
+  }
+  if (typeof input !== "object" || input === null || typeof input.turn_id !== "string")
+    return [raw];
+  const tool = input.tool_name;
+  const command = input.tool_input?.command;
+  const text = typeof command === "string" ? command : "";
+  const shell = tool === "Bash" && SHELL_PATCH.test(text);
+  if (tool !== "apply_patch" && !shell)
+    return [raw];
+  const paths = patchPaths(text);
+  if (paths.length === 0)
+    return null;
+  return [...shell ? [raw] : [], ...paths.map((path) => writeOf(input, path, text))];
+}
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function joinValues(array, separator = "|") {
@@ -4822,7 +4878,7 @@ var liveSettings = defineSettings({
 // scripts/hooks/shell.ts
 import { AsyncLocalStorage } from "async_hooks";
 import { homedir as homedir3 } from "os";
-import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
+import { basename, dirname, isAbsolute as isAbsolute3, resolve as resolve3 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var MAX_BYTES = 1048576;
@@ -6686,9 +6742,9 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
-  if (isAbsolute2(text.value))
+  if (isAbsolute3(text.value))
     return text.value;
-  return env.cwd ? resolve2(env.cwd, text.value) : undefined;
+  return env.cwd ? resolve3(env.cwd, text.value) : undefined;
 }
 async function readFile(path) {
   const file = Bun.file(path);
@@ -7103,6 +7159,7 @@ var WRITES = new Set(["Edit", "MultiEdit", "Write"]);
 var ID = /^[\w-]+$/;
 var LOADS = new RegExp(`^(?:[\\w./-]+:)?${SKILL}$`);
 var TYPED = new RegExp(`^\\s*/(?:[\\w./-]+:)?${SKILL}(?:\\s|$)`);
+var READS = new RegExp(`(?:^|[\\n;&|(])\\s*(?:bat|cat|head|less|more|nl|sed|tail)\\s[^\\n;&|]*${SKILL}/SKILL\\.md(?![\\w.])`);
 var FACTORY_MARKERS = [
   join4("extensions", "core", "skills", "playbook", "SKILL.md"),
   ...["playground", "engineering"].map((folder) => join4("skills", folder, "playground-factory", "SKILL.md"))
@@ -7130,7 +7187,7 @@ function real(path) {
 }
 var inside = (path, dir) => {
   const rel = relative(dir, path);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute3(rel);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute4(rel);
 };
 function repoOf(path) {
   for (let dir = dirname2(path);; dir = dirname2(dir)) {
@@ -7209,7 +7266,7 @@ async function judge(input, env) {
   if (typeof target !== "string" || !markOf(input, env))
     return;
   const cwd = typeof input.cwd === "string" ? input.cwd : undefined;
-  if (!await scoped(real(resolve3(cwd ?? "/", target)), env))
+  if (!await scoped(real(resolve4(cwd ?? "/", target)), env))
     return;
   return refusal(input, env, target);
 }
@@ -7360,7 +7417,7 @@ async function bashTarget(input, env) {
       if (!here.cwd)
         continue;
       for (const word of await inlineTargets(name, args, cmd, here)) {
-        const path = resolve3(here.cwd, word.replace(/^~(?=\/)/, home));
+        const path = resolve4(here.cwd, word.replace(/^~(?=\/)/, home));
         if (await scoped(real(path), env))
           return word;
       }
@@ -7399,17 +7456,31 @@ async function check(raw, env = process.env) {
         clear(input, env);
       return;
     }
-    if (event === "PreToolUse" && WRITES.has(String(input.tool_name)))
-      return await judge(input, env);
-    if (event === "PreToolUse" && input.tool_name === "Bash") {
-      const file = markOf(input, env);
-      if (!file || existsSync(file))
-        return;
-      const target = await withDeadline(8000, () => bashTarget(input, env));
-      return target === undefined ? undefined : await refusal(input, env, target);
+    if (event !== "PreToolUse")
+      return;
+    const command = input.tool_input?.command;
+    if (typeof input.turn_id === "string" && input.tool_name === "Bash" && typeof command === "string" && READS.test(command)) {
+      await mark(input, env);
+      return;
+    }
+    for (const one of guardInputs(raw) ?? []) {
+      const reason = await toolCheck(JSON.parse(one), env);
+      if (reason)
+        return reason;
     }
   } catch {
     return;
+  }
+}
+async function toolCheck(input, env) {
+  if (WRITES.has(String(input.tool_name)))
+    return await judge(input, env);
+  if (input.tool_name === "Bash") {
+    const file = markOf(input, env);
+    if (!file || existsSync(file))
+      return;
+    const target = await withDeadline(8000, () => bashTarget(input, env));
+    return target === undefined ? undefined : await refusal(input, env, target);
   }
 }
 if (import.meta.main) {

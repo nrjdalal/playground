@@ -4,7 +4,7 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 // scripts/hooks/no-extensions-write.ts
 import { existsSync, statSync } from "fs";
 import { homedir as homedir3 } from "os";
-import { dirname as dirname3, join as join5, resolve as resolve4, sep as sep2 } from "path";
+import { dirname as dirname3, join as join5, resolve as resolve5, sep as sep2 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -66,9 +66,58 @@ import { join as join2 } from "path";
 var CORE = "core";
 var extensionsDir = (data) => join2(data, "extensions");
 
+// scripts/hooks/codex.ts
+import { isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
+var HEADERS = ["*** Add File: ", "*** Delete File: ", "*** Update File: ", "*** Move to: "];
+var SHELL_PATCH = /(?:^|[\n;&|(`]|\$\()\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:\S*\/)?(?:apply_patch|applypatch)(?=$|[\s;&|)<>'"`])/;
+var patchPaths = (text) => text.split(`
+`).flatMap((line) => {
+  const trimmed = line.trim();
+  const header = HEADERS.find((h) => trimmed.startsWith(h));
+  return header && trimmed.length > header.length ? [trimmed.slice(header.length)] : [];
+});
+var writeOf = (input, path, patch) => {
+  const cwd = typeof input.cwd === "string" ? input.cwd : "/";
+  return JSON.stringify({
+    ...input,
+    tool_input: { content: patch, file_path: isAbsolute2(path) ? path : resolve2(cwd, path) },
+    tool_name: "Write"
+  });
+};
+function guardInputs(raw) {
+  let input;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return [raw];
+  }
+  if (typeof input !== "object" || input === null || typeof input.turn_id !== "string")
+    return [raw];
+  const tool = input.tool_name;
+  const command = input.tool_input?.command;
+  const text = typeof command === "string" ? command : "";
+  const shell = tool === "Bash" && SHELL_PATCH.test(text);
+  if (tool !== "apply_patch" && !shell)
+    return [raw];
+  const paths = patchPaths(text);
+  if (paths.length === 0)
+    return null;
+  return [...shell ? [raw] : [], ...paths.map((path) => writeOf(input, path, text))];
+}
+async function eachInput(raw, guard, judge) {
+  const inputs = guardInputs(raw);
+  if (!inputs)
+    return `${guard} hook refuses an apply_patch whose patch names no file it can read: give the patch whole in the call itself, with each file on its own *** Add File, *** Update File or *** Delete File line.`;
+  for (const input of inputs) {
+    const reason = await judge(input);
+    if (reason)
+      return reason;
+  }
+}
+
 // scripts/hooks/no-main-checkout.ts
 import { readdirSync, readFileSync, realpathSync } from "fs";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join4, normalize, resolve as resolve3, sep } from "path";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute4, join as join4, normalize, resolve as resolve4, sep } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function joinValues(array, separator = "|") {
@@ -4694,7 +4743,7 @@ var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
 // scripts/hooks/shell.ts
 import { AsyncLocalStorage } from "async_hooks";
 import { homedir as homedir2 } from "os";
-import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
+import { basename, dirname, isAbsolute as isAbsolute3, resolve as resolve3 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var MAX_BYTES = 1048576;
@@ -6570,9 +6619,9 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
-  if (isAbsolute2(text.value))
+  if (isAbsolute3(text.value))
     return text.value;
-  return env.cwd ? resolve2(env.cwd, text.value) : undefined;
+  return env.cwd ? resolve3(env.cwd, text.value) : undefined;
 }
 async function readFile(path) {
   const file = Bun.file(path);
@@ -7229,7 +7278,7 @@ var held2 = (word, env, steady) => !marked(word.value) || !!heldWord(word, env, 
 // scripts/hooks/no-main-checkout.ts
 function real(path) {
   const found = resolved(path);
-  if (found !== undefined || !isAbsolute3(path))
+  if (found !== undefined || !isAbsolute4(path))
     return found ?? nearest(path);
   const parts = normalize(path).split(sep).filter(Boolean);
   let low = 0;
@@ -8197,7 +8246,7 @@ async function inspect(raw, environment, unknown = false) {
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join5(home, file.slice(1)) : file;
-    return inRoot(resolve4(directory ?? "", expanded)) ? refuse(`a write to ${file}`) : undefined;
+    return inRoot(resolve5(directory ?? "", expanded)) ? refuse(`a write to ${file}`) : undefined;
   }
   if (tool !== "Bash")
     return;
@@ -8463,7 +8512,7 @@ async function inspect(raw, environment, unknown = false) {
 }
 async function check(raw, environment = process.env, budget = 1e4) {
   try {
-    return await withDeadline(budget, async () => inspect(raw, environment));
+    return await withDeadline(budget, async () => eachInput(raw, "no-extensions-write", (one) => inspect(one, environment)));
   } catch (error) {
     if (error instanceof RangeError)
       return refuse(TOO_LONG);

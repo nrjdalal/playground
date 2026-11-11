@@ -88,6 +88,21 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Every other factory hook acts for a factory session alone, `PLAYGROUND_ROLE` or else its name in Claude Code's registry, placed by the roster's `kind` for that name and then by the factory's names (`scripts/hooks/role.ts`), so a session the owner opens in the factory's checkout passes them untouched.
   Claude Code loads project settings from the session's own folder alone, so a factory session restored where they lack the hooks (another checkout, an older one, a subfolder) is respawned with its settings (playbook's SPAWN.md, Role and settings), and `scripts/ops/up.py --sessions`, which reads each session's command line and its own folder's `.claude/settings.json`, names each one.
 
+## A Codex session's calls
+
+- A Codex session (spawn.sh's `--harness codex`) loads the factory's guards from the `hooks.json` spawn.sh renders from `scripts/factory-settings.json` at each launch: every handler, with its matcher, on each event Codex has (it has no Notification, PermissionDenied, PostToolUseFailure or StopFailure), and the SessionStart beat beside them.
+  session-state is left out, so a Codex session writes no state record, and the Dashboard's light reads it as idle, since `lightOf()` in `api/hono/src/lib/dashboard/workers.ts` reads every state but running as idle.
+  Codex runs each command in the call's folder with `$PLAYGROUND_REPO` set by the launch, so every wrapper finds the main checkout as it does for Claude Code.
+- A Codex input carries a `turn_id`, which Claude Code's lacks (codex-cli 0.167.1).
+  It sends a shell call as Bash with its `command` and an MCP call by its `mcp__` name and arguments, both in Claude Code's shape, so every guard reads them as it reads Claude Code's.
+- Codex sends an edit in two shapes: an apply_patch call, or an apply_patch command run in the shell.
+  Its matcher takes Edit and Write as apply_patch's names, so the factory's edit matchers reach both.
+  `guardInputs()` in `scripts/hooks/codex.ts` reads either into one Write per file the patch adds, updates, deletes or moves to, its path resolved from the call's folder and its content the whole patch, and the shell form also keeps its Bash call.
+  Each edit guard (no-extensions-write, no-linear-ticket, no-main-checkout, no-raw-wa) judges each of them through `eachInput()`, which refuses an apply_patch whose patch names no file; writing-first judges them too and lets such a patch run, since it fails open.
+- A Codex session resumed with no `PLAYGROUND_ROLE` takes its role from its thread's name: `codexName()` in `scripts/hooks/role.ts` reads the last `thread_name` that `$CODEX_HOME/session_index.jsonl` holds for its id.
+- Codex has no Skill tool, so for writing-first a Codex Bash call that reads the skill's `SKILL.md` (`cat`, `head`, `sed` and the other readers in its `READS`) is the load, and its rendered matcher is `^(Bash|Edit|MultiEdit|Write)$`.
+- Its tests are `bun run test:file tests/scripts/hooks/codex.test.ts tests/scripts/hooks/refused-forms.test.ts tests/scripts/hooks/role.test.ts tests/scripts/hooks/writing-first.test.ts tests/scripts/spawn-codex.test.ts`.
+
 ## Guard lists
 
 - A guard that reads a list (no-desktop-owner-app's `desktop-owner-apps.json`, no-playground-leak's `playground-terms.json` and `slack-cleared.json`, no-release-comment's `release-owners.json` and spawn.sh's GLM gate's `glm-refused-sources.json`, all in core's `extensions/core/lists/`, and no-public-leak's,
@@ -937,6 +952,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 ## session-state
 
 - `scripts/hooks/session-state.ts` writes every session's own state to `session-state/<session id>.json` in the data folder, which ops-session-resume reads and the Dashboard is to read.
+  A Codex session's `hooks.json` leaves it out ([A Codex session's calls](#a-codex-sessions-calls)), so a Codex session writes none.
   Registered on Notification, PermissionDenied, PermissionRequest, PostToolUse, PostToolUseFailure, SessionEnd, Stop, StopFailure and UserPromptSubmit with one command in `.claude/settings.json` and `scripts/factory-settings.json`,
   it writes the shape `sessionStateSchema` in `packages/config/src/session-state.ts` checks (`agentId?`, `at`, `event`, `reason?`, `resetsAt?`, `sessionId`, `state`, `tool?`; `state` is `failed`, `idle`, `stuck`, `usage-limit` or `working`),
   whose `stateNow()` reads a stuck, failed or usage-limit record as over once the transcript holds a turn after it,
@@ -985,5 +1001,6 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   the root `AGENTS.md` and `CLAUDE.md`, `scripts/README.md` and `scripts/hooks/README.md`, and `docs/`; and anywhere, a handoff under the data folder's `handoffs/`.
   A Skill call or a typed `/writing-for-agents`, bare or a plugin's or folder's scoped copy (`ws-home:writing-for-agents`), leaves a mark under the data folder's `writing-first/`, a subagent's apart from its parent's, since a subagent's hook input carries its parent's session id beside its own `agent_id`; a compaction clears the session's marks.
   With the skill installed nowhere (the config folder's `skills/`, the checkout's `.claude/skills/`, or a plugin `plugins/installed_plugins.json` lists, installed for the user and enabled in the user settings or installed for the session's project) it lets every write through, and it fails open on a call it cannot read.
+  A Codex session's load and edits are in [A Codex session's calls](#a-codex-sessions-calls).
   Its refusal names the bare skill or the scoped name the session's skill list shows, since a factory session loads its org's set through `--plugin-dir` under a name the hook cannot see.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
