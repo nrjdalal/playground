@@ -139,13 +139,14 @@ The 98% switch to GLM is retired by his decision on Inbox #i827: the account rot
 A column's anchor is then a herdr pane id (`w1:p2`, or lettered as `wN:p1A`; your own is `$HERDR_PANE_ID`), and a name holds at most 32 characters.
 A probe on a server with no pane to split beside opens in a workspace of its own, in this checkout: `spawn.sh probe <name> <reports-to> <brief>`, with no `--runtime` or with `--runtime herdr`.
 It opens on the playground server; `PLAYGROUND_HERDR_SESSION=playground-probes` before the command puts it on the probes server.
+`--runtime hc` instead opens the probe as a terminal in hc's trial world, and is refused with any other mode; read [scripts/README.md](../../../../scripts/README.md#spawnsh)'s `--runtime hc` lines before you start one, drive it or remove the world.
 When herdr refuses a placement, spawn.sh quotes herdr's own error in its refusal.
 It labels the session's pane with its name, and that label is where the session is found, so the session's roster entry records no `workspace` or `surface`.
 The Dashboard lists it by name, for any session to read; `herdr pane list` shows the labels only when run in a pane on the playground server, since from a pane on another server herdr's reads reach that server's socket.
 It waits for Claude's REPL with `pane wait-output`, and answers the folder trust and MCP picker for you (the picker by enabling its servers, when `~/.mcp.json` alone defines them) only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards;
 anywhere else the session waits at the prompt for the owner, and spawn.sh says so.
-Every start and resume records its runtime, herdr, in `~/.playground/runtimes/<name>`, rewriting whatever word an older pin held.
-With no `--runtime`, every start and resume opens in herdr, from any terminal, and spawn.sh refuses a `--runtime` other than herdr and a column anchored on anything but a herdr pane id.
+Every start and resume records its runtime, herdr or hc, in `~/.playground/runtimes/<name>`, rewriting whatever word an older pin held.
+With no `--runtime`, every start and resume opens in herdr, from any terminal, and spawn.sh refuses a `--runtime` other than herdr or hc and a column anchored on anything but a herdr pane id.
 After a herdr server's restart, which brings each pane back as a shell under its label, ops-herdr runs `spawn.sh restore` for that server (LIFECYCLE.md, Ops jobs), which resumes every session whose resume record in `~/.playground/resume` names it on that server (its `# server:` line, the factory's when it has none) and whose roster row is not done, ended, parked or paused,
 each row read again once its resume finds the session gone and just before its launch, so a session `spawn.sh close` ends while a run goes on stays down,
 each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with, an `--effort` other than high and, for a reviewer or tester, `--pr` with the PRs its roster row serves,
