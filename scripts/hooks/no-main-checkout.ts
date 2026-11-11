@@ -400,7 +400,8 @@ function runnerTarget(args: Word[]): number {
 }
 
 // A tool by name or path, or as a package at a version (turbo@latest)
-const toolName = (word: string | undefined) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""))
+export const toolName = (word: string | undefined) =>
+  program((word ?? "").replace(/(?<=.)@[^/]*$/, ""))
 const isTurbo = (word: string | undefined) => toolName(word) === "turbo"
 
 // Whether the build's settings reach turbo: from its own assignments or env wrapper, an export before it, or the session's environment.

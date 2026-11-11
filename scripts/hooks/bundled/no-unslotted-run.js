@@ -7575,7 +7575,7 @@ function heavy(name, args, env) {
   if (words[0] === "x" && packagedTools(args.slice(sub + 1)).includes("next") && nextBuild([words[1] ?? "", ...rest.map((a) => a.value)]))
     return { also: runnerFolders(name, args, env, []), dir: cwd, what: "bun x next build" };
   if (words[0] === "x" && words[1] && args[at]?.value === words[1]) {
-    const ran = heavy(program(words[1].replace(/(?<=.)@[^/]*$/, "")), rest, {
+    const ran = heavy(toolName(words[1]), rest, {
       ...env,
       cwd: chained
     });

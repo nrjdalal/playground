@@ -7969,6 +7969,7 @@ export {
   ranIn,
   real,
   runnerFolders,
+  toolName,
   turboWords,
   unreadFolder,
   withChained,

@@ -13,6 +13,7 @@ import {
   RUNNER_TAKES,
   ranIn,
   runnerFolders,
+  toolName,
   turboWords,
   unreadFolder,
   withChained,
@@ -371,7 +372,7 @@ function heavy(
     return { also: runnerFolders(name, args, env, []), dir: cwd, what: "bun x next build" }
   // bun x runs any program in the folder its --cwd options chain to, so that program is read as the shell would read it there
   if (words[0] === "x" && words[1] && args[at]?.value === words[1]) {
-    const ran = heavy(program(words[1].replace(/(?<=.)@[^/]*$/, "")), rest, {
+    const ran = heavy(toolName(words[1]), rest, {
       ...env,
       cwd: chained,
     })
