@@ -899,7 +899,7 @@ describe("one night's run against a fixture data folder", () => {
     expect(
       ran.some((r) => r.includes("git/refs") && r.includes("ref=refs/tags/archive/scratch")),
     ).toBe(true)
-    expect(ran.some((r) => r.endsWith("tag archive/scratch s"))).toBe(!archived)
+    expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(!archived)
     expect(ran.some((r) => r.includes("push") && r.includes("archive/scratch"))).toBe(false)
     expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(archived)
     const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
@@ -912,7 +912,7 @@ describe("one night's run against a fixture data folder", () => {
         "kept scratch: its head s is not on GitHub, so it is tagged archive/scratch locally alone",
       )
       expect(line).toContain(
-        "branch scratch kept: its head is not on GitHub, tagged archive/scratch locally",
+        "branch scratch kept: its head s is not on GitHub, so it is tagged archive/scratch locally alone",
       )
     }
   })
@@ -925,10 +925,27 @@ describe("one night's run against a fixture data folder", () => {
     })
     await nightlyClean(deps)(ctx)
     const ran = runs.map((r) => r.join(" "))
-    expect(ran.some((r) => r.endsWith("tag archive/scratch s"))).toBe(false)
+    expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(false)
     expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(false)
     expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).not.toContain("scratch")
     expect(sent.find((s) => s.to === "ops")?.text ?? "").not.toContain("scratch")
+  })
+
+  test("a local archive tag at another head is re-pointed to the branch's head and named with both", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "git/refs": unknown,
+      "refs/tags/archive/scratch": "older",
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(true)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("kept scratch: its local archive/scratch tag held older, now holds s")
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain(
+      "branch scratch kept: its local archive/scratch tag held older, now holds s",
+    )
   })
 
   // #1515
@@ -1097,7 +1114,7 @@ describe("other repos' worktrees", () => {
     return path
   }
 
-  const night = () => {
+  const night = (answers: Record<string, string> = {}) => {
     const root = scratch()
     const data = join(root, "data")
     const ops = join(data, "ops")
@@ -1111,6 +1128,7 @@ describe("other repos' worktrees", () => {
     const site = repoAt(join(orgs, "site"))
     const lost = repoAt(join(root, "elsewhere", "lost"))
     const w = {
+      branched: worktreeOf(app, "branched", true),
       done: worktreeOf(app, "done", true),
       dirty: worktreeOf(app, "dirty", true),
       held: worktreeOf(app, "held", true),
@@ -1127,13 +1145,19 @@ describe("other repos' worktrees", () => {
     writeFileSync(join(w.ignored, "notes.txt"), "mine\n")
     writeFileSync(
       join(data, "roster.json"),
-      JSON.stringify({ agents: [{ name: "abc123-worker", worktree: w.rostered }] }),
+      JSON.stringify({
+        agents: [
+          { name: "abc123-worker", worktree: w.rostered },
+          { name: "def456-worker", branch: "branched" },
+        ],
+      }),
     )
     const fake = fakeRun({
       "docker ps": "",
       "docker system df": JSON.stringify({ Volumes: [] }),
       lsof: `p1\nfcwd\nn${root}\np2\nfcwd\nn${join(w.held, "src")}\n`,
       "worktree list": `worktree ${main}\nHEAD a\nbranch refs/heads/main`,
+      ...answers,
     })
     // git runs for real in every scratch checkout but Playground's own, whose reads the fakes answer as the other rows do
     const runs: string[][] = []
@@ -1169,6 +1193,7 @@ describe("other repos' worktrees", () => {
     }
     const prsByRepo: Record<string, Prs> = {
       [app]: prsOf({
+        branched: pr("MERGED"),
         dirty: pr("MERGED"),
         done: pr("MERGED"),
         held: pr("MERGED"),
@@ -1190,7 +1215,7 @@ describe("other repos' worktrees", () => {
       trashRoots: () => ({ home: root, main, trash: join(root, "trash") }),
       turbo: join(root, "turbo"),
     } as NightDeps
-    return { ctx, deps, lost, main, ops, runs, sent, w }
+    return { ctx, data, deps, lost, main, ops, runs, sent, w }
   }
   const outbox = (sent: { text: string; to: string }[]) =>
     sent.find((s) => s.to === "ops")?.text ?? ""
@@ -1221,6 +1246,44 @@ describe("other repos' worktrees", () => {
       expect(existsSync(path)).toBe(true)
       expect(outbox(sent)).toContain(`worktree ${path} kept: ${why}`)
     }
+  })
+
+  test("a worktree whose branch a roster row's branch names is kept, though no roster text holds its path", async () => {
+    const { ctx, deps, sent, w } = night()
+    await nightlyClean(deps)(ctx)
+    expect(existsSync(w.branched)).toBe(true)
+    expect(outbox(sent)).toContain(`worktree ${w.branched} kept: the roster names it`)
+  })
+
+  test("an lsof the step cannot read names the step's early exit and removes nothing", async () => {
+    const { ctx, deps, ops, w } = night({ lsof: "" })
+    await nightlyClean(deps)(ctx)
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toContain(
+      "other repos: lsof unreadable, none removed",
+    )
+    expect(existsSync(w.done)).toBe(true)
+    expect(existsSync(w.pushed)).toBe(true)
+  })
+
+  test("a roster the step cannot read names the step's early exit and removes nothing", async () => {
+    const { ctx, data, deps, ops, w } = night()
+    writeFileSync(join(data, "roster.json"), "not json")
+    await nightlyClean(deps)(ctx)
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toContain(
+      "other repos: the roster unreadable, none removed",
+    )
+    expect(existsSync(w.done)).toBe(true)
+    expect(existsSync(w.pushed)).toBe(true)
+  })
+
+  test("PRs the step cannot read name the repo's early exit and keep its worktrees", async () => {
+    const { ctx, deps, ops, w } = night()
+    deps.prs = async () => null
+    await nightlyClean(deps)(ctx)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("GitHub unreadable, none read")
+    expect(existsSync(w.done)).toBe(true)
+    expect(existsSync(w.pushed)).toBe(true)
   })
 
   test("a repo outside the code root and the org folders is never read", async () => {
