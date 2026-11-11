@@ -219,11 +219,9 @@ describe("run-slot hold", () => {
     writeFileSync(join(ops, `${slot}.holder`), `${who} ${pid} ${iso(sinceMs)} 4 3\n`)
     mkdirSync(join(ops, "run-slot.waiters"), { recursive: true })
     for (const ticket of waiters) writeFileSync(join(ops, "run-slot.waiters", ticket), "")
-    appendFileSync(
-      join(ops, "run-slot.runs.log"),
-      `2026-10-19T12:00:00Z ask ${who} ${pid} bun run test:file tests/scripts/long.test.ts\n`,
-    )
   }
+  const log = (who: string, pid: number) =>
+    `2026-10-19T12:00:00Z ask ${who} ${pid} bun run test:file tests/scripts/long.test.ts\n`
 
   test("a hold past 30 minutes with a waiter queued tells ops once, naming the holder, its command and its run time", async () => {
     const ops = scratch()
@@ -233,7 +231,9 @@ describe("run-slot hold", () => {
       `1760000000-${process.pid}-y8wqk2-worker`,
     ])
     hold(ops, "run-slot-2", "k3v9q2-worker", process.pid, now.getTime() - 10 * 60_000, [])
-    const { ctx, sent } = fake(ops, now)
+    const { ctx, sent } = fake(ops, now, {
+      "run-slot.runs.log": log("g7wkr2-worker", process.pid),
+    })
     await runSlotHold(ctx)
     expect(sent).toEqual([
       {
@@ -261,12 +261,50 @@ describe("run-slot hold", () => {
     hold(ops, "run-slot", "g7wkr2-worker", process.pid, now.getTime() - 40 * 60_000, [
       `1760000000-${process.pid}-y8wqk2-worker`,
     ])
-    const first = fake(ops, now)
+    const first = fake(ops, now, { "run-slot.runs.log": log("g7wkr2-worker", process.pid) })
     await runSlotHold(first.ctx)
     expect(first.sent).toHaveLength(1)
     const second = fake(ops, at(13, 15))
     await runSlotHold(second.ctx)
     expect(second.sent).toEqual([])
+  })
+
+  test("a pass with no hold due reads no runs.log, and sends nothing", async () => {
+    const ops = scratch()
+    const now = at(13, 10)
+    hold(ops, "run-slot", "g7wkr2-worker", process.pid, now.getTime() - 10 * 60_000, [
+      `1760000000-${process.pid}-y8wqk2-worker`,
+    ])
+    const { ctx, runs, sent } = fake(ops, now, {
+      "run-slot.runs.log": log("g7wkr2-worker", process.pid),
+    })
+    await runSlotHold(ctx)
+    expect(sent).toEqual([])
+    expect(runs.some((argv) => argv[0] === "cat" && argv[1]!.endsWith("run-slot.runs.log"))).toBe(
+      false,
+    )
+  })
+
+  test("a due hold still alerts once, reading runs.log once", async () => {
+    const ops = scratch()
+    const now = at(13, 10)
+    const since = now.getTime() - 40 * 60_000
+    hold(ops, "run-slot", "g7wkr2-worker", process.pid, since, [
+      `1760000000-${process.pid}-y8wqk2-worker`,
+    ])
+    const { ctx, runs, sent } = fake(ops, now, {
+      "run-slot.runs.log": log("g7wkr2-worker", process.pid),
+    })
+    await runSlotHold(ctx)
+    expect(sent).toEqual([
+      {
+        text: `run-slot: g7wkr2-worker's run has held run-slot for 40 min while 1 waiter queues: bun run test:file tests/scripts/long.test.ts (pid ${process.pid}, since ${iso(since)})`,
+        to: "ops",
+      },
+    ])
+    expect(
+      runs.filter((argv) => argv[0] === "cat" && argv[1]!.endsWith("run-slot.runs.log")),
+    ).toHaveLength(1)
   })
 })
 

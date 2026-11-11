@@ -239,9 +239,7 @@ export const runSlotHold = async (ctx: Context) => {
   const toldPath = join(ctx.ops, "tick", "run-slot-hold-told.json")
   const told = ((await readJson(toldPath).catch(() => null)) ?? {}) as Record<string, string>
   const before = JSON.stringify(told)
-  const runsLog = await Bun.file(join(ctx.ops, "run-slot.runs.log"))
-    .text()
-    .catch(() => "")
+  const runsLog = (await ctx.run(["cat", join(ctx.ops, "run-slot.runs.log")])).out
   const holds: { heldMs: number; pid: string; since: string; slot: string; who: string }[] = []
   for (const slot of RUN_SLOTS) {
     const line = (
