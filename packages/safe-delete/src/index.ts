@@ -282,7 +282,7 @@ const recentMoves = (trash: string, session: string, now: Date): TrashEntry[] =>
     .filter((entry) => Date.parse(entry.at) > since)
 }
 
-// Whether a cap refusal is its burst's first, so it alerts once: a burst is the moves that filled the cap, keyed by the newest of them, and the told mark is a file named for that key, made with wx, so of two tries at the same instant the first alone creates it and alerts, and every later try inside the burst, whose key is already told, is a plain refusal. A mark of the old shape, a content file at the session's own path, is cleared at the session's first burst, since left alone it turns every write ENOTDIR and silences the session; the folder's removal runs for that case alone, since a concurrent try's fresh folder must stand and its wx answer decide.
+// Whether a cap refusal is its burst's first, so it alerts once: the told mark is a file named for the burst's key, made with wx, so of two tries at one instant the first alone creates it and alerts, and a later try inside the burst, whose key is already told, is a plain refusal. A mark of the old shape, a content file at the session's own path, is cleared at the session's first burst, the removal for that case alone, so a concurrent try's fresh folder stands; the design's history is in the PG-1733 commits.
 const firstOfBurst = (trash: string, session: string, recent: TrashEntry[]): boolean => {
   const key =
     recent
@@ -306,10 +306,14 @@ const firstOfBurst = (trash: string, session: string, recent: TrashEntry[]): boo
   }
   try {
     mkdirSync(join(trash, ".cap-told", session), { recursive: true })
+  } catch {
+    return true
+  }
+  try {
     writeFileSync(told, "", { flag: "wx" })
     return true
   } catch (err) {
-    return (err as { code?: string }).code === "EEXIST" ? false : true
+    return (err as { code?: string }).code !== "EEXIST"
   }
 }
 
@@ -678,19 +682,27 @@ export function purgeTrash(
     if (stampMs(BATCH.exec(batch)![1]!) < cutoff) remove(batch)
     else young.push(batch)
   while (young.length && io.free() < PURGE.minFree) remove(young.shift()!)
-  // A told mark no try can meet again: a burst's key is a stamp that never recurs, so a mark older than the cap's window is swept, and an empty session folder with it.
+  // A told mark no try can meet again: a burst's key is a stamp that never recurs, so a mark older than the cap's window is swept, and the session's folder stays, since a concurrent try may be about to fill it.
   const toldCutoff = io.now.getTime() - CAP_WINDOW_MS
+  const stale = (at: string) => (lstat(at)?.mtimeMs ?? Infinity) < toldCutoff
   for (const session of entriesOf(join(root, ".cap-told"))) {
     const at = join(root, ".cap-told", session.name)
     if (!session.isDirectory()) {
-      if ((lstat(at)?.mtimeMs ?? Infinity) < toldCutoff) rmSync(at, { force: true })
+      if (stale(at)) {
+        try {
+          rmSync(at, { force: true })
+        } catch {}
+      }
       continue
     }
     for (const mark of entriesOf(at)) {
       const markAt = join(at, mark.name)
-      if ((lstat(markAt)?.mtimeMs ?? Infinity) < toldCutoff) rmSync(markAt, { force: true })
+      if (stale(markAt)) {
+        try {
+          rmSync(markAt, { force: true })
+        } catch {}
+      }
     }
-    if (!entriesOf(at).length) rmSync(at, { force: true, recursive: true })
   }
   return { removed, skipped }
 }
