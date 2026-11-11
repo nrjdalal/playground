@@ -535,6 +535,50 @@ describe("--check reads a tree git holds, never the working files", () => {
     expect(merged.stderr).toBe("")
   })
 
+  test("--merged reads a changed folder an unchanged importer reaches, by a relative path", () => {
+    const { git, root, run, side, write } = checkout()
+    const pkgs = join(root, "pkgs")
+    mkdirSync(join(pkgs, "a"), { recursive: true })
+    mkdirSync(join(pkgs, "b"), { recursive: true })
+    writeFileSync(join(pkgs, "a", "a.ts"), 'import { b } from "../b/b"\n\nexport const a = b\n')
+    writeFileSync(join(pkgs, "b", "b.ts"), 'export const b = "one"\n')
+    git("add", "-A")
+    git("commit", "-q", "--no-verify", "-m", "pkgs")
+    side("canary", () => {
+      write("lib.ts", 'import { a } from "../../pkgs/a/a"\n\nexport const lib = `two ${a}`\n')
+      writeFileSync(join(pkgs, "b", "b.ts"), 'export const b = "two"\n')
+    })
+    side("main", () => write("a-guard.ts", guard('console.log("head")\n')))
+    const merged = run("--check", "--merged", "canary")
+    expect(merged.code).toBe(0)
+    expect(merged.stderr).toBe("")
+  })
+
+  test("--merged reads a changed folder an unchanged importer reaches, by a bare name", () => {
+    const { git, root, run, side, write } = checkout()
+    const pkgs = join(root, "pkgs")
+    mkdirSync(join(pkgs, "a"), { recursive: true })
+    mkdirSync(join(pkgs, "b"), { recursive: true })
+    writeFileSync(join(pkgs, "a", "a.ts"), 'import { b } from "@w/b"\n\nexport const a = b\n')
+    writeFileSync(
+      join(pkgs, "b", "package.json"),
+      `${JSON.stringify({ name: "@w/b", main: "./b.ts" })}\n`,
+    )
+    writeFileSync(join(pkgs, "b", "b.ts"), 'export const b = "one"\n')
+    mkdirSync(join(root, "node_modules", "@w"), { recursive: true })
+    symlinkSync(join(pkgs, "b"), join(root, "node_modules", "@w", "b"))
+    git("add", "-A")
+    git("commit", "-q", "--no-verify", "-m", "pkgs")
+    side("canary", () => {
+      write("lib.ts", 'import { a } from "../../pkgs/a/a"\n\nexport const lib = `two ${a}`\n')
+      writeFileSync(join(pkgs, "b", "b.ts"), 'export const b = "two"\n')
+    })
+    side("main", () => write("a-guard.ts", guard('console.log("head")\n')))
+    const merged = run("--check", "--merged", "canary")
+    expect(merged.code).toBe(0)
+    expect(merged.stderr).toBe("")
+  })
+
   test("--merged names a conflict outside the bundles and exits 0, since pr:merge's gate reports it", () => {
     const { git, run, write } = checkout()
     git("checkout", "-q", "-b", "canary")
