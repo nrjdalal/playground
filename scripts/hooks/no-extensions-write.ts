@@ -5,6 +5,7 @@ import { dirname, join, resolve, sep } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { extensionsDir } from "../../packages/settings/src/rendered"
+import { eachInput } from "./codex"
 import { bunCall, FILE_TOOLS, gitCall, real } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
@@ -1472,7 +1473,9 @@ export async function check(
   budget = 10_000,
 ): Promise<string | undefined> {
   try {
-    return await withDeadline(budget, async () => inspect(raw, environment))
+    return await withDeadline(budget, async () =>
+      eachInput(raw, "no-extensions-write", (one) => inspect(one, environment)),
+    )
   } catch (error) {
     if (error instanceof RangeError) return refuse(TOO_LONG)
   }

@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from "no
 import { dataDirOf } from "../../packages/env/src/data-dir"
 import { liveSettings } from "../../packages/settings/src/live"
 import { readPolicySync } from "../../packages/settings/src/rendered"
+import { eachInput } from "./codex"
 import { fromFactory, registryName, rosterKind, sessionOf, sessionRole } from "./role"
 import {
   codeFed,
@@ -761,7 +762,7 @@ export async function check(
   main: string = mainCheckout(resolve(import.meta.dir, "..", "..")),
 ): Promise<string | undefined> {
   try {
-    return await inspect(raw, environment, main)
+    return await eachInput(raw, "no-main-checkout", (one) => inspect(one, environment, main))
   } catch {
     return
   }

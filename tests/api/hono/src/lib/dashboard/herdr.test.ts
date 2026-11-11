@@ -356,6 +356,14 @@ describe("readServer and herdrRecords", () => {
     expect(herdrRecords([pane("dispatcher", ["/bin/zsh"])], registered([]), "t", codex)).toEqual([])
     expect(herdrRecords([running], registered([]), "t")).toEqual([])
     expect(herdrRecords([pane("builder", ["codex"])], registered([]), "t", codex)).toEqual([])
+    // npm's launcher runs under node; a word naming codex elsewhere in the argv, a shell's argument, holds nothing
+    const launcher = pane("dispatcher", ["node", "/x/node_modules/.bin/codex", "resume"])
+    expect(herdrRecords([launcher], registered([]), "t", codex)).toHaveLength(1)
+    const shell = pane("dispatcher", ["/bin/zsh", "-c", "/opt/codex/bin/codex"])
+    expect(herdrRecords([shell], registered([]), "t", codex)).toEqual([])
+    expect(
+      herdrRecords([pane("dispatcher", ["less", "codex"])], registered([]), "t", codex),
+    ).toEqual([])
   })
 
   test("the Codex launch records are the sessions whose pin names codex, with their resume record's thread", () => {
