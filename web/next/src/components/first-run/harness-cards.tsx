@@ -21,7 +21,7 @@ export function HarnessCards({
   return (
     <RadioGroup
       aria-label="Alpha's harness"
-      className="grid w-full gap-3 sm:grid-cols-2"
+      className="grid w-full gap-3"
       onValueChange={(value) => onPick(value as HarnessId)}
       value={pick}
     >

@@ -120,7 +120,14 @@ export const checklistOf = (facts: {
   return { active: known ? (next ?? "start") : null, known, rows, start }
 }
 
-type ChecklistRow = { action?: React.ReactNode; done: string; title: string; todo?: string }
+// A row's action shows while it is undone, and a kept one (the harness cards, whose pick can change until Start) once it is done too.
+type ChecklistRow = {
+  action?: React.ReactNode
+  done: string
+  kept?: boolean
+  title: string
+  todo?: string
+}
 
 const START_URL = `${config.api.url}/api/v1/dashboard/dispatcher/start`
 
@@ -169,7 +176,7 @@ function Checklist({ name }: { name: string }) {
     github: { done: "Signed in.", title: "GitHub" },
     harness: {
       action:
-        list.active === "harness" && cards && picked ? (
+        list.active !== null && !["github", "settings"].includes(list.active) && cards && picked ? (
           <div className="flex w-full flex-col gap-2">
             <HarnessCards
               cards={cards}
@@ -181,6 +188,7 @@ function Checklist({ name }: { name: string }) {
           </div>
         ) : undefined,
       done: `${label ?? "It"} is installed and signed in.`,
+      kept: true,
       title: "Harness",
       todo: `Pick what ${name} runs on. Start turns on once it is installed and signed in.`,
     },
@@ -225,7 +233,7 @@ function Checklist({ name }: { name: string }) {
                   </p>
                   <p className="text-muted-foreground text-xs">{done ? row.done : row.todo}</p>
                 </div>
-                {!done && row.action}
+                {(!done || row.kept) && row.action}
               </div>
             </li>
           )
