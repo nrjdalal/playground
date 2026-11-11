@@ -538,10 +538,18 @@ export const nightlyClean =
           const local = await git(["rev-parse", "-q", "--verify", `refs/tags/${tag}`])
           const held = local.code === 0 ? (lines(local.out)[0] ?? "") : ""
           if (held === sha) continue
-          // -f drops the old head when it is no ancestor of the new one, so a moved branch's first archive is tagged beside the re-point, and git branch <name> <old> still brings it back
+          // -f drops the old head when it is no ancestor of the new one, so a moved branch's first archive is tagged beside the re-point, and git branch <name> <old> still brings it back; is-ancestor's 1 alone says no, and a failed rescue leaves the old tag standing, skips the re-point, and names why
           const rescued =
-            held !== "" && (await git(["merge-base", "--is-ancestor", held, sha])).code !== 0
-          if (rescued) await git(["tag", `${tag}-${held.slice(0, 7)}`, held])
+            held !== "" && (await git(["merge-base", "--is-ancestor", held, sha])).code === 1
+          if (rescued) {
+            const rescue = await git(["tag", `${tag}-${held.slice(0, 7)}`, held])
+            if (rescue.code !== 0) {
+              const why = `its local ${tag} tag held ${held}, and keeping it at ${tag}-${held.slice(0, 7)} failed: ${lines(rescue.out).at(-1) ?? ""}`
+              out.push(`kept ${name}: ${why}`)
+              kept.push(`branch ${name} kept: ${why}`)
+              continue
+            }
+          }
           const said =
             (await git(["tag", "-f", tag, sha])).code !== 0
               ? `its head ${sha} is not on GitHub, and its local ${tag} tag failed`
