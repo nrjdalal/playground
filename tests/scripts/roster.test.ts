@@ -524,6 +524,81 @@ describe("set", () => {
   })
 })
 
+// a reviewer scoring an extension item kept the ended worker it last served, since pr= took a GitHub PR alone, and the checker reaper ended it mid-review (#1851).
+describe("an extension item as a checker's pr (#1851)", () => {
+  const pull = (n: number) => `https://github.com/acme/app/pull/${n}`
+  const REF = "acme/script/start-up"
+  const gone: Agent = {
+    kind: "worker",
+    name: "x7mh4d-worker",
+    role: "worker",
+    status: "ended",
+    task: "Fix #1",
+  }
+  const live: Agent = { ...gone, name: "b4n8tz-worker", status: "working", task: "Fix #3" }
+  const checker: Agent = {
+    kind: "reviewer",
+    name: "k3v9q2-reviewer",
+    pr: pull(1),
+    prs: [pull(1)],
+    role: "worker",
+    status: "working",
+    task: "Review #1",
+    title: "Reviewer of x7mh4d-worker",
+    worker: "x7mh4d-worker",
+  }
+  const assign = (pr: string, worker = "b4n8tz-worker") => [
+    "assign",
+    "k3v9q2-reviewer",
+    "Review: the start-up script",
+    "Score the item",
+    `worker=${worker}`,
+    `pr=${pr}`,
+  ]
+
+  test("assign with a live worker and an item ref sets the worker and keeps the ref in prs, leaving pr unset", async () => {
+    const r = await run(configWith([gone, live, checker]), assign(REF))
+    expect(r.code).toBe(0)
+    const row = agentOf(r.roster, "k3v9q2-reviewer")
+    expect(row).toMatchObject({ prs: [pull(1), REF], status: "working", worker: "b4n8tz-worker" })
+    expect(row).not.toHaveProperty("pr")
+  })
+
+  for (const bad of ["-acme/script/start-up", "acme/widget/start-up", "acme/script/Start-Up"])
+    test(`refuses the ref ${bad}, naming the form, and writes nothing`, async () => {
+      const agents = [gone, live, checker]
+      const r = await run(configWith(agents), assign(bad))
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("<scope>/<kind>/<key>")
+      expect(r.roster?.agents).toEqual(agents)
+    })
+
+  test("refuses an item ref with an ended worker, naming assign with a live worker", async () => {
+    const agents = [gone, live, checker]
+    const r = await run(configWith(agents), assign(REF, "x7mh4d-worker"))
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(
+      "roster.ts assign k3v9q2-reviewer <title> <task> worker=<live worker> pr=<n>",
+    )
+    expect(r.roster?.agents).toEqual(agents)
+  })
+
+  test("prs+= and prs-= take an item ref on a checker with a live worker", async () => {
+    const config = configWith([live, { ...checker, worker: "b4n8tz-worker" }])
+    const added = await run(config, ["set", "k3v9q2-reviewer", `prs+=${REF}`])
+    expect(added.code).toBe(0)
+    expect(agentOf(added.roster, "k3v9q2-reviewer")?.prs).toEqual([pull(1), REF])
+    const removed = await run(config, ["set", "k3v9q2-reviewer", `prs-=${REF}`])
+    expect(agentOf(removed.roster, "k3v9q2-reviewer")?.prs).toEqual([pull(1)])
+  })
+
+  test("a worker's pr takes no item ref", async () => {
+    const r = await run(configWith([live]), ["set", "b4n8tz-worker", `pr=${REF}`])
+    expect(r.code).toBe(2)
+    expect(agentOf(r.roster, "b4n8tz-worker")).toEqual(live)
+  })
+})
+
 describe("prs (#706)", () => {
   const pull = (n: number) => `https://github.com/acme/app/pull/${n}`
   const ISSUE = "https://github.com/acme/app/issues/9"
