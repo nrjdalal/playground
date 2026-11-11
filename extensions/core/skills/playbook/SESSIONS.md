@@ -25,6 +25,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    the factory's `no-raw-spawn` hook refuses every cmux call but its help or version, a `claude --resume` or `--continue`, and every herdr call but its reads (`get`, `list`, `read`, `agent wait`, `pane wait-output` and the like)
    and a scratch world's of the session's own ([scripts/README.md](../../../../scripts/README.md#spawnsh)),
    naming the script; type every program by its literal name, since one held in a variable (`$V integration add`) reads as herdr when a herdr command group follows it.
+   A lead starting a checker runs `roster.ts assign <checker> <title> <task> worker=<live worker> pr=<n>` before spawn.sh, since spawn.sh writes `worker=` only for a worker's column and roster.ts refuses a checker's PR with no live worker (step 4).
    Read [SPAWN.md](SPAWN.md) for the command of the mode you start (a worker, a runner, a checker's or probe's column, a manager) and for each flag you pass,
    and before you act on a refusal: it holds the capacity gate, the launch line with its model and effort, the resume, `--account`, `--backend glm`, `--runtime herdr` with `spawn.sh restore`, `--check`, and the role and settings every launch carries.
    Done when spawn.sh has printed herdr's `herdr pane <id> workspace <id>` line for the session, or a refusal you have acted on by its gate's section in SPAWN.md.
@@ -81,6 +82,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A rule that changes while a checker is live goes to it at once from its worker's lead by `SendMessage`, as an addition to its brief, since a checker that never heard of the change scores it as a finding (12 Oct).
 4. Record the start by [ROSTER.md](ROSTER.md)'s start rows (a session respawned after a restore, by the respawned-session row, which keeps the entry's work).
    A worker that spawned a checker or a probe sends the Builder its name, and adds `pr=<its PR's URL>` to a checker's entry beside the `worker=` spawn.sh wrote, which the Dashboard nests it under its worker by.
+   A checker's next PR goes on its row with `roster.ts assign <checker> <title> <task> worker=<live worker> pr=<n>` whenever its row's `worker` is unset or ended, since the checker reaper ends a checker whose worker has gone (`checker-worker-gone`).
+   roster.ts refuses `prs+=`, `prs=` or a new `pr` on such a row, spawn.sh's restart of an ended checker included, naming that assign.
 
 Send the brief with `notify_when_idle: true`, so its next idle arrives as a notice.
 Done when `ListAgents` shows the session busy on the brief and the roster shows the task.
