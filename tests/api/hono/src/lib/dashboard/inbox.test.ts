@@ -3393,7 +3393,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     )
     if (!answered.ok) throw new Error(answered.message)
     expect(sent.map((d) => d.to)).toEqual(["worker-eod", "dispatcher"])
-    // the dispatcher gets the poster's line with relay set, and reads the preview with bun run ask get
+    // the dispatcher gets the poster's line with relay set, and reads the preview with playground ask get
     const relay = sent[1]?.text ?? ""
     expect(payloadOf(relay)).toMatchObject({
       close: `playground ask ack #i${posted.ref} --link <https url>`,

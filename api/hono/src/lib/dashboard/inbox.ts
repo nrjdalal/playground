@@ -1240,7 +1240,7 @@ type Telling = Omit<Sending, "upload">
 export const answerLine = (payload: AnswerPayload): string =>
   `${ANSWER_LEAD} ${JSON.stringify(answerPayloadSchema.parse(payload))}`
 
-// Pure: the line for the poster and, once it has ended, the same line for the dispatcher with relay set, which reads the item's preview with bun run ask get.
+// Pure: the line for the poster and, once it has ended, the same line for the dispatcher with relay set, which reads the item's preview with playground ask get.
 const textsOf = (
   item: InboxItem,
   answer: InboxAnswer | InboxProvided,
