@@ -1567,7 +1567,7 @@ cheap_idle() {
     [ "$LOAD" = "$LOAD0" ] || return 1
     [ -z "$BURST" ] || burst_held > /dev/null || return 1
     GATE_TICK=$((GATE_TICK + 1))
-    [ "$G0" = open ] && [ $((GATE_TICK % 4)) -ne 0 ] && return 0
+    [ "$G0" = open ] && [ $((GATE_TICK % GATE_EVERY)) -ne 0 ] && return 0
     gate_sig
     [ "$G" = "$G0" ]
   else
@@ -1600,7 +1600,8 @@ look_mark() {
 MQ=${PLAYGROUND_MERGE_QUEUE:-${PLAYGROUND_DATA_DIR:-$HOME/.playground}/merge-queue.json}
 LOOKER=1
 LOOKED=
-GATE_TICK=$(( $$ % 4 ))
+GATE_EVERY=4
+GATE_TICK=$(( $$ % GATE_EVERY ))
 
 # run-slot.priority (a lead's pick, under an hour old) works with the queue (builder, 12 Oct: a priority naming the 8th waiter deadlocked it):
 # the named session may take a slot whatever its place, and the reservation holds only while that session is itself waiting in the queue
@@ -1896,7 +1897,7 @@ load1_max() {
 # counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither
 lanes_open() {
   local idle swap tps mbs load need="" verdict=shut why="" seen free level
-  # a read subcommand takes the verdict a waiter wrote in the last 30 s (the head rewrites it each poll while the gauges shut a slot, gate_sig), so room, can-take and head see the lanes as the queue's head saw them, since the CPU gate can flip between two readings seconds apart (issue 1216: 55% then 33% idle); with none that fresh it reads the gauges itself
+  # a read subcommand takes the verdict a waiter wrote in the last 30 s (the head rewrites it each poll while the gauges shut a slot, and its every fourth poll opens it under gate_sig), so room, can-take and head see the lanes as the queue's head saw them, since the CPU gate can flip between two readings seconds apart (issue 1216: 55% then 33% idle); with none that fresh it reads the gauges itself
   if [ -n "$CAN_TAKE" ] && seen=$(fresh_lanes); then [ "$seen" = open ]; return; fi
   read -r idle swap tps mbs _ <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
