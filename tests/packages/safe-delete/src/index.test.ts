@@ -9,6 +9,7 @@ import {
   rmSync,
   symlinkSync,
   truncateSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -1028,6 +1029,21 @@ describe("purgeTrash", () => {
     expect(done.removed).toEqual([old])
     expect(existsSync(join(trash, old))).toBe(false)
     expect(existsSync(join(trash, young))).toBe(true)
+  })
+
+  test("clears a told mark older than the cap's window and keeps a fresh one", () => {
+    const { trash } = machine()
+    const told = join(trash, ".cap-told", "j6rjgy-worker")
+    mkdirSync(told, { recursive: true })
+    const old = join(told, "2026-11-01T00:00:00.000Z")
+    const fresh = join(told, "2026-11-02T12:00:00.000Z")
+    writeFileSync(old, "")
+    writeFileSync(fresh, "")
+    utimesSync(old, new Date(NOW.getTime() - 61_000), new Date(NOW.getTime() - 61_000))
+    utimesSync(fresh, new Date(NOW.getTime() - 30_000), new Date(NOW.getTime() - 30_000))
+    purgeTrash(trash, { free: () => 100 * GB, now: NOW })
+    expect(existsSync(old)).toBe(false)
+    expect(existsSync(fresh)).toBe(true)
   })
 
   test("removes the oldest batches early while free space is under 50 GB", () => {
