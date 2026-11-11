@@ -688,14 +688,26 @@ export function purgeTrash(
   for (const session of entriesOf(join(root, ".cap-told"))) {
     const at = join(root, ".cap-told", session.name)
     if (!session.isDirectory()) {
-      if (stale(at)) rmSync(at, { force: true })
+      if (stale(at)) {
+        try {
+          rmSync(at, { force: true })
+        } catch {}
+      }
       continue
     }
     for (const mark of entriesOf(at)) {
       const markAt = join(at, mark.name)
-      if (stale(markAt)) rmSync(markAt, { force: true })
+      if (stale(markAt)) {
+        try {
+          rmSync(markAt, { force: true })
+        } catch {}
+      }
     }
-    if (!entriesOf(at).length) rmSync(at, { force: true, recursive: true })
+    if (!entriesOf(at).length) {
+      try {
+        rmSync(at, { force: true, recursive: true })
+      } catch {}
+    }
   }
   return { removed, skipped }
 }
