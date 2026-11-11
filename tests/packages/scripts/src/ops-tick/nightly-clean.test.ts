@@ -912,7 +912,7 @@ describe("one night's run against a fixture data folder", () => {
         "kept scratch: its head s is not on GitHub, so it is tagged archive/scratch locally alone",
       )
       expect(line).toContain(
-        "branch scratch kept: its head is not on GitHub, tagged archive/scratch locally",
+        "branch scratch kept: its head s is not on GitHub, so it is tagged archive/scratch locally alone",
       )
     }
   })

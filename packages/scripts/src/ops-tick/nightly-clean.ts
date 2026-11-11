@@ -536,23 +536,14 @@ export const nightlyClean =
           const local = await git(["rev-parse", "-q", "--verify", `refs/tags/${tag}`])
           const held = local.code === 0 ? (lines(local.out)[0] ?? "") : ""
           if (held === sha) continue
-          if ((await git(["tag", "-f", tag, sha])).code === 0) {
-            out.push(
-              held
-                ? `kept ${name}: its local ${tag} tag held ${held}, now holds ${sha}`
-                : `kept ${name}: its head ${sha} is not on GitHub, so it is tagged ${tag} locally alone`,
-            )
-            kept.push(
-              held
-                ? `branch ${name} kept: its local ${tag} tag held ${held}, now holds ${sha}`
-                : `branch ${name} kept: its head is not on GitHub, tagged ${tag} locally`,
-            )
-          } else {
-            out.push(
-              `kept ${name}: its head ${sha} is not on GitHub, and its local ${tag} tag failed`,
-            )
-            kept.push(`branch ${name} kept: its head is not on GitHub, its local tag failed`)
-          }
+          const said =
+            (await git(["tag", "-f", tag, sha])).code !== 0
+              ? `its head ${sha} is not on GitHub, and its local ${tag} tag failed`
+              : held
+                ? `its local ${tag} tag held ${held}, now holds ${sha}`
+                : `its head ${sha} is not on GitHub, so it is tagged ${tag} locally alone`
+          out.push(`kept ${name}: ${said}`)
+          kept.push(`branch ${name} kept: ${said}`)
           continue
         }
         if (made.code !== 0) {
