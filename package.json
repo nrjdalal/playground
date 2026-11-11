@@ -12,7 +12,7 @@
     "auth:schema": "bun packages/scripts/src/auth-schema.ts",
     "build": "turbo run build --summarize && bun packages/scripts/src/build-sizes.ts",
     "changelog": "bun api/hono/src/plugins/changelog/cli.ts",
-    "check-types": "turbo run check-types --summarize && bun run check-types:tests",
+    "check-types": "env NODE_ENV=production SKIP_ENV_VALIDATION=true turbo run check-types --summarize && bun run check-types:tests",
     "check-types:tests": "if [ -d tests ]; then bun packages/scripts/src/verify/prebuild.ts tests --types && find tests -name tsconfig.json -print0 | xargs -0 -n1 tsc -p; fi",
     "clean": "bun packages/scripts/src/clean.ts",
     "console:roles": "bun packages/scripts/src/console-roles.ts",
