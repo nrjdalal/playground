@@ -46,6 +46,7 @@ export type ShownState =
   | "approvals"
   | "ready"
   | "parked"
+  | "unknown"
   | "idle"
   | "done"
 
@@ -92,6 +93,12 @@ const ICONS: Record<ShownState, StatusIconSpec> = {
   approvals: { Icon: RiGroupLine, label: "Waiting on approvals", spins: false, tone: "caution" },
   ready: { Icon: RiZzzLine, label: "Ready", spins: false, tone: "success" },
   parked: { Icon: RiPauseCircleLine, label: "Parked", spins: false, tone: "inactive" },
+  unknown: {
+    Icon: RiCheckboxBlankCircleLine,
+    label: LIGHT_LABELS.idle,
+    spins: false,
+    tone: "inactive",
+  },
   idle: {
     Icon: RiCheckboxBlankCircleLine,
     label: LIGHT_LABELS.idle,

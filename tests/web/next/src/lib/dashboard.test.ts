@@ -81,6 +81,7 @@ describe("LIGHT_LABELS", () => {
     expect(LIGHT_LABELS).toEqual({
       idle: "Idle",
       "needs-you": "Waiting on you",
+      unknown: "State unknown",
       working: "Working",
     })
     for (const label of Object.values(LIGHT_LABELS)) expect(label).toMatch(/^\p{Lu}/u)

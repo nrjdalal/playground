@@ -528,6 +528,7 @@ export const SHOWN_RANK: Record<ShownState, number> = {
   ready: 7,
   parked: 8,
   "usage-limit": 9,
+  unknown: 9,
   idle: 9,
   done: 10,
   merged: 11,
