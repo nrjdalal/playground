@@ -87,21 +87,17 @@ const WORKERS = ["no-extensions-write-worker"]
 const BANNER =
   'const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));'
 
-// Each module the build reads reads import.meta.dir as its own source's folder under the checkout the bundle sits in, so a path it builds from there (main-checkout.ts's checkout, a guard's own folder) holds as it does from source. In a mirrored build the checkout's own files are also read, through the links, so they load from the checkout with the same reading as a build there.
-const sourceDirs = (base: string, at?: string): BunPlugin => ({
+// Each module the build reads reads import.meta.dir as its own source's folder under the checkout the bundle sits in, so a path it builds from there (main-checkout.ts's checkout, a guard's own folder) holds as it does from source.
+const sourceDirs = (base: string): BunPlugin => ({
   name: "source-dirs",
   setup(build) {
-    const roots = at ? [base, at] : [base]
-    const filter = new RegExp(
-      `^(${roots.map(escape).join("|")})/(?!.*/node_modules/).*\\.[cm]?[jt]sx?$`,
-    )
+    const filter = new RegExp(`^${escape(base)}/(?!.*/node_modules/).*\\.[cm]?[jt]sx?$`)
     build.onLoad({ filter }, async ({ path }) => {
-      const from = roots.find((each) => path.startsWith(each))!
       const text = await Bun.file(path).text()
       return {
         contents: text.replace(
           /\bimport\.meta\.dir\b/g,
-          `(__CHECKOUT + ${JSON.stringify(`/${relative(from, dirname(path))}`)})`,
+          `(__CHECKOUT + ${JSON.stringify(`/${relative(base, dirname(path))}`)})`,
         ),
         loader: path.endsWith("x") ? "tsx" : /\.[cm]?js$/.test(path) ? "js" : "ts",
       }
@@ -109,7 +105,7 @@ const sourceDirs = (base: string, at?: string): BunPlugin => ({
   },
 })
 
-// The merged tree's sources, tsconfig.json and package.json files, copied into a temp folder in the tree's own layout, so the merged build reads the tree's own files and resolves its imports with the tree's own tsconfigs, per importing file as Bun does, and touches no worktree file; the mirror holds the tree's layout, so import.meta.dir keeps reading as the real checkout's folders. A bare import walks up to node_modules, which the mirror has none of, so each folder of the layout gets the checkout's own entries as links, read only, a workspace package's entry at the mirror's same path.
+// The merged tree's sources, tsconfig.json and package.json files, copied into a temp folder in the tree's own layout, so the merged build reads the tree's own files and resolves its imports with the tree's own tsconfigs, per importing file as Bun does, and touches no worktree file; the mirror holds the tree's layout, so import.meta.dir keeps reading as the real checkout's folders. A bare import walks up to node_modules, which the mirror has none of, so each folder of the layout gets the checkout's own entries as links, read only.
 const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
   const mirror = realpathSync(mkdtempSync(join(tmpdir(), "hooks-bundle-merged-")))
   try {
@@ -142,13 +138,11 @@ const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
           await linkModules(at, name)
           continue
         }
-        let rel = ""
-        try {
-          rel = relative(realRoot, realpathSync(at))
-        } catch {}
-        const target =
-          rel && !rel.startsWith("..") && !rel.includes("node_modules/") ? join(mirror, rel) : at
-        symlinkSync(existsSync(target) ? target : at, name)
+        const rel = relative(realRoot, realpathSync(at))
+        symlinkSync(
+          rel && !rel.startsWith("..") && !rel.includes("node_modules/") ? join(mirror, rel) : at,
+          name,
+        )
       }
     }
     const dirs = new Set<string>([""])
@@ -180,14 +174,11 @@ export async function bundle(root: string, tree?: Tree): Promise<Map<string, str
     mirror = tree ? await mirrorOf(tree, root) : undefined
     const base = mirror ?? root
     // A bare npm import reaches the checkout's own store through the mirror's links, so Bun names its modules by the walk back to the checkout; the rewrite names them from the base, as a build there does.
-    const at = mirror ? realpathSync(root) : undefined
-    const store = mirror && at ? relative(mirror, join(at, "node_modules")) : undefined
+    const store = mirror ? relative(mirror, join(realpathSync(root), "node_modules")) : undefined
     const text = async (output: Bun.BuildArtifact) => {
       const out = await output.text()
-      if (!mirror || !at || !store) return out
-      return out
-        .replaceAll(`// ${store}/`, "// node_modules/")
-        .replaceAll(`// ${relative(mirror, at)}/`, "// ")
+      if (!store) return out
+      return out.replaceAll(`// ${store}/`, "// node_modules/")
     }
     process.chdir(base)
     try {
@@ -196,7 +187,7 @@ export async function bundle(root: string, tree?: Tree): Promise<Map<string, str
           banner: BANNER,
           entrypoints: [join(base, HOOKS, `${name}.ts`)],
           naming: "[name].js",
-          plugins: [sourceDirs(realpathSync(base), at)],
+          plugins: [sourceDirs(realpathSync(base))],
           root: join(base, HOOKS),
           target: "bun",
         })
