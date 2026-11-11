@@ -12,7 +12,7 @@ import {
 } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, stop, machine } from "./run-slot-fake"
+import { SCRIPT, deadline, machine, startOf, stop, within } from "./run-slot-fake"
 
 // a check waits on a line its run prints or logs, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -38,25 +38,17 @@ const log = (m: Machine) => {
 }
 // the sessions whose clones have started, in the runs log's order
 const started = (m: Machine) =>
-  [...log(m).matchAll(/ start (\S+) \d+ run-slot-clone /g)].map((s) => s[1])
+  log(m)
+    .split("\n")
+    .map(startOf)
+    .filter((f): f is string[] => f?.[2] === "run-slot-clone")
+    .map((f) => f[0])
 // both waiters' places listed in the order clone_first's glob reads them, the older ask time first
 const ordered = (m: Machine) => {
   const names = readdirSync(join(m.ops, "run-slot.clone-waiters")).sort()
   return (
     names.length === 2 &&
     names.map((n) => n.split("-").slice(3).join("-")).join(",") === "worker-older,worker-newer"
-  )
-}
-// each wait ends within 10 s, failing with the waiters' names and the start lines, so a hang says what it waited on (issue 1723, run 42891811978: both waits hung to bun's 60 s timeout saying nothing)
-const within = async (ok: () => boolean, what: string, m: Machine) => {
-  const end = Date.now() + 10_000
-  while (!ok() && Date.now() < end) await Bun.sleep(50)
-  if (ok()) return
-  const waiters = existsSync(join(m.ops, "run-slot.clone-waiters"))
-    ? readdirSync(join(m.ops, "run-slot.clone-waiters")).sort()
-    : []
-  throw new Error(
-    `${what} within 10s; waiters: ${waiters.join(", ") || "none"}; starts: ${started(m).join(", ") || "none"}`,
   )
 }
 
@@ -100,10 +92,11 @@ describe("the clone lane", () => {
     const older = cloning(m, "worker-older")
     expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
     const newer = cloning(m, "worker-newer")
-    // the order is decided once both places are listed, the older's ask time first, so the lane frees with the order decided
-    await within(() => ordered(m), "both waiters listed, the older first", m)
+    // the order is decided once both places are listed, the older's ask time first, so the lane frees with the order decided; the two waits share one budget, since chained waits of their own can outlast bun's hang ceiling
+    const chain = deadline()
+    await within(() => ordered(m), "both waiters listed, the older first", m, chain)
     m.release("run-slot-clone")
-    await within(() => started(m).length > 0, "a clone started", m)
+    await within(() => started(m).length > 0, "a clone started", m, chain)
     await Promise.all([stop(older.p), stop(newer.p)])
     expect(started(m)[0]).toBe("worker-older")
   })
@@ -237,13 +230,14 @@ describe("the clone lane", () => {
     const older = cloning(m, "worker-older", copy)
     expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm)).toBe(true)
     const newer = cloning(m, "worker-newer")
-    await within(() => ordered(m), "both waiters listed, the older first", m)
+    const chain = deadline()
+    await within(() => ordered(m), "both waiters listed, the older first", m, chain)
     copyFileSync(SCRIPT, `${copy}.new`)
     utimesSync(`${copy}.new`, new Date(), new Date())
     renameSync(`${copy}.new`, copy)
     expect(await older.saw(/running the new copy/g)).toBe(true)
     m.release("run-slot-clone")
-    await within(() => started(m).length > 0, "a clone started", m)
+    await within(() => started(m).length > 0, "a clone started", m, chain)
     await Promise.all([stop(older.p), stop(newer.p)])
     expect(started(m)[0]).toBe("worker-older")
   })

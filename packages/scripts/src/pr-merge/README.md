@@ -67,6 +67,7 @@ An outside author's PR goes to the Builder, who gives its go only after a read-o
 - `freeze`: the `"*"` line holds and is the ship's own freeze for the next version, the latest tag's patch plus one (`freezeLine` in `held.ts`, `nextVersion`), so a lapsed freeze, another version's, focus's or one Ops wrote by hand refuses.
 
 It takes no merge lock and runs no pr:merge gate, since a ship PR merges `canary` into `main` while the freeze holds every PR into `canary`.
+`bun run ship:approve-held <n>` approves ship PR `<n>`'s held CI runs at its head (`packages/scripts/src/ship/approve-held.ts`, behind the `ship` prebuild target), the `pull_request` runs the bot's draft leaves at conclusion `action_required`, and prints each run it approved or `none held`, so `ci` can read them.
 
 ## The merge lock
 

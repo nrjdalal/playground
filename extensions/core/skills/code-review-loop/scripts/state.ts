@@ -1,6 +1,7 @@
 #!/usr/bin/env -S bun --no-env-file
 import { spawnSync } from "node:child_process"
 import { readFileSync, readdirSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, relative, dirname, basename, isAbsolute } from "node:path"
 
 export const VERDICT = /^##\s*ReviewBot\s*·\s*round\s+(\d+):\s*(\d)\/5\s+at\s+`?([0-9a-f]{7,40})/i
@@ -896,6 +897,8 @@ const watch = async (
   splitRepo(repo)
   number(n)
   if (!/^[0-9a-f]{7,40}$/.test(sha)) exitWith(`not a commit SHA: ${sha}`)
+  // a waiter outlives its round, so it leaves the folder it started in, which may be a review worktree the cleanup removes once the PR merges
+  process.chdir(tmpdir())
   let closed = false
   for (;;) {
     const view = await readRest(`repos/${repo}/pulls/${n}`, "{merged, sha: .head.sha, state}")

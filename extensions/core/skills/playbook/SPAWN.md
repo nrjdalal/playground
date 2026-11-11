@@ -28,7 +28,7 @@ Read the section for the mode you start and for each flag you pass, and the sect
   the Builder and Ops (which `playground planner`, `playground builder` and `playground ops` start the first time the dispatcher routes work to each) open instead in a workspace of their own, named after each,
   in the main checkout's `.claude/worktrees/leads` (`manager <name> <brief>`, the optimizer by its name or its roster kind, a new name given `kind=optimizer` first the same way;
   an orchestrator of any other manager kind in `kinds.ts`, such as the Assistant or the seatless `orchestrator` kind the sidebar's plus starts, any number at once, opens there too, as a lead reporting to the session its row names, once `scripts/roster.ts set <name> kind=<kind> reportsTo=<session> task=<what it does>` has given it both, and spawn.sh refuses it naming that line until it has;
-  spawn.sh refuses the second dispatcher on Claude without `--account <email>`, a second account, so it never shares the first's login, and a resume of it whose pin reads claude needs `--account` again, since nothing records the account).
+  spawn.sh refuses the second dispatcher on Claude without `--account <email>`, a second account, so it never shares the first's login, and a resume of it whose pin names claude needs `--account` again, since nothing records the account).
 
 ## Capacity gate
 
@@ -72,6 +72,14 @@ so a resume takes `--model` afresh and one without it runs on Opus) or with `--b
 from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approved #i492, 17 Oct; on GLM the alias maps to GLM), so a brief or subagent call that needs Opus names `model: opus`; a scheduled ops job that calls a model keeps its own.
 A resume of a dispatcher, the Assistant or the hosted session keeps neither a model nor an effort the owner picked in its Dashboard composer ([SKILL.md](SKILL.md#chain)).
 Its first prompt names the session, its role and who it reports to, and has it load this skill and read `<brief>`, a file under `~/.playground`, which spawn.sh refuses to start without (a Claude worker's adds that `brief-rush.md` binds it on its Claude lane, within the lanes its own header scopes, while that file exists; a GLM worker's leaves it out).
+
+`--harness codex` starts the first dispatcher in Codex in place of Claude Code: `spawn.sh manager <dispatcher> <brief> --harness codex`, and its resume, alone; spawn.sh refuses it for any other session and beside `--backend`, `--account`, `--model` or `--effort`, since Codex runs on the one login and the model its `CODEX_HOME` holds.
+That `CODEX_HOME` is the data folder's `codex/`, whose `config.toml` (the login kept in its `auth.json`, no update check, the session's folder trusted), `hooks.json` and `app-server-daemon/settings.json` (no self-update) spawn.sh writes at each launch, and the launch runs the `codex` on spawn.sh's `PATH` with `--dangerously-bypass-hook-trust`,
+since Codex silently drops a hook with no recorded trust.
+It fails closed: the SessionStart hook writes a beat naming the session's thread, and a start or resume whose beat does not land within 60 seconds has its pane closed and is refused, with no pin, resume record or roster row, so a Codex session whose guards did not load is stopped within a minute of starting;
+its brief rides the launch as Codex's first prompt, so it may work on that brief until then.
+The beat's thread is the session id its resume record keeps, and it takes the session's name through `codex app-server`'s `thread/name/set`.
+Until phase 3 of the harness layer wires the factory's guards into Codex's hooks, a Codex start or resume runs only on a scratch data folder (`PLAYGROUND_DATA_DIR` naming one), and spawn.sh refuses it on the live one, naming phase 3; phase 3 lifts that refusal in the change that wires the guards.
 
 ## Resume
 
@@ -130,7 +138,8 @@ The launch starts with `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, `ANT
 which carries 3x the plan's quota of glm-5.3 and keeps the 1M window the `[1m]` gives Claude Code; the small fast one `models.glm` bare), `ENABLE_TOOL_SEARCH=true`, since on a base URL that is not Anthropic's Claude Code would load every MCP tool's schema at start, past that window, and runs `--model 'glm-5.3-flash[1m]'` with `--settings ~/.playground/factory-settings-glm-400k.json`,
 which spawn.sh rebuilds from the factory's settings on every GLM launch with the telemetry turned off (`CLAUDE_CODE_ENABLE_TELEMETRY=0`, `OTEL_METRICS_EXPORTER=none`), since the user settings may export usage to an org's usage collector, which counts Claude usage alone; that file's env outranks the user settings' env, and it holds every factory hook.
 The session compacts in the factory's one 400k window (**context**).
-A start records its backend in `~/.playground/backends/<name>` once herdr has the session (`--backend claude` names the default), and a resume runs that backend: it refuses `--backend` while a pin stands, a resume with no pin and no `--backend`, and a pin that reads neither glm nor claude.
+A start records its harness and backend in `~/.playground/backends/<name>` once herdr has the session, as `claude-code glm`, `claude-code claude` or `codex openai` (`--backend claude` names the default; `HARNESSES` in `packages/settings/src/harnesses.ts` lists each harness with its backends), and a resume runs that backend, reading a pin of the backend alone too,
+as one written before the harness split holds: it refuses `--backend` or `--harness` while a pin stands, a resume with no pin and neither given, and a pin that reads none of those.
 So a running session moves to GLM only by a close and a fresh start under `--backend glm`.
 The 98% switch to GLM is retired by his decision on Inbox #i827: the account rotation moves the factory between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
 

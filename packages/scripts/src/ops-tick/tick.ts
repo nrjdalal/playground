@@ -1,5 +1,5 @@
 import { realpathSync, statfsSync } from "node:fs"
-import { appendFile, mkdir, stat, unlink } from "node:fs/promises"
+import { appendFile, mkdir, readdir, stat, unlink } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 
 import {
@@ -220,6 +220,69 @@ const focusCardBeat = async (ctx: Context) => {
 // Each window playground priority opened that has stood LAPSE_HOURS is lifted with a line in ops/priority.log (lapse), and that line goes to ops, so a window nobody lifted stops passing --priority starts by itself.
 const priorityLapse = async (ctx: Context) => {
   for (const line of await lapse(join(ctx.ops, ".."), ctx.now)) await ctx.send("ops", line)
+}
+
+const RUN_SLOTS = ["run-slot", "run-slot-2", "run-slot-3", "run-slot-4"]
+const HOLD_AFTER_MS = 30 * 60_000
+
+const pidLive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as { code?: string }).code === "EPERM"
+  }
+}
+
+// A run-slot hold past 30 minutes while a waiter queues is told to ops once per hold: the four queue lanes' holder lines (`<who> <pid> <iso> <units> <size>`) give the holder and its start, runs.log's ask line for that who and pid the command (a hold can-take, a reread or the merge train's own mkdir made names none), a dead pid no alert, the queue's live waiter tickets counted by each ticket's pid as run-slot.sh's own queue read prunes the dead ones, and tick/run-slot-hold-told.json holds one `<slot>:<pid>` key per told hold, pruned to the live holds on every pass, a no-waiter one included.
+export const runSlotHold = async (ctx: Context) => {
+  const toldPath = join(ctx.ops, "tick", "run-slot-hold-told.json")
+  const told = ((await readJson(toldPath).catch(() => null)) ?? {}) as Record<string, string>
+  const before = JSON.stringify(told)
+  let runsLog: string | null = null
+  const holds: { heldMs: number; pid: string; since: string; slot: string; who: string }[] = []
+  for (const slot of RUN_SLOTS) {
+    const line = (
+      await Bun.file(join(ctx.ops, `${slot}.holder`))
+        .text()
+        .catch(() => "")
+    ).trim()
+    const [who, pid, since] = line.split(/\s+/)
+    const heldMs = ctx.now.getTime() - Date.parse(since ?? "")
+    if (
+      !who ||
+      !pid ||
+      !Number.isFinite(heldMs) ||
+      heldMs <= HOLD_AFTER_MS ||
+      !pidLive(Number(pid))
+    )
+      continue
+    holds.push({ heldMs, pid, since: since!, slot, who })
+  }
+  const live = new Set(holds.map((h) => `${h.slot}:${h.pid}`))
+  for (const key of Object.keys(told)) if (!live.has(key)) delete told[key]
+  let waiters = 0
+  try {
+    waiters = (await readdir(join(ctx.ops, "run-slot.waiters"))).filter((t) =>
+      pidLive(Number(t.split("-")[1])),
+    ).length
+  } catch {}
+  if (waiters > 0) {
+    for (const hold of holds) {
+      const key = `${hold.slot}:${hold.pid}`
+      if (told[key]) continue
+      runsLog ??= await Bun.file(join(ctx.ops, "run-slot.runs.log"))
+        .text()
+        .catch(() => "")
+      const asked = runsLog.split("\n").findLast((l) => l.includes(` ask ${hold.who} ${hold.pid} `))
+      const command = asked
+        ? asked.replace(/^[^ ]+ ask \S+ \d+ /, "")
+        : "command unread from run-slot.runs.log"
+      const text = `run-slot: ${hold.who}'s run has held ${hold.slot} for ${Math.floor(hold.heldMs / 60_000)} min while ${waiters} waiter${waiters === 1 ? "" : "s"} queue${waiters === 1 ? "s" : ""}: ${command} (pid ${hold.pid}, since ${hold.since})`
+      if (await ctx.send("ops", text, true)) told[key] = text
+    }
+  }
+  if (JSON.stringify(told) !== before) await writeAtomic(toldPath, JSON.stringify(told))
 }
 
 // One kept focus card resolved, true, once no ask posted in its window is open; false while one is
@@ -979,6 +1042,7 @@ export const BEATS: Beat[] = [
   { cron: "*/10 * * * *", name: "guard-probe", run: guardProbe, to: "dispatcher" },
   { cron: "* * * * *", name: "focus-card", run: focusCardBeat, to: "the Inbox, by bun run ask" },
   { cron: "*/5 * * * *", name: "priority-lapse", run: priorityLapse, to: "ops" },
+  { cron: "*/5 * * * *", name: "run-slot-hold", run: runSlotHold, to: "ops" },
   {
     cron: "* * * * *",
     name: "dashboard-watch",

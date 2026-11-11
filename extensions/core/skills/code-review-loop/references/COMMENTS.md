@@ -84,7 +84,7 @@ After posting, close every thread of yours the head settles; the open list holds
 - **The author replied and is right**: say so in one line, and resolve; "is right" means you reproduced the author's reason with one command and named that command in your reply.
 - **The author replied and the finding stands**: reply with the measurement again, rather than the claim, and leave it open.
 - **The fix revealed a different problem**: resolve the old thread and open a new one for the new finding.
-- **A nit thread from an earlier round that the worker left**, in a round that scores 5/5: list the nit in the verdict, and resolve.
+- **A nit thread from an earlier round**, in a round that scores 5/5: list the nit in the verdict, and resolve.
 
 With GraphQL spent, reply over REST to the thread's first comment, which `state.ts pr` then names as `comment <id>`: `gh api repos/<repo>/pulls/<n>/comments/<id>/replies -F body=@<file>`; resolving waits for the reset. Otherwise write the mutation to a file, at most 8 threads to a mutation, then run `gh api graphql -F query=@<file>`; when one fails partway, read the threads again (`state.ts pr`) before the retry, since some already took their reply or resolve. Its reply names no skill, session or Playground term, since the no-playground-leak hook cannot place a repository from node ids and refuses it; say "another skill" instead:
 

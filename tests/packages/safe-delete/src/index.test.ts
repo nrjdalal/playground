@@ -9,11 +9,13 @@ import {
   rmSync,
   symlinkSync,
   truncateSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { hasManagerRole, ROSTER_KINDS } from "../../../../packages/config/src/kinds"
 import {
   CARVE_OUTS,
   type CarveOut,
@@ -344,6 +346,76 @@ describe("the tripwire", () => {
     expect(listTrash(roots.trash)).toHaveLength(6)
   })
 
+  test("a mark another try at the same instant made makes the second a plain refusal, so two tries at one instant cannot both alert", () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    // the winner's mark, as a concurrent try at the same instant leaves it: a file named for the burst's key
+    const key = listTrash(roots.trash)
+      .map((entry) => entry.at)
+      .sort()
+      .at(-1)!
+    mkdirSync(join(roots.trash, ".cap-told", opts.session), { recursive: true })
+    writeFileSync(join(roots.trash, ".cap-told", opts.session, key), "")
+    expect(quarantine(file(join(roots.home, "x")), opts, roots, { now: NOW })).toMatchObject({
+      kind: "refused",
+    })
+  })
+
+  test("a legacy told mark, a file where the session's folder goes, does not silence the session's next burst", () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    // a mark of the old shape, as a pre-merge night left it: a content file at the session's own path
+    mkdirSync(join(roots.trash, ".cap-told"), { recursive: true })
+    writeFileSync(join(roots.trash, ".cap-told", opts.session), "2026-11-01T00:00:00.000Z")
+    expect(quarantine(file(join(roots.home, "x")), opts, roots, { now: NOW })).toMatchObject({
+      kind: "tripwire",
+    })
+  })
+
+  test("a .cap-told that is a file does not throw out of quarantine: the burst alerts", () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    writeFileSync(join(roots.trash, ".cap-told"), "not a folder")
+    expect(quarantine(file(join(roots.home, "x")), opts, roots, { now: NOW })).toMatchObject({
+      kind: "tripwire",
+    })
+  })
+
+  test("two processes refusing at the same instant alert once: the folder's recovery never removes a concurrent try's folder", async () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    const src = join(import.meta.dir, "../../../../packages/safe-delete/src/index.ts")
+    const driver = join(roots.root, "driver.ts")
+    writeFileSync(
+      driver,
+      `import { quarantine } from ${JSON.stringify(src)}
+const [home, main, trash, path] = process.argv.slice(2)
+const done = quarantine(path, { reason: "test", session: "j6rjgy-worker" }, { home, main, trash }, { now: new Date("2026-11-02T12:00:00Z") })
+console.log("kind" in done ? done.kind : "moved")`,
+    )
+    const paths = ["d", "e"].map((name) => file(join(roots.home, name)))
+    const kids = paths.map((path) =>
+      Bun.spawn(["bun", driver, roots.home, roots.main, roots.trash, path]),
+    )
+    const kinds = await Promise.all(
+      kids.map(async (kid) => (await new Response(kid.stdout).text()).trim()),
+    )
+    await Promise.all(kids.map((kid) => kid.exited))
+    expect([...kinds].sort()).toEqual(["refused", "tripwire"])
+  })
+
   test("refuses a fourth quarantine within a minute from one session, and lets another go", () => {
     const roots = machine()
     for (const name of ["a", "b", "c"])
@@ -648,11 +720,11 @@ describe("worktreeRefusal", () => {
     // [folder, branch, live session, held]
     const cases: [string, string, string, boolean][] = [
       ["PG-864-second-dispatcher", "PG-864-second-dispatcher", "dispatcher", false],
-      ["PG-5-stops", "PG-5-stops", "ops", false],
-      ["PG-6-opsdesk", "PG-6-opsdesk", "ops", false],
-      ["PG-12-ops", "PG-12-ops", "ops", true],
-      ["PG-13-ops-job", "PG-13-ops-job", "ops", true],
-      ["PG-14-misc", "PG-14-ops-fix", "ops", true],
+      ["PG-5-splint", "PG-5-splint", "lint", false],
+      ["PG-6-lintdesk", "PG-6-lintdesk", "lint", false],
+      ["PG-12-lint", "PG-12-lint", "lint", true],
+      ["PG-13-lint-job", "PG-13-lint-job", "lint", true],
+      ["PG-14-misc", "PG-14-lint-fix", "lint", true],
     ]
     const seen = cases.map(([folder, branch, name]) => {
       const at = join(roots.main, ".claude", "worktrees", folder)
@@ -662,6 +734,53 @@ describe("worktreeRefusal", () => {
       return [folder, worktreeRefusal(at, roots, holders) === holds]
     })
     expect(seen).toEqual(cases.map(([folder, , , held]) => [folder, held]))
+  })
+
+  // A manager seat names the work it routes, not a worktree, so its name holds none, while its branch or PR still does
+  describe("a manager seat's name", () => {
+    const seat = (folder: string, agent: object) => {
+      const { holders, roots } = withWorktree()
+      const at = join(roots.main, ".claude", "worktrees", folder)
+      git(roots.main, "worktree", "add", "-q", "-b", folder, at)
+      writeFileSync(holders.roster, JSON.stringify({ agents: [agent] }))
+      return { at, holders, roots }
+    }
+
+    test.each(ROSTER_KINDS.filter(hasManagerRole))(
+      "a live %s row holds no worktree by its name alone",
+      (kind) => {
+        const { at, holders, roots } = seat(`PG-9-${kind}-thing`, {
+          kind,
+          name: kind,
+          status: "working",
+        })
+        const freed = { head: git(at, "rev-parse", "HEAD"), number: 9, state: "MERGED" as const }
+        expect(worktreeRefusal(at, roots, { ...holders, freed })).toBeNull()
+      },
+    )
+
+    test("a live ops row whose branch is the worktree's still holds it", () => {
+      const { at, holders, roots } = seat("PG-9-ops-thing", {
+        branch: "PG-9-ops-thing",
+        kind: "ops",
+        name: "ops",
+        status: "working",
+      })
+      expect(worktreeRefusal(at, roots, holders)).toBe(
+        `${at} is held by ops, which the roster lists as working`,
+      )
+    })
+
+    test("a live worker row still holds a worktree by its name", () => {
+      const { at, holders, roots } = seat("PG-9-ab12cd-worker-x", {
+        kind: "worker",
+        name: "ab12cd-worker",
+        status: "working",
+      })
+      expect(worktreeRefusal(at, roots, holders)).toBe(
+        `${at} is held by ab12cd-worker, which the roster lists as working`,
+      )
+    })
   })
 
   test("refuses a worktree a running node_modules clone reads from or copies into, naming the clone, and lets it go once the clone is gone", () => {
@@ -952,6 +1071,21 @@ describe("purgeTrash", () => {
     expect(done.removed).toEqual([old])
     expect(existsSync(join(trash, old))).toBe(false)
     expect(existsSync(join(trash, young))).toBe(true)
+  })
+
+  test("clears a told mark older than the cap's window and keeps a fresh one", () => {
+    const { trash } = machine()
+    const told = join(trash, ".cap-told", "j6rjgy-worker")
+    mkdirSync(told, { recursive: true })
+    const old = join(told, "2026-11-01T00:00:00.000Z")
+    const fresh = join(told, "2026-11-02T12:00:00.000Z")
+    writeFileSync(old, "")
+    writeFileSync(fresh, "")
+    utimesSync(old, new Date(NOW.getTime() - 61_000), new Date(NOW.getTime() - 61_000))
+    utimesSync(fresh, new Date(NOW.getTime() - 30_000), new Date(NOW.getTime() - 30_000))
+    purgeTrash(trash, { free: () => 100 * GB, now: NOW })
+    expect(existsSync(old)).toBe(false)
+    expect(existsSync(fresh)).toBe(true)
   })
 
   test("removes the oldest batches early while free space is under 50 GB", () => {
