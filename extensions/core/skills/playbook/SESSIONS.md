@@ -194,8 +194,8 @@ Done when every wait ends on a signal and every gap you name is checked against 
 
 ## Answer a picker
 
-Sessions in the chain ask by `SendMessage`.
-A picker that shows anyway (a skill's own `AskUserQuestion`) sits in a herdr pane, which takes no key from your hand, as Answer a permission prompt says:
+Sessions in the chain ask by `SendMessage`, and `no-chat-question` refuses `AskUserQuestion` to a worker, checker, runner or probe.
+A picker that shows anyway (a session the hook cannot place, or a manager's) sits in a herdr pane, which takes no key from your hand, as Answer a permission prompt says:
 
 - When a rule or a sound default decides it, end it by that section's close and resume, with a brief that gives the answer.
 - When only the owner decides it, give the resume brief the choice to post as an Inbox decision (**ask**), so the session carries on.
