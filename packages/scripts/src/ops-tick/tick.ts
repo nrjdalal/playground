@@ -239,7 +239,7 @@ export const runSlotHold = async (ctx: Context) => {
   const toldPath = join(ctx.ops, "tick", "run-slot-hold-told.json")
   const told = ((await readJson(toldPath).catch(() => null)) ?? {}) as Record<string, string>
   const before = JSON.stringify(told)
-  const runsLog = (await ctx.run(["cat", join(ctx.ops, "run-slot.runs.log")])).out
+  let runsLog: string | null = null
   const holds: { heldMs: number; pid: string; since: string; slot: string; who: string }[] = []
   for (const slot of RUN_SLOTS) {
     const line = (
@@ -271,6 +271,7 @@ export const runSlotHold = async (ctx: Context) => {
     for (const hold of holds) {
       const key = `${hold.slot}:${hold.pid}`
       if (told[key]) continue
+      runsLog ??= (await ctx.run(["cat", join(ctx.ops, "run-slot.runs.log")])).out
       const asked = runsLog.split("\n").findLast((l) => l.includes(` ask ${hold.who} ${hold.pid} `))
       const command = asked
         ? asked.replace(/^[^ ]+ ask \S+ \d+ /, "")
