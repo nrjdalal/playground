@@ -1,7 +1,7 @@
-// The harnesses a session runs in: each one's id, its name, and the backends it takes, a backend being a model setting of its harness (GLM is Claude Code on Z.ai's models.glm), its default first. Codex runs the first dispatcher alone (spawn.sh --harness codex).
+// The harnesses a session runs in: each one's id and the backends it takes, a backend being a model setting of its harness (GLM is Claude Code on Z.ai's models.glm), its default first. Codex runs the first dispatcher alone (spawn.sh --harness codex).
 export const HARNESSES = [
-  { backends: ["claude", "glm"], id: "claude-code", label: "Claude Code" },
-  { backends: ["openai"], id: "codex", label: "Codex" },
+  { backends: ["claude", "glm"], id: "claude-code" },
+  { backends: ["openai"], id: "codex" },
 ] as const
 
 export type Harness = (typeof HARNESSES)[number]

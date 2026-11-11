@@ -5142,8 +5142,8 @@ var guardedOrgs = (values) => {
 
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
-  { backends: ["claude", "glm"], id: "claude-code", label: "Claude Code" },
-  { backends: ["openai"], id: "codex", label: "Codex" }
+  { backends: ["claude", "glm"], id: "claude-code" },
+  { backends: ["openai"], id: "codex" }
 ];
 var readPin = (text) => {
   const words = text.trim().split(/\s+/);
