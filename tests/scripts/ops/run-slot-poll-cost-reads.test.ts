@@ -2,8 +2,8 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 
 import { SCRIPT, WAITING, machine, runSlot, shim, starts, waiter } from "./run-slot-fake"
 
-// ten waiters' first looks under xtrace and the shims, about 700 process starts each at a queue of 10, took 45 to 110 s at load5 19 to 25 before the window opened (issue 1612, measured), and this row took 236 s beside the other poll-cost files at load5 15 to 34 (issue 1671, measured), so it has about 1.5 times its time
-setDefaultTimeout(360_000)
+// five waiters' first looks under xtrace and the shims, about 700 process starts each at a queue of 10 (issue 1612, measured), open the window, and this row took 42.7 s in CI and 53.9 to 57.2 s at load5 9.7 to 13.8 here (issue 1671, measured), so it has about 3 times its time
+setDefaultTimeout(180_000)
 
 // issue 1338, 7 Nov: sixteen waiters started about 60 processes a second between them, which held load5 between 30 and 42 on 15 cores with the CPU half idle, so the slots they waited for stayed shut
 describe("waiters cost close to nothing while they wait", () => {
