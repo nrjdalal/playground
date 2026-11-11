@@ -157,6 +157,16 @@ describe("a run through run-slot, a light run, or one outside the worktrees runs
     ["the suite through run-slot", `${SLOT} bun run test`],
     ["a package runner's -p turbo build through run-slot", `${SLOT} bunx -p turbo turbo run build`],
     ["bun x's -p turbo build through run-slot", `${SLOT} bun x -p turbo turbo run build`],
+    ["a shell beside -p turbo through run-slot", `${SLOT} bunx -p turbo sh -c 'turbo run "build"'`],
+    ["a shell beside -p next through run-slot", `${SLOT} npx -p next sh -c 'next build>log'`],
+    [
+      "a runner --cwd in a worktree through run-slot",
+      `${SLOT} bun --cwd=${WORKTREE} x --cwd=. next build`,
+    ],
+    [
+      "a runner --cwd the hook cannot read through run-slot",
+      `${SLOT} bunx --cwd="$D" turbo run build`,
+    ],
     [
       "check-types through run-slot with env in front",
       `NODE_ENV=production ${SLOT} env SKIP_ENV_VALIDATION=true bun run check-types`,
