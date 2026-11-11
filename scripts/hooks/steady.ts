@@ -29,7 +29,7 @@ const QUALIFIER =
   /[^\s(|&;<>$=]\((?:#q)?[^()\s|]*?(?:e(?:\[[^]*?\]|\{[^]*?\}|<[^]*?>|([^\s[{<])[^]*?\1)|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>`}])/
 
 // The line with each single-quoted span outside double quotes, comments, backslash escapes and heredoc bodies put as one letter, so a jq filter's `select(…)` reads as no qualifier while `'f1'(e:…:)` still does; a heredoc's body is kept as written, and the line as written when a quote or a heredoc is left open or the line holds `$'…'`, whose quoting this scan does not read
-function singleQuotesOut(command: string): string {
+export function singleQuotesOut(command: string): string {
   if (command.includes("$'")) return command
   let out = ""
   let double = false

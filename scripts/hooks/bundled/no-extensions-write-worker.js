@@ -7363,6 +7363,7 @@ var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings 
 var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
 var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
 var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
+var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a prompt expansion, arithmetic or a subscript) on a line that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS = new Set([
   "[",
@@ -7512,6 +7513,33 @@ function ghFilters(parsed) {
       filters.add(args[k]);
   }
   return filters;
+}
+var GH_POSTS = new Set([
+  "issue comment",
+  "issue create",
+  "issue edit",
+  "pr comment",
+  "pr create",
+  "pr edit"
+]);
+function ghTexts(parsed) {
+  const { args, first, name } = parsed;
+  const texts = new Set;
+  if (name !== "gh" || !first || marked(first.value))
+    return texts;
+  const [verb, sub] = args.map((a) => a.value);
+  if (!GH_POSTS.has(`${verb} ${sub}`))
+    return texts;
+  if (args.some((a) => GH_WEB.test(a.value) || /^(?:-[^-=bt]*e|--editor(?:=|$))/.test(a.value)))
+    return texts;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (["-b", "--body", "-t", "--title"].includes(value) && args[k + 1])
+      texts.add(args[++k]);
+    else if (/^(?:-[bt].|--(?:body|title)=)/.test(value))
+      texts.add(args[k]);
+  }
+  return texts;
 }
 function gitConfigs(args) {
   const configs = [];
@@ -7884,6 +7912,11 @@ function perlReads({ args, local }, env) {
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
 }
+var evaluates = (text) => namings(text).blind || /\$\{?~/.test(text);
+var expands = (text) => {
+  const outside = singleQuotesOut(text).replace(/"(?:[^"\\$]|\\.)*"/g, "q");
+  return evaluates(outside) || /(?:^|[\s;&|(<>])=\(/.test(outside);
+};
 function narrow(cmd, env) {
   const parsed = parse3(cmd);
   const { args, first } = parsed;
@@ -7909,7 +7942,12 @@ function narrow(cmd, env) {
     return true;
   if (base === "gh") {
     const filters = ghFilters(parsed);
-    return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value));
+    const texts = filters.size > 0 ? filters : ghTexts(parsed);
+    return texts.size > 0 && args.every((a) => texts.has(a) || !/\s/.test(a.value));
+  }
+  if (base === "cd") {
+    const [folder] = args;
+    return args.length === 1 && literal(folder) && !/^(?:-|~[-+0-9])/.test(folder.value);
   }
   if (base === "sort")
     return !args.some(({ value }) => /^-[a-zA-Z]*o|^--./.test(value));
@@ -8111,7 +8149,8 @@ async function inspect(raw, environment, unknown = false) {
     const near = relative(env);
     return value.includes(needle) || !!near && value.includes(near);
   };
-  const guarded = (body, env) => holds(body, env) || body.includes("~") || needle.split(sep2).filter(Boolean).some((part) => body.toLowerCase().includes(part.toLowerCase()));
+  const touches = (body, env) => holds(body, env) || needle.split(sep2).filter(Boolean).some((part) => body.toLowerCase().includes(part.toLowerCase()));
+  const guarded = (body, env) => touches(body, env) || body.includes("~");
   const judged = new Map;
   const names = (word, env, remover, literal = false) => {
     const quotedGlob = literal && !word.glob;
@@ -8145,6 +8184,7 @@ async function inspect(raw, environment, unknown = false) {
   let steadyAt = () => NONE2;
   let whole = false;
   let rootLine = false;
+  let evaluating = false;
   let patterns = new Set;
   let lineWrites = false;
   let textDepth = 0;
@@ -8164,6 +8204,23 @@ async function inspect(raw, environment, unknown = false) {
   const visit = async (cmd, parsed, env) => {
     if (patterns.has(cmd))
       return;
+    if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
+      const shellCall = SHELLS.has(parsed.name);
+      const { inline, operand } = shellCall ? shellOperand(parsed.args, parsed.name) : { inline: false, operand: parsed.args[0] };
+      if (inline && operand && unreadWord(operand))
+        return refuse(`a ${parsed.name} -c of ${shown({ ...operand, raw: operand.raw ?? operand.source })}, a script the hook cannot read; run its commands as calls of their own`);
+      if (inline && operand && expands(operand.value)) {
+        if (touches(operand.value, env))
+          return refuse(EVALUATES_ROOT);
+        evaluating = true;
+      }
+      const path = !inline && operand ? pathOf(operand, env) : undefined;
+      const written = path === undefined ? undefined : env.files.get(path);
+      if (written && (written.unknown || marked(written.value)))
+        return refuse(`${parsed.name} ${shown(operand)}, a script this line wrote with text the hook cannot read; run its commands as calls of their own`);
+      if (shellCall)
+        return;
+    }
     const slot = slotWords(parsed);
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
@@ -8200,7 +8257,7 @@ async function inspect(raw, environment, unknown = false) {
     const unplaced = env.cwdUnread ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd))) : undefined;
     if (unplaced?.target)
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
-    const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env);
+    const reader = !rootLine && !evaluating && ownFirst(cmd, first) && reads(parsed, env);
     const fed = xargs ? await stdinOf(cmd, env) : undefined;
     const stdinWords = !fed ? [] : fed.unknown ? [{ quoted: false, value: UNKNOWN }] : fed.value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
     const calls = reader ? [] : cliCalls(parsed, env);
@@ -8330,9 +8387,13 @@ async function inspect(raw, environment, unknown = false) {
     known,
     old: { dir: directory },
     process: environment,
-    vars: new Map
+    vars: new Map,
+    visitShells: true
   };
   rootLine = rooted(lexed.commands);
+  evaluating = expands(command);
+  if (evaluating && touches(command, env))
+    return refuse(EVALUATES_ROOT);
   whole = rootLine || wholeLine(lexed.commands, env);
   patterns = casePatterns(lexed.commands);
   lineWrites = redirectsWrite(lexed.commands);
