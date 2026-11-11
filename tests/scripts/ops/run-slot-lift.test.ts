@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { machine, set, slots } from "./run-slot-fake"
+import { machine, set, slots, stop, WAITING } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -74,6 +74,25 @@ describe("a load throttle lifts by itself once load5 holds under its cap", () =>
     expect((await set(m, "ops", "single", "--reason", "suites one at a time")).code).toBe(0)
     expect(since(m)).toBeNull()
     expect(slots(m)).toBe("2\n")
+  })
+
+  // 3-off and 4-off, since single's memory gauge calls lifted on each poll; the mark stands before the waiter starts, since one its look writes changes its signature and it looks again
+  test("a waiting head's idle poll moves the mark's last reading to now, so its own readings stay inside the gap", async () => {
+    const m = throttled(5, ["run-slot.3-off", "run-slot.4-off"], 5)
+    m.hold("run-slot", 1, "small")
+    m.hold("run-slot-2", 1, "small")
+    const w = m.start("worker-s", { RUN_SLOT_SIZE: "small" })
+    try {
+      expect(await w.saw(WAITING)).toBe(true)
+      await Bun.sleep(1_000)
+      writeFileSync(join(m.ops, UNDER), `${now() - 60} ${now() - 60}\n`)
+      const last = () => Number(readFileSync(join(m.ops, UNDER), "utf8").split(" ")[1])
+      const until = Date.now() + 5_000
+      while (Date.now() < until && now() - last() > 2) await Bun.sleep(100)
+      expect(now() - last()).toBeLessThanOrEqual(2)
+    } finally {
+      await stop(w.p)
+    }
   })
 
   test("a waiter held by single takes a slot when the 5 minutes end", async () => {
