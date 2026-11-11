@@ -279,21 +279,19 @@ const recentMoves = (trash: string, session: string, now: Date): TrashEntry[] =>
     .filter((entry) => Date.parse(entry.at) > since)
 }
 
-// Whether a cap refusal is its burst's first, so it alerts once: a burst is the moves that filled the cap, keyed by the newest of them, and the key told is kept in <trash>/.cap-told/<session>, so every later try inside it is a plain refusal.
+// Whether a cap refusal is its burst's first, so it alerts once: a burst is the moves that filled the cap, keyed by the newest of them, and the told mark is a file named for that key, made with wx, so of two tries at the same instant the first alone creates it and alerts, and every later try inside the burst, whose key is already told, is a plain refusal.
 const firstOfBurst = (trash: string, session: string, recent: TrashEntry[]): boolean => {
   const key =
     recent
       .map((entry) => entry.at)
       .sort()
       .at(-1) ?? ""
-  const told = join(trash, ".cap-told", session)
   try {
-    if (readFileSync(told, "utf8") === key) return false
-  } catch {}
-  try {
-    mkdirSync(dirname(told), { recursive: true })
-    writeFileSync(told, key)
-  } catch {}
+    mkdirSync(join(trash, ".cap-told", session), { recursive: true })
+    writeFileSync(join(trash, ".cap-told", session, key), "", { flag: "wx" })
+  } catch {
+    return false
+  }
   return true
 }
 

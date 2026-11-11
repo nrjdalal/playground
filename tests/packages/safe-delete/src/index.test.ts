@@ -345,6 +345,24 @@ describe("the tripwire", () => {
     expect(listTrash(roots.trash)).toHaveLength(6)
   })
 
+  test("a mark another try at the same instant made makes the second a plain refusal, so two tries at one instant cannot both alert", () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    // the winner's mark, as a concurrent try at the same instant leaves it: a file named for the burst's key
+    const key = listTrash(roots.trash)
+      .map((entry) => entry.at)
+      .sort()
+      .at(-1)!
+    mkdirSync(join(roots.trash, ".cap-told", opts.session), { recursive: true })
+    writeFileSync(join(roots.trash, ".cap-told", opts.session, key), "")
+    expect(quarantine(file(join(roots.home, "x")), opts, roots, { now: NOW })).toMatchObject({
+      kind: "refused",
+    })
+  })
+
   test("refuses a fourth quarantine within a minute from one session, and lets another go", () => {
     const roots = machine()
     for (const name of ["a", "b", "c"])
