@@ -312,6 +312,48 @@ test("a job on a deleted executable is restarted, or reported once when launchd 
   expect(log).not.toContain("ops-w")
 })
 
+// Loads up.py and runs one pass per health answer given, every notify.sh call recorded rather than made.
+const DOWN = `${LOAD}calls = []
+up.render_jobs = lambda: None
+up.ptable.table = lambda: {}
+up.once.running = lambda name, marker: None
+up.run = lambda argv, timeout=60: (calls.append(argv) if argv[0].endswith("notify.sh") else None, (0, ""))[1]
+for answer in json.loads(sys.argv[2]):
+    up.healthy = lambda job, answer=answer: tuple(answer)
+    up.up(True)
+print(json.dumps(calls))
+`
+
+// a launchd job turned on but never installed once logged "keeps it alive" every pass and told nobody, so a run of down passes is told to ops once, and again only after a healthy pass.
+test("a launchd job down 3 passes in a row is told to ops once, and again only after it comes back and goes down", () => {
+  const config = mkdtempSync(join(scratch, "down-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  writeFileSync(
+    join(ops, "jobs.json"),
+    JSON.stringify({ jobs: [{ heartbeat: "ops-l", launchd: "com.x.ops-l", name: "ops-l" }] }),
+  )
+  const down = [false, "no heartbeat"]
+  const answers = [down, down, down, down, [true, "ok"], down, down, down]
+  const child = Bun.spawnSync(["python3", "-I", "-c", DOWN, upPy, JSON.stringify(answers)], {
+    env: {
+      CLAUDE_CONFIG_DIR: config,
+      PLAYGROUND_DATA_DIR: join(config, "playground"),
+      HOME: scratch,
+      PATH: "/usr/bin:/bin",
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  const told = [
+    join(dirname(upPy), "notify.sh"),
+    "up",
+    "ops-l has been unhealthy (no heartbeat) for 3 passes in a row; launchd job com.x.ops-l is not bringing it back, so check it is installed and loaded (playground doctor)",
+  ]
+  expect(JSON.parse(child.stdout.toString())).toEqual([told, told])
+})
+
 // Loads up.py and starts one herdr job, recording every herdr call rather than making it.
 const STARTED = `${LOAD}calls = []
 up.herdr = lambda: ("/x/herdr", "")
@@ -451,6 +493,33 @@ test("a dead render with no ops folder shows the render's own error in up.log, n
   expect(readFileSync(join(dataOf(config), "ops", "up.log"), "utf8")).toContain(
     "the render died here",
   )
+})
+
+// a launchd job turned on reaches launchd only through the render's install into HOME's LaunchAgents, so each pass hands it that folder.
+test("a pass hands the render HOME's LaunchAgents folder to install into", () => {
+  const config = join(scratch, "config-install")
+  mkdirSync(dataOf(config), { recursive: true })
+  const render = join(scratch, "argv-render.ts")
+  const argv = join(scratch, "argv-render.json")
+  writeFileSync(
+    render,
+    `require("node:fs").writeFileSync(${JSON.stringify(argv)}, JSON.stringify(process.argv.slice(2)))\n`,
+  )
+  const pass = Bun.spawnSync(
+    ["python3", "-I", "-c", `${LOAD}up.JOBS_RENDER = sys.argv[2]\nup.render_jobs()`, upPy, render],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: dataOf(config),
+        HOME: scratch,
+        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      },
+      stderr: "pipe",
+    },
+  )
+  expect(pass.stderr.toString()).toBe("")
+  const args = JSON.parse(readFileSync(argv, "utf8")) as string[]
+  expect(args[args.indexOf("--install") + 1]).toBe(join(scratch, "Library", "LaunchAgents"))
 })
 
 test("a pass writes jobs.json into the data folder dataDir() resolves, playground over an old dispatcher beside it", () => {
