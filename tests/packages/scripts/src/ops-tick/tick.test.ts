@@ -224,8 +224,8 @@ describe("run-slot hold", () => {
       `2026-10-19T12:00:00Z ask ${who} ${pid} bun run test:file tests/scripts/long.test.ts\n`,
     )
   }
-  // The passes the rows read runs.log through, counted by Bun.file calls naming it
-  const logReads = async (run: () => Promise<void>): Promise<number> => {
+  // Counts the Bun.file calls that name run-slot.runs.log during run()
+  const runsLogReads = async (run: () => Promise<void>): Promise<number> => {
     const spy = spyOn(Bun, "file")
     try {
       await run()
@@ -265,6 +265,16 @@ describe("run-slot hold", () => {
     expect(sent).toEqual([])
   })
 
+  test("a due hold with no waiter at all reads no runs.log and sends nothing", async () => {
+    const ops = scratch()
+    const now = at(13, 10)
+    hold(ops, "run-slot", "g7wkr2-worker", process.pid, now.getTime() - 40 * 60_000, [])
+    const { ctx, sent } = fake(ops, now)
+    const reads = await runsLogReads(() => runSlotHold(ctx))
+    expect(sent).toEqual([])
+    expect(reads).toBe(0)
+  })
+
   test("a second pass on the same hold tells nothing more", async () => {
     const ops = scratch()
     const now = at(13, 10)
@@ -275,7 +285,7 @@ describe("run-slot hold", () => {
     await runSlotHold(first.ctx)
     expect(first.sent).toHaveLength(1)
     const second = fake(ops, at(13, 15))
-    const reads = await logReads(() => runSlotHold(second.ctx))
+    const reads = await runsLogReads(() => runSlotHold(second.ctx))
     expect(second.sent).toEqual([])
     expect(reads).toBe(0)
   })
@@ -287,7 +297,7 @@ describe("run-slot hold", () => {
       `1760000000-${process.pid}-y8wqk2-worker`,
     ])
     const { ctx, sent } = fake(ops, now)
-    const reads = await logReads(() => runSlotHold(ctx))
+    const reads = await runsLogReads(() => runSlotHold(ctx))
     expect(sent).toEqual([])
     expect(reads).toBe(0)
   })
@@ -300,7 +310,7 @@ describe("run-slot hold", () => {
       `1760000000-${process.pid}-y8wqk2-worker`,
     ])
     const { ctx, sent } = fake(ops, now)
-    const reads = await logReads(() => runSlotHold(ctx))
+    const reads = await runsLogReads(() => runSlotHold(ctx))
     expect(sent).toEqual([
       {
         text: `run-slot: g7wkr2-worker's run has held run-slot for 40 min while 1 waiter queues: bun run test:file tests/scripts/long.test.ts (pid ${process.pid}, since ${iso(since)})`,
