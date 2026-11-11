@@ -683,7 +683,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 ## no-public-leak
 
 - ALWAYS: Write each public repository's pull requests, issues, reviews and comments in plain words, naming no person, company or private record, since everything written there is public once the repository is and stays cached after.
-  `scripts/hooks/no-public-leak.ts`, run on Bash by [guards](#guards) and registered in both settings files on the GitHub MCP tools, refuses a write to a public repository (`factory.publicRepo`, one or a list, or while unset `TODAY_PUBLIC` in trace-count's `kinds.ts`, the factory's and Yard's)
+  `scripts/hooks/no-public-leak.ts`, run on Bash by [guards](#guards) and registered in both settings files on the GitHub MCP tools, refuses a write to a public repository (`factory.publicRepo`, one or a list, or while unset the main checkout's origin, as trace-count's `kinds.ts` reads it)
   whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or any email address or link into the archive repository (`factory.archiveRepo`).
   An extensions root whose policy.json it cannot read for those two refuses the write, as a list it cannot trust does.
   Its reason names the kind and the plain-words fix, never the text.
