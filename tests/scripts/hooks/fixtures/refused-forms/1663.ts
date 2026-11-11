@@ -72,6 +72,15 @@ export const groups: Group[] = [
         "a commit after a return the cd's || runs, which bash -c carries on past",
         `cd ${join(MAIN, ".claude", "worktrees", "a")} || return; git commit -m x`,
       ],
+      // round 2: a script's own sure cd, and a brace group's exit as a pipeline stage
+      [
+        "a commit the || after an eval's cd runs",
+        `eval 'cd ${join(MAIN, ".claude", "worktrees", "a")}' || git commit -m x`,
+      ],
+      [
+        "a commit after an exit in a brace group piped on from the cd's ||",
+        `cd ${join(MAIN, ".claude", "worktrees", "a")} || { exit; } | cat; git commit -m x`,
+      ],
       [
         "a commit after an exit in a pipeline the cd's || runs",
         `cd ${join(MAIN, ".claude", "worktrees", "a")} || exit | cat; git commit -m x`,
@@ -91,6 +100,16 @@ export const groups: Group[] = [
         "a commit after a physical cd into a link, then a climb",
         "cd -P into-main && cd .. && git commit -m x",
       ],
+      // round 2: any -P among the options lands physical, whatever else is there
+      [
+        "a commit after zsh's quiet physical cd that climbs out of a link",
+        "cd -qP into-main/.. && git commit -m x",
+      ],
+      [
+        "a commit after a quiet physical pushd that climbs out of a link",
+        "pushd -qP into-main/.. && git commit -m x",
+      ],
+      ["a commit after a cd whose -P comes before -L", "cd -PL into-main/.. && git commit -m x"],
     ],
   },
 ]

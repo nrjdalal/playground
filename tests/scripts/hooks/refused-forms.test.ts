@@ -878,9 +878,12 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1173 GNU mv to the shell's folder attached to its target option in a cluster after a cd to a variable | -ft",
       "#1173 GNU mv to the shell's folder by its long target option after a cd to a variable | --target-directory",
       "#1173 GNU mv to the shell's folder by its shortened long target option after a cd to a variable | --target",
-      // cd's -P, which takes no value: the folder after it is the cd's own operand
+      // cd's -P, alone or among its other options, which take no value: the folder after it is the cd's own operand
+      "#1663 a commit after a cd whose -P comes before -L | -PL",
       "#1663 a commit after a physical cd into a link, then a climb | -P",
       "#1663 a commit after a physical cd that climbs out of a link | -P",
+      "#1663 a commit after a quiet physical pushd that climbs out of a link | -qP",
+      "#1663 a commit after zsh's quiet physical cd that climbs out of a link | -qP",
       // git's second -C, read from where the first lands through a link, so a spelling of it alone from the row's folder names another folder
       "#1663 a commit by a -C read from a link into the main checkout | -C",
       "#1663 a commit by a -C read from a link named by its absolute path | -C",
