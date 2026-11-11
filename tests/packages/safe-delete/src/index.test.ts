@@ -378,6 +378,32 @@ describe("the tripwire", () => {
     })
   })
 
+  test("two processes refusing at the same instant alert once: the folder's recovery never removes a concurrent try's folder", async () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    const src = join(import.meta.dir, "../../../../packages/safe-delete/src/index.ts")
+    const driver = join(roots.root, "driver.ts")
+    writeFileSync(
+      driver,
+      `import { quarantine } from ${JSON.stringify(src)}
+const [home, main, trash, path] = process.argv.slice(2)
+const done = quarantine(path, { reason: "test", session: "j6rjgy-worker" }, { home, main, trash }, { now: new Date("2026-11-02T12:00:00Z") })
+console.log("kind" in done ? done.kind : "moved")`,
+    )
+    const paths = ["d", "e"].map((name) => file(join(roots.home, name)))
+    const kids = paths.map((path) =>
+      Bun.spawn(["bun", driver, roots.home, roots.main, roots.trash, path]),
+    )
+    const kinds = await Promise.all(
+      kids.map(async (kid) => (await new Response(kid.stdout).text()).trim()),
+    )
+    await Promise.all(kids.map((kid) => kid.exited))
+    expect([...kinds].sort()).toEqual(["refused", "tripwire"])
+  })
+
   test("refuses a fourth quarantine within a minute from one session, and lets another go", () => {
     const roots = machine()
     for (const name of ["a", "b", "c"])
