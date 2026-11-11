@@ -1181,7 +1181,7 @@ const repoFiles = async (keep: (path: string) => boolean): Promise<Record<string
   return files
 }
 
-// Text typed into a pane lands as a user turn and reads as the owner's, and nothing may speak for the owner, so only herdr.ts's writes type, for the owner's own clicks and the idle compact's `/compact` the owner approved (ADR 0020); sessions talk through SendMessage. A cmux command that types is held here while cmux can still be installed, and a script's key into a herdr pane further below, to run.py's Escape and `playground picker`.
+// Text typed into a pane lands as a user turn and reads as the owner's, and nothing may speak for the owner, so only herdr.ts's writes type, for the owner's own acts and the idle compact's `/compact` the owner approved (ADR 0020); sessions talk through SendMessage. A cmux command that types is held here while cmux can still be installed, and a script's key into a herdr pane further below, to run.py's Escape and `playground picker`.
 const PANE_TYPING = [
   /(?:^|[^\w-])[$"'{]*[\w./~-]*cmux\b[}"']?(?:\s+--?[\w-]+(?:=\S+)?)*\s+send(?:-key)?\s+(?!(?:or|and)\b)[^\s`]/i,
   /["']cmux["']\s*,\s*["']send(?:-key)?["']/i,
