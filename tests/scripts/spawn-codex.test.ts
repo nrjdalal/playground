@@ -11,8 +11,13 @@ const NAME = "dispatcher"
 const START = ["manager", NAME, "b.md", "--harness", "codex"]
 const THREAD = "0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b"
 
-// A case's own fakes ahead of spawn-fake's: codex, which logs its argv and answers each app-server request with an empty result, and sleep, the wait's clock, which ticks at once, logging each tick, and lands the SessionStart beat at its first tick unless FAKE_NO_BEAT says the hooks never loaded.
-const fakes = (home: string) => {
+// A case's own fakes ahead of spawn-fake's, and on a scratch data folder the thread's rollout, which Codex writes as the session starts, unless the case says it never did: codex, which logs its argv and answers each app-server request with an empty result, and sleep, the wait's clock, which ticks at once, logging each tick, and lands the SessionStart beat at its first tick unless FAKE_NO_BEAT says the hooks never loaded.
+const fakes = (home: string, rollout = true) => {
+  const sessions = join(home, "scratch-data", "codex", "sessions", "2026", "11", "11")
+  if (existsSync(join(home, "scratch-data")) && rollout) {
+    mkdirSync(sessions, { recursive: true })
+    writeFileSync(join(sessions, `rollout-2026-11-11T10-00-00-${THREAD}.jsonl`), "{}\n")
+  }
   const dir = join(home, "fakebin")
   mkdirSync(dir, { recursive: true })
   const write = (name: string, body: string) => {
@@ -39,7 +44,7 @@ printf '{"session_id":"${THREAD}","source":"startup"}\\n' > "$PLAYGROUND_DATA_DI
 }
 
 // Every case runs on a scratch data folder, the one place a Codex session starts before phase 3, unless it says LIVE_DATA.
-const run = (args: string[], env: Record<string, string> = {}, pin?: string) =>
+const run = (args: string[], env: Record<string, string> = {}, pin?: string, rollout = true) =>
   spawn(
     args,
     [],
@@ -50,7 +55,7 @@ const run = (args: string[], env: Record<string, string> = {}, pin?: string) =>
     },
     undefined,
     pin ? { backend: pin, name: NAME } : undefined,
-    fakes,
+    (home) => fakes(home, rollout),
   )
 
 const data = (r: Spawned, ...parts: string[]) => join(r.home, "scratch-data", ...parts)
@@ -78,6 +83,26 @@ describe("spawn.sh --harness codex starts the dispatcher in Codex, failing close
     expect(read(data(r, "resume", `${NAME}.sh`))).toBeNull()
     expect(readdirSync(data(r, "launch")).filter((f) => !f.endsWith(".herdr"))).toEqual([])
     expect(r.rosterLog ?? []).toEqual([])
+  })
+
+  test("a resume whose beat never lands is refused, its earlier pin and record left standing", async () => {
+    const r = await run(["resume", NAME, root, THREAD], { FAKE_NO_BEAT: "1" }, "codex openai")
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("SessionStart")
+    expect(r.err).toContain("its earlier pin and resume record stand")
+    expect(placing(r).some((c) => c[0] === "pane" && c[1] === "close")).toBe(true)
+    expect(read(data(r, "backends", NAME))).toBe("codex openai\n")
+    expect(r.rosterLog ?? []).toEqual([])
+  })
+
+  test("a pane herdr will not close is refused in its own words, never read as closed", async () => {
+    const r = await run(START, { FAKE_HERDR_CLOSE_FAIL: "1", FAKE_NO_BEAT: "1" })
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      "herdr would not close dispatcher's pane w5:p1, so the session may still run",
+    )
+    expect(r.err).not.toContain("is closed")
+    expect(read(data(r, "backends", NAME))).toBeNull()
   })
 
   test("a start whose beat lands runs with hooks trusted, named, pinned and recorded", async () => {
@@ -110,6 +135,16 @@ describe("spawn.sh --harness codex starts the dispatcher in Codex, failing close
       `${join(r.home, "fakebin", "codex")} resume --dangerously-bypass-hook-trust ${THREAD} "`,
     )
     expect(read(data(r, "backends", NAME))).toBe("codex openai\n")
+  })
+
+  test("a resume of a thread that never wrote its rollout starts afresh, under the thread its beat names", async () => {
+    const r = await run(["resume", NAME, root, THREAD], {}, "codex openai", false)
+    expect(r.err).toBe("")
+    expect(r.code).toBe(0)
+    expect(launchText(r)).toEndWith(
+      `${join(r.home, "fakebin", "codex")} --dangerously-bypass-hook-trust)`,
+    )
+    expect(read(data(r, "resume", `${NAME}.sh`))).toContain(` ${THREAD}\n`)
   })
 
   // No factory guard reaches a Codex session until phase 3 wires them into its hooks, so the live data folder takes no Codex start or resume.

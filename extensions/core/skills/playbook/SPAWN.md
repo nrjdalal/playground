@@ -76,10 +76,11 @@ Its first prompt names the session, its role and who it reports to, and has it l
 `--harness codex` starts the first dispatcher in Codex in place of Claude Code: `spawn.sh manager <dispatcher> <brief> --harness codex`, and its resume, alone; spawn.sh refuses it for any other session and beside `--backend`, `--account`, `--model` or `--effort`, since Codex runs on the one login and the model its `CODEX_HOME` holds.
 That `CODEX_HOME` is the data folder's `codex/`, whose `config.toml` (the login kept in its `auth.json`, no update check, the session's folder trusted), `hooks.json` and `app-server-daemon/settings.json` (no self-update) spawn.sh writes at each launch, and the launch runs the `codex` on spawn.sh's `PATH` with `--dangerously-bypass-hook-trust`,
 since Codex silently drops a hook with no recorded trust.
-It fails closed: the SessionStart hook writes a beat naming the session's thread, and a start or resume whose beat does not land within 60 seconds has its pane closed and is refused, with no pin, resume record or roster row, so a Codex session whose guards did not load is stopped within a minute of starting;
+It fails closed: the SessionStart hook writes a beat naming the session's thread, and a start or resume whose beat does not land within 60 seconds has its pane closed and is refused, with no new pin, resume record or roster row (a resume keeps its earlier pin and record, so a later resume tries again), so a Codex session whose guards did not load is stopped within a minute of starting;
+when herdr will not close that pane, the refusal names the pane, since the session may still run, for you to close it yourself;
 its brief rides the launch as Codex's first prompt, so it may work on that brief until then.
 The beat's thread is the session id its resume record keeps, and it takes the session's name through `codex app-server`'s `thread/name/set`.
-Until phase 3 of the harness layer wires the factory's guards into Codex's hooks, a Codex start or resume runs only on a scratch data folder (`PLAYGROUND_DATA_DIR` naming one), and spawn.sh refuses it on the live one, naming phase 3; phase 3 lifts that refusal in the change that wires the guards.
+Until phase 3 of the harness layer (the `plan-harness-layer` doc) wires the factory's guards into Codex's hooks, a Codex start or resume runs only on a scratch data folder (`PLAYGROUND_DATA_DIR` naming one), and spawn.sh refuses it on the live one, naming phase 3; phase 3 lifts that refusal in the change that wires the guards.
 
 ## Resume
 
@@ -138,7 +139,8 @@ The launch starts with `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, `ANT
 which carries 3x the plan's quota of glm-5.3 and keeps the 1M window the `[1m]` gives Claude Code; the small fast one `models.glm` bare), `ENABLE_TOOL_SEARCH=true`, since on a base URL that is not Anthropic's Claude Code would load every MCP tool's schema at start, past that window, and runs `--model 'glm-5.3-flash[1m]'` with `--settings ~/.playground/factory-settings-glm-400k.json`,
 which spawn.sh rebuilds from the factory's settings on every GLM launch with the telemetry turned off (`CLAUDE_CODE_ENABLE_TELEMETRY=0`, `OTEL_METRICS_EXPORTER=none`), since the user settings may export usage to an org's usage collector, which counts Claude usage alone; that file's env outranks the user settings' env, and it holds every factory hook.
 The session compacts in the factory's one 400k window (**context**).
-A start records its harness and backend in `~/.playground/backends/<name>` once herdr has the session, as `claude-code glm`, `claude-code claude` or `codex openai` (`--backend claude` names the default; `HARNESSES` in `packages/settings/src/harnesses.ts` lists each harness with its backends), and a resume runs that backend, reading a pin of the backend alone too,
+A start records its harness and backend in `~/.playground/backends/<name>` once herdr has the session, as `claude-code glm`, `claude-code claude` or `codex openai` (`--backend claude` names the default; `HARNESSES` in `packages/settings/src/harnesses.ts` lists each harness with its backends), and a resume runs that backend, reading the pin by its words whatever their spacing,
+and a pin of the backend alone too,
 as one written before the harness split holds: it refuses `--backend` or `--harness` while a pin stands, a resume with no pin and neither given, and a pin that reads none of those.
 So a running session moves to GLM only by a close and a fresh start under `--backend glm`.
 The 98% switch to GLM is retired by his decision on Inbox #i827: the account rotation moves the factory between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
@@ -166,7 +168,7 @@ A restore whose only misses wait exits 0, since ops-herdr runs it again each cyc
 It is safe to run again, one at a time:
 while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
 A readable record on another server gets no line, since that server's own restore reads it.
-A session that never took its first turn has no transcript, so its resume starts it afresh under its own id and name, with the prompt its start recorded in `resume/<name>.prompt`.
+A session that never took its first turn has no transcript, so its resume starts it afresh under its name, with the prompt its start recorded in `resume/<name>.prompt`: a Claude Code session under its own id, a Codex one under the new thread its beat names.
 Done when each line reads `restored`, `waiting`, `skipped <name>: live` or a roster row's down status, or you have acted on it (a gate that cannot read its input or reads a bad setting: fix it and run it again; a broken record or a missing backend pin: resume the session by hand).
 
 ## --check
