@@ -881,6 +881,9 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       // git's second -C, read from where the first lands through a link, so a spelling of it alone from the row's folder names another folder
       "#1663 a commit by a -C read from a link into the main checkout | -C",
       "#1663 a commit by a -C read from a link named by its absolute path | -C",
+      // cd's -P, which takes no value: the folder after it is the cd's own operand
+      "#1663 a commit after a physical cd into a link, then a climb | -P",
+      "#1663 a commit after a physical cd that climbs out of a link | -P",
       // turbo's own --cwd, which no path flag spells
       "#1663 turbo by its --cwd in a plain folder of the worktrees folder | --cwd",
       "#1663 turbo by its --cwd in the worktrees folder | --cwd",

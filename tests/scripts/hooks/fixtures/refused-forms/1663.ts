@@ -47,6 +47,46 @@ export const groups: Group[] = [
         "turbo by bunx --cwd that runs only when the cd before its || failed",
         `cd ${join(MAIN, ".claude", "worktrees", "a")} || bunx --cwd=api turbo run build`,
       ],
+      // round 1: what the || runs, reached through a subshell, a substitution or an eval, and an exit that ends only a subshell
+      [
+        "a commit in a subshell the cd's || runs",
+        `cd ${join(MAIN, ".claude", "worktrees", "a")} || (git commit -m x)`,
+      ],
+      [
+        "a commit in a substitution the cd's || runs",
+        `cd ${join(MAIN, ".claude", "worktrees", "a")} || echo $(git commit -m x)`,
+      ],
+      [
+        "a commit in a substitution of the exit the cd's || runs",
+        `cd ${join(MAIN, ".claude", "worktrees", "a")} || exit $(git commit -m x)`,
+      ],
+      [
+        "a commit in an eval the || after the cd's run runs",
+        `cd ${join(MAIN, ".claude", "worktrees", "a")} && true || eval 'git commit -m x'`,
+      ],
+      [
+        "a commit after an exit in a subshell the cd's || runs",
+        `cd ${join(MAIN, ".claude", "worktrees", "a")} || (exit); git commit -m x`,
+      ],
+      [
+        "a commit after an exit in a pipeline the cd's || runs",
+        `cd ${join(MAIN, ".claude", "worktrees", "a")} || exit | cat; git commit -m x`,
+      ],
+    ],
+  },
+  // round 1: a physical cd follows a link before a `..`, as git's -C does
+  {
+    folders: ["checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      [
+        "a commit after a physical cd that climbs out of a link",
+        "cd -P into-main/.. && git commit -m x",
+      ],
+      [
+        "a commit after a physical cd into a link, then a climb",
+        "cd -P into-main && cd .. && git commit -m x",
+      ],
     ],
   },
 ]
