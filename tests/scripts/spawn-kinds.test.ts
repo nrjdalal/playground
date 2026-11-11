@@ -284,14 +284,16 @@ describe("the backend pin carries a start onto its resume", () => {
     expect(r.err).toContain("the pin decides")
   })
 
-  test("a pin that reads neither glm nor claude refuses, like a missing one", async () => {
+  test("a pin that reads none of the pin shapes refuses, like a missing one", async () => {
     const r = await spawn(["resume", "worker-brave-otter", root], [], {}, undefined, {
       name: "worker-brave-otter",
       backend: "openai",
     })
     expect(r.code).not.toBe(0)
     expect(placing(r)).toEqual([])
-    expect(r.err).toContain("reads neither glm nor claude")
+    expect(r.err).toContain(
+      "reads none of claude-code claude, claude-code glm, codex openai, glm or claude",
+    )
   })
 
   test("a start writes its pin only once herdr has the session", async () => {

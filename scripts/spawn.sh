@@ -1362,7 +1362,7 @@ if [ "$MODE" = resume ]; then
       glm | "claude-code glm") BACKEND=glm ;;
       claude | "claude-code claude") ;;
       "codex openai") HARNESS=codex ;;
-      *) refuse "the backend pin for $NAME reads neither glm nor claude: it cannot know how $NAME ran. Fix or remove $SHOWN/backends/$NAME, then resume." ;;
+      *) refuse "the backend pin for $NAME reads none of claude-code claude, claude-code glm, codex openai, glm or claude: it cannot know how $NAME ran. Fix or remove $SHOWN/backends/$NAME, then resume." ;;
     esac
   elif [ -n "$BACKEND$HARNESS" ]; then
     PIN_GIVEN=1
@@ -2055,7 +2055,7 @@ if [ "$MODE" != resume ] || [ -n "$PIN_GIVEN" ]; then
   pin="claude-code ${BACKEND:-claude}"
   [ "$HARNESS" = codex ] && pin="codex openai"
   if ! { mkdir -p "$PINS" && printf '%s\n' "$pin" > "$PINS/$NAME"; }; then
-    echo "spawn.sh: $NAME started, but its backend pin write failed; its next resume refuses until the pin reads glm or claude" >&2
+    echo "spawn.sh: $NAME started, but its backend pin write failed; its next resume refuses until the pin reads $pin" >&2
   fi
 fi
 if ! { mkdir -p "$RUNTIMES" && printf '%s\n' "$RUNTIME" > "$RUNTIMES/$NAME"; }; then
