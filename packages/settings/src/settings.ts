@@ -208,3 +208,6 @@ export const settingsFor = (
     ),
   }
 }
+
+// A value as the page reads it.
+export const shownValue = (_key: string, value: unknown): unknown => value
