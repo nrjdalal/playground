@@ -2,16 +2,16 @@
 """login-flip.py: say when the factory should move to another Claude account, and to which (dispatcher, 14 Oct:
 the switch is the factory's, never an ask to the owner). It reads usage.json, which follows the stored login, and reads each other
 account in ACCOUNTS that has a long-lived token in the Keychain (service usage.keychainService) from one 1-token call's rate-limit
-headers, at most every 14 minutes. The current account is login-flip.json's `factory`, else the stored login. Ending accounts (ENDS) come first: the first usable one in ending_order() is the target whenever
+headers, at most every 14 minutes. The current account reads through the pool rule beat.factory_login carries: login-flip.json's `factory` while it is a pool
+account whose token is still in the Keychain, else the pool account the split gives the best share, else the stored login. Ending accounts (ENDS) come first: the first usable one in ending_order() is the target whenever
 the factory is on another account; with none usable, once the current login reaches its line, the renewing account with MIN_ROOM
-whose week resets soonest. The current account reads through the pool rule: login-flip.json's `factory` while it is a pool
-account whose token is still in the Keychain, else the pool account the split gives the best share, else the stored login. It names the target once ("switch due to ..."), or says once that no account has room. Prints nothing otherwise.
+whose week resets soonest. It names the target once ("switch due to ..."), or says once that no account has room. Prints nothing otherwise.
 It also writes the split, each account's share of new sessions (week left per hour to its deadline, a fifth of that for an own account while that deadline is over a day away, none for one parked until a later time), which spawn.sh's no-account default follows. --dry-run reads no token and changes nothing. State in login-flip.json in the state folder, the data folder's ops/usage."""
 import datetime, json, os, shutil, subprocess, sys, time
 
 HERE = os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state
 sys.path.insert(0, os.path.dirname(HERE))
-from beat import OPS, checkout, setting  # noqa: E402
+from beat import OPS, checkout, factory_login, setting  # noqa: E402
 
 # the stored login's own reading: usage.json names the account the factory spends (its `factory` key below), which may be another
 STORED = os.path.join(HERE, "stored-login.json")
@@ -71,22 +71,6 @@ def probe(email):
     return got
 
 
-def has_token(a):
-    """Whether the account's long-lived token is still in the Keychain: the read probe() makes, judged by the exit alone."""
-    return not subprocess.run(["security", "find-generic-password", "-s", SERVICE, "-a", a, "-w"], capture_output=True, text=True, timeout=15).returncode
-
-
-# the factory login resolves only to a pool account that still holds its token, else to the pool account the split gives the best share
-def factory_login(state):
-    factory = state.get("factory")
-    if not factory:
-        return None
-    if factory in ACCOUNTS and has_token(factory):
-        return factory
-    shares = (state.get("split") or {}).get("shares") or {}
-    return max((a for a in TARGETS if has_token(a) and shares.get(a, 0) > 0), key=shares.get, default=None)
-
-
 def dashboard_ask(*args, stdin=None):
     if DRY:
         print("would run: bun run ask", *args, stdin or "")
@@ -113,7 +97,7 @@ except (OSError, ValueError):
     state = {}
 now = time.time()
 seen = state.setdefault("seen", {})
-current = factory_login(state) or acct  # the account the factory's sessions run on (spawn.sh --account), else the stored login
+current = factory_login(state.get("factory"), ACCOUNTS, (state.get("split") or {}).get("shares") or {}, SERVICE) or acct  # the account the factory's sessions run on (spawn.sh --account), the pool rule beat.py carries
 # a usage.json run.py took from a probe already came from seen, and stamping it again would stop run.py's next probe
 if acct in ACCOUNTS and u.get("source") != "token/ratelimit-headers":
     last, seen[acct] = seen.get(acct) or {}, {"at": now}

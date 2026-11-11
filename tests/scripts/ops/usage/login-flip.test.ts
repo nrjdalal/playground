@@ -19,10 +19,11 @@ const script = join(
   "usage",
   "login-flip.py",
 )
+const beat = join(import.meta.dir, "..", "..", "..", "..", "scripts", "ops", "beat.py")
 const scratch = mkdtempSync(join(tmpdir(), "ops-usage-login-flip-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-// login-flip.py run whole under a scratch HOME at the clock given, with subprocess stubbed so no Keychain read or bun run ask runs, and beat's setting() answering ACCOUNTS as usage.accounts. Accounts go by short names (ND, LW, ...) over made-up addresses: the harness writes the stored login and every reading into the state it finds, runs it, and names the switch's target (none when no account has room), the account it said the factory is now on, the accounts it kept in `accounts`, and the pool and split it wrote. spec.tokens names the short accounts whose Keychain read succeeds, every one of them unless it says otherwise, and urlopen refuses, so a probe that passes the Keychain gate still leaves the Mac unread
+// login-flip.py run whole under a scratch HOME at the clock given, with subprocess stubbed so no Keychain read or bun run ask runs, and beat's setting() answering ACCOUNTS as usage.accounts, the rule's factory_login and has_token the real ones beat.py carries. Accounts go by short names (ND, LW, ...) over made-up addresses: the harness writes the stored login and every reading into the state it finds, runs it, and names the switch's target (none when no account has room), the account it said the factory is now on, the accounts it kept in `accounts`, and the pool and split it wrote. spec.tokens names the short accounts whose Keychain read succeeds, every one of them unless it says otherwise, and urlopen refuses, so a probe that passes the Keychain gate still leaves the Mac unread
 const harness = `
 import contextlib, io, json, os, re, sys, time, types, urllib.request
 spec = json.loads(sys.argv[2])
@@ -30,11 +31,14 @@ time.time = lambda: spec["now"]
 email = {k: f"{k.lower()}@example.test" for k in ("OWN", "ND", "LW", "PRIDE", "OWN2")}
 name = {v: k for k, v in email.items()}
 values = {"models.probe": "a-made-up-model", "usage.keychainService": "made-up-service", "usage.accounts": [dict(row, email=email.get(row["email"], row["email"])) for row in spec["accounts"]]}
-sys.modules["beat"] = types.SimpleNamespace(OPS=os.path.expanduser("~/.playground/ops"), checkout=lambda: "/checkout", setting=lambda key: values[key])
+beat = {"__name__": "beat", "__file__": sys.argv[3]}
+exec(open(sys.argv[3]).read(), beat)
 tokens = set(email[k] for k in (spec.get("tokens") or list(email)))
 def keychain(cmd, *a, **k):
     return types.SimpleNamespace(returncode=0 if "-a" in cmd and cmd[cmd.index("-a") + 1] in tokens else 1, stdout="", stderr="")
 sys.modules["subprocess"] = types.SimpleNamespace(run=keychain)
+beat["subprocess"] = sys.modules["subprocess"]
+sys.modules["beat"] = types.SimpleNamespace(OPS=os.path.expanduser("~/.playground/ops"), checkout=lambda: "/checkout", setting=lambda key: values[key], factory_login=beat["factory_login"], has_token=beat["has_token"])
 class Refused(Exception):
     headers = None
 def refused(*a, **k):
@@ -146,7 +150,7 @@ const flip = (
     probeRead,
     seen,
   })
-  const child = Bun.spawnSync(["python3", "-I", "-c", harness, script, spec], { env })
+  const child = Bun.spawnSync(["python3", "-I", "-c", harness, script, spec, beat], { env })
   expect(child.stderr.toString()).toBe("")
   return JSON.parse(child.stdout.toString().trim())
 }
@@ -219,7 +223,7 @@ test("a factory that has left the pool falls back to the pool account with the b
 })
 
 test("a pool factory whose token is gone from the Keychain falls back to the best tokened share", () => {
-  // pride@ holds a reading but no Keychain item: the login resolves to own@ (its 0.3 share over nd941z@'s 0.2), which the due state already names, so the run says the factory is now on own@
+  // pride@ holds a reading but no Keychain item: the login resolves to own@ (its 0.3 share over nd941z@'s 0.2), which the due state already names, so the run says the factory is now on own@. run.test.ts feeds this same fixture to run.py's resolved_factory and expects the same answer
   const seen = {
     LW: { ...spent.LW },
     ND: { ...spent.ND },
@@ -523,7 +527,8 @@ test("a reading with a week and no 5-hour window is an account with no 5-hour li
 const probeHarness = `
 import json, os, sys, types
 spec = json.loads(sys.argv[2])
-sys.modules["beat"] = types.SimpleNamespace(OPS=os.path.expanduser("~/.playground/ops"), checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+beat = {"__name__": "beat", "__file__": sys.argv[3]}
+exec(open(sys.argv[3]).read(), beat)
 class Refused(Exception):
     def __init__(self, headers):
         self.headers = headers
@@ -533,6 +538,8 @@ import urllib
 urllib.request = types.SimpleNamespace(Request=lambda *a, **k: None, urlopen=urlopen)
 sys.modules["urllib.request"] = urllib.request
 sys.modules["subprocess"] = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(returncode=0, stdout="made-up-token\\n", stderr=""))
+beat["subprocess"] = sys.modules["subprocess"]
+sys.modules["beat"] = types.SimpleNamespace(OPS=os.path.expanduser("~/.playground/ops"), checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key], factory_login=beat["factory_login"], has_token=beat["has_token"])
 src = open(sys.argv[1]).read()
 ns = {"__name__": "login_flip_under_test"}
 exec(compile(src[: src.index("\\ndef dashboard_ask")], sys.argv[1], "exec"), ns)
@@ -572,6 +579,7 @@ test.each([
         probeHarness,
         script,
         JSON.stringify({ email: "spare@example.test", headers }),
+        beat,
       ],
       { env },
     )

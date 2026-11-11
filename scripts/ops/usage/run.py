@@ -6,8 +6,8 @@ The stored login (Claude Code's keychain item "Claude Code-credentials") is read
 (api.anthropic.com/api/oauth/usage) into usage/stored-login.json, which login-flip.py reads, and into usage-<local part>.json beside
 usage.json, the file the dashboard's Week tooltip reads. It never refreshes that token (a refresh
 rotates the refresh token Claude Code holds); an expired one waits for Claude Code to refresh it.
-login-flip.json's `factory` login reads through the pool rule: itself while the pool still lists it and its token still reads (a
-fresh reading, then), else the pool account the split gives the best share. While that login is an account other than the stored login (the
+login-flip.json's `factory` login reads through the pool rule beat.factory_login carries: itself while the pool still lists it and its
+token still reads (has_token's Keychain check), else the pool account the split gives the best share. While that login is an account other than the stored login (the
 factory's sessions run on its token, spawn.sh --account), usage.json holds that account's limits instead: login-flip's own reading of it, from one 1-token call's
 rate-limit headers (a setup-token's inference scope cannot read /usage), taken here when login-flip's is 14 minutes old or more and its
 limitedUntil has passed, and shared through login-flip.json, so the two never probe the same account twice in that time. usage.json then adds `readAt` (when the
@@ -39,7 +39,7 @@ API = os.environ.get("PLAYGROUND_USAGE_API") or "https://api.anthropic.com/api/o
 PROBE_URL = os.environ.get("PLAYGROUND_PROBE_URL") or "https://api.anthropic.com/v1/messages"  # the new-user gate points it at a closed loopback port, so its made-up token never leaves the Mac
 STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 sys.path.insert(0, OPS)
-from beat import beat, checkout, setting  # noqa: E402
+from beat import beat, checkout, factory_login, setting  # noqa: E402
 
 PROBE_MODEL, SERVICE = setting("models.probe"), setting("usage.keychainService")
 
@@ -190,24 +190,15 @@ def rotation(flip):
     return {"pool": [{"account": e["account"], "ending": e["ending"], "endsAt": e.get("endsAt"), "renewsOn": e.get("renewsOn")} for e in pool]} if isinstance(pool, list) and all(map(entry, pool)) else None
 
 
-def factory_login(flip, now):
-    """login-flip.json's `factory` through the pool rule: itself while the pool still lists it and its reading is fresh (the token, then, still in the Keychain), else the pool account the split gives the best share; None when the file names no factory, and the factory itself when the file names no pool to read it against."""
-    factory = flip.get("factory")
+def resolved_factory(flip):
+    """The factory login the pool rule (beat.factory_login) resolves for this file: the file's pool and split against its `factory`, the token read the rule's validity test."""
     pool = rotation(flip)
-    if not factory:
-        return None
-    if pool is None:
-        return factory
-    names = [e["account"] for e in pool["pool"]]
-    shares = (flip.get("split") or {}).get("shares") or {}
-    if factory not in names or not fresh(seen(flip, factory, now), now):
-        factory = max((a for a in names if a != factory and shares.get(a, 0) > 0), key=shares.get, default=None)
-    return factory
+    return factory_login(flip.get("factory"), [e["account"] for e in pool["pool"]] if pool else None, (flip.get("split") or {}).get("shares") or {}, SERVICE)
 
 
 def factory_reading(stored, flip, accounts):
-    """usage.json's data for the factory login factory_login resolves, when that is not the stored login and usage.accounts still lists it; else None."""
-    factory = factory_login(flip, time.time())
+    """usage.json's data for the factory login resolved_factory resolves, when that is not the stored login and usage.accounts still lists it; else None."""
+    factory = resolved_factory(flip)
     if not factory or (stored and factory == stored["account"]) or (accounts is not None and factory not in accounts):
         return None
     now = time.time()
@@ -282,7 +273,7 @@ while True:
     except Exception as e:
         problems.append(f"factory account: {type(e).__name__}: {e}")
     # the factory login, resolved through the pool rule, is the account the sessions run on, so the added ones are read only while it resolves to none
-    if not data and not factory_login(flip, time.time()):
+    if not data and not resolved_factory(flip):
         try:
             data = added_reading(stored, flip, FACTORY or [])
         except Exception as e:
