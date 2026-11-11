@@ -1864,7 +1864,7 @@ load5_held() {
 }
 # whether single, 3-off and 4-off stand lifted: load5 has read under load_line's cap for LIFT_HOLD s, from the first of readings UNDER holds no more than LIFT_GAP s apart (issue 1737, 11 Nov: single and a cap of 14 stood by timer at load5 5.6, and eight runs queued behind one lane); a reading at or over the cap removes UNDER, so the throttle holds again until its end time, and a reading under after a longer gap, which may have hidden one over, starts the hold again
 lifted() {
-  local l5= since= last= now
+  local l5= since= last= now s0
   read -r _ _ l5 _ <<< "$(loadavg)"; l5=${l5%%.*}
   case "$l5" in '' | *[!0-9]*) return 1 ;; esac
   if [ "$l5" -ge "$(load_line)" ]; then
@@ -1872,9 +1872,9 @@ lifted() {
     return 1
   fi
   read -r since last 2>/dev/null < "$UNDER"
-  now=$(date +%s)
+  now=$(date +%s) s0="$since $last"
   case "$since $last" in *[!0-9\ ]* | ' ' | *' ') since=$now ;; *) [ $((now - last)) -le "$LIFT_GAP" ] || since=$now ;; esac
-  echo "$since $now" > "$UNDER"
+  [ "$since $now" = "$s0" ] || under_write "$since $now"
   [ $((now - since)) -ge "$LIFT_HOLD" ]
 }
 # a waiting head's idle poll, with builtins alone, while its load reads as its look read it: false once the hold in UNDER has ended since that look, so the head looks again and the throttle lifts on time, a hold restarted in place included; else it writes the poll's second as UNDER's last again, at most every 30 s, so the hold counts across polls with no look of their own (a reading at or over the cap moves the load's whole numbers, so the head looks instead)
@@ -1885,9 +1885,11 @@ under_seen() {
   case "$first $last" in *[!0-9\ ]* | ' '* | *' ') return 0 ;; esac
   now=$((LIFT_AT + SECONDS - LIFT_S))
   [ "$LIFT_AT" -lt $((first + LIFT_HOLD)) ] && [ "$now" -ge $((first + LIFT_HOLD)) ] && return 1
-  [ $((now - last)) -lt 30 ] || echo "$first $now" > "$UNDER"
+  [ $((now - last)) -lt 30 ] || under_write "$first $now"
   return 0
 }
+# UNDER's line written whole: to a dotted file of this run's, which cheap_sig's run-slot* glob never reads, then moved over it, so another run's read never meets the empty file a truncating write leaves for a moment
+under_write() { echo "$1" > "$OPS/.run-slot.under.$$" && mv -f "$OPS/.run-slot.under.$$" "$UNDER"; }
 # whether the load rules open slot $1 to this run now
 slot_open() {
   local s=$1
