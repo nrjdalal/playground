@@ -26,6 +26,7 @@ import {
   loadCapOf,
   nextDue,
   resultOf,
+  runSlotHold,
   runner,
   switchAccount,
   trashPurge,
@@ -196,6 +197,66 @@ describe("roll gate", () => {
     await beat("roll-gate").run(ctx)
     expect(await Bun.file(join(ops, "dashboard", "roll-now")).exists()).toBe(false)
     expect(sent).toEqual([])
+  })
+})
+
+// #1779: a run-slot hold past 30 minutes while a waiter queues is told to ops once per hold.
+describe("run-slot hold", () => {
+  const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z")
+  const hold = (
+    ops: string,
+    slot: string,
+    who: string,
+    pid: number,
+    sinceMs: number,
+    waiters: string[],
+  ) => {
+    writeFileSync(join(ops, `${slot}.holder`), `${who} ${pid} ${iso(sinceMs)} 4 3\n`)
+    mkdirSync(join(ops, "run-slot.waiters"), { recursive: true })
+    for (const ticket of waiters) writeFileSync(join(ops, "run-slot.waiters", ticket), "")
+    appendFileSync(
+      join(ops, "run-slot.runs.log"),
+      `2026-10-19T12:00:00Z ask ${who} ${pid} bun run test:file tests/scripts/long.test.ts\n`,
+    )
+  }
+
+  test("a hold past 30 minutes with a waiter queued tells ops once, naming the holder, its command and its run time", async () => {
+    const ops = scratch()
+    const now = at(13, 10)
+    const since = now.getTime() - 40 * 60_000
+    hold(ops, "run-slot", "g7wkr2-worker", 4242, since, ["1760000000-4311-y8wqk2-worker"])
+    hold(ops, "run-slot-2", "k3v9q2-worker", 4311, now.getTime() - 10 * 60_000, [])
+    const { ctx, sent } = fake(ops, now)
+    await runSlotHold(ctx)
+    expect(sent).toEqual([
+      {
+        text: `run-slot: g7wkr2-worker's run has held run-slot for 40 min while 1 waiter queues: bun run test:file tests/scripts/long.test.ts (pid 4242, since ${iso(since)})`,
+        to: "ops",
+      },
+    ])
+  })
+
+  test("a hold past 30 minutes with no waiter queued tells ops nothing", async () => {
+    const ops = scratch()
+    const now = at(13, 10)
+    hold(ops, "run-slot", "g7wkr2-worker", 4242, now.getTime() - 40 * 60_000, [])
+    const { ctx, sent } = fake(ops, now)
+    await runSlotHold(ctx)
+    expect(sent).toEqual([])
+  })
+
+  test("a second pass on the same hold tells nothing more", async () => {
+    const ops = scratch()
+    const now = at(13, 10)
+    hold(ops, "run-slot", "g7wkr2-worker", 4242, now.getTime() - 40 * 60_000, [
+      "1760000000-4311-y8wqk2-worker",
+    ])
+    const first = fake(ops, now)
+    await runSlotHold(first.ctx)
+    expect(first.sent).toHaveLength(1)
+    const second = fake(ops, at(13, 15))
+    await runSlotHold(second.ctx)
+    expect(second.sent).toEqual([])
   })
 })
 

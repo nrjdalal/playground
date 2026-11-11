@@ -223,6 +223,9 @@ const priorityLapse = async (ctx: Context) => {
   for (const line of await lapse(join(ctx.ops, ".."), ctx.now)) await ctx.send("ops", line)
 }
 
+// The rows for the run-slot hold check land first; the check replaces this stub.
+export const runSlotHold = async (_ctx: Context) => {}
+
 // One kept focus card resolved, true, once no ask posted in its window is open; false while one is
 const settleFocusCard = async (ctx: Context, card: FocusCardKept): Promise<boolean> => {
   const open = await ctx.run([
