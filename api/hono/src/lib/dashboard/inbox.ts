@@ -1074,9 +1074,9 @@ export function getPickLine(item: InboxItem): string | null {
 export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvided): AnswerPayload {
   if (item.kind === "update") throw new Error("An update takes no answer")
   const tag = itemTag(item.ref)
-  const ack = `bun run ask ack ${tag} --link <https url>`
+  const ack = `playground ask ack ${tag} --link <https url>`
   const ackOrWhy = `${ack}, or --no-link "<why>" when it leaves no page`
-  const read = `bun run ask get ${tag} --ack`
+  const read = `playground ask get ${tag} --ack`
   const head = {
     at: answer.at,
     id: item.id,
@@ -1116,7 +1116,7 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
           ...head,
           ...comment,
           ...ran,
-          close: `bun run ask ack ${tag} --no-link "<why>"`,
+          close: `playground ask ack ${tag} --no-link "<why>"`,
           go: true,
           next: answer.opened?.exitCode === 0 ? "carry-out" : "nothing",
           option: optionOf(item, answer),
@@ -1195,10 +1195,10 @@ export function closedPayload(
     return { ...head, next: "nothing" }
   }
   const close = isGo(answer.choice)
-    ? `bun run ask ack ${tag} --no-link "<why>"`
+    ? `playground ask ack ${tag} --no-link "<why>"`
     : answer.choice === "replied"
-      ? `bun run ask ack ${tag}`
-      : `bun run ask get ${tag} --ack`
+      ? `playground ask ack ${tag}`
+      : `playground ask get ${tag} --ack`
   return { ...head, close, next: "close" }
 }
 

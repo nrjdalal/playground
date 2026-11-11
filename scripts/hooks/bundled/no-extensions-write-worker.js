@@ -7700,7 +7700,7 @@ var GUARD_KEYS = new Set([
   "usage.keychainService"
 ]);
 var JOB_PREFIX = "jobs.";
-var BY_APPROVE = "a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it";
+var BY_APPROVE = "a key only the owner sets: post a guard decision with playground ask new (.agents/dashboard/asks.md), whose Approve writes it";
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
 var SWITCHES = {
@@ -8222,7 +8222,7 @@ function cliWrite(words) {
     return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : job ? `playground settings ${verb} of ${key}, ${BY_APPROVE}` : `playground settings ${verb} of ${key}, a key a guard reads`;
   }
   if (verb === "accept")
-    return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set";
+    return "playground ext accept, the owner's own call: post it as an accept decision with playground ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set";
   if (verb === "put")
     return unread || positional[1] === "list" ? "playground ext put of a list, or with a word it cannot read, which may render into a guard's list" : undefined;
   if (EXT_WRITES.has(verb) && !(dry && EXT_DRY.has(verb)))
