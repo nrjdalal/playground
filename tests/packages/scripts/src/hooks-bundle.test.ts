@@ -428,12 +428,12 @@ describe("--check reads a tree git holds, never the working files", () => {
     expect(merged.stderr).toContain("git merge-tree HEAD no-such-ref")
   })
 
-  // canary adds a source the head's checkout lacks, reached by a tsconfig alias as packages/settings reaches its own, or by a relative path: the merged tree cannot be built from this checkout, so the check refuses, naming the source, Bun's own error and the merge that lets it build, rather than pass a bundle it never read
+  // canary adds a source the head's checkout lacks, reached by a tsconfig alias as packages/settings reaches its own, or by a relative path: the merged build reads it from the merged tree itself, so the check reports the stale bundle the merge makes
   test.each([
     ["a tsconfig alias", "@/more"],
     ["a relative path", "./more"],
   ])(
-    "--merged refuses a head whose merged tree holds a source canary adds, reached by %s, naming it, the build's error and the merge",
+    "--merged reads a merged source the head's checkout lacks, reached by %s, and reports the stale bundle",
     (_, specifier) => {
       const { root, run, side, write } = checkout()
       side("canary", () => {
@@ -447,12 +447,30 @@ describe("--check reads a tree git holds, never the working files", () => {
       expect(() => readFileSync(join(root, HOOKS, "more.ts"))).toThrow()
       const merged = run("--check", "--merged", "canary")
       expect(merged.code).toBe(1)
-      expect(merged.stderr).toContain("this checkout lacks")
-      expect(merged.stderr).toContain(join(HOOKS, "more.ts"))
-      expect(merged.stderr).toContain(`Could not resolve: "${specifier}"`)
-      expect(merged.stderr).toContain("merge canary in first")
+      expect(merged.stderr).toContain(`stale in ${BUNDLED}: a-guard.js`)
+      expect(merged.stderr).toContain("merged with canary")
     },
   )
+
+  // canary adds a path mapping and an import that needs it, and the head's tsconfig predates it: the merged build resolves with the merged tree's own tsconfigs, so the check passes where the on-disk mapping could not resolve the import
+  test("--merged resolves a mapping the merged tsconfig adds, which the head's on-disk one lacks", () => {
+    const { git, root, run, side, write } = checkout()
+    side("canary", () => {
+      writeFileSync(
+        join(root, "tsconfig.json"),
+        `${JSON.stringify({
+          compilerOptions: { paths: { "@/*": ["./scripts/hooks/*"], "@cfg/*": ["./pkgs/cfg/*"] } },
+        })}\n`,
+      )
+      mkdirSync(join(root, "pkgs", "cfg"), { recursive: true })
+      writeFileSync(join(root, "pkgs", "cfg", "kinds.ts"), 'export const kind = "cfg"\n')
+      write("lib.ts", 'import { kind } from "@cfg/kinds"\n\nexport const lib = `two ${kind}`\n')
+    })
+    git("checkout", "-q", "main")
+    const merged = run("--check", "--merged", "canary")
+    expect(merged.code).toBe(0)
+    expect(merged.stderr).toBe("")
+  })
 
   test("--merged names a conflict outside the bundles and exits 0, since pr:merge's gate reports it", () => {
     const { git, run, write } = checkout()
