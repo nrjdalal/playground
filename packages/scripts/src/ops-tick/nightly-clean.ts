@@ -108,12 +108,13 @@ export const rosterNames = (roster: unknown): { branches: Set<string>; texts: st
   return { branches, texts }
 }
 
-// The roster's names for one step, whole or the rows a filter keeps, or null when the file cannot be read.
-const readRoster = async (data: string, keep?: (rows: unknown[]) => unknown[]) =>
+// The roster's names for one step, whole or with the rows a predicate keeps, or null when the file cannot be read.
+const readRoster = async (data: string, keep?: (row: { status?: unknown }) => boolean) =>
   Bun.file(join(data, "roster.json"))
     .json()
     .then(
-      (r: { agents?: unknown[] }) => rosterNames(keep ? keep(r.agents ?? []) : r),
+      (r: { agents?: { status?: unknown }[] }) =>
+        rosterNames(keep ? { ...r, agents: (r.agents ?? []).filter(keep) } : r),
       () => null,
     )
 
@@ -460,9 +461,7 @@ export const nightlyClean =
       const entries = await readdir(dir, { withFileTypes: true }).catch(() => null)
       if (!entries) return "none: the data folder holds no folder of theirs"
       // a row whose status is ended holds no folder
-      const roster = await readRoster(data, (rows) =>
-        rows.filter((row) => (row as { status?: unknown })?.status !== "ended"),
-      )
+      const roster = await readRoster(data, (row) => row?.status !== "ended")
       if (roster === null) return "the roster unreadable, none removed"
       const idOf = (name: string) => name.split("-")[0]!
       const live = new Set((await deps.live()).map(idOf))
