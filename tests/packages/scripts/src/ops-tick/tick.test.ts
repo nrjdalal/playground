@@ -275,8 +275,9 @@ describe("run-slot hold", () => {
     await runSlotHold(first.ctx)
     expect(first.sent).toHaveLength(1)
     const second = fake(ops, at(13, 15))
-    await runSlotHold(second.ctx)
+    const reads = await logReads(() => runSlotHold(second.ctx))
     expect(second.sent).toEqual([])
+    expect(reads).toBe(0)
   })
 
   test("a pass with no hold due reads no runs.log, and sends nothing", async () => {
