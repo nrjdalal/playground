@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 import {
   bytesOf,
@@ -1043,5 +1043,180 @@ describe("one night's run against a fixture data folder", () => {
     const { ctx, deps, inputs } = night(leftovers(), undefined, 0.01)
     await nightlyClean(deps)(ctx)
     expect(inputs).toEqual([])
+  })
+})
+
+// #1778: the stale worktrees of every other repo the factory works in, each a real git checkout under a fake code root and org folder, PRs, lsof and the roster faked
+describe("other repos' worktrees", () => {
+  const git = (cwd: string, ...args: string[]) => {
+    const proc = Bun.spawnSync(
+      ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", cwd, ...args],
+      { stderr: "pipe", stdout: "pipe" },
+    )
+    if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${proc.stderr.toString()}`)
+    return proc.stdout.toString()
+  }
+  // A checkout at <dir> with a bare origin beside it, one pushed commit on main, and a .gitignore for build output and *.txt
+  const repoAt = (dir: string) => {
+    mkdirSync(dir, { recursive: true })
+    git(dirname(dir), "init", "-q", "--bare", `${basename(dir)}-origin.git`)
+    git(dir, "init", "-q", "-b", "main")
+    writeFileSync(join(dir, ".gitignore"), "node_modules/\n.env*\n*.txt\n")
+    writeFileSync(join(dir, "a.ts"), "a\n")
+    git(dir, "add", ".")
+    git(dir, "commit", "-qm", "one")
+    git(dir, "remote", "add", "origin", join(dirname(dir), `${basename(dir)}-origin.git`))
+    git(dir, "push", "-q", "origin", "main")
+    return dir
+  }
+  // A worktree of repo at .claude/worktrees/<name> on branch <name>, with a commit of its own that is pushed or not
+  const worktreeOf = (repo: string, name: string, pushed: boolean) => {
+    const path = join(repo, ".claude", "worktrees", name)
+    git(repo, "worktree", "add", "-q", path, "-b", name)
+    writeFileSync(join(path, `${name}.ts`), "b\n")
+    git(path, "add", ".")
+    git(path, "commit", "-qm", name)
+    if (pushed) git(path, "push", "-q", "origin", name)
+    return path
+  }
+
+  const night = () => {
+    const root = scratch()
+    const data = join(root, "data")
+    const ops = join(data, "ops")
+    mkdirSync(join(ops, "log"), { recursive: true })
+    const code = join(root, "code")
+    const orgs = join(root, "home", "acme")
+    const main = join(code, "playground")
+    mkdirSync(join(main, ".git"), { recursive: true })
+    mkdirSync(join(main, ".claude", "worktrees", "own"), { recursive: true })
+    const app = repoAt(join(code, "app"))
+    const site = repoAt(join(orgs, "site"))
+    const lost = repoAt(join(root, "elsewhere", "lost"))
+    const w = {
+      done: worktreeOf(app, "done", true),
+      dirty: worktreeOf(app, "dirty", true),
+      held: worktreeOf(app, "held", true),
+      ignored: worktreeOf(app, "ignored", true),
+      lost: worktreeOf(lost, "lost", true),
+      open: worktreeOf(app, "open", true),
+      pushed: worktreeOf(site, "pushed", true),
+      rostered: worktreeOf(app, "rostered", true),
+      unpushed: worktreeOf(site, "unpushed", false),
+    }
+    mkdirSync(join(w.done, "node_modules", "x"), { recursive: true })
+    writeFileSync(join(w.done, ".env.local"), "A=1\n")
+    writeFileSync(join(w.dirty, "a.ts"), "changed\n")
+    writeFileSync(join(w.ignored, "notes.txt"), "mine\n")
+    writeFileSync(
+      join(data, "roster.json"),
+      JSON.stringify({ agents: [{ name: "abc123-worker", worktree: w.rostered }] }),
+    )
+    const fake = fakeRun({
+      "docker ps": "",
+      "docker system df": JSON.stringify({ Volumes: [] }),
+      lsof: `p1\nfcwd\nn${root}\np2\nfcwd\nn${join(w.held, "src")}\n`,
+      "worktree list": `worktree ${main}\nHEAD a\nbranch refs/heads/main`,
+    })
+    // git runs for real in every scratch checkout but Playground's own, whose reads the fakes answer as the other rows do
+    const runs: string[][] = []
+    const run: Context["run"] = async (argv, timeoutMs, stdin) => {
+      runs.push(argv)
+      if (argv[0] !== "git" || argv[1] !== "-C" || !argv[2]!.startsWith(root) || argv[2] === main)
+        return fake.run(argv, timeoutMs, stdin)
+      const proc = Bun.spawnSync(argv, { stderr: "pipe", stdout: "pipe" })
+      return { code: proc.exitCode, out: proc.stdout.toString() + proc.stderr.toString() }
+    }
+    const sent: { text: string; to: string }[] = []
+    const ctx: Context = {
+      now: new Date("2026-11-11T03:00:00Z"),
+      ops,
+      repo: main,
+      run,
+      send: async (to, text) => {
+        sent.push({ text, to })
+        return true
+      },
+    }
+    const cleanup: CleanupDeps = {
+      containers: async () => [],
+      devStop: async () => ({ ok: true, out: "" }),
+      finished: async () => false,
+      git: async () => "",
+      held: async () => null,
+      live,
+      liveBranch: "live/dashboard",
+      main,
+      removeContainer: async () => true,
+      rm: async () => ({ ok: true, out: "" }),
+    }
+    const prsByRepo: Record<string, Prs> = {
+      [app]: prsOf({
+        dirty: pr("MERGED"),
+        done: pr("MERGED"),
+        held: pr("MERGED"),
+        ignored: pr("CLOSED"),
+        open: pr("OPEN"),
+        rostered: pr("MERGED"),
+      }),
+      [site]: prsOf({}),
+    }
+    const deps = {
+      cleanup: async () => cleanup,
+      free: () => 100 * 1024 ** 3,
+      now: () => Date.now(),
+      prs: async (_ctx: Context, _branches: string[], _numbers: number[], dir?: string) =>
+        (dir && prsByRepo[dir]) || prsOf({}),
+      roots: async () => [code, orgs],
+      sleep: async () => {},
+      turbo: join(root, "turbo"),
+    } as NightDeps
+    return { ctx, deps, lost, main, ops, runs, sent, w }
+  }
+  const outbox = (sent: { text: string; to: string }[]) =>
+    sent.find((s) => s.to === "ops")?.text ?? ""
+
+  test("a worktree that passes all three tests is removed by git worktree remove, its branch kept", async () => {
+    const { ctx, deps, runs, sent, w } = night()
+    await nightlyClean(deps)(ctx)
+    for (const path of [w.done, w.pushed]) {
+      expect(existsSync(path)).toBe(false)
+      expect(outbox(sent)).toContain(`worktree ${path} by git worktree remove`)
+    }
+    expect(git(dirname(dirname(dirname(w.done))), "branch", "--list", "done")).toContain("done")
+    expect(runs.some((r) => r.includes("--force"))).toBe(false)
+  })
+
+  test("a worktree that fails a test is kept, its reason in the outbox line", async () => {
+    const { ctx, deps, sent, w } = night()
+    await nightlyClean(deps)(ctx)
+    const kept: [string, string][] = [
+      [w.open, "its PR is open"],
+      [w.unpushed, "it has no PR and a commit no remote holds"],
+      [w.dirty, "uncommitted work"],
+      [w.ignored, "ignored files outside build output: notes.txt"],
+      [w.held, "a live process works in it"],
+      [w.rostered, "the roster names it"],
+    ]
+    for (const [path, why] of kept) {
+      expect(existsSync(path)).toBe(true)
+      expect(outbox(sent)).toContain(`worktree ${path} kept: ${why}`)
+    }
+  })
+
+  test("a repo outside the code root and the org folders is never read", async () => {
+    const { ctx, deps, lost, runs, sent, w } = night()
+    await nightlyClean(deps)(ctx)
+    expect(existsSync(w.lost)).toBe(true)
+    expect(runs.some((r) => r.some((a) => a.startsWith(lost)))).toBe(false)
+    expect(outbox(sent)).not.toContain(lost)
+  })
+
+  test("Playground's own checkout is never read by the new step", async () => {
+    const { ctx, deps, main, runs } = night()
+    await nightlyClean(deps)(ctx)
+    expect(existsSync(join(main, ".claude", "worktrees", "own"))).toBe(true)
+    expect(runs.some((r) => r.some((a) => a.startsWith(join(main, ".claude"))))).toBe(false)
+    expect(runs.some((r) => r.includes("remove") && r.includes(main))).toBe(false)
   })
 })
