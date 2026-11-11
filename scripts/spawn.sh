@@ -72,7 +72,7 @@ set -euo pipefail
 #   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
 #   --effort <level>   with any mode but restore or close, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
-#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PRs the checker serves, each by its URL or its number alone, with an issue's URL beside a pull request for a PR not yet opened; a reviewer's or tester's start is refused unless it names a pull request, and its roster row records it before the pane opens; on an ended roster row it replaces the row's prs, and its pr with the first pull request named; on a live row, or none, it joins them and gives a row with no pr the first pull request named
+#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PRs the checker serves, each by its URL or its number alone, with an issue's URL beside a pull request for a PR not yet opened, or an extension item it scores as <scope>/<kind>/<key>; a reviewer's or tester's start is refused unless it names a pull request or an extension item, and its roster row records it before the pane opens; on an ended roster row it replaces the row's prs, and its pr with the first pull request named; on a live row, or none, it joins them and gives a row with no pr the first pull request named
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
 #   --memory <dir>     with any mode but restore or close, anywhere among its words: the launch runs with Claude Code's auto-memory on, writing to <dir>, an absolute folder: its built settings file, one of its own (factory-settings-...-memory-<name>.json), sets autoMemoryEnabled and autoMemoryDirectory, while every other launch's file stays as it is, for the auto-memory trial; --memory off launches with memory off on the shared file, whatever arm the role or the row would take
@@ -846,6 +846,8 @@ CLAUDE_MODEL=
 EFFORT=
 RESUME_BRIEF=
 PR_ARG=
+# An extension item a checker scores, <scope>/<kind>/<key>, checked as roster.ts and playground ext check one: the kinds are packages/settings' KINDS.
+ITEM_FORM='[A-Za-z0-9][A-Za-z0-9-]*/(doc|learning|list|rule|script|skill|template)/[a-z0-9][a-z0-9._-]*'
 REPORTS_TO=
 TITLE_ARG=
 IN_DIR=
@@ -884,10 +886,10 @@ while [ $# -gt 0 ]; do
     shift 2
   elif [ "$1" = --pr ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PR_ARG" ] || usage "--pr takes the PR a checker serves, once"
-    pr_form='^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(pull|issues)/[1-9][0-9]*)$'
+    pr_form="^(#?[1-9][0-9]*|https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(pull|issues)/[1-9][0-9]*|$ITEM_FORM)\$"
     IFS=, read -ra prs_named <<<"$2"
     for one in "${prs_named[@]}"; do
-      [[ $one =~ $pr_form ]] || usage "--pr takes a PR's URL or its number alone, comma-separated, or an issue's URL beside one for a PR not yet opened, not \"$2\""
+      [[ $one =~ $pr_form ]] || usage "--pr takes a PR's URL or its number alone, comma-separated, an issue's URL beside one for a PR not yet opened, or an extension item as <scope>/<kind>/<key>, not \"$2\""
     done
     PR_ARG=$2
     shift 2
@@ -1335,9 +1337,9 @@ elif [ "$MODE" = column ] && [[ $ROLE =~ ^(reviewer|tester)$ ]] && [ -z "$TITLE_
   if [ "$ROLE" = reviewer ]; then TITLE_ARG="Review: $of"; else TITLE_ARG="Test: $of"; fi
 fi
 [ -z "$PR_ARG" ] || [[ $ROLE =~ ^(reviewer|tester)$ ]] || usage "--pr is for a reviewer's or tester's start, not a $ROLE's"
-# A checker's row names the pull request it serves, which no-outside-pr-code reads at its first tool call (a row naming none holds it in read mode) and auto-end reads to end it (an ended row's are the PRs it last served), so every reviewer or tester start names one.
-[[ ! $ROLE =~ ^(reviewer|tester)$ ]] || [[ ,$PR_ARG, =~ ,(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*), ]] ||
-  refuse "a $ROLE starts with --pr <pull url>, the pull request it serves now, by its URL or its number, which its roster row records before its pane opens; an issue's URL alone leaves the row with no pr, so open the PR as a draft first"
+# A checker's row names the pull request or extension item it serves, which no-outside-pr-code reads at its first tool call (a row naming no pull request holds it in read mode) and auto-end reads to end it (an ended row's are the PRs it last served), so every reviewer or tester start names one.
+[[ ! $ROLE =~ ^(reviewer|tester)$ ]] || [[ ,$PR_ARG, =~ ,(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*|$ITEM_FORM), ]] ||
+  refuse "a $ROLE starts with --pr <pull url>, the pull request it serves now, by its URL or its number, or the extension item it scores as <scope>/<kind>/<key>, which its roster row records before its pane opens; an issue's URL alone leaves the row with no pr, so open the PR as a draft first"
 if [ "$MODE" != resume ] || [ -n "$BRIEF" ]; then
   # The brief's path under ~/.playground names the same file as its bare name.
   BRIEF=${BRIEF#"$DATA/"}
