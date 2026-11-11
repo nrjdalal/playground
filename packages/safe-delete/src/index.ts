@@ -682,7 +682,7 @@ export function purgeTrash(
     if (stampMs(BATCH.exec(batch)![1]!) < cutoff) remove(batch)
     else young.push(batch)
   while (young.length && io.free() < PURGE.minFree) remove(young.shift()!)
-  // A told mark no try can meet again: a burst's key is a stamp that never recurs, so a mark older than the cap's window is swept, and an empty session folder with it.
+  // A told mark no try can meet again: a burst's key is a stamp that never recurs, so a mark older than the cap's window is swept, and the session's folder stays, since a concurrent try may be about to fill it.
   const toldCutoff = io.now.getTime() - CAP_WINDOW_MS
   const stale = (at: string) => (lstat(at)?.mtimeMs ?? Infinity) < toldCutoff
   for (const session of entriesOf(join(root, ".cap-told"))) {
