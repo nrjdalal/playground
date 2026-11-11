@@ -378,6 +378,18 @@ describe("the tripwire", () => {
     })
   })
 
+  test("a .cap-told that is a file does not throw out of quarantine: the burst alerts", () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    writeFileSync(join(roots.trash, ".cap-told"), "not a folder")
+    expect(quarantine(file(join(roots.home, "x")), opts, roots, { now: NOW })).toMatchObject({
+      kind: "tripwire",
+    })
+  })
+
   test("two processes refusing at the same instant alert once: the folder's recovery never removes a concurrent try's folder", async () => {
     const roots = machine()
     for (const name of ["a", "b", "c"])

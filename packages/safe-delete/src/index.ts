@@ -299,7 +299,11 @@ const firstOfBurst = (trash: string, session: string, recent: TrashEntry[]): boo
   }
   if (code === "EEXIST") return false
   if (code !== "ENOENT" && code !== "ENOTDIR") return true
-  if (code === "ENOTDIR") rmSync(join(trash, ".cap-told", session), { force: true })
+  if (code === "ENOTDIR") {
+    try {
+      rmSync(join(trash, ".cap-told", session), { force: true })
+    } catch {}
+  }
   try {
     mkdirSync(join(trash, ".cap-told", session), { recursive: true })
     writeFileSync(told, "", { flag: "wx" })
