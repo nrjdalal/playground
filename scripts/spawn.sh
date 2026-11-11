@@ -1656,9 +1656,9 @@ FLAGS+=" --plugin-dir $(printf %q "$PLUGIN")"
 READ="Load the playbook skill first. Your brief is in $SHOWN/$BRIEF: read it in full and follow it."
 # Two GLM workers searched ToolSearch for Read, Bash and Skill, found none since it lists only deferred tools, and stopped as if they had none.
 [ "$BACKEND" = glm ] && READ="$READ Skill, Read, Bash, Edit and Write are already loaded; ToolSearch lists only deferred tools."
-# A herdr start names its session id up front, so its resume record can resume exactly that session.
+# A herdr or hc start names its session id up front, so a herdr resume record can resume exactly that session, and the launch's --session-id always holds one.
 SID=${SESSION:-}
-if [ "$RUNTIME" = herdr ] && [ "$MODE" != resume ]; then
+if [[ $RUNTIME =~ ^(hc|herdr)$ ]] && [ "$MODE" != resume ]; then
   SID=$(uuidgen | tr 'A-F' 'a-f') || refuse "it cannot make a session id (uuidgen)"
 fi
 if [ "$MODE" = resume ]; then
