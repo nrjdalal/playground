@@ -5112,7 +5112,7 @@ var extOrderSchema = array(extScopeSchema).refine((names) => new Set(names).size
 var extLinksSchema = record(extScopeSchema, array(extLinkSchema));
 
 // packages/settings/src/ext.ts
-var BUNDLED_EXTENSIONS = ["slack"];
+var BUNDLED_EXTENSIONS = ["slack", "whatsapp"];
 var extSettings = defineSettings({
   "ext.bundled": {
     default: [],
@@ -5138,6 +5138,21 @@ var extSettings = defineSettings({
 var guardedOrgs = (values) => {
   const links = extLinksSchema.parse(values["ext.links"] ?? {});
   return [...new Set(Object.values(links).flat())].filter((link) => link !== "*").sort();
+};
+
+// packages/settings/src/harnesses.ts
+var HARNESSES = [
+  { backends: ["claude", "glm"], id: "claude-code", label: "Claude Code" }
+];
+var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
+var readPin = (text) => {
+  const words = text.trim().split(/\s+/);
+  const [harnessId, backend] = words.length === 1 ? ["claude-code", words[0]] : words;
+  if (words.length > 2)
+    return null;
+  const harness = HARNESSES.find((h) => h.id === harnessId);
+  const found = harness?.backends.find((b) => b === backend);
+  return harness && found ? { backend: found, harness: harness.id } : null;
 };
 
 // packages/settings/src/rules.ts
@@ -7400,7 +7415,7 @@ async function onGlm(raw, environment = process.env) {
     if (!name || name.includes("/"))
       return false;
     const pin = join5(dataDir(environment), "backends", name);
-    return (await Bun.file(pin).text()).trim() === "glm";
+    return readPin(await Bun.file(pin).text())?.backend === "glm";
   } catch {
     return false;
   }

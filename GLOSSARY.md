@@ -147,6 +147,9 @@ The file the dispatcher keeps of the agents it dispatched (`~/.playground/roster
 **Slack mode**:
 The owner is away and the owner's own Slack DM is the owner's remote access: the `slack.mode` setting, on until the owner turns it off. While it is on, ops-dm-watch hands each owner message in the DM to the dispatcher, to the session in the assistant seat too when no reply lands in 3 minutes while the dispatcher is not mid-turn, or the dispatcher is stuck, and nudges the dispatcher for an update every 15 minutes; every reply goes through `playground dm send` (the bundled [slack skill](./extensions/slack/skills/slack/SKILL.md)).
 
+**WhatsApp mode**:
+The owner's WhatsApp is a chat with the factory: the bundled `whatsapp` extension's switch in Settings, Extensions (`ext.bundled`). While it is on, ops-wa hands each 1:1 message from `wa.owner` to the dispatcher, to the session in the assistant seat too when no reply goes out in 3 minutes while the dispatcher is not mid-turn, or the dispatcher is stuck, and asks the dispatcher for an update every 15 minutes while the owner has written in the last 24 hours; every reply goes through `playground wa send`, in factory status alone (the bundled [whatsapp skill](./extensions/whatsapp/skills/whatsapp/SKILL.md)).
+
 **Slot**:
 One turn at a heavy run on this machine: `~/.playground/ops/run-slot.sh <name> -- <command>` takes a run slot by mkdir and gives it back however the run ends ([playbook](./extensions/core/skills/playbook/SKILL.md), the **slots** rule).
 

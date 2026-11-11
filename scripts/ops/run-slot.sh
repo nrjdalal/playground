@@ -1562,11 +1562,13 @@ due_at() {
 gate_sig() { G=shut; lanes_open && G=open; switch_on run-slot.single && ! lifted && ! mem_ok && G="$G nomem"; return 0; }
 # whether this waiter may sleep again with no look: its script is unchanged and the oldest waiter alive. A waiter at the head (one with no ticket, the
 # head of either order, or the oldest) looks again on anything its last look decides by: a file it read (SIG, merge-queue.json), the load's whole numbers,
-# the clock's next turn (due_at), the burst's minute while one held it, and the gauges while they shut a slot (gate_sig, about 25 processes, which
-# keeps run-slot.lanes fresh for room and can-take); any other, which a new waiter or a run's end never moves to the head, looks once it is the oldest or
-# next_sig changes, so the queue's waiters look once when the oldest names another rather than each time the folder changes
+# the clock's next turn (due_at), the burst's minute while one held it, and the gauges: every poll while they shut a slot, and while they open one,
+# whenever a fresh reading of them moves the line its verdict came from, its stamp apart (a `-nt` against the look's mark and a builtin compare, no
+# process of their own, so a flip lands with the reading that moved it, issue 1477, and rewrites run-slot.next within a poll; memory's pressure and free
+# share move without the cache, and a fresh reader's own lanes read names them); any other, which a new waiter or a run's end never moves to the head,
+# looks once it is the oldest or next_sig changes, so the queue's waiters look once when the oldest names another rather than each time the folder changes
 cheap_idle() {
-  local a pid
+  local a pid l=
   self_changed && return 1
   a=("$QUEUE"/*)
   if [ -e "${a[0]}" ]; then pid=${a[0]##*/}; pid=${pid#*-}; pid=${pid%%-*}; alive "$pid" || return 1; fi
@@ -1579,9 +1581,14 @@ cheap_idle() {
     [ "$LOAD" = "$LOAD0" ] || return 1
     under_seen || return 1
     [ -z "$BURST" ] || burst_held > /dev/null || return 1
-    [ "$G0" = open ] && return 0
+    if [ "$G0" = open ]; then
+      [ "$OPS/run-slot.gauges" -ot "$REF" ] && return 0
+      l=; read -r _ l 2>/dev/null < "$OPS/run-slot.gauges"
+      [ "$l" = "$G0_CACHE" ] && return 0
+    fi
     gate_sig
-    [ "$G" = "$G0" ]
+    [ "$G" = "$G0" ] || return 1
+    G0_CACHE=$l
   else
     [ "${a[0]}" = "$TICKET" ] && return 1
     next_sig
@@ -1605,6 +1612,7 @@ look_mark() {
   # the clock's second, read once a look while a turn is due or a lift mark stands (under_seen)
   { [ -z "$d" ] && ! [ -e "$UNDER" ]; } || LIFT_AT=$(date +%s) LIFT_S=$SECONDS
   [ -z "$d" ] || DUE=$((SECONDS + d - LIFT_AT))
+  read -r _ G0_CACHE 2>/dev/null < "$OPS/run-slot.gauges"
   gate_sig
   G0=$G
   LANES=${G%% *}
@@ -1614,6 +1622,7 @@ look_mark() {
 MQ=${PLAYGROUND_MERGE_QUEUE:-${PLAYGROUND_DATA_DIR:-$HOME/.playground}/merge-queue.json}
 LOOKER=1
 LOOKED=
+G0_CACHE=
 
 # run-slot.priority (a lead's pick, under an hour old) works with the queue (builder, 12 Oct: a priority naming the 8th waiter deadlocked it):
 # the named session may take a slot whatever its place, and the reservation holds only while that session is itself waiting in the queue
@@ -1939,7 +1948,7 @@ load1_max() {
 # counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither
 lanes_open() {
   local idle swap tps mbs load need="" verdict=shut why="" seen free level
-  # a read subcommand takes the verdict a waiter wrote in the last 30 s (the head rewrites it each poll while the gauges shut a slot, gate_sig), so room, can-take and head see the lanes as the queue's head saw them, since the CPU gate can flip between two readings seconds apart (issue 1216: 55% then 33% idle); with none that fresh it reads the gauges itself
+  # a read subcommand takes the verdict a waiter wrote in the last 30 s (the head rewrites it each poll while the gauges shut a slot, and, while they open one, whenever a fresh reading moves the readings past their stamp, gate_sig), so room, can-take and head see the lanes as the queue's head saw them, since the CPU gate can flip between two readings seconds apart (issue 1216: 55% then 33% idle); with none that fresh it reads the gauges itself
   if [ -n "$CAN_TAKE" ] && seen=$(fresh_lanes); then [ "$seen" = open ]; return; fi
   read -r idle swap tps mbs _ <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
@@ -2096,7 +2105,7 @@ SWAPINS_MAX=100
 BUSY_TOLD="run-slot.sh: another look is reading the CPU's idle share and the swap-ins, so slots 2 to 4 stay shut until it lands"
 # `<idle> <swapins> <disk0 transfers/s> <disk0 MB/s> <the last reading's swapins>`: the CPU's idle share in top's second sample (top -l 2 -n 0), the swap-ins a second in
 # vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them) and disk_rate's two figures, which lanes lines log and no verdict reads (a bound on disk load waits on a day of them), each - when unread; every look shares one reading through run-slot.gauges
-# (`<epoch> <idle> <swapins> <tps> <MB/s> <last swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and the heads of a queue of some 27 waiters each read them every 15 s while they shut a slot;
+# (`<epoch> <idle> <swapins> <tps> <MB/s> <last swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and the head waiter of a queue reads them every poll while they shut a slot, and, while they open one, whenever a fresh reading of them moves the readings past their stamp;
 # one look refreshes it, under gauges_lock, while the rest keep the reading they have, or `busy busy` when there is none yet, since without the
 # lock every look that found it stale ran its own top (3 Nov, 10:53Z: 16 to 23 tops at once from 26 waiters, and load1 56.8); the refresher
 # removes the lock only while it still carries the mtime it took, so a refresher that ran past a takeover leaves the new holder's lock

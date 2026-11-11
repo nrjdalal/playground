@@ -82,7 +82,7 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
 - A test that fails only on the runner box counts against the score once a rerun on the Mac fails too, so a difference in the box alone never lowers a score.
 - A report that fails to send by name reaches the worker anyway, sent again to the `uds:` address its newest message came from.
 - The reviewer's small fix goes to the worker as a patch, never as a commit of its own, since ADR 0004 makes the gate a reviewer independent of the code it scores: save `git -C <clone> diff > <scratch>/fix.patch`, restore the clone, check it with `git -C <clone> apply --check <scratch>/fix.patch`,
-  and hand it over inline in the verdict, which the message to the worker links, since a restart clears `/tmp`: that `fix.patch` as a `diff` block, pasted whole and unedited with every context line kept so `git apply` takes it as it stands, which the worker applies word for word.
+  and hand it over inline in the verdict, which the message to the worker links, since a restart clears `/tmp`: that `fix.patch` as a `diff` block, pasted whole and unedited with every context line kept so `git apply` takes it as it stands, which the worker applies word for word, on the PR for a blocking or should-fix finding and in its follow-up PR for a nit.
   It applies a patch or a suggested wording in its clone and runs the checks its files call for before it posts, the trace ratchet's test and the em-dash check among them on any doc, so its own fix never costs the PR a round.
   Each patched test file outside `CLOCK_EXEMPT` also runs once under `CLOCK_AHEAD_DAYS=30`, since a file's mtime and a child process stay on the real clock, and an exempt file's run counts as a no-op, not a pass.
   A patch to a promoted skill's `SKILL.md` also greps each changed term over that skill's docs page and every README that lists it, and patches every hit.
@@ -94,7 +94,7 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
 - A 5/5 verdict says the fresh full read found nothing blocking or should-fix and `bun run check-types` ran green, or green CI at the head stood in for it; a red run is a blocking finding.
 - Before a 5/5 posts, `bun run pr:merge <n> --explain`, bare and unpiped, reads ✓ on every gate but ready, ci and review, since the body gate also needs a doc that a reviewer's patch or the last commit changed named in the Evidence; a ✗ is a finding for the worker.
 - The reviewer posts the 5/5 verdict and its `Review • 5/5` label; GitHub's two checks green at the head are the next gate, never an input to the score, and a run cited where CI stands in is evidence of the touched tests and check-types alone.
-- A round left with only nits scores 5/5: the reviewer lists them, or hands the small edit over as a patch, so a nit the worker leaves sends no PR through another test round.
+- A round left with only nits scores 5/5: the reviewer lists them, or hands the small edit over as a patch, for the worker's follow-up PR, since the 5/5 head merges as it stands and a push after it would need a fresh full read.
   A nit that would widen a permission, a setting or a guard's reach if a rare event happens goes to the worker's lead first, and the 5/5 waits for the lead's ruling, since a worker can merge seconds after a 5/5 posts.
 - A PR body with no `test:skills` result in it is a nit, since GitHub Actions runs the suite at the head.
 - When the ticket carries samples, the verdict holds a samples table, and a sample left unhandled holds the score down.
