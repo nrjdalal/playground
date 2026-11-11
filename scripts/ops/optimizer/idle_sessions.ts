@@ -49,6 +49,7 @@ export type RosterEntry = {
 }
 
 export type PrState = {
+  closedAt?: string
   head: string
   mergeSha?: string
   mergedAt?: string
