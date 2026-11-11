@@ -19,6 +19,12 @@ const upPy = join(import.meta.dir, "..", "..", "..", "scripts", "ops", "up.py")
 const scratch = mkdtempSync(join(tmpdir(), "ops-up-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
+// bun first on PATH, behind a launchctl that refuses every call, so a pass's real render can never reach the real launchctl whatever jobs the registry turns on
+const fakeBin = join(scratch, "fake-bin")
+mkdirSync(fakeBin)
+writeFileSync(join(fakeBin, "launchctl"), "#!/bin/sh\nexit 1\n", { mode: 0o755 })
+const BUN_PATH = `${fakeBin}:${dirname(process.execPath)}:/usr/bin:/bin`
+
 // The data folder up.py reads under a config folder: its jobs.json, roster and up.log.
 const dataOf = (config: string) => join(config, "playground")
 
@@ -80,7 +86,7 @@ test("--sessions names a session of a kind only kinds.ts knows", () => {
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
-      PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      PATH: BUN_PATH,
     },
     stderr: "pipe",
     stdout: "pipe",
@@ -442,7 +448,7 @@ test("a pass renders jobs.json from the store, keeps it when the store has no po
         CLAUDE_CONFIG_DIR: config,
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: scratch,
-        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+        PATH: BUN_PATH,
       },
       stderr: "pipe",
     })
@@ -484,7 +490,7 @@ test("a dead render with no ops folder shows the render's own error in up.log, n
         CLAUDE_CONFIG_DIR: config,
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: scratch,
-        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+        PATH: BUN_PATH,
       },
       stderr: "pipe",
     },
@@ -512,7 +518,7 @@ test("a pass hands the render HOME's LaunchAgents folder to install into", () =>
         CLAUDE_CONFIG_DIR: config,
         PLAYGROUND_DATA_DIR: dataOf(config),
         HOME: scratch,
-        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+        PATH: BUN_PATH,
       },
       stderr: "pipe",
     },
@@ -531,7 +537,7 @@ test("a pass writes jobs.json into the data folder dataDir() resolves, playgroun
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
-      PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      PATH: BUN_PATH,
     },
     stderr: "pipe",
   })
@@ -556,7 +562,7 @@ test("a pass moves a turned-off job's plist from ops/launch-agents to the data f
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: data,
       HOME: scratch,
-      PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      PATH: BUN_PATH,
     },
     stderr: "pipe",
   })
