@@ -12,14 +12,6 @@ import {
 const HEAD = "abc123def456abc123def456abc123def456a"
 const OTHER = "9999999999999999999999999999999999999"
 
-const runOf = (headSha: string, status: string, conclusion: string, event: string, id: number) => ({
-  conclusion,
-  event,
-  headSha,
-  id,
-  status,
-})
-
 // A run as GitHub's list returns it, whose head_sha and conclusion the script maps onto HeldRun: a held run reads status completed with conclusion action_required.
 const wireOf = (
   headSha: string,
@@ -33,6 +25,24 @@ const wireOf = (
   head_sha: headSha,
   id,
   status,
+})
+
+// The four-run fixture, written once: the held run at the head, one at another sha, one whose conclusion is success, and one whose event is push.
+const four = [
+  wireOf(HEAD, "completed", "action_required", "pull_request", 101),
+  wireOf(OTHER, "completed", "action_required", "pull_request", 202),
+  wireOf(HEAD, "completed", "success", "pull_request", 303),
+  wireOf(HEAD, "completed", "action_required", "push", 404),
+]
+
+const heldAtHead = JSON.stringify({ workflow_runs: four })
+
+// The rows mapped onto HeldRun the way approveHeld maps them, for heldRuns' own test.
+const toHeld = (r: (typeof four)[number]): HeldRun => ({
+  conclusion: r.conclusion,
+  event: r.event,
+  headSha: r.head_sha,
+  id: r.id,
 })
 
 // A stub Run that answers gh reads from a map keyed by the call's first two arguments and records every call, so a test can assert which approve went out.
@@ -56,40 +66,25 @@ const prAnswer = JSON.stringify({
 
 const runsKey = `api repos/o/r/actions/runs?event=pull_request&head_sha=${HEAD}&per_page=100&status=action_required`
 
-const heldAtHead = JSON.stringify({
-  workflow_runs: [
-    wireOf(HEAD, "completed", "action_required", "pull_request", 101),
-    wireOf(OTHER, "completed", "action_required", "pull_request", 202),
-    wireOf(HEAD, "completed", "success", "pull_request", 303),
-    wireOf(HEAD, "completed", "action_required", "push", 404),
-  ],
-})
-
 describe("heldRefusals", () => {
   const base: HeldFacts = { base: "main", head: "canary", sha: HEAD, state: "open" }
   test("an open ship PR holds no refusal", () => {
-    expect(heldRefusals(base)).toEqual([])
+    expect(heldRefusals(base)).toBeNull()
   })
   test("a PR whose head is not canary is refused", () => {
-    expect(heldRefusals({ ...base, head: "other-branch" }).length).toBe(1)
+    expect(heldRefusals({ ...base, head: "other-branch" })).toContain("head other-branch")
   })
   test("a PR whose base is not main is refused", () => {
-    expect(heldRefusals({ ...base, base: "canary" }).length).toBe(1)
+    expect(heldRefusals({ ...base, base: "canary" })).toContain("into canary")
   })
   test("a closed PR is refused", () => {
-    expect(heldRefusals({ ...base, state: "closed" }).length).toBe(1)
+    expect(heldRefusals({ ...base, state: "closed" })).toContain("closed")
   })
 })
 
 describe("heldRuns", () => {
   test("keeps only a held run at the head", () => {
-    const runs = [
-      runOf(HEAD, "completed", "action_required", "pull_request", 101),
-      runOf(OTHER, "completed", "action_required", "pull_request", 202),
-      runOf(HEAD, "completed", "success", "pull_request", 303),
-      runOf(HEAD, "completed", "action_required", "push", 404),
-    ]
-    expect(heldRuns(runs, HEAD).map((r) => r.id)).toEqual([101])
+    expect(heldRuns(four.map(toHeld), HEAD).map((r) => r.id)).toEqual([101])
   })
 })
 
@@ -108,7 +103,7 @@ describe("approveHeld", () => {
     const { calls, run } = fakeRun({
       "api repos/o/r/pulls/5": prAnswer,
       [runsKey]: JSON.stringify({
-        workflow_runs: [wireOf(OTHER, "completed", "action_required", "pull_request", 202)],
+        workflow_runs: [four[1]],
       }),
     })
     const lines = await approveHeld(run, "o/r", 5)
@@ -119,7 +114,7 @@ describe("approveHeld", () => {
     const { calls, run } = fakeRun({
       "api repos/o/r/pulls/5": prAnswer,
       [runsKey]: JSON.stringify({
-        workflow_runs: [wireOf(HEAD, "completed", "success", "pull_request", 303)],
+        workflow_runs: [four[2]],
       }),
     })
     await approveHeld(run, "o/r", 5)
@@ -134,6 +129,18 @@ describe("approveHeld", () => {
       }),
     })
     await expect(approveHeld(run, "o/r", 5)).rejects.toThrow("canary")
+    expect(calls.filter((call) => call.includes("/approve"))).toEqual([])
+    expect(calls.length).toBe(1)
+  })
+  test("a PR whose base is not main is refused with no call made", async () => {
+    const { calls, run } = fakeRun({
+      "api repos/o/r/pulls/5": JSON.stringify({
+        base: { ref: "canary" },
+        head: { ref: "canary", sha: HEAD },
+        state: "open",
+      }),
+    })
+    await expect(approveHeld(run, "o/r", 5)).rejects.toThrow("into canary")
     expect(calls.filter((call) => call.includes("/approve"))).toEqual([])
     expect(calls.length).toBe(1)
   })
