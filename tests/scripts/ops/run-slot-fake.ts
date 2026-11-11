@@ -404,6 +404,26 @@ esac
   }
 }
 
+// each wait gives up at WITHIN_MS, just under bun's 60 s hang ceiling, failing with both queues' waiter names and the log's start lines, so a hang says what it waited on (issues 1723 and 1725: hangs that said nothing)
+export const WITHIN_MS = 45_000
+export const within = async (ok: () => boolean, what: string, m: { ops: string }) => {
+  const end = Date.now() + WITHIN_MS
+  while (!ok() && Date.now() < end) await Bun.sleep(50)
+  if (ok()) return
+  const names = (dir: string) =>
+    existsSync(join(m.ops, dir)) ? readdirSync(join(m.ops, dir)).sort() : []
+  const waiters = [...names("run-slot.waiters"), ...names("run-slot.clone-waiters")]
+  const starts = existsSync(join(m.ops, "run-slot.runs.log"))
+    ? readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
+        .split("\n")
+        .filter((l) => l.split(" ")[1] === "start")
+        .map((l) => l.split(" ").slice(2, 5).join(" "))
+    : []
+  throw new Error(
+    `${what} within ${WITHIN_MS / 1000}s; waiters: ${waiters.join(", ") || "none"}; starts: ${starts.join(", ") || "none"}`,
+  )
+}
+
 // Playground's own lefthook.yml, whose pre-commit runs the build, as the commit-lane tests read it
 export const LEFTHOOK = readFileSync(join(import.meta.dir, "../../../lefthook.yml"), "utf8")
 // A machine whose fake git fails on a `-C` folder that is not one, answers `git config --get alias.<verb>` from a folder whose top level is the root by whether the root's `aliases` file lists that key, answers `git rev-parse --show-toplevel` with its folder's physical path, as git does (the root's, from `docs`, `web` or a folder under it), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths (each pathspec read from the `-C` folder, `.` included), `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, every one for `:/`, as git prints them), and touches its last argument for anything else, as a commit's marker
