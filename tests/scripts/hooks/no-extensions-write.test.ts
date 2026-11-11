@@ -776,6 +776,7 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["sed -n with a brace, then date", "sed -n '/{/p' f; date"],
     ["date, then sed -n with a brace", "date -u +%FT%TZ; sed -n '/{/p' f"],
     ["sed -n with a bracket, then date", "sed -n '/\\[b\\]/p' f; date"],
+    ["sed -n with a bracketed address range, then date", "sed -n '/[blocking]/,$p' f; date"],
     ["sed -n with a brace range, then date", `sed -n "/^switch_ends() {/,/^}/p" f; date`],
     [
       "sed -n with a brace range under bash -c",
