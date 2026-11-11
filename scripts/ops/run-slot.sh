@@ -1581,8 +1581,7 @@ cheap_idle() {
     fi
     gate_sig
     [ "$G" = "$G0" ] || return 1
-    # the same verdict's read is the reading the next compare holds, so a moved line that moved nothing re-baselines here
-    read -r _ G0_CACHE 2>/dev/null < "$OPS/run-slot.gauges"
+    G0_CACHE=$l
   else
     [ "${a[0]}" = "$TICKET" ] && return 1
     next_sig
@@ -1604,9 +1603,9 @@ look_mark() {
   LOAD0=$LOAD
   d=$(due_at)
   [ -z "$d" ] || DUE=$((SECONDS + d - $(date +%s)))
+  read -r _ G0_CACHE 2>/dev/null < "$OPS/run-slot.gauges"
   gate_sig
   G0=$G
-  read -r _ G0_CACHE 2>/dev/null < "$OPS/run-slot.gauges"
   LANES=${G%% *}
   HELD5=unread
   load5_held || :

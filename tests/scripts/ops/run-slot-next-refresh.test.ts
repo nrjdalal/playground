@@ -60,7 +60,7 @@ describe("the oldest names the queue's fresh pick through a lanes flip", () => {
     // the open-lanes look names the reviewer's medium, the first in the order that fits 4 held of 8
     while (!named().startsWith(t2)) await Bun.sleep(20)
     flip(m, 30)
-    // the oldest follows the fresh pick within the cadence, and a fresh read then names the small ticket the frozen verdict never named again
+    // the oldest follows the fresh pick within a poll, and a fresh read then names the small ticket the frozen verdict never named again
     expect(await namesWithin(named, t3, 20)).toBe(true)
     expect(await head(m)).toBe(t3)
     expect(existsSync(join(m.ops, "run-slot.holder"))).toBe(false)
