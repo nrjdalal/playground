@@ -1098,8 +1098,8 @@ git_known() {
 }
 # whether a git verb is an alias in that folder's config, which may run a commit (`git ci`); git ignores an alias that names one of its own commands
 aliased() { ! git_known "$1" && git ${2:+-C "$2"} config --get "alias.$1" >/dev/null 2>&1; }
-# the first word past env and VAR=x, the command box_fits finds
-first_word() { local a; for a in "$@"; do case "$a" in env | *=*) continue ;; esac; printf '%s' "$a"; return; done; }
+# the first word past env, its no-argument flags and VAR=x, the command box_fits finds
+first_word() { local a; for a in "$@"; do case "$a" in env | -i | - | *=*) continue ;; esac; printf '%s' "$a"; return; done; }
 # a git -c key that runs a program or a hook (core.hooksPath, an alias, an include), which counts as a build for any verb
 runs_program() {
   case "$(printf '%s' "${1%%=*}" | tr '[:upper:]' '[:lower:]')" in
@@ -1252,7 +1252,7 @@ docker_kind() {
 light_run() {
   [ -n "$(quick_kind "$@")" ] && return
   local a first="" next="" turbo="" filter="" types=""
-  for a in "$@"; do case "$a" in env|*=*) continue ;; esac; [ -z "$first" ] && first=$a && continue; next=$a; break; done
+  for a in "$@"; do case "$a" in env|-i|-|*=*) continue ;; esac; [ -z "$first" ] && first=$a && continue; next=$a; break; done
   # the 4 bare bunx tsc runs in the runs log each ran 1 s or less, while an sh -c holding a build and then tsc ran up to 152 s, so only the bare program counts (retro 5, 31 Oct)
   [ "$(basename -- "$first")" = tsc ] && return
   case "$(basename -- "$first")" in bun|bunx) ;; *) return 1 ;; esac
@@ -1298,10 +1298,10 @@ case "$DOCKER" in refuse\ *) echo "${DOCKER#refuse }" >&2; rlog refused "docker"
 # a model-bound run skips the queue's lanes, run-slot-docker among them, and a build fills the VM rather than waiting on a model
 [ -n "$DOCKER" ] && [ -n "$MODEL_BOUND" ] && { echo "run-slot.sh refuses --model-bound for a docker build, which fills the Docker VM rather than waiting on a model: run it without --model-bound, so it takes run-slot-docker, one docker build at a time" >&2; rlog refused "docker"; exit 2; }
 [ -n "$HEAVY" ] && SIZE=big UNITS=3
-# Merging keeps going: a run that gates a merge (Checks, local CI, the merge train, the dashboard's build) goes before the
+# Merging keeps going: a run that gates a merge (Checks, local CI, the merge train, the dashboard's build) and a ship's own runs (ops-ship) go before the
 # rest and may use the small reserve, as may an org's run (below) and the run-slot.priority pick. A checker's run is ranked by its worker's size (size_of), and
 # the rest keep class 2 so an older copy's ticket still ranks.
-case "$WHO" in ops-checks-*|ops-localci|ops-merge-train|ops-dashboard) CLASS=0 ;; *) CLASS=2 ;; esac
+case "$WHO" in ops-checks-*|ops-localci|ops-merge-train|ops-dashboard|ops-ship) CLASS=0 ;; *) CLASS=2 ;; esac
 # the session a run counts as for the priority pick and its class: a commit-<worktree> pre-commit step counts as the last named session that ran run-slot from
 # that worktree (run-slot.owner/<worktree>), since the hook's waiter carries no session's name (4 Nov: a commit's build waited from 20:45Z
 # while the priority named its session, until a lead named its commit-<worktree> by hand)

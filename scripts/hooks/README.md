@@ -31,6 +31,15 @@ the group's redirect taking the place of a pipe into the group (`<reader> | { sh
 It reads a here-string's `$(echo …)` of words it can read as those words, zsh's `\n` a line break and any other backslash unread, and a here-string of one variable the line set earlier (`S='…'; sh <<< "$S"`) as that variable's value.
 It follows no descriptor an `exec` feeds, which it reads as unfed, and no variable set other than by a plain assignment, which it reads as that assignment's value.
 
+## Plan a hook's ships
+
+Plan the ships before you build a guard, since every wrapper runs its script from the main checkout, which follows `main` ([Registered in both settings files](#registered-in-both-settings-files)):
+
+1. Look for a hook script on `main` whose role read or input fits the new rule (`git show origin/main:scripts/hooks/<hook>.ts`), and extend it there: a new event or tool on a script `main` already holds lands in one PR and goes live with the next ship, as no-chat-question's PreToolUse path on `AskUserQuestion` beside its Stop gate and writing-first's events do, each branching on `hook_event_name`.
+2. When no script fits, plan a new hook file as two PRs: the script and its tests in one ship, then its registration in both settings files and its bundle in a later one, since `bun run test:skills`'s hooks-on-main step fails a wrapper whose script `origin/main` lacks.
+
+Done when your plan names the hook script, whether it is on `origin/main`, and the ships the guard needs to go live: one, or two.
+
 ## Registered in both settings files
 
 - A session resumed without its `--settings` or `PLAYGROUND_ROLE` (a bare `claude --resume`, or herdr's own resume, which ops-herdr's `config.toml` keeps off: playbook's SPAWN.md, Role and settings) still loads the checkout's project settings, so `.claude/settings.json` registers every PreToolUse hook `scripts/factory-settings.json` does, with the same matcher and the same command string,
@@ -392,6 +401,8 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   The closed list also holds a read-only gh call with a `-q` or `--jq` filter or a `-t` or `--template` template: `gh api` with no option that sends, or `issue list`, `issue view`, `pr list`, `pr view`, `run list`, `run view` or `search`.
   A call with an option that sends (`-F`, `-X`, `-f`, `--cache`, `--field`, `--input`, `--method` or `--raw-field`) or opens the browser (`--web` or `-w`) is no read, a short one counted alone or in a cluster ahead of the filter's letter (`-iX POST`).
   Such a call holds no other word with a space, and no pager or editor variable (`EDITOR`, `GH_EDITOR`, `GH_PAGER`, `PAGER`, `VISUAL`) is set on its line, since an assignment or an export keeps a line from being read call by call.
+  The closed list also holds a gh post (`issue` or `pr` with `comment`, `create` or `edit`) whose only words with a space are its `-t`, `--title`, `-b` or `--body` values, text gh sends, so `gh issue create --title "a note about ~/.playground" --body x` runs; a post with `-e`, `--editor`, `-w` or `--web` keeps canary's reading.
+  The closed list also holds a `cd` to one literal folder, since the walk follows it and judges each later call where it lands, so `cd /tmp && sed -n '/[Ff]ollow/,$p' f` runs; a `cd -`, `~-`, `~+` or a folder the hook cannot read keeps canary's reading.
   Its filter or template is text, never a path, so `gh pr view 1 --json a,b -q '.a+" \(.b)/x"'` runs from every folder, and is judged only when it names the root.
   An unquoted glob in it is the shell's, so `gh api x --jq .[]` is judged as any glob and refused from the home.
   The closed list also holds a `sed` or `gsed` with options from `-E`, `-n`, `-r`, `-s`, `-u` and `-z` (and their long names) whose every script, each `-e` value or else its first operand, is a literal word a closed grammar holds whole (`SED_SCRIPT`), so `sed -n '/^- \*\*/p' f` and `sed -n '/a/,$p' f` run.
@@ -446,7 +457,10 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   A command string it cannot read as a run of string literals (one from a variable, a template with a `${…}` substitution, a computed name, or split across a file and an argument list) keeps canary's cwd-relative reading, as does an argument list no shell runs, which keeps its `~` literal.
   A shell named as the program with its line in an argument-list `-c` element (`spawnSync("sh", ["-c", …])`), and a non-JavaScript inline program that hands a shell its string (`python -c` with `os.system` or `subprocess` under `shell=True`, `perl -e` or `ruby -e` with `system`), keep canary's reading too: each is the same irreversible data-folder loss by a smaller route.
   A `sed` or `perl` whose script its closed grammar does not hold keeps canary's reading, a quoted regex address's glob included (below).
-  It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs, an awk program file run with `-f` included.
+  It refuses a shell or a `source` handed a script it reads none of: a `-c` script that is all a variable or a substitution, or a script file the same line wrote with text it cannot read, such as a reader's output; a `-c` script it reads in part is walked as any line.
+  It refuses code the shell runs where its lexer reads a plain word once that code names the guarded folder or a folder of its path: a zsh `e` glob qualifier's code, an `e` or `P` parameter flag's expansion and zsh's `=(…)`, each as written, and the whole line for a prompt expansion (`@P`) or a glob substitution (`${~…}`, `$~…`).
+  A quoted heredoc body, a single-quoted span, a `$'…'` string and a double-quoted text with no `$` hold no such code.
+  It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes in one call and runs in another, an awk program file run with `-f` included.
   An `ext score` after an `unset` or an `export -n` of one of those variables earlier on the line gets past, since the hook tracks a variable set, not one unset or un-exported.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` whose landing folder nothing on the line names (`cd "$X"`, `cd -`, `popd`'s stack, a `CDPATH` lookup) leaves the command's folder unread, so after one a relative write (a writing redirect, a remover's operand, one after `--` included, or a writer's target) is refused, since the shell may be in this root.
@@ -482,10 +496,13 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 
 ## no-false-green
 
-- A factory session's test run keeps its own exit status: `scripts/hooks/no-false-green.ts`, registered beside no-stash, refuses bun with an option given its value as the next word (`--cwd <dir>`, `--env-file <file>`, `--preload <file>`) before its `run` or `test` (bun then prints its usage and exits 0, or runs package.json's `test` script with the paths appended in place of the tests;
+- A factory session's test run and git push keep their own exit status: `scripts/hooks/no-false-green.ts`, registered beside no-stash, refuses bun with an option given its value as the next word (`--cwd <dir>`, `--env-file <file>`, `--preload <file>`) before its `run` or `test`
+  (bun then prints its usage and exits 0, or runs package.json's `test` script with the paths appended in place of the tests;
   `--opt=value` there, as `bun --cwd=<dir> run test:file <files>` and `bun run --cwd <dir> <script>` work), and a test run (`bun test`, a `test` or `check-types` script, vitest or jest, pytest, ty or ruff, bare, through `uv run`, `uv tool run`, `uvx` or `python -m`,
   through run-slot.sh or a shell's `-c` too) piped into another command while the script holding the pipe sets no `pipefail` and reads no pipe status of its own shell (`PIPESTATUS` in bash, `pipestatus` in zsh, the Bash tool's shell here; a pipefail outside a `bash -c` script never reaches the pipes inside it),
   since the pipeline's exit is its last command's (a red test once read 0 through `| tail`).
+  A `git push` piped the same way is refused by the same rule, read past git's global options (`git -C <dir>`, `git -c <key=value>`, `GIT_TAKES` in `scripts/hooks/shell.ts`) and through run-slot or a shell's `-c` too, since a failed push then reads 0 (one once read as landed through `| grep error` and cost a review round on a head GitHub never had);
+  its reason names the fix: push bare, then check with `git ls-remote origin refs/heads/<branch>`, which prints the local head's sha once the push has landed.
   A run-slot call, typed bare or as a shell's script (`bash <path>/run-slot.sh <who> -- <command>`, `shellSlot`), is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, shared with no-glm-heavy-path and no-main-checkout), and a call with no `--`, or nothing after it, runs nothing (run-slot exits 2 on it), so nothing in it is judged.
   A piped subshell or brace group, `(bun test x) | tail`, is not read.
   It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too.
