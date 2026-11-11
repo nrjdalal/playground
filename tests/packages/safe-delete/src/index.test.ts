@@ -9,6 +9,7 @@ import {
   rmSync,
   symlinkSync,
   truncateSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -343,6 +344,76 @@ describe("the tripwire", () => {
       }),
     ).toMatchObject({ kind: "tripwire" })
     expect(listTrash(roots.trash)).toHaveLength(6)
+  })
+
+  test("a mark another try at the same instant made makes the second a plain refusal, so two tries at one instant cannot both alert", () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    // the winner's mark, as a concurrent try at the same instant leaves it: a file named for the burst's key
+    const key = listTrash(roots.trash)
+      .map((entry) => entry.at)
+      .sort()
+      .at(-1)!
+    mkdirSync(join(roots.trash, ".cap-told", opts.session), { recursive: true })
+    writeFileSync(join(roots.trash, ".cap-told", opts.session, key), "")
+    expect(quarantine(file(join(roots.home, "x")), opts, roots, { now: NOW })).toMatchObject({
+      kind: "refused",
+    })
+  })
+
+  test("a legacy told mark, a file where the session's folder goes, does not silence the session's next burst", () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    // a mark of the old shape, as a pre-merge night left it: a content file at the session's own path
+    mkdirSync(join(roots.trash, ".cap-told"), { recursive: true })
+    writeFileSync(join(roots.trash, ".cap-told", opts.session), "2026-11-01T00:00:00.000Z")
+    expect(quarantine(file(join(roots.home, "x")), opts, roots, { now: NOW })).toMatchObject({
+      kind: "tripwire",
+    })
+  })
+
+  test("a .cap-told that is a file does not throw out of quarantine: the burst alerts", () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    writeFileSync(join(roots.trash, ".cap-told"), "not a folder")
+    expect(quarantine(file(join(roots.home, "x")), opts, roots, { now: NOW })).toMatchObject({
+      kind: "tripwire",
+    })
+  })
+
+  test("two processes refusing at the same instant alert once: the folder's recovery never removes a concurrent try's folder", async () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    const src = join(import.meta.dir, "../../../../packages/safe-delete/src/index.ts")
+    const driver = join(roots.root, "driver.ts")
+    writeFileSync(
+      driver,
+      `import { quarantine } from ${JSON.stringify(src)}
+const [home, main, trash, path] = process.argv.slice(2)
+const done = quarantine(path, { reason: "test", session: "j6rjgy-worker" }, { home, main, trash }, { now: new Date("2026-11-02T12:00:00Z") })
+console.log("kind" in done ? done.kind : "moved")`,
+    )
+    const paths = ["d", "e"].map((name) => file(join(roots.home, name)))
+    const kids = paths.map((path) =>
+      Bun.spawn(["bun", driver, roots.home, roots.main, roots.trash, path]),
+    )
+    const kinds = await Promise.all(
+      kids.map(async (kid) => (await new Response(kid.stdout).text()).trim()),
+    )
+    await Promise.all(kids.map((kid) => kid.exited))
+    expect([...kinds].sort()).toEqual(["refused", "tripwire"])
   })
 
   test("refuses a fourth quarantine within a minute from one session, and lets another go", () => {
@@ -1000,6 +1071,21 @@ describe("purgeTrash", () => {
     expect(done.removed).toEqual([old])
     expect(existsSync(join(trash, old))).toBe(false)
     expect(existsSync(join(trash, young))).toBe(true)
+  })
+
+  test("clears a told mark older than the cap's window and keeps a fresh one", () => {
+    const { trash } = machine()
+    const told = join(trash, ".cap-told", "j6rjgy-worker")
+    mkdirSync(told, { recursive: true })
+    const old = join(told, "2026-11-01T00:00:00.000Z")
+    const fresh = join(told, "2026-11-02T12:00:00.000Z")
+    writeFileSync(old, "")
+    writeFileSync(fresh, "")
+    utimesSync(old, new Date(NOW.getTime() - 61_000), new Date(NOW.getTime() - 61_000))
+    utimesSync(fresh, new Date(NOW.getTime() - 30_000), new Date(NOW.getTime() - 30_000))
+    purgeTrash(trash, { free: () => 100 * GB, now: NOW })
+    expect(existsSync(old)).toBe(false)
+    expect(existsSync(fresh)).toBe(true)
   })
 
   test("removes the oldest batches early while free space is under 50 GB", () => {
