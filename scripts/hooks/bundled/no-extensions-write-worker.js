@@ -7271,17 +7271,23 @@ var RUNNERS = new Set(["npx"]);
 var TOOLS = new Set(["lefthook", "turbo"]);
 function bunCall(args, env) {
   let cwd = env.cwd;
+  let xCwd;
+  let chained = env.cwd;
   let filtered = false;
   let sub = -1;
   const words = [];
   let k = 0;
   for (;k < args.length; k++) {
     const v = args[k].value;
-    if (v === "--cwd")
-      cwd = args[k + 1] && pathOf(args[++k], env);
-    else if (v.startsWith("--cwd="))
-      cwd = pathOf({ ...args[k], value: v.slice(6) }, env);
-    else if (v === "--filter" || v === "-F") {
+    const value = v === "--cwd" ? args[k + 1] : v.startsWith("--cwd=") ? { ...args[k], value: v.slice(6) } : undefined;
+    if (v === "--cwd" || v.startsWith("--cwd=")) {
+      if (v === "--cwd")
+        k++;
+      cwd = value && pathOf(value, env);
+      chained = value && pathOf(value, { ...env, cwd: chained });
+      if (words[0] === "x")
+        xCwd = { dir: cwd };
+    } else if (v === "--filter" || v === "-F") {
       filtered = true;
       k++;
     } else if (v.startsWith("--filter="))
@@ -7295,7 +7301,7 @@ function bunCall(args, env) {
         break;
     }
   }
-  return { at: k, cwd, filtered, sub, words };
+  return { at: k, chained, cwd, filtered, sub, words, xCwd };
 }
 function gitCall(args, env) {
   let cwd = env.cwd;

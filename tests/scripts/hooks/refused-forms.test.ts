@@ -714,6 +714,9 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
 
   test("the rows whose path flag keeps its single spelling are the ones pinned here", () => {
     expect([...UNSPELT].sort()).toEqual([
+      // bunx's spelling takes the row's last --cwd, which bun reads from the --cwd=/ before it, so the row's own folder holds none
+      "#1732 a runner --cwd read from the one before it | bunx --cwd, no folder",
+      "#1732 turbo's relative --cwd read from the runner's | bunx --cwd, no folder",
       "#466 git --work-tree with a subcommand for its value | git --work-tree, no folder",
       "#466 git -C with a subcommand for its value | git -C, no folder",
     ])
@@ -743,6 +746,9 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1173 GNU mv to the shell's folder attached to its target option in a cluster after a cd to a variable | -ft",
       "#1173 GNU mv to the shell's folder by its long target option after a cd to a variable | --target-directory",
       "#1173 GNU mv to the shell's folder by its shortened long target option after a cd to a variable | --target",
+      // the --cwd=/ that bunx's spelling passes over for the row's last --cwd, read from it
+      "#1732 a runner --cwd read from the one before it | --cwd",
+      "#1732 turbo's relative --cwd read from the runner's | --cwd",
       // an option that takes no value, followed by an operand
       "#356 a link to the data folder made in the same call | -s",
       "#356 a write after a word with an unbalanced quote | -rf",
