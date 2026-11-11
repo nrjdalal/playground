@@ -108,11 +108,12 @@ export async function life<S extends LinkSock>(io: LifeIo<S>): Promise<string> {
             })(),
           )
         }
-        if (update.connection === "close") io.up(false)
-        if (update.connection === "close")
+        if (update.connection === "close") {
+          io.up(false)
           void Promise.allSettled(pending).then(() =>
             resolve({ code: update.lastDisconnect?.error?.output?.statusCode, opened }),
           )
+        }
       })
       io.listen(sock)
     })
