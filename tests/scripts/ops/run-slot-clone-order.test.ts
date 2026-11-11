@@ -198,6 +198,22 @@ describe("the clone lane", () => {
     expect(started(m)[0]).toBe("ops-dashboard")
   })
 
+  // issue 1722, 11 Nov: a ship's runs took class 2, so its gate, rehearsal and update waited behind workers' runs and focus held the floor for them
+  // while it waits it prints either the lane's line or, once the worker's ticket leads, the behind line, so the row reads both and the start order alone decides
+  test("and a ship's clone, class 0 as ops-ship, goes before an older worker's", async () => {
+    const m = machine()
+    m.hold("run-slot-clone", 1, "small")
+    const waiting = /^run-slot\.sh: (waiting for the clone slot|this clone waits behind)/gm
+    const worker = cloning(m, "worker-older")
+    expect(await worker.saw(waiting)).toBe(true)
+    const ship = cloning(m, "ops-ship")
+    expect(await ship.saw(waiting)).toBe(true)
+    m.release("run-slot-clone")
+    await within(() => started(m).length > 0, "a clone started", m)
+    await Promise.all([stop(worker.p), stop(ship.p)])
+    expect(started(m)[0]).toBe("ops-ship")
+  })
+
   // issue 1317's added Done when: a queue read sees each clone waiter
   test("lists each waiting clone in run-slot.clone-waiters", async () => {
     const m = machine()
