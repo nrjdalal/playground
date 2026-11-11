@@ -80,13 +80,9 @@ const sourceDirs = (base: string, at?: string): BunPlugin => ({
   },
 })
 
-// The merged tree's sources and tsconfig.json files, set out in a temp folder in the tree's own layout, so the merged build reads its sources and resolves its imports with the tree's own tsconfigs, per importing file as Bun does, and touches no worktree file; the mirror holds the tree's layout, so import.meta.dir keeps reading as the real checkout's folders. A bare import walks up to node_modules, which the mirror has none of, so every folder the mirror holds for real gets the checkout's own entries as links, read only, a workspace package's entry at the mirror's same path. A folder the tree holds as the checkout does is a link to the checkout's own, so every route to its files reads one module, as a build there does; a folder the tree changes, adds a file to, or drops a file from holds the tree's own files as copies, and dirt runs up to the root, since an import can enter from above.
+// The merged tree's sources, tsconfig.json and package.json files, copied into a temp folder in the tree's own layout, so the merged build reads the tree's own files and resolves its imports with the tree's own tsconfigs, per importing file as Bun does, and touches no worktree file; the mirror holds the tree's layout, so import.meta.dir keeps reading as the real checkout's folders. A bare import walks up to node_modules, which the mirror has none of, so each folder of the layout gets the checkout's own entries as links, read only, a workspace package's entry at the mirror's same path.
 const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
   const mirror = realpathSync(mkdtempSync(join(tmpdir(), "hooks-bundle-merged-")))
-  const dirOf = (path: string) => {
-    const at = path.lastIndexOf("/")
-    return at === -1 ? "" : path.slice(0, at)
-  }
   const reads = new Map<string, string>()
   for (const path of tree.paths()) {
     if (path.includes("node_modules/")) continue
@@ -99,61 +95,12 @@ const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
     const text = tree.text(path)
     if (text !== undefined) reads.set(path, text)
   }
-  const dirs = new Set<string>([""])
-  for (const path of reads.keys())
-    for (let at = path.indexOf("/"); at !== -1; at = path.indexOf("/", at + 1))
-      dirs.add(path.slice(0, at))
-  const dirty = new Set<string>()
-  const mark = (dir: string) => {
-    while (!dirty.has(dir)) {
-      dirty.add(dir)
-      if (dir === "") return
-      dir = dir.slice(0, dir.lastIndexOf("/"))
-    }
-  }
   for (const [path, text] of reads) {
-    const twin = join(root, path)
-    let same = false
-    if (existsSync(twin)) {
-      try {
-        same = (await Bun.file(twin).text()) === text
-      } catch {}
-    }
-    if (!same) mark(dirOf(path))
-  }
-  for (const dir of dirs) {
-    const held = new Set(
-      [...reads.keys()].filter((path) => dirOf(path) === dir).map((path) => basename(path)),
-    )
-    for (const entry of await readdir(join(root, dir), { withFileTypes: true }).catch(() => [])) {
-      if (!entry.isFile() || (!SOURCE.test(entry.name) && entry.name !== "tsconfig.json")) continue
-      if (!held.has(entry.name)) mark(dir)
-    }
-  }
-  const walk = async (dir: string): Promise<void> => {
-    const pre = dir === "" ? "" : `${dir}/`
-    for (const kid of [...dirs]
-      .filter((each) => each !== "" && each.startsWith(pre) && !each.includes("/", pre.length))
-      .sort()) {
-      if (dirty.has(kid)) {
-        mkdirSync(join(mirror, kid), { recursive: true })
-        await walk(kid)
-      } else {
-        mkdirSync(dirname(join(mirror, kid)), { recursive: true })
-        symlinkSync(join(root, kid), join(mirror, kid))
-      }
-    }
-  }
-  await walk("")
-  for (const [path, text] of reads) {
-    const dir = dirOf(path)
     const to = join(mirror, path)
-    if (dirty.has(dir)) {
-      mkdirSync(dirname(to), { recursive: true })
-      await Bun.write(to, text)
-    } else if (dir === "") symlinkSync(join(root, path), to)
+    mkdirSync(dirname(to), { recursive: true })
+    await Bun.write(to, text)
   }
-  // Every folder the mirror holds for real gets the checkout's node_modules entries beside it, each as a link to the checkout's own, except a workspace package's: its link resolves outside node_modules, so its mirror entry points at the mirror's same path, and a bare import reads the tree's own copy with the tree's own tsconfigs.
+  // Every folder of the layout gets the checkout's node_modules entries beside it, each as a link to the checkout's own, except a workspace package's: its link resolves outside node_modules, so its mirror entry points at the mirror's same path, and a bare import reads the tree's own copy with the tree's own tsconfigs.
   const realRoot = realpathSync(root)
   const linkModules = async (from: string, to: string): Promise<void> => {
     if (!existsSync(from)) return
@@ -174,10 +121,12 @@ const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
       symlinkSync(existsSync(target) ? target : at, name)
     }
   }
-  for (const dir of dirs) {
-    if (dir !== "" && !dirty.has(dir)) continue
+  const dirs = new Set<string>([""])
+  for (const path of reads.keys())
+    for (let at = path.indexOf("/"); at !== -1; at = path.indexOf("/", at + 1))
+      dirs.add(path.slice(0, at))
+  for (const dir of dirs)
     await linkModules(join(root, dir, "node_modules"), join(mirror, dir, "node_modules"))
-  }
   return mirror
 }
 
@@ -192,7 +141,7 @@ export async function bundle(root: string, tree?: Tree): Promise<Map<string, str
   // Bun names each module in a comment by its path from the working folder, so the build runs from the base folder, whose layout the mirror holds, and its text is the same wherever it is called from.
   const mirror = tree ? await mirrorOf(tree, root) : undefined
   const base = mirror ?? root
-  // A bare import reaches the checkout's own files through the mirror's links, so Bun names its modules by the walk back to the checkout, whether to its node_modules or to a workspace package it links; the rewrite names them from the base, as a build there does.
+  // A bare npm import reaches the checkout's own store through the mirror's links, so Bun names its modules by the walk back to the checkout; the rewrite names them from the base, as a build there does.
   const at = mirror ? realpathSync(root) : undefined
   const store = mirror && at ? relative(mirror, join(at, "node_modules")) : undefined
   const text = async (output: Bun.BuildArtifact) => {
