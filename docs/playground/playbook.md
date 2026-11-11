@@ -174,7 +174,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   and the `no-raw-spawn` hook refuses a session not started through it.
   A session started with `--account <email>` runs on that account, and its token shows in no command, message or log.
   A worker started with `--backend glm` runs on Z.ai's GLM model in place of Claude, with its key kept just as safe, and keeps that model when it is resumed; a reviewer or tester always runs on Claude.
-  The first dispatcher started with `--harness codex` runs in Codex in place of Claude Code, and keeps it when it is resumed; a Codex session whose safety guards fail to load is stopped within a minute of starting.
+  The first dispatcher started with `--harness codex` runs in Codex in place of Claude Code, and keeps it when it is resumed; a Codex session whose safety guards fail to load is stopped within a minute of starting, and a Codex start stops when PowerShell is installed.
   A GLM session takes tiny mechanical work as well as docs, skill text, research reads and plan drafts, and stays on Playground's own work, an org's work staying on Claude.
   No guarded org's data reaches GLM: spawn.sh starts a session in a checkout of an org `ext.links` guards, or on a brief naming a word of the `glm-refused-sources` list, on Claude alone, and a job that reads an org's data starts its `claude` with GLM's settings cleared.
   For a smaller build task, Claude writes the plan and a GLM worker builds it: the plan names the files the worker may touch, the lead checks that list against the hook's refused paths, and anything outside it goes back before it is edited.
