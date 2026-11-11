@@ -7874,7 +7874,7 @@ function scoreAsOther(words, cmd, parsed, env) {
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at));
 }
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
-var AWK_RUNS = /system|getline|[>@]/;
+var AWK_RUNS = /system|[>@]/;
 var AWK_PATTERN = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.)*\//g;
 var awkRuns = (program) => AWK_RUNS.test(program.replace(AWK_PATTERN, "$1$2RE")) || awkPipe(program);
 var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
@@ -8175,8 +8175,12 @@ function narrow(cmd, env) {
     return sedReads(args);
   if (base === "perl")
     return perlReads(parsed, env);
-  if (base === "cut" || base === "echo" || base === "lsof")
+  if (base === "cut" || base === "date" || base === "echo" || base === "lsof")
     return true;
+  if (base === "bash") {
+    const [flag, script] = args;
+    return args.length === 2 && flag.value === "-c" && script.quoted && !marked(script.value) && !wholeLine(lex(script.value, env.known).commands, env);
+  }
   if (base === "gh") {
     const filters = ghFilters(parsed);
     const texts = filters.size > 0 ? filters : ghTexts(parsed);
@@ -8215,6 +8219,8 @@ function wholeLine(commands, env) {
     if (words.some((word) => word.procs && wholeLine(word.procs, env)))
       return true;
     const parsed = parse3(cmd);
+    if (commands.length > 1 && parsed.first && program(parsed.first.value) === "bash")
+      return true;
     const slot = slotWords(parsed);
     const commit = slot ? { ...cmd, words: slot } : cmd;
     if (quietCommit(commit, slot ? parse3(commit) : parsed, env))

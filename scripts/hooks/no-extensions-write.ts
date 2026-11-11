@@ -486,8 +486,8 @@ function scoreAsOther(words: Word[], cmd: Command, parsed: Parsed, env: Env): bo
 }
 
 const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
-// what lets an awk program run a command or write a file: system(), getline, a > redirect or an @ directive, and a | pipe outside the literals awkPipe allows
-const AWK_RUNS = /system|getline|[>@]/
+// what lets an awk program run a command or write a file: system(), a > redirect or an @ directive, and a | pipe outside the literals awkPipe allows, the one way a getline runs a command (`"cmd" | getline`), since a plain getline or one from a file only reads
+const AWK_RUNS = /system|[>@]/
 // a regex literal where awk reads only a pattern: at the program's start or after {, }, ;, !, (, ,, ~, &&, || or a newline, holding no quote, no [ and no newline, so a > in it (`/^>>>>>>> /`) is a character it matches, never a redirect
 const AWK_PATTERN = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.)*\//g
 const awkRuns = (program: string) =>
@@ -801,7 +801,7 @@ const FLAGS = /\$\{\([^)]*[eP][^)]*\)[^}]*\}?/g
 const FILE_RUN = /(?:^|[\s;&|(<>])=\(/
 const FILE_RUNS = /=\([^)]*\)?/g
 
-// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, date, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, a bash -c of a script of such readers, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
   const { args, first } = parsed
@@ -826,7 +826,19 @@ function narrow(cmd: Command, env: Env): boolean {
   if (base === "git") return reads(parsed, env) && !args.some(({ value }) => marked(value))
   if (SEDS.has(base)) return sedReads(args)
   if (base === "perl") return perlReads(parsed, env)
-  if (base === "cut" || base === "echo" || base === "lsof") return true
+  // date prints the time and runs nothing, so a read line ending in `; date -u +%FT%TZ` keeps its readers' reading
+  if (base === "cut" || base === "date" || base === "echo" || base === "lsof") return true
+  // bash given one script by -c runs that script alone, which the reader walks call by call, so it is narrow when that script reads call by call too; wholeLine counts it only as its line's one command, and sh and zsh keep canary's reading
+  if (base === "bash") {
+    const [flag, script] = args
+    return (
+      args.length === 2 &&
+      flag.value === "-c" &&
+      script.quoted &&
+      !marked(script.value) &&
+      !wholeLine(lex(script.value, env.known).commands, env)
+    )
+  }
   // a read-only gh call is narrow when its jq filter is the only word that holds a space, and a gh post when its title and body are
   if (base === "gh") {
     const filters = ghFilters(parsed)
@@ -886,6 +898,8 @@ function wholeLine(commands: Command[], env: Env): boolean {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
     if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
     const parsed = parse(cmd)
+    // a bash -c is narrow only as its line's one command, so a shell beside another call keeps canary's reading
+    if (commands.length > 1 && parsed.first && program(parsed.first.value) === "bash") return true
     // a quiet commit run-slot runs is read as the commit (slotWords), and its own redirect takes what git prints, never its message, judged by where it writes as every redirect is
     const slot = slotWords(parsed)
     const commit = slot ? { ...cmd, words: slot } : cmd
