@@ -7,7 +7,7 @@ import type { BunPlugin } from "bun"
 
 import { guardsIn, preToolUseGuards } from "./ops-tick/guard-probe"
 
-// hooks-bundle: each PreToolUse guard in scripts/hooks/ bundled with everything it imports into scripts/hooks/bundled/<guard>.js, the file its wrapper runs, so a guard starts with no node_modules; the bundles are committed, since a git restore of a deleted checkout brings it back with no install. `--check` builds in memory from a tree git holds, the index or with `--merged <ref>` the head merged with ref, and names each bundle there that differs from that build; write mode builds from the working files, writes each bundle and removes each .js file in the folder no build writes.
+// hooks-bundle: each PreToolUse guard in scripts/hooks/ bundled with everything it imports into scripts/hooks/bundled/<guard>.js, the file its wrapper runs, so a guard starts with no node_modules; the bundles are committed, since a git restore of a deleted checkout brings it back with no install. `--check` builds a tree git holds, the index or with `--merged <ref>` the head merged with ref, in a temp folder of the tree's own files that it removes afterwards, and names each bundle there that differs from that build; write mode builds from the working files, writes each bundle and removes each .js file in the folder no build writes.
 export const ROOT = join(import.meta.dir, "..", "..", "..")
 export const HOOKS = join("scripts", "hooks")
 export const BUNDLED = join(HOOKS, "bundled")
@@ -80,7 +80,7 @@ const sourceDirs = (base: string, at?: string): BunPlugin => ({
   },
 })
 
-// The merged tree's sources and tsconfig.json files, set out in a temp folder in the tree's own layout, so the merged build reads its sources and resolves its imports with the tree's own tsconfigs, per importing file as Bun does, and touches no worktree file; the mirror holds the tree's layout, so import.meta.dir keeps reading as the real checkout's folders. A bare import walks up to node_modules, which the mirror has none of, so every folder the mirror holds for real gets the checkout's own as a link, read only. A folder the tree holds as the checkout does is a link to the checkout's own, so every route to its files reads one module, as a build there does; a folder the tree changes, adds a file to, or drops a file from holds the tree's own files as copies, and dirt runs up to the root, since an import can enter from above.
+// The merged tree's sources and tsconfig.json files, set out in a temp folder in the tree's own layout, so the merged build reads its sources and resolves its imports with the tree's own tsconfigs, per importing file as Bun does, and touches no worktree file; the mirror holds the tree's layout, so import.meta.dir keeps reading as the real checkout's folders. A bare import walks up to node_modules, which the mirror has none of, so every folder the mirror holds for real gets the checkout's own entries as links, read only, a workspace package's entry at the mirror's same path. A folder the tree holds as the checkout does is a link to the checkout's own, so every route to its files reads one module, as a build there does; a folder the tree changes, adds a file to, or drops a file from holds the tree's own files as copies, and dirt runs up to the root, since an import can enter from above.
 const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
   const mirror = realpathSync(mkdtempSync(join(tmpdir(), "hooks-bundle-merged-")))
   const dirOf = (path: string) => {
@@ -90,7 +90,12 @@ const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
   const reads = new Map<string, string>()
   for (const path of tree.paths()) {
     if (path.includes("node_modules/")) continue
-    if (!SOURCE.test(path) && basename(path) !== "tsconfig.json") continue
+    if (
+      !SOURCE.test(path) &&
+      basename(path) !== "tsconfig.json" &&
+      basename(path) !== "package.json"
+    )
+      continue
     const text = tree.text(path)
     if (text !== undefined) reads.set(path, text)
   }
@@ -125,15 +130,6 @@ const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
       if (!held.has(entry.name)) mark(dir)
     }
   }
-  for (const dir of dirs) {
-    if (dir !== "" && !dirty.has(dir)) continue
-    const from = join(root, dir, "node_modules")
-    if (existsSync(from)) {
-      const to = join(mirror, dir, "node_modules")
-      mkdirSync(dirname(to), { recursive: true })
-      symlinkSync(from, to)
-    }
-  }
   const walk = async (dir: string): Promise<void> => {
     const pre = dir === "" ? "" : `${dir}/`
     for (const kid of [...dirs]
@@ -156,6 +152,31 @@ const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
       mkdirSync(dirname(to), { recursive: true })
       await Bun.write(to, text)
     } else if (dir === "") symlinkSync(join(root, path), to)
+  }
+  // Every folder the mirror holds for real gets the checkout's node_modules entries beside it, each as a link to the checkout's own, except a workspace package's: its link resolves outside node_modules, so its mirror entry points at the mirror's same path, and a bare import reads the tree's own copy with the tree's own tsconfigs.
+  const realRoot = realpathSync(root)
+  const linkModules = async (from: string, to: string): Promise<void> => {
+    if (!existsSync(from)) return
+    mkdirSync(to, { recursive: true })
+    for (const entry of await readdir(from, { withFileTypes: true })) {
+      const at = join(from, entry.name)
+      const name = join(to, entry.name)
+      if (entry.isDirectory() && entry.name.startsWith("@")) {
+        await linkModules(at, name)
+        continue
+      }
+      let rel = ""
+      try {
+        rel = relative(realRoot, realpathSync(at))
+      } catch {}
+      const target =
+        rel && !rel.startsWith("..") && !rel.includes("node_modules/") ? join(mirror, rel) : at
+      symlinkSync(existsSync(target) ? target : at, name)
+    }
+  }
+  for (const dir of dirs) {
+    if (dir !== "" && !dirty.has(dir)) continue
+    await linkModules(join(root, dir, "node_modules"), join(mirror, dir, "node_modules"))
   }
   return mirror
 }
