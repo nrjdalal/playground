@@ -15,6 +15,7 @@ const script = join(root, "scripts", "hooks", "no-main-checkout.ts")
 const MAIN = mkdtempSync(join(tmpdir(), "no-main-checkout-main-"))
 const WORKTREE = `${MAIN}/.claude/worktrees/a`
 mkdirSync(join(WORKTREE, "api", "hono"), { recursive: true })
+writeFileSync(join(WORKTREE, ".git"), `gitdir: ${MAIN}/.git/worktrees/a\n`)
 afterAll(() => rmSync(MAIN, { force: true, recursive: true }))
 // the settings the main checkout's packages build needs, as the release skill's step 5 types them
 const OFF = "env NODE_ENV=production SKIP_ENV_VALIDATION=true"
@@ -630,14 +631,20 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     expect(await bash(command, WORKTREE)).toContain("no-main-checkout hook refuses")
   })
 
-  // #623: a climb the shell runs at most once reaches one folder up, the worktrees folder, so each stays running
+  // #1663: a climb the shell runs once reaches the worktrees folder, which no worktree holds, so git walks up to the main checkout from there
   test.each([
     ["a function whose cd climbs, called once", "f() { cd ..; }; f; git commit -m x"],
     ["an if condition that climbs", "if cd ..; then git commit -m x; fi"],
     ["a single eval of a climb", "eval 'cd ..'; git commit -m x"],
     ["one climb through a variable", "U=..; cd $U; git commit -m x"],
-    ["a function called once beside a file of its name", "f() { cd ..; }; f; echo x > f"],
     ["a function called once beside a variable argument", 'f() { cd ..; }; f; git commit -m "$m"'],
+  ])("from a worktree, %s is refused", async (_name, command) => {
+    expect(await bash(command, WORKTREE)).toContain("no-main-checkout hook refuses")
+  })
+
+  // #623: a file a climb writes in the worktrees folder lands in no checkout, and a line with no climb stays where it started
+  test.each([
+    ["a function called once beside a file of its name", "f() { cd ..; }; f; echo x > f"],
     ["an if condition with a brace argument", "if grep -q { f; then :; fi; git commit -m x"],
     ["a for loop with no cd", "for i in 1 2 3; do echo $i; done; git commit -m x"],
   ])("from a worktree, %s runs", async (_name, command) => {
@@ -666,6 +673,28 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
   test("from a worktree, bun's --cwd into another worktree runs", async () => {
     expect(await bash(`bun run --cwd ${MAIN}/.claude/worktrees/b build`, WORKTREE)).toBeUndefined()
   })
+
+  // #1663: what a cd's || runs, runs only where the cd failed; an exit or a return there ends the line, so what follows runs where the cd landed
+  test.each([
+    ["an exit", `cd ${WORKTREE} || exit; git commit -m x`],
+    ["an exit with a status", `cd ${WORKTREE} || exit 1; git commit -m x`],
+    ["a return", `cd ${WORKTREE} || return; git commit -m x`],
+  ])(
+    "from the main checkout, a commit after a cd whose || runs %s runs",
+    async (_name, command) => {
+      expect(await bash(command)).toBeUndefined()
+    },
+  )
+
+  test.each([
+    ["an echo", `cd ${WORKTREE} || echo no; git commit -m x`],
+    ["a cd back", `cd ${WORKTREE} || cd ${MAIN}; git commit -m x`],
+  ])(
+    "from the main checkout, a commit after a cd whose || runs %s is refused",
+    async (_name, command) => {
+      expect(await bash(command)).toContain("no-main-checkout hook refuses")
+    },
+  )
 })
 
 // Each git command that moves HEAD, the index or the files, as a session would type it

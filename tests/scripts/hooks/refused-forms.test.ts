@@ -68,6 +68,7 @@ const PATHS: Paths = {
   MAIN: join(SCRATCH, "main"),
   ROOT,
   SCOPE,
+  TREE_LINK: join(SCRATCH, "main", ".claude", "worktrees", "a", "into-main"),
   WORDS: join(HOME, "words"),
   WORK: join(HOME, "work"),
 }
@@ -87,6 +88,10 @@ writeFileSync(join(ROOT, "policy.json"), "{}\n")
 writeFileSync(join(SCOPE, "lists", "release-owners.json"), "[]\n")
 writeFileSync(PATHS.WORDS, "y ".repeat(400_000))
 symlinkSync(ROOT, PATHS.LINK)
+// the main checkout's worktree a, by its .git file, holding a link into the main checkout, and a plain folder beside it that no worktree holds, for #1663's rows
+writeFileSync(join(PATHS.MAIN, ".claude", "worktrees", "a", ".git"), "gitdir: x\n")
+symlinkSync(join(PATHS.MAIN, ".claude"), PATHS.TREE_LINK)
+mkdirSync(join(PATHS.MAIN, ".claude", "worktrees", "plain"))
 symlinkSync(ROOT, join(DATA, "store"))
 symlinkSync(DATA, join(HOME, "pg"))
 symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, "pc"))
@@ -829,6 +834,8 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
 
   test("the rows whose path flag keeps its single spelling are the ones pinned here", () => {
     expect([...UNSPELT].sort()).toEqual([
+      // the row's cd moves the shell, so its --cwd is read from a folder no spelling knows
+      "#1663 turbo by bunx --cwd that runs only when the cd before its || failed | bunx --cwd, it moves folders",
       // bunx's spelling takes the row's last --cwd, which bun reads from the --cwd=/ before it, so the row's own folder holds none
       "#1732 a runner --cwd read from the one before it | bunx --cwd, no folder",
       "#1732 turbo's relative --cwd read from the runner's | bunx --cwd, no folder",
@@ -864,6 +871,12 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1173 GNU mv to the shell's folder attached to its target option in a cluster after a cd to a variable | -ft",
       "#1173 GNU mv to the shell's folder by its long target option after a cd to a variable | --target-directory",
       "#1173 GNU mv to the shell's folder by its shortened long target option after a cd to a variable | --target",
+      // git's second -C, read from where the first lands through a link, so a spelling of it alone from the row's folder names another folder
+      "#1663 a commit by a -C read from a link into the main checkout | -C",
+      "#1663 a commit by a -C read from a link named by its absolute path | -C",
+      // turbo's own --cwd, which no path flag spells
+      "#1663 turbo by its --cwd in a plain folder of the worktrees folder | --cwd",
+      "#1663 turbo by its --cwd in the worktrees folder | --cwd",
       // the --cwd=/ that bunx's spelling passes over for the row's last --cwd, read from it
       "#1732 a runner --cwd read from the one before it | --cwd",
       "#1732 turbo's relative --cwd read from the runner's | --cwd",
