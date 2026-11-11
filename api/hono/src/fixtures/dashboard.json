@@ -3826,8 +3826,8 @@
         {
           "disabled": true,
           "disabledWhy": "Fixture: paused on purpose",
-          "heartbeat": "ops-example-dm",
-          "name": "ops-example-dm",
+          "heartbeat": "ops-dm-watch",
+          "name": "ops-dm-watch",
           "schedule": {
             "cron": "*/2 * * * *"
           }
