@@ -403,6 +403,7 @@ describe("jobsListed", () => {
     for (const text of [null, "{not json", "[]", '{"jobs": {}}']) {
       expect(jobsListed(text)).toEqual({
         calls: new Map(),
+        descriptions: new Map(),
         enabled: [],
         paused: new Set(),
         schedules: new Map(),
