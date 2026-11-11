@@ -1,7 +1,7 @@
 ## What it does
 
 `playbook` holds the operating rules of Playground's factory, the Claude Code sessions herdr runs on the owner's behalf: who does what, who reports to whom, how sessions start and end, how the leads keep watch,
-and the standing rules (ask, battery, ci, classified, clock, comments, context, correction, dashboard, eta, gate, github, glm, local page, main, meetings, memory, override, polling, public, release, roster, rounds, signal, slots, talk, terminal, tickets, unstick, upstream, usage, verify, voice, workers, writing).
+and the standing rules (ask, battery, ci, classified, clock, comments, context, correction, dashboard, eta, gate, github, glm, local page, main, memory, override, polling, public, release, roster, rounds, signal, slots, talk, terminal, tickets, unstick, upstream, usage, verify, voice, workers, writing).
 It lives in the repo rather than in one session's memory, so every session loads the same rules.
 
 ## When to reach for it
@@ -233,7 +233,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - No session writes Claude Code memory: every learning arrives as a PR to this repo.
 - Every skill, agent guide, docs page, handoff and brief a session writes reads as writing-for-agents shapes it: lean, each step ending on a completion criterion, phrased as what to do, a hook turns back a factory session's write to one until it has loaded the skill,
   and the reviewer scores the changed ones against it.
-- After each of the owner's meetings, Playground reads its transcript from Wispr Flow on this Mac (`bun run wispr:latest`) and acts on the follow-ups, so he never pastes one by hand, and no transcript text leaves Playground's own chat and the Dashboard's local tables for Slack, Linear, GitHub, Notion or another session.
+- After each of the owner's meetings, Playground reads its transcript on this Mac with the login extension's meetings script, which its own **meetings** rule names, and acts on the follow-ups, so he never pastes one by hand, and no transcript text leaves Playground's own chat and the Dashboard's local tables for Slack, Linear, GitHub, Notion or another session.
 - No brief agrees in advance to raising a ratchet, or loosening any check whose own rule says it never rises: that call goes to the rule's owner, on the PR or directly, before the code relies on it.
 - Every Linear ticket a factory session files traces to an Inbox decision the owner approved, and none names Playground.
 - No guarded org's ticket, PR, commit, branch, comment or Slack message names Playground, a lead, a factory session or the live dashboard.
