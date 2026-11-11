@@ -46,7 +46,7 @@ const head = async (m: Machine) => {
   })
   return (await new Response(p.stdout).text()).trim()
 }
-// whether run-slot.next names `ticket` within a deadline, so a loaded pass waits out the fourth-poll cadence instead of racing one check; the base never names it, so the red run takes the deadline whole
+// whether run-slot.next names `ticket` within a deadline, so a loaded pass waits for the gauges' next reading instead of racing one check; the base never names it, so the red run takes the deadline whole
 const namesWithin = async (named: () => string, ticket: string, seconds: number) => {
   const at = Date.now()
   while (!named().startsWith(ticket) && Date.now() - at < seconds * 1000) await Bun.sleep(50)
