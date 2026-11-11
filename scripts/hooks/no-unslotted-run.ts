@@ -8,9 +8,11 @@ import {
   bunCall,
   cwdFlag,
   mainCheckout,
+  packagedTools,
   real,
   RUNNER_TAKES,
-  runnerCwd,
+  ranIn,
+  runnerFolders,
   turboWords,
 } from "./no-main-checkout"
 import { fromFactory } from "./role"
@@ -240,10 +242,24 @@ const TEST_TAKES = new Set([
 const TURBO_TASKS = new Set(["build", "check-types", "lint", "test"])
 const TURBO_LIGHT = /^(?:--help|-h|--version|--dry(?:-run)?(?:=.*)?)$/
 
+// A program's words as a shell line splits them, so a script word (sh -c '<script>') shows the commands in it
+const lineWords = (values: string[]) => values.flatMap((v) => v.split(/[\s;&|()`]+/))
+
+// Whether a program a runner's -p puts next beside (sh -c '<script>', env) runs next build among its words.
+const nextBuild = (values: string[]) =>
+  lineWords(values).some((v, k, all) => program(v) === "next" && all[k + 1] === "build")
+
 // The heavy task a turbo call runs, as `turbo run <task>` or turbo's own `turbo <task>`, or undefined.
 function turboTask(words: Word[]): string | undefined {
-  if (words.some((w) => TURBO_LIGHT.test(w.value))) return
-  const tasks = words.map((w) => w.value).filter((v) => !v.startsWith("-"))
+  const values = words.map((w) => w.value)
+  // a program a runner's -p puts turbo beside (sh -c '<script>', env) may run turbo from any of its words, so each word's own words count, and a light turbo call among them makes no other light
+  const beside =
+    values[0] !== undefined &&
+    !values[0].startsWith("-") &&
+    values[0] !== "run" &&
+    !TURBO_TASKS.has(values[0])
+  if (!beside && values.some((v) => TURBO_LIGHT.test(v))) return
+  const tasks = (beside ? lineWords(values) : values).filter((v) => v !== "" && !v.startsWith("-"))
   return (tasks[0] === "run" ? tasks.slice(1) : tasks).find((t) => TURBO_TASKS.has(t))
 }
 
@@ -252,10 +268,6 @@ const recursive = (args: Word[]) =>
     (a) => /^-[a-zA-Z]*[Rra]/.test(a.value) || ["--archive", "--recursive"].includes(a.value),
   )
 
-// Every folder a heavy run runs in: its own, and a package runner's --cwd beside it.
-const ranIn = (found: { also?: { dir: string | undefined }; dir: string | undefined }) =>
-  found.also ? [found.dir, found.also.dir] : [found.dir]
-
 // What of the command is a heavy run, and the directory it runs in or writes to, or undefined.
 function heavy(
   name: string,
@@ -263,7 +275,7 @@ function heavy(
   env: Env,
 ):
   | {
-      also?: { dir: string | undefined }
+      also?: (string | undefined)[]
       anywhere?: true
       dir: string | undefined
       fix?: string
@@ -297,26 +309,37 @@ function heavy(
   if (turbo) {
     const task = turboTask(turbo)
     return task
-      ? { also: runnerCwd(name, args, env), dir: cwdFlag(turbo, env), what: `turbo run ${task}` }
+      ? {
+          also: runnerFolders(name, args, env, turbo),
+          dir: cwdFlag(turbo, env),
+          what: `turbo run ${task}`,
+        }
       : undefined
   }
   if (RUNNERS.has(name)) {
     const words = args.filter(
       (a, k) => !a.value.startsWith("-") && !RUNNER_TAKES.has(args[k - 1]?.value ?? ""),
     )
-    return program(words[0]?.value ?? "") === "next" && words[1]?.value === "build"
-      ? { dir: env.cwd, what: `${name} next build` }
+    const values = words.map((w) => w.value)
+    return (program(values[0] ?? "") === "next" && values[1] === "build") ||
+      (packagedTools(args).includes("next") && nextBuild(values))
+      ? { also: runnerFolders(name, args, env, []), dir: env.cwd, what: `${name} next build` }
       : undefined
   }
   if (name !== "bun") return
-  const { at, cwd, filtered, words } = bunCall(args, env)
+  const { at, cwd, filtered, sub, words } = bunCall(args, env)
   const rest = args.slice(at + 1)
   if (words[0] === "install" || words[0] === "i") {
     if (rest.some((a) => ["--dry-run", "--help", "-h"].includes(a.value))) return
     return { dir: cwdFlag(rest, { ...env, cwd }), what: "bun install" }
   }
-  if (words[0] === "x" && program(words[1] ?? "") === "next" && rest[0]?.value === "build")
-    return { dir: cwd, what: "bun x next build" }
+  if (
+    words[0] === "x" &&
+    ((program(words[1] ?? "") === "next" && rest[0]?.value === "build") ||
+      (packagedTools(args.slice(sub + 1)).includes("next") &&
+        nextBuild([words[1] ?? "", ...rest.map((a) => a.value)])))
+  )
+    return { also: runnerFolders(name, args, env, []), dir: cwd, what: "bun x next build" }
   // bun run test:file passes its words to bun test, and with no file runs the whole suite as bun test does
   const testFile = words[0] === "run" && words[1] === "test:file"
   if (words[0] === "test" || testFile) {
@@ -414,14 +437,17 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
       if (
         found &&
         line !== undefined &&
-        ranIn(found).some((dir) => dir === undefined || inWorktree(dir))
+        ranIn(found.dir, found.also).some((dir) => dir === undefined || inWorktree(dir))
       )
         return anywhere(found.what, line)
     }
     // every folder the shell may be in, so a heavy run after a cd the reader cannot be sure of is caught wherever that cd may have left it
     for (const here of places(env)) {
       const found = heavy(name, args, here)
-      if (!found || !(found.anywhere || ranIn(found).some(inWorktree))) continue
+      // a runner folder the hook cannot read could be a worktree
+      const unread = found?.also?.includes(undefined)
+      if (!found || !(found.anywhere || unread || ranIn(found.dir, found.also).some(inWorktree)))
+        continue
       // run-slot execs the first word after its --, so the fix keeps the program, its words and every assignment before it behind env, and drops every wrapper (exec, timeout, env's own options)
       const line = words()
       if (line === undefined) return
