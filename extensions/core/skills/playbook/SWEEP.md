@@ -83,7 +83,7 @@ Done when every row the recovery scan leaves and every stalled PR is acted on, e
 
 ## 5. Act on your Inbox decisions
 
-Run `bun run --cwd <dashboard checkout> ask get <id> --ack` (the live Dashboard's checkout, which its runner's roster task names; any other has its own database) for each Inbox decision your roster entry still lists ([ROSTER.md](ROSTER.md)),
+Run `playground ask get <id> --ack` (it runs in the live Dashboard's checkout; any other has its own database) for each Inbox decision your roster entry still lists ([ROSTER.md](ROSTER.md)),
 act on each whose `status` is no longer `open` (`approved`, `denied`, `sent`, `drafted`, `discarded`, `cleared` or `provided`, with the owner's note in `answer.note` and a draft's changed words in `answer.editedText`),
 and take its id off the list once it is closed: a go with `playground ask ack <id> --link <url>` or `--no-link "<why>"` after you carry it out, a deny, a clear, a discard or a provided secret by that read.
 Ops also checks the `asks` on the dispatcher's entry and sends the dispatcher any answer it missed.
