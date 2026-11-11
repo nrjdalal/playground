@@ -93,18 +93,20 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## A Codex session's calls
 
-- A Codex session (spawn.sh's `--harness codex`) loads the factory's guards from the `hooks.json` spawn.sh renders from `scripts/factory-settings.json` at each launch: every handler, with its matcher, on each event Codex has (it has no Notification, PermissionDenied, PostToolUseFailure or StopFailure), and the SessionStart beat beside them.
-  session-state is left out, so a Codex session writes no state record, and the Dashboard's light reads it as idle, since `lightOf()` in `api/hono/src/lib/dashboard/workers.ts` reads every state but running as idle.
+- A Codex session (spawn.sh's `--harness codex`) loads the factory's guards from the `hooks.json` spawn.sh writes at each launch: `codexHooks()` in `packages/scripts/src/codex-hooks.ts` renders it from `scripts/factory-settings.json`, each handler in its group on each event Codex has (it has no Notification, PermissionDenied, PostToolUseFailure or StopFailure),
+  and spawn.sh adds the SessionStart beat beside them.
+  Each group keeps its matcher, but for a hook `CODEX_MATCHERS` names (writing-first, below), and each hook `LEFT_OUT` names is left out.
+  session-state is left out, so a Codex session writes no state record, and the Dashboard's light reads it as idle, since `lightOf()` in `api/hono/src/lib/dashboard/workers.ts` reads a session with no record and no question as idle.
   Codex runs each command in the call's folder with `$PLAYGROUND_REPO` set by the launch, so every wrapper finds the main checkout as it does for Claude Code.
 - A Codex input carries a `turn_id`, which Claude Code's lacks (codex-cli 0.167.1).
   It sends a shell call as Bash with its `command` and an MCP call by its `mcp__` name and arguments, both in Claude Code's shape, so every guard reads them as it reads Claude Code's.
 - Codex sends an edit in two shapes: an apply_patch call, or an apply_patch command run in the shell.
-  Its matcher takes Edit and Write as apply_patch's names, so the factory's edit matchers reach both.
+  Codex's matcher takes Edit and Write as apply_patch's names (`HookToolName::apply_patch()` in codex-rs's `hook_names.rs`, codex-cli 0.167.1), so the factory's edit matchers reach both.
   `guardInputs()` in `scripts/hooks/codex.ts` reads either into one Write per file the patch adds, updates, deletes or moves to, its path resolved from the call's folder and its content the whole patch, and the shell form also keeps its Bash call.
   Each edit guard (no-extensions-write, no-linear-ticket, no-main-checkout, no-raw-wa) judges each of them through `eachInput()`, which refuses an apply_patch whose patch names no file; writing-first judges them too and lets such a patch run, since it fails open.
 - A Codex session resumed with no `PLAYGROUND_ROLE` takes its role from its thread's name: `codexName()` in `scripts/hooks/role.ts` reads the last `thread_name` that `$CODEX_HOME/session_index.jsonl` holds for its id.
-- Codex has no Skill tool, so for writing-first a Codex Bash call that reads the skill's `SKILL.md` (`cat`, `head`, `sed` and the other readers in its `READS`) is the load, and its rendered matcher is `^(Bash|Edit|MultiEdit|Write)$`.
-- Its tests are `bun run test:file tests/scripts/hooks/codex.test.ts tests/scripts/hooks/refused-forms.test.ts tests/scripts/hooks/role.test.ts tests/scripts/hooks/writing-first.test.ts tests/scripts/spawn-codex.test.ts`.
+- Codex has no Skill tool, so for writing-first a Codex Bash call that reads the skill's `SKILL.md` (`cat`, `head`, `sed` and the other readers in its `READS`) is the load, and its PreToolUse matcher is `CODEX_MATCHERS`' `^(Bash|Edit|MultiEdit|Write)$`, since Codex has no Skill tool and reads a skill in the shell.
+- Its tests are `bun run test:file tests/packages/scripts/src/codex-hooks.test.ts tests/scripts/hooks/codex.test.ts tests/scripts/hooks/refused-forms.test.ts tests/scripts/hooks/role.test.ts tests/scripts/hooks/writing-first.test.ts tests/scripts/spawn-codex.test.ts`.
 
 ## Guard lists
 

@@ -81,7 +81,7 @@ when herdr will not close that pane, the refusal names the pane, since the sessi
 its brief rides the launch as Codex's first prompt, so it may work on that brief until then.
 The beat's thread is the session id its resume record keeps, and it takes the session's name through `codex app-server`'s `thread/name/set`.
 Its `hooks.json` carries the factory's guards beside the beat (`scripts/hooks/README.md`, A Codex session's calls).
-Until phase 3 of the harness layer (the `plan-harness-layer` doc) lifts it, once a live probe has passed, a Codex start or resume runs only on a scratch data folder (`PLAYGROUND_DATA_DIR` naming one), and spawn.sh refuses it on the live one, naming phase 3.
+Until phase 3 of the harness layer (the `plan-harness-layer` doc) lifts it, in the change it makes once a live Codex probe has passed, a Codex start or resume runs only on a scratch data folder (`PLAYGROUND_DATA_DIR` naming one), and spawn.sh refuses it on the live one, naming phase 3.
 
 ## Resume
 
