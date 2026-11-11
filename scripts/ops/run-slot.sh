@@ -1568,7 +1568,7 @@ gate_sig() { G=shut; lanes_open && G=open; switch_on run-slot.single && ! lifted
 # share move without the cache, and a fresh reader's own lanes read names them); any other, which a new waiter or a run's end never moves to the head,
 # looks once it is the oldest or next_sig changes, so the queue's waiters look once when the oldest names another rather than each time the folder changes
 cheap_idle() {
-  local a pid l
+  local a pid l=
   self_changed && return 1
   a=("$QUEUE"/*)
   if [ -e "${a[0]}" ]; then pid=${a[0]##*/}; pid=${pid#*-}; pid=${pid%%-*}; alive "$pid" || return 1; fi
