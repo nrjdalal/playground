@@ -405,7 +405,7 @@ esac
 }
 
 // each wait gives up at WITHIN_MS, just under bun's 60 s hang ceiling, failing with both queues' waiter names and the log's start lines, so a hang says what it waited on (issues 1723 and 1725: hangs that said nothing); a chain of waits shares one deadline(), since two chained waits of this budget can outlast the ceiling and the second wait's message would never fire
-export const WITHIN_MS = 45_000
+const WITHIN_MS = 45_000
 // the one budget a chain of waits shares
 export const deadline = () => ({ end: Date.now() + WITHIN_MS })
 // a runs.log start line's who, pid and lane, or null when the line is not one; the one parser the wait messages and the rows read

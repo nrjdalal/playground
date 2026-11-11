@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, machine, startOf, stop, within } from "./run-slot-fake"
+import { SCRIPT, deadline, machine, startOf, stop, within } from "./run-slot-fake"
 
 // a check waits on a line its run prints or logs, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -56,13 +56,20 @@ describe("a waiter whose wait loop bash drops", () => {
     expect(await older.saw(STOPPED)).toBe(true)
     expect(await older.p.exited).toBe(143)
     const newer = cloning(m, "worker-newer")
+    const chain = deadline()
     await within(
       () => places(m).some((n) => n.endsWith("-worker-newer")),
       "the newer clone's place",
       m,
+      chain,
     )
     m.release("run-slot-clone")
-    await within(() => starts(m).some((f) => f[2] === "run-slot-clone"), "a clone's start", m)
+    await within(
+      () => starts(m).some((f) => f[2] === "run-slot-clone"),
+      "a clone's start",
+      m,
+      chain,
+    )
     await stop(newer.p)
     expect(starts(m).map((f) => f[0])).toEqual(["worker-newer"])
   })
