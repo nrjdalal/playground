@@ -2,6 +2,8 @@ import { existsSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
+import type { Roots } from "@packages/safe-delete"
+
 import { opsDir, REPO, scheduled } from "../ops-job/job"
 import { preToolUseGuards } from "../ops-tick/guard-probe"
 import type { Beat, Context } from "../ops-tick/tick"
@@ -50,6 +52,7 @@ export const upkeepHeld = async (ctx: Context): Promise<boolean> => {
 export type Restore = {
   guards: string[] | (() => Promise<string[]>)
   main: string
+  roots?: () => Roots
   upkeep?: (ctx: Context) => Promise<boolean>
 }
 
