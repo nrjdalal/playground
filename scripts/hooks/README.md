@@ -47,7 +47,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   That one command finds the checkout with no `$HOME` in it: `$PLAYGROUND_REPO`, which spawn.sh's launch exports as its main checkout, else the main checkout git names for `$CLAUDE_PROJECT_DIR` (`--git-common-dir`, so a session in a worktree runs the main checkout's guards); when neither names a folder holding the hook's script, it runs nothing and exits 0.
 - A hook's script lands on `main` in one ship and its registration in a later one, since every wrapper runs its script from the main checkout, which follows `main`, and a factory session on `canary` loses the hook's tool the moment `canary` registers a script `main` lacks.
   A hook leaves in the reverse order: its registration in one ship and its script in a later one, since a worktree branched before the first still registers the hook in its `.claude/settings.json`, and its wrapper refuses every call the hook guards once the main checkout lacks the script.
-  Its bundle goes with its registration, since `bun run hooks:bundle` builds only the guards `scripts/factory-settings.json` registers, and the wrapper runs the script in the bundle's place.
+  Its bundle goes with its registration, since `bun run hooks:bundle` builds only the guards `scripts/factory-settings.json` registers and those `ALWAYS` names ([guards](#guards)), and the wrapper runs the script in the bundle's place.
   `bun run test:skills`'s hooks-on-main step (`packages/scripts/src/hooks-on-main.ts`, CI's `test` check) holds every tracked `*.json` file and `SKILL.md` frontmatter outside `tests/` that runs a hook script to it: it fails naming each wrapper none of whose scripts (both of a bundle-then-source wrapper's) `origin/main` holds, and fails when `origin/main` does not read, after fetching it.
 - A PreToolUse guard fails closed, since Claude Code blocks a call only on exit 2: its wrapper turns any other exit but 0 (a crash, a damaged bundle, Bun missing) into exit 2, its refusal naming the hook, the code and `bun install` in the checkout,
   and under `PLAYGROUND_ROLE` a missing script or an unresolved checkout refuses too, naming the restore route (ops-restore puts the checkout back, else Ops by playbook's LIFECYCLE.md, Restoring the main checkout); with no role it runs nothing and exits 0, as above.
@@ -68,9 +68,12 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It reads the tree `git merge-tree --write-tree HEAD origin/canary` writes and names the rebuild on the merged tree.
   A merge that conflicts in `scripts/hooks/bundled/` alone is read with its conflict markers, which read stale, and one that conflicts elsewhere prints the paths and passes, since pr:merge's merged-tree gate (`packages/scripts/src/pr-merge/README.md`) reports it.
   Limits: `origin/canary` is the local ref as the last fetch left it, so a push after canary moved checks the older canary, and pr:merge's gate covers the fresh one; a package's import (zod's) resolves from the checkout's `node_modules`, so a `bun.lock` change `canary` brings in is not in the merged read.
-  Bun resolves every import from the working files, whatever its specifier (relative, `@/`, `@packages/*`), so a merged tree that reaches a source only it holds, one `canary` adds, fails to build: `--check --merged` then refuses, naming the sources the checkout lacks, the build's first error and the fix, merge `canary` in first, so no bundle passes unread.
-  The working files still decide what an import resolves to, so an imported file or guard deleted from disk alone fails `--check`'s build (`Could not resolve`), and an untracked file that shadows an import is refused as not in the tree: restore the file, or stage the change.
-  A source `canary` deletes that the head's guard still imports resolves from the working file and reads no text in the tree, so the check refuses naming that file (`is not in the tree --check reads`) rather than a bundle; and the job merges the checked-out `HEAD`, so a push of another ref is judged by `HEAD`'s tree, and pr:merge's gate by the PR's own.
+  `--check` builds its tree in the mirror, a temp folder it removes afterwards, which holds a copy of every source, `tsconfig.json` and `package.json` file the tree holds, in the tree's own layout.
+  So every import the tree reaches resolves as a build of that tree would, whatever its specifier (relative, `@/`, `@packages/*`) and whichever folder it starts from, with the tree's own tsconfigs: a source only `canary` adds, and a path mapping only its tsconfig holds, build and pass.
+  Only `node_modules` entries are links: each to the checkout's own, and a workspace package's to the mirror's same path, so a bare `@packages/<name>` import reads the tree's copy of that package with its own tsconfig.
+  An import the tree cannot resolve fails the build, exit 1 with Bun's error (`Could not resolve`), so no bundle passes unread: a source `canary` deletes that the head's guard still imports is one, since the mirror lacks it.
+  The working files decide nothing the tree holds, so an imported file deleted from disk alone, or an untracked file beside an import, leaves the check as the tree reads.
+  The job merges the checked-out `HEAD`, so a push of another ref is judged by `HEAD`'s tree, and pr:merge's gate by the PR's own.
   Write mode also removes a bundle no build writes, a removed guard's: each `.js` file directly in `scripts/hooks/bundled/` that no build writes, one file at a time, and nothing else there.
   The bundles are committed, so a git restore of a deleted checkout brings them back with no install (so a guard that cannot start needs its bundle back, by `git checkout` or `bun run hooks:bundle`, where the wrapper's refusal still reads `bun install`).
   Two branches that both change a shared hook file conflict there, so merge `canary` into a hook PR with `bun run hooks:merge-canary` (`packages/scripts/src/hooks-merge-canary.ts`), from a clean tree.
@@ -90,18 +93,20 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## A Codex session's calls
 
-- A Codex session (spawn.sh's `--harness codex`) loads the factory's guards from the `hooks.json` spawn.sh renders from `scripts/factory-settings.json` at each launch: every handler, with its matcher, on each event Codex has (it has no Notification, PermissionDenied, PostToolUseFailure or StopFailure), and the SessionStart beat beside them.
-  session-state is left out, so a Codex session writes no state record, and the Dashboard's light reads it as idle, since `lightOf()` in `api/hono/src/lib/dashboard/workers.ts` reads every state but running as idle.
+- A Codex session (spawn.sh's `--harness codex`) loads the factory's guards from the `hooks.json` spawn.sh writes at each launch: `codexHooks()` in `packages/scripts/src/codex-hooks.ts` renders it from `scripts/factory-settings.json`, each handler in its group on each event Codex has (it has no Notification, PermissionDenied, PostToolUseFailure or StopFailure),
+  and spawn.sh adds the SessionStart beat beside them.
+  Each group keeps its matcher, but for a hook `CODEX_MATCHERS` names (writing-first, below), and each hook `LEFT_OUT` names is left out.
+  session-state is left out, so a Codex session writes no state record, and the Dashboard's light reads it as idle, since `lightOf()` in `api/hono/src/lib/dashboard/workers.ts` reads a session with no record and no question as idle.
   Codex runs each command in the call's folder with `$PLAYGROUND_REPO` set by the launch, so every wrapper finds the main checkout as it does for Claude Code.
 - A Codex input carries a `turn_id`, which Claude Code's lacks (codex-cli 0.167.1).
   It sends a shell call as Bash with its `command` and an MCP call by its `mcp__` name and arguments, both in Claude Code's shape, so every guard reads them as it reads Claude Code's.
 - Codex sends an edit in two shapes: an apply_patch call, or an apply_patch command run in the shell.
-  Its matcher takes Edit and Write as apply_patch's names, so the factory's edit matchers reach both.
+  Codex's matcher takes Edit and Write as apply_patch's names (`HookToolName::apply_patch()` in codex-rs's `hook_names.rs`, codex-cli 0.167.1), so the factory's edit matchers reach both.
   `guardInputs()` in `scripts/hooks/codex.ts` reads either into one Write per file the patch adds, updates, deletes or moves to, its path resolved from the call's folder and its content the whole patch, and the shell form also keeps its Bash call.
   Each edit guard (no-extensions-write, no-linear-ticket, no-main-checkout, no-raw-wa) judges each of them through `eachInput()`, which refuses an apply_patch whose patch names no file; writing-first judges them too and lets such a patch run, since it fails open.
 - A Codex session resumed with no `PLAYGROUND_ROLE` takes its role from its thread's name: `codexName()` in `scripts/hooks/role.ts` reads the last `thread_name` that `$CODEX_HOME/session_index.jsonl` holds for its id.
-- Codex has no Skill tool, so for writing-first a Codex Bash call that reads the skill's `SKILL.md` (`cat`, `head`, `sed` and the other readers in its `READS`) is the load, and its rendered matcher is `^(Bash|Edit|MultiEdit|Write)$`.
-- Its tests are `bun run test:file tests/scripts/hooks/codex.test.ts tests/scripts/hooks/refused-forms.test.ts tests/scripts/hooks/role.test.ts tests/scripts/hooks/writing-first.test.ts tests/scripts/spawn-codex.test.ts`.
+- Codex has no Skill tool, so for writing-first a Codex Bash call that reads the skill's `SKILL.md` (`cat`, `head`, `sed` and the other readers in its `READS`) is the load, and its PreToolUse matcher is `CODEX_MATCHERS`' `^(Bash|Edit|MultiEdit|Write)$`, since Codex has no Skill tool and reads a skill in the shell.
+- Its tests are `bun run test:file tests/packages/scripts/src/codex-hooks.test.ts tests/scripts/hooks/codex.test.ts tests/scripts/hooks/refused-forms.test.ts tests/scripts/hooks/role.test.ts tests/scripts/hooks/writing-first.test.ts tests/scripts/spawn-codex.test.ts`.
 
 ## Guard lists
 
@@ -194,6 +199,17 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A terminal's own restore passes no prompt: a session it restores where its folder lacks the factory's hooks is respawned through spawn.sh (playbook's SPAWN.md, Role and settings), and one in the factory's checkout keeps running with the hook's context but stays idle until a message reaches it.
   On 25 Oct an account switch restarted every session: two reviewers lost their workers' round requests, and the ops lead's watches and the dispatcher's login-flip loop died, each found by hand later.
   It says nothing to the owner's own sessions here, fails open, and its tests are in `bun run test:file tests/scripts/hooks`.
+
+## guards
+
+- Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names with the gate and the entry its own main block runs (`fromFactory` or none; `check`, or `guarded` for no-extensions-write's Worker and `refusal` for no-glm-heavy-path), all at once.
+  It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
+  A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
+  Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
+  `GUARDS` holds every guard each settings file registers on Bash, which a test reads from both files, so a guard registered on Bash later runs here once it joins `GUARDS`.
+  `bun run hooks:bundle` builds it as `scripts/hooks/bundled/guards.js` whether or not the settings register it yet (`ALWAYS` in `packages/scripts/src/hooks-bundle.ts`), so its bundle reaches `main` a ship before its registration.
+  Its registration in both settings files, in place of each Bash guard's own Bash entry, lands in a later ship than its script, as [Registered in both settings files](#registered-in-both-settings-files) says.
+  Its tests are `bun run test:file tests/scripts/hooks/guards.test.ts tests/scripts/hooks/refused-forms.test.ts`, the second feeding each Bash row of a guard it runs through its `check()`.
 
 ## no-bare-slack-link
 
@@ -409,7 +425,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A remover under `xargs` whose input the hook cannot read is refused too.
   The shell's pid `$$` reads as digits, so a path built on it is judged where it lands, and a plain `$(mktemp)` (only `-d` or `-q`, no `-p`, `--tmpdir` or `-t`, and no `TMPDIR=` on the line) reads as its held template, judged where it lands from the call's folder, or with none as a path under `TMPDIR`; any other `mktemp` stays unread.
   A dry run (`-u`) is one of those, since it makes no file, so its name can be one that exists.
-  A line is read call by call instead when every command on it, a substitution's included, is on a closed list of readers or a quiet git commit, and no redirect on it but a quiet commit's own writes a file (`2>&1` and `>/dev/null` write none): then only a variable's text is read that way, so `awk '$3 ~ /runner/' f` runs from `~`.
+  A line is read call by call instead when every command on it, a substitution's included, is on a closed list of readers or a quiet git commit, and no redirect other than a quiet commit's own writes a file (`2>&1` and `>/dev/null` write none): then only a variable's text is read that way, so `awk '$3 ~ /runner/' f` runs from `~`.
   The closed list is an `awk`, `gawk`, `mawk` or `nawk` whose program runs nothing, a `cat`, `git`, `grep`, `head`, `tail` or `wc` that is a reader by the list above (so `git show <rev>:<file> | awk '/^f\(\)/,/^}/'` runs), `cut`, a `sort` with no `-o` and no long option (macOS sort takes an abbreviation, `--out=`), and a `uniq` with at most one file, since its second is its output.
   A `git` on it holds no word the hook cannot read, since one may be an option that writes or runs (`--output=…`).
   The closed list also holds an `echo`, `lsof` or `date`, which prints and runs nothing, so the awk it feeds keeps its reading and a read ending in `date` keeps its own: `lsof -U | awk '$5 ~ /unix/'`, `echo x | awk '{print $1}'` and `sed -n '/a\|\[nit\]/,+3p' f; date -u +%FT%TZ` run from `~`, while a `date` on a line with an in-place sed or a quiet commit keeps canary's reading.
