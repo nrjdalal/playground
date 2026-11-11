@@ -2286,36 +2286,39 @@ if [ -n "$KIND" ]; then
   # each waiter ticks every 15 to 24 s, its own length, so waiters that started together do not all find the verdict stale in the same second
   CT0= CHL= CSP= CVF= CTICK=$((15 + RANDOM % 10))
   : > "$REF" 2>/dev/null
-  GOT=
-  polls=0
   LOOPS_LEFT=${RUN_SLOT_TEST_LOOP_END:-0}
   while :; do
-    # RUN_SLOT_TEST_LOOP_END ends this loop once with no lane taken, the way bash 5.2's loop drop (the rule at the load5 wait) does, so a test can hold the guard after it to its contract
-    [ "$LOOPS_LEFT" -gt 0 ] && { LOOPS_LEFT=$((LOOPS_LEFT - 1)); break; }
-    spaced=
-    waited=$((SECONDS - WAIT_FROM))
-    self_changed && reread
-    [ "$KIND" = clone ] && clone_verdict
-    if [ "$KIND" = clone ] && [ -z "$spaced" ]; then
-      clone_first
-      [ -n "$FIRST" ] && [ "$FIRST" != "${CLONE_TICKET##*/}" ] && spaced="behind ${FIRST#*-*-*-}, who asked first"
-    fi
-    if [ -z "$spaced" ]; then
-      if ! [ -d "$OPS/run-slot-$KIND" ]; then
-        mkdir "$OPS/run-slot-$KIND" 2>/dev/null && { GOT=1; break; }
+    GOT=
+    polls=0
+    while :; do
+      # RUN_SLOT_TEST_LOOP_END ends this loop once with no lane taken, the way bash 5.2's loop drop (the rule at the load5 wait) does, so a test can hold the guard after it to its contract
+      [ "$LOOPS_LEFT" -gt 0 ] && { LOOPS_LEFT=$((LOOPS_LEFT - 1)); break; }
+      spaced=
+      waited=$((SECONDS - WAIT_FROM))
+      self_changed && reread
+      [ "$KIND" = clone ] && clone_verdict
+      if [ "$KIND" = clone ] && [ -z "$spaced" ]; then
+        clone_first
+        [ -n "$FIRST" ] && [ "$FIRST" != "${CLONE_TICKET##*/}" ] && spaced="behind ${FIRST#*-*-*-}, who asked first"
       fi
-      [ $((polls % 3)) -eq 0 ] && reclaim "$OPS/run-slot-$KIND"
-    fi
-    # the full reread, a stat, every 12th poll, about a minute; a newer mtime than the last tick's is read at the top of the poll, before a tick moves it
-    [ $((polls % 12)) -eq 0 ] && reread
-    polls=$((polls + 1))
-    if [ "$waited" -ge "$CAT" ]; then
-      if [ -n "$spaced" ]; then echo "run-slot.sh: this clone waits $spaced" >&2; else echo "run-slot.sh: waiting for the $KIND slot ($(cat "$OPS/run-slot-$KIND.holder" 2>/dev/null))" >&2; fi
-      CAT=$(((waited / 300 + 1) * 300))
-    fi
-    sleep "$CLONE_POLL"
+      if [ -z "$spaced" ]; then
+        if ! [ -d "$OPS/run-slot-$KIND" ]; then
+          mkdir "$OPS/run-slot-$KIND" 2>/dev/null && { GOT=1; break; }
+        fi
+        [ $((polls % 3)) -eq 0 ] && reclaim "$OPS/run-slot-$KIND"
+      fi
+      # the full reread, a stat, every 12th poll, about a minute; a newer mtime than the last tick's is read at the top of the poll, before a tick moves it
+      [ $((polls % 12)) -eq 0 ] && reread
+      polls=$((polls + 1))
+      if [ "$waited" -ge "$CAT" ]; then
+        if [ -n "$spaced" ]; then echo "run-slot.sh: this clone waits $spaced" >&2; else echo "run-slot.sh: waiting for the $KIND slot ($(cat "$OPS/run-slot-$KIND.holder" 2>/dev/null))" >&2; fi
+        CAT=$(((waited / 300 + 1) * 300))
+      fi
+      sleep "$CLONE_POLL"
+    done
+    [ -n "$GOT" ] && break
+    echo "run-slot.sh: the $KIND wait loop ended without the slot, so $WHO waits again" >&2
   done
-  [ -n "$GOT" ] || exit 143
   [ -n "$CLONE_TICKET" ] && rm -f "$CLONE_TICKET" && CLONE_TICKET=""
   SLOT="$OPS/run-slot-$KIND"
   ends=""
