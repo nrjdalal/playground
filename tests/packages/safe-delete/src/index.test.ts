@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { ROSTER_KINDS, ROSTER_ROLE_OF_KIND } from "../../../../packages/config/src/kinds"
+import { hasManagerRole, ROSTER_KINDS } from "../../../../packages/config/src/kinds"
 import {
   CARVE_OUTS,
   type CarveOut,
@@ -685,7 +685,7 @@ describe("worktreeRefusal", () => {
       expect(worktreeRefusal(at, roots, { ...holders, freed })).toBeNull()
     })
 
-    test.each(ROSTER_KINDS.filter((kind) => ROSTER_ROLE_OF_KIND[kind] === "manager"))(
+    test.each(ROSTER_KINDS.filter(hasManagerRole))(
       "a live %s row holds no worktree by its name alone",
       (kind) => {
         const { at, holders, roots } = seat(`PG-9-${kind}-thing`, {
