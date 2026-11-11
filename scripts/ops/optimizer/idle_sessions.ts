@@ -7,6 +7,7 @@
 //   checker-pr-done      a reviewer or tester whose PRs are all merged or closed
 //   checker-nothing      a reviewer or tester not busy for 30+ minutes whose every PR head carries its verdict or is closed
 //   worker-prs-done      a worker whose roster holds a pr, and whose PRs are all merged or closed
+//   worker-pr-closed     a worker whose PR that closed last closed unmerged; its lead is asked to reassign or end it
 //   roster-says-<status> any session whose roster entry reads paused or ended
 // A session whose status is `shell` (a background command still running) is not busy, and is marked `+bg`, since its watcher keeps waking it.
 // Prints one line per flagged session and a total; reads only, signals nothing.
@@ -59,9 +60,9 @@ export type PrState = {
 }
 
 export type Row = {
+  donePr?: string
   kind: string | null
   lead?: string
-  mergedPr?: string
   name: string
   quiet: number
   refs: string[]
@@ -212,7 +213,7 @@ export async function collect(input: CollectInput): Promise<Row[]> {
     const checker = kind === "reviewer" || kind === "tester"
     const worker = checker ? workerOf(name, r.worker) : undefined
     let refs: string[] = []
-    let mergedPr: string | undefined
+    let donePr: string | undefined
     let sha: string | undefined
     if (checker || kind === "worker") {
       const prs = await sessionPrs(input, name, worker, d.sessionId)
@@ -226,25 +227,35 @@ export async function collect(input: CollectInput): Promise<Row[]> {
       )
         why.push(`checker-worker-gone (${worker})`)
       refs = states.flatMap((s) => (s?.ref ? [s.ref] : []))
-      // The PR that merged last, by its merged_at, so an older linked PR never names the merge: a state cached without one sorts oldest, and a tie keeps the later in the list.
+      // The PR that closed last decides the end, a merge by its merged_at and a close by its closed_at, so an older merged PR never names a newer close: a state closed before its time was kept sorts oldest, and a tie keeps the later in the list.
       let newest: number | undefined
+      let newestAt: string | undefined
       states.forEach((s, i) => {
-        if (
-          s?.mergeSha &&
-          (newest === undefined || (s.mergedAt ?? "") >= (states[newest]?.mergedAt ?? ""))
-        )
+        const at =
+          s?.state === "merged"
+            ? (s.mergedAt ?? "")
+            : s?.state === "closed"
+              ? (s.closedAt ?? "")
+              : undefined
+        if (at === undefined) return
+        if (newest === undefined || at >= (newestAt ?? "")) {
           newest = i
+          newestAt = at
+        }
       })
       if (newest !== undefined) {
-        mergedPr = PR_URL.exec(prs[newest] ?? "")?.[2]
-        sha = states[newest]?.mergeSha
+        donePr = PR_URL.exec(prs[newest] ?? "")?.[2]
+        if (states[newest]?.state === "merged") sha = states[newest]?.mergeSha
       }
       const done = states.every((s) => s !== null && (s.state === "merged" || s.state === "closed"))
-      const how = states.some((s) => s?.state === "merged") ? "merged" : "closed"
+      // The PR that closed last names the how alone: a worker whose last close was a close is kept and its lead asked, not ended.
+      const how = newest !== undefined && states[newest]?.state === "merged" ? "merged" : "closed"
       // A worker only while its roster holds a pr: one with none sits between chores, since assign clears it.
-      if (states.length > 0 && done && (checker || r.pr))
-        why.push(`${checker ? "checker" : "worker"}-pr${checker ? "" : "s"}-done (${how})`)
-      else if (
+      if (states.length > 0 && done && (checker || r.pr)) {
+        if (checker) why.push(`checker-pr-done (${how})`)
+        else if (how === "merged") why.push("worker-prs-done (merged)")
+        else why.push(`worker-pr-closed (closed${donePr ? ` #${donePr}` : ""})`)
+      } else if (
         checker &&
         quiet >= 30 &&
         states.length > 0 &&
@@ -257,9 +268,9 @@ export async function collect(input: CollectInput): Promise<Row[]> {
     }
     if (why.length === 0) continue
     rows.push({
+      donePr,
       kind,
       lead: r.lead ?? (worker ? roster[worker]?.lead : undefined),
-      mergedPr,
       name,
       quiet,
       refs,
@@ -358,10 +369,22 @@ export async function prStateLive(
     return fresh
   }
   if (!m) {
-    const read = (await api(`repos/${issue![1]}/issues/${issue![2]}`)) as { state?: string } | null
-    return read?.state ? remember({ at: now, head: "", state: read.state, verdicts: [] }) : null
+    const read = (await api(`repos/${issue![1]}/issues/${issue![2]}`)) as {
+      closed_at?: string | null
+      state?: string
+    } | null
+    return read?.state
+      ? remember({
+          at: now,
+          closedAt: read.closed_at || undefined,
+          head: "",
+          state: read.state,
+          verdicts: [],
+        })
+      : null
   }
   const pr = (await api(`repos/${m[1]}/pulls/${m[2]}`)) as {
+    closed_at?: string | null
     comments?: number
     head?: { ref?: string; sha?: string }
     merge_commit_sha?: string | null
@@ -382,6 +405,7 @@ export async function prStateLive(
   }
   return remember({
     at: now,
+    closedAt: pr.closed_at || undefined,
     head: pr.head.sha,
     mergeSha: (pr.merged_at && pr.merge_commit_sha) || undefined,
     mergedAt: pr.merged_at || undefined,
