@@ -209,7 +209,7 @@ export function bunCall(
     // bun x's options that take a value (-p, --registry), so the word after one is the tool
     else if (words[0] === "x" && RUNNER_TAKES.has(v)) k++
     else if (!v.startsWith("-")) {
-      // bun takes its subcommand from the first word that is no option, an option's value included, then drops the first word after its options as that subcommand's own; so an x after an option's x (bun --env-file x … x turbo) is that dropped word, and the tool follows it
+      // when bun reads an option's value as its subcommand, it drops the next word naming that subcommand, so the tool is the word after it
       if (
         v === "x" &&
         words.length === 1 &&
@@ -410,6 +410,12 @@ function validationOff(local: Map<string, Text>, env: Env): boolean {
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true"
 }
 
+// The folders beside a program bun x runs: its own, and an unread one when the hook cannot read the folder bun's --cwd options chain to
+export const withChained = (
+  also: (string | undefined)[] | undefined,
+  chained: string | undefined,
+) => [...(also ?? []), ...(chained === undefined ? [undefined] : [])]
+
 // Every folder a hit runs in: its own, and those runnerFolders adds beside it.
 export const ranIn = (dir: string | undefined, also?: (string | undefined)[]) => [
   dir,
@@ -478,7 +484,7 @@ function runs(
     return (
       ran && {
         ...ran,
-        also: [...(ran.also ?? []), ...(chained === undefined ? [undefined] : [])],
+        also: withChained(ran.also, chained),
         what: `bun x ${ran.what}`,
       }
     )

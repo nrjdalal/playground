@@ -7314,6 +7314,7 @@ function runnerTarget(args) {
 }
 var toolName = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""));
 var isTurbo = (word) => toolName(word) === "turbo";
+var withChained = (also, chained) => [...also ?? [], ...chained === undefined ? [undefined] : []];
 var ranIn = (dir, also) => [
   dir,
   ...also ?? []
@@ -7579,8 +7580,7 @@ function heavy(name, args, env) {
       cwd: chained
     });
     if (ran) {
-      const also = [...ran.also ?? [], ...chained === undefined ? [undefined] : []];
-      return { ...ran, also, what: `bun x ${ran.what}` };
+      return { ...ran, also: withChained(ran.also, chained), what: `bun x ${ran.what}` };
     }
   }
   const testFile = words[0] === "run" && words[1] === "test:file";

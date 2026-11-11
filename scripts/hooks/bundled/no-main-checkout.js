@@ -7652,6 +7652,7 @@ function validationOff(local, env) {
   const read = (key) => local.get(key)?.value ?? env.vars.get(key)?.value ?? env.process[key];
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true";
 }
+var withChained = (also, chained) => [...also ?? [], ...chained === undefined ? [undefined] : []];
 var ranIn = (dir, also) => [
   dir,
   ...also ?? []
@@ -7708,7 +7709,7 @@ function runs(name, args, local, env) {
     const ran = runs(toolName(target), args.slice(at + 1), local, { ...env, cwd: chained });
     return ran && {
       ...ran,
-      also: [...ran.also ?? [], ...chained === undefined ? [undefined] : []],
+      also: withChained(ran.also, chained),
       what: `bun x ${ran.what}`
     };
   }
@@ -7970,5 +7971,6 @@ export {
   runnerFolders,
   turboWords,
   unreadFolder,
+  withChained,
   writeTargets
 };

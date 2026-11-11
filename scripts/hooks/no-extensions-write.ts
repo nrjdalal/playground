@@ -409,8 +409,7 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   const { args, first, name } = parsed
   if (!first) return []
   const words = [first, ...args]
-  const call = name === "bun" ? bunCall(args, env) : undefined
-  const dirs = [env.cwd, call?.cwd, call?.chained]
+  const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined]
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 

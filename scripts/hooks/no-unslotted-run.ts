@@ -15,6 +15,7 @@ import {
   runnerFolders,
   turboWords,
   unreadFolder,
+  withChained,
   X,
 } from "./no-main-checkout"
 import { fromFactory } from "./role"
@@ -375,8 +376,7 @@ function heavy(
       cwd: chained,
     })
     if (ran) {
-      const also = [...(ran.also ?? []), ...(chained === undefined ? [undefined] : [])]
-      return { ...ran, also, what: `bun x ${ran.what}` }
+      return { ...ran, also: withChained(ran.also, chained), what: `bun x ${ran.what}` }
     }
   }
   // bun run test:file passes its words to bun test, and with no file runs the whole suite as bun test does
