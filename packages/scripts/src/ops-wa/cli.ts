@@ -15,13 +15,14 @@ import { keepAlive, ownFolder, releaseLock, SOCKET, takeLock } from "./habits"
 import { life, type LinkSock, PAIRING, unguarded } from "./life"
 import { socketPath, serve } from "./server"
 
-// ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while it runs and, once stopped, beats why, idle, so up.py does not start it again and its row reads the reason.
+// ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so up.py does not start it again and its row reads the reason.
 process.umask(0o077)
 const data = engineData("ops-wa")
 const dir = join(data, "whatsapp")
 const ops = join(data, "ops")
 const startedAt = new Date()
-let result = "ok"
+const CONNECTING = "waiting: connecting to WhatsApp"
+let result = CONNECTING
 const pulse = () =>
   beat(join(ops, "ops-wa.json"), startedAt, new Date(), result, "ops-wa").catch((e) =>
     console.error(e),
@@ -170,11 +171,7 @@ const main = async () => {
     },
     device,
     dir,
-    linked: async (id) => {
-      result = "ok"
-      void pulse()
-      return ask(["resolve", id, "--by", await by(), "--note", "linked"])
-    },
+    linked: async (id) => ask(["resolve", id, "--by", await by(), "--note", "linked"]),
     listen: (sock) => {
       current = sock
       watched.attach(sock)
@@ -182,6 +179,10 @@ const main = async () => {
     now: Date.now,
     owner,
     sleep: Bun.sleep,
+    up: (open) => {
+      result = open ? "ok" : CONNECTING
+      void pulse()
+    },
   })
   current = undefined
   clearInterval(reminder)

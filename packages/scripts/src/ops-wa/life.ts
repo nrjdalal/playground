@@ -40,6 +40,8 @@ export type LifeIo<S extends LinkSock> = {
   owner: string
   random?: () => number
   sleep: (ms: number) => Promise<void>
+  // told true as a connection opens, the device linked, and false as it closes
+  up: (open: boolean) => void
 }
 
 export const RELINK = "playground wa relink"
@@ -94,6 +96,7 @@ export async function life<S extends LinkSock>(io: LifeIo<S>): Promise<string> {
         }
         if (update.connection === "open") {
           opened = true
+          io.up(true)
           pending.push(
             (async () => {
               const path = join(io.dir, "link.json")
@@ -105,6 +108,7 @@ export async function life<S extends LinkSock>(io: LifeIo<S>): Promise<string> {
             })(),
           )
         }
+        if (update.connection === "close") io.up(false)
         if (update.connection === "close")
           void Promise.allSettled(pending).then(() =>
             resolve({ code: update.lastDisconnect?.error?.output?.statusCode, opened }),

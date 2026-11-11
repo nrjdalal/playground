@@ -41,6 +41,7 @@ const harness = (
   const alerts: string[] = []
   const cards: string[] = []
   const linked: string[] = []
+  const ups: boolean[] = []
   const waits: number[] = []
   const sockets: Fake[] = []
   const io = {
@@ -69,8 +70,9 @@ const harness = (
       waits.push(ms)
       now += ms
     },
+    up: (open: boolean) => void ups.push(open),
   }
-  return { alerts, cards, dir, linked, run: () => life(io), sockets, waits }
+  return { alerts, cards, dir, linked, run: () => life(io), sockets, ups, waits }
 }
 
 describe("ops-wa's ban-safety habits", () => {
@@ -145,6 +147,18 @@ describe("ops-wa's ban-safety habits", () => {
     expect(h.sockets[0]!.pairings).toEqual([SPARE.slice(1)])
     expect(h.cards).toEqual(["ABCD1234"])
     expect(h.linked).toEqual(["card-1"])
+  })
+
+  test("names the link up only while a connection is open, so the heartbeat tells linked from connecting", async () => {
+    const h = harness([
+      (f) => f.close(408),
+      (f) => {
+        f.open()
+        f.close(401)
+      },
+    ])
+    await h.run()
+    expect(h.ups).toEqual([false, true, false])
   })
 
   test("holds the auth state in one process: an exclusive lock a live holder keeps and a gone one gives up", async () => {

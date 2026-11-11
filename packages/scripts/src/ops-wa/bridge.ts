@@ -115,7 +115,7 @@ async function inbound(io: Io & Mode, m: Incoming) {
   await writeOwn(ownerFile(io.dir), { ownerAt: at })
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
   if (!(await io.on())) {
-    // one reply an hour at most, so a run of messages while it is off gets one answer
+    // one reply an hour at most, so a run of messages while it is off gets one answer; offAt is written first, so a failed reply waits out the hour too
     if (at - (watch.offAt ?? 0) < HOUR) return
     await writeOwn(handedFile(io.dir), { ...watch, offAt: at })
     await io.reply(OFF).catch((error: Error) => io.log(`ops-wa: the off reply: ${error.message}`))
@@ -134,38 +134,42 @@ async function pass(io: Io & Mode) {
   const now = io.now()
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
   const handed = (watch.handed ?? []).filter((h) => now - h.at < HOUR)
-  if (await io.on()) {
-    const sends = (await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})).sends ?? []
-    const waiting = handed.filter((h) => !h.bravo && !sends.some((at) => at >= h.at))
-    const blocked = waiting.length > 0 ? await io.stuck() : null
-    const working = !blocked && waiting.length > 0 && (await io.busy())
-    const due = waiting.filter((h) => blocked || (now - h.at >= WAIT_S * 1000 && !working))
-    const to = due.length > 0 ? await io.assistant() : undefined
-    for (const h of due) {
-      h.bravo = true
-      if (!to) {
-        io.log(
-          `ops-wa: no live session holds the assistant seat, so the owner's WhatsApp at ${new Date(h.at).toISOString()} stays with the dispatcher alone`,
-        )
-        continue
+  // the file is written however the pass ends, so a relay that throws keeps the marks of those sent before it
+  try {
+    if (await io.on()) {
+      const sends = (await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})).sends ?? []
+      const waiting = handed.filter((h) => !h.bravo && !sends.some((at) => at >= h.at))
+      const blocked = waiting.length > 0 ? await io.stuck() : null
+      const working = !blocked && waiting.length > 0 && (await io.busy())
+      const due = waiting.filter((h) => blocked || (now - h.at >= WAIT_S * 1000 && !working))
+      const to = due.length > 0 ? await io.assistant() : undefined
+      for (const h of due) {
+        if (!to) {
+          io.log(
+            `ops-wa: no live session holds the assistant seat, so the owner's WhatsApp at ${new Date(h.at).toISOString()} stays with the dispatcher alone`,
+          )
+        } else {
+          const why = blocked
+            ? `the dispatcher has read ${blocked.state} since ${blocked.at}`
+            : `no reply has gone out in ${WAIT_S / 60} minutes`
+          await io.relay(to, `Handed on since ${why}. ${h.line}`)
+        }
+        h.bravo = true
       }
-      const why = blocked
-        ? `the dispatcher has read ${blocked.state} since ${blocked.at}`
-        : `no reply has gone out in ${WAIT_S / 60} minutes`
-      await io.relay(to, `Handed on since ${why}. ${h.line}`)
+      const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
+      if (
+        ownerAt !== undefined &&
+        now - ownerAt <= OWNER_WINDOW_MS &&
+        now - Math.max(watch.updateAt ?? 0, ownerAt) >= UPDATE_MS
+      ) {
+        await io.relay("dispatcher", UPDATE)
+        watch.updateAt = now
+      }
     }
-    const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
-    if (
-      ownerAt !== undefined &&
-      now - ownerAt <= OWNER_WINDOW_MS &&
-      now - Math.max(watch.updateAt ?? 0, ownerAt) >= UPDATE_MS
-    ) {
-      await io.relay("dispatcher", UPDATE)
-      watch.updateAt = now
-    }
+  } finally {
+    await ownFolder(io.dir)
+    await writeOwn(handedFile(io.dir), { ...watch, handed })
   }
-  await ownFolder(io.dir)
-  await writeOwn(handedFile(io.dir), { ...watch, handed })
 }
 
 // The bridge, one per process, so its one queue writes its state files across every reconnect: attach listens on a socket, where each new 1:1 message from the owner goes to the dispatcher while WhatsApp mode is on and every other message and call is dropped and logged, one at a time in the order they came; pass queues the failover and update check; idle waits for the queue to empty.

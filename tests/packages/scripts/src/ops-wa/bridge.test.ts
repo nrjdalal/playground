@@ -36,6 +36,8 @@ const harness = () => {
   const waits: number[] = []
   const mode = {
     busy: false,
+    // a relay whose text holds it throws, as a failed sendAs would
+    fails: undefined as string | undefined,
     on: true,
     seat: ASSISTANT as string | undefined,
     stuck: null as Stuck,
@@ -59,6 +61,7 @@ const harness = () => {
     log: (line) => logs.push(line),
     on: async () => mode.on,
     relay: async (to: string, text: string) => {
+      if (mode.fails && text.includes(mode.fails)) throw new Error("the relay failed")
       routed.push({ text, to })
       if (to === "dispatcher") relayed.push(text)
     },
@@ -350,6 +353,35 @@ describe("WhatsApp mode", () => {
     await alone.pass()
     expect(alone.routed.map((r) => r.to)).toEqual(["dispatcher"])
     expect(alone.logs.join("\n")).toContain("stays with the dispatcher alone")
+  })
+
+  test("while it is off, a pass hands nothing on and keeps the file for when it is on again", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "still there?")])
+    await h.settle()
+    h.mode.on = false
+    h.advance(5 * 60_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
+    h.mode.on = true
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", ASSISTANT])
+  })
+
+  test("a hand-on that throws keeps the marks of those sent before it, so each goes to the assistant once", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "first"), h.fake.message(jid(OWNER), "second")])
+    await h.settle()
+    h.advance(3 * 60_000)
+    h.mode.fails = "second"
+    await h.pass()
+    expect(h.logs.join("\n")).toContain("the relay failed")
+    h.mode.fails = undefined
+    await h.pass()
+    const toSeat = h.routed.filter((r) => r.to === ASSISTANT).map((r) => r.text)
+    expect(toSeat).toHaveLength(2)
+    expect(toSeat[0]).toContain("first")
+    expect(toSeat[1]).toContain("second")
   })
 
   test("asks the dispatcher for an update every 15 minutes while the owner has written in the last 24 hours", async () => {
