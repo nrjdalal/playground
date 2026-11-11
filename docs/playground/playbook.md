@@ -77,7 +77,9 @@ and the Dashboard shows each one it finds as Stuck, with a red alarm, or as Paus
 Each night at 3:00 am, ops-tick's nightly clean removes what no merge's cleanup reached: worktrees and branches of merged or closed PRs, exited containers of worktrees that are gone, Docker's dangling images and build cache, and turbo cache files over 2 days old.
 It keeps a worktree that another worktree or a scratch folder still links into, and names the first three links.
 A merged or closed PR's worktree goes to the trash whatever it holds, and one whose merge or close `playground rm` cannot confirm goes there too under the owner's standing approval, each move restorable with `playground rm --restore`.
+It spaces its deletes under `playground rm`'s limit of 3 a minute, so none is refused, and leaves what does not fit in a 10-minute wait for the next night.
 An unmerged branch's head is tagged `archive/<branch>` on origin before any delete, so the tag holds it and `git branch <name> archive/<branch>` brings the branch back; one whose tag cannot be made, or whose origin head is not the local head the tag would hold, stays, named in the log.
+A branch never pushed stays too, with a local `archive/<branch>` tag alone, since a push would publish commits no one has reviewed, and is named once, the night that tag is made.
 Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch.
 It posts an Inbox update when it freed 1 GB or more, and asks no decision: a container or unused volume over 1 GB that no rule takes is kept, and named as kept in the same log and outbox line, as is a container whose removal failed.
 A worker spawns its own reviewer and tester, each briefed from a template it fills in, and the Dashboard nests them under it; the reviewer scores the PR through [code-review-loop](./code-review-loop.md).

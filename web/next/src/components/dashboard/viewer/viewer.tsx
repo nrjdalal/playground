@@ -9,6 +9,8 @@ import {
   RiErrorWarningLine,
   RiExternalLinkLine,
   RiFileLine,
+  RiFullscreenLine,
+  RiLayoutRightLine,
 } from "@remixicon/react"
 import { cn } from "cn"
 import {
@@ -20,12 +22,13 @@ import {
   useSyncExternalStore,
 } from "react"
 
+import { useText } from "@/components/dashboard/viewer/documents"
 import { type ViewerItem, VIEWERS } from "@/components/dashboard/viewer/registry"
 import {
   attachmentDownloadUrl,
   useAttachment,
 } from "@/components/dashboard/viewer/use-attachment-url"
-import { OFF_FOCUSABLE } from "@/components/hint"
+import { Hint, OFF_FOCUSABLE } from "@/components/hint"
 import { Button } from "@/components/ui/button"
 import { Carousel, type CarouselApi, CarouselContent, CarouselItem } from "@/components/ui/carousel"
 import {
@@ -36,8 +39,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
+import { opensInAside } from "@/lib/aside-docs"
 import { saveFrom } from "@/lib/download"
 import { BAR_ITEM, FLOATING_BAR } from "@/lib/floating-bar"
+import { pageTab } from "@/lib/viewer"
 
 const KIND_LABELS: Record<InboxAttachmentKind, string> = {
   code: "Code",
@@ -102,7 +107,7 @@ function Slide({
   onEdge: (direction: -1 | 1) => void
 }) {
   const viewer = VIEWERS[item.kind]
-  const { failed, missing, url } = useAttachment(item.id, near && Boolean(viewer))
+  const { failed, missing, url } = useAttachment(item.id, near && Boolean(viewer), item.page?.url)
   const Icon = viewer?.icon ?? RiFileLine
   return (
     <CarouselItem
@@ -156,46 +161,109 @@ export const BAR_COUNT =
   "text-muted-foreground w-16 shrink-0 text-center font-mono text-xs tabular-nums"
 export const BAR_NAME = "w-48 min-w-0 shrink truncate px-1 text-xs font-normal"
 
-// The kinds a tab may open as a blob URL, which runs with the Dashboard's origin: only those that run no script, an image being a GIF, JPEG, PNG or WebP (`IMAGE_EXTENSIONS`), never an SVG, and never an HTML page or code.
-export const OPENS_IN_TAB: readonly InboxAttachmentKind[] = ["image", "pdf"]
+// The kinds a tab may open: an image or a PDF as its blob URL, which runs with the Dashboard's origin, so only those that run no script, an image being a GIF, JPEG, PNG or WebP (`IMAGE_EXTENSIONS`), never an SVG or code; an HTML page at its own address on Previews, else held in a sandboxed frame (pageTab).
+export const OPENS_IN_TAB: readonly InboxAttachmentKind[] = ["html", "image", "pdf"]
 
-// The shown file on a tab of its own, at full size, off until its file has arrived; a kind OPENS_IN_TAB leaves out has no button at all. No tooltips in the bar: each square's icon says it.
-export function OpenInNewTab({ item }: { item: ViewerItem }) {
+// A square's blank room in a bar, where a kind takes no button, so the bar holds one width.
+const ROOM = <span aria-hidden className="size-8 shrink-0" />
+
+// Pure: what a tab opens for a file of a kind OPENS_IN_TAB takes: a kept page's own address, a card's page held in pageTab (framed, made once its text has arrived), and an image's or a PDF's own blob; null until it can.
+export const tabHref = (item: ViewerItem, blob: string | null, framed: string | null) =>
+  item.page ? item.page.url : item.kind === "html" ? framed : blob
+
+// A card's page held in pageTab as a blob URL while its square shows, freed once it goes, since the URL holds the whole page; a tab it opened keeps its document.
+function useFramedPage(name: string, html: string | null | false): string | null {
+  const [framed, setFramed] = useState<string | null>(null)
+  useEffect(() => {
+    if (typeof html !== "string") return
+    const href = URL.createObjectURL(new Blob([pageTab(name, html)], { type: "text/html" }))
+    setFramed(href)
+    return () => {
+      URL.revokeObjectURL(href)
+      setFramed(null)
+    }
+  }, [name, html])
+  return framed
+}
+
+// The shown file on a tab of its own, at full size, off until it can open; a kind OPENS_IN_TAB leaves out has no button at all, keeping its room where keepRoom asks, as the viewer's bar does so it holds one width.
+export function OpenInNewTab({ item, keepRoom = false }: { item: ViewerItem; keepRoom?: boolean }) {
   const opens = OPENS_IN_TAB.includes(item.kind)
-  const { url } = useAttachment(item.id, opens && Boolean(VIEWERS[item.kind]))
-  // a kind that never opens in a tab keeps the square's room, so the bar holds one width
-  if (!opens) return <span aria-hidden className="size-8 shrink-0" />
-  return url ? (
-    <Button
-      aria-label="Open in new tab"
-      className={SQUARE}
-      render={<a href={url} rel="noreferrer" target="_blank" />}
-      size="icon-sm"
-      variant="ghost"
-    >
-      <RiExternalLinkLine />
-    </Button>
-  ) : (
-    <Button
-      aria-label="Open in new tab"
-      className={cn(SQUARE, OFF_FOCUSABLE.className)}
-      disabled
-      focusableWhenDisabled={OFF_FOCUSABLE.focusableWhenDisabled}
-      size="icon-sm"
-      variant="ghost"
-    >
-      <RiExternalLinkLine />
-    </Button>
+  const { url } = useAttachment(item.id, opens && !item.page && Boolean(VIEWERS[item.kind]))
+  const text = useText(item.kind === "html" && !item.page ? url : null)
+  const href = tabHref(item, url, useFramedPage(item.name, text))
+  if (!opens) return keepRoom ? ROOM : null
+  return (
+    // the off square is a button and the live one a link, so the element is swapped once the file arrives; the key remounts the tooltip with it, whose trigger would stay bound to the gone button
+    <Hint key={href ? "open" : "off"} content="Open in new tab" description={null}>
+      {href ? (
+        <Button
+          aria-label="Open in new tab"
+          className={SQUARE}
+          render={<a href={href} rel="noreferrer" target="_blank" />}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <RiExternalLinkLine />
+        </Button>
+      ) : (
+        <Button
+          aria-label="Open in new tab"
+          className={cn(SQUARE, OFF_FOCUSABLE.className)}
+          disabled
+          focusableWhenDisabled={OFF_FOCUSABLE.focusableWhenDisabled}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <RiExternalLinkLine />
+        </Button>
+      )}
+    </Hint>
+  )
+}
+
+// A page's square that opens it full screen, in the viewer over the page.
+export function FullScreen({ onClick }: { onClick: () => void }) {
+  return (
+    <Hint content="Full screen" description={null}>
+      <Button
+        aria-label="Full screen"
+        className={SQUARE}
+        onClick={onClick}
+        size="icon-sm"
+        variant="ghost"
+      >
+        <RiFullscreenLine />
+      </Button>
+    </Hint>
+  )
+}
+
+// A page's square that opens it in an aside tab of its own, beside the chat.
+export function SidePanel({ onClick }: { onClick: () => void }) {
+  return (
+    <Hint content="Open in side panel" description={null}>
+      <Button
+        aria-label="Open in side panel"
+        className={SQUARE}
+        onClick={onClick}
+        size="icon-sm"
+        variant="ghost"
+      >
+        <RiLayoutRightLine />
+      </Button>
+    </Hint>
   )
 }
 
 // Saves a file, or both sides of a before/after pair one after the other, through the Inbox's route in its download mode, under the name the API builds from its item's title.
 export async function saveItem(item: ViewerItem): Promise<void> {
+  if (item.page) return saveFrom(item.page.download)
   for (const file of item.pair ? [item.pair.before, item.pair.after] : [item])
     await saveFrom(attachmentDownloadUrl(file.id))
 }
 
-// Saves the shown file, or both sides of a before/after pair, under its item's title, as the API names it; off while it saves, and a failed save shows a warning in its place and says so in its name, so another press tries again. label names it where several sit together, a tile's naming its file.
+// Saves the shown file, or both sides of a before/after pair, under its item's title, as the API names it, Download in its tooltip; off while it saves, and a failed save shows a warning in its place and says so in its name and tooltip, so another press tries again. label names it where several sit together, a tile's naming its file.
 export function Download({
   className = SQUARE,
   item,
@@ -216,36 +284,43 @@ export function Download({
     }
   }
   return (
-    <Button
-      aria-label={state === "failed" ? `${label} failed, try again` : label}
-      className={cn(className, state === "saving" && OFF_FOCUSABLE.className)}
-      disabled={state === "saving"}
-      focusableWhenDisabled={OFF_FOCUSABLE.focusableWhenDisabled}
-      onClick={save}
-      size="icon-sm"
-      variant="ghost"
+    <Hint
+      content={state === "failed" ? "Download failed, try again" : "Download"}
+      description={null}
     >
-      {state === "failed" ? (
-        <RiErrorWarningLine className="text-destructive" />
-      ) : (
-        <RiDownloadLine />
-      )}
-    </Button>
+      <Button
+        aria-label={state === "failed" ? `${label} failed, try again` : label}
+        className={cn(className, state === "saving" && OFF_FOCUSABLE.className)}
+        disabled={state === "saving"}
+        focusableWhenDisabled={OFF_FOCUSABLE.focusableWhenDisabled}
+        onClick={save}
+        size="icon-sm"
+        variant="ghost"
+      >
+        {state === "failed" ? (
+          <RiErrorWarningLine className="text-destructive" />
+        ) : (
+          <RiDownloadLine />
+        )}
+      </Button>
+    </Hint>
   )
 }
 
-// The Inbox's viewer: full screen over the page on a see-through stage, the stock Dialog overlay's dim and blur, in Slider mode, one file filling the screen at a time, as slides, the file filling it edge to edge, fitted to whichever side runs out first, and one floating bar, the aside's own (FLOATING_BAR), that rises only while the pointer is near the bottom edge or a key has focus in it. The arrows, a swipe or the ‹ › buttons move it (a jump where motion is reduced), Esc or X closes it, and focus stays inside, the stock Dialog's. The bar holds ‹, where it stands ("2 / 6") and ›, the file's name, Open in new tab, Download and X. index is the slide shown, which the viewer reports as it moves.
+// The Inbox's viewer: full screen over the page on a see-through stage, the stock Dialog overlay's dim and blur, in Slider mode, one file filling the screen at a time, as slides, the file filling it edge to edge, fitted to whichever side runs out first, and one floating bar, the aside's own (FLOATING_BAR), that rises only while the pointer is near the bottom edge or a key has focus in it. The arrows, a swipe or the ‹ › buttons move it (a jump where motion is reduced), Esc or X closes it, and focus stays inside, the stock Dialog's. The bar holds ‹, where it stands ("2 / 6") and ›, the file's name, then Download, Open in new tab, Open in side panel where the viewer opens from the aside (onSidePanel) and X, each naming itself in a tooltip. index is the slide shown, which the viewer reports as it moves.
 export function Viewer({
   index,
   items,
   onIndexChange,
   onOpenChange,
+  onSidePanel,
   open,
 }: {
   index: number
   items: ViewerItem[]
   onIndexChange: (index: number) => void
   onOpenChange: (open: boolean) => void
+  onSidePanel?: (item: ViewerItem) => void
   open: boolean
 }) {
   const [api, setApi] = useState<CarouselApi>()
@@ -408,16 +483,25 @@ export function Viewer({
             </Button>
             <Separator className="mx-1 h-5" orientation="vertical" />
             <DialogTitle className={BAR_NAME}>{item.name}</DialogTitle>
-            <OpenInNewTab item={item} />
             <Download item={item} />
-            <DialogClose
-              render={
-                <Button aria-label="Close" className={SQUARE} size="icon-sm" variant="ghost" />
-              }
-            >
-              {/* every bar icon reads one size, 16px, the cross included */}
-              <RiCloseLine />
-            </DialogClose>
+            <OpenInNewTab item={item} keepRoom />
+            {/* a file the aside takes no tab for keeps the square's room, so the bar holds one width */}
+            {onSidePanel &&
+              (!item.pair && opensInAside(item.kind) ? (
+                <SidePanel onClick={() => onSidePanel(item)} />
+              ) : (
+                ROOM
+              ))}
+            <Hint content="Close" description={null}>
+              <DialogClose
+                render={
+                  <Button aria-label="Close" className={SQUARE} size="icon-sm" variant="ghost" />
+                }
+              >
+                {/* every bar icon reads one size, 16px, the cross included */}
+                <RiCloseLine />
+              </DialogClose>
+            </Hint>
           </div>
         </div>
       </DialogContent>
