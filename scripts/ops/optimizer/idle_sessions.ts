@@ -3,7 +3,7 @@
 // Ported from ~/.playground/ops/optimizer/idle_sessions.py; a session's PRs are its roster pr and prs list, its worker's, every open one on its branch and every one its transcript links, so a checker serving a second PR is never listed while that one is open.
 // Flags, from Claude's session registry (live pid, status, statusUpdatedAt), roster.json and GitHub REST reads per PR (an open PR cached 5 minutes, a merged or closed one for good):
 // Every flag needs 10+ minutes not busy, so a session finishing a step is never listed. ops-tick's auto-end beat ends what auto_end.ts takes of it.
-//   checker-worker-gone  a reviewer or tester whose worker has no live session, with no open PR of a live worker on its prs list
+//   checker-worker-gone  a reviewer or tester whose worker has no live session, with no open PR a live worker serves among its PRs
 //   checker-pr-done      a reviewer or tester whose PRs are all merged or closed
 //   checker-nothing      a reviewer or tester not busy for 30+ minutes whose every PR head carries its verdict or is closed
 //   worker-prs-done      a worker whose roster holds a pr, and whose PRs are all merged or closed
@@ -101,6 +101,23 @@ export async function sessionPrs(
       ...(workerSession && linkedPrs ? await linkedPrs(workerSession) : []),
     ]),
   ]
+}
+
+// The PR's worker: a live worker session whose workerPrs (its roster pr and open branch PRs) holds an open PR of the checker's list; read only once the checker's own worker is found gone, so the extra reads wait for that.
+export async function servesLiveWorker(
+  input: CollectInput,
+  prs: string[],
+  states: (PrState | null)[],
+): Promise<boolean> {
+  const { roster, sessions, workerPrs } = input
+  for (let i = 0; i < states.length; i++) {
+    if (states[i]?.state !== "open") continue
+    for (const w of Object.keys(sessions)) {
+      if (kindOf(w, roster[w]?.kind) !== "worker") continue
+      if ((await workerPrs(w)).includes(prs[i])) return true
+    }
+  }
+  return false
 }
 
 type Usage = {
@@ -208,12 +225,7 @@ export async function collect(input: CollectInput): Promise<Row[]> {
         worker &&
         !(worker in sessions) &&
         !Object.keys(sessions).some((s) => s.startsWith("worker-") && s.startsWith(worker)) &&
-        // an open PR whose roster worker row names a live session keeps the checker on
-        !states.some((s, i) => {
-          if (s?.state !== "open") return false
-          const owner = Object.values(roster).find((r) => r.kind === "worker" && r.pr === prs[i])
-          return owner?.name !== undefined && owner.name in sessions
-        })
+        !(await servesLiveWorker(input, prs, states))
       )
         why.push(`checker-worker-gone (${worker})`)
       refs = states.flatMap((s) => (s?.ref ? [s.ref] : []))
