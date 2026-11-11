@@ -3817,19 +3817,19 @@
         {
           "disabled": true,
           "disabledWhy": "Fixture: paused on purpose",
-          "heartbeat": "ops-fixture",
-          "name": "ops-fixture",
+          "heartbeat": "ops-dm-watch",
+          "name": "ops-dm-watch",
           "schedule": {
-            "always": true
+            "cron": "*/2 * * * *"
           }
         },
         {
           "disabled": true,
           "disabledWhy": "Fixture: paused on purpose",
-          "heartbeat": "ops-dm-watch",
-          "name": "ops-dm-watch",
+          "heartbeat": "ops-fixture",
+          "name": "ops-fixture",
           "schedule": {
-            "cron": "*/2 * * * *"
+            "always": true
           }
         },
         {
