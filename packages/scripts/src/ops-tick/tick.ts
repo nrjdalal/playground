@@ -223,7 +223,6 @@ const priorityLapse = async (ctx: Context) => {
   for (const line of await lapse(join(ctx.ops, ".."), ctx.now)) await ctx.send("ops", line)
 }
 
-// A run-slot hold past 30 minutes while a waiter queues is told to ops once per hold: the four queue lanes' holder lines (`<who> <pid> <iso> <units> <size>`) give the holder and its start, runs.log's ask line for that who and pid the command (a hold can-take, a reread or the merge train's own mkdir made names none), a dead pid no alert, and tick/run-slot-hold-told.json holds one `<slot>:<pid>` key per told hold, pruned to the live holds each pass.
 const RUN_SLOTS = ["run-slot", "run-slot-2", "run-slot-3", "run-slot-4"]
 const HOLD_AFTER_MS = 30 * 60_000
 
@@ -236,21 +235,15 @@ const pidLive = (pid: number): boolean => {
   }
 }
 
+// A run-slot hold past 30 minutes while a waiter queues is told to ops once per hold: the four queue lanes' holder lines (`<who> <pid> <iso> <units> <size>`) give the holder and its start, runs.log's ask line for that who and pid the command (a hold can-take, a reread or the merge train's own mkdir made names none), a dead pid no alert, the queue's live waiter tickets counted by each ticket's pid as run-slot.sh's own queue read prunes the dead ones, and tick/run-slot-hold-told.json holds one `<slot>:<pid>` key per told hold, pruned to the live holds on every pass, a no-waiter one included.
 export const runSlotHold = async (ctx: Context) => {
-  let waiters = 0
-  try {
-    waiters = (await readdir(join(ctx.ops, "run-slot.waiters"))).length
-  } catch {
-    return
-  }
-  if (waiters === 0) return
   const toldPath = join(ctx.ops, "tick", "run-slot-hold-told.json")
   const told = ((await readJson(toldPath).catch(() => null)) ?? {}) as Record<string, string>
   const before = JSON.stringify(told)
   const runsLog = await Bun.file(join(ctx.ops, "run-slot.runs.log"))
     .text()
     .catch(() => "")
-  const live = new Set<string>()
+  const holds: { heldMs: number; pid: string; since: string; slot: string; who: string }[] = []
   for (const slot of RUN_SLOTS) {
     const line = (
       await Bun.file(join(ctx.ops, `${slot}.holder`))
@@ -267,17 +260,28 @@ export const runSlotHold = async (ctx: Context) => {
       !pidLive(Number(pid))
     )
       continue
-    const key = `${slot}:${pid}`
-    live.add(key)
-    if (told[key]) continue
-    const asked = runsLog.split("\n").findLast((l) => l.includes(` ask ${who} ${pid} `))
-    const command = asked
-      ? asked.replace(/^[^ ]+ ask \S+ \d+ /, "")
-      : "command unread from run-slot.runs.log"
-    const text = `run-slot: ${who}'s run has held ${slot} for ${Math.floor(heldMs / 60_000)} min while ${waiters} waiter${waiters === 1 ? "" : "s"} queue${waiters === 1 ? "s" : ""}: ${command} (pid ${pid}, since ${since})`
-    if (await ctx.send("ops", text, true)) told[key] = text
+    holds.push({ heldMs, pid, since: since!, slot, who })
   }
+  const live = new Set(holds.map((h) => `${h.slot}:${h.pid}`))
   for (const key of Object.keys(told)) if (!live.has(key)) delete told[key]
+  let waiters = 0
+  try {
+    waiters = (await readdir(join(ctx.ops, "run-slot.waiters"))).filter((t) =>
+      pidLive(Number(t.split("-")[1])),
+    ).length
+  } catch {}
+  if (waiters > 0) {
+    for (const hold of holds) {
+      const key = `${hold.slot}:${hold.pid}`
+      if (told[key]) continue
+      const asked = runsLog.split("\n").findLast((l) => l.includes(` ask ${hold.who} ${hold.pid} `))
+      const command = asked
+        ? asked.replace(/^[^ ]+ ask \S+ \d+ /, "")
+        : "command unread from run-slot.runs.log"
+      const text = `run-slot: ${hold.who}'s run has held ${hold.slot} for ${Math.floor(hold.heldMs / 60_000)} min while ${waiters} waiter${waiters === 1 ? "" : "s"} queue${waiters === 1 ? "s" : ""}: ${command} (pid ${hold.pid}, since ${hold.since})`
+      if (await ctx.send("ops", text, true)) told[key] = text
+    }
+  }
   if (JSON.stringify(told) !== before) await writeAtomic(toldPath, JSON.stringify(told))
 }
 
