@@ -289,6 +289,16 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "^AskUserQuestion$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && { s=scripts/hooks/bundled/no-chat-question.js; [ -f \"$R/$s\" ] || s=scripts/hooks/no-chat-question.ts; [ -f \"$R/$s\" ]; } || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-chat-question: no guard script in the main checkout (${R:-not found}); refusing. ops-restore puts it back, else Ops by playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file \"$s\"; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-chat-question: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "timeout": 15
+          }
+        ]
       }
     ],
     "SessionEnd": [
