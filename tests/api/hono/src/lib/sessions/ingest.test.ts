@@ -1330,6 +1330,33 @@ describe.skipIf(!dockerUp())("ingest", () => {
   test("a Claude Code transcript still ingests as a claude-code session", async () => {
     expect((await sessionRow(SESSION)).harness).toBe("claude-code")
   })
+
+  test("a stack that reads this machine skips a rollout that is not Playground's own, unread", async () => {
+    const FOREIGN = "019a7c00-0000-7000-8000-00000000f00d"
+    writeFileSync(rolloutPath(FOREIGN), rollout(FOREIGN))
+    const keys = [
+      "PLAYGROUND_ALL_SESSIONS",
+      "PLAYGROUND_DATA_DIR",
+      "PLAYGROUND_FIXTURE",
+      "PLAYGROUND_LIVE_READS",
+    ]
+    const saved = keys.map((key) => [key, process.env[key]] as const)
+    Object.assign(process.env, {
+      PLAYGROUND_DATA_DIR: join(root, "own-data"),
+      PLAYGROUND_LIVE_READS: "1",
+    })
+    delete process.env.PLAYGROUND_ALL_SESSIONS
+    delete process.env.PLAYGROUND_FIXTURE
+    try {
+      expect(await ingestRollout(rolloutPath(FOREIGN))).toBeNull()
+    } finally {
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+    expect(await sessionRow(FOREIGN)).toBeUndefined()
+  })
 })
 
 describe("mergeSession", () => {

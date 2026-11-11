@@ -212,6 +212,114 @@
     ]
   },
   "files": {
+    "codex/sessions/2026/01/01/rollout-2026-01-01T09-00-00-11111111-1111-7111-8111-00000000c0de.jsonl": [
+      {
+        "payload": {
+          "cli_version": "0.167.1",
+          "cwd": "/fixture/playground",
+          "git": {
+            "branch": "canary"
+          },
+          "id": "11111111-1111-7111-8111-00000000c0de",
+          "model_provider": "openai",
+          "originator": "codex_cli_rs",
+          "session_id": "11111111-1111-7111-8111-00000000c0de",
+          "source": "cli",
+          "timestamp": "2026-01-01T09:00:00.000Z"
+        },
+        "timestamp": "2026-01-01T09:00:00.000Z",
+        "type": "session_meta"
+      },
+      {
+        "payload": {
+          "cwd": "/fixture/playground",
+          "model": "gpt-5.5-codex"
+        },
+        "timestamp": "2026-01-01T09:00:00.100Z",
+        "type": "turn_context"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "text": "<environment_context>Fixture: a sandbox in /fixture/playground</environment_context>",
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        "timestamp": "2026-01-01T09:00:00.200Z",
+        "type": "response_item"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "text": "Fixture: list the open pull requests and say which one needs review first.",
+              "type": "input_text"
+            }
+          ],
+          "role": "user",
+          "type": "message"
+        },
+        "timestamp": "2026-01-01T09:00:05.000Z",
+        "type": "response_item"
+      },
+      {
+        "payload": {
+          "summary": [
+            {
+              "text": "Reading the open pull requests",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        },
+        "timestamp": "2026-01-01T09:00:08.000Z",
+        "type": "response_item"
+      },
+      {
+        "payload": {
+          "arguments": "{\"command\": [\"gh\", \"pr\", \"list\", \"--state\", \"open\"]}",
+          "call_id": "call_fixture_1",
+          "name": "shell",
+          "type": "function_call"
+        },
+        "timestamp": "2026-01-01T09:00:09.000Z",
+        "type": "response_item"
+      },
+      {
+        "payload": {
+          "call_id": "call_fixture_1",
+          "output": "#12  Fixture: tidy the sidebar\n#14  Fixture: a faster board refresh",
+          "type": "function_call_output"
+        },
+        "timestamp": "2026-01-01T09:00:11.000Z",
+        "type": "response_item"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "text": "Two pull requests are open. **#14** needs review first: it changes how often the board refreshes, and #12 builds on it.",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "type": "message"
+        },
+        "timestamp": "2026-01-01T09:00:15.000Z",
+        "type": "response_item"
+      },
+      {
+        "payload": {
+          "type": "task_complete"
+        },
+        "timestamp": "2026-01-01T09:00:15.100Z",
+        "type": "event_msg"
+      }
+    ],
     "projects/-fixture-playground/11111111-1111-4111-8111-000000000001.jsonl": [
       {
         "agentName": "dispatcher",
