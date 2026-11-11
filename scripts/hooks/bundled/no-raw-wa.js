@@ -2,7 +2,7 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-raw-wa.ts
-import { realpathSync } from "fs";
+import { realpathSync as realpathSync2 } from "fs";
 import { homedir as homedir4 } from "os";
 import { resolve as resolve4 } from "path";
 
@@ -266,6 +266,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { AsyncLocalStorage } from "async_hooks";
+import { realpathSync } from "fs";
 import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute3, resolve as resolve3 } from "path";
 var UNKNOWN = "\x00";
@@ -1018,6 +1019,8 @@ function walk(lx, scope, nested, inherit) {
       if (after === "&&")
         done.chained = true;
       done.chain = lx.token;
+      if (lx.orRun)
+        done.orRun = true;
       const last = lx.commands[lx.commands.length - 1]?.words;
       const compound = !!done.group && last?.length === 1 && OPENS.has(reserved[0] ?? "") && !HELD.has(reserved[0] ?? "");
       if (reserved.some((w) => HELD.has(w)) || compound)
@@ -1050,8 +1053,10 @@ function walk(lx, scope, nested, inherit) {
         done.atLeastOnce = true;
       depth = Math.max(0, depth + opened - closed);
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0));
-      if (depth === 0 && FREES.has(op))
+      if (depth === 0 && FREES.has(op)) {
         lx.token = freshToken();
+        lx.orRun = op === "||";
+      }
       after = op;
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted)
@@ -1738,11 +1743,14 @@ function again(lexed, cmd, parsed) {
 async function nested(cmd, env, body) {
   const chain = env.cwdChain;
   const token = env.cwdChainToken;
+  const or = env.cwdOr;
   env.cwdChain = [];
   env.cwdChainToken = undefined;
+  env.cwdOr = undefined;
   try {
     return await body();
   } finally {
+    env.cwdOr = or;
     const left = [...new Set([...chain ?? [], ...env.cwdChain ?? []])];
     env.cwdChain = keep(left, env);
     env.cwdChainToken = left.length > 0 ? chain?.length ? token : cmd.chain : undefined;
@@ -1793,7 +1801,8 @@ async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
     return homedir3();
-  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
+  const lexical = dir.value === "-" ? undefined : pathOf(dir, env);
+  const typed = await folder(lexical && physicalCd(args) ? kernelPath(dir, env.cwd, lexical) : lexical);
   const sign = typed ? undefined : tildeSign(name, dir, env);
   const base = sign && (sign === "-" ? env.old?.dir : env.cwd);
   return base ? await folder(base + dir.value.slice(2)) : typed;
@@ -1813,6 +1822,7 @@ function cdTargets(name, cmd, parsed, env, from) {
     return { back: true, paths: [], unread: true };
   const paths = new Set;
   const many = manyTimes(cmd, parsed);
+  const physical = physicalCd(parsed.args);
   let unread = dirs.length > 1;
   for (const typed of dirs.length > 1 ? dirs : [dir]) {
     const word = env.hold?.(typed, cmd, env) ?? typed;
@@ -1825,14 +1835,23 @@ function cdTargets(name, cmd, parsed, env, from) {
         unread = true;
         continue;
       }
-      paths.add(path);
+      const landed = physical ? kernelPath(word, base, path) : path;
+      paths.add(landed);
       if (many && word.value.split("/").includes("..")) {
-        for (const up of ancestors(path))
+        for (const up of ancestors(landed))
           paths.add(up);
       }
     }
   }
   return { back: dirs.length > 1, paths: [...paths], unread };
+}
+var physicalCd = (args) => args.filter((a) => /^-[LPe@]+$/.test(a.value)).map((a) => a.value.replace(/[^LP]/g, "")).join("").endsWith("P");
+function kernelPath(word, base, lexical) {
+  try {
+    return realpathSync.native(isAbsolute3(word.value) ? word.value : `${base}/${word.value}`);
+  } catch {
+    return lexical;
+  }
 }
 function tildeMove(move, name, parsed, env, from, back) {
   const dir = parsed.args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
@@ -1875,7 +1894,7 @@ async function chdirTo(name, cmd, parsed, env) {
     env.cwdSure = paths[0];
     env.cwdMaybe = [];
     env.cwdUnread = false;
-    env.cwdOr = chained ? undefined : { before: from, token: cmd.chain };
+    env.cwdOr = chained ? undefined : { before: from, cdChain: cmd.chain, scope: cmd.scope };
     if (env.old)
       env.oldFrom = bases;
     if (chained) {
@@ -1894,19 +1913,19 @@ var negated = (cmd) => markers(cmd.words).filter((word) => word === "!").length 
 var EXITS = new Set(["exit", "return"]);
 function orElse(cmd, env) {
   const or = env.cwdOr;
-  if (!or || cmd.chain === or.operand)
+  if (!or || cmd.chain === or.orChain)
     return;
-  if (cmd.chain === or.token) {
-    if (!or.tail)
-      env.cwdOr = { ...or, tail: true };
+  if (cmd.chain === or.cdChain) {
+    if (!or.joined)
+      env.cwdOr = { ...or, joined: true };
     return;
   }
-  if (or.operand === undefined && cmd.follows === "||") {
+  if (or.orChain === undefined && cmd.orRun) {
     env.cwdOr = {
       ...or,
       landed: { maybe: env.cwdMaybe ?? [], sure: env.cwdSure },
-      operand: cmd.chain,
-      resumes: or.tail || EXITS.has(parse(cmd).name)
+      orChain: cmd.chain,
+      resumes: or.joined || EXITS.has(parse(cmd).name) && !cmd.detached && cmd.scope === or.scope
     };
     env.cwdMaybe = keep([...new Set([...startFolders(env), ...or.before])], env);
     env.cwdSure = undefined;
@@ -2215,7 +2234,7 @@ var targetsOf = (environment) => {
   const typed = resolve4(dataDirOf(environment), "whatsapp");
   let real = typed;
   try {
-    real = resolve4(realpathSync(dataDirOf(environment)), "whatsapp");
+    real = resolve4(realpathSync2(dataDirOf(environment)), "whatsapp");
   } catch {}
   return [...new Set([typed, real].map((p) => p.toLowerCase()))];
 };

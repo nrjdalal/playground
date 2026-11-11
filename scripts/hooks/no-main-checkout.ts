@@ -75,7 +75,7 @@ export function liveCheckout(
   }
 }
 
-// Whether a path under the worktrees folder sits in one worktree: inside a folder there that holds a .git, or one not there yet, where nothing runs; the worktrees folder itself and a plain folder in it hold no checkout of their own, so git, turbo and bun walk up from there to the main checkout.
+// Whether a path under the worktrees folder sits in one worktree: inside a folder there that holds a .git, or one not there yet, which the line may make into a new worktree (`git worktree add <path> && cd <path>`); the worktrees folder itself and a plain folder in it hold no checkout of their own, so git, turbo and bun walk up from there to the main checkout.
 function inWorktree(path: string, worktrees: string): boolean {
   if (!path.startsWith(worktrees)) return false
   const tree = join(worktrees, path.slice(worktrees.length).split(sep)[0])

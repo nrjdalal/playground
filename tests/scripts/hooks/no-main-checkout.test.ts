@@ -1123,3 +1123,36 @@ describe("the live checkout's reading", () => {
     )
   })
 })
+
+// #1663: git lands where the kernel takes a -C, so a -C through a link out of the main checkout that then climbs runs, as git runs it outside the main checkout; a logical cd folds its `..` by text
+describe("a -C or a cd read where it lands", () => {
+  const OUTSIDE = mkdtempSync(join(tmpdir(), "no-main-checkout-outside-"))
+  mkdirSync(join(OUTSIDE, "deep"))
+  symlinkSync(join(OUTSIDE, "deep"), join(MAIN, "out"))
+  symlinkSync(join(WORKTREE, "api"), join(MAIN, "towt"))
+  symlinkSync(join(MAIN, ".claude"), join(WORKTREE, "into-main"))
+  afterAll(() => rmSync(OUTSIDE, { force: true, recursive: true }))
+
+  test.each([
+    ["a -C through a link out of it, then a -C that climbs", "git -C out -C .. commit -m x"],
+    ["a -C that climbs out of a link out of it", "git -C out/.. commit -m x"],
+    [
+      "a -C through a link into a worktree's folder, then a -C that climbs",
+      "git -C towt -C .. commit -m x",
+    ],
+    ["a -C that climbs out of a link into a worktree's folder", "git -C towt/.. commit -m x"],
+  ])("from the main checkout, %s runs", async (_name, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    ["a logical cd that climbs out of a link", "cd -L into-main/.. && git commit -m x"],
+    ["a physical cd into a folder of its own", "cd -P api && git commit -m x"],
+  ])("from a worktree, %s runs", async (_name, command) => {
+    expect(await bash(command, WORKTREE)).toBeUndefined()
+  })
+
+  test("from the main checkout, a commit after a cd whose || runs an exit in a brace group runs", async () => {
+    expect(await bash(`cd ${WORKTREE} || { exit; }; git commit -m x`)).toBeUndefined()
+  })
+})
