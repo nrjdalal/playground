@@ -4,6 +4,8 @@ import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 import { managerOf } from "@packages/config/kinds"
+import { configDirOf } from "@packages/env/data-dir"
+import { quarantine, type Roots } from "@packages/safe-delete"
 import { codeRoot, guardedOrgs, readPolicyOrDefaults, type Settings } from "@packages/settings"
 
 import {
@@ -11,10 +13,11 @@ import {
   cleanupDeps,
   cleanWorktree,
 } from "../../../../scripts/ops/optimizer/auto_end"
+import { machineRoots } from "../trash"
 import { writeAtomic } from "../write-atomic"
 import type { Context } from "./tick"
 
-// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), every other repo's stale worktrees (git worktree remove, its branch kept), branches (each head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, and an Inbox update when 1 GB or more was freed. It asks no decision: each container or volume no rule removes is kept and named as kept.
+// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), every other repo's stale worktrees (git worktree remove, its branch kept), the scratch folders of sessions that are gone (trashed, each restorable), branches (each head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, and an Inbox update when 1 GB or more was freed. It asks no decision: each container or volume no rule removes is kept and named as kept.
 
 const GB = 1024 ** 3
 // The freed-space finding's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
@@ -27,14 +30,16 @@ export type Prs = { byBranch: Map<string, Pr>; byNumber: Map<number, Pr>; repo?:
 export type Ref = { name: string; sha: string }
 export type Worktree = { branch: string | null; path: string }
 
-// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers in the repo a folder's origin names (the checkout's when none is given; null when GitHub cannot be read), the folders other repos are read in, the turbo cache's folder, the clock the cap's pacing reads, and the sleep it waits on.
+// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers in the repo a folder's origin names (the checkout's when none is given; null when GitHub cannot be read), the folders other repos are read in, the names of the live sessions, the roots safe-delete's quarantine reads, the turbo cache's folder, the clock the cap's pacing reads, and the sleep it waits on.
 export type NightDeps = {
   cleanup: () => Promise<CleanupDeps | null>
   free: (dir: string) => number
+  live: () => Promise<string[]>
   now: () => number
   prs: (ctx: Context, branches: string[], numbers: number[], dir?: string) => Promise<Prs | null>
   roots: (data: string, checkout: string) => Promise<string[]>
   sleep: (ms: number) => Promise<void>
+  trashRoots: () => Roots
   turbo: string
 }
 
@@ -446,6 +451,39 @@ export const nightlyClean =
       }
       return out.join("; ")
     })
+    // Each folder in the data folder's scratch/ whose session is gone: no live session and no roster string shares its leading id, so a session's scratch/<id>-<task> stays while it lives or its row stands. It goes to the trash through quarantine under that session's own name, the route safe-delete gives a session for its own scratch, so the data folder stays protected and playground rm --restore brings it back.
+    await step("gone sessions", async () => {
+      const dir = join(data, "scratch")
+      const entries = await readdir(dir, { withFileTypes: true }).catch(() => null)
+      if (!entries) return "none: the data folder holds no folder of theirs"
+      const roster = await Bun.file(join(data, "roster.json"))
+        .json()
+        .then(rosterNames, () => null)
+      if (roster === null) return "the roster unreadable, none removed"
+      const idOf = (name: string) => name.split("-")[0]!
+      const live = new Set((await deps.live()).map(idOf))
+      let gone = 0
+      for (const entry of entries) {
+        const id = idOf(entry.name)
+        if (!entry.isDirectory() || live.has(id) || roster.texts.some((t) => t.includes(id)))
+          continue
+        const path = join(dir, entry.name)
+        const moved = quarantine(
+          path,
+          {
+            reason: "nightly-clean: the scratch folder of a session that is gone",
+            session: entry.name,
+          },
+          deps.trashRoots(),
+        )
+        if ("refused" in moved) kept.push(`scratch ${path} kept: ${moved.refused}`)
+        else {
+          gone++
+          removed.push(`scratch ${path} as trash ${moved.id} (playground rm --restore ${moved.id})`)
+        }
+      }
+      return `trashed ${gone}`
+    })
     await step("branches", async () => {
       if (!prs) return "GitHub unreadable, none read"
       const listed = (await git(["worktree", "list", "--porcelain"])).out
@@ -676,10 +714,16 @@ const liveNight: NightDeps = {
     }
     return prs
   },
+  // imported at the call, since resume.ts's imports reach tick.ts, which builds this beat as it loads
+  live: async () => {
+    const { liveSessions } = await import("../ops-session-resume/resume")
+    return [...(await liveSessions(configDirOf())).values()].map((s) => s.name)
+  },
   roots: async (data, checkout) => {
     const read = readPolicyOrDefaults(data)
     return read.refusal === undefined ? rootsOf(read.settings, checkout, homedir()) : []
   },
   sleep: (ms) => Bun.sleep(ms),
+  trashRoots: machineRoots,
   turbo: TURBO_CACHE,
 }

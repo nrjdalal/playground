@@ -356,6 +356,7 @@ describe("one night's run against a fixture data folder", () => {
     const deps: NightDeps = {
       cleanup: async () => cleanup,
       free: () => (free += grow * 1024 ** 3),
+      live: async () => [],
       now: () => Date.now(),
       prs: async () => ({
         ...prsOf({
@@ -368,6 +369,7 @@ describe("one night's run against a fixture data folder", () => {
       }),
       roots: async () => [],
       sleep: async () => {},
+      trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
     }
     return { ctx, deps, inputs, ops, runs, sent, wt }
@@ -566,6 +568,7 @@ describe("one night's run against a fixture data folder", () => {
         rm: async () => ({ ok: true, out: "" }),
       }),
       free: () => 100 * 1024 ** 3,
+      live: async () => [],
       now: () => t,
       prs: async () => ({
         ...prsOf(
@@ -577,6 +580,7 @@ describe("one night's run against a fixture data folder", () => {
       }),
       roots: async () => [],
       sleep,
+      trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
     }
     await nightlyClean(deps)(ctx)
@@ -650,6 +654,7 @@ describe("one night's run against a fixture data folder", () => {
         },
       }),
       free: () => 100 * 1024 ** 3,
+      live: async () => [],
       now: () => t,
       prs: async () => ({
         ...prsOf(
@@ -664,6 +669,7 @@ describe("one night's run against a fixture data folder", () => {
         waits.push(ms)
         t += ms
       },
+      trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
     }
     await nightlyClean(deps)(ctx)
@@ -738,6 +744,7 @@ describe("one night's run against a fixture data folder", () => {
         rm: async () => ({ ok: true, out: "" }),
       }),
       free: () => 100 * 1024 ** 3,
+      live: async () => [],
       now: () => 0,
       prs: async () => ({
         ...prsOf(
@@ -749,6 +756,7 @@ describe("one night's run against a fixture data folder", () => {
       }),
       roots: async () => [],
       sleep,
+      trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
     }
     await nightlyClean(deps)(ctx)
@@ -828,6 +836,7 @@ describe("one night's run against a fixture data folder", () => {
         rm: async () => ({ ok: true, out: "" }),
       }),
       free: () => 100 * 1024 ** 3,
+      live: async () => [],
       now: () => t,
       prs: async () => ({
         ...prsOf(
@@ -839,6 +848,7 @@ describe("one night's run against a fixture data folder", () => {
       }),
       roots: async () => [],
       sleep,
+      trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
     }
     await nightlyClean(deps)(ctx)
@@ -1174,8 +1184,10 @@ describe("other repos' worktrees", () => {
       now: () => Date.now(),
       prs: async (_ctx: Context, _branches: string[], _numbers: number[], dir?: string) =>
         (dir && prsByRepo[dir]) || prsOf({}),
+      live: async () => [],
       roots: async () => [code, orgs],
       sleep: async () => {},
+      trashRoots: () => ({ home: root, main, trash: join(root, "trash") }),
       turbo: join(root, "turbo"),
     } as NightDeps
     return { ctx, deps, lost, main, ops, runs, sent, w }
@@ -1252,7 +1264,7 @@ test("the folders other repos are read in: the code root, else the checkout's fo
 })
 
 // #1778's add: a gone session's scratch folder in the data folder, through safe-delete's quarantine with that session's own-scratch route, no carve-out
-test("a scratch folder no live session and no roster row names goes to the trash; a live session's and a rostered one stay", async () => {
+test("a scratch folder no live session and no roster row but an ended one names goes to the trash; a live session's and a working row's stay", async () => {
   const root = scratch()
   const home = join(root, "home")
   const data = join(home, ".playground")
@@ -1270,9 +1282,15 @@ test("a scratch folder no live session and no roster row names goes to the trash
   const gone = pad("qq1zzz-1700")
   const alive = pad("aa2bbb-1701")
   const rostered = pad("cc3ddd")
+  const ended = pad("ee4fff-1702")
   writeFileSync(
     join(data, "roster.json"),
-    JSON.stringify({ agents: [{ name: "cc3ddd-worker", state: "ended" }] }),
+    JSON.stringify({
+      agents: [
+        { name: "cc3ddd-worker", status: "working" },
+        { name: "ee4fff-worker", status: "ended" },
+      ],
+    }),
   )
   const { run } = fakeRun({
     "docker ps": "",
@@ -1302,6 +1320,7 @@ test("a scratch folder no live session and no roster row names goes to the trash
   } as NightDeps
   await nightlyClean(deps)(ctx)
   expect(existsSync(gone)).toBe(false)
+  expect(existsSync(ended)).toBe(false)
   expect(existsSync(alive)).toBe(true)
   expect(existsSync(rostered)).toBe(true)
   const line = sent.find((s) => s.to === "ops")?.text ?? ""
