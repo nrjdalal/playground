@@ -118,7 +118,7 @@ describe("collect: live sessions with nothing to do", () => {
           "b4w2k8-reviewer": reviewer,
           "c5e7g2-worker": entry({ name: "c5e7g2-worker" }),
         },
-        workerPrs: async () => [],
+        workerPrs: async (name) => (name === "c5e7g2-worker" ? [OPEN] : []),
       }),
     )
     expect(kept).toEqual([])
@@ -129,10 +129,70 @@ describe("collect: live sessions with nothing to do", () => {
         prState,
         roster,
         sessions: { "b4w2k8-reviewer": reviewer },
-        workerPrs: async () => [],
+        workerPrs: async (name) => (name === "c5e7g2-worker" ? [OPEN] : []),
       }),
     )
     expect(whys(goneOwner)).toEqual([["checker-worker-gone (a3f9d1-worker)"]])
+  })
+
+  // most live workers carry no roster pr: a live worker's own PRs, its roster pr and open branch PRs among them, keep the checker on
+  test("checker-worker-gone: kept while an open PR on its prs list is a live worker's open branch PR, its row holding no pr", async () => {
+    const OPEN = "https://github.com/o/r/pull/2131"
+    const prState = async (url: string) =>
+      url === OPEN ? { head: "ddd4444", state: "open", verdicts: [] } : null
+    const roster = {
+      "e6h8j3-reviewer": {
+        kind: "reviewer",
+        name: "e6h8j3-reviewer",
+        prs: [OPEN],
+        worker: "b4w2k8-worker",
+      },
+      "f7k9l4-worker": { kind: "worker", name: "f7k9l4-worker" },
+    }
+    const kept = await collect(
+      deps({
+        prState,
+        roster,
+        sessions: {
+          "e6h8j3-reviewer": entry({ name: "e6h8j3-reviewer" }),
+          "f7k9l4-worker": entry({ name: "f7k9l4-worker" }),
+        },
+        workerPrs: async (name) => (name === "f7k9l4-worker" ? [OPEN] : []),
+      }),
+    )
+    expect(kept).toEqual([])
+  })
+
+  test("checker-worker-gone: a live worker does not keep a checker whose PR to it is closed or merged", async () => {
+    const DONE = "https://github.com/o/r/pull/2131"
+    const roster = {
+      "e6h8j3-reviewer": {
+        kind: "reviewer",
+        name: "e6h8j3-reviewer",
+        prs: [DONE],
+        worker: "b4w2k8-worker",
+      },
+      "f7k9l4-worker": { kind: "worker", name: "f7k9l4-worker" },
+    }
+    for (const [how, state] of [
+      ["closed", "closed"],
+      ["merged", "merged"],
+    ] as const) {
+      const rows = await collect(
+        deps({
+          prState: async (url) => (url === DONE ? { head: "ddd4444", state, verdicts: [] } : null),
+          roster,
+          sessions: {
+            "e6h8j3-reviewer": entry({ name: "e6h8j3-reviewer" }),
+            "f7k9l4-worker": entry({ name: "f7k9l4-worker" }),
+          },
+          workerPrs: async (name) => (name === "f7k9l4-worker" ? [DONE] : []),
+        }),
+      )
+      expect(whys(rows)).toEqual([
+        ["checker-worker-gone (b4w2k8-worker)", `checker-pr-done (${how})`],
+      ])
+    }
   })
 
   // a checker is known by its roster kind, so a name with no role prefix still is one.
