@@ -4,7 +4,8 @@ the switch is the factory's, never an ask to the owner). It reads usage.json, wh
 account in ACCOUNTS that has a long-lived token in the Keychain (service usage.keychainService) from one 1-token call's rate-limit
 headers, at most every 14 minutes. The current account is login-flip.json's `factory`, else the stored login. Ending accounts (ENDS) come first: the first usable one in ending_order() is the target whenever
 the factory is on another account; with none usable, once the current login reaches its line, the renewing account with MIN_ROOM
-whose week resets soonest. It names the target once ("switch due to ..."), or says once that no account has room. Prints nothing otherwise.
+whose week resets soonest. The current account reads through the pool rule: login-flip.json's `factory` while it is a pool
+account whose token is still in the Keychain, else the pool account the split gives the best share, else the stored login. It names the target once ("switch due to ..."), or says once that no account has room. Prints nothing otherwise.
 It also writes the split, each account's share of new sessions (week left per hour to its deadline, a fifth of that for an own account while that deadline is over a day away, none for one parked until a later time), which spawn.sh's no-account default follows. --dry-run reads no token and changes nothing. State in login-flip.json in the state folder, the data folder's ops/usage."""
 import datetime, json, os, shutil, subprocess, sys, time
 
@@ -70,6 +71,22 @@ def probe(email):
     return got
 
 
+def has_token(a):
+    """Whether the account's long-lived token is still in the Keychain: the read probe() makes, judged by the exit alone."""
+    return not subprocess.run(["security", "find-generic-password", "-s", SERVICE, "-a", a, "-w"], capture_output=True, text=True, timeout=15).returncode
+
+
+# the factory login resolves only to a pool account that still holds its token, else to the pool account the split gives the best share
+def factory_login(state):
+    factory = state.get("factory")
+    if not factory:
+        return None
+    if factory in ACCOUNTS and has_token(factory):
+        return factory
+    shares = (state.get("split") or {}).get("shares") or {}
+    return max((a for a in TARGETS if has_token(a) and shares.get(a, 0) > 0), key=shares.get, default=None)
+
+
 def dashboard_ask(*args, stdin=None):
     if DRY:
         print("would run: bun run ask", *args, stdin or "")
@@ -96,7 +113,7 @@ except (OSError, ValueError):
     state = {}
 now = time.time()
 seen = state.setdefault("seen", {})
-current = state.get("factory") or acct  # the account the factory's sessions run on (spawn.sh --account), else the stored login
+current = factory_login(state) or acct  # the account the factory's sessions run on (spawn.sh --account), else the stored login
 # a usage.json run.py took from a probe already came from seen, and stamping it again would stop run.py's next probe
 if acct in ACCOUNTS and u.get("source") != "token/ratelimit-headers":
     last, seen[acct] = seen.get(acct) or {}, {"at": now}
@@ -230,6 +247,10 @@ else:
 weights = {a: weight(a) for a in TARGETS}
 total = sum(weights.values())
 state["split"] = {"at": now, "shares": {a: w / total if total else 0 for a, w in weights.items()}}
+
+# an account that leaves the pool drops out of `accounts`, so its readers probe and count pool accounts alone
+if "accounts" in state:
+    state["accounts"] = [a for a in state["accounts"] if a in TARGETS]
 
 # the rotation as data, so ops-usage copies it into usage.json for the dashboard's usage tooltip
 state["rotation"] = {"pool": [{"account": a, "ending": a in ENDS, "endsAt": ENDS.get(a), "renewsOn": RENEWS.get(a)} for a in TARGETS]}
