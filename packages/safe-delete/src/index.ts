@@ -17,7 +17,7 @@ import {
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve, sep } from "node:path"
 
-import { placedKindOf, ROSTER_ROLE_OF_KIND } from "@packages/config/kinds"
+import { hasManagerRole, placedKindOf } from "@packages/config/kinds"
 
 // The folders a delete starts from, passed in so a test builds them on a mkdtemp root of its own.
 export type Roots = { home: string; main: string; trash: string }
@@ -80,6 +80,9 @@ export const MARKER = ".safe-delete-scratch"
 export const LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 }
 
 export const PURGE = { days: 7, minFree: 50e9 }
+
+// The cap's window, which a burst's recent moves read and a told mark outlives by at most: past it no try can meet the key again, since the key is a stamp that never recurs.
+const CAP_WINDOW_MS = 60_000
 
 // One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), each at most its files and bytes; the folder itself, its parent, a sibling and anything deeper stay protected.
 export type CarveOut = { bytes: number; files: number; folder: string }
@@ -269,7 +272,7 @@ const manifestOf = (trash: string, batch: string): TrashEntry[] => {
 }
 
 const recentMoves = (trash: string, session: string, now: Date): TrashEntry[] => {
-  const since = now.getTime() - 60_000
+  const since = now.getTime() - CAP_WINDOW_MS
   return batches(trash)
     .filter(
       (batch) =>
@@ -279,22 +282,35 @@ const recentMoves = (trash: string, session: string, now: Date): TrashEntry[] =>
     .filter((entry) => Date.parse(entry.at) > since)
 }
 
-// Whether a cap refusal is its burst's first, so it alerts once: a burst is the moves that filled the cap, keyed by the newest of them, and the key told is kept in <trash>/.cap-told/<session>, so every later try inside it is a plain refusal.
+// Whether a cap refusal is its burst's first, so it alerts once: a burst is the moves that filled the cap, keyed by the newest of them, and the told mark is a file named for that key, made with wx, so of two tries at the same instant the first alone creates it and alerts, and every later try inside the burst, whose key is already told, is a plain refusal. A mark of the old shape, a content file at the session's own path, is cleared at the session's first burst, since left alone it turns every write ENOTDIR and silences the session; the folder's removal runs for that case alone, since a concurrent try's fresh folder must stand and its wx answer decide.
 const firstOfBurst = (trash: string, session: string, recent: TrashEntry[]): boolean => {
   const key =
     recent
       .map((entry) => entry.at)
       .sort()
       .at(-1) ?? ""
-  const told = join(trash, ".cap-told", session)
+  const told = join(trash, ".cap-told", session, key)
+  let code = ""
   try {
-    if (readFileSync(told, "utf8") === key) return false
-  } catch {}
+    writeFileSync(told, "", { flag: "wx" })
+    return true
+  } catch (err) {
+    code = (err as { code?: string }).code ?? ""
+  }
+  if (code === "EEXIST") return false
+  if (code !== "ENOENT" && code !== "ENOTDIR") return true
+  if (code === "ENOTDIR") {
+    try {
+      rmSync(join(trash, ".cap-told", session), { force: true })
+    } catch {}
+  }
   try {
-    mkdirSync(dirname(told), { recursive: true })
-    writeFileSync(told, key)
-  } catch {}
-  return true
+    mkdirSync(join(trash, ".cap-told", session), { recursive: true })
+    writeFileSync(told, "", { flag: "wx" })
+    return true
+  } catch (err) {
+    return (err as { code?: string }).code === "EEXIST" ? false : true
+  }
 }
 
 const otherVolume = (path: string, trash: string) =>
@@ -539,7 +555,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const name = agent.name.toLowerCase()
     // a manager seat names the work it routes, never a worktree, so its name alone holds none; its branch and PR still do
     const kind = placedKindOf(agent.name, agent.kind)
-    const seat = kind !== null && ROSTER_ROLE_OF_KIND[kind] === "manager"
+    const seat = kind !== null && hasManagerRole(kind)
     const byName = !seat && slugs.some((s) => s === name || s.startsWith(`${name}-`))
     const id = name.split("-")[0]!
     const byId = /\d/.test(id) && where.includes(id)
@@ -662,6 +678,20 @@ export function purgeTrash(
     if (stampMs(BATCH.exec(batch)![1]!) < cutoff) remove(batch)
     else young.push(batch)
   while (young.length && io.free() < PURGE.minFree) remove(young.shift()!)
+  // A told mark no try can meet again: a burst's key is a stamp that never recurs, so a mark older than the cap's window is swept, and an empty session folder with it.
+  const toldCutoff = io.now.getTime() - CAP_WINDOW_MS
+  for (const session of entriesOf(join(root, ".cap-told"))) {
+    const at = join(root, ".cap-told", session.name)
+    if (!session.isDirectory()) {
+      if ((lstat(at)?.mtimeMs ?? Infinity) < toldCutoff) rmSync(at, { force: true })
+      continue
+    }
+    for (const mark of entriesOf(at)) {
+      const markAt = join(at, mark.name)
+      if ((lstat(markAt)?.mtimeMs ?? Infinity) < toldCutoff) rmSync(markAt, { force: true })
+    }
+    if (!entriesOf(at).length) rmSync(at, { force: true, recursive: true })
+  }
   return { removed, skipped }
 }
 

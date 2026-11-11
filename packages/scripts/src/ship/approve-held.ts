@@ -9,16 +9,13 @@ export type HeldRun = {
   event: string
   headSha: string
   id: number
-  status: string
 }
 
-// Pure: why the ship PR's held runs may not be approved, one line each; none means they may.
-export function heldRefusals(facts: HeldFacts): string[] {
+// Pure: the one reason the ship PR's held runs may not be approved, or null when they may.
+export function heldRefusals(facts: HeldFacts): string | null {
   if (facts.state !== "open" || facts.head !== "canary" || facts.base !== "main")
-    return [
-      `pr: it is ${facts.state} with head ${facts.head} into ${facts.base}: ship:approve-held approves an open ship PR, head canary into main`,
-    ]
-  return []
+    return `pr: it is ${facts.state} with head ${facts.head} into ${facts.base}: ship:approve-held approves an open ship PR, head canary into main`
+  return null
 }
 
 // Pure: the held runs of a list, a pull_request run at this head waiting for its approval; GitHub reads one status completed with conclusion action_required.
@@ -41,8 +38,8 @@ export async function approveHeld(run: Run, repo: string, n: number): Promise<st
     sha: pr.head.sha,
     state: pr.state,
   }
-  const refusals = heldRefusals(facts)
-  if (refusals.length > 0) throw new Error(refusals.join("; "))
+  const refusal = heldRefusals(facts)
+  if (refusal) throw new Error(refusal)
   const listed = JSON.parse(
     await gh(run, [
       "api",
@@ -63,7 +60,6 @@ export async function approveHeld(run: Run, repo: string, n: number): Promise<st
       event: r.event,
       headSha: r.head_sha,
       id: r.id,
-      status: r.status,
     })),
     facts.sha,
   )

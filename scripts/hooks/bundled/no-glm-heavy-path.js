@@ -5142,7 +5142,8 @@ var guardedOrgs = (values) => {
 
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
-  { backends: ["claude", "glm"], id: "claude-code", label: "Claude Code" }
+  { backends: ["claude", "glm"], id: "claude-code", label: "Claude Code" },
+  { backends: ["openai"], id: "codex", label: "Codex" }
 ];
 var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
 var readPin = (text) => {

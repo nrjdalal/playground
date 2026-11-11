@@ -14,7 +14,8 @@ export type Probes = {
 export type Step = "dispatcher" | "jobs" | "open" | "wait"
 
 export const NEW_WORKER_BRIEF = "handoffs/new-worker.md"
-const BACKENDS: readonly string[] = HARNESSES.flatMap((harness) => harness.backends)
+// spawn.sh's --backend, Claude Code's backends; Codex takes none.
+const BACKENDS: readonly string[] = HARNESSES[0].backends
 const KINDS = ["worker", "runner"]
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
@@ -252,7 +253,13 @@ export const planStart = (probes: Probes): Step[] => {
 }
 
 export const modelOf = (backend: Backend | null): string =>
-  backend === "glm" ? "GLM" : backend === "claude" ? "Claude" : "an unknown model"
+  backend === "glm"
+    ? "GLM"
+    : backend === "claude"
+      ? "Claude"
+      : backend === "openai"
+        ? "Codex"
+        : "an unknown model"
 
 export const statusLines = (probes: Probes): string[] => {
   const lead = probes.dispatchers.filter((d) => slotOfName(d.name) === 1)

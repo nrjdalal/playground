@@ -108,6 +108,15 @@ export const rosterNames = (roster: unknown): { branches: Set<string>; texts: st
   return { branches, texts }
 }
 
+// The roster's names for one step, whole or the rows a filter keeps, or null when the file cannot be read.
+const readRoster = async (data: string, keep?: (rows: unknown[]) => unknown[]) =>
+  Bun.file(join(data, "roster.json"))
+    .json()
+    .then(
+      (r: { agents?: unknown[] }) => rosterNames(keep ? keep(r.agents ?? []) : r),
+      () => null,
+    )
+
 // Pure: the folders the factory works in, as spawn.sh trusts them: the code root, and ~/<org> for each org ext.links guards.
 export const rootsOf = (settings: Settings, checkout: string, home: string): string[] => [
   codeRoot(settings, checkout),
@@ -352,11 +361,7 @@ export const nightlyClean =
         out.push(line)
         if (line.startsWith("removed ")) moves.push(deps.now())
         if (!discardable(line)) continue
-        // The owner's standing approval: trashed with no decision, the 7-day trash holds it and playground rm --restore brings it back. The retry below stays for the callers this session shares with.
-        if (!(await paced())) {
-          left(w.path)
-          continue
-        }
+        // The owner's standing approval: trashed with no decision, the 7-day trash holds it and playground rm --restore brings it back. The pace above this loop covers the rm this iteration reaches: no move lands between the two calls, since a removed line is not discardable, so one paced verdict per iteration is the whole contract.
         let moved = await trashWorktree(ctx, w.path)
         if (moved.code === 0) moves.push(deps.now())
         let capped = moved.code !== 0 && RM_CAP.test(moved.out)
@@ -387,9 +392,7 @@ export const nightlyClean =
         .filter((l) => l.startsWith("n/"))
         .map((l) => l.slice(1))
       if (!cwds.length) return "lsof unreadable, none removed"
-      const roster = await Bun.file(join(data, "roster.json"))
-        .json()
-        .then(rosterNames, () => null)
+      const roster = await readRoster(data)
       if (roster === null) return "the roster unreadable, none removed"
       const out: string[] = []
       for (const repo of repos) {
@@ -457,13 +460,9 @@ export const nightlyClean =
       const entries = await readdir(dir, { withFileTypes: true }).catch(() => null)
       if (!entries) return "none: the data folder holds no folder of theirs"
       // a row whose status is ended holds no folder
-      const roster = await Bun.file(join(data, "roster.json"))
-        .json()
-        .then(
-          (r: { agents?: { status?: unknown }[] }) =>
-            rosterNames((r.agents ?? []).filter((row) => row?.status !== "ended")),
-          () => null,
-        )
+      const roster = await readRoster(data, (rows) =>
+        rows.filter((row) => (row as { status?: unknown })?.status !== "ended"),
+      )
       if (roster === null) return "the roster unreadable, none removed"
       const idOf = (name: string) => name.split("-")[0]!
       const live = new Set((await deps.live()).map(idOf))
@@ -535,21 +534,19 @@ export const nightlyClean =
               `sha=${sha}`,
             ])
           : { code: 1, out: "no repository read" }
-        // A head GitHub does not hold, a branch never pushed, would go public with a push, so it stays with a local archive tag alone, named the night that tag is made and quiet on every night after.
+        // A head GitHub does not hold, a branch never pushed, would go public with a push, so it stays with a local archive tag alone, named the night that tag is made or re-pointed and quiet on every night after. The existing tag's commit is read first, as the same-head case reads it, and -f re-points one at an older head, so the branch is not named as failed every night.
         if (made.code !== 0 && UNKNOWN_SHA.test(made.out)) {
           const local = await git(["rev-parse", "-q", "--verify", `refs/tags/${tag}`])
-          if (local.code === 0 && lines(local.out)[0] === sha) continue
-          if ((await git(["tag", tag, sha])).code === 0) {
-            out.push(
-              `kept ${name}: its head ${sha} is not on GitHub, so it is tagged ${tag} locally alone`,
-            )
-            kept.push(`branch ${name} kept: its head is not on GitHub, tagged ${tag} locally`)
-          } else {
-            out.push(
-              `kept ${name}: its head ${sha} is not on GitHub, and its local ${tag} tag failed`,
-            )
-            kept.push(`branch ${name} kept: its head is not on GitHub, its local tag failed`)
-          }
+          const held = local.code === 0 ? (lines(local.out)[0] ?? "") : ""
+          if (held === sha) continue
+          const said =
+            (await git(["tag", "-f", tag, sha])).code !== 0
+              ? `its head ${sha} is not on GitHub, and its local ${tag} tag failed`
+              : held
+                ? `its local ${tag} tag held ${held}, now holds ${sha}`
+                : `its head ${sha} is not on GitHub, so it is tagged ${tag} locally alone`
+          out.push(`kept ${name}: ${said}`)
+          kept.push(`branch ${name} kept: ${said}`)
           continue
         }
         if (made.code !== 0) {
@@ -693,6 +690,11 @@ const liveNight: NightDeps = {
     const fs = statfsSync(dir)
     return fs.bavail * fs.bsize
   },
+  // imported at the call, since resume.ts's imports reach tick.ts, which builds this beat as it loads
+  live: async () => {
+    const { liveSessions } = await import("../ops-session-resume/resume")
+    return [...(await liveSessions(configDirOf())).values()].map((s) => s.name)
+  },
   now: () => Date.now(),
   prs: async (ctx, branches, numbers, dir = ctx.repo) => {
     const url = (await ctx.run(["git", "-C", dir, "remote", "get-url", "origin"])).out.trim()
@@ -718,11 +720,6 @@ const liveNight: NightDeps = {
       if (!readPrs(read.out, branches, numbers, prs)) return null
     }
     return prs
-  },
-  // imported at the call, since resume.ts's imports reach tick.ts, which builds this beat as it loads
-  live: async () => {
-    const { liveSessions } = await import("../ops-session-resume/resume")
-    return [...(await liveSessions(configDirOf())).values()].map((s) => s.name)
   },
   roots: async (data, checkout) => {
     const read = readPolicyOrDefaults(data)

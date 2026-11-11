@@ -66,7 +66,9 @@ set -euo pipefail
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
-#     The backend is recorded at the start in ~/.playground/backends/<name>, its harness then its backend (claude-code glm), and carried on its resume, which also reads a pin of the backend alone: a resume takes no --backend while a pin stands, and refuses with no pin and none given, or with a pin that reads as neither glm nor claude.
+#   --harness codex    with the first dispatcher's manager start or its resume alone, on a scratch data folder (PLAYGROUND_DATA_DIR naming one) until phase 3 wires the factory's guards into Codex's hooks, and no --backend, --account, --model or --effort: the session runs in Codex (the codex on PATH), its CODEX_HOME the data folder's codex/, whose config.toml, hooks.json and app-server-daemon/settings.json each launch writes; its hooks always run trusted (--dangerously-bypass-hook-trust), and it fails closed: a session whose SessionStart hook writes no beat within 60 seconds has its pane closed and the start refused, with no pin, record or roster row. The beat names its thread, which takes the session's name through codex app-server's thread/name/set.
+#   --harness claude-code  the default: the session runs in Claude Code.
+#     The harness and backend are recorded at the start in ~/.playground/backends/<name> (claude-code glm, codex openai), and carried on its resume, which also reads a pin of the backend alone: a resume takes no --backend or --harness while a pin stands, and refuses with no pin and none given, or with a pin that reads as none of those.
 #   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
 #   --effort <level>   with any mode but restore or close, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
@@ -819,10 +821,11 @@ PY
   esac
 }
 
-# --account, --backend, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check and --priority may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --harness, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check and --priority may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
+HARNESS=
 GLM_ACCOUNT=
 GLM_GIVEN=
 # usage.accounts sits mid-list, since an empty list prints an empty line, which a last line would lose. The models a session runs on (models.*) and the capacity gate's lines (gates.*) are settings, each in the docs' list of keys, so changing one is a settings write, never an edit here.
@@ -864,6 +867,10 @@ while [ $# -gt 0 ]; do
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$BACKEND" ] || usage
     case "$2" in --*) usage "--backend needs a value; \"$2\" starts with --" ;; esac
     BACKEND=$2
+    shift 2
+  elif [ "$1" = --harness ]; then
+    [ $# -ge 2 ] && [ -z "$HARNESS" ] || usage "--harness takes claude-code or codex, once"
+    case "$2" in claude-code | codex) HARNESS=$2 ;; *) usage "--harness takes claude-code or codex, not \"$2\"" ;; esac
     shift 2
   elif [ "$1" = --model ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$CLAUDE_MODEL" ] || usage "--model takes one of $MODELS, once"
@@ -1348,15 +1355,16 @@ fi
 PIN_GIVEN=
 if [ "$MODE" = resume ]; then
   if [ -e "$PINS/$NAME" ]; then
-    [ -z "$BACKEND" ] || refuse "the pin decides how $NAME runs; --backend would change it mid-life. Close it and start it again instead."
+    [ -z "$BACKEND$HARNESS" ] || refuse "the pin decides how $NAME runs; --backend or --harness would change it mid-life. Close it and start it again instead."
     pin=$(cat "$PINS/$NAME") || refuse "it cannot read the backend pin for $NAME"
-    # A pin names its harness, then its backend (HARNESSES in packages/settings/src/harnesses.ts, Claude Code alone); one written before the harness split names its backend alone.
+    # A pin names its harness, then its backend (HARNESSES in packages/settings/src/harnesses.ts); one written before the harness split names its backend alone.
     case "$pin" in
       glm | "claude-code glm") BACKEND=glm ;;
       claude | "claude-code claude") ;;
+      "codex openai") HARNESS=codex ;;
       *) refuse "the backend pin for $NAME reads neither glm nor claude: it cannot know how $NAME ran. Fix or remove $SHOWN/backends/$NAME, then resume." ;;
     esac
-  elif [ -n "$BACKEND" ]; then
+  elif [ -n "$BACKEND$HARNESS" ]; then
     PIN_GIVEN=1
   else
     if [ "$ROLE" = reviewer ] || [ "$ROLE" = tester ]; then
@@ -1364,6 +1372,16 @@ if [ "$MODE" = resume ]; then
     fi
     refuse "no backend pin for $NAME: it cannot know how $NAME ran. Resume it with --backend glm or --backend claude, whichever it ran on, which records the pin."
   fi
+fi
+# Codex runs the first dispatcher alone, on the one login its CODEX_HOME holds, with the model and effort its own config names.
+if [ "$HARNESS" = codex ]; then
+  { [ -n "$FIRST" ] && [[ $MODE =~ ^(manager|resume)$ ]]; } || refuse "Codex runs the first dispatcher alone, in a workspace of its own (spawn.sh manager $(dispatcher_of 1) <brief> --harness codex), not $NAME"
+  [ -z "$BACKEND$ACCOUNT$CLAUDE_MODEL$EFFORT" ] || refuse "Codex runs on the login and model its CODEX_HOME holds, so it takes no --backend, --account, --model or --effort"
+  # No factory guard reaches a Codex session until phase 3 of the harness layer wires them into its hooks, so it runs only on a scratch data folder; phase 3 lifts this in the change that wires them.
+  # The live data folder is the one dataDir() gives with no PLAYGROUND_DATA_DIR set.
+  live=$(cd / && env $UNSET -u PLAYGROUND_DATA_DIR "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || refuse "bun could not resolve the live data folder"
+  [ "$(cd -P "$DATA" 2>/dev/null && pwd -P)" != "$(cd -P "$live" 2>/dev/null && pwd -P)" ] ||
+    refuse "Codex starts only on a scratch data folder (PLAYGROUND_DATA_DIR naming one) until phase 3 of the harness layer wires the factory's guards into its hooks, and $SHOWN is the live one"
 fi
 # Every start and resume runs in herdr, the one runtime: a resume reads no pin, and the write below rewrites it whatever word it held.
 RUNTIMES="$DATA/runtimes"
@@ -1514,6 +1532,8 @@ if [ -n "$NAME_PROJECT" ]; then
     refuse "no session named $NAME ran in $DIR, so Claude's resume picker would find nothing there: pass its session id, or resume it in the folder it ran in"
 fi
 gate_capacity
+# Codex runs on the login its CODEX_HOME holds, so a Claude login the usage gate picked stays off its launch.
+if [ "$HARNESS" = codex ]; then ACCOUNT= PICKED=; fi
 if [ "$RUNTIME" = herdr ]; then
   # herdr names an agent by [a-z][a-z0-9_-]{0,31}, so a longer name could never name the session's agent there.
   [ "${#NAME}" -le 32 ] || refuse "herdr names an agent with at most 32 characters, and $NAME has ${#NAME}"
@@ -1647,7 +1667,7 @@ if [ "$MODE" = resume ]; then
   COMMAND="$LAUNCH --resume $SESSION -n $NAME $FLAGS"
   PROMPT=
   # A herdr session that never took a message has no transcript, so --resume finds no conversation, while --session-id refuses an id that has one (both measured on claude in herdr): it starts afresh under its own id and name, with the prompt its start recorded.
-  if [ "$RUNTIME" = herdr ] && [[ $SESSION =~ ^[0-9a-f-]{36}$ ]] &&
+  if [ "$RUNTIME" = herdr ] && [ "$HARNESS" != codex ] && [[ $SESSION =~ ^[0-9a-f-]{36}$ ]] &&
     [ -z "$(find "$PROJECTS" -mindepth 2 -maxdepth 2 -name "$SESSION.jsonl" -print -quit 2>/dev/null)" ]; then
     COMMAND="$LAUNCH --session-id $SESSION -n $NAME $FLAGS"
     PROMPT=$(cat "$RESUME_DIR/$NAME.prompt" 2>/dev/null) || PROMPT=
@@ -1684,12 +1704,43 @@ else
   COMMAND="$LAUNCH --session-id $SID -n $NAME $FLAGS \"$PROMPT\""
 fi
 # The pane's shell runs this text, so the whole launch goes in a subshell: a failed Keychain read's exit ends only that, the message stays on the pane, and tk dies with it.
+# Codex's launch: its CODEX_HOME's files are written fresh each launch, and its hooks always run trusted, since a hook with no recorded trust is silently dropped (measured); the session id comes from the SessionStart beat its hook writes, read after the pane runs.
+BEAT=
+if [ "$HARNESS" = codex ]; then
+  CODEX=$(command -v codex) || refuse "codex is not on PATH, so $NAME cannot start in Codex"
+  CODEX_HOME="$DATA/codex"
+  BEAT="$DATA/launch/$NAME.beat"
+  mkdir -p "$CODEX_HOME/app-server-daemon" || refuse "it cannot prepare $CODEX_HOME"
+  python3 -I - "$CODEX_HOME" "$(cd -P "$OWN" && pwd -P)" <<'PY' || refuse "it cannot write $CODEX_HOME's config.toml and hooks.json"
+import json, os, sys
+home, folder = sys.argv[1:3]
+def write(name, text):
+    tmp = os.path.join(home, f"{name}.{os.getpid()}.tmp")
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.replace(tmp, os.path.join(home, name))
+# The login stays in CODEX_HOME's auth.json, no update check or self-update runs mid-session, and the session's folder is trusted, so no prompt waits on the owner.
+write("config.toml", f'cli_auth_credentials_store = "file"\ncheck_for_update_on_startup = false\n\n[projects.{json.dumps(folder)}]\ntrust_level = "trusted"\n')
+write(os.path.join("app-server-daemon", "settings.json"), json.dumps({"autoUpdateEnabled": False}) + "\n")
+# The beat lands whole: written beside its path, then moved onto it, so the wait never reads half of it.
+beat = {"hooks": [{"command": 'f="$SPAWN_CODEX_BEAT"; cat > "$f.tmp" && mv "$f.tmp" "$f"', "timeout": 10, "type": "command"}], "matcher": ""}
+write("hooks.json", json.dumps({"hooks": {"SessionStart": [beat]}}, indent=2) + "\n")
+PY
+  LAUNCH="env ${UNSET}${CARRY}PLAYGROUND_ROLE=$ROLE CODEX_HOME=$(printf %q "$CODEX_HOME") SPAWN_CODEX_BEAT=$(printf %q "$BEAT") $(printf %q "$CODEX")"
+  if [ "$MODE" = resume ]; then
+    COMMAND="$LAUNCH resume --dangerously-bypass-hook-trust $SESSION"
+  else
+    COMMAND="$LAUNCH --dangerously-bypass-hook-trust"
+  fi
+  [ -z "$PROMPT" ] || COMMAND="$COMMAND \"$PROMPT\""
+fi
 COMMAND="($COMMAND)"
 
 # macOS types at most MAX_CANON 1024 bytes into a pane, and a GLM worker's launch line crosses it (1,025 bytes, measured), so the tail never arrives and the pane waits at >. The same text runs from a file instead: the typed line names the file alone, and the file, read by the pane's own shell, holds the Keychain lookup, never a token. Its first line removes the file, so no past launch outlives its pane to be rerun past this script's refusals.
 LAUNCH_DIR="$DATA/launch"
 mkdir -p "$LAUNCH_DIR" && chmod 700 "$LAUNCH_DIR" || refuse "it cannot prepare $LAUNCH_DIR"
 LAUNCH_FILE="$LAUNCH_DIR/$NAME.sh"
+[ -z "$BEAT" ] || rm -f -- "$BEAT"
 # The factory's hooks read PLAYGROUND_REPO before the session's own folder, so the launch file's second line exports this script's main checkout: a session in a worktree, or outside any Playground checkout, runs the main checkout's guards.
 HEAD_LINES=
 if [ "$RUNTIME" = herdr ]; then
@@ -1946,6 +1997,41 @@ except (ValueError, KeyError, TypeError):
   fi
   rm -f -- "$said_file"
   echo "herdr pane $PANE workspace $ws"
+  # Codex fails closed: the beat its SessionStart hook writes proves its hooks loaded, and names its thread, so a session with none is stopped within 60 seconds of its start.
+  if [ "$HARNESS" = codex ]; then
+    for ((tick = 0; tick < 120; tick++)); do
+      [ -s "$BEAT" ] && break
+      sleep 0.5
+    done
+    SID=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["session_id"])' "$BEAT" 2>/dev/null) || SID=
+    rm -f -- "$BEAT"
+    if ! [[ $SID =~ ^[0-9a-f-]{36}$ ]]; then
+      hr pane close "$PANE" >/dev/null 2>&1 || true
+      rm -f -- "$LAUNCH_FILE"
+      refuse "Codex's SessionStart hook wrote no beat within 60 seconds, so its guards may not have loaded: $NAME's pane $PANE is closed, and no pin, record or roster row was written"
+    fi
+    # The thread takes the session's name through the app-server's thread/name/set, so Codex's own lists and resume by name find it.
+    python3 -I - "$CODEX" "$CODEX_HOME" "$SID" "$NAME" <<'PY' || echo "spawn.sh: $NAME started in Codex, but its thread $SID kept no name" >&2
+import json, os, signal, subprocess, sys
+codex, home, thread, name = sys.argv[1:5]
+signal.alarm(20)
+server = subprocess.Popen([codex, "app-server"], env={**os.environ, "CODEX_HOME": home}, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+def call(id, method, params):
+    server.stdin.write(json.dumps({"id": id, "method": method, "params": params}, separators=(",", ":"), sort_keys=True) + "\n")
+    server.stdin.flush()
+    for line in server.stdout:
+        answer = json.loads(line)
+        if answer.get("id") == id:
+            return "error" not in answer
+    return False
+named = call(1, "initialize", {"clientInfo": {"name": "spawn.sh", "version": "1"}})
+server.stdin.write(json.dumps({"method": "initialized"}) + "\n")
+named = named and call(2, "thread/name/set", {"name": name, "threadId": thread})
+server.stdin.close()
+server.wait()
+sys.exit(0 if named else 1)
+PY
+  fi
   # The session's resume record, which spawn.sh restore reads after a server's restart, written once herdr runs the session. It is the one resume that brings it back, with the --account its start was given, the model it started with and an effort other than high, and never a token.
   record="exec $(printf %q "$MAIN/scripts/spawn.sh") resume $(printf '%q ' "$NAME" "$CWD" "$SID")"
   # A login the usage gate picked stays off the exec line, so a restore picks afresh, and on the account line, which ops-unstick and no-headless-login read.
@@ -1961,12 +2047,14 @@ except (ValueError, KeyError, TypeError):
   # A start's prompt, which a resume sends again when the session never took it (no transcript yet); it names the brief's file, never its text.
   [ "$MODE" = resume ] || (umask 077 && printf '%s\n' "$PROMPT" > "$RESUME_DIR/$NAME.prompt") ||
     echo "spawn.sh: $NAME started, but its prompt record write failed, so a restore before its first turn starts it without its brief" >&2
-  herdr_answer || true
+  [ "$HARNESS" = codex ] || herdr_answer || true
 fi
 
 # The pin lands only once herdr has the session; a healed resume records the backend it was given.
 if [ "$MODE" != resume ] || [ -n "$PIN_GIVEN" ]; then
-  if ! { mkdir -p "$PINS" && printf 'claude-code %s\n' "${BACKEND:-claude}" > "$PINS/$NAME"; }; then
+  pin="claude-code ${BACKEND:-claude}"
+  [ "$HARNESS" = codex ] && pin="codex openai"
+  if ! { mkdir -p "$PINS" && printf '%s\n' "$pin" > "$PINS/$NAME"; }; then
     echo "spawn.sh: $NAME started, but its backend pin write failed; its next resume refuses until the pin reads glm or claude" >&2
   fi
 fi

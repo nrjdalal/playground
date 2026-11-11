@@ -83,7 +83,7 @@ The same night it sweeps every other repo the factory works in: each checkout di
 A worktree there goes by `git worktree remove`, its branch kept, only when its PR merged or closed (or it has none and every commit is pushed), it holds nothing but build output, and no live process or roster row has it; each one kept is named with why.
 It also moves to the trash each folder in the data folder's `scratch/` whose session is gone, with no live session and no roster row naming it that has not ended, each restorable with `playground rm --restore`.
 An unmerged branch's head is tagged `archive/<branch>` on origin before any delete, so the tag holds it and `git branch <name> archive/<branch>` brings the branch back; one whose tag cannot be made, or whose origin head is not the local head the tag would hold, stays, named in the log.
-A branch never pushed stays too, with a local `archive/<branch>` tag alone, since a push would publish commits no one has reviewed, and is named once, the night that tag is made.
+A branch never pushed stays too, with a local `archive/<branch>` tag alone, since a push would publish commits no one has reviewed, and is named once, the night that tag is made or re-pointed to the branch's head.
 Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch.
 It posts an Inbox update when it freed 1 GB or more, and asks no decision: a container or unused volume over 1 GB that no rule takes is kept, and named as kept in the same log and outbox line, as is a container whose removal failed.
 A worker spawns its own reviewer and tester, each briefed from a template it fills in, and the Dashboard nests them under it; the reviewer scores the PR through [code-review-loop](./code-review-loop.md).
@@ -173,6 +173,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   and the `no-raw-spawn` hook refuses a session not started through it.
   A session started with `--account <email>` runs on that account, and its token shows in no command, message or log.
   A worker started with `--backend glm` runs on Z.ai's GLM model in place of Claude, with its key kept just as safe, and keeps that model when it is resumed; a reviewer or tester always runs on Claude.
+  The first dispatcher started with `--harness codex` runs in Codex in place of Claude Code, and keeps it when it is resumed; a Codex session whose safety guards fail to load is stopped within a minute of starting.
   A GLM session takes tiny mechanical work as well as docs, skill text, research reads and plan drafts, and stays on Playground's own work, an org's work staying on Claude.
   No guarded org's data reaches GLM: spawn.sh starts a session in a checkout of an org `ext.links` guards, or on a brief naming a word of the `glm-refused-sources` list, on Claude alone, and a job that reads an org's data starts its `claude` with GLM's settings cleared.
   For a smaller build task, Claude writes the plan and a GLM worker builds it: the plan names the files the worker may touch, the lead checks that list against the hook's refused paths, and anything outside it goes back before it is edited.

@@ -6308,7 +6308,8 @@ var gateSettings = defineSettings({
 });
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
-  { backends: ["claude", "glm"], id: "claude-code", label: "Claude Code" }
+  { backends: ["claude", "glm"], id: "claude-code", label: "Claude Code" },
+  { backends: ["openai"], id: "codex", label: "Codex" }
 ];
 var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
 var GLM_MODEL = "glm";
@@ -6449,7 +6450,7 @@ var sessionTemplate = strictObject({
   account: string2().email().optional(),
   brief: string2().regex(BRIEF_NAME, "a brief is a file name, with no /").refine((brief) => !brief.includes(".."), "a brief is a file name, with no .."),
   effort: _enum(EFFORTS).optional(),
-  harness: _enum(HARNESS_IDS),
+  harness: literal("claude-code"),
   id: name,
   kind: _enum(TEMPLATE_KINDS),
   label: string2().min(1).max(40),
