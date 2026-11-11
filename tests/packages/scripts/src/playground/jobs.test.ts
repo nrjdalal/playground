@@ -140,11 +140,11 @@ test("a dropped job's plist the trash refuses stays, is named, and the render ex
   expect(existsSync(join(odd, "a"))).toBe(true)
 })
 
-// A render with install, in a HOME of the test's own whose LaunchAgents folder is the one launchd would load, every launchctl call recorded: print answers whether a label is loaded, bootstrap loads one (refusing the first refusals given), and bootout unloads it.
+// A render with install, in a HOME of the test's own whose LaunchAgents folder is the one launchd would load, every launchctl call recorded: print answers whether a label is loaded, bootstrap loads one (refusing the first refusals given), and bootout unloads it, or ends the render as launchd ends a job that boots itself out (killed).
 const installRun = async (
   name: string,
   values: Record<string, unknown>,
-  launchd: { loaded?: string[]; refusals?: number } = {},
+  launchd: { killed?: boolean; loaded?: string[]; refusals?: number } = {},
 ) => {
   const data = storeWith(name, values)
   const home = join(scratch, name, "home")
@@ -169,6 +169,7 @@ const installRun = async (
         return { code: 5, out: "nope" }
       }
       if (args[0] === "bootstrap") loaded.add(label)
+      if (args[0] === "bootout" && launchd.killed) throw new Error("killed by its own bootout")
       if (args[0] === "bootout") loaded.delete(label)
       return { code: 0, out: "" }
     },
@@ -243,6 +244,24 @@ test("a launchd job turned off is booted out and its installed plist moved to th
   expect(readFileSync(join(agents, "com.other.agent.plist"), "utf8")).toBe("theirs")
   expect((await render()).out).toBe("jobs: unchanged")
   expect(changes()).toHaveLength(1)
+})
+
+// ops-tick runs the render through up.py, so turning ops-tick off boots out the job the render runs under, which ends the render inside that call.
+test("a launchd job whose bootout ends the render has its plist in the trash already", async () => {
+  const { agents, changes, data, render } = await installRun(
+    "install-self",
+    { "jobs.opsTick": { ...tick, enabled: false } },
+    { killed: true },
+  )
+  const tickPlist = join(agents, "com.playground.ops-tick.plist")
+  writeFileSync(tickPlist, "installed")
+  await expect(render()).rejects.toThrow("killed by its own bootout")
+  expect(changes()).toEqual([["bootout", "gui/501/com.playground.ops-tick"]])
+  expect(existsSync(tickPlist)).toBe(false)
+  const [batch] = readdirSync(join(data, "trash"))
+  expect(
+    readFileSync(join(data, "trash", batch!, "1", "com.playground.ops-tick.plist"), "utf8"),
+  ).toBe("installed")
 })
 
 test("a bootstrap launchctl refuses is named on stderr, exits 1, and is tried again on the next pass", async () => {
