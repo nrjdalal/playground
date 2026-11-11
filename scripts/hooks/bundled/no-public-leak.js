@@ -6519,16 +6519,16 @@ var isPublicList = (value) => typeof value === "object" && value !== null && !Ar
 });
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var anyOf = (items, tail = "") => items.length ? new RegExp(`(?<![a-z\\d])(?:${items.map(escape).join("|")})${tail}(?![a-z\\d])`, "gi") : undefined;
-var ownerWord = (name, archive) => {
+var ownerWord = (name) => {
   const cased = [...name].map((c) => /[a-z]/i.test(c) ? `[${c.toLowerCase()}${c.toUpperCase()}]` : escape(c));
-  return `(?<![a-zA-Z\\d])(?<![\\w.+-]@[\\w.-]*)${cased.join("")}(?![a-zA-Z\\d])(?!/[\\w-])(?![\\w.+-]*@)(?!/${escape(archive.split("/")[1] ?? "")}(?![\\w.-]))`;
+  return `(?<![a-zA-Z\\d])(?<![\\w.+-]@[\\w.-]*)${cased.join("")}(?![a-zA-Z\\d])(?!/[\\w-])(?![\\w.+-]*@)`;
 };
 var ownerName = (repos) => {
   if (!repos.owner.length)
     return;
   const MONTH = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*";
   return new RegExp([
-    ...repos.owner.map((name) => ownerWord(name, repos.archive)),
+    ...repos.owner.map(ownerWord),
     `\\b[Tt]he owner(?:,[^:"\\n]{0,40})?:\\s*["\u201C]`,
     "\\b[Tt]he owner (?:said|wrote)\\b",
     `\\b[A-Z][a-z]+, \\d{1,2} ${MONTH}\\b[^"\\n]{0,30}: *["\u201C]`

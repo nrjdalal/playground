@@ -74,12 +74,12 @@ export const anyOf = (items: string[], tail = ""): RegExp | undefined =>
     ? new RegExp(`(?<![a-z\\d])(?:${items.map(escape).join("|")})${tail}(?![a-z\\d])`, "gi")
     : undefined
 
-// A name in either case, standing alone, never inside an address or the archive's own link (archiveLinks counts that).
-const ownerWord = (name: string, archive: string): string => {
+// A name in either case, standing alone, never inside an address, and never followed by a slash and a path word, which reads as data (a repository URL, a slug such as the archive's own link, which archiveLinks counts, or any path).
+const ownerWord = (name: string): string => {
   const cased = [...name].map((c) =>
     /[a-z]/i.test(c) ? `[${c.toLowerCase()}${c.toUpperCase()}]` : escape(c),
   )
-  return `(?<![a-zA-Z\\d])(?<![\\w.+-]@[\\w.-]*)${cased.join("")}(?![a-zA-Z\\d])(?!/[\\w-])(?![\\w.+-]*@)(?!/${escape(archive.split("/")[1] ?? "")}(?![\\w.-]))`
+  return `(?<![a-zA-Z\\d])(?<![\\w.+-]@[\\w.-]*)${cased.join("")}(?![a-zA-Z\\d])(?!/[\\w-])(?![\\w.+-]*@)`
 }
 // The owner's names, a quote set against the owner (`the owner, 24 Oct: "`, `the owner said`), or anyone's dated quote (`Corin, 23 Oct: "`), so the repo's text names no person and quotes no one; none with no names to read, as a list kind has none with an empty list. Case is spelled out, since a dated quote's name is read by its capital.
 const ownerName = (repos: Repos): RegExp | undefined => {
@@ -87,7 +87,7 @@ const ownerName = (repos: Repos): RegExp | undefined => {
   const MONTH = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
   return new RegExp(
     [
-      ...repos.owner.map((name) => ownerWord(name, repos.archive)),
+      ...repos.owner.map(ownerWord),
       `\\b[Tt]he owner(?:,[^:"\\n]{0,40})?:\\s*["“]`,
       "\\b[Tt]he owner (?:said|wrote)\\b",
       `\\b[A-Z][a-z]+, \\d{1,2} ${MONTH}\\b[^"\\n]{0,30}: *["“]`,

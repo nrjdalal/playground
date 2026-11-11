@@ -108,6 +108,12 @@ describe("the trace count", () => {
     expect(count([{ path: "a.md", text }], undefined, repos).ownerName).toBe(1)
   })
 
+  test("leaves the owner's handle out before any path word, a path in prose included", () => {
+    const repos = reposOf({ schemaVersion: 1, values: { "owner.names": ["quilla"] } })
+    const text = "the drafts sit in quilla/notes for now"
+    expect(count([{ path: "a.md", text }], undefined, repos).ownerName).toBe(0)
+  })
+
   test("counts a quote set against the owner and anyone's dated quote, as a name is, and nothing with no names to read", () => {
     // Built at run time, so this file's own text holds no quote.
     const owner = ["the", "owner"].join(" ")
