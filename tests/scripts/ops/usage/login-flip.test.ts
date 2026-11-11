@@ -22,16 +22,25 @@ const script = join(
 const scratch = mkdtempSync(join(tmpdir(), "ops-usage-login-flip-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-// login-flip.py run whole under a scratch HOME at the clock given, with subprocess stubbed so no Keychain read or bun run ask runs, and beat's setting() answering ACCOUNTS as usage.accounts. Accounts go by short names (ND, LW, ...) over made-up addresses: the harness writes the stored login and every reading into the state it finds, runs it, and names the switch's target (none when no account has room), the accounts it said have no end, and the pool and split it wrote
+// login-flip.py run whole under a scratch HOME at the clock given, with subprocess stubbed so no Keychain read or bun run ask runs, and beat's setting() answering ACCOUNTS as usage.accounts. Accounts go by short names (ND, LW, ...) over made-up addresses: the harness writes the stored login and every reading into the state it finds, runs it, and names the switch's target (none when no account has room), the account it said the factory is now on, the accounts it kept in `accounts`, and the pool and split it wrote. spec.tokens names the short accounts whose Keychain read succeeds, every one of them unless it says otherwise, and urlopen refuses, so a probe that passes the Keychain gate still leaves the Mac unread
 const harness = `
-import contextlib, io, json, os, re, sys, time, types
+import contextlib, io, json, os, re, sys, time, types, urllib.request
 spec = json.loads(sys.argv[2])
 time.time = lambda: spec["now"]
 email = {k: f"{k.lower()}@example.test" for k in ("OWN", "ND", "LW", "PRIDE", "OWN2")}
 name = {v: k for k, v in email.items()}
 values = {"models.probe": "a-made-up-model", "usage.keychainService": "made-up-service", "usage.accounts": [dict(row, email=email.get(row["email"], row["email"])) for row in spec["accounts"]]}
 sys.modules["beat"] = types.SimpleNamespace(OPS=os.path.expanduser("~/.playground/ops"), checkout=lambda: "/checkout", setting=lambda key: values[key])
-sys.modules["subprocess"] = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
+tokens = set(email[k] for k in (spec.get("tokens") or list(email)))
+def keychain(cmd, *a, **k):
+    return types.SimpleNamespace(returncode=0 if "-a" in cmd and cmd[cmd.index("-a") + 1] in tokens else 1, stdout="", stderr="")
+sys.modules["subprocess"] = types.SimpleNamespace(run=keychain)
+class Refused(Exception):
+    headers = None
+def refused(*a, **k):
+    raise Refused()
+urllib.request.urlopen = refused
+sys.modules["urllib.request"] = urllib.request
 src = open(sys.argv[1]).read()
 folder = os.path.expanduser("~/.playground/ops/usage")
 os.makedirs(folder, exist_ok=True)
@@ -52,6 +61,12 @@ if not spec.get("keepDue"):
     state.pop("due", None)
 if spec.get("factory"):
     state["factory"] = email[spec["factory"]]
+if spec.get("split"):
+    state["split"] = {"at": spec["now"], "shares": {email[k]: v for k, v in spec["split"].items()}}
+if spec.get("due"):
+    state["due"] = email[spec["due"]]
+if spec.get("accountsList"):
+    state["accounts"] = [email.get(k, k) for k in spec["accountsList"]]
 json.dump(state, open(path, "w"))
 out = io.StringIO()
 ns = {"__name__": "__main__"}
@@ -60,13 +75,15 @@ with contextlib.redirect_stdout(out):
 text = out.getvalue()
 due = re.search(r"switch due to (\\S+)", text)
 target = name[due.group(1)] if due else "none" if "no account has room" in text else None
+nowOn = re.search(r"the factory is now on (\\S+)", text)
 noEnd = [name[e] for e in re.findall(r"login flip: (\\S+)'s plan ends but usage.accounts sets no end", text)]
 written = json.load(open(ns["STATE"]))
 pool = [dict(e, account=name[e["account"]]) for e in written["rotation"]["pool"]]
 split = {name[k]: v for k, v in written["split"]["shares"].items()}
+accountsList = [name.get(a, a) for a in written.get("accounts") or []]
 seenAt = {name[k]: v.get("at") for k, v in written["seen"].items()}
 seenFive = {name[k]: v.get("five") for k, v in written["seen"].items()}
-print(json.dumps({"noEnd": noEnd, "pool": pool, "seenAt": seenAt, "seenFive": seenFive, "split": split, "target": target}))
+print(json.dumps({"accountsList": accountsList, "noEnd": noEnd, "on": name[nowOn.group(1)] if nowOn else None, "pool": pool, "seenAt": seenAt, "seenFive": seenFive, "split": split, "target": target}))
 `
 
 const at = (iso: string) => Date.parse(iso) / 1000
@@ -106,8 +123,12 @@ const flip = (
   probeRead = false,
   extra: {
     accounts?: Record<string, unknown>[]
+    accountsList?: string[]
+    due?: string
     noFive?: boolean
     prior?: Record<string, Reading>
+    split?: Record<string, number>
+    tokens?: string[]
   } = {},
 ) => {
   const env: Record<string, string | undefined> = {
@@ -179,6 +200,55 @@ test("the account the factory runs on is the current one, not the stored login",
     OWN2: { ...spent.OWN2, week: 50 },
   }
   expect(flip("OWN2", onFirst, TONIGHT, undefined, "ND").target).toBeNull()
+})
+
+// #1751: the factory login reads through the pool rule, itself while it is a pool account whose token is still in the Keychain, else the pool account the split gives the best share
+test("a factory that has left the pool falls back to the pool account with the best share, and the switch machinery stays alive", () => {
+  // nd941z@ has left usage.accounts, so its row is gone: the login lands on own@ (the best share, a token in the Keychain), and own@ spent, the ending own2@ is the target
+  const seen = {
+    LW: { ...spent.LW },
+    OWN: { ...spent.OWN },
+    OWN2: { ...spent.OWN2, week: 50 },
+    PRIDE: { ...spent.PRIDE, week: 40 },
+  }
+  const { target } = flip("OWN", seen, TONIGHT, undefined, "ND", false, false, {
+    accounts: ACCOUNTS.filter((row) => row.email !== "ND"),
+    split: { LW: 0, OWN: 0.4, OWN2: 0.35, PRIDE: 0.25 },
+  })
+  expect(target).toBe("OWN2")
+})
+
+test("a pool factory whose token is gone from the Keychain falls back to the best tokened share", () => {
+  // pride@ holds a reading but no Keychain item: the login resolves to own@ (its 0.3 share over nd941z@'s 0.2), which the due state already names, so the run says the factory is now on own@
+  const seen = {
+    LW: { ...spent.LW },
+    ND: { ...spent.ND },
+    OWN2: { ...spent.OWN2 },
+    PRIDE: { ...spent.PRIDE, week: 50 },
+  }
+  const { on, target } = flip(
+    "OWN",
+    { ...seen, OWN: { ...spent.OWN, week: 40 } },
+    TONIGHT,
+    undefined,
+    "PRIDE",
+    true,
+    false,
+    {
+      due: "OWN",
+      split: { LW: 0, ND: 0.2, OWN: 0.3, OWN2: 0, PRIDE: 0.5 },
+      tokens: ["LW", "ND", "OWN", "OWN2"],
+    },
+  )
+  expect(on).toBe("OWN")
+  expect(target).toBeNull()
+})
+
+test("an accounts entry not in the pool is dropped from the written state", () => {
+  const { accountsList } = flip("OWN", spent, TONIGHT, undefined, undefined, false, false, {
+    accountsList: ["ND", "LW", "OWN", "OWN2", "PRIDE", "gone@example.test"],
+  })
+  expect(accountsList).toEqual(["ND", "LW", "OWN", "OWN2", "PRIDE"])
 })
 
 test("a reading missing its week keeps the last one, so no switch fires", () => {

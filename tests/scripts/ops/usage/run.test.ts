@@ -709,3 +709,72 @@ test("a settings read that fails keeps the factory's reading, since no account i
     factory: "gone@example.test",
   })
 })
+
+// #1751: factory_reading reads the field through the pool rule, itself while the pool lists it and its token still reads (a fresh reading, then), else the pool account the split gives the best share. The probe and the Keychain are stubbed, so no request leaves the Mac; an account named in `dead` probes as one whose Keychain item is gone
+const poolHarness = `
+import json, os, sys, time, types
+spec = json.loads(sys.argv[2])
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+now = time.time()
+calls = []
+def probe(email):
+    calls.append(email)
+    if email in (spec.get("dead") or []):
+        return None
+    return {"five": 10, "fiveReset": now + 3600, "week": 40, "weekReset": now + 86400}
+ns["probe"] = probe
+ns["subprocess"] = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
+flip = {"factory": spec["factory"],
+        "rotation": {"pool": [{"account": a, "ending": False, "endsAt": None, "renewsOn": None} for a in spec["pool"]]},
+        "seen": {a: {"at": now + v.get("at", -60), "week": v.get("week", 40), "weekReset": now + 2 * 86400} for a, v in spec["seen"].items()},
+        "split": {"at": now, "shares": spec["shares"]}}
+out = {}
+try:
+    data = ns["factory_reading"]({"account": "stored@example.test", "rate_limits": {}}, flip, spec["accounts"])
+    if data:
+        out["factory"] = data["account"]
+except Exception as e:
+    out["error"] = f"{type(e).__name__}: {e}"
+out["probes"] = calls
+print(json.dumps(out))
+`
+
+const runPool = (name: string, spec: Record<string, unknown>) => {
+  const home = join(scratch, name)
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(["python3", "-I", "-c", poolHarness, script, JSON.stringify(spec)], {
+    env,
+  })
+  expect(child.stderr.toString()).toBe("")
+  return JSON.parse(child.stdout.toString())
+}
+
+test("a factory that has left the pool falls back to the pool account the split gives the best share (#1751)", () => {
+  expect(
+    runPool("pool-left", {
+      accounts: ["mine@example.test", "spare@example.test"],
+      factory: "gone@example.test",
+      pool: ["mine@example.test", "spare@example.test"],
+      seen: { "spare@example.test": {} },
+      shares: { "mine@example.test": 0.2, "spare@example.test": 0.8 },
+    }),
+  ).toEqual({ factory: "spare@example.test", probes: [] })
+})
+
+test("a pool factory whose token reads no more falls back to the pool account the split gives the best share (#1751)", () => {
+  expect(
+    runPool("pool-token-gone", {
+      accounts: ["mine@example.test", "spare@example.test"],
+      dead: ["mine@example.test"],
+      factory: "mine@example.test",
+      pool: ["mine@example.test", "spare@example.test"],
+      seen: { "mine@example.test": { at: -2000 }, "spare@example.test": {} },
+      shares: { "mine@example.test": 0.8, "spare@example.test": 0.2 },
+    }),
+  ).toEqual({ factory: "spare@example.test", probes: ["mine@example.test"] })
+})
