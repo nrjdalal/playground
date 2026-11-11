@@ -2086,20 +2086,20 @@ unit_fits() {
   local c=${5:-$(capacity)} m h r lu=${8:-}
   [ -n "$lu" ] || lu=$(lane_units)
   r=$(($c / 4)); [ "$r" -ge 1 ] || r=1
-  may_reserve "$1" "$3" "$4" "$r" m "${9-}"
+  may_reserve "$1" "$3" "$4" "$r" m ${9+"$9"}
   held_for "$m" "${6:-}" "${7:-0}" h "$lu"
   fits "$h" "$2" $((c - m))
 }
 # whether a run of $2 units fits beside $1 held within a limit of $3; any run fits while no slot is held, so a big run still starts on a quiet machine
 fits() { [ "$1" -eq 0 ] || [ $(($1 + $2)) -le "$3" ]; }
 reserve() { local r=$(($1 / 4)); [ "$r" -ge 1 ] && echo "$r" || echo 1; }
-# the units a run must leave free: none for a small run, one that gates a merge (rank 0x), an org's run (1x) or the run-slot.priority pick, else the reserve; with $5 given it is set instead of echoed, and $6 given names the holder the walk read once, so a walk pays no read a ticket (issue 1654)
+# the units a run must leave free: none for a small run, one that gates a merge (rank 0x), an org's run (1x) or the run-slot.priority pick, else the reserve; with $5 given it is set instead of echoed, and $6 given names the holder the walk read once, empty when none stands, so a walk pays no read a ticket; callers without $6 read their own (issue 1654)
 may_reserve() {
   local rr
   case "$2" in small) rr=0 ;; *)
     case "$1" in 0?|1?) rr=0 ;; *)
       if [ -z "$3" ]; then rr=$4
-      elif [ -n "${6+x}" ]; then [ "$(owner_of "$3")" = "$6" ] && rr=0 || rr=$4
+      elif [ -n "${6+x}" ]; then { [ -n "$6" ] && [ "$(owner_of "$3")" = "$6" ]; } && rr=0 || rr=$4
       elif prio_for "$3"; then rr=0; else rr=$4; fi
     ;; esac
   ;; esac
