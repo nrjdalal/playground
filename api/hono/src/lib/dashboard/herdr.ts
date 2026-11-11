@@ -519,9 +519,9 @@ export function codexLaunches(data = dataDir()): CodexLaunches {
       const exec = readFileSync(join(data, "resume", `${name}.sh`), "utf8")
         .split("\n")
         .find((line) => line.startsWith("exec "))
-      const words = exec?.split(" ") ?? []
-      const thread = words[3] === name ? words[5] : undefined
-      if (thread && /^[0-9a-f-]{36}$/.test(thread)) out.set(name, thread)
+      // spawn.sh writes the line with %q, so a folder may hold an escaped space: the name follows resume, and the thread ends the line
+      const words = exec?.match(/ resume (\S+) .* ([0-9a-f-]{36})$/)
+      if (words?.[1] === name && words[2]) out.set(name, words[2])
     } catch {}
   }
   return out

@@ -66,7 +66,7 @@ set -euo pipefail
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
-#   --harness codex    with the first dispatcher's manager start or its resume alone, and no --backend, --account, --model or --effort: the session runs in Codex (the codex on PATH), its CODEX_HOME the data folder's codex/, whose config.toml, hooks.json and app-server-daemon/settings.json each launch writes; its hooks always run trusted (--dangerously-bypass-hook-trust), and it fails closed: a session whose SessionStart hook writes no beat within 60 seconds has its pane closed and the start refused, with no pin, record or roster row. The beat names its thread, which takes the session's name through codex app-server's thread/name/set.
+#   --harness codex    with the first dispatcher's manager start or its resume alone, on a scratch data folder (PLAYGROUND_DATA_DIR naming one) until phase 3 wires the factory's guards into Codex's hooks, and no --backend, --account, --model or --effort: the session runs in Codex (the codex on PATH), its CODEX_HOME the data folder's codex/, whose config.toml, hooks.json and app-server-daemon/settings.json each launch writes; its hooks always run trusted (--dangerously-bypass-hook-trust), and it fails closed: a session whose SessionStart hook writes no beat within 60 seconds has its pane closed and the start refused, with no pin, record or roster row. The beat names its thread, which takes the session's name through codex app-server's thread/name/set.
 #   --harness claude-code  the default: the session runs in Claude Code.
 #     The harness and backend are recorded at the start in ~/.playground/backends/<name> (claude-code glm, codex openai), and carried on its resume, which also reads a pin of the backend alone: a resume takes no --backend or --harness while a pin stands, and refuses with no pin and none given, or with a pin that reads as none of those.
 #   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
@@ -1377,6 +1377,9 @@ fi
 if [ "$HARNESS" = codex ]; then
   { [ -n "$FIRST" ] && [[ $MODE =~ ^(manager|resume)$ ]]; } || refuse "Codex runs the first dispatcher alone, in a workspace of its own (spawn.sh manager $(dispatcher_of 1) <brief> --harness codex), not $NAME"
   [ -z "$BACKEND$ACCOUNT$CLAUDE_MODEL$EFFORT" ] || refuse "Codex runs on the login and model its CODEX_HOME holds, so it takes no --backend, --account, --model or --effort"
+  # No factory guard reaches a Codex session until phase 3 of the harness layer wires them into its hooks, so it runs only beside the live data folder; phase 3 lifts this in the change that wires them.
+  [ "$(cd -P "$DATA" 2>/dev/null && pwd -P)" != "$(cd -P "$HOME/.playground" 2>/dev/null && pwd -P)" ] ||
+    refuse "Codex starts only on a scratch data folder (PLAYGROUND_DATA_DIR naming one) until phase 3 of the harness layer wires the factory's guards into its hooks, and $SHOWN is the live one"
 fi
 # Every start and resume runs in herdr, the one runtime: a resume reads no pin, and the write below rewrites it whatever word it held.
 RUNTIMES="$DATA/runtimes"
@@ -1717,7 +1720,8 @@ def write(name, text):
 # The login stays in CODEX_HOME's auth.json, no update check or self-update runs mid-session, and the session's folder is trusted, so no prompt waits on the owner.
 write("config.toml", f'cli_auth_credentials_store = "file"\ncheck_for_update_on_startup = false\n\n[projects.{json.dumps(folder)}]\ntrust_level = "trusted"\n')
 write(os.path.join("app-server-daemon", "settings.json"), json.dumps({"autoUpdateEnabled": False}) + "\n")
-beat = {"hooks": [{"command": 'cat > "$SPAWN_CODEX_BEAT"', "timeout": 10, "type": "command"}], "matcher": ""}
+# The beat lands whole: written beside its path, then moved onto it, so the wait never reads half of it.
+beat = {"hooks": [{"command": 'f="$SPAWN_CODEX_BEAT"; cat > "$f.tmp" && mv "$f.tmp" "$f"', "timeout": 10, "type": "command"}], "matcher": ""}
 write("hooks.json", json.dumps({"hooks": {"SessionStart": [beat]}}, indent=2) + "\n")
 PY
   LAUNCH="env ${UNSET}${CARRY}PLAYGROUND_ROLE=$ROLE CODEX_HOME=$(printf %q "$CODEX_HOME") SPAWN_CODEX_BEAT=$(printf %q "$BEAT") $(printf %q "$CODEX")"
