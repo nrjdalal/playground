@@ -80,6 +80,16 @@ describe("spawn.sh --harness codex starts the dispatcher in Codex, failing close
     expect(r.rosterLog ?? []).toEqual([])
   })
 
+  test("a resume whose beat never lands is refused, its earlier pin and record left standing", async () => {
+    const r = await run(["resume", NAME, root, THREAD], { FAKE_NO_BEAT: "1" }, "codex openai")
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("SessionStart")
+    expect(r.err).toContain("its earlier pin and resume record stand")
+    expect(placing(r).some((c) => c[0] === "pane" && c[1] === "close")).toBe(true)
+    expect(read(data(r, "backends", NAME))).toBe("codex openai\n")
+    expect(r.rosterLog ?? []).toEqual([])
+  })
+
   test("a pane herdr will not close is refused in its own words, never read as closed", async () => {
     const r = await run(START, { FAKE_HERDR_CLOSE_FAIL: "1", FAKE_NO_BEAT: "1" })
     expect(r.code).not.toBe(0)
