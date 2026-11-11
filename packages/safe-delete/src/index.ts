@@ -17,6 +17,8 @@ import {
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve, sep } from "node:path"
 
+import { placedKindOf, ROSTER_ROLE_OF_KIND } from "../../config/src/kinds"
+
 // The folders a delete starts from, passed in so a test builds them on a mkdtemp root of its own.
 export type Roots = { home: string; main: string; trash: string }
 
@@ -450,7 +452,13 @@ const linkHolder = (at: string, roots: Roots, places: string[]): string | null =
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   if (dirname(at) !== worktreesOf(roots)) return `${at} is not a worktree in ${worktreesOf(roots)}`
-  let agents: ({ branch?: unknown; name?: unknown; pr?: unknown; status?: unknown } | null)[]
+  let agents: ({
+    branch?: unknown
+    kind?: unknown
+    name?: unknown
+    pr?: unknown
+    status?: unknown
+  } | null)[]
   try {
     agents = JSON.parse(readFileSync(holders.roster, "utf8")).agents
     if (!Array.isArray(agents)) throw new Error("no agents")
@@ -467,13 +475,16 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   const head = git("rev-parse", "HEAD").out
   const folder = basename(at).toLowerCase()
   const where = `${folder} ${branch.toLowerCase()}`
-  // Each name's slug, after its PG-<n>- prefix: ops holds PG-12-ops-job, not PG-5-stops.
+  // Each name's slug, after its PG-<n>- prefix: lint holds PG-12-lint-job, not PG-5-splint.
   const slugs = [folder, branch.toLowerCase()].map((n) => n.replace(/^pg-\d+-/, ""))
   for (const agent of agents) {
     if (!agent || !holders.live.includes(String(agent.status)) || typeof agent.name !== "string")
       continue
     const name = agent.name.toLowerCase()
-    const byName = slugs.some((s) => s === name || s.startsWith(`${name}-`))
+    // a manager seat names the work it routes, never a worktree, so its name alone holds none; its branch and PR still do
+    const kind = placedKindOf(agent.name, agent.kind)
+    const seat = kind !== null && ROSTER_ROLE_OF_KIND[kind] === "manager"
+    const byName = !seat && slugs.some((s) => s === name || s.startsWith(`${name}-`))
     const id = name.split("-")[0]!
     const byId = /\d/.test(id) && where.includes(id)
     const byBranch =

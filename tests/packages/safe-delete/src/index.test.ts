@@ -603,11 +603,11 @@ describe("worktreeRefusal", () => {
     // [folder, branch, live session, held]
     const cases: [string, string, string, boolean][] = [
       ["PG-864-second-dispatcher", "PG-864-second-dispatcher", "dispatcher", false],
-      ["PG-5-stops", "PG-5-stops", "ops", false],
-      ["PG-6-opsdesk", "PG-6-opsdesk", "ops", false],
-      ["PG-12-ops", "PG-12-ops", "ops", true],
-      ["PG-13-ops-job", "PG-13-ops-job", "ops", true],
-      ["PG-14-misc", "PG-14-ops-fix", "ops", true],
+      ["PG-5-splint", "PG-5-splint", "lint", false],
+      ["PG-6-lintdesk", "PG-6-lintdesk", "lint", false],
+      ["PG-12-lint", "PG-12-lint", "lint", true],
+      ["PG-13-lint-job", "PG-13-lint-job", "lint", true],
+      ["PG-14-misc", "PG-14-lint-fix", "lint", true],
     ]
     const seen = cases.map(([folder, branch, name]) => {
       const at = join(roots.main, ".claude", "worktrees", folder)
