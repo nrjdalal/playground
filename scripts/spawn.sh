@@ -1377,8 +1377,10 @@ fi
 if [ "$HARNESS" = codex ]; then
   { [ -n "$FIRST" ] && [[ $MODE =~ ^(manager|resume)$ ]]; } || refuse "Codex runs the first dispatcher alone, in a workspace of its own (spawn.sh manager $(dispatcher_of 1) <brief> --harness codex), not $NAME"
   [ -z "$BACKEND$ACCOUNT$CLAUDE_MODEL$EFFORT" ] || refuse "Codex runs on the login and model its CODEX_HOME holds, so it takes no --backend, --account, --model or --effort"
-  # No factory guard reaches a Codex session until phase 3 of the harness layer wires them into its hooks, so it runs only beside the live data folder; phase 3 lifts this in the change that wires them.
-  [ "$(cd -P "$DATA" 2>/dev/null && pwd -P)" != "$(cd -P "$HOME/.playground" 2>/dev/null && pwd -P)" ] ||
+  # No factory guard reaches a Codex session until phase 3 of the harness layer wires them into its hooks, so it runs only on a scratch data folder; phase 3 lifts this in the change that wires them.
+  # The live data folder is the one dataDir() gives with no PLAYGROUND_DATA_DIR set.
+  live=$(cd / && env $UNSET -u PLAYGROUND_DATA_DIR "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || refuse "bun could not resolve the live data folder"
+  [ "$(cd -P "$DATA" 2>/dev/null && pwd -P)" != "$(cd -P "$live" 2>/dev/null && pwd -P)" ] ||
     refuse "Codex starts only on a scratch data folder (PLAYGROUND_DATA_DIR naming one) until phase 3 of the harness layer wires the factory's guards into its hooks, and $SHOWN is the live one"
 fi
 # Every start and resume runs in herdr, the one runtime: a resume reads no pin, and the write below rewrites it whatever word it held.
