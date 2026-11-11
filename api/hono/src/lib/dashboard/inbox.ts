@@ -449,6 +449,9 @@ const askOption = z.strictObject({
   label: oneLine(LIMITS.line),
 })
 
+// Whose work an ask or an update is about: FACTORY_SCOPE, or an org's name; only a factory card goes to WhatsApp (ADR 0024).
+const scope = oneLine(LIMITS.name).optional()
+
 // The most and fewest questions one ask holds.
 export const MAX_QUESTIONS = 20
 export const MIN_QUESTIONS = 2
@@ -488,6 +491,7 @@ export const previewSchema = z.discriminatedUnion("type", [
       .min(MIN_QUESTIONS, QUESTIONS_MESSAGE)
       .max(MAX_QUESTIONS, QUESTIONS_MESSAGE)
       .optional(),
+    scope,
     text: words,
     type: z.literal("ask"),
   }),
@@ -567,6 +571,7 @@ export const updateSchema = z.strictObject({
   attachments,
   link,
   outcome: z.enum(OUTCOMES),
+  scope,
   text: words.optional(),
 })
 
@@ -697,6 +702,8 @@ export type InboxAnswer = {
   owned?: RunResult
   set?: RunResult
   uploaded?: number
+  // where the owner answered when not on the card: whatsapp, his reply naming the card's id there (whatsapp-answer.ts)
+  via?: "whatsapp"
 }
 
 // What a run the dashboard carried out on Approve gave: its exit code and the line it printed, the result or why it was refused.
@@ -1626,6 +1633,7 @@ export async function answerItem(
     reveal,
     settingsData,
     upload,
+    via,
     wait,
   }: {
     accept?: ExtRun
@@ -1637,6 +1645,7 @@ export async function answerItem(
     now?: Date
     reveal?: KeychainRead
     settingsData?: string
+    via?: InboxAnswer["via"]
   } & Pick<Sending, "upload" | "wait">,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
@@ -1678,7 +1687,7 @@ export async function answerItem(
   const answer: InboxAnswer =
     input.action === "dismiss"
       ? { ...checked.answer, at, dismissed: true, dismissedAt: at }
-      : { ...checked.answer, at }
+      : { ...checked.answer, at, ...(via && { via }) }
   // an accept's, an apps change's, a grant's, a guard setting's or an own account change's Approve runs its step, so one with nothing to run it is refused before it is recorded
   const step =
     current.kind === "decision" && answer.choice === "approve"

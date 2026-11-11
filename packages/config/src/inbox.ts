@@ -97,6 +97,9 @@ export type ChoiceRow = {
 // yes-no: one go row and its no, Approve and Deny with their own labels; letters: two or more go rows, A to E, then None of these.
 export type Choices = { rows: ChoiceRow[]; shape: "letters" | "yes-no" }
 
+// The scope a poster gives an ask or an update about the factory's own work, the one scope whose card may leave the Mac, on WhatsApp (ADR 0024); an org's work names its org, and a card with none stays in the Inbox.
+export const FACTORY_SCOPE = "factory"
+
 // The most go rows a decision offers, A to E.
 export const MAX_OPTIONS = 5
 
