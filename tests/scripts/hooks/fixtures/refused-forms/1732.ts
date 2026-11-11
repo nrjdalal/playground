@@ -67,6 +67,26 @@ export const groups: Group[] = [
       ["bunx -p next then env", "bunx -p next env next build"],
       ["bun x -p next then bash -c", "bun x -p next bash -c 'cd . && next build'"],
       ["npx -p next then sh -c", "npx -p next sh -c 'next build'"],
+      ["bunx -p turbo then sh -c with a quoted task", `bunx -p turbo sh -c 'turbo run "build"'`],
+      [
+        "bunx -p turbo then sh -c with an empty quote in the task",
+        `bunx -p turbo sh -c 'turbo run bu""ild'`,
+      ],
+      [
+        "bunx -p turbo then sh -c with a redirect glued to the task",
+        "bunx -p turbo sh -c 'turbo run build>log'",
+      ],
+      ["bunx -p next then sh -c with a quoted build", `bunx -p next sh -c 'next "build"'`],
+      [
+        "bunx -p next then sh -c with a redirect glued to build",
+        "bunx -p next sh -c 'next build>log'",
+      ],
+      ["npx -p next then sh -c with a single-quoted build", `npx -p next sh -c "next 'build'"`],
+      // a script beside -p is read as a line of its own, so turbo's --dry-run in it excuses no other command there
+      [
+        "bunx -p turbo then sh -c with a dry run",
+        "bunx -p turbo sh -c 'turbo run build --dry-run'",
+      ],
     ],
   },
 ]
