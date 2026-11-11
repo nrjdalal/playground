@@ -364,18 +364,25 @@ describe("readServer and herdrRecords", () => {
     mkdirSync(join(data, "backends"))
     mkdirSync(join(data, "resume"))
     const THREAD = "0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b"
-    const record = (name: string, pin: string, thread = THREAD) => {
+    const record = (name: string, pin: string, thread = THREAD, folder = "/x/leads") => {
       writeFileSync(join(data, "backends", name), `${pin}\n`)
       writeFileSync(
         join(data, "resume", `${name}.sh`),
-        `#!/bin/bash\n# server: playground\nexec /x/scripts/spawn.sh resume ${name} /x/leads ${thread}\n`,
+        `#!/bin/bash\n# server: playground\nexec /x/scripts/spawn.sh resume ${name} ${folder} ${thread}\n`,
       )
     }
     record("dispatcher", "codex openai")
+    // spawn.sh writes the exec line with %q, so a folder holding a space reads as one word with its space escaped
+    record("dispatcher-b", "codex openai", THREAD, "/x/my\\ leads")
     record("builder", "claude-code claude")
     record("planner", "codex openai", "not-a-thread")
     writeFileSync(join(data, "backends", "ops"), "codex openai\n")
-    expect(codexLaunches(data)).toEqual(new Map([["dispatcher", THREAD]]))
+    expect(codexLaunches(data)).toEqual(
+      new Map([
+        ["dispatcher", THREAD],
+        ["dispatcher-b", THREAD],
+      ]),
+    )
     expect(codexLaunches(join(data, "none"))).toEqual(new Map())
   })
 

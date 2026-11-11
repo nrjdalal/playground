@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { bin, lw, placing, root, spawn, type Spawned } from "./spawn-fake"
+import { bin, placing, root, spawn, type Spawned } from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them.
 setDefaultTimeout(40_000)
@@ -34,26 +34,29 @@ done`,
     `echo "$*" >> "$HOME/sleep.calls"
 [ -n "$FAKE_NO_BEAT" ] || [ -e "$HOME/beat.sent" ] && exit 0
 : > "$HOME/beat.sent"
-printf '{"session_id":"${THREAD}","source":"startup"}\\n' > "$HOME/.playground/launch/${NAME}.beat"`,
+printf '{"session_id":"${THREAD}","source":"startup"}\\n' > "$PLAYGROUND_DATA_DIR/launch/${NAME}.beat"`,
   )
 }
 
+// Every case runs on a scratch data folder, the one place a Codex session starts before phase 3, unless it says LIVE_DATA.
 const run = (args: string[], env: Record<string, string> = {}, pin?: string) =>
   spawn(
     args,
     [],
-    { PATH: `{home}/fakebin:${bin}:${process.env.PATH}`, ...env },
+    {
+      PATH: `{home}/fakebin:${bin}:${process.env.PATH}`,
+      ...(env.LIVE_DATA ? {} : { SCRATCH_DATA: "1" }),
+      ...env,
+    },
     undefined,
     pin ? { backend: pin, name: NAME } : undefined,
     fakes,
   )
 
-const read = (r: Spawned, ...parts: string[]) => {
-  const path = join(r.home, ...parts)
-  return existsSync(path) ? readFileSync(path, "utf8") : null
-}
+const data = (r: Spawned, ...parts: string[]) => join(r.home, "scratch-data", ...parts)
+const read = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : null)
 const launchText = (r: Spawned) => {
-  const dir = lw(r.home, "launch")
+  const dir = data(r, "launch")
   const file = readdirSync(dir).find((f) => f.endsWith(".sh"))
   return file ? readFileSync(join(dir, file), "utf8") : ""
 }
@@ -64,14 +67,16 @@ describe("spawn.sh --harness codex starts the dispatcher in Codex, failing close
     expect(r.code).not.toBe(0)
     expect(r.err).toContain("spawn.sh refuses")
     expect(r.err).toContain("SessionStart")
-    // the wait ran its whole length on the fake clock, then ended the session it had started
-    expect(read(r, "sleep.calls")?.split("\n").filter(Boolean).length).toBeGreaterThan(1)
+    // the wait ran its whole 60 seconds on the fake clock, 120 ticks of 0.5, then ended the session it had started
+    expect(read(join(r.home, "sleep.calls"))?.split("\n").filter(Boolean)).toEqual(
+      Array(120).fill("0.5"),
+    )
     expect(placing(r).some((c) => c[0] === "pane" && c[1] === "close" && c[2] === "w5:p1")).toBe(
       true,
     )
-    expect(read(r, ".playground", "backends", NAME)).toBeNull()
-    expect(read(r, ".playground", "resume", `${NAME}.sh`)).toBeNull()
-    expect(readdirSync(lw(r.home, "launch")).filter((f) => !f.endsWith(".herdr"))).toEqual([])
+    expect(read(data(r, "backends", NAME))).toBeNull()
+    expect(read(data(r, "resume", `${NAME}.sh`))).toBeNull()
+    expect(readdirSync(data(r, "launch")).filter((f) => !f.endsWith(".herdr"))).toEqual([])
     expect(r.rosterLog ?? []).toEqual([])
   })
 
@@ -80,23 +85,21 @@ describe("spawn.sh --harness codex starts the dispatcher in Codex, failing close
     expect(r.err).toBe("")
     expect(r.code).toBe(0)
     const launch = launchText(r)
-    expect(launch).toContain(`CODEX_HOME=${lw(r.home, "codex")}`)
-    expect(launch).toContain(`SPAWN_CODEX_BEAT=${lw(r.home, "launch", `${NAME}.beat`)}`)
+    expect(launch).toContain(`CODEX_HOME=${data(r, "codex")}`)
+    expect(launch).toContain(`SPAWN_CODEX_BEAT=${data(r, "launch", `${NAME}.beat`)}`)
     expect(launch).toContain(
       `${join(r.home, "fakebin", "codex")} --dangerously-bypass-hook-trust "`,
     )
     expect(launch).not.toContain(" claude ")
-    // the launch's own CODEX_HOME trusts the folder, keeps the login in a file, and its hooks write the beat
-    expect(read(r, ".playground", "codex", "config.toml")).toContain(`[projects."`)
-    expect(read(r, ".playground", "codex", "hooks.json")).toContain("SPAWN_CODEX_BEAT")
-    expect(read(r, "codex-app-server.log")).toContain(
+    // the launch's own CODEX_HOME trusts the folder, keeps the login in a file, and its hooks write the beat whole, through a file moved into place
+    expect(read(data(r, "codex", "config.toml"))).toContain(`[projects."`)
+    expect(read(data(r, "codex", "hooks.json"))).toContain('mv \\"$f.tmp\\" \\"$f\\"')
+    expect(read(join(r.home, "codex-app-server.log"))).toContain(
       `"method":"thread/name/set","params":{"name":"${NAME}","threadId":"${THREAD}"}`,
     )
-    expect(read(r, ".playground", "backends", NAME)).toBe("codex openai\n")
-    expect(read(r, ".playground", "resume", `${NAME}.sh`)).toContain(
-      `/scripts/spawn.sh resume ${NAME} `,
-    )
-    expect(read(r, ".playground", "resume", `${NAME}.sh`)).toContain(` ${THREAD}\n`)
+    expect(read(data(r, "backends", NAME))).toBe("codex openai\n")
+    expect(read(data(r, "resume", `${NAME}.sh`))).toContain(`/scripts/spawn.sh resume ${NAME} `)
+    expect(read(data(r, "resume", `${NAME}.sh`))).toContain(` ${THREAD}\n`)
   })
 
   test("a resume from a codex pin resumes its thread with hooks trusted", async () => {
@@ -106,7 +109,20 @@ describe("spawn.sh --harness codex starts the dispatcher in Codex, failing close
     expect(launchText(r)).toContain(
       `${join(r.home, "fakebin", "codex")} resume --dangerously-bypass-hook-trust ${THREAD} "`,
     )
-    expect(read(r, ".playground", "backends", NAME)).toBe("codex openai\n")
+    expect(read(data(r, "backends", NAME))).toBe("codex openai\n")
+  })
+
+  // No factory guard reaches a Codex session until phase 3 wires them into its hooks, so the live data folder takes no Codex start or resume.
+  test.each([
+    ["a start", START, undefined],
+    ["a resume", ["resume", NAME, root, THREAD], "codex openai"],
+  ])("refuses %s on the live data folder, naming phase 3", async (_, args, pin) => {
+    const r = await run(args, { LIVE_DATA: "1" }, pin)
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("spawn.sh refuses")
+    expect(r.err).toContain("phase 3")
+    expect(placing(r)).toEqual([])
+    expect(read(join(r.home, "codex.args"))).toBeNull()
   })
 
   test.each([
@@ -118,6 +134,6 @@ describe("spawn.sh --harness codex starts the dispatcher in Codex, failing close
     const r = await run(args)
     expect(r.code).not.toBe(0)
     expect(r.err).toContain("Codex")
-    expect(read(r, "codex.args")).toBeNull()
+    expect(read(join(r.home, "codex.args"))).toBeNull()
   })
 })
