@@ -1046,6 +1046,40 @@ describe("stripTrash", () => {
     expect("refused" in done && done.refused).toContain("tripwire")
     expect(existsSync(join(tree, "node_modules", "left-pad", "index.js"))).toBe(true)
   })
+
+  test("a tree that passes the tripwire only because its node_modules is skipped still moves", () => {
+    const roots = machine()
+    const tree = join(roots.home, "review-clone")
+    for (let i = 0; i < LIMITS.files - 1; i++) file(join(tree, "src", `f${i}`))
+    for (let i = 0; i < 100; i++) file(join(tree, "node_modules", `f${i}`))
+    const done = quarantine(tree, opts, roots)
+    if (!("id" in done)) throw new Error(`quarantine refused: ${done.refused}`)
+    const [batch] = done.id.split("/")
+    expect(existsSync(join(roots.trash, batch, "1", "review-clone", "src", "f0"))).toBe(true)
+  })
+
+  test("a strip that throws leaves the item reachable, its entry unmarked, and names the failure", () => {
+    const roots = machine()
+    const tree = join(roots.home, "review-clone")
+    file(join(tree, "node_modules", "locked", "child.js"))
+    file(join(tree, "node_modules", "ok", "child.js"))
+    file(join(tree, "src", "index.ts"))
+    chmodSync(join(tree, "node_modules", "locked"), 0o555)
+    const done = quarantine(tree, opts, roots)
+    if (!("id" in done)) throw new Error(`quarantine refused: ${done.refused}`)
+    expect(typeof done.stripFailed).toBe("string")
+    expect("stripped" in done).toBe(false)
+    const [batch] = done.id.split("/")
+    const entry = JSON.parse(
+      readFileSync(join(roots.trash, batch, "manifest.jsonl"), "utf8").trim(),
+    ) as { stripped?: number }
+    expect(entry.stripped).toBeUndefined()
+    expect(existsSync(join(roots.trash, batch, "1", "review-clone", "src", "index.ts"))).toBe(true)
+    expect(
+      existsSync(join(roots.trash, batch, "1", "review-clone", "node_modules", "locked")),
+    ).toBe(true)
+    chmodSync(join(roots.trash, batch, "1", "review-clone", "node_modules", "locked"), 0o755)
+  })
 })
 
 test("a path outside a tree's node_modules and web/next/.next is never removed outright", () => {

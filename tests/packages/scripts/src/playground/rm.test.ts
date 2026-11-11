@@ -1,5 +1,6 @@
 import { afterAll, expect, test } from "bun:test"
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -171,6 +172,25 @@ test("rm of a tree leaves its node_modules and web/next/.next out of the trash, 
   expect(existsSync(join(tree, "src", "index.ts"))).toBe(true)
   expect(existsSync(join(tree, "node_modules"))).toBe(false)
   expect(said.join("\n")).toContain("bun install")
+})
+
+test("a strip that stops partway still moves the tree, and the move line names it", async () => {
+  const { deps, home } = machine()
+  const tree = join(home, "review-clone")
+  file(join(tree, "node_modules", "locked", "child.js"))
+  file(join(tree, "node_modules", "ok", "child.js"))
+  file(join(tree, "src", "index.ts"))
+  chmodSync(join(tree, "node_modules", "locked"), 0o555)
+  const log = console.log
+  const said: string[] = []
+  console.log = (line: string) => void said.push(line)
+  expect(await runRm([tree, "--reason", "scratch"], deps)).toBe(0)
+  console.log = log
+  expect(said.join("\n")).toContain("the strip stopped")
+  const trash = join(deps.data, "trash")
+  const [batch] = readdirSync(trash)
+  expect(existsSync(join(trash, batch, "1", "review-clone", "src", "index.ts"))).toBe(true)
+  chmodSync(join(trash, batch, "1", "review-clone", "node_modules", "locked"), 0o755)
 })
 
 test("the restore of a batch the strip took rebuildables from names the install", async () => {
