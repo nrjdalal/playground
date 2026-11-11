@@ -585,6 +585,90 @@ describe("one night's run against a fixture data folder", () => {
     expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(600_000)
   })
 
+  // #1710: cleanWorktree moves a saved worktree through rm itself, so its moves count toward the cap too
+  test("the beat paces cleanWorktree's own moves under rm's cap, so no try is refused", async () => {
+    const root = scratch()
+    const data = join(root, "data")
+    const ops = join(data, "ops")
+    const main = join(root, "main")
+    const names = Array.from({ length: 10 }, (_, i) => `pg-${i + 1}`)
+    for (const name of names)
+      mkdirSync(join(main, ".claude", "worktrees", name), { recursive: true })
+    mkdirSync(join(ops, "log"), { recursive: true })
+    writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
+    const wt = (name: string) => join(main, ".claude", "worktrees", name)
+    const porcelain = [
+      `worktree ${main}\nHEAD a\nbranch refs/heads/main`,
+      ...names.map(
+        (name, i) => `worktree ${wt(name)}\nHEAD h${i + 1}\nbranch refs/heads/PG-${i + 1}-x`,
+      ),
+    ].join("\n\n")
+    const { run } = fakeRun({
+      "docker ps": "playground-dashboard-db\trunning\t10B",
+      "docker system df": JSON.stringify({ Volumes: [] }),
+      "for-each-ref refs/heads": "main m",
+      "for-each-ref refs/remotes/origin": "HEAD x",
+      "worktree list": porcelain,
+    })
+    let t = 0
+    const accepted: number[] = []
+    let refusals = 0
+    const waits: number[] = []
+    const ctx: Context = {
+      now: new Date("2026-11-05T03:00:00Z"),
+      ops,
+      repo: main,
+      run,
+      send: async () => true,
+    }
+    const deps: NightDeps = {
+      cleanup: async () => ({
+        containers: async () => [],
+        devStop: async () => ({ ok: true, out: "" }),
+        finished: async () => true,
+        git: async (dir, args) =>
+          args[0] === "rev-parse" ? `${dir}/.git\n${main}/.git` : args[0] === "rev-list" ? "0" : "",
+        held: async () => null,
+        live,
+        liveBranch: "live/dashboard",
+        main,
+        removeContainer: async () => true,
+        rm: async () => {
+          if (accepted.filter((at) => t - at < 60_000).length >= 3) {
+            refusals++
+            return {
+              ok: false,
+              out: "playground: shell quarantined 3 paths in the last minute, the most one session may",
+            }
+          }
+          accepted.push(t)
+          return { ok: true, out: "" }
+        },
+      }),
+      free: () => 100 * 1024 ** 3,
+      now: () => t,
+      prs: async () => ({
+        ...prsOf(
+          Object.fromEntries(
+            names.map((_, i) => [`PG-${i + 1}-x`, pr("MERGED", `h${i + 1}`, i + 1)]),
+          ),
+        ),
+        repo: "https://github.com/acme/app",
+      }),
+      sleep: async (ms) => {
+        waits.push(ms)
+        t += ms
+      },
+      turbo: join(root, "turbo"),
+    }
+    await nightlyClean(deps)(ctx)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(refusals).toBe(0)
+    expect(log.match(/removed \/[^;]*pg-\d+/g)).toHaveLength(10)
+    expect(waits).toEqual([60_000, 60_000, 60_000])
+    expect(log).not.toContain("quarantined")
+  })
+
   // the bound: with rm refusing forever, the beat still ends inside its 10-minute wait budget, and each worktree it leaves is named for the next run
   test("the beat ends within its wait bound when rm refuses every move, naming each one left", async () => {
     const root = scratch()
@@ -781,6 +865,53 @@ describe("one night's run against a fixture data folder", () => {
     expect(log).toContain("archived scratch as archive/scratch at s, deleted on origin and locally")
     const line = sent.find((s) => s.to === "ops")
     expect(line?.text).toContain("branch scratch as tag archive/scratch at s")
+  })
+
+  // #1710: a branch never pushed has a head GitHub does not hold, which the refs API refuses
+  const unknown = { code: 1, err: "gh: Object does not exist (HTTP 422)" }
+  test.each([
+    ["a head GitHub does not hold stays, with a local archive tag alone", unknown, false],
+    ["a pushed head is still archived on origin, then deleted", {}, true],
+  ])("%s", async (_, answer, archived) => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "git/refs": answer,
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(
+      ran.some((r) => r.includes("git/refs") && r.includes("ref=refs/tags/archive/scratch")),
+    ).toBe(true)
+    expect(ran.some((r) => r.endsWith("tag archive/scratch s"))).toBe(!archived)
+    expect(ran.some((r) => r.includes("push") && r.includes("archive/scratch"))).toBe(false)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(archived)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    const line = sent.find((s) => s.to === "ops")?.text ?? ""
+    if (archived) {
+      expect(log).toContain("archived scratch as archive/scratch at s, deleted locally")
+      expect(line).toContain("branch scratch as tag archive/scratch at s")
+    } else {
+      expect(log).toContain(
+        "kept scratch: its head s is not on GitHub, so it is tagged archive/scratch locally alone",
+      )
+      expect(line).toContain(
+        "branch scratch kept: its head is not on GitHub, tagged archive/scratch locally",
+      )
+    }
+  })
+
+  test("a head GitHub does not hold, already tagged locally at that head, is named on no later night", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "git/refs": unknown,
+      "refs/tags/archive/scratch": "s",
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.endsWith("tag archive/scratch s"))).toBe(false)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(false)
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).not.toContain("scratch")
+    expect(sent.find((s) => s.to === "ops")?.text ?? "").not.toContain("scratch")
   })
 
   // #1515

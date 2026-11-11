@@ -690,7 +690,7 @@ const SPELLINGS = CASES.flatMap((c) => {
 })
 
 describe("every spelling of a row's path flag keeps the row's verdict", () => {
-  // the row's own verdict, read once per case; each check runs alone, since no-playground-leak's inspectAs holds its policy at module level (no-extension-repo-write, no-playground-leak, no-public-leak reach it) and two overlapping checks swap it (#1702)
+  // the row's own verdict, read once per case
   const verdicts = new Map<string, string | undefined>()
   const verdictOf = async (c: (typeof SPELLINGS)[number]) => {
     if (!verdicts.has(c.key))
