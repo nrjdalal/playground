@@ -30,7 +30,7 @@ const NAME = "dispatcher"
 const START = ["manager", NAME, "b.md", "--harness", "codex"]
 const THREAD = "0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b"
 
-// A case's own fakes ahead of spawn-fake's, and on a scratch data folder the thread's rollout, which Codex writes as the session starts, unless the case says it never did: codex, which logs its argv and answers each app-server request with an empty result, and sleep, the wait's clock, which ticks at once, logging each tick, and lands the SessionStart beat at its first tick unless FAKE_NO_BEAT says the hooks never loaded.
+// A case's own fakes ahead of spawn-fake's, and on a scratch data folder the thread's rollout, which Codex writes as the session starts, unless the case says it never did: codex, which logs its argv and answers each app-server request with an empty result, and sleep, the wait's clock, which ticks at once, logging each tick, and at its first tick runs the beat's own SessionStart hook from the rendered hooks.json, as Codex would, unless FAKE_NO_BEAT says the hooks never loaded; and pwsh in a folder of its own, which a case puts on PATH to have PowerShell installed.
 const fakes = (home: string, rollout = true) => {
   const sessions = join(home, "scratch-data", "codex", "sessions", "2026", "11", "11")
   if (existsSync(join(home, "scratch-data")) && rollout) {
@@ -58,8 +58,12 @@ done`,
     `echo "$*" >> "$HOME/sleep.calls"
 [ -n "$FAKE_NO_BEAT" ] || [ -e "$HOME/beat.sent" ] && exit 0
 : > "$HOME/beat.sent"
-printf '{"session_id":"${THREAD}","source":"startup"}\\n' > "$PLAYGROUND_DATA_DIR/launch/${NAME}.beat"`,
+hook=$(python3 -I -c 'import json, sys; print(next(h["command"] for g in json.load(open(sys.argv[1]))["hooks"]["SessionStart"] for h in g["hooks"] if "SPAWN_CODEX_BEAT" in h["command"]))' "$PLAYGROUND_DATA_DIR/codex/hooks.json")
+printf '{"session_id":"${THREAD}","source":"startup"}\\n' | SPAWN_CODEX_BEAT="$PLAYGROUND_DATA_DIR/launch/${NAME}.beat" bash -c "$hook"`,
   )
+  mkdirSync(join(home, "pwshbin"), { recursive: true })
+  writeFileSync(join(home, "pwshbin", "pwsh"), "#!/bin/bash\nexit 0\n")
+  chmodSync(join(home, "pwshbin", "pwsh"), 0o755)
 }
 
 // Every case runs on a scratch data folder, the one place a Codex session starts before phase 3, unless it says LIVE_DATA.
@@ -122,6 +126,28 @@ describe("spawn.sh --harness codex starts the dispatcher in Codex, failing close
     )
     expect(r.err).not.toContain("is closed")
     expect(read(data(r, "backends", NAME))).toBeNull()
+  })
+
+  test("PowerShell installed: the start stops, its pane closed, with no pin, record or roster row", async () => {
+    const r = await run(START, { PATH: `{home}/pwshbin:{home}/fakebin:${bin}:${process.env.PATH}` })
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("a Codex start stops when PowerShell is installed")
+    expect(r.err).toContain(join(r.home, "pwshbin", "pwsh"))
+    // the beat landed at once, so the wait took one tick, not its whole 60 seconds
+    expect(read(join(r.home, "sleep.calls"))?.split("\n").filter(Boolean)).toEqual(["0.5"])
+    expect(placing(r).some((c) => c[0] === "pane" && c[1] === "close" && c[2] === "w5:p1")).toBe(
+      true,
+    )
+    expect(read(data(r, "backends", NAME))).toBeNull()
+    expect(read(data(r, "resume", `${NAME}.sh`))).toBeNull()
+    expect(r.rosterLog ?? []).toEqual([])
+  })
+
+  test("no PowerShell: the beat's own hook names the thread and the start runs", async () => {
+    const r = await run(START)
+    expect(r.err).not.toContain("PowerShell")
+    expect(r.code).toBe(0)
+    expect(read(data(r, "resume", `${NAME}.sh`))).toContain(THREAD)
   })
 
   test("a start whose beat lands runs with hooks trusted, named, pinned and recorded", async () => {
