@@ -467,7 +467,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   if ("worktree" in args && args.worktree)
     Bun.spawnSync(["git", "-C", roots.main, "worktree", "prune"])
   console.log(
-    `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back${done.stripped ? ", and a bun install in it rebuilds what the strip removed" : ""}`,
+    `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back${done.stripped ? ", and a bun install in it rebuilds what the strip removed" : ""}${done.stripFailed ? ` (the strip stopped partway: ${done.stripFailed}; the hourly strip takes the rest)` : ""}`,
   )
   return 0
 }

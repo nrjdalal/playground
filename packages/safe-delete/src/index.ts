@@ -47,7 +47,14 @@ export type Holders = {
 export const isAgentBrowser = (command: string): boolean =>
   /^agent-browser(?:-[\w-]+)?$/.test(basename(command.split(" ")[0]!))
 
-export type Quarantined = { files: number; id: string; size: number; stripped?: number; to: string }
+export type Quarantined = {
+  files: number
+  id: string
+  size: number
+  stripFailed?: string
+  stripped?: number
+  to: string
+}
 
 // A worktree's git record, kept in the trash since the prune after its move deletes it: its branch (null when detached), record folder and commit.
 export type WorktreeGit = { branch: string | null; gitdir: string; sha: string }
@@ -193,9 +200,12 @@ const carveOutOf = (
 // The files and bytes under a path, symlinks not followed; the walk stops once either passes its limit, and a folder skip names, by its path relative to the tree, is neither entered nor counted.
 const measure = (
   path: string,
-  limits = { bytes: Infinity, files: Infinity },
-  skip?: (rel: string, name: string) => boolean,
+  io: {
+    limits?: { bytes: number; files: number }
+    skip?: (rel: string, name: string) => boolean
+  } = {},
 ) => {
+  const limits = io.limits ?? { bytes: Infinity, files: Infinity }
   let files = 0
   let size = 0
   const stack: [string, string][] = [[path, ""]]
@@ -205,7 +215,7 @@ const measure = (
     if (info.isDirectory())
       for (const entry of readdirSync(at, { withFileTypes: true })) {
         const next = rel ? join(rel, entry.name) : entry.name
-        if (entry.isDirectory() && skip?.(next, entry.name)) continue
+        if (entry.isDirectory() && io.skip?.(next, entry.name)) continue
         stack.push([join(at, entry.name), next])
       }
     else {
@@ -317,11 +327,10 @@ export function quarantine(
     )
   // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole.
   const cap = carve ?? LIMITS
-  const { files, size } = measure(
-    abs,
-    opts.worktree ? undefined : cap,
-    carve ? undefined : isRebuildable,
-  )
+  const { files, size } = measure(abs, {
+    limits: opts.worktree ? undefined : cap,
+    skip: carve ? undefined : isRebuildable,
+  })
   if (!opts.worktree && (files > cap.files || size > cap.bytes))
     return refused(
       carve
@@ -352,8 +361,17 @@ export function quarantine(
         : `${abs} did not move: ${code ?? (error as Error).message}`,
     )
   }
-  // The tree's rebuildable folders go once the move is past every refusal: an install or a build puts them back, so the trash holds only what the 7-day restore needs.
-  const stripped = carve ? [] : stripRebuildable(to)
+  // The tree's rebuildable folders go once the move is past every refusal, and the strip never throws past this line: a strip that stops partway names its error and leaves the entry unmarked, so the hourly strip's pass reaches the item and takes the rest. An install or a build puts what it removed back.
+  let stripped: string[] = []
+  let stripFailed: string | null = null
+  if (!carve) {
+    try {
+      stripped = stripRebuildable(to)
+    } catch (error) {
+      stripped = []
+      stripFailed = (error as Error).message
+    }
+  }
   const id = `${batch}/${n}`
   const entry: TrashEntry = {
     at: now.toISOString(),
@@ -368,7 +386,14 @@ export function quarantine(
     ...(stripped.length ? { stripped: stripped.length } : {}),
   }
   appendFileSync(join(trash, batch, "manifest.jsonl"), `${JSON.stringify(entry)}\n`)
-  return { files, id, size, ...(stripped.length ? { stripped: stripped.length } : {}), to }
+  return {
+    files,
+    id,
+    size,
+    ...(stripFailed ? { stripFailed } : {}),
+    ...(stripped.length ? { stripped: stripped.length } : {}),
+    to,
+  }
 }
 
 // Every item still in the trash, oldest first.
