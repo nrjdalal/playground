@@ -835,8 +835,8 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   `playground wa send` names no path there, so it runs, as does every path beside the folder (`~/.playground/whatsapp-notes.md`) and below the data folder elsewhere (`grep -r x ~/.playground/handoffs`).
   It is a speed bump, as no-raw-delete is: a word it cannot expand, built from a variable no command on the call sets, and a program's own code that builds the path, pass it.
   It fails open on a call it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-raw-wa.test.ts`.
-  Its script lands on `main` before its registration in both settings files, by the order in [Registered in both settings files](#registered-in-both-settings-files), so it is registered in WhatsApp's phase 2.
-  Until then ops-wa pairs no device (`unguarded()` in `packages/scripts/src/ops-wa/life.ts`), so no auth state exists for a session to reach.
+  It is registered in both settings files for Bash, Edit, Glob, Grep, MultiEdit, NotebookEdit, Read and Write, after its script reached `main` by the order in [Registered in both settings files](#registered-in-both-settings-files).
+  ops-wa pairs a device only while that registration stands (`unguarded()` in `packages/scripts/src/ops-wa/life.ts`), so no auth state exists for a session to reach without it.
 
 ## no-release-comment
 
