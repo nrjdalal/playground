@@ -428,12 +428,12 @@ describe("--check reads a tree git holds, never the working files", () => {
     expect(merged.stderr).toContain("git merge-tree HEAD no-such-ref")
   })
 
-  // canary adds a source the head's checkout lacks, reached by a tsconfig alias as packages/settings reaches its own, or by a relative path: the merged build reads it from the merged tree itself, so the check reports the stale bundle the merge makes
+  // canary adds a source the head's checkout lacks, reached by a tsconfig alias as packages/settings reaches its own, or by a relative path: the merged build reads it from the merged tree itself and passes, where the old on-disk build could not resolve it
   test.each([
     ["a tsconfig alias", "@/more"],
     ["a relative path", "./more"],
   ])(
-    "--merged reads a merged source the head's checkout lacks, reached by %s, and reports the stale bundle",
+    "--merged builds a merged source the head's checkout lacks, reached by %s, and passes",
     (_, specifier) => {
       const { root, run, side, write } = checkout()
       side("canary", () => {
@@ -446,9 +446,8 @@ describe("--check reads a tree git holds, never the working files", () => {
       side("main", () => write("a-guard.ts", guard('console.log("head")\n')))
       expect(() => readFileSync(join(root, HOOKS, "more.ts"))).toThrow()
       const merged = run("--check", "--merged", "canary")
-      expect(merged.code).toBe(1)
-      expect(merged.stderr).toContain(`stale in ${BUNDLED}: a-guard.js`)
-      expect(merged.stderr).toContain("merged with canary")
+      expect(merged.code).toBe(0)
+      expect(merged.stderr).toBe("")
     },
   )
 
@@ -467,6 +466,31 @@ describe("--check reads a tree git holds, never the working files", () => {
       write("lib.ts", 'import { kind } from "@cfg/kinds"\n\nexport const lib = `two ${kind}`\n')
     })
     git("checkout", "-q", "main")
+    const merged = run("--check", "--merged", "canary")
+    expect(merged.code).toBe(0)
+    expect(merged.stderr).toBe("")
+  })
+
+  test("--merged resolves a bare import a merged source reaches, from the checkout's node_modules", () => {
+    const { git, root, run, side, write } = checkout()
+    // a hand-made link, no install
+    const link = () => {
+      mkdirSync(join(root, "node_modules", "demo"), { recursive: true })
+      writeFileSync(
+        join(root, "node_modules", "demo", "package.json"),
+        `${JSON.stringify({ name: "demo", main: "index.js" })}\n`,
+      )
+      writeFileSync(join(root, "node_modules", "demo", "index.js"), 'export const demo = "demo"\n')
+    }
+    link()
+    side("canary", () => {
+      // a source the head's checkout lacks, whose import is bare: only the tree holds it
+      write("more.ts", 'import { demo } from "demo"\n\nexport const more = demo\n')
+      write("lib.ts", 'import { more } from "./more"\n\nexport const lib = `two ${more}`\n')
+    })
+    git("checkout", "-q", "main")
+    // the checkout drops canary's committed link, so the head's own is back before the read
+    link()
     const merged = run("--check", "--merged", "canary")
     expect(merged.code).toBe(0)
     expect(merged.stderr).toBe("")

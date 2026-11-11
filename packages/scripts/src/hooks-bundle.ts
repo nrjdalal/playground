@@ -1,5 +1,6 @@
-import { existsSync, realpathSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
 import { readdir, unlink } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { basename, dirname, join, relative } from "node:path"
 
 import type { BunPlugin } from "bun"
@@ -50,20 +51,6 @@ export function treeAt(root: string, oid: string): Tree {
 const SOURCE = /\.[cm]?[jt]sx?$/
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")
 
-// The sources a tree holds that neither HEAD nor the working copy holds, the ones a merge brings in: Bun resolves every import from the working files, so a build of the tree that reaches one fails.
-export const lacking = (root: string, tree: Tree): string[] => {
-  const head = new Set(treeAt(root, "HEAD").paths())
-  return tree
-    .paths()
-    .filter(
-      (path) =>
-        SOURCE.test(path) &&
-        !path.includes("node_modules/") &&
-        !head.has(path) &&
-        !existsSync(join(root, path)),
-    )
-}
-
 // no-extensions-write runs its check in this Worker, which it starts by URL beside its own file.
 const WORKERS = ["no-extensions-write-worker"]
 
@@ -71,20 +58,21 @@ const WORKERS = ["no-extensions-write-worker"]
 const BANNER =
   'const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));'
 
-// Each module of the checkout reads import.meta.dir as its own source's folder under the checkout the bundle sits in, so a path it builds from there (main-checkout.ts's checkout, a guard's own folder) holds as it does from source.
-// With a tree, each checkout source an import resolves to is read from it, so a file the working copy has edited reads as the tree holds it; a package's import, zod's, still resolves from the checkout's node_modules.
-const sourceDirs = (root: string, tree?: Tree): BunPlugin => ({
+// Each module the build reads reads import.meta.dir as its own source's folder under the checkout the bundle sits in, so a path it builds from there (main-checkout.ts's checkout, a guard's own folder) holds as it does from source. In a mirrored build the checkout's own files are also read, through the links, so they load from the checkout with the same reading as a build there.
+const sourceDirs = (base: string, at?: string): BunPlugin => ({
   name: "source-dirs",
   setup(build) {
-    const filter = new RegExp(`^${escape(root)}/(?!.*/node_modules/).*\\.[cm]?[jt]sx?$`)
+    const roots = at ? [base, at] : [base]
+    const filter = new RegExp(
+      `^(${roots.map(escape).join("|")})/(?!.*/node_modules/).*\\.[cm]?[jt]sx?$`,
+    )
     build.onLoad({ filter }, async ({ path }) => {
-      const text = tree ? tree.text(relative(root, path)) : await Bun.file(path).text()
-      if (text === undefined)
-        throw new Error(`hooks-bundle: ${relative(root, path)} is not in the tree --check reads`)
+      const from = roots.find((each) => path.startsWith(each))!
+      const text = await Bun.file(path).text()
       return {
         contents: text.replace(
           /\bimport\.meta\.dir\b/g,
-          `(__CHECKOUT + ${JSON.stringify(`/${relative(root, dirname(path))}`)})`,
+          `(__CHECKOUT + ${JSON.stringify(`/${relative(from, dirname(path))}`)})`,
         ),
         loader: path.endsWith("x") ? "tsx" : /\.[cm]?js$/.test(path) ? "js" : "ts",
       }
@@ -92,33 +80,126 @@ const sourceDirs = (root: string, tree?: Tree): BunPlugin => ({
   },
 })
 
+// The merged tree's sources and tsconfig.json files, set out in a temp folder in the tree's own layout, so the merged build reads its sources and resolves its imports with the tree's own tsconfigs, per importing file as Bun does, and touches no worktree file; the mirror holds the tree's layout, so import.meta.dir keeps reading as the real checkout's folders. A bare import walks up to node_modules, which the mirror has none of, so every folder the mirror holds for real gets the checkout's own as a link, read only. A folder the tree holds as the checkout does is a link to the checkout's own, so every route to its files reads one module, as a build there does; a folder the tree changes, adds a file to, or drops a file from holds the tree's own files as copies, and dirt runs up to the root, since an import can enter from above.
+const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
+  const mirror = realpathSync(mkdtempSync(join(tmpdir(), "hooks-bundle-merged-")))
+  const dirOf = (path: string) => {
+    const at = path.lastIndexOf("/")
+    return at === -1 ? "" : path.slice(0, at)
+  }
+  const reads = new Map<string, string>()
+  for (const path of tree.paths()) {
+    if (path.includes("node_modules/")) continue
+    if (!SOURCE.test(path) && basename(path) !== "tsconfig.json") continue
+    const text = tree.text(path)
+    if (text !== undefined) reads.set(path, text)
+  }
+  const dirs = new Set<string>([""])
+  for (const path of reads.keys())
+    for (let at = path.indexOf("/"); at !== -1; at = path.indexOf("/", at + 1))
+      dirs.add(path.slice(0, at))
+  const dirty = new Set<string>()
+  const mark = (dir: string) => {
+    while (!dirty.has(dir)) {
+      dirty.add(dir)
+      if (dir === "") return
+      dir = dir.slice(0, dir.lastIndexOf("/"))
+    }
+  }
+  for (const [path, text] of reads) {
+    const twin = join(root, path)
+    let same = false
+    if (existsSync(twin)) {
+      try {
+        same = (await Bun.file(twin).text()) === text
+      } catch {}
+    }
+    if (!same) mark(dirOf(path))
+  }
+  for (const dir of dirs) {
+    const held = new Set(
+      [...reads.keys()].filter((path) => dirOf(path) === dir).map((path) => basename(path)),
+    )
+    for (const entry of await readdir(join(root, dir), { withFileTypes: true }).catch(() => [])) {
+      if (!entry.isFile() || (!SOURCE.test(entry.name) && entry.name !== "tsconfig.json")) continue
+      if (!held.has(entry.name)) mark(dir)
+    }
+  }
+  for (const dir of dirs) {
+    if (dir !== "" && !dirty.has(dir)) continue
+    const from = join(root, dir, "node_modules")
+    if (existsSync(from)) {
+      const to = join(mirror, dir, "node_modules")
+      mkdirSync(dirname(to), { recursive: true })
+      symlinkSync(from, to)
+    }
+  }
+  const walk = async (dir: string): Promise<void> => {
+    const pre = dir === "" ? "" : `${dir}/`
+    for (const kid of [...dirs]
+      .filter((each) => each !== "" && each.startsWith(pre) && !each.includes("/", pre.length))
+      .sort()) {
+      if (dirty.has(kid)) {
+        mkdirSync(join(mirror, kid), { recursive: true })
+        await walk(kid)
+      } else {
+        mkdirSync(dirname(join(mirror, kid)), { recursive: true })
+        symlinkSync(join(root, kid), join(mirror, kid))
+      }
+    }
+  }
+  await walk("")
+  for (const [path, text] of reads) {
+    const dir = dirOf(path)
+    const to = join(mirror, path)
+    if (dirty.has(dir)) {
+      mkdirSync(dirname(to), { recursive: true })
+      await Bun.write(to, text)
+    } else if (dir === "") symlinkSync(join(root, path), to)
+  }
+  return mirror
+}
+
 export const entries = async (root: string, tree?: Tree): Promise<string[]> => [
   ...(tree ? guardsIn(tree.text(SETTINGS) ?? '{"hooks":{}}') : await preToolUseGuards(root)),
   ...WORKERS,
 ]
 
-// Each bundle's file name and text, built from root's sources, or the tree's when one is given, one build per entry point: Bun compiles an imported module's `if (import.meta.main)` to `if (false)` only when that module is no entry point of the same build, and a guard imports other guards.
+// Each bundle's file name and text, built from root's sources, or the tree's through its mirror when one is given, one build per entry point: Bun compiles an imported module's `if (import.meta.main)` to `if (false)` only when that module is no entry point of the same build, and a guard imports other guards.
 export async function bundle(root: string, tree?: Tree): Promise<Map<string, string>> {
   const files = new Map<string, string>()
-  // Bun names each module in a comment by its path from the working folder, so the build runs from root and its text is the same wherever it is called from.
+  // Bun names each module in a comment by its path from the working folder, so the build runs from the base folder, whose layout the mirror holds, and its text is the same wherever it is called from.
+  const mirror = tree ? await mirrorOf(tree, root) : undefined
+  const base = mirror ?? root
+  // A bare import reaches the checkout's own files through the mirror's links, so Bun names its modules by the walk back to the checkout, whether to its node_modules or to a workspace package it links; the rewrite names them from the base, as a build there does.
+  const at = mirror ? realpathSync(root) : undefined
+  const store = mirror && at ? relative(mirror, join(at, "node_modules")) : undefined
+  const text = async (output: Bun.BuildArtifact) => {
+    const out = await output.text()
+    if (!mirror || !at || !store) return out
+    return out
+      .replaceAll(`// ${store}/`, "// node_modules/")
+      .replaceAll(`// ${relative(mirror, at)}/`, "// ")
+  }
   const cwd = process.cwd()
-  process.chdir(root)
+  process.chdir(base)
   try {
     for (const name of await entries(root, tree)) {
       const result = await Bun.build({
         banner: BANNER,
-        entrypoints: [join(root, HOOKS, `${name}.ts`)],
+        entrypoints: [join(base, HOOKS, `${name}.ts`)],
         naming: "[name].js",
-        plugins: [sourceDirs(realpathSync(root), tree)],
-        root: join(root, HOOKS),
+        plugins: [sourceDirs(realpathSync(base), at)],
+        root: join(base, HOOKS),
         target: "bun",
       })
       if (!result.success) throw new AggregateError(result.logs, "hooks-bundle: the build failed")
       for (const output of result.outputs)
-        files.set(output.path.replace(/^.*\//, ""), await output.text())
+        files.set(output.path.replace(/^.*\//, ""), await text(output))
     }
   } finally {
     process.chdir(cwd)
+    if (mirror) rmSync(mirror, { recursive: true, force: true })
   }
   return files
 }
@@ -195,22 +276,7 @@ if (import.meta.main) {
     }
     const { note, tree } = checkedTree(ROOT, ref)
     if (note) console.error(note)
-    const drift = tree
-      ? await stale(ROOT, tree).catch((error) => {
-          const absent = ref ? lacking(ROOT, tree) : []
-          if (!absent.length) throw error
-          const named =
-            absent.slice(0, 5).join(", ") +
-            (absent.length > 5 ? ` and ${absent.length - 5} more` : "")
-          const why = (error instanceof AggregateError ? error.errors[0] : error) as {
-            message?: string
-          }
-          console.error(
-            `hooks-bundle: the head merged with ${ref} holds sources this checkout lacks (${named}) and fails to build here (${why?.message ?? error}), so its bundles go unchecked; merge ${ref} in first, then push again`,
-          )
-          process.exit(1)
-        })
-      : []
+    const drift = tree ? await stale(ROOT, tree) : []
     if (drift.length) {
       console.error(
         ref
