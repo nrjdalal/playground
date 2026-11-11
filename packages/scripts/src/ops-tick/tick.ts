@@ -653,7 +653,7 @@ export const trashPurge =
     const root = trash ?? join(dirname(ctx.ops), "trash")
     const { removed, skipped } = purgeTrash(root, { free: () => free(root), now: ctx.now })
     const strip = await stripTrash(root, { sleep })
-    const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}${strip.folders ? `, stripped ${strip.folders} folders (${strip.batches.join(", ")})` : ""}`
+    const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}${strip.folders ? `, stripped ${strip.folders} folders (${strip.batches.join(", ")})` : ""}${strip.failed.length ? `, manifest not written (${strip.failed.join(", ")})` : ""}`
     await mkdir(join(ctx.ops, "log"), { recursive: true })
     await appendFile(join(ctx.ops, "log", "trash-purge.log"), `${isoSeconds(ctx.now)} ${line}\n`)
   }

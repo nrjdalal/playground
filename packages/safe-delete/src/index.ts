@@ -190,15 +190,24 @@ const carveOutOf = (
     : found
 }
 
-// The files and bytes under a path, symlinks not followed; the walk stops once either passes its limit.
-const measure = (path: string, limits = { bytes: Infinity, files: Infinity }) => {
+// The files and bytes under a path, symlinks not followed; the walk stops once either passes its limit, and a folder skip names, by its path relative to the tree, is neither entered nor counted.
+const measure = (
+  path: string,
+  limits = { bytes: Infinity, files: Infinity },
+  skip?: (rel: string, name: string) => boolean,
+) => {
   let files = 0
   let size = 0
-  const stack = [path]
+  const stack: [string, string][] = [[path, ""]]
   while (stack.length && files <= limits.files && size <= limits.bytes) {
-    const at = stack.pop()!
+    const [at, rel] = stack.pop()!
     const info = lstatSync(at)
-    if (info.isDirectory()) for (const name of readdirSync(at)) stack.push(join(at, name))
+    if (info.isDirectory())
+      for (const entry of readdirSync(at, { withFileTypes: true })) {
+        const next = rel ? join(rel, entry.name) : entry.name
+        if (entry.isDirectory() && skip?.(next, entry.name)) continue
+        stack.push([join(at, entry.name), next])
+      }
     else {
       files++
       size += info.size
@@ -306,22 +315,25 @@ export function quarantine(
       `${opts.session} quarantined ${recent.length} paths in the last minute, the most one session may`,
       firstOfBurst(trash, opts.session, recent) ? "tripwire" : "refused",
     )
+  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole.
+  const cap = carve ?? LIMITS
+  const { files, size } = measure(
+    abs,
+    opts.worktree ? undefined : cap,
+    carve ? undefined : isRebuildable,
+  )
+  if (!opts.worktree && (files > cap.files || size > cap.bytes))
+    return refused(
+      carve
+        ? `${abs} holds over ${cap.files} files or ${cap.bytes} bytes, past the ${opts.carveOut} carve-out's cap`
+        : `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire`,
+      "tripwire",
+    )
   mkdirSync(trash, { recursive: true })
   const dev = io.dev ?? ((p: string) => lstatSync(p).dev)
   if (dev(abs) !== dev(trash)) return refused(otherVolume(abs, trash))
   const cloned = opts.worktree && cloneHolder(real(abs), opts.worktree.clones())
   if (cloned) return refused(cloned)
-  // The rebuildable folders go before the measure and the move, once every refusal is past: an install or a build puts them back, so the manifest counts only what the 7-day restore needs, and no strip precedes a refusal. A carve-out's move keeps its tree whole.
-  const stripped = carve ? [] : stripRebuildable(abs)
-  const cap = carve ?? LIMITS
-  const { files, size } = measure(abs, opts.worktree ? undefined : cap)
-  if (!opts.worktree && (files > cap.files || size > cap.bytes))
-    return refused(
-      carve
-        ? `${abs} holds over ${cap.files} files or ${cap.bytes} bytes, past the ${opts.carveOut} carve-out's cap`
-        : `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire${stripped.length ? ", its node_modules and web/next/.next already gone, and an install rebuilds them" : ""}`,
-      "tripwire",
-    )
   const batch = `${stamp(now)}-${opts.session}`
   mkdirSync(join(trash, batch), { recursive: true })
   let n = 1
@@ -340,6 +352,8 @@ export function quarantine(
         : `${abs} did not move: ${code ?? (error as Error).message}`,
     )
   }
+  // The tree's rebuildable folders go once the move is past every refusal: an install or a build puts them back, so the trash holds only what the 7-day restore needs.
+  const stripped = carve ? [] : stripRebuildable(to)
   const id = `${batch}/${n}`
   const entry: TrashEntry = {
     at: now.toISOString(),
@@ -602,8 +616,12 @@ export function purgeTrash(
   return { removed, skipped }
 }
 
-// The wait between two folder removals of the strip, so its deletions never run back to back.
+// The wait between two item strips, so the strip's deletions never run back to back.
 const STRIP_PACE_MS = 250
+
+// Whether a tree folder is one an install or a build rebuilds: a node_modules folder, at any depth, and web/next/.next.
+const isRebuildable = (rel: string, name: string): boolean =>
+  name === "node_modules" || rel === join("web", "next", ".next")
 
 // Removes a tree's node_modules folders, at any depth, and its web/next/.next, the folders an install or a build rebuilds, and returns the removed paths relative to the tree; a symlink is not followed, so a link named node_modules stays.
 const stripRebuildable = (tree: string): string[] => {
@@ -612,7 +630,7 @@ const stripRebuildable = (tree: string): string[] => {
     for (const entry of entriesOf(dir)) {
       if (!entry.isDirectory()) continue
       const rel = base ? join(base, entry.name) : entry.name
-      if (entry.name === "node_modules" || rel === join("web", "next", ".next")) {
+      if (isRebuildable(rel, entry.name)) {
         rmSync(join(dir, entry.name), { force: true, recursive: true })
         removed.push(rel)
       } else walk(join(dir, entry.name), rel)
@@ -622,14 +640,15 @@ const stripRebuildable = (tree: string): string[] => {
   return removed.sort()
 }
 
-// Strips every batch in the trash, oldest first and paced, of the folders an install or a build rebuilds, at any load; what it leaves is the tree's code, which the 7-day restore brings back, so no batch goes whole. An entry whose item it stripped gains the folder count on stripped, which the restore line names the install from.
+// Strips every batch in the trash, oldest first and paced, of the folders an install or a build rebuilds, at any load; what it leaves is the tree's code, which the 7-day restore brings back, so no batch goes whole. An entry whose item it stripped gains the folder count on stripped, which the restore line names the install from, an entry a carve-out let through or one already marked keeps its item whole, and a manifest it cannot rewrite names its batch in failed.
 export async function stripTrash(
   trash: string,
   io: { sleep?: (ms: number) => Promise<void> } = {},
-): Promise<{ batches: string[]; folders: number }> {
+): Promise<{ batches: string[]; failed: string[]; folders: number }> {
   const root = real(trash)
   const sleep = io.sleep ?? ((ms: number) => Bun.sleep(ms))
   const done: string[] = []
+  const failed: string[] = []
   let folders = 0
   for (const batch of batches(root)) {
     const at = join(root, batch)
@@ -641,6 +660,8 @@ export async function stripTrash(
       .map((dir) => basename(dir))
       .filter((name) => /^\d+$/.test(name))
       .sort((a, b) => Number(a) - Number(b))) {
+      const entry = entries.find((line) => line.id === `${batch}/${slot}`)
+      if (entry?.stripped || entry?.carveOut) continue
       const item = dirsIn(join(at, slot))
       if (item.length !== 1) continue
       const stripped = stripRebuildable(item[0]!)
@@ -648,20 +669,21 @@ export async function stripTrash(
       folders += stripped.length
       held += stripped.length
       await sleep(STRIP_PACE_MS)
-      const entry = entries.find((line) => line.id === `${batch}/${slot}`)
       if (entry) {
         entry.stripped = (entry.stripped ?? 0) + stripped.length
         changed = true
       }
     }
-    if (changed)
+    if (changed) {
+      const tmp = join(at, "manifest.jsonl.strip")
       try {
-        writeFileSync(
-          join(at, "manifest.jsonl"),
-          `${entries.map((line) => JSON.stringify(line)).join("\n")}\n`,
-        )
-      } catch {}
+        writeFileSync(tmp, `${entries.map((line) => JSON.stringify(line)).join("\n")}\n`)
+        renameSync(tmp, join(at, "manifest.jsonl"))
+      } catch {
+        failed.push(batch)
+      }
+    }
     if (held) done.push(batch)
   }
-  return { batches: done, folders }
+  return { batches: done, failed, folders }
 }
