@@ -144,6 +144,7 @@ For that last one, since a herdr pane takes no key from a session's hand, the ma
 
 `playground rm <path> [--reason "<why>"]` moves a file or folder into the trash, `~/.playground/trash`, rather than deleting it, so it can come back for 7 days.
 Each delete lands in `trash/<UTC-ts>-<session>/<n>/`, and a line in that folder's `manifest.jsonl` records where it came from, who deleted it, why, and its size and file count.
+Its `node_modules` folders and `web/next/.next` are removed from the trashed copy, since a `bun install` or a build rebuilds them, and the move's and the restore's lines both say so.
 The dashboard moves its own leftovers there too: a fixture stack's scratch folder and a Vibeground's record and `.env`, and so do the factory's scripts: `sync:shadcn`'s old `ui/` folder, the skill folders `vendor:upstream` replaces, and a leads worktree whose first install failed.
 `playground rm --list` prints what the trash holds, and `playground rm --restore <id>` puts one item back where it was, refusing when something already stands there, and a worktree's restore also refuses as its `--worktree` lines below say.
 It refuses, before moving anything:
@@ -180,7 +181,7 @@ Known residual, read as a terminal's: a call a session moves outside its own pro
 So for an open, missing or unreadable pull request, a session posts the `delete` decision with `bun run ask new` (`bun run ask example delete` prints one to start from), naming the full path and why (it refuses a short name, such as a worktree's folder name alone, and names the full path to write), and once it reads approved runs `playground rm --worktree <path> --discard --decision <id>`; an open, denied or missing decision, another kind, or one naming another path is refused.
 Discarded work goes into the trash with the worktree, so it comes back with it.
 A worktree whose trash entry holds no git record, one trashed before the entry kept it or one git could not read, comes back with its files alone, and git does not list it as a worktree.
-Ops empties the trash every hour: each delete over 7 days old goes, and the oldest go sooner while the disk has under 50 GB free, every batch, the 7-day ones too, only while load5 is under the cap of the `run-slot.load5-cap` switch (22 while it is off), or at any load once the disk is under the 5 GB floor.
+Ops empties the trash every hour: each delete over 7 days old goes, and the oldest go sooner while the disk has under 50 GB free, at any load. Each hour it also strips every delete's `node_modules` folders and `web/next/.next`, which a `bun install` or a build rebuilds.
 
 ## Read the rules: `playground rules`
 
