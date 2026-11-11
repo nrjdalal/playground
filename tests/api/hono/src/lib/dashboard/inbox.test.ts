@@ -908,8 +908,8 @@ describe("an answer", () => {
       ref: 44,
       title: "Accept",
     })
-    const read = (ref: number) => `bun run ask get #i${ref} --ack`
-    const ack = (ref: number) => `bun run ask ack #i${ref} --link <https url>`
+    const read = (ref: number) => `playground ask get #i${ref} --ack`
+    const ack = (ref: number) => `playground ask ack #i${ref} --link <https url>`
     const ackOrWhy = (ref: number) => `${ack(ref)}, or --no-link "<why>" when it leaves no page`
     const asked = item({
       id: "mno",
@@ -1067,7 +1067,7 @@ describe("an answer", () => {
         { accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" }, at: AT, choice: "approve" },
         {
           accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
-          close: 'bun run ask ack #i44 --no-link "<why>"',
+          close: 'playground ask ack #i44 --no-link "<why>"',
           next: "nothing",
           verb: "pick",
         },
@@ -2898,7 +2898,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(told.sent).toHaveLength(1)
       expect(told.sent[0]!.to).toBe(go.from)
       expect(payloadOf(told.sent[0]!.text)).toMatchObject({
-        close: `bun run ask ack #i${go.ref} --no-link "<why>"`,
+        close: `playground ask ack #i${go.ref} --no-link "<why>"`,
         go: false,
         id: go.id,
         kind: "decision",
@@ -2912,7 +2912,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const deniedTold = typed()
       await store.answerItem(db, denied.id, { action: "dismiss" }, { actor, ...deniedTold })
       expect(payloadOf(deniedTold.sent[0]!.text)).toMatchObject({
-        close: `bun run ask get #i${denied.ref} --ack`,
+        close: `playground ask get #i${denied.ref} --ack`,
         verb: "dismiss",
       })
 
@@ -3396,7 +3396,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     // the dispatcher gets the poster's line with relay set, and reads the preview with bun run ask get
     const relay = sent[1]?.text ?? ""
     expect(payloadOf(relay)).toMatchObject({
-      close: `bun run ask ack #i${posted.ref} --link <https url>`,
+      close: `playground ask ack #i${posted.ref} --link <https url>`,
       kind: "draft",
       next: "carry-out",
       ref: `#i${posted.ref}`,
@@ -3678,7 +3678,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     )
     expect(sent.map((d) => d.to)).toEqual(["worker-eod", "dispatcher"])
     expect(payloadOf(sent[1]?.text ?? "")).toMatchObject({
-      close: `bun run ask get #i${posted.ref} --ack`,
+      close: `playground ask get #i${posted.ref} --ack`,
       go: false,
       next: "close",
       relay: { for: "worker-eod", why: "poster-ended" },
@@ -4930,7 +4930,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(sent).toHaveLength(1)
       expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
         accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
-        close: `bun run ask ack #i${posted.ref} --no-link "<why>"`,
+        close: `playground ask ack #i${posted.ref} --no-link "<why>"`,
         next: "nothing",
       })
     })
@@ -5206,7 +5206,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const relayed = sent.find((delivery) => delivery.to === "dispatcher")
       const relayedPayload = payloadOf(relayed?.text ?? "")
       expect(relayedPayload).toMatchObject({
-        close: `bun run ask ack #i${posted.ref} --no-link "<why>"`,
+        close: `playground ask ack #i${posted.ref} --no-link "<why>"`,
         next: "nothing",
         relay: { for: "worker-eod", why: "poster-ended" },
       })
@@ -5259,7 +5259,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(answered.ok && answered.item.status).toBe("approved")
       // the pane opened, so the poster carries out the recheck asks.md names, then closes it
       expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
-        close: `bun run ask ack #i${posted.ref} --no-link "<why>"`,
+        close: `playground ask ack #i${posted.ref} --no-link "<why>"`,
         next: "carry-out",
         opened: { exitCode: 0 },
         type: "grant",
