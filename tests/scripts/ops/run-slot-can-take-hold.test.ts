@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { SCRIPT, machine, slots, stop, within } from "./run-slot-fake"
 
-// the verdicts answer for the holds the wait loop obeys: battery_holds and focus_holds gate the wait loop first (run-slot.sh's hold check) and can-take and room never read them, so a hold reads as a free lane to can-take and room while it keeps a fitting head waiter from taking (issue 1818, the 12:52:45Z can-take 0 beside a waiter that took nothing); an idle share that reads - is a dark sensor, not a busy CPU, so it keeps the slots open too (issue 1818, the 15:20Z lanes shut with why=cpu idle=-% on an idle machine)
+// the verdicts answer for the holds the wait loop obeys: battery_holds and focus_holds gate the wait loop first (run-slot.sh's hold check), and can-take and room answer for them too, so a hold reads closed to every check while it keeps a fitting head waiter from taking (issue 1818: at 12:52:45Z can-take answered takeable beside a waiter that took nothing, both reads saying the lane was free); an idle share that reads - is a dark sensor, not a busy CPU, so it keeps the slots open too (issue 1818, the 15:20Z lanes shut with why=cpu idle=-% on an idle machine)
 setDefaultTimeout(60_000)
 
 // the battery switch, held for the row: its line's third field is its expiry, a day out
@@ -25,7 +25,7 @@ const darkTop = (m: ReturnType<typeof machine>) => {
 }
 
 describe("a hold the wait loop obeys", () => {
-  test("can-take and room answer open while a fitting head waiter takes no lane", async () => {
+  test("can-take and room answer closed beside the hold the wait loop obeys", async () => {
     const m = machine()
     battery(m)
     const w = m.start("worker-h", {})
