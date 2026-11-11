@@ -2008,7 +2008,10 @@ except (ValueError, KeyError, TypeError):
     if ! [[ $SID =~ ^[0-9a-f-]{36}$ ]]; then
       hr pane close "$PANE" >/dev/null 2>&1 || true
       rm -f -- "$LAUNCH_FILE"
-      refuse "Codex's SessionStart hook wrote no beat within 60 seconds, so its guards may not have loaded: $NAME's pane $PANE is closed, and no pin, record or roster row was written"
+      # A resume's pin and record stand from its last start, so a later resume tries again.
+      left="no pin, record or roster row was written"
+      [ "$MODE" != resume ] || left="no new pin, record or roster row was written, so its earlier pin and resume record stand"
+      refuse "Codex's SessionStart hook wrote no beat within 60 seconds, so its guards may not have loaded: $NAME's pane $PANE is closed, and $left"
     fi
     # The thread takes the session's name through the app-server's thread/name/set, so Codex's own lists and resume by name find it.
     python3 -I - "$CODEX" "$CODEX_HOME" "$SID" "$NAME" <<'PY' || echo "spawn.sh: $NAME started in Codex, but its thread $SID kept no name" >&2
