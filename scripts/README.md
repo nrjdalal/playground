@@ -152,7 +152,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A start naming no pull request refuses before any pane opens, naming `--pr`, since a row with no `pr` holds the checker in no-outside-pr-code's read mode.
   A checker's roster row is written before its pane opens, every other row once its session has started, since no-outside-pr-code reads the checker's PR at its first tool call; a checker's failed write refuses its start, and any other's warns.
   On a row that reads `ended`, which still lists the PRs it last served, which auto-end and the sweep read as done, `--pr` sets the row back to starting with `prs` of those PRs alone and `pr` of the first pull request named.
-  On a live row, or none, `--pr` joins `prs`, as `assign` does, and a row with no `pr` takes the first pull request named.
+  On a live row, or none, `--pr` joins `prs`, as `assign` does, and a row with no `pr` takes the first pull request named; roster.ts refuses that write while the row's `worker` is unset or ended, naming `roster.ts assign <checker> <title> <task> worker=<live worker> pr=<n>`, which a lead starting a checker from its own column runs first.
   `spawn.sh restore` passes a checker's `--pr` itself, its row's `pr` first, then the rest of its `prs`.
   The dashboard's login-expired restart closes the pane, which ends the row, so its resume of a checker passes `--pr` with the row's `pr` first, then the rest of its `prs`, read before the close.
   `spawn.sh restore` names such a checker as not restored and runs the rest, and exits 1, so ops:herdr's beat names it with the log that holds its line; once one of those two commands runs, `spawn.sh resume` brings it back.
