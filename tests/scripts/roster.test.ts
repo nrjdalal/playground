@@ -303,6 +303,16 @@ describe("set", () => {
         [gone, live, checker],
         ["assign", "k3v9q2-reviewer", "Reviewer", "Review #2", "worker=x7mh4d-worker", "pr=2"],
       ],
+      [
+        "a restart of an ended checker whose worker has ended",
+        [gone, { ...checker, status: "ended" }],
+        ["set", "k3v9q2-reviewer", "kind=reviewer", "status=starting", "prs=3", "pr=3"],
+      ],
+      [
+        "a restart of an ended checker with no worker, as a lead's column writes one",
+        [{ ...bare, status: "ended" }],
+        ["set", "k3v9q2-reviewer", "kind=reviewer", "status=starting", "prs=3", "pr=3"],
+      ],
       ["prs+= with no worker", [bare], ["set", "k3v9q2-reviewer", "prs+=2"]],
       ["a first pr with no worker", [bare], ["set", "k3v9q2-reviewer", "pr=2"]],
     ] as [string, Agent[], string[]][])
