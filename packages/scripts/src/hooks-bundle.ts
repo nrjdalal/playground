@@ -35,14 +35,39 @@ export function treeAt(root: string, oid: string): Tree {
     if (tab !== -1 && type === "blob" && blob) blobs.set(entry.slice(tab + 1), blob)
   }
   const texts = new Map<string, string>()
+  // one git cat-file --batch for every blob on the first text read, in place of one spawn per file
+  const readAll = () => {
+    if (texts.size) return
+    const decode = new TextDecoder()
+    const proc = Bun.spawnSync(["git", "-C", root, "cat-file", "--batch"], {
+      stdin: new TextEncoder().encode([...blobs.values()].map((sha) => `${sha}\n`).join("")),
+    })
+    const bytes = proc.stdout
+    const bySha = new Map<string, string>()
+    let at = 0
+    while (at < bytes.length) {
+      const nl = bytes.indexOf(10, at)
+      if (nl === -1) break
+      const header = decode.decode(bytes.subarray(at, nl))
+      const size = Number(header.slice(header.lastIndexOf(" ") + 1))
+      bySha.set(
+        header.slice(0, header.indexOf(" ")),
+        decode.decode(bytes.subarray(nl + 1, nl + 1 + size)),
+      )
+      at = nl + 1 + size + 1
+    }
+    for (const [path, sha] of blobs) {
+      const text = bySha.get(sha)
+      if (text !== undefined) texts.set(path, text)
+    }
+  }
   return {
     names: (dir) =>
       [...blobs.keys()].filter((path) => dirname(path) === dir).map((path) => basename(path)),
     paths: () => [...blobs.keys()],
     text: (path) => {
-      const blob = blobs.get(path)
-      if (!blob) return undefined
-      if (!texts.has(path)) texts.set(path, gitIn(root, ["cat-file", "blob", blob]).out)
+      if (!blobs.has(path)) return undefined
+      readAll()
       return texts.get(path)
     },
   }
