@@ -18,6 +18,7 @@ import { check as promptStop } from "./no-prompt-stop"
 import { check as publicLeak } from "./no-public-leak"
 import { check as rawDelete } from "./no-raw-delete"
 import { check as rawSpawn } from "./no-raw-spawn"
+import { check as rawWa } from "./no-raw-wa"
 import { check as releaseComment } from "./no-release-comment"
 import { check as stash } from "./no-stash"
 import { check as unslottedRun } from "./no-unslotted-run"
@@ -56,6 +57,7 @@ export const GUARDS: readonly Guard[] = [
   { factory: true, name: "no-public-leak", run: (raw, env) => publicLeak(raw, env) },
   { factory: false, name: "no-raw-delete", run: (raw, env) => rawDelete(raw, env) },
   { factory: true, name: "no-raw-spawn", run: (raw, env) => rawSpawn(raw, env) },
+  { factory: true, name: "no-raw-wa", run: (raw, env) => rawWa(raw, env) },
   { factory: false, name: "no-release-comment", run: (raw, env) => releaseComment(raw, env) },
   { factory: true, name: "no-stash", run: (raw, env) => stash(raw, env) },
   { factory: true, name: "no-unslotted-run", run: (raw, env) => unslottedRun(raw, env) },

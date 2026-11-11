@@ -1,12 +1,15 @@
 import { describe, expect, test } from "bun:test"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check, type Guard, GUARDS } from "../../../scripts/hooks/guards"
+import { inspectAs, type Policy } from "../../../scripts/hooks/no-playground-leak"
+import { pastDeadline, withDeadline } from "../../../scripts/hooks/shell"
 
 const ROOT = join(import.meta.dir, "..", "..", "..")
 const HOOKS = join(ROOT, "scripts", "hooks")
 
-// The 21 guards canary's settings registered on Bash, one entry each, before guards.ts ran them in one process.
+// The guards both settings files register on Bash, one entry each, which guards.ts runs in one process.
 const BASH_GUARDS = [
   "no-desktop-owner-app",
   "no-env-dump",
@@ -26,6 +29,7 @@ const BASH_GUARDS = [
   "no-public-leak",
   "no-raw-delete",
   "no-raw-spawn",
+  "no-raw-wa",
   "no-release-comment",
   "no-stash",
   "no-unslotted-run",
@@ -49,9 +53,25 @@ const input = (command: string, extra: Record<string, unknown> = {}) =>
 const fake = (name: string, factory: boolean, run: Guard["run"]): Guard => ({ factory, name, run })
 
 describe("guards.ts runs every Bash guard", () => {
-  test("it names each of the 21 Bash guards once, A to Z", () => {
+  test("it names each Bash guard once, A to Z", () => {
     expect(GUARDS.map((g) => g.name)).toEqual(BASH_GUARDS)
   })
+
+  // Until guards.ts takes their place, each settings file's Bash entries are the list, so a guard a later PR registers on Bash fails here until GUARDS runs it.
+  test.each(["scripts/factory-settings.json", ".claude/settings.json"])(
+    "the Bash guards %s registers are the list",
+    async (file) => {
+      const settings = (await Bun.file(join(ROOT, file)).json()) as {
+        hooks: { PreToolUse: { hooks: { command: string }[]; matcher: string }[] }
+      }
+      const registered = settings.hooks.PreToolUse.filter(({ matcher }) =>
+        new RegExp(matcher).test("Bash"),
+      ).flatMap(({ hooks }) =>
+        hooks.flatMap(({ command }) => command.match(/bundled\/([a-z-]+)\.js/)?.[1] ?? []),
+      )
+      expect([...new Set(registered)].sort()).toEqual(BASH_GUARDS)
+    },
+  )
 
   test.each(BASH_GUARDS)("%s keeps its own main block's factory gate", async (name) => {
     const gated = (await mainBlock(name)).includes("await fromFactory(raw)")
@@ -131,6 +151,65 @@ describe("check", () => {
     const env = { ...process.env, ...worker }
     expect(await check(input("git stash"), env)).toContain("no-stash hook ")
     expect(await check(input("true"), env)).toBe(undefined)
+  })
+})
+
+// guards.ts runs its guards at once in one process, so each keeps the state a check holds per call in its async context: inspectAs's policy (#1702, fixed by #1721) and withDeadline's deadline (#1699).
+describe("each guard keeps its own per-call state in one process", () => {
+  const env = { HOME: tmpdir(), PATH: process.env.PATH, PLAYGROUND_ROLE: "worker" }
+  const at = (command: string) => input(command, { cwd: tmpdir() })
+  // two made-up policies, as #1721's row has them: A guards acme/ext on any write, B guards nothing
+  const guarding: Policy = {
+    anyWrite: true,
+    find: () => undefined,
+    git: true,
+    guard: "A",
+    guarded: (r) => `${r.owner}/${r.repo}`.toLowerCase() === "acme/ext",
+    hosts: false,
+    place: "p",
+    what: "w",
+    why: "y",
+  }
+  const none: Policy = {
+    ...guarding,
+    anyWrite: undefined,
+    guard: "B",
+    guarded: () => false,
+    hosts: true,
+  }
+  const leak = (name: string, policy: Policy) =>
+    fake(name, false, (raw, e) => withDeadline(10_000, () => inspectAs(policy, raw, e)))
+  // reading files first gives the walk awaits, so the other guard runs inside it
+  const merge = at("cat /etc/hosts /etc/shells > /dev/null; gh pr merge 1 -R acme/ext")
+
+  test("two guards on one engine, under different policies, each give their own verdict in either order", async () => {
+    const alone = await check(merge, env, [leak("a", guarding)])
+    expect(alone).toContain("A hook refused")
+    expect(await check(merge, env, [leak("b", none)])).toBeUndefined()
+    expect(await check(merge, env, [leak("a", guarding), leak("b", none)])).toBe(alone)
+    expect(await check(merge, env, [leak("b", none), leak("a", guarding)])).toBe(alone)
+  })
+
+  // a guard reads its own deadline once its wait is over, refusing when it is past
+  const timed = (name: string, budget: number, wait: number) =>
+    fake(name, false, () =>
+      withDeadline(budget, async () => {
+        await Bun.sleep(wait)
+        try {
+          pastDeadline()
+          return undefined
+        } catch {
+          return `${name} past`
+        }
+      }),
+    )
+
+  test("a guard's short deadline cuts neither a long one beside it nor leaves one behind, in either order", async () => {
+    const short = () => timed("short", 1, 20)
+    const long = () => timed("long", 60_000, 40)
+    expect(await check(at("true"), env, [short(), long()])).toBe("short past")
+    expect(await check(at("true"), env, [long(), short()])).toBe("short past")
+    expect(() => pastDeadline()).not.toThrow()
   })
 })
 
