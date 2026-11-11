@@ -422,8 +422,8 @@ const leakPolicy = (orgs: Set<string>, term = /(?!)/): Policy => ({
   what: "a factory term",
   why: "the factory is private, so nothing about it, its skills or its sessions goes into anything a guarded org sees, in any shape.",
 })
-// One inspectAs call's own state, held in its async context, so checks that overlap in one process never read each other's: its policy and Slack's cleared conversations;
-// under anyWrite, whether the call has run a git or gh command or a program the hook cannot name, and whether one ran before the command being read, which may have moved the branch a bare push reads its remote from; and the folder the call starts in.
+// One inspectAs call's own state, held in its async context so checks that overlap in one process never read each other's: its policy, Slack's cleared conversations and the folder the call starts in.
+// Under anyWrite, `changed` and `moved` say whether the call has run a git or gh command or a program the hook cannot name, and `movedBefore` whether one ran before the command being read, which may have moved the branch a bare push reads its remote from.
 type Call = {
   changed: boolean
   cleared: Cleared

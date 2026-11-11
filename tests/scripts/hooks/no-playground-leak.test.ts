@@ -1597,8 +1597,12 @@ describe("each inspectAs call keeps its own policy (PG-1702)", () => {
     const alone = [await judge(guards("acme/ext"), merge), await judge(none, merge)]
     expect(alone[0]).toContain("A hook refused")
     expect(alone[1]).toBeUndefined()
-    const [guarded] = await Promise.all([judge(guards("acme/ext"), merge), judge(none, read)])
-    const [open] = await Promise.all([judge(none, merge), judge(guards("acme/ext"), read)])
-    expect([guarded, open]).toEqual(alone)
+    const partners = [await judge(none, read), await judge(guards("acme/ext"), read)]
+    const first = await Promise.all([judge(guards("acme/ext"), merge), judge(none, read)])
+    const second = await Promise.all([judge(none, merge), judge(guards("acme/ext"), read)])
+    expect([first, second]).toEqual([
+      [alone[0], partners[0]],
+      [alone[1], partners[1]],
+    ])
   })
 })
