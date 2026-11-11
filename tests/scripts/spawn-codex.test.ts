@@ -80,6 +80,16 @@ describe("spawn.sh --harness codex starts the dispatcher in Codex, failing close
     expect(r.rosterLog ?? []).toEqual([])
   })
 
+  test("a pane herdr will not close is refused in its own words, never read as closed", async () => {
+    const r = await run(START, { FAKE_HERDR_CLOSE_FAIL: "1", FAKE_NO_BEAT: "1" })
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      "herdr would not close dispatcher's pane w5:p1, so the session may still run",
+    )
+    expect(r.err).not.toContain("is closed")
+    expect(read(data(r, "backends", NAME))).toBeNull()
+  })
+
   test("a start whose beat lands runs with hooks trusted, named, pinned and recorded", async () => {
     const r = await run(START)
     expect(r.err).toBe("")

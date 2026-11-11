@@ -2006,8 +2006,9 @@ except (ValueError, KeyError, TypeError):
     SID=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["session_id"])' "$BEAT" 2>/dev/null) || SID=
     rm -f -- "$BEAT"
     if ! [[ $SID =~ ^[0-9a-f-]{36}$ ]]; then
-      hr pane close "$PANE" >/dev/null 2>&1 || true
       rm -f -- "$LAUNCH_FILE"
+      hr pane close "$PANE" >/dev/null 2>&1 ||
+        refuse "Codex's SessionStart hook wrote no beat within 60 seconds, so its guards may not have loaded, and herdr would not close $NAME's pane $PANE, so the session may still run: close that pane yourself"
       # A resume's pin and record stand from its last start, so a later resume tries again.
       left="no pin, record or roster row was written"
       [ "$MODE" != resume ] || left="no new pin, record or roster row was written, so its earlier pin and resume record stand"
