@@ -945,6 +945,10 @@ describe("a git write in the live Dashboard's checkout is refused to every sessi
     ["b", "PG-1-b"],
   ]) {
     mkdirSync(join(LMAIN, ".git", "worktrees", name), { recursive: true })
+    writeFileSync(
+      join(LMAIN, ".claude", "worktrees", name, ".git"),
+      `gitdir: ${join(LMAIN, ".git", "worktrees", name)}\n`,
+    )
     writeFileSync(join(LMAIN, ".git", "worktrees", name, "HEAD"), `ref: refs/heads/${branch}\n`)
     writeFileSync(
       join(LMAIN, ".git", "worktrees", name, "gitdir"),
@@ -1078,6 +1082,7 @@ describe("the live checkout's reading", () => {
   const RMAIN = mkdtempSync(join(tmpdir(), "no-main-checkout-live-read-"))
   const DESK = join(RMAIN, ".claude", "worktrees", "desk")
   mkdirSync(DESK, { recursive: true })
+  writeFileSync(join(DESK, ".git"), "gitdir: ../../../.git/worktrees/desk\n")
   mkdirSync(join(RMAIN, ".git", "worktrees", "desk"), { recursive: true })
   writeFileSync(
     join(RMAIN, ".git", "worktrees", "desk", "HEAD"),

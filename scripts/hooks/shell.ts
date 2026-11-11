@@ -86,6 +86,8 @@ export type Env = {
   cwdHeld?: string[]
   // The folders a cd the reader could not be sure of may have left the shell in, beside `cwdSure`; `cwdSure` is unnamed whenever one of them is the shell's instead
   cwdMaybe?: string[]
+  // A sure cd that an `||` may follow (`orElse`): the folders the shell was in before it and its run's token; once the `||`'s command arrives, that command's token, where the cd left the shell, and whether that command is an exit or a return
+  cwdOr?: CdOr
   // The folder the reader proved the shell is in: a cd it is sure the shell runs once, into one folder it reads. Unnamed wherever the reader cannot prove one, which is what `places` enumerates instead.
   cwdSure?: string
   // Set once a cd's landing folder cannot be named at all (`cd "$X"`, a popd, zsh's two-operand cd), so each hook reads it by its own fail-closed rule, through `places`'s fallback
@@ -1623,6 +1625,7 @@ export async function examine(
   builtins: boolean,
 ): Promise<string | undefined> {
   tick()
+  orElse(cmd, env)
   unchain(cmd, env)
   if (cmd.opaque) {
     env.cwdAnywhere = true
@@ -2025,6 +2028,7 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     env.cwdSure = paths[0]
     env.cwdMaybe = []
     env.cwdUnread = false
+    env.cwdOr = chained ? undefined : { before: from, token: cmd.chain }
     if (env.old) env.oldFrom = bases
     // the chain holds only to the first command it does not reach, so the folders from before this cd are kept for that one
     if (chained) {
@@ -2034,6 +2038,7 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     return
   }
   env.cwdSure = undefined
+  env.cwdOr = undefined
   // a while's or an until's condition runs at least once, so a cd there into folders that are there leaves the ones before it behind, and the shell is in one its passes reach
   const behind =
     onceOrMore(cmd, parsed) &&
@@ -2049,6 +2054,39 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
 // Whether a `!` inverts the command's own status, which an `&&` after it reads: a cd negated an odd number of times carries the chain on when it fails, so the commands after it run in the folder the shell never left and the reader keeps that folder a candidate.
 const negated = (cmd: Command): boolean =>
   markers(cmd.words).filter((word) => word === "!").length % 2 === 1
+
+type CdOr = {
+  before: string[]
+  exits?: boolean
+  landed?: { maybe: string[]; sure?: string }
+  operand?: number
+  token?: number
+}
+
+// The words that end the line where they run, so a cd's `||` that runs one leaves the commands after it where the cd landed
+const EXITS = new Set(["exit", "return"])
+
+// What a cd's `||` runs, runs only where the cd failed, so it and its own run are judged in the folders from before the cd too, beside where the cd landed; the commands after that run keep both, but after an exit or a return, which ends the line where the cd failed.
+function orElse(cmd: Command, env: Env): void {
+  const or = env.cwdOr
+  if (!or || cmd.chain === or.token || cmd.chain === or.operand) return
+  if (or.operand === undefined && cmd.follows === "||") {
+    env.cwdOr = {
+      ...or,
+      exits: EXITS.has(parse(cmd).name),
+      landed: { maybe: env.cwdMaybe ?? [], sure: env.cwdSure },
+      operand: cmd.chain,
+    }
+    env.cwdMaybe = keep([...new Set([...startFolders(env), ...or.before])], env)
+    env.cwdSure = undefined
+    return
+  }
+  if (or.exits && or.landed) {
+    env.cwdMaybe = or.landed.maybe
+    env.cwdSure = or.landed.sure
+  }
+  env.cwdOr = undefined
+}
 
 // A cd an `&&` alone made sure holds for its own run of commands alone: any other command runs whether or not that cd did, so the folders from before it are the shell's again beside the one it named. A command keeps the folder only by proof, its own token matching the cd's, which every operator that frees a command takes away and no group, body, pipeline or script grants.
 function unchain(cmd: Command, env: Env): void {

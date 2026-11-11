@@ -1499,6 +1499,7 @@ async function runAll(lexed, env, visit, builtins) {
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
+  orElse(cmd, env);
   unchain(cmd, env);
   if (cmd.opaque) {
     env.cwdAnywhere = true;
@@ -1794,6 +1795,7 @@ async function chdirTo(name, cmd, parsed, env) {
     env.cwdSure = paths[0];
     env.cwdMaybe = [];
     env.cwdUnread = false;
+    env.cwdOr = chained ? undefined : { before: from, token: cmd.chain };
     if (env.old)
       env.oldFrom = bases;
     if (chained) {
@@ -1803,11 +1805,34 @@ async function chdirTo(name, cmd, parsed, env) {
     return;
   }
   env.cwdSure = undefined;
+  env.cwdOr = undefined;
   const behind = onceOrMore(cmd, parsed) && !unread && !move.back && paths.length > 0 && (chained || (await Promise.all(paths.map(isFolder))).every(Boolean));
   env.cwdMaybe = keep([...new Set([...move.back ? back : behind ? [] : from, ...paths])], env);
   env.cwdUnread = env.cwdUnread || unread || from.length === 0 && paths.length === 0;
 }
 var negated = (cmd) => markers(cmd.words).filter((word) => word === "!").length % 2 === 1;
+var EXITS = new Set(["exit", "return"]);
+function orElse(cmd, env) {
+  const or = env.cwdOr;
+  if (!or || cmd.chain === or.token || cmd.chain === or.operand)
+    return;
+  if (or.operand === undefined && cmd.follows === "||") {
+    env.cwdOr = {
+      ...or,
+      exits: EXITS.has(parse(cmd).name),
+      landed: { maybe: env.cwdMaybe ?? [], sure: env.cwdSure },
+      operand: cmd.chain
+    };
+    env.cwdMaybe = keep([...new Set([...startFolders(env), ...or.before])], env);
+    env.cwdSure = undefined;
+    return;
+  }
+  if (or.exits && or.landed) {
+    env.cwdMaybe = or.landed.maybe;
+    env.cwdSure = or.landed.sure;
+  }
+  env.cwdOr = undefined;
+}
 function unchain(cmd, env) {
   if (!env.cwdChain?.length || cmd.chain === env.cwdChainToken)
     return;
@@ -10180,7 +10205,7 @@ async function eachInput(raw, guard, judge) {
 }
 
 // scripts/hooks/no-main-checkout.ts
-import { readdirSync as readdirSync3, readFileSync as readFileSync4, realpathSync as realpathSync2 } from "fs";
+import { existsSync as existsSync7, readdirSync as readdirSync3, readFileSync as readFileSync4, realpathSync as realpathSync2 } from "fs";
 import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute4, join as join10, normalize, resolve as resolve5, sep } from "path";
 
 // packages/settings/src/live.ts
@@ -10825,6 +10850,12 @@ function liveCheckout(main, environment) {
     } catch {}
   }
 }
+function inWorktree(path, worktrees) {
+  if (!path.startsWith(worktrees))
+    return false;
+  const tree = join10(worktrees, path.slice(worktrees.length).split(sep)[0]);
+  return existsSync7(join10(tree, ".git")) || !existsSync7(tree);
+}
 function real(path) {
   const found = resolved(path);
   if (found !== undefined || !isAbsolute4(path))
@@ -10939,6 +10970,16 @@ function bunCall(args, env) {
   }
   return { at: k, chained, cwd, filtered, sub, words, xCwd };
 }
+var landing = (word, env, from) => {
+  if (!word || pathOf(word, { ...env, cwd: from }) === undefined)
+    return;
+  const path = isAbsolute4(word.value) ? word.value : `${from}${sep}${word.value}`;
+  try {
+    return realpathSync2.native(path);
+  } catch {
+    return real(resolve5(path));
+  }
+};
 function gitCall(args, env) {
   let cwd = env.cwd;
   let gitDir;
@@ -10948,17 +10989,17 @@ function gitCall(args, env) {
   for (;k < args.length && args[k].value.startsWith("-"); k++) {
     const v = args[k].value;
     if (v === "-C")
-      cwd = args[k + 1] && pathOf(args[++k], { ...env, cwd });
+      cwd = args[k + 1] && landing(args[++k], env, cwd);
     else if (v === "--git-dir" || v.startsWith("--git-dir=")) {
       const word = value(k, "--git-dir");
       if (v === "--git-dir")
         k++;
-      gitDir = word && pathOf(word, { ...env, cwd });
+      gitDir = landing(word, env, cwd);
     } else if (v === "--work-tree" || v.startsWith("--work-tree=")) {
       const word = value(k, "--work-tree");
       if (v === "--work-tree")
         k++;
-      workTree = word && pathOf(word, { ...env, cwd });
+      workTree = landing(word, env, cwd);
     } else if (GIT_TAKES.has(v))
       k++;
   }
@@ -11302,7 +11343,7 @@ async function inspect3(raw, environment, main) {
   const worktrees = join10(checkout, ".claude", "worktrees") + sep;
   const inMain = (raw) => {
     const path = raw === undefined ? undefined : real(resolve5(directory ?? "", raw));
-    return path !== undefined && (path === checkout || path.startsWith(checkout + sep)) && !(path + sep).startsWith(worktrees);
+    return path !== undefined && (path === checkout || path.startsWith(checkout + sep)) && !inWorktree(path, worktrees);
   };
   let live;
   const inLive = (raw) => {
@@ -11691,7 +11732,7 @@ async function check6(raw, shell = process.env.SHELL ?? "zsh") {
 if (false) {}
 
 // scripts/hooks/no-glm-heavy-path.ts
-import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync5, readlinkSync, realpathSync as realpathSync3 } from "fs";
+import { existsSync as existsSync8, readdirSync as readdirSync4, readFileSync as readFileSync5, readlinkSync, realpathSync as realpathSync3 } from "fs";
 import { loadavg } from "os";
 import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute5, join as join13, resolve as resolve7 } from "path";
 
@@ -12426,7 +12467,7 @@ function checkoutOf(path, orgs, roots) {
       break;
     }
     walked.push(at);
-    if (existsSync7(join13(at, ".git"))) {
+    if (existsSync8(join13(at, ".git"))) {
       found = remotes(at).find((r) => isGuarded(orgs, r.owner));
       break;
     }
@@ -15524,7 +15565,7 @@ async function inspect16(raw, environment) {
 if (false) {}
 
 // scripts/hooks/no-unslotted-run.ts
-import { existsSync as existsSync8, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync2 } from "fs";
+import { existsSync as existsSync9, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync2 } from "fs";
 import { tmpdir } from "os";
 import { join as join18, resolve as resolve12, sep as sep6 } from "path";
 var refuse15 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
@@ -15605,7 +15646,7 @@ async function commitLint(cmd, args, env, wrote) {
   });
   const root = top.success ? top.stdout.toString().trim() : "";
   const lint = join18(root, "node_modules", ".bin", "commitlint");
-  if (!root || !existsSync8(lint))
+  if (!root || !existsSync9(lint))
     return;
   const folder = mkdtempSync(join18(tmpdir(), "commit-msg-"));
   const file = join18(folder, "COMMIT_EDITMSG");
