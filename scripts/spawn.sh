@@ -1245,7 +1245,7 @@ case "$MODE" in
     ROLE=$(role_of_kind "$KIND")
     [ -n "$ROLE" ] || refuse "$NAME is not a factory session's name, and the roster gives it no kind"
     [ "$KIND" = dispatcher ] && first_dispatcher "$NAME" && FIRST=1
-    # A checker whose roster row names an ended worker is ended again on the checker reaper's next pass (checker-worker-gone, scripts/ops/optimizer/idle_sessions.ts) unless an open PR on its prs list has a live roster worker row, so its row moves to the worker it now serves before it comes back.
+    # A checker whose roster row names an ended worker is ended again on the checker reaper's next pass (checker-worker-gone, by the rule scripts/ops/README.md's optimizer/ entry gives), so its row moves to the worker it now serves before it comes back.
     if [[ $ROLE =~ ^(reviewer|tester)$ ]]; then
       serves=$(roster_field "$NAME" worker)
       [ -z "$serves" ] || [ "$(roster_field "$serves" status)" != ended ] ||
