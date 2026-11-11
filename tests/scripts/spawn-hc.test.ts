@@ -96,6 +96,9 @@ describe("a probe starts in hc's trial world with --runtime hc (#1715)", () => {
     expect(launchOf(r)).toContain(
       "unset SSH_CONNECTION XDG_CONFIG_HOME XDG_RUNTIME_DIR XDG_STATE_HOME\n",
     )
+    expect(launchOf(r)).toMatch(
+      / --session-id [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} -n probe-hc-a /,
+    )
     expect(readFileSync(lw(r.home, "hc-trial", "hc"), "utf8")).toBe(
       readFileSync(join(root, "scripts", "hc-trial.sh"), "utf8"),
     )
