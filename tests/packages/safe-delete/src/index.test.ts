@@ -364,6 +364,20 @@ describe("the tripwire", () => {
     })
   })
 
+  test("a legacy told mark, a file where the session's folder goes, does not silence the session's next burst", () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    // a mark of the old shape, as a pre-merge night left it: a content file at the session's own path
+    mkdirSync(join(roots.trash, ".cap-told"), { recursive: true })
+    writeFileSync(join(roots.trash, ".cap-told", opts.session), "2026-11-01T00:00:00.000Z")
+    expect(quarantine(file(join(roots.home, "x")), opts, roots, { now: NOW })).toMatchObject({
+      kind: "tripwire",
+    })
+  })
+
   test("refuses a fourth quarantine within a minute from one session, and lets another go", () => {
     const roots = machine()
     for (const name of ["a", "b", "c"])
