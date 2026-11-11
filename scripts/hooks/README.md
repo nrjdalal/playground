@@ -181,6 +181,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   The follow-up is filed as the shell reader reading a compound piped or sent to the background as run in a subshell, which is the wording to search the tracker for.
 - A script an `eval` or a `source` reads where the shell may skip that command (`false && eval 'cd /tmp'`, `true || eval …`, an `if` body that does not run) reads as sure to run, which canary shares, so its `cd` moves the reader's folder where the shell's stays.
   The follow-up is filed as the shell reader reading the script an eval or a source runs as unsure wherever that eval may not run, which is the wording to search the tracker for.
+- A resumed session's SessionStart `cwd` is the folder it launched in, the main checkout for a worker, so a hook keyed on the session's worktree reads the transcript's own `cwd` entries or its `git -C <worktree>` commits, as [after-resume](#after-resume) does.
+- lefthook names the patch it sets aside (`info/lefthook-unstaged.<folder>.patch`) and its stash entry (`lefthook auto backup - <folder>`) after the worktree's folder, never the branch (the patch measured on lefthook 2.2.2, the stash name read in its `store_stash.go`).
 
 ## after-compact
 
