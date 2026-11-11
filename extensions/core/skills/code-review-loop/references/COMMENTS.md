@@ -18,7 +18,7 @@ One new comment per round, never an edit of an earlier one: the record of what w
 ## ReviewBot · round <r>: <s>/5 at <sha7> · <b> blocking, <f> should-fix, <k> nits
 ```
 
-On an outside author's PR, the verdict also carries need, hit and factory lines ([CHANNEL.md](../../../../../extensions/core/skills/playbook/CHANNEL.md)).
+On an outside author's PR, the verdict also carries three lines: need (do we need it), hit (do we hit the problem it fixes, with evidence) and factory (does it upgrade or degrade the factory, and why).
 
 Then, in this order:
 

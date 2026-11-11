@@ -21,7 +21,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | Ask the owner something, or pass on his override                                                                         | the **ask** and **override** rules                                                                                    |
 | File a Linear ticket                                                                                                     | the **tickets** rule                                                                                                  |
 | Write anything an org sees                                                                                               | the **classified** rule                                                                                               |
-| Post in the factory's channel, or take an ask from there                                                                 | the channel's lists and triage (`CHANNEL.md`)                                                                         |
+| Post in the factory's channel, or take an ask from there                                                                 | the org's `doc channel` (`playground ext show`)                                                                       |
 | Run a `vercel` command, a deploy among them                                                                              | the Vercel CLI's three traps (`VERCEL.md`)                                                                            |
 | Stop a process                                                                                                           | the **signal** rule                                                                                                   |
 | Hand off a build, a read or research                                                                                     | the **workers** rule                                                                                                  |
@@ -150,11 +150,7 @@ An org whose extension gates its Slack sends (`slack.gatedSends`) gets no such p
 The channel is where the owner's and the colleague's Playgrounds talk:
 a post there speaks as Playground and ends with an italic _Sent via Playground_, since it goes out through the owner's Slack account, and the hook refuses a Slack MCP chat post there without it, and refuses any curl write that names the channel.
 Its links go as link chips: rich text of plain words and links alone, each link labelled with its address and shortened, ending in the italic signature, and the hook refuses any other rich content there.
-An observer in the channel is answered directly when they write there.
-The dispatcher sorts each ask from the colleague, their Playground or the observer into three: it answers it; it takes a change that can be undone within Playground's own repo and changes no standing rule, recording why; or it puts a hard-to-undo change, any change to a standing rule, a looser guard or anything outside the repo to the owner first.
-The standing rules change only on the owner's own ask, so a colleague's ask that adds, tightens or loosens one always waits for the owner.
-The owner's asks always come first (`CHANNEL.md` beside the skill).
-A simple, working PR from the colleague that changes no standing rule is the dispatcher's to decide and record, and it merges as their own PR after a read-only review, so their name stays on the work; only a hard-to-undo change to how the owner works goes to the owner's Inbox.
+The channel's own lists, limits and triage are its org's, in that org's extension (`playground ext show <org> doc channel`).
 The hook also refuses a guarded org's write it cannot read.
 Like the ticket guard, a hook that cannot start refuses the call, and one that times out on a tool other than Bash lets it through, where the rule still binds the session.
 

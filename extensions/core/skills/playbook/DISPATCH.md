@@ -32,7 +32,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
 - Building calls stay in the factory (everything runs on its own, and only a breaking change or talking to someone goes through the owner, mostly on Slack): scope, order, design, a build, a fix, an additive schema change (AGENTS.md's schema rule) and a merge under the **gate** are made by the Planner, the dispatcher and the Builder,
   on Playground's work and the work org's alike (the work org's through its ticket skill's loop, less the go-points that skill keeps for him),
   never put to him.
-  The work org's scope is its ticket and the Product team's decisions, and a plan or lane adds nothing beyond them; a gap or a disagreement goes to your lead as a question (`.agents/decisions.md`).
+  The work org's scope is its ticket and the answers of the people its ticket skill names, and a plan or lane adds nothing beyond them; a gap or a disagreement goes to your lead as a question (`.agents/decisions.md`).
   A breaking change, and a message to anyone but a developer, go to him as **ask** says.
   Before a lane builds one of the owner's asks, it posts one Inbox update with two lines, what it understood and what it will build, only when the ask changes behaviour drastically (a visible change to how he works, or a removal), so the owner sees the lane reads the ask as he does;
   it posts a decision in place of the update only when the ask removes or reverses the owner's own rule, the one door here he cannot cheaply undo, so that card carries a Deny where the update carries none;
