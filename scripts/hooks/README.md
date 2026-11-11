@@ -822,6 +822,19 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   It fails closed only on a call it cannot read that reads as a delete, and its tests are `bun run test:file tests/scripts/hooks/no-raw-delete.test.ts tests/scripts/hooks/refused-forms.test.ts`.
   The repo's own scripts are held by `tests/no-raw-delete.test.ts` instead, which reads the repo's text and fails on a raw recursive delete outside its allowed folders and named carve-outs.
 
+## no-raw-wa
+
+- A factory session reaches ops-wa's folder only through `playground wa send <absolute file>`: `scripts/hooks/no-raw-wa.ts` refuses a call that reaches the data folder's `whatsapp/`, which holds the linked device's auth state, its socket and the owner's messages,
+  so no session can copy the device or write past the allowlist of one ([ADR 0023](../../.agents/adr/0023-the-owners-whatsapp-chat-is-the-owners-words.md)).
+  It reads the folder as typed and through its links, in any case, as macOS opens it.
+  On Bash it refuses a call whose text names that folder under `.playground`, `$PLAYGROUND_DATA_DIR` or the data folder's own path, whatever reads it (a script's string, a variable it cannot expand), then walks the call through `shell.ts`'s reader:
+  a word or a redirect target that reaches the folder (a glob segment that may match its name included, and an option's value after `=`), a command run in a folder inside it (`places`), and a recursive reader (`find`, `rg`, `tar`, `rsync`, `grep -r`, `cp -R` and the rest of `RECURSIVE`) given a folder above it.
+  On Read, Write, Edit, MultiEdit and NotebookEdit it refuses a path inside the folder; on Grep a path inside or above it, the session's folder when none is given; on Glob a path inside it, or a pattern that may reach into it.
+  `playground wa send` names no path there, so it runs, as does every path beside the folder (`~/.playground/whatsapp-notes.md`) and below the data folder elsewhere (`grep -r x ~/.playground/handoffs`).
+  It is a speed bump, as no-raw-delete is: a word it cannot expand, built from a variable no command on the call sets, and a program's own code that builds the path, pass it.
+  It fails open on a call it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-raw-wa.test.ts`.
+  Its script lands on `main` before its registration in both settings files, by the order in [Registered in both settings files](#registered-in-both-settings-files), so it is registered in WhatsApp's phase 2.
+
 ## no-release-comment
 
 - ALWAYS: In every comment and review body on a repo whose owner `release-owners.json` lists, write "ship" or "publish step" where "release" (any case) would go: there an owner comment holding the word publishes to npm, and gh and the GitHub MCP post as the owner.

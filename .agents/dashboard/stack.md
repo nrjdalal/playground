@@ -166,7 +166,8 @@
 - ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, one zod schema over env with generic defaults: the owner (`PLAYGROUND_OWNER_NAME`, Owner) and the work queue, off by default (`WORK_GITHUB_ORG`, a GitHub login or none, and `WORK_LABEL`, Work; dashboard.md).
   The owner's name is the prefix Next up ranks second (roster.md).
   The API reads the config once as it starts (`api/hono/src/lib/org.ts`).
-  Slack is opted into in each machine's own job settings: ops-dm-watch by the `jobs.opsDmWatch` setting, off by default, which runs the bundled `slack` extension's script only while `ext.bundled` lists it, and ops-channel-watch by a row listed by hand in `jobs.json` (playbook's LIFECYCLE.md).
+  Slack is opted into in each machine's own job settings: ops-dm-watch by the `jobs.opsDmWatch` setting, off by default, which runs the bundled `slack` extension's script only while `ext.bundled` lists it, and ops-channel-watch by a row listed by hand in `jobs.json` (playbook's LIFECYCLE.md);
+  WhatsApp likewise, ops-wa by the `jobs.opsWa` setting, off by default, with `wa.owner` and `wa.device` set (ADR 0023).
   Every file the dashboard keeps outside the database sits in its data folder, `dataDir()` in `api/hono/src/lib/sessions/paths.ts` over `dataDirOf()` in `packages/env/src/data-dir.ts`: `PLAYGROUND_DATA_DIR` on a stack that reads this machine, else `~/.playground`,
   so every `playground/<path>` these rules name is under it;
   a fixture stack keeps to its fixture's `playground`.
