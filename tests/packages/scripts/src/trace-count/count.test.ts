@@ -86,6 +86,28 @@ describe("the trace count", () => {
     expect(counts.archiveLinks).toBe(1)
   })
 
+  test("leaves the owner's handle out where it is the owner part of a repository URL or slug", () => {
+    const repos = reposOf({ schemaVersion: 1, values: { "owner.names": ["quilla"] } })
+    const counts = count(
+      [
+        {
+          path: "a.md",
+          text: "the main product lives at https://github.com/quilla/zerosdk, which comes later",
+        },
+        { path: "b.md", text: "clone it as quilla/zerosdk to run it" },
+      ],
+      undefined,
+      repos,
+    )
+    expect(counts.ownerName).toBe(0)
+  })
+
+  test("still counts the owner's handle in prose beside a repository slug", () => {
+    const repos = reposOf({ schemaVersion: 1, values: { "owner.names": ["quilla"] } })
+    const text = "quilla wrote the warning line, and the clone line beside it reads quilla/zerosdk."
+    expect(count([{ path: "a.md", text }], undefined, repos).ownerName).toBe(1)
+  })
+
   test("counts a quote set against the owner and anyone's dated quote, as a name is, and nothing with no names to read", () => {
     // Built at run time, so this file's own text holds no quote.
     const owner = ["the", "owner"].join(" ")

@@ -79,7 +79,7 @@ const ownerWord = (name: string, archive: string): string => {
   const cased = [...name].map((c) =>
     /[a-z]/i.test(c) ? `[${c.toLowerCase()}${c.toUpperCase()}]` : escape(c),
   )
-  return `(?<![a-zA-Z\\d])(?<![\\w.+-]@[\\w.-]*)${cased.join("")}(?![a-zA-Z\\d])(?![\\w.+-]*@)(?!/${escape(archive.split("/")[1] ?? "")}(?![\\w.-]))`
+  return `(?<![a-zA-Z\\d])(?<![\\w.+-]@[\\w.-]*)${cased.join("")}(?![a-zA-Z\\d])(?!/[\\w-])(?![\\w.+-]*@)(?!/${escape(archive.split("/")[1] ?? "")}(?![\\w.-]))`
 }
 // The owner's names, a quote set against the owner (`the owner, 24 Oct: "`, `the owner said`), or anyone's dated quote (`Corin, 23 Oct: "`), so the repo's text names no person and quotes no one; none with no names to read, as a list kind has none with an empty list. Case is spelled out, since a dated quote's name is read by its capital.
 const ownerName = (repos: Repos): RegExp | undefined => {
