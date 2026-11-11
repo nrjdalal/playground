@@ -69,6 +69,10 @@ export const groups: Group[] = [
         `cd ${join(MAIN, ".claude", "worktrees", "a")} || (exit); git commit -m x`,
       ],
       [
+        "a commit after a return the cd's || runs, which bash -c carries on past",
+        `cd ${join(MAIN, ".claude", "worktrees", "a")} || return; git commit -m x`,
+      ],
+      [
         "a commit after an exit in a pipeline the cd's || runs",
         `cd ${join(MAIN, ".claude", "worktrees", "a")} || exit | cat; git commit -m x`,
       ],
