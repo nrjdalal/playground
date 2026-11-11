@@ -4,6 +4,25 @@ import { join } from "node:path"
 
 import { bin, placing, root, spawn, type Spawned } from "./spawn-fake"
 
+type Hook = { command: string; timeout?: number; type: string }
+type Group = { hooks: Hook[]; matcher?: string }
+// The factory's guards as Claude Code loads them, the source every Codex launch renders its hooks.json from.
+const FACTORY = JSON.parse(
+  readFileSync(join(root, "scripts", "factory-settings.json"), "utf8"),
+) as {
+  hooks: Record<string, Group[]>
+}
+// The events Codex's hooks.json takes (codex-rs/protocol/src/hooks.rs, rust-v0.167.1) that the factory registers.
+const CODEX_EVENTS = [
+  "PermissionRequest",
+  "PostToolUse",
+  "PreToolUse",
+  "SessionEnd",
+  "SessionStart",
+  "Stop",
+  "UserPromptSubmit",
+]
+
 // Every case runs spawn.sh, which starts fake processes and waits on them.
 setDefaultTimeout(40_000)
 
@@ -100,6 +119,51 @@ describe("spawn.sh --harness codex starts the dispatcher in Codex, failing close
     expect(read(data(r, "backends", NAME))).toBe("codex openai\n")
     expect(read(data(r, "resume", `${NAME}.sh`))).toContain(`/scripts/spawn.sh resume ${NAME} `)
     expect(read(data(r, "resume", `${NAME}.sh`))).toContain(` ${THREAD}\n`)
+  })
+
+  // Codex has no Notification, PermissionDenied, PostToolUseFailure or StopFailure, and session-state stays out, so no record reads a Codex session as idle; writing-first also matches Bash, where Codex reads a skill and may run apply_patch.
+  test("its hooks.json registers the factory's guards on each event Codex has, beside the beat", async () => {
+    const r = await run(START)
+    expect(r.code).toBe(0)
+    const rendered = JSON.parse(read(data(r, "codex", "hooks.json")) ?? "{}") as {
+      hooks: Record<string, Group[]>
+    }
+    const guards = (groups: Group[]) =>
+      groups.flatMap((g) =>
+        g.hooks
+          .filter((h) => !h.command.includes("session-state"))
+          .map((h) => ({
+            command: h.command,
+            matcher:
+              h.command.includes("writing-first") && g.matcher?.includes("Skill")
+                ? "^(Bash|Edit|MultiEdit|Write)$"
+                : (g.matcher ?? ""),
+          })),
+      )
+    const expected = Object.fromEntries(
+      CODEX_EVENTS.map((event) => [event, guards(FACTORY.hooks[event] ?? [])]).filter(
+        ([, list]) => list.length > 0,
+      ),
+    )
+    const got = Object.fromEntries(
+      Object.entries(rendered.hooks).map(([event, groups]) => [
+        event,
+        groups.flatMap((g) =>
+          g.hooks
+            .filter((h) => !h.command.includes("SPAWN_CODEX_BEAT"))
+            .map((h) => ({ command: h.command, matcher: g.matcher ?? "" })),
+        ),
+      ]),
+    )
+    expect(got).toEqual(expected)
+    expect(JSON.stringify(rendered)).not.toContain("session-state")
+    expect(Object.keys(rendered.hooks).every((event) => CODEX_EVENTS.includes(event))).toBe(true)
+    expect(Object.keys(expected).length).toBeGreaterThan(2)
+    expect(
+      rendered.hooks.SessionStart?.some((g) =>
+        g.hooks.some((h) => h.command.includes("SPAWN_CODEX_BEAT")),
+      ),
+    ).toBe(true)
   })
 
   test("a resume from a codex pin resumes its thread with hooks trusted", async () => {
