@@ -269,7 +269,7 @@ if [ "${1:-}" = set ]; then
   exit 0
 fi
 # every read subcommand below sets CAN_TAKE, so quick_kind never sends its bare true down the quick lane (run-slot-can-take.test.ts runs each)
-# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules and burst_held open it, and unit_fits passes (the
+# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules, the battery's and focus's holds and burst_held open it, and unit_fits passes (the
 # session's units and reserve, or a queue ticket's own when <who> names one, as ops-unstick asks for the head), else 1, so a script that takes its
 # slot itself reads them as every run here does (localci and the merge train still take theirs by their own mkdir for now); it reads no queue order and no other waiter, only the ticket it is given, and run-slot.priority only through may_reserve's reserve
 CAN_TAKE=
@@ -287,7 +287,7 @@ if [ "${1:-}" = slots ]; then
   SLOTS_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
-# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many the queue's next run can take now (the open, unheld ones while unit_fits passes for first_waiter's ticket, or a medium with no waiter; none while waiters wait and none can start), and the live tickets in the queue, which spawn.sh's slots gate reads
+# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many the queue's next run can take now (the open, unheld ones while unit_fits passes for first_waiter's ticket, or a medium with no waiter; none while waiters wait and none can start, and none while the battery's or focus's hold stands), and the live tickets in the queue, which spawn.sh's slots gate reads
 # run-slot.sh kind -- <command>: print the lane run-slot picks for that command (refuse for a run it refuses, docker for a docker build, else quick_kind's clone, commit, quick, or nothing for the queue) and exit, with no ask line, ticket or holder and nothing run, so a lane question reads run-slot's own pick
 KIND_ONLY=
 if [ "${1:-}" = kind ]; then
@@ -2416,13 +2416,15 @@ if [ -n "$ROOM_ONLY" ]; then
   c=$(capacity)
   free=0
   waiters=$(ordered_waiters | grep -c .)
-  # the free lanes are the ones the queue's next run can take: first_waiter's own units, none while no waiter can start, a medium's with no waiter
-  t=$(first_waiter)
-  if [ -n "$t" ]; then
-    set -- $(cat "$QUEUE/$t" 2>/dev/null)
-    unit_fits "${2:-22}" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" && free=$((c / 2 - held))
-  elif [ "$waiters" = 0 ]; then
-    unit_fits 22 2 medium "" "$c" && free=$((c / 2 - held))
+  # the free lanes are the ones the queue's next run can take: first_waiter's own units, none while no waiter can start, a medium's with no waiter; none while a hold stands, since it holds the queue's next run (issue 1818)
+  if ! battery_holds && ! focus_holds; then
+    t=$(first_waiter)
+    if [ -n "$t" ]; then
+      set -- $(cat "$QUEUE/$t" 2>/dev/null)
+      unit_fits "${2:-22}" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" && free=$((c / 2 - held))
+    elif [ "$waiters" = 0 ]; then
+      unit_fits 22 2 medium "" "$c" && free=$((c / 2 - held))
+    fi
   fi
   echo "$((c / 2)) $held $free $waiters"
   exit 0
@@ -2437,6 +2439,8 @@ if [ -n "$CAN_TAKE" ]; then
     # the ticket's own wait, its ask's time_ns in its name, so a small one past the backlog line answers for the hold the queue holds it under (issue 1417); a session-name ask has no wait to read and reads as fresh
     waited=$((($(date +%s) - ${CAN_TICKET%%-*} / 1000000000)))
   fi
+  # the holds the wait loop obeys first (its hold check) answer here too, so a held run reads closed to the verdict while it holds (issue 1818)
+  if battery_holds || focus_holds; then exit 1; fi
   reclaim "$OPS/$CAN_TAKE"
   [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" && ! burst_held > /dev/null || exit 1
   unit_fits "$CLASS$UNITS" "$UNITS" "$SIZE" "$WHO"
