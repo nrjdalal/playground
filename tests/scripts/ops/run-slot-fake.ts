@@ -404,10 +404,22 @@ esac
   }
 }
 
-// each wait gives up at WITHIN_MS, just under bun's 60 s hang ceiling, failing with both queues' waiter names and the log's start lines, so a hang says what it waited on (issues 1723 and 1725: hangs that said nothing)
+// each wait gives up at WITHIN_MS, just under bun's 60 s hang ceiling, failing with both queues' waiter names and the log's start lines, so a hang says what it waited on (issues 1723 and 1725: hangs that said nothing); a chain of waits shares one deadline(), since two chained waits of this budget can outlast the ceiling and the second wait's message would never fire
 export const WITHIN_MS = 45_000
-export const within = async (ok: () => boolean, what: string, m: { ops: string }) => {
-  const end = Date.now() + WITHIN_MS
+// the one budget a chain of waits shares
+export const deadline = () => ({ end: Date.now() + WITHIN_MS })
+// a runs.log start line's who, pid and lane, or null when the line is not one; the one parser the wait messages and the rows read
+export const startOf = (line: string): string[] | null => {
+  const fields = line.split(" ")
+  return fields[1] === "start" ? fields.slice(2, 5) : null
+}
+export const within = async (
+  ok: () => boolean,
+  what: string,
+  m: { ops: string },
+  chain?: { end: number },
+) => {
+  const end = chain ? chain.end : Date.now() + WITHIN_MS
   while (!ok() && Date.now() < end) await Bun.sleep(50)
   if (ok()) return
   const names = (dir: string) =>
@@ -416,8 +428,9 @@ export const within = async (ok: () => boolean, what: string, m: { ops: string }
   const starts = existsSync(join(m.ops, "run-slot.runs.log"))
     ? readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
         .split("\n")
-        .filter((l) => l.split(" ")[1] === "start")
-        .map((l) => l.split(" ").slice(2, 5).join(" "))
+        .map(startOf)
+        .filter((f) => f !== null)
+        .map((f) => f.join(" "))
     : []
   throw new Error(
     `${what} within ${WITHIN_MS / 1000}s; waiters: ${waiters.join(", ") || "none"}; starts: ${starts.join(", ") || "none"}`,

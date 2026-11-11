@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, machine, stop } from "./run-slot-fake"
+import { SCRIPT, machine, startOf, stop, within } from "./run-slot-fake"
 
 // a check waits on a line its run prints or logs, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -25,18 +25,8 @@ const runsLog = (m: Machine) => {
 const starts = (m: Machine) =>
   runsLog(m)
     .split("\n")
-    .filter((l) => l.split(" ")[1] === "start")
-// waits up to 10 s for `done`, then fails naming what the machine holds, so a wrong order reads by name rather than as the test's timeout
-const within = async (m: Machine, what: string, done: () => boolean) => {
-  const end = Date.now() + 10_000
-  while (!done()) {
-    if (Date.now() > end)
-      throw new Error(
-        `${what} not seen in 10 s: places [${places(m).join(", ")}], starts [${starts(m).join(" | ")}]`,
-      )
-    await Bun.sleep(50)
-  }
-}
+    .map(startOf)
+    .filter((f): f is string[] => f !== null)
 
 // issue 1641: a waiter whose wait loop bash drops (a TERM mid-expansion on bash 5.2, the rule at the load5 wait) stopped with 143 and no word of why; RUN_SLOT_TEST_LOOP_END drops the lane's wait loop once, as bash does
 describe("a waiter whose wait loop bash drops", () => {
@@ -66,12 +56,14 @@ describe("a waiter whose wait loop bash drops", () => {
     expect(await older.saw(STOPPED)).toBe(true)
     expect(await older.p.exited).toBe(143)
     const newer = cloning(m, "worker-newer")
-    await within(m, "the newer clone's place", () =>
-      places(m).some((n) => n.endsWith("-worker-newer")),
+    await within(
+      () => places(m).some((n) => n.endsWith("-worker-newer")),
+      "the newer clone's place",
+      m,
     )
     m.release("run-slot-clone")
-    await within(m, "a clone's start", () => starts(m).some((l) => l.includes(" run-slot-clone ")))
+    await within(() => starts(m).some((f) => f[2] === "run-slot-clone"), "a clone's start", m)
     await stop(newer.p)
-    expect(starts(m).map((l) => l.split(" ")[2])).toEqual(["worker-newer"])
+    expect(starts(m).map((f) => f[0])).toEqual(["worker-newer"])
   })
 })
