@@ -30,6 +30,7 @@ import {
   removeScratch,
   restore,
   type Roots,
+  stripTrash,
   worktreeRefusal,
 } from "../../../../packages/safe-delete/src"
 
@@ -937,65 +938,13 @@ describe("purgeTrash", () => {
     expect(purgeTrash(trash, { free: () => 0, now: NOW }).removed).toEqual([])
   })
 
-  // the load cap (#1413): free between the floor and 50 GB, so only the cap decides; at or over it nothing goes, and the batches it left come back named
-  test("removes no batch at or over the load cap, and names what it left", () => {
+  // deleting the trash is cheap, so no load holds a batch, whatever the cap reads
+  test("removes its batches at any load", () => {
     const { trash } = machine()
     const old = batchAt(trash, new Date(NOW.getTime() - 8 * DAY))
-    const done = purgeTrash(trash, {
-      free: () => 20 * GB,
-      load: () => 15,
-      loadCap: 15,
-      now: NOW,
-    })
-    expect(done.removed).toEqual([])
-    expect(done.leftForLoad).toEqual([old])
-    expect(existsSync(join(trash, old))).toBe(true)
-  })
-
-  test("removes its batch at a load over the cap", () => {
-    const { trash } = machine()
-    const old = batchAt(trash, new Date(NOW.getTime() - 8 * DAY))
-    const done = purgeTrash(trash, {
-      free: () => 20 * GB,
-      load: () => 19,
-      loadCap: 15,
-      now: NOW,
-    })
-    expect(done.removed).toEqual([old])
+    const done = purgeTrash(trash, { free: () => 20 * GB, now: NOW })
+    expect(done).toEqual({ removed: [old], skipped: [] })
     expect(existsSync(join(trash, old))).toBe(false)
-  })
-
-  test("stops between batches when the load reaches the cap mid-purge", () => {
-    const { trash } = machine()
-    const first = batchAt(trash, new Date(NOW.getTime() - 9 * DAY), "a")
-    const second = batchAt(trash, new Date(NOW.getTime() - 8 * DAY), "b")
-    const third = batchAt(trash, new Date(NOW.getTime() - 8 * DAY), "c")
-    let reads = 0
-    const load = () => (reads++ < 2 ? 10 : 15)
-    const done = purgeTrash(trash, {
-      free: () => 20 * GB,
-      load,
-      loadCap: 15,
-      now: NOW,
-    })
-    expect(done.removed).toEqual([first, second])
-    expect(done.leftForLoad).toEqual([third])
-    expect(existsSync(join(trash, third))).toBe(true)
-  })
-
-  test("removes batches at any load when the disk is under the hard floor", () => {
-    const { trash } = machine()
-    const old = batchAt(trash, new Date(NOW.getTime() - 8 * DAY))
-    const young = batchAt(trash, new Date(NOW.getTime() - 2 * DAY))
-    const done = purgeTrash(trash, {
-      free: () => 4 * GB,
-      load: () => 20,
-      loadCap: 15,
-      now: NOW,
-    })
-    expect(done.removed).toEqual([old, young])
-    expect(done.leftForLoad).toEqual([])
-    expect(existsSync(join(trash, young))).toBe(false)
   })
 })
 
@@ -1029,17 +978,10 @@ describe("stripTrash", () => {
     const old = batchTree(roots, new Date(NOW.getTime() - 2 * DAY), "s")
     const young = batchTree(roots, new Date(NOW.getTime() - DAY), "t")
     const slept: number[] = []
-    // A dynamic import cast keeps this row alone red while the strip is unbuilt, and the file still loads.
-    const { stripTrash } = (await import("../../../../packages/safe-delete/src")) as unknown as {
-      stripTrash: (
-        trash: string,
-        io?: { sleep?: (ms: number) => Promise<void> },
-      ) => Promise<{ batches: string[]; folders: number }>
-    }
     const done = await stripTrash(roots.trash, { sleep: async (ms) => void slept.push(ms) })
     expect(done.batches).toEqual([old, young])
     expect(done.folders).toBe(6)
-    expect(slept).toHaveLength(6)
+    expect(slept).toHaveLength(2)
     for (const batch of [old, young]) {
       const tree = join(roots.trash, batch, "1", "review-clone")
       expect(existsSync(join(tree, "node_modules"))).toBe(false)
