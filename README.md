@@ -36,7 +36,7 @@ You need a Mac, a Claude account and a GitHub account.
 
    > **Warning**: the local database listens on every interface with the user, password and database `postgres`. Anyone who can reach this Mac on its port can sign in to it.
 
-3. The same chat then lists the steps left, each ticked once done: GitHub, **Set up settings** (your settings in a private repo under your GitHub login), a Claude account, and **Start Alpha**.
+3. The same chat then lists the steps left, each ticked once done: GitHub, **Set up settings** (your settings in a private repo under your GitHub login), **Harness** (Claude Code or Codex for Alpha), a Claude account when the pick is Claude Code, and **Start Alpha**.
 
    Install does the first two when it can, and its **Left for you** list names any it could not.
 
