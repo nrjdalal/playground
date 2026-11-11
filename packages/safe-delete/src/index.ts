@@ -87,6 +87,9 @@ const CAP_WINDOW_MS = 60_000
 // One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), or in HOME with home set, each at most its files and bytes, and with name set only a plain file whose name it matches; the folder itself, its parent, a sibling and anything deeper stay protected.
 export type CarveOut = { bytes: number; files: number; folder: string; home?: true; name?: RegExp }
 
+// The file name of a LaunchAgent that is Playground's own, which the jobs render installs and removes, and no other.
+export const PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/
+
 // Each script's carve-outs by the script's name, one entry per folder it removes from, A to Z, which only that script passes as quarantine's carveOut; playground rm takes none.
 export const CARVE_OUTS: Record<string, CarveOut> = {
   // scripts/ops/dashboard/supervisor.sh's production builds, one folder per head; one measured 2,251 files and 78 MB on 2 Nov
@@ -103,7 +106,7 @@ export const CARVE_OUTS: Record<string, CarveOut> = {
     files: 1,
     folder: "Library/LaunchAgents",
     home: true,
-    name: /^com\.playground\.[\w.-]+\.plist$/,
+    name: PLAYGROUND_AGENT,
   },
 }
 

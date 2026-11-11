@@ -10,7 +10,7 @@ import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { parseArgs } from "node:util"
 
-import { quarantine, type Roots } from "@packages/safe-delete"
+import { PLAYGROUND_AGENT, quarantine, type Roots } from "@packages/safe-delete"
 import {
   CORE,
   type Fill,
@@ -81,7 +81,7 @@ export type Install = {
   uid: number
 }
 
-// Each enabled launchd job with no plist in install's folder gets its rendered plist there and is bootstrapped, and each turned-off one whose plist is there is booted out and its plist moved to the trash through the jobs-installed carve-out. A plist already there stays as it stands, since its PATH line differs with each shell the runner starts from and a rewrite would restart the job.
+// Each enabled launchd job launchd has not loaded gets its rendered plist in install's folder when none is there, and is bootstrapped, so a refused bootstrap is tried again on the next pass; each turned-off one whose plist is there is booted out and its plist moved to the trash through the jobs-installed carve-out. A plist already there stays as it stands, since its PATH line differs with each shell the runner starts from and a rewrite would restart the job. A label that is not Playground's own (PLAYGROUND_AGENT) is left alone, so no other app's agent is loaded or stopped.
 const installAgents = async (
   install: Install,
   jobs: Record<string, unknown>[],
@@ -94,11 +94,12 @@ const installAgents = async (
   const domain = `gui/${install.uid}`
   for (const job of jobs) {
     const label = job.launchd
-    if (typeof label !== "string") continue
+    if (typeof label !== "string" || !PLAYGROUND_AGENT.test(`${label}.plist`)) continue
     const path = join(install.agents, `${label}.plist`)
     const text = plists.get(label)
-    if (text && job.disabled !== true && !existsSync(path)) {
-      writeIfChanged(path, text)
+    if (text && job.disabled !== true) {
+      if ((await install.launchctl(["print", `${domain}/${label}`])).code === 0) continue
+      if (!existsSync(path)) writeIfChanged(path, text)
       const loaded = await install.launchctl(["bootstrap", domain, path])
       if (loaded.code === 0) changed.push(`+${label}`)
       else {
@@ -121,7 +122,7 @@ const installAgents = async (
   return code
 }
 
-// The ops runner's render, at the top of each pass: jobs.json and each enabled launchd job's plist from the store's policy.json and each org's own job rows (orgJobs), and each org's script folders installed under ops; each org row refused is a `jobs: refused` line on stderr, and when the orgs cannot be read their jobs stay as jobs.json had them, said in a `jobs: kept` line, the render exiting 1 with everything else written. Exits 3 with jobs.json untouched on a machine with no store whose jobs.json is there (a fresh one gets the registry's defaults, the Dashboard's job and the usage read on, as does a store with no policy.json yet), and 2 on stderr when policy.json or jobs.json does not parse, so the runner keeps the last jobs.json and logs why. Plists go only into the folder it is handed; one for a job now off moves to the trash through the jobs carve-out, and one the trash refuses stays, named on stderr, the render exiting 1 with everything else written. With install, each launchd job turned on or off is installed or removed there too (installAgents).
+// The ops runner's render, at the top of each pass: jobs.json and each enabled launchd job's plist from the store's policy.json and each org's own job rows (orgJobs), and each org's script folders installed under ops; each org row refused is a `jobs: refused` line on stderr, and when the orgs cannot be read their jobs stay as jobs.json had them, said in a `jobs: kept` line, the render exiting 1 with everything else written. Exits 3 with jobs.json untouched on a machine with no store whose jobs.json is there (a fresh one gets the registry's defaults, the Dashboard's job and the usage read on, as does a store with no policy.json yet), and 2 on stderr when policy.json or jobs.json does not parse, so the runner keeps the last jobs.json and logs why. Rendered plists go into the folder it is handed; one for a job now off moves to the trash through the jobs carve-out, and one the trash refuses stays, named on stderr, the render exiting 1 with everything else written. With install, each launchd job turned on or off is installed or removed there too (installAgents).
 export const renderJobsFile = async (
   options: {
     data: string
