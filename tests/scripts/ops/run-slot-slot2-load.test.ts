@@ -1,7 +1,6 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import {
   copyFileSync,
-  existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -11,7 +10,7 @@ import {
 } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, WAITING, machine, stop } from "./run-slot-fake"
+import { SCRIPT, WAITING, machine, stop, within } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -39,22 +38,6 @@ const MEDIUM = { RUN_SLOT_SIZE: "medium" }
 // how many of run-slot to run-slot-4 `run-slot.sh slots` counts held or open
 const slots = (m: ReturnType<typeof machine>) =>
   Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() }).stdout.toString()
-// each wait ends within 10 s, failing with the heavy queue's waiter names and the log's start lines, so a hang says what it waited on (issue 1725: an 8 s wall-time race lost once in a 145-file batch said nothing)
-const within = async (ok: () => boolean, what: string, m: { ops: string }) => {
-  const end = Date.now() + 10_000
-  while (!ok() && Date.now() < end) await Bun.sleep(50)
-  if (ok()) return
-  const waiters = existsSync(join(m.ops, "run-slot.waiters"))
-    ? readdirSync(join(m.ops, "run-slot.waiters")).sort()
-    : []
-  const starts = readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
-    .split("\n")
-    .filter((l) => l.split(" ")[1] === "start")
-    .map((l) => l.split(" ").slice(2, 5).join(" "))
-  throw new Error(
-    `${what} within 10s; waiters: ${waiters.join(", ") || "none"}; starts: ${starts.join(", ") || "none"}`,
-  )
-}
 
 // issue 1403, 7 Nov 11:07Z: two checker suites, one in run-slot and one in run-slot-2, took load5 to 17.96 on their own, since slot 2 took a holder at the cap unless single-slot mode was on
 describe("slots 2 to 4 with single-slot mode off", () => {
@@ -69,7 +52,7 @@ describe("slots 2 to 4 with single-slot mode off", () => {
     const run = m.start("worker-m", { ...MEDIUM, RUN_SLOT_LOAD_WAIT: "600" })
     expect(await run.saw(WAITING)).toBe(true)
     writeFileSync(join(m.ops, "run-slot.load5-cap"), "raised for the shards\n20\n")
-    // bound on what run-slot does, not wall time: the look that reads the moved cap stretches under a batch's load (issue 1725, one 8 s loss in a 145-file batch)
+    // the check binds the run's own line, not wall time; within is the give-up if the line never comes (issue 1725: an 8 s wall-time race lost once in a 145-file batch, the look that reads the moved cap stretching under a batch's load)
     await within(() => run.stderr().includes("holds run-slot-2"), "the held waiter took slot 2", m)
     expect(await run.ran()).toBe(true)
   })

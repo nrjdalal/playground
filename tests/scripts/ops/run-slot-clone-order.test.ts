@@ -12,7 +12,7 @@ import {
 } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, stop, machine } from "./run-slot-fake"
+import { SCRIPT, stop, machine, within } from "./run-slot-fake"
 
 // a check waits on a line its run prints or logs, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -45,18 +45,6 @@ const ordered = (m: Machine) => {
   return (
     names.length === 2 &&
     names.map((n) => n.split("-").slice(3).join("-")).join(",") === "worker-older,worker-newer"
-  )
-}
-// each wait ends within 10 s, failing with the waiters' names and the start lines, so a hang says what it waited on (issue 1723, run 42891811978: both waits hung to bun's 60 s timeout saying nothing)
-const within = async (ok: () => boolean, what: string, m: Machine) => {
-  const end = Date.now() + 10_000
-  while (!ok() && Date.now() < end) await Bun.sleep(50)
-  if (ok()) return
-  const waiters = existsSync(join(m.ops, "run-slot.clone-waiters"))
-    ? readdirSync(join(m.ops, "run-slot.clone-waiters")).sort()
-    : []
-  throw new Error(
-    `${what} within 10s; waiters: ${waiters.join(", ") || "none"}; starts: ${started(m).join(", ") || "none"}`,
   )
 }
 
