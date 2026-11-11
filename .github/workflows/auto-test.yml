@@ -36,9 +36,16 @@ jobs:
         with:
           bun-version-file: package.json
 
-      # test:skills' steps run zsh, which the hosted image may not carry
+      # test:skills' steps run zsh, which the hosted image may not carry; apt's lookup fails now and then (exit 100), so it gets 3 tries
       - name: Install zsh
-        run: sudo apt-get update && sudo apt-get install -y zsh
+        run: |
+          if command -v zsh >/dev/null; then echo "zsh is present at $(command -v zsh): no apt call"; exit 0; fi
+          for try in 1 2 3; do
+            if sudo apt-get update -q && sudo apt-get install -y -q zsh; then exit 0; fi
+            echo "apt try $try of 3 failed"
+            if [ "$try" -lt 3 ]; then sleep $((try * 15)); fi
+          done
+          exit 1
 
       - name: Install dependencies
         run: bun install --frozen-lockfile --ignore-scripts
