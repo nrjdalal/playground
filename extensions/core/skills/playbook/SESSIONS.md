@@ -25,6 +25,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    the factory's `no-raw-spawn` hook refuses every cmux call but its help or version, a `claude --resume` or `--continue`, and every herdr call but its reads (`get`, `list`, `read`, `agent wait`, `pane wait-output` and the like)
    and a scratch world's of the session's own ([scripts/README.md](../../../../scripts/README.md#spawnsh)),
    naming the script; type every program by its literal name, since one held in a variable (`$V integration add`) reads as herdr when a herdr command group follows it.
+   A lead starting a checker runs `roster.ts assign <checker> <title> <task> worker=<live worker> pr=<n>` before spawn.sh, since spawn.sh writes `worker=` only for a worker's column and roster.ts refuses a checker's PR with no live worker (step 4).
    Read [SPAWN.md](SPAWN.md) for the command of the mode you start (a worker, a runner, a checker's or probe's column, a manager) and for each flag you pass,
    and before you act on a refusal: it holds the capacity gate, the launch line with its model and effort, the resume, `--account`, `--backend glm`, `--runtime herdr` with `spawn.sh restore`, `--check`, and the role and settings every launch carries.
    Done when spawn.sh has printed herdr's `herdr pane <id> workspace <id>` line for the session, or a refusal you have acted on by its gate's section in SPAWN.md.
