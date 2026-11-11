@@ -1,0 +1,49 @@
+name: Install zsh
+description: Installs zsh from a cache of its .deb files, keyed on the runner image, and on a miss fetches them with apt, 3 tries of at most 140 s, then saves them; apt's lookup fails for minutes at a time (exit 100).
+
+runs:
+  using: composite
+  steps:
+    # the key is read in the shell, since an expression's env context holds no runner variable
+    - name: Name zsh's packages' cache by the runner image
+      id: zsh-key
+      shell: bash
+      run: echo "key=zsh-debs-$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+
+    - name: Restore zsh's packages
+      id: zsh-debs
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.cache/zsh-debs
+        key: ${{ steps.zsh-key.outputs.key }}
+
+    - name: Install zsh
+      id: zsh
+      shell: bash
+      run: |
+        if command -v zsh >/dev/null; then echo "zsh is present at $(command -v zsh): no apt call"; exit 0; fi
+        debs=~/.cache/zsh-debs
+        if ls "$debs"/*.deb >/dev/null 2>&1; then
+          echo "zsh from the cache: no apt call"
+          sudo dpkg -i "$debs"/*.deb
+          exit 0
+        fi
+        mkdir -p "$debs/partial"
+        for try in 1 2 3; do
+          if sudo timeout 140 sh -c 'apt-get update -q && apt-get install -y -q --download-only -o Dir::Cache::archives="$1" zsh' sh "$debs"; then
+            sudo dpkg -i "$debs"/*.deb
+            echo "fetched=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "apt try $try of 3 failed"
+          if [ "$try" -lt 3 ]; then sleep $((try * 15)); fi
+        done
+        exit 1
+
+    # a cache saved on a PR serves that PR alone, so zsh-cache.yml saves one on canary, which every PR reads as its base's
+    - name: Save zsh's packages
+      if: steps.zsh.outputs.fetched == 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.cache/zsh-debs
+        key: ${{ steps.zsh-key.outputs.key }}

@@ -118,46 +118,9 @@ jobs:
         with:
           bun-version-file: package.json
 
-      # the spawn gates' fake pane types its command into zsh, which ubuntu-latest lacks; apt's lookup fails for minutes at a time (exit 100), so zsh's packages are cached per runner image and apt is the fallback, 3 tries of at most 140 s
-      - name: Name zsh's packages' cache by the runner image
-        id: zsh-key
-        run: echo "key=zsh-debs-$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
-
-      - name: Restore zsh's packages
-        id: zsh-debs
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/zsh-debs
-          key: ${{ steps.zsh-key.outputs.key }}
-
+      # the spawn gates' fake pane types its command into zsh, which ubuntu-latest lacks
       - name: Install zsh
-        id: zsh
-        run: |
-          if command -v zsh >/dev/null; then echo "zsh is present at $(command -v zsh): no apt call"; exit 0; fi
-          debs=~/.cache/zsh-debs
-          if ls "$debs"/*.deb >/dev/null 2>&1; then
-            echo "zsh from the cache: no apt call"
-            sudo dpkg -i "$debs"/*.deb
-            exit 0
-          fi
-          mkdir -p "$debs/partial"
-          for try in 1 2 3; do
-            if sudo timeout 140 sh -c 'apt-get update -q && apt-get install -y -q --download-only -o Dir::Cache::archives="$1" zsh' sh "$debs"; then
-              sudo dpkg -i "$debs"/*.deb
-              echo "fetched=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "apt try $try of 3 failed"
-            if [ "$try" -lt 3 ]; then sleep $((try * 15)); fi
-          done
-          exit 1
-
-      - name: Save zsh's packages
-        if: steps.zsh.outputs.fetched == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/zsh-debs
-          key: ${{ steps.zsh-debs.outputs.cache-primary-key }}
+        uses: ./.github/actions/install-zsh
 
       - name: Cache turbo
         uses: actions/cache@v4
