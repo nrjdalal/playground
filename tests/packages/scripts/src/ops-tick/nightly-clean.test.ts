@@ -899,7 +899,7 @@ describe("one night's run against a fixture data folder", () => {
     expect(
       ran.some((r) => r.includes("git/refs") && r.includes("ref=refs/tags/archive/scratch")),
     ).toBe(true)
-    expect(ran.some((r) => r.endsWith("tag archive/scratch s"))).toBe(!archived)
+    expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(!archived)
     expect(ran.some((r) => r.includes("push") && r.includes("archive/scratch"))).toBe(false)
     expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(archived)
     const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
@@ -925,10 +925,27 @@ describe("one night's run against a fixture data folder", () => {
     })
     await nightlyClean(deps)(ctx)
     const ran = runs.map((r) => r.join(" "))
-    expect(ran.some((r) => r.endsWith("tag archive/scratch s"))).toBe(false)
+    expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(false)
     expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(false)
     expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).not.toContain("scratch")
     expect(sent.find((s) => s.to === "ops")?.text ?? "").not.toContain("scratch")
+  })
+
+  test("a local archive tag at another head is re-pointed to the branch's head and named with both", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "git/refs": unknown,
+      "refs/tags/archive/scratch": "older",
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(true)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("kept scratch: its local archive/scratch tag held older, now holds s")
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain(
+      "branch scratch kept: its local archive/scratch tag held older, now holds s",
+    )
   })
 
   // #1515

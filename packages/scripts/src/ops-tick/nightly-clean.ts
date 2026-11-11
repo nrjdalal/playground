@@ -535,15 +535,22 @@ export const nightlyClean =
               `sha=${sha}`,
             ])
           : { code: 1, out: "no repository read" }
-        // A head GitHub does not hold, a branch never pushed, would go public with a push, so it stays with a local archive tag alone, named the night that tag is made and quiet on every night after.
+        // A head GitHub does not hold, a branch never pushed, would go public with a push, so it stays with a local archive tag alone, named the night that tag is made or re-pointed and quiet on every night after. The existing tag's commit is read first, as the same-head case reads it, and -f re-points one at an older head, so the branch is not named as failed every night.
         if (made.code !== 0 && UNKNOWN_SHA.test(made.out)) {
           const local = await git(["rev-parse", "-q", "--verify", `refs/tags/${tag}`])
-          if (local.code === 0 && lines(local.out)[0] === sha) continue
-          if ((await git(["tag", tag, sha])).code === 0) {
+          const held = local.code === 0 ? (lines(local.out)[0] ?? "") : ""
+          if (held === sha) continue
+          if ((await git(["tag", "-f", tag, sha])).code === 0) {
             out.push(
-              `kept ${name}: its head ${sha} is not on GitHub, so it is tagged ${tag} locally alone`,
+              held
+                ? `kept ${name}: its local ${tag} tag held ${held}, now holds ${sha}`
+                : `kept ${name}: its head ${sha} is not on GitHub, so it is tagged ${tag} locally alone`,
             )
-            kept.push(`branch ${name} kept: its head is not on GitHub, tagged ${tag} locally`)
+            kept.push(
+              held
+                ? `branch ${name} kept: its local ${tag} tag held ${held}, now holds ${sha}`
+                : `branch ${name} kept: its head is not on GitHub, tagged ${tag} locally`,
+            )
           } else {
             out.push(
               `kept ${name}: its head ${sha} is not on GitHub, and its local ${tag} tag failed`,
