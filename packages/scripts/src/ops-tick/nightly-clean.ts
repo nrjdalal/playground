@@ -451,14 +451,19 @@ export const nightlyClean =
       }
       return out.join("; ")
     })
-    // Each folder in the data folder's scratch/ whose session is gone: no live session and no roster string shares its leading id, so a session's scratch/<id>-<task> stays while it lives or its row stands. It goes to the trash through quarantine under that session's own name, the route safe-delete gives a session for its own scratch, so the data folder stays protected and playground rm --restore brings it back.
+    // Each folder in the data folder's scratch/ whose session is gone: no live session and no roster row whose status is not ended shares its leading id, so a session's scratch/<id>-<task> stays while it lives or its row is not ended. It goes to the trash through quarantine under that session's own name, the route safe-delete gives a session for its own scratch, so the data folder stays protected and playground rm --restore brings it back.
     await step("gone sessions", async () => {
       const dir = join(data, "scratch")
       const entries = await readdir(dir, { withFileTypes: true }).catch(() => null)
       if (!entries) return "none: the data folder holds no folder of theirs"
+      // a row whose status is ended holds no folder
       const roster = await Bun.file(join(data, "roster.json"))
         .json()
-        .then(rosterNames, () => null)
+        .then(
+          (r: { agents?: { status?: unknown }[] }) =>
+            rosterNames((r.agents ?? []).filter((row) => row?.status !== "ended")),
+          () => null,
+        )
       if (roster === null) return "the roster unreadable, none removed"
       const idOf = (name: string) => name.split("-")[0]!
       const live = new Set((await deps.live()).map(idOf))
