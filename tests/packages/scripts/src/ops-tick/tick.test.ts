@@ -224,13 +224,13 @@ describe("run-slot hold", () => {
     const ops = scratch()
     const now = at(13, 10)
     const since = now.getTime() - 40 * 60_000
-    hold(ops, "run-slot", "g7wkr2-worker", 4242, since, ["1760000000-4311-y8wqk2-worker"])
+    hold(ops, "run-slot", "g7wkr2-worker", process.pid, since, ["1760000000-4311-y8wqk2-worker"])
     hold(ops, "run-slot-2", "k3v9q2-worker", 4311, now.getTime() - 10 * 60_000, [])
     const { ctx, sent } = fake(ops, now)
     await runSlotHold(ctx)
     expect(sent).toEqual([
       {
-        text: `run-slot: g7wkr2-worker's run has held run-slot for 40 min while 1 waiter queues: bun run test:file tests/scripts/long.test.ts (pid 4242, since ${iso(since)})`,
+        text: `run-slot: g7wkr2-worker's run has held run-slot for 40 min while 1 waiter queues: bun run test:file tests/scripts/long.test.ts (pid ${process.pid}, since ${iso(since)})`,
         to: "ops",
       },
     ])
@@ -248,7 +248,7 @@ describe("run-slot hold", () => {
   test("a second pass on the same hold tells nothing more", async () => {
     const ops = scratch()
     const now = at(13, 10)
-    hold(ops, "run-slot", "g7wkr2-worker", 4242, now.getTime() - 40 * 60_000, [
+    hold(ops, "run-slot", "g7wkr2-worker", process.pid, now.getTime() - 40 * 60_000, [
       "1760000000-4311-y8wqk2-worker",
     ])
     const first = fake(ops, now)
