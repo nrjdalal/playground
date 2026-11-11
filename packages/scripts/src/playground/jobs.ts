@@ -81,7 +81,7 @@ export type Install = {
   uid: number
 }
 
-// Each enabled launchd job launchd has not loaded gets its rendered plist in install's folder when none is there, and is bootstrapped, so a refused bootstrap is tried again on the next pass; each turned-off one whose plist is there has it moved to the trash through the jobs-installed carve-out, then is booted out. A plist already there stays as it stands, since its PATH line differs with each shell the runner starts from and a rewrite would restart the job. A label that is not Playground's own (PLAYGROUND_AGENT) is left alone, so no other app's agent is loaded or stopped.
+// Each enabled launchd job launchd has not loaded gets its rendered plist in install's folder when none is there, and is bootstrapped, so a refused bootstrap is tried again on the next pass; each turned-off one has its plist there, if any, moved to the trash through the jobs-installed carve-out, then is booted out while launchd holds it, so a refused bootout is tried again too. A plist already there stays as it stands, since its PATH line differs with each shell the runner starts from and a rewrite would restart the job. A label that is not Playground's own (PLAYGROUND_AGENT) is left alone, so no other app's agent is loaded or stopped.
 const installAgents = async (
   install: Install,
   jobs: Record<string, unknown>[],
@@ -97,27 +97,40 @@ const installAgents = async (
     if (typeof label !== "string" || !PLAYGROUND_AGENT.test(`${label}.plist`)) continue
     const path = join(install.agents, `${label}.plist`)
     const text = plists.get(label)
-    if (text && job.disabled !== true) {
-      if ((await install.launchctl(["print", `${domain}/${label}`])).code === 0) continue
-      if (!existsSync(path)) writeIfChanged(path, text)
-      const loaded = await install.launchctl(["bootstrap", domain, path])
-      if (loaded.code === 0) changed.push(`+${label}`)
+    const on = Boolean(text) && job.disabled !== true
+    if (!on && job.disabled !== true) continue
+    const loaded = (await install.launchctl(["print", `${domain}/${label}`])).code === 0
+    if (on && !loaded) {
+      if (!existsSync(path)) writeIfChanged(path, text!)
+      const started = await install.launchctl(["bootstrap", domain, path])
+      if (started.code === 0) changed.push(`+${label}`)
       else {
-        err(`jobs: refused bootstrap of ${label}, exit ${loaded.code}: ${loaded.out.trim()}`)
+        err(`jobs: refused bootstrap of ${label}, exit ${started.code}: ${started.out.trim()}`)
         code = 1
       }
-    } else if (job.disabled === true && existsSync(path)) {
+    } else if (!on) {
       // the plist goes first, since the bootout of the job this render runs under (ops-tick's) ends it inside that call
-      const moved = quarantine(
-        path,
-        { carveOut: "jobs-installed", reason: "its launchd job is turned off", session: "jobs" },
-        roots,
-      )
-      if ("refused" in moved) {
-        err(`jobs: kept ${path}: ${moved.refused}`)
-        code = 1
-      } else changed.push(`-${label}`)
-      await install.launchctl(["bootout", `${domain}/${label}`])
+      let gone = false
+      if (existsSync(path)) {
+        const moved = quarantine(
+          path,
+          { carveOut: "jobs-installed", reason: "its launchd job is turned off", session: "jobs" },
+          roots,
+        )
+        if ("refused" in moved) {
+          err(`jobs: kept ${path}: ${moved.refused}`)
+          code = 1
+        } else gone = true
+      }
+      if (loaded) {
+        const stopped = await install.launchctl(["bootout", `${domain}/${label}`])
+        if (stopped.code === 0) gone = true
+        else {
+          err(`jobs: refused bootout of ${label}, exit ${stopped.code}: ${stopped.out.trim()}`)
+          code = 1
+        }
+      }
+      if (gone) changed.push(`-${label}`)
     }
   }
   return code
