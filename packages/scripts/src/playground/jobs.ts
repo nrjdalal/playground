@@ -81,7 +81,7 @@ export type Install = {
   uid: number
 }
 
-// Each enabled launchd job launchd has not loaded gets its rendered plist in install's folder when none is there, and is bootstrapped, so a refused bootstrap is tried again on the next pass; each turned-off one whose plist is there is booted out and its plist moved to the trash through the jobs-installed carve-out. A plist already there stays as it stands, since its PATH line differs with each shell the runner starts from and a rewrite would restart the job. A label that is not Playground's own (PLAYGROUND_AGENT) is left alone, so no other app's agent is loaded or stopped.
+// Each enabled launchd job launchd has not loaded gets its rendered plist in install's folder when none is there, and is bootstrapped, so a refused bootstrap is tried again on the next pass; each turned-off one whose plist is there has it moved to the trash through the jobs-installed carve-out, then is booted out. A plist already there stays as it stands, since its PATH line differs with each shell the runner starts from and a rewrite would restart the job. A label that is not Playground's own (PLAYGROUND_AGENT) is left alone, so no other app's agent is loaded or stopped.
 const installAgents = async (
   install: Install,
   jobs: Record<string, unknown>[],
@@ -107,7 +107,7 @@ const installAgents = async (
         code = 1
       }
     } else if (job.disabled === true && existsSync(path)) {
-      await install.launchctl(["bootout", `${domain}/${label}`])
+      // the plist goes first, since the bootout of the job this render runs under (ops-tick's) ends it inside that call
       const moved = quarantine(
         path,
         { carveOut: "jobs-installed", reason: "its launchd job is turned off", session: "jobs" },
@@ -117,6 +117,7 @@ const installAgents = async (
         err(`jobs: kept ${path}: ${moved.refused}`)
         code = 1
       } else changed.push(`-${label}`)
+      await install.launchctl(["bootout", `${domain}/${label}`])
     }
   }
   return code
