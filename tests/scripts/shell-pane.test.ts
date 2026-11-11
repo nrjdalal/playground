@@ -60,6 +60,7 @@ const PATHS: Paths = {
   MAIN: NONE,
   ROOT: NONE,
   SCOPE: NONE,
+  TREE_LINK: NONE,
   WORDS: NONE,
   WORK: NONE,
 }
