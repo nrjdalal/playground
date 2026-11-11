@@ -271,7 +271,9 @@ export const runSlotHold = async (ctx: Context) => {
     for (const hold of holds) {
       const key = `${hold.slot}:${hold.pid}`
       if (told[key]) continue
-      runsLog ??= (await ctx.run(["cat", join(ctx.ops, "run-slot.runs.log")])).out
+      runsLog ??= await Bun.file(join(ctx.ops, "run-slot.runs.log"))
+        .text()
+        .catch(() => "")
       const asked = runsLog.split("\n").findLast((l) => l.includes(` ask ${hold.who} ${hold.pid} `))
       const command = asked
         ? asked.replace(/^[^ ]+ ask \S+ \d+ /, "")
