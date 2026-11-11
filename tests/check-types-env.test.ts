@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -7,7 +7,7 @@ const root = join(import.meta.dir, "..")
 const scratch = mkdtempSync(join(tmpdir(), "check-types-env-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-// A copy of the committed tree with no .env, which is the state a fresh worktree with no stack starts in: git archive holds exactly the committed files, the installed dependencies and the worktree's cache are linked in, so the run replays what is warm and builds the rest.
+// A copy of the committed tree with no .env, which is the state a fresh worktree with no stack starts in: git archive holds exactly the committed files, the installed dependencies are copied dereferenced (a symlinked node_modules leaves the copy's bun run unable to find its bins), and the worktree's cache is linked in, so the run replays what is warm and builds the rest.
 const copy = (): string => {
   const at = join(scratch, "repo")
   mkdirSync(at)
@@ -16,7 +16,10 @@ const copy = (): string => {
   if (archived.exitCode !== 0) throw new Error(archived.stderr.toString())
   const untarred = Bun.spawnSync(["tar", "-xf", tar, "-C", at])
   if (untarred.exitCode !== 0) throw new Error(untarred.stderr.toString())
-  symlinkSync(join(root, "node_modules"), join(at, "node_modules"))
+  cpSync(join(root, "node_modules"), join(at, "node_modules"), {
+    dereference: true,
+    recursive: true,
+  })
   if (existsSync(join(root, ".turbo"))) symlinkSync(join(root, ".turbo"), join(at, ".turbo"))
   return at
 }
