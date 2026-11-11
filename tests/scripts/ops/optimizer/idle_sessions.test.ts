@@ -93,6 +93,48 @@ describe("collect: live sessions with nothing to do", () => {
     expect(prefix).toEqual([])
   })
 
+  // #1738: the row's worker names one PR's worker; an open PR of a live worker keeps the reviewer on.
+  test("checker-worker-gone: kept while an open PR on its prs list has a live worker, listed when that worker is gone too", async () => {
+    const OPEN = "https://github.com/o/r/pull/2130"
+    const open = { head: "ccc3333", state: "open", verdicts: [] }
+    const prState = async (url: string) => (url === OPEN ? open : null)
+    const roster = {
+      "b4w2k8-reviewer": {
+        kind: "reviewer",
+        name: "b4w2k8-reviewer",
+        prs: [OPEN],
+        worker: "a3f9d1-worker",
+      },
+      "c5e7g2-worker": { kind: "worker", name: "c5e7g2-worker", pr: OPEN },
+    }
+    const reviewer = entry({ name: "b4w2k8-reviewer" })
+
+    // the row's worker is gone, and the open PR belongs to another worker whose session is live
+    const kept = await collect(
+      deps({
+        prState,
+        roster,
+        sessions: {
+          "b4w2k8-reviewer": reviewer,
+          "c5e7g2-worker": entry({ name: "c5e7g2-worker" }),
+        },
+        workerPrs: async () => [],
+      }),
+    )
+    expect(kept).toEqual([])
+
+    // every open PR of a gone worker still ends the reviewer
+    const goneOwner = await collect(
+      deps({
+        prState,
+        roster,
+        sessions: { "b4w2k8-reviewer": reviewer },
+        workerPrs: async () => [],
+      }),
+    )
+    expect(whys(goneOwner)).toEqual([["checker-worker-gone (a3f9d1-worker)"]])
+  })
+
   // a checker is known by its roster kind, so a name with no role prefix still is one.
   test("a checker by its roster kind is flagged like one by its name; another kind is not a checker", async () => {
     const roster = {
