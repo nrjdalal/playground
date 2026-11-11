@@ -1575,8 +1575,8 @@ gate_sig() { G=shut; lanes_open && G=open; switch_on run-slot.single && ! lifted
 # whenever a fresh reading of them moves the line its verdict came from, its stamp apart (a `-nt` against the look's mark and a builtin compare, no
 # process of their own, so a flip lands with the reading that moved it, issue 1477, and rewrites run-slot.next within a poll; memory's pressure and free
 # share move without the cache, and a fresh reader's own lanes read names them); any other, which a new waiter or a run's end never moves to the head,
-# looks on the look signature too, so a freeing, a run's end or a new ask wakes it once per change within a poll (issue 1818: Ops' A/B measured the pick
-# asleep through a freed gate), and once it is the oldest or next_sig changes; the load's, merge queue's, clock's and gauges' reads stay the head's alone
+# looks on the look signature too, so a freeing, a run's end or a new ask wakes it once per change within a poll (issue 1818), and once it is the oldest
+# or next_sig changes; the load's, merge queue's, clock's and gauges' reads stay the head's alone
 cheap_idle() {
   local a pid l=
   self_changed && return 1
