@@ -176,7 +176,7 @@ describe("spawn.sh --harness codex starts the dispatcher in Codex, failing close
     expect(read(data(r, "backends", NAME))).toBe("codex openai\n")
   })
 
-  // No factory guard reaches a Codex session until phase 3 wires them into its hooks, so the live data folder takes no Codex start or resume.
+  // Until phase 3 lifts it, the live data folder takes no Codex start or resume, guards wired or not.
   test.each([
     ["a start", START, undefined],
     ["a resume", ["resume", NAME, root, THREAD], "codex openai"],

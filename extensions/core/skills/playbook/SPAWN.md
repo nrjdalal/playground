@@ -79,7 +79,8 @@ since Codex silently drops a hook with no recorded trust.
 It fails closed: the SessionStart hook writes a beat naming the session's thread, and a start or resume whose beat does not land within 60 seconds has its pane closed and is refused, with no pin, resume record or roster row, so a Codex session whose guards did not load is stopped within a minute of starting;
 its brief rides the launch as Codex's first prompt, so it may work on that brief until then.
 The beat's thread is the session id its resume record keeps, and it takes the session's name through `codex app-server`'s `thread/name/set`.
-Until phase 3 of the harness layer wires the factory's guards into Codex's hooks, a Codex start or resume runs only on a scratch data folder (`PLAYGROUND_DATA_DIR` naming one), and spawn.sh refuses it on the live one, naming phase 3; phase 3 lifts that refusal in the change that wires the guards.
+Its `hooks.json` carries the factory's guards beside the beat (`scripts/hooks/README.md`, A Codex session's calls).
+Until phase 3 of the harness layer lifts it, once a live probe has passed, a Codex start or resume runs only on a scratch data folder (`PLAYGROUND_DATA_DIR` naming one), and spawn.sh refuses it on the live one, naming phase 3.
 
 ## Resume
 
