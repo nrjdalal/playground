@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs"
@@ -15,11 +16,13 @@ import { join } from "node:path"
 
 import {
   BUNDLED,
+  bundle,
   entries,
   FIX,
   HOOKS,
   ROOT,
   stale,
+  treeAt,
 } from "../../../../packages/scripts/src/hooks-bundle"
 
 test("every bundle in scripts/hooks/bundled is what a fresh build of its source writes", async () => {
@@ -30,18 +33,6 @@ test("every bundle in scripts/hooks/bundled is what a fresh build of its source 
 test("scripts/hooks/bundled holds one bundle per PreToolUse guard and per worker, and nothing else", async () => {
   const names = (await entries(ROOT)).map((name) => `${name}.js`).sort()
   expect(readdirSync(join(ROOT, BUNDLED)).sort()).toEqual(names)
-})
-
-// --check builds from a tree (the index, or the merged head), so guards.ts is bundled when that tree holds it, whatever the working copy holds.
-test("an always-bundled entry is built when the tree --check reads holds its source", async () => {
-  const tree = (paths: string[]) => ({
-    names: () => [],
-    paths: () => paths,
-    text: (path: string) => (paths.includes(path) ? "" : undefined),
-  })
-  const scratch = mkdtempSync(join(tmpdir(), "hooks-bundle-always-"))
-  expect(await entries(scratch, tree([join(HOOKS, "guards.ts")]))).toContain("guards")
-  expect(await entries(ROOT, tree([]))).not.toContain("guards")
 })
 
 // A guard that imports another guard keeps that guard's main block live when both are entry points of one build, and the imported block then reads stdin first and judges the call by its own rules.
@@ -65,15 +56,15 @@ describe("a bundle run as its wrapper runs it gives its source's verdict", () =>
     })
   test.each([
     [
-      "no-ours-merge",
+      "guards",
       "an ours merge",
       call(ROOT, "git merge -s ours origin/canary"),
       2,
       "no-ours-merge hook refuses",
     ],
-    ["no-ours-merge", "a stash, which no-stash judges", call(ROOT, "git stash"), 0, ""],
+    ["guards", "a plain call", call(ROOT, "true"), 0, ""],
     [
-      "no-unslotted-run",
+      "guards",
       "a worktree's suite with no slot",
       call(worktree, `bun run --cwd ${worktree} test`),
       2,
@@ -101,7 +92,7 @@ describe("a bundle run as its wrapper runs it gives its source's verdict", () =>
 })
 
 // A main checkout made in a scratch folder outside any repo, as the factory's sits, holding the bundle: with PLAYGROUND_REPO unset, as cmux restores a session, the bundle finds that checkout from its own folder, as the source does from its own, so an ask note there runs and the same note from another folder is refused.
-test("no-desktop-owner-app's bundle finds the main checkout it sits in, with PLAYGROUND_REPO unset", async () => {
+test("no-desktop-owner-app, run by guards' bundle, finds the main checkout it sits in, with PLAYGROUND_REPO unset", async () => {
   const main = realpathSync(mkdtempSync(join(tmpdir(), "hooks-bundle-main-")))
   expect(Bun.spawnSync(["git", "-C", main, "init", "-q"]).exitCode).toBe(0)
   mkdirSync(join(main, BUNDLED), { recursive: true })
@@ -113,10 +104,8 @@ test("no-desktop-owner-app's bundle finds the main checkout it sits in, with PLA
     join(main, "package.json"),
     `${JSON.stringify({ scripts: { ask: JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).scripts.ask } })}\n`,
   )
-  copyFileSync(
-    join(ROOT, BUNDLED, "no-desktop-owner-app.js"),
-    join(main, BUNDLED, "no-desktop-owner-app.js"),
-  )
+  for (const name of ["guards", "no-extensions-write-worker"])
+    copyFileSync(join(ROOT, BUNDLED, `${name}.js`), join(main, BUNDLED, `${name}.js`))
   const note = (cwd: string) =>
     JSON.stringify({
       cwd,
@@ -125,16 +114,13 @@ test("no-desktop-owner-app's bundle finds the main checkout it sits in, with PLA
       tool_name: "Bash",
     })
   const run = async (cwd: string) => {
-    const proc = Bun.spawn(
-      ["bun", "--no-env-file", join(main, BUNDLED, "no-desktop-owner-app.js")],
-      {
-        cwd: main,
-        env: { ...process.env, PLAYGROUND_REPO: "", PLAYGROUND_ROLE: "worker" },
-        stderr: "pipe",
-        stdin: new Blob([note(cwd)]),
-        stdout: "pipe",
-      },
-    )
+    const proc = Bun.spawn(["bun", "--no-env-file", join(main, BUNDLED, "guards.js")], {
+      cwd: main,
+      env: { ...process.env, PLAYGROUND_REPO: "", PLAYGROUND_ROLE: "worker" },
+      stderr: "pipe",
+      stdin: new Blob([note(cwd)]),
+      stdout: "pipe",
+    })
     return { code: await proc.exited, stderr: await new Response(proc.stderr).text() }
   }
   expect(await run(main)).toEqual({ code: 0, stderr: "" })
@@ -607,5 +593,67 @@ describe("--check reads a tree git holds, never the working files", () => {
     expect(merged.code).toBe(0)
     expect(merged.stderr).toContain(`conflicts with canary outside ${BUNDLED}`)
     expect(merged.stderr).toContain(join(HOOKS, "lib.ts"))
+  })
+
+  // A tree file holding a leading UTF-8 BOM reads with the BOM git holds, so a BOM'd source is never read as a change it does not carry
+  test("a tree file's leading UTF-8 BOM reads as git holds it", () => {
+    const { git, root, write } = checkout()
+    const text = '\uFEFFexport const lib = "one"\n'
+    write("lib.ts", text)
+    git("add", "-A")
+    git("commit", "-q", "--no-verify", "-m", "bom")
+    expect(treeAt(root, "HEAD").text(join(HOOKS, "lib.ts"))).toBe(text)
+  })
+
+  // cat-file names a blob the object store has lost as `<sha> missing` in its header, and the read says so instead of stopping silently
+  test("a tree blob the object store has lost throws, naming the header", () => {
+    const { root } = checkout()
+    const sha = Bun.spawnSync(["git", "-C", root, "rev-parse", `HEAD:${join(HOOKS, "lib.ts")}`])
+      .stdout.toString()
+      .trim()
+    expect(sha).toMatch(/^[0-9a-f]{40,64}$/)
+    rmSync(join(root, ".git", "objects", sha.slice(0, 2), sha.slice(2)))
+    expect(() => treeAt(root, "HEAD").text(join(HOOKS, "lib.ts"))).toThrow("missing")
+  })
+
+  // A source whose name is longer than the filesystem takes makes the mirror's write throw, and the mirror goes with it; the wait rides out a mirror another test's check holds up at the same moment
+  test("a throw while the mirror is written leaves no temp folder behind", async () => {
+    const { root } = checkout()
+    const mirrors = () =>
+      readdirSync(realpathSync(tmpdir())).filter((name) => name.startsWith("hooks-bundle-merged-"))
+    const before = new Set(mirrors())
+    const blob = Bun.spawnSync(["git", "-C", root, "hash-object", "-w", "--stdin"], {
+      stdin: new TextEncoder().encode("export const big = 1\n"),
+    })
+      .stdout.toString()
+      .trim()
+    const oid = Bun.spawnSync(["git", "-C", root, "mktree"], {
+      stdin: new TextEncoder().encode(`100644 blob ${blob}\t${"n".repeat(300)}.ts\n`),
+    })
+      .stdout.toString()
+      .trim()
+    expect(oid).toMatch(/^[0-9a-f]{40,64}$/)
+    await expect(bundle(root, treeAt(root, oid))).rejects.toThrow()
+    let extra = mirrors().filter((name) => !before.has(name))
+    for (let tick = 0; tick < 100 && extra.length; tick++) {
+      await Bun.sleep(50)
+      extra = mirrors().filter((name) => !before.has(name))
+    }
+    expect(extra).toEqual([])
+  })
+
+  // A dangling entry in the checkout's own node_modules, one nothing imports, links through as it does at the base, where the entry's own read fails soft
+  test("a dangling node_modules entry no import reaches leaves both checks green", () => {
+    const { git, root, run } = checkout()
+    mkdirSync(join(root, "node_modules", "@w"), { recursive: true })
+    symlinkSync(
+      join(root, "node_modules", "gone-package"),
+      join(root, "node_modules", "@w", "gone"),
+    )
+    git("add", "-A")
+    git("commit", "-q", "--no-verify", "-m", "dangling")
+    git("branch", "canary")
+    expect(run("--check")).toEqual({ code: 0, stderr: "" })
+    expect(run("--check", "--merged", "canary")).toEqual({ code: 0, stderr: "" })
   })
 })

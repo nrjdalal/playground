@@ -47,11 +47,12 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   That one command finds the checkout with no `$HOME` in it: `$PLAYGROUND_REPO`, which spawn.sh's launch exports as its main checkout, else the main checkout git names for `$CLAUDE_PROJECT_DIR` (`--git-common-dir`, so a session in a worktree runs the main checkout's guards); when neither names a folder holding the hook's script, it runs nothing and exits 0.
 - A hook's script lands on `main` in one ship and its registration in a later one, since every wrapper runs its script from the main checkout, which follows `main`, and a factory session on `canary` loses the hook's tool the moment `canary` registers a script `main` lacks.
   A hook leaves in the reverse order: its registration in one ship and its script in a later one, since a worktree branched before the first still registers the hook in its `.claude/settings.json`, and its wrapper refuses every call the hook guards once the main checkout lacks the script.
-  Its bundle goes with its registration, since `bun run hooks:bundle` builds only the guards `scripts/factory-settings.json` registers and those `ALWAYS` names ([guards](#guards)), and the wrapper runs the script in the bundle's place.
+  Its bundle goes with its registration, since `bun run hooks:bundle` builds only the guards `scripts/factory-settings.json` registers, and the wrapper runs the script in the bundle's place.
   `bun run test:skills`'s hooks-on-main step (`packages/scripts/src/hooks-on-main.ts`, CI's `test` check) holds every tracked `*.json` file and `SKILL.md` frontmatter outside `tests/` that runs a hook script to it: it fails naming each wrapper none of whose scripts (both of a bundle-then-source wrapper's) `origin/main` holds, and fails when `origin/main` does not read, after fetching it.
 - A PreToolUse guard fails closed, since Claude Code blocks a call only on exit 2: its wrapper turns any other exit but 0 (a crash, a damaged bundle, Bun missing) into exit 2, its refusal naming the hook, the code and `bun install` in the checkout,
   and under `PLAYGROUND_ROLE` a missing script or an unresolved checkout refuses too, naming the restore route (ops-restore puts the checkout back, else Ops by playbook's LIFECYCLE.md, Restoring the main checkout); with no role it runs nothing and exits 0, as above.
-  A timeout still lets the call run, since Claude Code treats a hook timeout as a non-blocking error.
+  A timeout lets the call run, since Claude Code treats a hook timeout as a non-blocking error.
+  On Bash, guards' `onFailure: "block"` refuses a call whose guards time out or fail to start ([guards](#guards)).
   Every other wrapper (SessionStart, Stop, PostToolUse and the rest) stays open on a crash, since a Stop hook at exit 2 keeps its session going and a crashing one would loop it.
   `tests/scripts/hooks-abs-path.test.ts` holds both shapes and runs them over stub guards.
 - A PreToolUse guard's wrapper runs its bundle, `scripts/hooks/bundled/<hook>.js`, which `bun run hooks:bundle` (`packages/scripts/src/hooks-bundle.ts`) builds from `scripts/hooks/<hook>.ts` with everything it imports, so the guard starts with a missing or damaged `node_modules`; every other hook runs its source.
@@ -95,7 +96,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - A Codex session (spawn.sh's `--harness codex`) loads the factory's guards from the `hooks.json` spawn.sh writes at each launch: `codexHooks()` in `packages/scripts/src/codex-hooks.ts` renders it from `scripts/factory-settings.json`, each handler in its group on each event Codex has (it has no Notification, PermissionDenied, PostToolUseFailure or StopFailure),
   and spawn.sh adds the SessionStart beat beside them.
-  Each group keeps its matcher, but for a hook `CODEX_MATCHERS` names (writing-first, below), and each hook `LEFT_OUT` names is left out.
+  Each group keeps its matcher, but for a hook `CODEX_MATCHERS` names (writing-first, below), each hook `LEFT_OUT` names is left out, and each handler drops `onFailure`, a key Codex's hook handler lacks.
   session-state is left out, so a Codex session writes no state record, and the Dashboard reads its light as State unknown where it would read idle (`codexLight()` in `api/hono/src/lib/dashboard/workers.ts`, sidebar.md's Worker Lights).
   Codex runs each command in the call's folder with `$PLAYGROUND_REPO` set by the launch, so every wrapper finds the main checkout as it does for Claude Code.
 - A Codex input carries a `turn_id`, which Claude Code's lacks (codex-cli 0.167.1).
@@ -202,13 +203,14 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## guards
 
-- Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names with the gate and the entry its own main block runs (`fromFactory` or none; `check`, or `guarded` for no-extensions-write's Worker and `refusal` for no-glm-heavy-path), all at once.
+- Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
+  Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
-  `GUARDS` holds every guard each settings file registers on Bash, which a test reads from both files, so a guard registered on Bash later runs here once it joins `GUARDS`.
-  `bun run hooks:bundle` builds it as `scripts/hooks/bundled/guards.js` whether or not the settings register it yet (`ALWAYS` in `packages/scripts/src/hooks-bundle.ts`), so its bundle reaches `main` a ship before its registration.
-  Its registration in both settings files, in place of each Bash guard's own Bash entry, lands in a later ship than its script, as [Registered in both settings files](#registered-in-both-settings-files) says.
+  Both settings files register it once on Bash, with `onFailure: "block"`, in place of each Bash guard's own Bash entry, and a guard that also guards another tool keeps its own entry for that tool.
+  A test holds each file to that one Bash entry, so a guard a later PR registers on Bash fails it until the guard joins `GUARDS`.
+  A Codex session loads the same entry with no `onFailure`, since `codexHooks()` drops that key, which Codex's hook handler lacks (`HookHandlerConfig::Command`, codex-cli 0.167.1), so there a timeout lets the call run ([A Codex session's calls](#a-codex-sessions-calls)).
   Its tests are `bun run test:file tests/scripts/hooks/guards.test.ts tests/scripts/hooks/refused-forms.test.ts`, the second feeding each Bash row of a guard it runs through its `check()`.
 
 ## no-bare-slack-link
@@ -269,7 +271,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-desktop-owner-app
 
-- agent-desktop runs headless and leaves the owner's own apps alone: `scripts/hooks/no-desktop-owner-app.ts`, registered beside no-headless-login and acting for every session, refuses an `agent-desktop` call that carries `--headed`, since headed input moves the owner's own pointer and focus.
+- agent-desktop runs headless and leaves the owner's own apps alone: `scripts/hooks/no-desktop-owner-app.ts`, run on Bash by [guards](#guards) and acting for every session, refuses an `agent-desktop` call that carries `--headed`, since headed input moves the owner's own pointer and focus.
   It also refuses one that targets an app on the `desktop-owner-apps` guard list ([Guard lists](#guard-lists)): an `--app` value, or a `launch` or `close-app` target, matched without case and with or without `.app` or a path before it.
   Core's list is empty, and the owner's login extension holds the owner's apps, which change only by the owner's Approve on an Inbox `apps` decision, whose Approve has the Dashboard write the list (`.agents/dashboard/asks.md`).
   It reads the list and nothing else, so no flag, environment variable, `export`, `env` or write in the same call frees a call.
@@ -292,14 +294,14 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-env-dump
 
-- A factory session never prints its environment: `scripts/hooks/no-env-dump.ts`, registered beside no-stash, refuses an `env` with no command (`env`, `env -0`, `env FOO=1`), `printenv`, a bare `set`, and a bare `declare`, `export` or `typeset`,
+- A factory session never prints its environment: `scripts/hooks/no-env-dump.ts`, run on Bash by [guards](#guards), refuses an `env` with no command (`env`, `env -0`, `env FOO=1`), `printenv`, a bare `set`, and a bare `declare`, `export` or `typeset`,
   since the environment holds tokens and the output lands in the transcript (13 Oct: a planning subagent's `env` printed this machine's GitHub and Slack tokens).
   `env VAR=x <command>`, `set -e` and `export VAR=x` run.
   It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too.
 
 ## no-extension-repo-write
 
-- A factory session changes no extension repository's git data or name: `scripts/hooks/no-extension-repo-write.ts`, registered beside no-public-leak, refuses such a write, since `ops:ext-sync` renders each one's `main` into the extensions root every guard reads.
+- A factory session changes no extension repository's git data or name: `scripts/hooks/no-extension-repo-write.ts`, run on Bash by [guards](#guards) and registered beside no-public-leak on the GitHub MCP tools, refuses such a write, since `ops:ext-sync` renders each one's `main` into the extensions root every guard reads.
   Its repositories are each `ext.repos` value in the root's `policy.json`, each scope clone's `origin`, which follows a rename, and `<login>/playground-<scope>` for each scope clone `ext.repos` does not name, under `PLAYGROUND_LOGIN` and the root's `login` file both, matched in any case and with percent escapes decoded, as GitHub decodes them.
   It reads every write through no-playground-leak's engine with `anyWrite` set (`inspectAs`), which refuses a write to one of them whatever its text, and a write whose target it cannot place.
   Those writes are a `git push`, `send-pack` or `subtree push`, a git alias expanded from its config (its body split as git splits it, quotes and backslashes included), a gh or `gh api` write, a curl to one on `api.github.com` or `github.com` (a read included), and a GitHub MCP write.
@@ -338,7 +340,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-extensions-write
 
-- A factory session changes nothing a guard reads to allow or deny a call: `scripts/hooks/no-extensions-write.ts`, registered beside no-main-checkout on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), guards the extensions root (`extensionsDir` of the data folder) and every file under it.
+- A factory session changes nothing a guard reads to allow or deny a call: `scripts/hooks/no-extensions-write.ts`, run on Bash by [guards](#guards) and registered on the file tools (Edit, MultiEdit, NotebookEdit and Write), guards the extensions root (`extensionsDir` of the data folder) and every file under it.
   Each guard reads its list and `policy.json` there, each scope's `lists/` and `settings.json` render into them on the next write (its `git add -A` takes a hand edit along), and a root that is gone sends the guards back to core's smaller lists.
   It refuses a file tool's path in the root, `~` expanded, and a redirect into it, a group's, a subshell's, `exec`'s, a shell's, `eval`'s, `source`'s, `.`'s, `cd`'s, `pushd`'s, `popd`'s or a bare one included, and zsh's `>!` and `>>!` with them.
   It refuses any program but a reader that names the root, a path in it, a folder above it (`~/.playground`, `~`) or a glob there (`*`, `?`, `[…]`, `{…}` or zsh's `(…)`, in a redirect's target too), links followed, in any word: the program word, an option's attached value (`-o<path>`, `--out=<path>`), a variable the call sets (`GIT_DIR=<clone>`), or the stdin xargs hands it.
@@ -428,12 +430,14 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A line is read call by call instead when every command on it, a substitution's included, is on a closed list of readers or a quiet git commit, and no redirect other than a quiet commit's own writes a file (`2>&1` and `>/dev/null` write none): then only a variable's text is read that way, so `awk '$3 ~ /runner/' f` runs from `~`.
   The closed list is an `awk`, `gawk`, `mawk` or `nawk` whose program runs nothing, a `cat`, `git`, `grep`, `head`, `tail` or `wc` that is a reader by the list above (so `git show <rev>:<file> | awk '/^f\(\)/,/^}/'` runs), `cut`, a `sort` with no `-o` and no long option (macOS sort takes an abbreviation, `--out=`), and a `uniq` with at most one file, since its second is its output.
   A `git` on it holds no word the hook cannot read, since one may be an option that writes or runs (`--output=…`).
-  The closed list also holds an `echo` or `lsof`, which prints and runs nothing, so the awk it feeds keeps its reading: `lsof -U | awk '$5 ~ /unix/'` and `echo x | awk '{print $1}'` run from `~`.
+  The closed list also holds an `echo`, `lsof` or `date`, which prints and runs nothing, so the awk it feeds keeps its reading and a read ending in `date` keeps its own: `lsof -U | awk '$5 ~ /unix/'`, `echo x | awk '{print $1}'` and `sed -n '/a\|\[nit\]/,+3p' f; date -u +%FT%TZ` run from `~`, while a `date` on a line with an in-place sed or a quiet commit keeps canary's reading.
   The closed list also holds a read-only gh call with a `-q` or `--jq` filter or a `-t` or `--template` template: `gh api` with no option that sends, or `issue list`, `issue view`, `pr list`, `pr view`, `run list`, `run view` or `search`.
   A call with an option that sends (`-F`, `-X`, `-f`, `--cache`, `--field`, `--input`, `--method` or `--raw-field`) or opens the browser (`--web` or `-w`) is no read, a short one counted alone or in a cluster ahead of the filter's letter (`-iX POST`).
   Such a call holds no other word with a space, and no pager or editor variable (`EDITOR`, `GH_EDITOR`, `GH_PAGER`, `PAGER`, `VISUAL`) is set on its line, since an assignment or an export keeps a line from being read call by call.
   The closed list also holds a gh post (`issue` or `pr` with `comment`, `create` or `edit`) whose only words with a space are its `-t`, `--title`, `-b` or `--body` values, text gh sends, so `gh issue create --title "a note about ~/.playground" --body x` runs; a post with `-e`, `--editor`, `-w` or `--web` keeps canary's reading.
   The closed list also holds a `cd` to one literal folder, since the walk follows it and judges each later call where it lands, so `cd /tmp && sed -n '/[Ff]ollow/,$p' f` runs; a `cd -`, `~-`, `~+` or a folder the hook cannot read keeps canary's reading.
+  The closed list also holds a `bash -c` with one quoted script the hook can read, as its line's one command, when that script reads call by call by this same rule, since bash runs that script alone and the walk judges each of its calls, so `bash -c 'sed -n "/^f() {/,/^}/p" f'` runs.
+  A `bash -c` beside another call, one whose script holds a call off the list (a substitution's, an in-place sed and a commit included), and `sh -c` or `zsh -c` keep canary's reading.
   Its filter or template is text, never a path, so `gh pr view 1 --json a,b -q '.a+" \(.b)/x"'` runs from every folder, and is judged only when it names the root.
   An unquoted glob in it is the shell's, so `gh api x --jq .[]` is judged as any glob and refused from the home.
   The closed list also holds a `sed` or `gsed` with options from `-E`, `-n`, `-r`, `-s`, `-u` and `-z` (and their long names) whose every script, each `-e` value or else its first operand, is a literal word a closed grammar holds whole (`SED_SCRIPT`), so `sed -n '/^- \*\*/p' f` and `sed -n '/a/,$p' f` run.
@@ -444,7 +448,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A match variable in a string or a replacement comes before no `[`, `{` or `->`, since perl reads one there as a subscript and runs its expression as code.
   Each of its file operands is a plain name (`PERL_FILE`), since `-n` and `-p` open a name that starts or ends with `|` as a command.
   Each command on the closed list is its own first word as a reader is, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call and a reader behind a wrapper (`time cut …`) keep canary's reading.
-  An awk program runs something when it holds `system`, `getline`, `>` or `@`, or comes from `-f` or an option the hook does not know.
+  An awk program runs something when it holds `system`, `>` or `@`, or a `|` outside the literals `awkPipe` allows (the one way a `getline` runs a command, `"cmd" | getline`), or comes from `-f` or an option the hook does not know; a plain `getline` or one from a file only reads, so `awk '/-->/{getline; print}' f` runs.
   A regex literal where awk reads only a pattern (`AWK_PATTERN`: at the program's start or after `{`, `}`, `;`, `!`, `(`, `,`, `~`, `&&`, `||` or a newline) is cut out first, so `awk '/^>>>>>>> /{p=0}' f` runs, while a `>` comparison such as `NR>1` still counts as a redirect.
   It runs something too when it holds a `|` anywhere but two places: a regex that is the whole leading pattern (`/a|b/`, `/a|b/ {print $2}`) and a regex or a string right after `~` (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, `[` or newline.
   Once those are cut out, any `|`, quote, `/`, `#` or backslash left counts as a pipe, as canary counted every `|`, so `awk '!/a|b/' f` and `awk '/[ab]|c/' f` keep canary's reading.
@@ -523,12 +527,12 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A form that passes is a guard hole, kept in fixture rows off GitHub until its fix merges; the check is done when each reverse case is refused at `check()`, or held as a fixture row and reported to your lead.
   A refusal that likely names no write (`unwritten`) ends by asking the session to report it to its lead as a false positive if the command writes nothing: the typed line's redirects write no file, the word reads as a folder above the root or a glob there rather than as the root's own path, and the command was read out of a quoted text or is a reader that writes nothing as called.
   Every other refusal keeps the owner's route, so `sed -i`, `perl -pi` or `chmod` on a file in the root, or `chmod` on a glob above it, is routed to the owner.
-  A gh `-q` filter on a line read whole (one beside a program off the closed list, such as `date; gh …` or `gh … | sh`) keeps canary's reading: one that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(`; pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
+  A gh `-q` filter on a line read whole (one beside a program off the closed list, such as `ls; gh …` or `gh … | sh`) keeps canary's reading: one that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(`; pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
   It fails open on any other error, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
 ## no-false-green
 
-- A factory session's test run and git push keep their own exit status: `scripts/hooks/no-false-green.ts`, registered beside no-stash, refuses bun with an option given its value as the next word (`--cwd <dir>`, `--env-file <file>`, `--preload <file>`) before its `run` or `test`
+- A factory session's test run and git push keep their own exit status: `scripts/hooks/no-false-green.ts`, run on Bash by [guards](#guards), refuses bun with an option given its value as the next word (`--cwd <dir>`, `--env-file <file>`, `--preload <file>`) before its `run` or `test`
   (bun then prints its usage and exits 0, or runs package.json's `test` script with the paths appended in place of the tests;
   `--opt=value` there, as `bun --cwd=<dir> run test:file <files>` and `bun run --cwd <dir> <script>` work), and a test run (`bun test`, a `test` or `check-types` script, vitest or jest, pytest, ty or ruff, bare, through `uv run`, `uv tool run`, `uvx` or `python -m`,
   through run-slot.sh or a shell's `-c` too) piped into another command while the script holding the pipe sets no `pipefail` and reads no pipe status of its own shell (`PIPESTATUS` in bash, `pipestatus` in zsh, the Bash tool's shell here; a pipefail outside a `bash -c` script never reaches the pipes inside it),
@@ -570,7 +574,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A runner given one of their files is refused whatever it does with it, a formatter or linter included, and a runner in a folder a value the hook cannot read names (`--cwd $D`, `cd $D`), or a program path it cannot place (`cd $D && ./cli.ts`, `$P/cli.ts`), is refused whatever it runs, failing closed as git's rule does.
   A read, test, staging or commit of their files runs, and so does a run of their tests' mirror under `tests/`.
   It refuses every MCP tool and Claude Code's `ListMcpResourcesTool`, `ReadMcpResourceDirTool` and `ReadMcpResourceTool`, which list and read an MCP server's resources, since each MCP server here is an org's or an outside service's connector.
-  Both settings files register the hook on `^(Bash|ListMcpResourcesTool|ReadMcpResourceDirTool|ReadMcpResourceTool|mcp__.+)$`, so each of those calls reaches it.
+  Both settings files register the hook on `^(ListMcpResourcesTool|ReadMcpResourceDirTool|ReadMcpResourceTool|mcp__.+)$`, and Bash reaches it through [guards](#guards), so each of those calls reaches it.
   A `gh` call is refused when a word names a guarded org (one `ext.links` links, `guardedOrgs`, as [no-playground-leak](#no-playground-leak) reads them): by `-R` or `--repo`, a GitHub URL (`raw.githubusercontent.com` and `codeload.github.com` included), a `repos/`, `orgs/` or `users/` endpoint, or as a whole word anywhere, a GraphQL query's included.
   It is also refused when a value the hook cannot read names its repository or `gh api` endpoint (a `-R` xargs fills included), when a search names no owner or repository (`--owner`, `--repo`, or an `org:`, `owner:`, `repo:` or `user:` qualifier), and when it names no repository and falls back to a guarded org's (`GH_REPO`, the checkout's remotes).
   A gh call whose reach is the whole account is refused too: `gh status`, `gh org list`, and a `gh api` endpoint outside `repos/`, `orgs/`, `users/` and `search/` but for `markdown`, `user` and `rate_limit`, read past a leading `https://api.github.com/`; gh's `repos/{owner}/{repo}/` placeholders read as the checkout's own repository, as the fallback above.
@@ -598,7 +602,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-headless-login
 
-- A factory session's headless `claude -p` (or `--print`) runs on the session's own account and carries its role: `scripts/hooks/no-headless-login.ts`, registered beside no-stash and acting for a factory session alone (`scripts/hooks/role.ts`), refuses one whose command sets no `CLAUDE_CODE_OAUTH_TOKEN` for it, as a prefix, through `env` or by an `export` earlier in the command,
+- A factory session's headless `claude -p` (or `--print`) runs on the session's own account and carries its role: `scripts/hooks/no-headless-login.ts`, run on Bash by [guards](#guards) and acting for a factory session alone (`scripts/hooks/role.ts`), refuses one whose command sets no `CLAUDE_CODE_OAUTH_TOKEN` for it, as a prefix, through `env` or by an `export` earlier in the command,
   since spawn.sh hands the token to the session's own `claude` alone, so a child started from its Bash shell bills this machine's own login (21 eval runs billed an account paused at 98%).
   It also requires `PLAYGROUND_ROLE` in the command when the session's role came from its name in the registry rather than its environment (a session resumed without its settings), since a run with no role passes every role-gated hook (a headless Slack post sent a url-only link no-bare-slack-link let through).
   The role rides the environment rather than a match on the run's folder: a child inherits its parent's environment wherever it runs, while a folder match would also catch a session the owner opens there.
@@ -609,7 +613,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-kill-by-name
 
-- A factory session signals only processes it started, by their own handle (the **signal** rule): `scripts/hooks/no-kill-by-name.ts`, registered after no-headless-login, refuses `pkill`, `killall` and `fuser -k`, <!-- kill-check: names only -->
+- A factory session signals only processes it started, by their own handle (the **signal** rule): `scripts/hooks/no-kill-by-name.ts`, run on Bash by [guards](#guards), refuses `pkill`, `killall` and `fuser -k`, <!-- kill-check: names only -->
   and, in a call that searches with `pgrep`, `pidof`, `lsof`, `fuser` or `ps` (but `ps` given a pid by `-p`, `-q`, `--pid` or `--quick-pid`), a `kill` run by xargs or given a pid the hook cannot read, in a chain, a pipe, a loop, a group or `sh -c` alike,
   since a name, pattern or port matches the live dashboard and every worker's stack (31 Oct: a session ran `pkill -f` on its own watcher, and only `tests/test_kill_by_name.py`, which reads the repo's text, guarded it). <!-- kill-check: names only -->
   It reads the whole call for a search before it judges a kill, since a loop's `done < <(pgrep …)` comes after the kill it feeds, and it reads the `-I` string xargs hands a shell it starts as such a pid.
@@ -622,7 +626,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - ALWAYS: Keep the factory out of every ticket, PR, commit, branch, comment, Slack message or DM, and file in a guarded org's repo: playbook's **classified** rule, since the factory is the owner's own and stays out of the org's records in any shape.
   Every factory session is spawned with `--settings ~/.playground/factory-settings.json` (playbook's SPAWN.md, Role and settings), the file `scripts/link-skills.sh` links to `scripts/factory-settings.json`,
-  which registers the PreToolUse hook `scripts/hooks/no-playground-leak.ts` wherever the session works (`.claude/settings.json` registers it too, for a session resumed without its settings in the factory's checkout).
+  which runs the PreToolUse hook `scripts/hooks/no-playground-leak.ts` on Bash through [guards](#guards) and on the Linear, Slack and GitHub MCP tools wherever the session works (`.claude/settings.json` registers it too, for a session resumed without its settings in the factory's checkout).
   It refuses a write to a guarded org's surface whose text holds a factory term (a name, an old session name, which a scope's own copy adds, a path, a `<role>-<sin>` session or a `probe-<sin>` or `probe-<role>-<sin>` probe from `extensions/core/lists/playground-terms.json`,
   its sins the seven words alone so `worker-pool` and `probe-path` pass, any skill's name in the checkout's `skills/` bucket folders,
   or any agent's name in the roster, both read on every call since skills are added and sessions renamed, leaving out one the file's `everyday` list names, such as `builder`, an org's own name, which its extension's copy adds, or `pr`, the public skill copied from upstream whose name is the word for a pull request, and adding none when the roster is missing or does not read;
@@ -656,14 +660,14 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A declaration that does not read refuses every such write, on any server named for Slack and by curl, with the fix; with none, Slack reads as above.
   The hook reads the declaration alone, and the extension's own gate stays the one check of a message's words.
   A Slack upload from a path that holds a factory term (the scratchpad folder's name does) is refused, so copy the file first to `/private/tmp/claude-501/<topic>/`, a `<topic>` that names no session and holds no term.
-  When it cannot start it refuses and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)), and its two lists are read as [Guard lists](#guard-lists) says.
+  When it cannot start it refuses and a timeout acts as [Registered in both settings files](#registered-in-both-settings-files) says, and its two lists are read as [Guard lists](#guard-lists) says.
   It shares `scripts/hooks/shell.ts` and `scripts/hooks/github.ts` (the repository resolver) with the other hooks, and its tests are in `bun run test:file tests/scripts/hooks`.
   Its term pattern also reads a public post's draft for `bun run ask new` and `edit`, through `factoryTerms` ([The public-draft check](#the-public-draft-check)).
 
 ## no-public-leak
 
 - ALWAYS: Write each public repository's pull requests, issues, reviews and comments in plain words, naming no person, company or private record, since everything written there is public once the repository is and stays cached after.
-  `scripts/hooks/no-public-leak.ts`, registered in both settings files, refuses a write to a public repository (`factory.publicRepo`, one or a list, or while unset `TODAY_PUBLIC` in trace-count's `kinds.ts`, the factory's and Yard's)
+  `scripts/hooks/no-public-leak.ts`, run on Bash by [guards](#guards) and registered in both settings files on the GitHub MCP tools, refuses a write to a public repository (`factory.publicRepo`, one or a list, or while unset `TODAY_PUBLIC` in trace-count's `kinds.ts`, the factory's and Yard's)
   whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or any email address or link into the archive repository (`factory.archiveRepo`).
   An extensions root whose policy.json it cannot read for those two refuses the write, as a list it cannot trust does.
   Its reason names the kind and the plain-words fix, never the text.
@@ -709,21 +713,21 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - ALWAYS: File a new Linear ticket only after the owner's yes, and keep the factory out of Linear and out of every guarded org's ticket, PR, commit, branch, comment, Slack message or DM, and file in its repo: playbook's **tickets** rule, since the factory is no project of the org's and stays out of its records in any shape.
   A session started with `PLAYGROUND_ROLE` set (every factory spawn, by the launch line in playbook's SPAWN.md, Launch, model and effort), or with no role but a factory name in Claude Code's registry (`scripts/hooks/role.ts`, for a session resumed without its settings), runs the PreToolUse hook `scripts/hooks/no-linear-ticket.ts`,
-  registered in both settings files and in the ticket skill's and playbook's frontmatter,
+  run on Bash by [guards](#guards), registered in both settings files on the file tools and every create-issue tool, and in the ticket skill's and playbook's frontmatter, Bash included,
   so it also runs in a guarded org's checkout whose session loads either; without the variable or a factory name it allows everything, so the owner's own sessions file freely.
   It refuses a call that files a new Linear ticket (`save_issue` with no `id`, a Linear server's create-issue tool, a GraphQL `issueCreate` or `issueBatchCreate` sent by curl, by `gh api` to a URL off GitHub, or by inline script code) unless `ticket-approvals/<team>-<UTC date>.json` in the data folder names its title;
   a GraphQL create is refused even then, since its `teamId` matches no approval.
   Only the dispatcher's refusal names that path and the approval's shape, `{"ask": "<the Inbox decision's id>", "titles": ["<title>"]}` adding each title approved for that team that day, so the dispatcher writes the approval from its refusal.
   Its `<team>` is the team as `save_issue` names it, lowercased with each run of other characters one hyphen (`AI Platform` is `ai-platform`).
   Any other role is refused a Write, Edit, MultiEdit or NotebookEdit into that folder, or a Bash command with a word that names a path in it; an interpreter's code that builds the path itself is not read.
-  It fails closed on any call that reads as filing a ticket, a Linear API call whose body it cannot read included; when it cannot start it refuses, and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)).
+  It fails closed on any call that reads as filing a ticket, a Linear API call whose body it cannot read included; when it cannot start it refuses, and a timeout acts as [Registered in both settings files](#registered-in-both-settings-files) says.
   The refusal of a body it cannot read names the fix, the query written with the Write tool first and named by its literal absolute path in a call of its own (`curl -d @/abs/query.json`, `gh api --input /abs/query.json`), and says none of the call's commands ran.
   The refusal of an endpoint or URL it cannot read names its fix, that endpoint written out literally (`gh api https://api.linear.app/graphql`).
   It reads Bash through `scripts/hooks/shell.ts`, the reader it shares with the release hook, and its tests are in `bun run test:file tests/scripts/hooks` too.
 
 ## no-mac-web-build
 
-- A factory session builds the web image on the box: `scripts/hooks/no-mac-web-build.ts`, registered after no-raw-wa, six entries past no-glm-heavy-path, refuses a factory session's web image build on the Mac while the live dashboard's Postgres runs in the same Docker VM.
+- A factory session builds the web image on the box: `scripts/hooks/no-mac-web-build.ts`, run on Bash by [guards](#guards), refuses a factory session's web image build on the Mac while the live dashboard's Postgres runs in the same Docker VM.
   On 21 Oct a tester's web build took the 3.1 GB VM's out-of-memory killer to every Postgres in it, the dashboard's included, and the build peaks at about 4 GB over baseline (measured on the box), so no memory cap makes it safe here.
   It reads each docker call through `scripts/hooks/docker-build.ts`, which no-unslotted-run and run-slot read too.
   A web image build is `docker compose build` (or `docker-compose build`) with no service named, `web` among them or a service it cannot read, `docker compose up`, `create` or `run` on the same terms unless given `--no-build` (compose builds a missing image, and docker-compose.yml names none), and `docker build`, `buildx build`,
@@ -739,7 +743,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-main-checkout
 
-- A factory session keeps the main checkout clean: `scripts/hooks/no-main-checkout.ts`, registered beside no-stash on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), refuses lefthook and turbo, by name, path or versioned package (`turbo@latest`), through `bunx`,
+- A factory session keeps the main checkout clean: `scripts/hooks/no-main-checkout.ts`, run on Bash by [guards](#guards) and registered on the file tools (Edit, MultiEdit, NotebookEdit and Write), refuses lefthook and turbo, by name, path or versioned package (`turbo@latest`), through `bunx`,
   `npx` or `bun x` (a package runner, read as below) (but for turbo's packages build, below), `git commit` (it runs pre-commit), `bun run build`, `bun run check-types`,
   `bun run test`, `bun run test:file` and `bun test` while the command's directory ([The folder a hook reads](#the-folder-a-hook-reads), and a `git -C` or `bun --cwd` in it, each `~-` and `~+` expanded as that section says) is the main checkout and not a worktree under `.claude/worktrees/`,
   and a write into the main checkout from anywhere (a redirect, `cp`, `mv`, `touch`, `tee`, curl's `-c` or `-o`, the files `sed -i`, BSD's `sed -I`, `sed --in-place` or `perl -i` edits in place, or a file tool's path), naming the fix: run it in your own worktree.
@@ -792,7 +796,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 ## no-off-palette-label
 
 - ALWAYS: Give every GitHub label a Tailwind 500 color, on any label created from now on.
-  The PreToolUse hook `scripts/hooks/no-off-palette-label.ts`, registered beside no-mac-web-build on Bash and the GitHub MCP's `label_write`, acts for every session and refuses a label write whose color is not one of the 22 hexes in its `TAILWIND_500`, read in any case, with or without `#`:
+  The PreToolUse hook `scripts/hooks/no-off-palette-label.ts`, run on Bash by [guards](#guards) and registered on the GitHub MCP's `label_write`, acts for every session and refuses a label write whose color is not one of the 22 hexes in its `TAILWIND_500`, read in any case, with or without `#`:
   `gh label create` or `gh label edit` by `--color` or `-c`, `gh api` POST to `repos/<owner>/<repo>/labels` or PATCH to `.../labels/<name>` by a `color` field or an `--input` JSON body, and `label_write`'s `create` or `update` by its `color`.
   A create with no color is refused too, since GitHub then picks one; an edit with no color keeps the label's color and runs, as do a delete, `gh label clone` and adding a label to an issue or PR.
   A color it cannot read (a variable, an `--input` it cannot open) is refused, and the reason names the fix: one of the 22 hexes, by name, written literally.
@@ -802,7 +806,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-ours-merge
 
-- A factory session merges `canary` plainly: `scripts/hooks/no-ours-merge.ts`, registered beside no-stash, refuses a `git merge` or `git pull` with the ours strategy or the ours option (`-s ours`, `-sours`, `--strategy=ours`, `--strategy ours`, `-X ours`, `-Xours`, `--strategy-option=ours`, `--strategy-option ours`, an abbreviation of `--strategy-option`, `-s` in a cluster of short options,
+- A factory session merges `canary` plainly: `scripts/hooks/no-ours-merge.ts`, run on Bash by [guards](#guards), refuses a `git merge` or `git pull` with the ours strategy or the ours option (`-s ours`, `-sours`, `--strategy=ours`, `--strategy ours`, `-X ours`, `-Xours`, `--strategy-option=ours`, `--strategy-option ours`, an abbreviation of `--strategy-option`, `-s` in a cluster of short options,
   and an alias for one), through `git -C`, a wrapper, `bash -c` or run-slot.sh, and a value it cannot read beside one, naming the fix: `git merge origin/canary`, resolving each conflict with both sides' meaning.
   It fails closed only on a call that reads as a merge with ours, and its tests are in `bun run test:file tests/scripts/hooks` too.
 - A merge resolved by hand can still drop a line `canary` added in a file git merged clean, which no-ours-merge cannot see: lefthook's pre-push script `keeps-canary` refuses that push, naming each file and merge in the words of pr:merge's keeps canary gate (`packages/scripts/src/pr-merge/README.md`), and its tests are `bun run test:file tests/packages/scripts/src/pr-merge/prepush.test.ts`.
@@ -844,7 +848,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-prompt-stop
 
-- A factory session never waits on a permission prompt no one answers: `scripts/hooks/no-prompt-stop.ts`, registered beside no-stash, refuses the Bash shapes Claude Code stops on, with a reason the session acts on:
+- A factory session never waits on a permission prompt no one answers: `scripts/hooks/no-prompt-stop.ts`, run on Bash by [guards](#guards), refuses the Bash shapes Claude Code stops on, with a reason the session acts on:
   an `rm` or an `rmdir` whose target has two or more parts that start with an unguarded variable (`$S/$m`, `$HOME/$s`, `$S/$v.d`), which the session rewrites as a literal path, an `rm` of a file outside its worktree and scratchpad as `playground rm <literal path>`, and an `rmdir` guarded with `${VAR:?}` too, since no-raw-delete refuses an `rm` whose path it cannot read, guarded or not,
   and names `playground rm <literal path>`.
   A single such part (`"$O"/d`), or a variable after a name (`$S/p$v`), runs, as it does in Claude Code.
@@ -856,7 +860,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>` (with `--discard` once its PR has merged or closed, whatever it holds), so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
   The trash takes up to 5,000 files or 2 GB, so the refusal also names the lead's cleanup for a bigger tree and `bun install` for a `node_modules`.
-  `scripts/hooks/no-raw-delete.ts`, registered after no-kill-by-name, acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:
+  `scripts/hooks/no-raw-delete.ts`, run on Bash by [guards](#guards), acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:
   an `rm` or GNU rm's `grm` with `-r`, `-R` or `--recursive` (any prefix GNU rm takes, anywhere among its words), `find -delete`, `rm` under xargs, `gxargs` or `parallel`,
   `find -exec`, `-execdir`, `-ok` or `-okdir` and `fd -x`, `-X`, `--exec` or `--exec-batch` running `rm` behind any wrapper, fd's option last in a cluster of its flags that take no value too (`-HX rm`) and its value attached too (`--exec=rm`, `-xrm`),
   `git clean` with `-d`, `-x` or `-X` and no dry run, with or without force, since `clean.requireForce` can be off,
@@ -894,19 +898,19 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   `playground wa send` names no path there, so it runs, as does every path beside the folder (`~/.playground/whatsapp-notes.md`) and below the data folder elsewhere (`grep -r x ~/.playground/handoffs`).
   It is a speed bump, as no-raw-delete is: a word it cannot expand, built from a variable no command on the call sets, and a program's own code that builds the path, pass it.
   It fails open on a call it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-raw-wa.test.ts`.
-  It is registered in both settings files after no-raw-delete, for Bash, Edit, Glob, Grep, MultiEdit, NotebookEdit, Read and Write, after its script reached `main` by the order in [Registered in both settings files](#registered-in-both-settings-files).
+  [guards](#guards) runs it on Bash, and both settings files register it for Edit, Glob, Grep, MultiEdit, NotebookEdit, Read and Write, after its script reached `main` by the order in [Registered in both settings files](#registered-in-both-settings-files).
   ops-wa pairs a device only while that registration stands (`unguarded()` in `packages/scripts/src/ops-wa/life.ts`), so no auth state exists for a session to reach without it.
 
 ## no-release-comment
 
 - ALWAYS: In every comment and review body on a repo whose owner `release-owners.json` lists, write "ship" or "publish step" where "release" (any case) would go: there an owner comment holding the word publishes to npm, and gh and the GitHub MCP post as the owner.
-  A session run from this repo has the PreToolUse hook `scripts/hooks/no-release-comment.ts`, registered in both settings files, which refuses such a comment before it posts, and refuses one whose text or repository it cannot read (a GraphQL comment names no repository, so it is always checked).
+  A session run from this repo has the PreToolUse hook `scripts/hooks/no-release-comment.ts`, run on Bash by [guards](#guards) and registered in both settings files on the GitHub MCP comment tools, which refuses such a comment before it posts, and refuses one whose text or repository it cannot read (a GraphQL comment names no repository, so it is always checked).
   To post a body it can read, write it with the Write tool first, then post it in a call of its own with `--body-file` naming that file by its literal absolute path; it cannot read a path built from a variable or a file a heredoc with an expansion writes in the same call, and its refusal then names this recipe, as no-playground-leak's does.
   A GraphQL query and each of its fields reach it only as text written in the command or a file named by its literal absolute path, so it refuses one held in a shell variable (`Q='…'; gh api graphql -f query="$Q"`), and its refusal then names both ways.
   An `--attach` reads only what gh posts, its alt text after `#`, else its file's name, so a path built from a variable (`"$S/after.png#After"`) passes when the variable sits before the alt's first `#`, or, with no `#`, before the name's last `/`.
   Its refusal gives the way out for a file, rule or patch that holds the word: name the file or rule by what it is ("the ship rule") with its line number, and keep the patch out of the comment.
   Write the patch to a file in your scratchpad, send its absolute path to the PR's worker by SendMessage, and say in the comment that a patch went to the author, since gh's `--attach` uploads only images and video (gh 2.103.3: "supported: png, jpg, jpeg, gif, webp, svg, mp4, mov, webm").
-  It fails closed only on a call that reads as a comment; when it cannot start it refuses, and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)).
+  It fails closed only on a call that reads as a comment; when it cannot start it refuses, and a timeout acts as [Registered in both settings files](#registered-in-both-settings-files) says.
   A PR body or a commit message is not a comment.
   The owners it guards are its `release-owners` list, A to Z, read as [Guard lists](#guard-lists) says; core's `release-owners.json` names none, so a fresh clone guards no owner until one is added.
   Its tests are `bun run test:file tests/scripts/hooks`, which `bun run test` runs rather than `test:skills`; run them before pushing a change to the hook.
@@ -914,13 +918,13 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 ## no-stash
 
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry (the pre-commit's lint-staged runs with `--no-stash`, so a commit adds none): take a before-shot from a separate worktree on `origin/canary`, or commit first.
-  The factory's `scripts/hooks/no-stash.ts` (registered in `scripts/factory-settings.json`, and in `.claude/settings.json` for a session resumed without its settings) refuses a stash that could take another worktree's work, and `agent-browser close --all`, which closes every session's browser on the machine.
+  The factory's `scripts/hooks/no-stash.ts` (run on Bash by [guards](#guards), which both settings files register) refuses a stash that could take another worktree's work, and `agent-browser close --all`, which closes every session's browser on the machine.
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD stash pop` reads as a stash.
   A stash inside an unquoted heredoc body's command substitution or backquotes is judged as one typed on the line (the shared reader's heredoc rule, at the top), whatever heredoc shape holds it, since the shell runs it while it reads the body; under a quoted delimiter it is text.
 
 ## no-unslotted-run
 
-- A factory session runs every heavy run in a worktree through run-slot: `scripts/hooks/no-unslotted-run.ts`, registered beside no-stash, refuses `bun install`, a recursive `cp` of a `node_modules` folder, `bun run build`, `bun run check-types`, `bun run test`, a `bun test` or `bun run test:file` that names no file,
+- A factory session runs every heavy run in a worktree through run-slot: `scripts/hooks/no-unslotted-run.ts`, run on Bash by [guards](#guards), refuses `bun install`, a recursive `cp` of a `node_modules` folder, `bun run build`, `bun run check-types`, `bun run test`, a `bun test` or `bun run test:file` that names no file,
   `next build` (judged in its own folder and in the folder it names, read from the folder bun's `--cwd` options chain to when `bunx` or `bun x` starts it),
   and turbo running `build`, `check-types`, `lint` or `test` (`turbo run <task>` or `turbo <task>`), by name, path or versioned package (`turbo@latest`), through a package runner read as [no-main-checkout](#no-main-checkout) reads it, with each word of a program its `-p` puts turbo or next beside (`sh -c '<script>'`, `env`) read as the shell reads a line, quotes and redirects included,
   for the task or for `next build`, but for `--help`,

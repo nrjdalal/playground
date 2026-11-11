@@ -56,4 +56,19 @@ describe("the hooks.json a Codex launch loads", () => {
     )
     expect(writing?.matcher).toBe(CODEX_MATCHERS["writing-first"])
   })
+
+  // A Codex shell call reaches every Bash guard through guards.ts's one handler, as a Claude Code Bash call does, and writing-first beside it.
+  test("a Codex shell call runs guards.ts and writing-first alone", () => {
+    const bash = (codexHooks(FACTORY.hooks).PreToolUse ?? [])
+      .filter((group) => new RegExp(group.matcher ?? "").test("Bash"))
+      .flatMap((group) => group.hooks.map((hook) => hookOf(hook.command)))
+    expect(bash.sort()).toEqual(["guards", "writing-first"])
+  })
+
+  test("a Codex hook holds no onFailure, a key Codex's handler lacks", () => {
+    const rendered = Object.values(codexHooks(FACTORY.hooks)).flatMap((groups) =>
+      groups.flatMap((group) => group.hooks),
+    )
+    expect(rendered.filter((hook) => "onFailure" in hook)).toEqual([])
+  })
 })
