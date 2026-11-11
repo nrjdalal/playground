@@ -728,6 +728,17 @@ describe("an hc call through the trial world's wrapper runs, but a start, an upd
     ["another machine added", `${HC} machine add vps`],
     ["exec on another machine", `${HC} exec --on vps ls`],
     ["the API over stdin", `${HC} connect`],
+    ["a verb held in a variable", `X=run; ${HC} $X --bg claude`],
+    ["a verb from a command substitution", `${HC} $(echo run) --bg claude`],
+    ["a verb from a quoted variable", `${HC} "$V" --bg claude`],
+    ["a later word the hook cannot read", `${HC} exec $FLAG ls`],
+    ["the wrapper run by bash", `bash ${HC} run --bg claude`],
+    ["the wrapper run by sh", `sh ${HC} run --bg claude`],
+    ["the wrapper run by zsh", `zsh ${HC} run --bg claude`],
+    ["the wrapper run by bash with an option", `bash -e ${HC} run --bg claude`],
+    ["the wrapper sourced", `source ${HC} run`],
+    ["the wrapper dotted", `. ${HC} run`],
+    ["a copy of herdr-core run by a shell", `bash /tmp/herdr-core send t1 hi`],
   ])("%s is refused", async (_name, command) => {
     expect(await hc(command)).toMatch(/^no-raw-spawn hook refuses /)
   })

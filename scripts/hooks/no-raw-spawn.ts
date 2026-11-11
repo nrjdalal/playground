@@ -9,7 +9,10 @@ import {
   lex,
   marked,
   pathOf,
+  program,
   run,
+  shellOperand,
+  SHELLS,
   type Text,
   unreadable,
   type Visit,
@@ -214,6 +217,7 @@ const hcWrapper = (env: Env) =>
     "hc-trial",
     "hc",
   )
+const HC_NAMES = new Set(["hc", "herdr-core"])
 // hc's commands that a program the hook cannot read is judged as hc by; server reaches judgeHerdr through HERDR_HEADS.
 const HC_HEADS = new Set(["exec", "file", "keys", "send"])
 // The calls the trial world still refuses: a start, which spawn.sh alone makes; an update, which swaps the checked binary; and another machine.
@@ -222,15 +226,20 @@ const HC_WORLD_REFUSED = new Set(["connect", "machine", "run", "update"])
 const refuseHc = (what: string, env: Env) =>
   `no-raw-spawn hook refuses ${what}: herdr-core's socket has no access control and gives a caller exec, file and keys, so a factory session runs hc only through the trial world's wrapper, ${hcWrapper(env)}, which ${SPAWN} probe <name> <reports-to> <brief> --runtime hc builds; outside it only hc's --help and --version run.`
 
-function judgeHc(args: Word[], env: Env, program?: Text): string | undefined {
+function judgeHc(args: Word[], env: Env, wrapper?: Text): string | undefined {
   const given = args.map((a) => a.value)
   const options = given.filter((v) => v.startsWith("-"))
   if (options.length && options.every((v) => HELP.has(v)) && given.length - options.length <= 1)
     return
   if (given.length === 1 && (given[0] === "--version" || given[0] === "-V")) return
   const [head] = given.filter((v) => !v.startsWith("-"))
-  const path = program && pathOf(program, env)
+  const path = wrapper && pathOf(wrapper, env)
   if (path && resolve(path) === hcWrapper(env)) {
+    if (args.some((a) => a.unknown !== undefined || marked(a.value)))
+      return refuseHc(
+        "an hc call in the trial world with a word it cannot read, which may name a refused verb",
+        env,
+      )
     if (
       HC_WORLD_REFUSED.has(head ?? "") ||
       given.some((v) => v === "--on" || v.startsWith("--on="))
@@ -307,7 +316,20 @@ const visit: Visit = async (cmd, { args, first, local, name }, env) => {
   if (args.some((a) => a.value === "herdrdev/herdr"))
     return refuseHerdr("herdr's agent skill, which teaches typing into other panes")
   if (TERMINAL.test(name)) return judgeCmux(args)
-  if (name === "hc" || name === "herdr-core") return judgeHc(args, env, first)
+  if (HC_NAMES.has(name)) return judgeHc(args, env, first)
+  // A shell that runs hc's wrapper or binary as its script file, or a source of it, runs it with the words after it.
+  if (SHELLS.has(name) || name === "." || name === "source") {
+    const { inline, operand } = SHELLS.has(name)
+      ? shellOperand(args, name)
+      : { inline: false, operand: args[0] }
+    const path = operand && pathOf(operand, env)
+    if (
+      operand &&
+      !inline &&
+      (HC_NAMES.has(program(operand.value)) || (path && resolve(path) === hcWrapper(env)))
+    )
+      return judgeHc(args.slice(args.indexOf(operand) + 1), env, operand)
+  }
   // herdr sets HERDR_BIN_PATH in every pane it opens, so a program word expanding it is herdr whatever follows.
   if (name === "herdr" || first?.variable === "HERDR_BIN_PATH") return judgeHerdr(args, local, env)
   if (first && (first.unknown || marked(first.value))) {
@@ -378,6 +400,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     known: knownVariables(command, environment, directory),
     process: environment,
     vars: new Map(),
+    // a shell running hc's wrapper as its script file is judged by the words it hands the wrapper, which a walk of the script's text loses
+    visitShells: true,
   }
   return run(lex(command, env.known), env, visit, true)
 }
