@@ -1128,6 +1128,7 @@ describe("other repos' worktrees", () => {
     const site = repoAt(join(orgs, "site"))
     const lost = repoAt(join(root, "elsewhere", "lost"))
     const w = {
+      branched: worktreeOf(app, "branched", true),
       done: worktreeOf(app, "done", true),
       dirty: worktreeOf(app, "dirty", true),
       held: worktreeOf(app, "held", true),
@@ -1144,7 +1145,12 @@ describe("other repos' worktrees", () => {
     writeFileSync(join(w.ignored, "notes.txt"), "mine\n")
     writeFileSync(
       join(data, "roster.json"),
-      JSON.stringify({ agents: [{ name: "abc123-worker", worktree: w.rostered }] }),
+      JSON.stringify({
+        agents: [
+          { name: "abc123-worker", worktree: w.rostered },
+          { name: "def456-worker", branch: "branched" },
+        ],
+      }),
     )
     const fake = fakeRun({
       "docker ps": "",
@@ -1187,6 +1193,7 @@ describe("other repos' worktrees", () => {
     }
     const prsByRepo: Record<string, Prs> = {
       [app]: prsOf({
+        branched: pr("MERGED"),
         dirty: pr("MERGED"),
         done: pr("MERGED"),
         held: pr("MERGED"),
@@ -1239,6 +1246,13 @@ describe("other repos' worktrees", () => {
       expect(existsSync(path)).toBe(true)
       expect(outbox(sent)).toContain(`worktree ${path} kept: ${why}`)
     }
+  })
+
+  test("a worktree whose branch a roster row's branch names is kept, though no roster text holds its path", async () => {
+    const { ctx, deps, sent, w } = night()
+    await nightlyClean(deps)(ctx)
+    expect(existsSync(w.branched)).toBe(true)
+    expect(outbox(sent)).toContain(`worktree ${w.branched} kept: the roster names it`)
   })
 
   test("an lsof the step cannot read names the step's early exit and removes nothing", async () => {
