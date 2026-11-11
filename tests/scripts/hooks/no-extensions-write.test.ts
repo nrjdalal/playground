@@ -2019,6 +2019,25 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "GNU find by its g name in capitals printing names after a cd to a variable",
       `cd "$X"; GFIND /tmp/x -name x`,
     ],
+    // #1340: a program on neither list whose writes the hook places outside the root
+    ["an in-place sed of an absolute file", `cd "$X"; sed -i '' s/a/b/ /tmp/p.json`],
+    ["an in-place perl of an absolute file", `cd "$X"; perl -pi -e s/a/b/ /tmp/p.json`],
+    ["a sed that edits nothing in place", `cd "$X"; sed s/a/b/ notes.txt`],
+    ["chmod of an absolute file", `cd "$X"; chmod 644 /tmp/p`],
+    ["chmod by a symbolic mode of an absolute file", `cd "$X"; chmod u+x /tmp/p`],
+    ["truncate of an absolute file", `cd "$X"; truncate -s 0 /tmp/p`],
+    ["shred of an absolute file", `cd "$X"; shred -u /tmp/p`],
+    ["tar extracting into an absolute folder", `cd "$X"; tar -xf /tmp/a.tar -C /tmp/out`],
+    ["tar listing an archive", `cd "$X"; tar -tf /tmp/a.tar`],
+    ["curl's -o to an absolute file", `cd "$X"; curl -o /tmp/p https://example.com`],
+    ["curl printing to its output", `cd "$X"; curl -s https://example.com`],
+    ["sort's -o to an absolute file", `cd "$X"; sort -o /tmp/p /tmp/a`],
+    ["sort printing to its output", `cd "$X"; sort notes.txt`],
+    ["git rm in an absolute -C", `cd "$X"; git -C /tmp/repo rm -q p`],
+    ["a bare mktemp", `cd "$X"; mktemp`],
+    ["mktemp of a template in the temp folder", `cd "$X"; mktemp -t x.XXXX`],
+    ["mktemp of a template in an absolute folder", `cd "$X"; mktemp -p /tmp x.XXXX`],
+    ["chmod under xargs of an absolute file", `cd "$X"; xargs chmod 644 /tmp/p`],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
