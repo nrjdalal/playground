@@ -127,10 +127,14 @@ const agent = (fields: Partial<Agent> = {}): Agent => ({
 describe("lightOf", () => {
   const light = (facts: Partial<LightFacts>) => lightOf({ light: "idle", ...facts })
 
-  // A Codex session writes no state record, so its idle is never known: it reads State unknown, never Idle, while a merge or a failure still shows over it.
-  test("State unknown: a session whose state no record tells, never Idle", () => {
+  // A Codex session writes no state record, so its idle is never known: it reads State unknown where it would read Idle, and every other light still shows over it.
+  test("State unknown: a session whose state no record tells, where it would read Idle", () => {
     expect(light({ light: "unknown" })).toBe("unknown")
-    expect(light({ light: "unknown", parked: "held" })).toBe("unknown")
+    expect(light({ light: "unknown", parked: "held" })).toBe("parked")
+    expect(light({ light: "unknown", waits: ["inbox"] })).toBe("waiting")
+    expect(light({ light: "unknown", pr: pull({ score: "5/5" }) })).toBe("ready")
+    expect(light({ light: "unknown", pr: pull({ approvals: 1 }) })).toBe("approval")
+    expect(light({ checked: true, light: "unknown" })).toBe("done")
     expect(light({ light: "unknown", pr: pull({ state: "merged" }) })).toBe("merged")
     expect(light({ failed: true, light: "unknown" })).toBe("failing")
     expect(stateWords("unknown", {})).toBe("State unknown")
