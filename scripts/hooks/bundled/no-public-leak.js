@@ -6307,7 +6307,21 @@ var gateSettings = defineSettings({
   }
 });
 // packages/settings/src/harnesses.ts
+var HARNESSES = [
+  { backends: ["claude", "glm"], id: "claude-code" },
+  { backends: ["openai"], id: "codex" }
+];
 var GLM_MODEL = "glm";
+
+// packages/settings/src/harness-alpha.ts
+var ids = HARNESSES.map((harness) => harness.id);
+var harnessSettings = defineSettings({
+  "harness.alpha": {
+    default: "claude-code",
+    description: "The harness the first dispatcher starts on: claude-code or codex. First run's pick and Settings' Switch write it, and the Dashboard's Start runs spawn.sh --harness with it.",
+    schema: _enum(ids)
+  }
+});
 // packages/settings/src/models.ts
 var id = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id, such as claude-opus-5-5");
 var modelSettings = defineSettings({

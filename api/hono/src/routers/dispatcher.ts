@@ -1,19 +1,36 @@
+import { sValidator } from "@hono/standard-validator"
 import type { Session } from "@packages/auth"
 import { Hono } from "hono"
 import { describeRoute, resolver } from "hono-openapi"
 import { z } from "zod"
 
 import { startDispatcher } from "@/lib/dashboard/dispatcher-start"
+import { dispatcherSwitch, switchDeps } from "@/lib/dashboard/dispatcher-switch"
 import {
   ApiError,
   authErrorResponses,
   conflictErrorResponses,
   errorResponse,
   forbiddenErrorResponses,
+  validationErrorResponses,
 } from "@/lib/error"
 import { authMiddleware, guardWrites, requireConsoleRole } from "@/middlewares"
+import { invalid } from "@/routers/store"
 
-// The home's Start <dispatcher>, for a dashboard with an account and no dispatcher: a dashboard write, behind the write guards and the owner rung.
+// The home's Start <dispatcher>, for a dashboard with an account and no dispatcher, and Settings' Switch Alpha, which moves it to the other harness: dashboard writes, behind the write guards and the owner rung.
+
+const switchRead = z.object({
+  harness: z.enum(["claude-code", "codex"]).nullable(),
+  reason: z.string().nullable(),
+  state: z.enum(["failed", "idle", "ok", "running"]),
+  step: z.string().nullable(),
+})
+const switchAnswer = (status: 200 | 202) => ({
+  [status]: {
+    content: { "application/json": { schema: resolver(z.object({ data: switchRead })) } },
+    description: status === 200 ? "OK" : "Started",
+  },
+})
 export const dispatcherRouter = new Hono<{ Variables: Session }>()
   .use("/*", guardWrites)
   .use("/*", authMiddleware)
@@ -52,5 +69,40 @@ export const dispatcherRouter = new Hono<{ Variables: Session }>()
       }
       if (started.status === "refused") throw new ApiError(502, "ERROR", started.detail)
       throw new ApiError(500, "INTERNAL_SERVER_ERROR", started.detail)
+    },
+  )
+  .get(
+    "/switch",
+    describeRoute({
+      tags: ["Dashboard"],
+      description:
+        "Reads Switch Alpha: idle, running with the step it is on (waiting for the dispatcher's handoff, then starting it on the new harness), ok, or failed with why.",
+      responses: { ...switchAnswer(200), ...authErrorResponses, ...forbiddenErrorResponses },
+    }),
+    (c) => c.json({ data: dispatcherSwitch.read() }),
+  )
+  .post(
+    "/switch",
+    describeRoute({
+      tags: ["Dashboard"],
+      description:
+        "Switch Alpha to a harness: saves harness.alpha, then starts the dispatcher on it when none runs, or asks the running one for its handoff, closes it once the handoff is written, and starts it again on the new harness from it. Refused while a switch runs, and for Codex on the live data folder.",
+      responses: {
+        ...switchAnswer(202),
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...conflictErrorResponses,
+        ...validationErrorResponses,
+      },
+    }),
+    sValidator("json", z.strictObject({ harness: z.enum(["claude-code", "codex"]) }), invalid),
+    (c) => {
+      const user = c.get("user")
+      const begun = dispatcherSwitch.begin(
+        c.req.valid("json").harness,
+        switchDeps({ email: user.email, id: user.id }),
+      )
+      if (typeof begun === "string") throw new ApiError(409, "CONFLICT", begun)
+      return c.json({ data: dispatcherSwitch.read() }, 202)
     },
   )
