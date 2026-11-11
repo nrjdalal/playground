@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { checkSetting } from "../../../../packages/settings/src"
+import { checkSetting, HARNESS_IDS } from "../../../../packages/settings/src"
 import { readSetting, setSetting } from "../../../../packages/settings/src/settings-folder"
 
 process.env.PLAYGROUND_LOGIN = "made-up-me"
@@ -13,6 +13,10 @@ afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 const who = { actor: "test", author: "owner", inboxRef: null, reason: "first run's pick" }
 
 describe("harness.alpha, the harness Alpha starts on (#1835)", () => {
+  test("HARNESS_IDS names every harness, for the API's schemas", () => {
+    expect(HARNESS_IDS).toEqual(["claude-code", "codex"])
+  })
+
   test("reads Claude Code until it is set", () => {
     expect(readSetting(join(scratch, "fresh"), "harness.alpha")?.value).toBe("claude-code")
   })

@@ -6314,12 +6314,12 @@ var HARNESSES = [
 var GLM_MODEL = "glm";
 
 // packages/settings/src/harness-alpha.ts
-var ids = HARNESSES.map((harness) => harness.id);
+var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
 var harnessSettings = defineSettings({
   "harness.alpha": {
     default: "claude-code",
     description: "The harness the first dispatcher starts on: claude-code or codex. First run's pick and Settings' Switch write it, and the Dashboard's Start runs spawn.sh --harness with it.",
-    schema: _enum(ids)
+    schema: _enum(HARNESS_IDS)
   }
 });
 // packages/settings/src/models.ts

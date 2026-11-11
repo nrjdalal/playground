@@ -1,5 +1,6 @@
 import { sValidator } from "@hono/standard-validator"
 import type { Session } from "@packages/auth"
+import { HARNESS_IDS } from "@packages/settings"
 import { Hono } from "hono"
 import { describeRoute, resolver } from "hono-openapi"
 import { z } from "zod"
@@ -21,7 +22,7 @@ import { invalid } from "@/routers/store"
 
 const switchRead = z.object({
   ask: z.string().nullable(),
-  harness: z.enum(["claude-code", "codex"]).nullable(),
+  harness: z.enum(HARNESS_IDS).nullable(),
   reason: z.string().nullable(),
   state: z.enum(["failed", "idle", "ok", "running"]),
   step: z.string().nullable(),
@@ -88,7 +89,7 @@ export const dispatcherRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Switch Alpha to a harness: saves harness.alpha, then starts the dispatcher on it when none runs; for a running one the answer's ask holds the words that ask it for its handoff, which Settings sends through the outbox, and once the handoff is written the switch closes it and starts it again on the new harness from it. Refused while a switch runs, and for Codex on the live data folder.",
+        "Switch Alpha to a harness: starts the dispatcher on it when none runs; for a running one the answer's ask holds the words that ask it for its handoff, which Settings sends through the outbox, and once the handoff is written the switch closes it and starts it again on the new harness from it. harness.alpha saves once the new dispatcher has started. Refused while a switch runs, and for Codex on the live data folder.",
       responses: {
         ...switchAnswer(202),
         ...authErrorResponses,
@@ -97,7 +98,7 @@ export const dispatcherRouter = new Hono<{ Variables: Session }>()
         ...validationErrorResponses,
       },
     }),
-    sValidator("json", z.strictObject({ harness: z.enum(["claude-code", "codex"]) }), invalid),
+    sValidator("json", z.strictObject({ harness: z.enum(HARNESS_IDS) }), invalid),
     async (c) => {
       const begun = await dispatcherSwitch.begin(
         c.req.valid("json").harness,

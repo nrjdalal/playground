@@ -3,6 +3,7 @@ import { site } from "@packages/config/site"
 import { db, recordActivity, roleChangeSummary, user as userTable } from "@packages/db"
 import { isLocal } from "@packages/env"
 import { env } from "@packages/env/api-hono"
+import { HARNESS_IDS } from "@packages/settings"
 import { and, eq, ne } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { describeRoute, resolver } from "hono-openapi"
@@ -88,7 +89,7 @@ const owner = requireConsoleRole("owner")
 
 const harnessCard = z.object({
   checks: z.array(checkSchema),
-  id: z.enum(["claude-code", "codex"]),
+  id: z.enum(HARNESS_IDS),
   label: z.string(),
   ready: z.boolean(),
   refusal: z.string().nullable(),

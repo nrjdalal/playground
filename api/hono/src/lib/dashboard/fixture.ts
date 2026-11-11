@@ -15,7 +15,7 @@ import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path"
 
 import { threadIdSchema } from "@packages/config/threads"
 import type { Roots } from "@packages/safe-delete"
-import { deriveRoot } from "@packages/settings"
+import { deriveRoot, HARNESS_IDS } from "@packages/settings"
 import { z } from "zod"
 
 // Relative, not @/: paths.ts imports this file, and the web's tests type-check it under web/next's own @/ paths.
@@ -236,7 +236,7 @@ export const fixtureSchema = z.object({
   doctor: z
     .object({
       checks: z.array(doctorCheck),
-      harnesses: z.record(z.enum(["claude-code", "codex"]), harnessFacts).optional(),
+      harnesses: z.record(z.enum(HARNESS_IDS), harnessFacts).optional(),
       missing: z.array(doctorCheck),
     })
     .optional(),

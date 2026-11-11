@@ -9,7 +9,7 @@ import { DISPATCHER } from "@/lib/dashboard/workers"
 import { CODEX_LIVE_REFUSAL, isLiveFolder } from "@/lib/onboard/harness"
 import { dataDir } from "@/lib/sessions/paths"
 
-// Settings' Switch Alpha, on the owner's own click: harness.alpha takes the other harness, then a dispatcher that is not running starts on it; for a running one the answer carries the words that ask it to write its handoff to a fixed file and stop, which Settings sends through the dashboard's outbox as that same click, and once that file is written and still, spawn.sh closes it and the CLI starts it again on the new harness from that handoff. One switch at a time; a Codex switch on the live data folder is refused before anything changes, as Start is.
+// Settings' Switch Alpha, on the owner's own click: a dispatcher that is not running starts on the other harness; for a running one the answer carries the words that ask it to write its handoff to a fixed file and stop, which Settings sends through the dashboard's outbox as that same click, and once that file is written and still, spawn.sh closes it and the CLI starts it again on the new harness from that handoff. harness.alpha takes the new harness once it has started. One switch at a time; a Codex switch on the live data folder is refused before anything changes, as Start is.
 
 export type SwitchRead = {
   // The words Settings sends the running dispatcher through the outbox while the switch waits for its handoff, else null.
@@ -101,6 +101,17 @@ export const createSwitch = () => {
     job.state = "failed"
   }
 
+  // harness.alpha takes the new harness only once the dispatcher has started on it, so a switch that fails leaves the setting on the harness Alpha still runs.
+  const succeed = (job: SwitchRead, to: HarnessId, deps: SwitchDeps) => {
+    const unsaved = deps.save(to)
+    if (unsaved)
+      return fail(
+        job,
+        `${deps.name} runs on ${LABELS[to]} now, but harness.alpha did not save: ${unsaved}`,
+      )
+    job.state = "ok"
+  }
+
   // Waits for the handoff, then closes the dispatcher and starts it again from it. The handoff counts once it is newer than the ask and unchanged over one wait, so a file still being written is never read.
   const handover = async (to: HarnessId, deps: SwitchDeps, job: SwitchRead, asked: number) => {
     const path = join(deps.data, switchBrief(deps.name))
@@ -118,19 +129,18 @@ export const createSwitch = () => {
     const closed = await deps.close(deps.name)
     if (closed) return fail(job, closed)
     const again = await deps.start(to, switchBrief(deps.name))
-    if (again.status === "started") return void (job.state = "ok")
-    fail(job, again.status === "running" ? `${deps.name} is still running` : again.detail)
+    if (again.status === "started") return succeed(job, to, deps)
+    const why = again.status === "running" ? "its name is still held" : again.detail
+    fail(job, `${deps.name} stopped, but did not start again on ${LABELS[to]}: ${why}`)
   }
 
-  // Starts a switch to harness to: the refusal's words while one runs, for Codex on the live data folder, or when harness.alpha does not save; else done, which settles once the switch has.
+  // Starts a switch to harness to: the refusal's words while one runs, or for Codex on the live data folder; else done, which settles once the switch has.
   const begin = async (
     to: HarnessId,
     deps: SwitchDeps,
   ): Promise<{ done: Promise<void> } | string> => {
     if (current.state === "running") return "A switch is already running"
     if (to === "codex" && isLiveFolder(deps.env)) return CODEX_LIVE_REFUSAL
-    const unsaved = deps.save(to)
-    if (unsaved) return unsaved
     const job: SwitchRead = {
       ask: null,
       harness: to,
@@ -147,7 +157,7 @@ export const createSwitch = () => {
       status: "failed",
     }))
     if (first.status === "started") {
-      job.state = "ok"
+      succeed(job, to, deps)
       return settled
     }
     if (first.status !== "running") {
