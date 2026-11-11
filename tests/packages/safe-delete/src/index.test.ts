@@ -675,16 +675,6 @@ describe("worktreeRefusal", () => {
       return { at, holders, roots }
     }
 
-    test("a live ops row holds no worktree by its name alone, so a clean one with a freed PR goes", () => {
-      const { at, holders, roots } = seat("PG-9-ops-thing", {
-        kind: "ops",
-        name: "ops",
-        status: "working",
-      })
-      const freed = { head: git(at, "rev-parse", "HEAD"), number: 9, state: "MERGED" as const }
-      expect(worktreeRefusal(at, roots, { ...holders, freed })).toBeNull()
-    })
-
     test.each(ROSTER_KINDS.filter(hasManagerRole))(
       "a live %s row holds no worktree by its name alone",
       (kind) => {
