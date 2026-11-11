@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { ROSTER_KINDS, ROSTER_ROLE_OF_KIND } from "../../../../packages/config/src/kinds"
 import {
   CARVE_OUTS,
   type CarveOut,
@@ -683,6 +684,19 @@ describe("worktreeRefusal", () => {
       const freed = { head: git(at, "rev-parse", "HEAD"), number: 9, state: "MERGED" as const }
       expect(worktreeRefusal(at, roots, { ...holders, freed })).toBeNull()
     })
+
+    test.each(ROSTER_KINDS.filter((kind) => ROSTER_ROLE_OF_KIND[kind] === "manager"))(
+      "a live %s row holds no worktree by its name alone",
+      (kind) => {
+        const { at, holders, roots } = seat(`PG-9-${kind}-thing`, {
+          kind,
+          name: kind,
+          status: "working",
+        })
+        const freed = { head: git(at, "rev-parse", "HEAD"), number: 9, state: "MERGED" as const }
+        expect(worktreeRefusal(at, roots, { ...holders, freed })).toBeNull()
+      },
+    )
 
     test("a live ops row whose branch is the worktree's still holds it", () => {
       const { at, holders, roots } = seat("PG-9-ops-thing", {
