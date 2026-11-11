@@ -19,6 +19,7 @@ import {
   tabHref,
   wrapStep,
 } from "../../../../../../../web/next/src/components/dashboard/viewer/viewer"
+import { pageTab } from "../../../../../../../web/next/src/lib/viewer"
 
 describe("Open in new tab opens a blob URL with the Dashboard's origin only for a file that runs no script", () => {
   test("it opens an image, a PDF or an HTML page, and code and a doc have no button", () => {
@@ -49,11 +50,10 @@ describe("Open in new tab opens a blob URL with the Dashboard's origin only for 
   })
 
   // the builder's ruling on #1716: the tab's blob takes the Dashboard's origin, so the page runs only in a frame with no same-origin
-  test("a card's page opens as a blob that holds it in a sandboxed frame, and runs no script of its own", async () => {
+  test("a card's page opens as a blob that holds it in a sandboxed frame, and runs no script of its own", () => {
     expect(tabHref(CARD_PAGE, "blob:x", null)).toBeNull()
-    const href = tabHref(CARD_PAGE, "blob:x", "<script>alert(1)</script><p>hi</p>")
-    expect(href).toStartWith("blob:")
-    const tab = await (await fetch(href!)).text()
+    expect(tabHref(CARD_PAGE, "blob:x", "blob:framed")).toBe("blob:framed")
+    const tab = pageTab("demo.html", "<script>alert(1)</script><p>hi</p>")
     expect(tab).toContain(
       '<iframe sandbox="allow-scripts" srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;&lt;p&gt;hi&lt;/p&gt;"',
     )
@@ -63,6 +63,17 @@ describe("Open in new tab opens a blob URL with the Dashboard's origin only for 
 
   test("an image or a PDF opens its own blob", () => {
     expect(tabHref({ ...CARD_PAGE, kind: "pdf", name: "a.pdf" }, "blob:pdf", null)).toBe("blob:pdf")
+  })
+
+  // a reviewer: the framed page's blob URL held the whole page for the dashboard tab's life
+  test("the framed page's blob URL is freed once its square goes", async () => {
+    const source = await Bun.file(
+      join(
+        import.meta.dir,
+        "../../../../../../../web/next/src/components/dashboard/viewer/viewer.tsx",
+      ),
+    ).text()
+    expect(source).toMatch(/return \(\) => \{\s+URL\.revokeObjectURL\(href\)/)
   })
 
   test("a kept page saves from its own download address", async () => {

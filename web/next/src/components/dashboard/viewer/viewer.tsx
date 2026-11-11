@@ -17,7 +17,6 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -165,13 +164,26 @@ export const BAR_NAME = "w-48 min-w-0 shrink truncate px-1 text-xs font-normal"
 // The kinds a tab may open: an image or a PDF as its blob URL, which runs with the Dashboard's origin, so only those that run no script, an image being a GIF, JPEG, PNG or WebP (`IMAGE_EXTENSIONS`), never an SVG or code; an HTML page at its own address on Previews, else held in a sandboxed frame (pageTab).
 export const OPENS_IN_TAB: readonly InboxAttachmentKind[] = ["html", "image", "pdf"]
 
-// Pure: what a tab opens for a file of a kind OPENS_IN_TAB takes, from its blob and, for a card's page, its text: a kept page's own address, a card's page held in pageTab once its text has arrived, and an image's or a PDF's blob; null until it can.
-export function tabHref(item: ViewerItem, blob: string | null, text: string | null | false) {
-  if (item.page) return item.page.url
-  if (item.kind !== "html") return blob
-  return typeof text === "string"
-    ? URL.createObjectURL(new Blob([pageTab(item.name, text)], { type: "text/html" }))
-    : null
+// A square's blank room in a bar, where a kind takes no button, so the bar holds one width.
+const ROOM = <span aria-hidden className="size-8 shrink-0" />
+
+// Pure: what a tab opens for a file of a kind OPENS_IN_TAB takes: a kept page's own address, a card's page held in pageTab (framed, made once its text has arrived), and an image's or a PDF's own blob; null until it can.
+export const tabHref = (item: ViewerItem, blob: string | null, framed: string | null) =>
+  item.page ? item.page.url : item.kind === "html" ? framed : blob
+
+// A card's page held in pageTab as a blob URL while its square shows, freed once it goes, since the URL holds the whole page; a tab it opened keeps its document.
+function useFramedPage(name: string, html: string | null | false): string | null {
+  const [framed, setFramed] = useState<string | null>(null)
+  useEffect(() => {
+    if (typeof html !== "string") return
+    const href = URL.createObjectURL(new Blob([pageTab(name, html)], { type: "text/html" }))
+    setFramed(href)
+    return () => {
+      URL.revokeObjectURL(href)
+      setFramed(null)
+    }
+  }, [name, html])
+  return framed
 }
 
 // The shown file on a tab of its own, at full size, off until it can open; a kind OPENS_IN_TAB leaves out has no button at all, keeping its room where keepRoom asks, as the viewer's bar does so it holds one width.
@@ -179,10 +191,10 @@ export function OpenInNewTab({ item, keepRoom = false }: { item: ViewerItem; kee
   const opens = OPENS_IN_TAB.includes(item.kind)
   const { url } = useAttachment(item.id, opens && !item.page && Boolean(VIEWERS[item.kind]))
   const text = useText(item.kind === "html" && !item.page ? url : null)
-  const href = useMemo(() => tabHref(item, url, text), [item, url, text])
-  if (!opens) return keepRoom ? <span aria-hidden className="size-8 shrink-0" /> : null
+  const href = tabHref(item, url, useFramedPage(item.name, text))
+  if (!opens) return keepRoom ? ROOM : null
   return (
-    // keyed by whether it can open, so the tooltip follows the button to the link that takes its place once the file arrives
+    // the off square is a button and the live one a link, so the element is swapped once the file arrives; the key remounts the tooltip with it, whose trigger would stay bound to the gone button
     <Hint key={href ? "open" : "off"} content="Open in new tab" description={null}>
       {href ? (
         <Button
@@ -478,7 +490,7 @@ export function Viewer({
               (!item.pair && opensInAside(item.kind) ? (
                 <SidePanel onClick={() => onSidePanel(item)} />
               ) : (
-                <span aria-hidden className="size-8 shrink-0" />
+                ROOM
               ))}
             <Hint content="Close" description={null}>
               <DialogClose
