@@ -5142,10 +5142,9 @@ var guardedOrgs = (values) => {
 
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
-  { backends: ["claude", "glm"], id: "claude-code", label: "Claude Code" },
-  { backends: ["openai"], id: "codex", label: "Codex" }
+  { backends: ["claude", "glm"], id: "claude-code" },
+  { backends: ["openai"], id: "codex" }
 ];
-var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
 var readPin = (text) => {
   const words = text.trim().split(/\s+/);
   const [harnessId, backend] = words.length === 1 ? ["claude-code", words[0]] : words;
