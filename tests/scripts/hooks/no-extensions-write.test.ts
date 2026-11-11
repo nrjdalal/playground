@@ -784,6 +784,11 @@ describe("a quoted argument is read as a command line only where a program runs 
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
 
+  test("a gh post that opens an editor keeps canary's reading of its title", async () => {
+    const command = `gh issue create --editor --title "a note about ~/.playground"`
+    for (const cwd of homes) expect(await at(command, cwd)).toContain("no-extensions-write hook ")
+  })
+
   test.each([
     ["ls of a glob", "ls *.md"],
     ["grep through a glob", "grep -n foo src/*.ts"],

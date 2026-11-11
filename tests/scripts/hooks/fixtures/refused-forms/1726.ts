@@ -2,7 +2,7 @@ import { type Group, NEVER_MADE } from "./_shared"
 
 export const groups: Group[] = [
   {
-    folders: ["home", "data folder", "checkout"],
+    folders: ["home", "data folder", "checkout", "tmp"],
     guards: ["no-extensions-write"],
     rows: () => [
       ["a shell -c of a variable", `sh -c "$x"`],
