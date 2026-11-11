@@ -3,7 +3,23 @@ import { join } from "node:path"
 
 import { secretIn } from "@packages/settings"
 
-import { type Stuck, WAIT_S } from "../ops-job/dispatcher"
+import { handOn, type Stuck } from "../ops-job/dispatcher"
+import {
+  answered,
+  answerOf,
+  type Card,
+  cardOf,
+  goesOut,
+  NO_ID,
+  noRow,
+  notAnswered,
+  notSent,
+  type Reply,
+  replyOf,
+  type Sent,
+  type Terms,
+  waitingLine,
+} from "./cards"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, writeOwn } from "./habits"
 
 type Key = {
@@ -40,6 +56,18 @@ export type Mode = {
   on: () => Promise<boolean>
   reply: (body: string) => Promise<string>
   stuck: () => Promise<Stuck>
+  // the Inbox, for its cards on WhatsApp; a bridge with none sends none
+  inbox?: Inbox
+}
+export type Inbox = {
+  // the answer recorded through the Inbox's own route, or why not
+  answer: (
+    id: string,
+    answer: { action: "approve" | "deny"; option?: number },
+  ) => Promise<string | undefined>
+  open: () => Promise<Card[]>
+  // undefined while no-public-leak's list cannot be read, so no card goes out
+  terms: () => Promise<Terms | undefined>
 }
 // Door 2: what goes back over WhatsApp is factory status alone.
 export const REPLY =
@@ -57,6 +85,10 @@ export const UPDATE_MS = 15 * 60_000
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
 const handedFile = (dir: string) => join(dir, "handed.json")
+// cards.json, the bridge's queue's too: each card sent by its ref, and the ids the last waiting line counted
+const cardsFile = (dir: string) => join(dir, "cards.json")
+type Cards = { held?: string; sent?: Record<string, Sent> }
+const CARD_KEEP_MS = 30 * 24 * HOUR
 // bravo marks a message past its hand-on to the assistant seat, so it goes once.
 type Handed = { at: number; bravo?: true; line: string }
 type Watch = { handed?: Handed[]; offAt?: number; updateAt?: number }
@@ -121,6 +153,8 @@ async function inbound(io: Io & Mode, m: Incoming) {
     await io.reply(OFF).catch((error: Error) => io.log(`ops-wa: the off reply: ${error.message}`))
     return
   }
+  const reply = io.inbox && text ? replyOf(text) : null
+  if (reply) return answerCard(io, io.inbox!, reply)
   const when = new Date(at).toISOString()
   const line = text
     ? `The owner's WhatsApp at ${when} reads: ${text}\n${REPLY}`
@@ -129,7 +163,51 @@ async function inbound(io: Io & Mode, m: Incoming) {
   await writeOwn(handedFile(io.dir), { ...watch, handed: [...(watch.handed ?? []), { at, line }] })
 }
 
-// One pass while WhatsApp mode is on: a message with no send after it in 3 minutes while the dispatcher is not mid-turn, or any while it has read stuck or failed, goes to the session in the assistant seat too (else the log says it stays with the dispatcher); and every 15 minutes while the owner has written in the last 24 hours, the dispatcher is asked for an update.
+// An owner's reply naming a card: it answers the card only when the card went out here and the number is one of its rows, else one line back says why it answers nothing.
+async function answerCard(io: Io & Mode, inbox: Inbox, reply: Reply) {
+  const say = (line: string) =>
+    io.reply(line).catch((error: Error) => io.log(`ops-wa: a card reply's line: ${error.message}`))
+  if (reply.ref === undefined) return say(NO_ID)
+  const card = (await readOwn<Cards>(cardsFile(io.dir), {})).sent?.[reply.ref]
+  if (!card) return say(notSent(reply.ref))
+  const n = reply.number ?? 0
+  if (n < 1 || n > card.rows.length) return say(noRow(reply.ref, card.rows.length))
+  const why = await inbox
+    .answer(card.id, answerOf(card.rows, n - 1))
+    .catch((error: Error) => error.message)
+  return say(
+    why === undefined ? answered(reply.ref, card.rows[n - 1]!.label) : notAnswered(reply.ref, why),
+  )
+}
+
+// The cards step of a pass: each open card on the allowlist goes out once, and the rest stand as one waiting line, sent when the cards it counts change.
+async function cards(io: Io & Mode, inbox: Inbox) {
+  const now = io.now()
+  const state = await readOwn<Cards>(cardsFile(io.dir), {})
+  const sent = Object.fromEntries(
+    Object.entries(state.sent ?? {}).filter(([, s]) => now - s.at < CARD_KEEP_MS),
+  )
+  let held = state.held
+  try {
+    const [open, terms] = await Promise.all([inbox.open(), inbox.terms()])
+    const kept: string[] = []
+    for (const card of open) {
+      if (!terms || !goesOut(card, terms)) kept.push(card.id)
+      else if (!sent[card.ref]) {
+        const { rows, text } = cardOf(card, terms)
+        await io.reply(text)
+        sent[card.ref] = { at: io.now(), id: card.id, rows }
+      }
+    }
+    const key = kept.sort().join(",")
+    if (kept.length > 0 && key !== held) await io.reply(waitingLine(kept.length))
+    held = key
+  } finally {
+    await writeOwn(cardsFile(io.dir), { held, sent })
+  }
+}
+
+// One pass while WhatsApp mode is on: the failover to the assistant seat (handOn), the 15-minute update and the Inbox's cards, the last two only while the owner has written in the last 24 hours, since ops-wa never starts a chat.
 async function pass(io: Io & Mode) {
   const now = io.now()
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
@@ -141,19 +219,14 @@ async function pass(io: Io & Mode) {
       const waiting = handed.filter((h) => !h.bravo && !sends.some((at) => at >= h.at))
       const blocked = waiting.length > 0 ? await io.stuck() : null
       const working = !blocked && waiting.length > 0 && (await io.busy())
-      const due = waiting.filter((h) => blocked || (now - h.at >= WAIT_S * 1000 && !working))
+      const { due, why } = handOn(waiting, (h) => (now - h.at) / 1000, blocked, working)
       const to = due.length > 0 ? await io.assistant() : undefined
       for (const h of due) {
         if (!to) {
           io.log(
             `ops-wa: no live session holds the assistant seat, so the owner's WhatsApp at ${new Date(h.at).toISOString()} stays with the dispatcher alone`,
           )
-        } else {
-          const why = blocked
-            ? `the dispatcher has read ${blocked.state} since ${blocked.at}`
-            : `no reply has gone out in ${WAIT_S / 60} minutes`
-          await io.relay(to, `Handed on since ${why}. ${h.line}`)
-        }
+        } else await io.relay(to, `Handed on since ${why}. ${h.line}`)
         h.bravo = true
       }
       const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
@@ -165,6 +238,10 @@ async function pass(io: Io & Mode) {
         await io.relay("dispatcher", UPDATE)
         watch.updateAt = now
       }
+      if (io.inbox && ownerAt !== undefined && now - ownerAt <= OWNER_WINDOW_MS)
+        await cards(io, io.inbox).catch((error: Error) =>
+          io.log(`ops-wa: the Inbox's cards: ${error.message}`),
+        )
     }
   } finally {
     await ownFolder(io.dir)
@@ -172,7 +249,7 @@ async function pass(io: Io & Mode) {
   }
 }
 
-// The bridge, one per process, so its one queue writes its state files across every reconnect: attach listens on a socket, where each new 1:1 message from the owner goes to the dispatcher while WhatsApp mode is on and every other message and call is dropped and logged, one at a time in the order they came; pass queues the failover and update check; idle waits for the queue to empty.
+// One bridge per process, so one queue writes its state files across every reconnect and handles the owner's messages in the order they came.
 export function bridge(io: Io & Mode) {
   let chain = Promise.resolve()
   const queue = (job: () => Promise<unknown>) => {
@@ -225,13 +302,13 @@ const split = (text: string): string[] => {
   return parts
 }
 
-// Why a body never goes out, or undefined: phase 1 refuses a token shape (door 2's line), and any later filter sits in front of this one.
+// Why a body never goes out: a token shape, door 2's last line, behind the cards' redactor (cards.ts).
 export const refusalOf = (body: string): string | undefined => {
   const secret = secretIn(body)
   if (secret) return `the body holds ${secret}, which never goes over WhatsApp`
 }
 
-// The send wa send reaches: to the owner's number alone, one send at a time, a second apart and 300 ms between a split body's parts, at most 60 an hour, and only within 24 hours of the owner's last message, since ops-wa never starts a chat.
+// The one send path: to the owner's number alone, paced by habits.ts's SEND, and only within 24 hours of the owner's last message, since ops-wa never starts a chat.
 export function sender(io: Omit<Io, "relay"> & { sock: Sock }) {
   let chain: Promise<unknown> = Promise.resolve()
   let last = 0
