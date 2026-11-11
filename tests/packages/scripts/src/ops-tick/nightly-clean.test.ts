@@ -1250,3 +1250,62 @@ test("the folders other repos are read in: the code root, else the checkout's fo
     ),
   ).toEqual(["/srv/src", "/home/me/acme"])
 })
+
+// #1778's add: a gone session's scratch folder in the data folder, through safe-delete's quarantine with that session's own-scratch route, no carve-out
+test("a scratch folder no live session and no roster row names goes to the trash; a live session's and a rostered one stay", async () => {
+  const root = scratch()
+  const home = join(root, "home")
+  const data = join(home, ".playground")
+  const ops = join(data, "ops")
+  const main = join(root, "main")
+  mkdirSync(join(ops, "log"), { recursive: true })
+  mkdirSync(join(data, "trash"), { recursive: true })
+  mkdirSync(main, { recursive: true })
+  const pad = (name: string) => {
+    const path = join(data, "scratch", name)
+    mkdirSync(path, { recursive: true })
+    writeFileSync(join(path, "notes.md"), "x\n")
+    return path
+  }
+  const gone = pad("qq1zzz-1700")
+  const alive = pad("aa2bbb-1701")
+  const rostered = pad("cc3ddd")
+  writeFileSync(
+    join(data, "roster.json"),
+    JSON.stringify({ agents: [{ name: "cc3ddd-worker", state: "ended" }] }),
+  )
+  const { run } = fakeRun({
+    "docker ps": "",
+    "docker system df": JSON.stringify({ Volumes: [] }),
+  })
+  const sent: { text: string; to: string }[] = []
+  const ctx: Context = {
+    now: new Date("2026-11-11T03:00:00Z"),
+    ops,
+    repo: main,
+    run,
+    send: async (to, text) => {
+      sent.push({ text, to })
+      return true
+    },
+  }
+  const deps = {
+    cleanup: async () => null,
+    free: () => 100 * 1024 ** 3,
+    live: async () => ["aa2bbb-worker"],
+    now: () => Date.now(),
+    prs: async () => prsOf({}),
+    roots: async () => [],
+    sleep: async () => {},
+    trashRoots: () => ({ home, main, trash: join(data, "trash") }),
+    turbo: join(root, "turbo"),
+  } as NightDeps
+  await nightlyClean(deps)(ctx)
+  expect(existsSync(gone)).toBe(false)
+  expect(existsSync(alive)).toBe(true)
+  expect(existsSync(rostered)).toBe(true)
+  const line = sent.find((s) => s.to === "ops")?.text ?? ""
+  expect(line).toMatch(new RegExp(`scratch ${gone} as trash \\d{8}T\\d{6}Z-qq1zzz-1700/1 `))
+  expect(line).not.toContain(alive)
+  expect(line).not.toContain(rostered)
+})
