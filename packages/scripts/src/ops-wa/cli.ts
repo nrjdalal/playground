@@ -130,7 +130,7 @@ const main = async () => {
     connect: async () => {
       const sock = makeWASocket({
         auth: state,
-        browser: Browsers.macOS("Desktop"),
+        browser: Browsers.macOS("Chrome"),
         logger: silent,
         ...SOCKET,
       })
