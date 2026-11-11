@@ -138,20 +138,21 @@ const whyHolds = (path: string, roots: Roots): string | null => {
   return null
 }
 
-// The caller's own scratch folders in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved.
+// The caller's own scratch folders in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved, none for a name no session may hold.
 const ownScratchOf = (home: string, session: string): string[] =>
-  [
-    join(home, ".playground", "scratch", session),
-    join(home, ".playground", "scratchpad", session),
-  ].map(real)
+  SESSION.test(session)
+    ? [
+        join(home, ".playground", "scratch", session),
+        join(home, ".playground", "scratchpad", session),
+      ].map(real)
+    : []
 
 const whyProtected = (path: string, roots: Roots, session?: string): string | null => {
   const held = whyHolds(path, roots)
   if (held) return held
   const main = real(roots.main)
   const subtrees = subtreesOf(real(roots.home), real(roots.trash))
-  const ownScratch =
-    session !== undefined && SESSION.test(session) ? ownScratchOf(real(roots.home), session) : []
+  const ownScratch = session === undefined ? [] : ownScratchOf(real(roots.home), session)
   for (const root of subtrees)
     if (inside(path, root)) {
       if (ownScratch.some((own) => inside(path, own))) return null
@@ -162,7 +163,7 @@ const whyProtected = (path: string, roots: Roots, session?: string): string | nu
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own scratch and scratchpad folders in the data folder alone.
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, and nothing else.
 export function isProtected(path: string, roots: Roots, session?: string): string | null {
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
@@ -386,7 +387,7 @@ export function restore(
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
-  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts)
+  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts, entry.session)
   if (carve && "refused" in carve) return carve
   if (lstat(entry.path)) return refused(`${entry.path} already exists; move it aside first`)
   if (!existsSync(dirname(entry.path)))
