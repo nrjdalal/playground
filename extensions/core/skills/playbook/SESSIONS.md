@@ -190,7 +190,8 @@ Done when the task is running; the relay sends the same alert later, so drop tha
 A lead waits on the signals the **polling** rule names, never a `sleep` loop or a repeated `gh` read.
 A signal that stops coming may be the Mac asleep: read `pmset -g log | grep -E ' (Sleep|Wake) {2,}'` before you name a gap in a relay, a tick or a sampled series, and leave the sleep out of any rate.
 A Monitor or watch script runs under zsh, which does not word-split `$list`: loop over literal values or write `${=list}`, since zsh reads `$list` as one item.
-Done when every wait ends on a signal and every gap you name is checked against the sleep log.
+Run each measurement as its own background task, since a chained task signals only when the whole chain ends, and a stall in its first stage once stayed hidden for 41 minutes.
+Done when every wait ends on a signal, each background task holds one measurement, and every gap you name is checked against the sleep log.
 
 ## Answer a picker
 
