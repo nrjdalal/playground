@@ -1340,8 +1340,9 @@ CHILD=""
 POLL=${RUN_SLOT_POLL:-15}
 # the longest a commit or quick start waits on load5 (issue 1385)
 LOAD_WAIT=${RUN_SLOT_LOAD_WAIT:-300}
-# the seconds load5 reads under load_line's cap before single, 3-off and 4-off lift (lifted), and the file holding the second it first read under
+# the seconds load5 reads under load_line's cap before single, 3-off and 4-off lift (lifted), the longest gap between two readings the hold counts across, and the file holding the second of the first reading under and of the last
 LIFT_HOLD=300
+LIFT_GAP=90
 UNDER="$OPS/run-slot.under"
 # the wait past which a waiter counts as a backlog the burst hold keeps spaced, small runs included (issue 1417): a queue that releases starts its small runs all at once, and load5 reads them only about a minute later (7 Nov 13:10 to 13:15Z: 12 queued runs started on run-slot and run-slot-2, and load5 crossed 15 at 13:16:08Z), so a small run that has waited this long also waits for burst_held to clear; a fresh small run starts at once (the tests shorten it; a waiter's waited count is the real seconds since its wait began, so the line reads in seconds whatever RUN_SLOT_POLL is)
 BACKLOG_WAIT=${RUN_SLOT_BACKLOG_WAIT:-300}
@@ -1535,9 +1536,6 @@ due_at() {
   # the load5 hold's ceiling for slots 2 to 4 (load5_held)
   oldest_asked; e=$((OLDEST + LOAD_WAIT))
   [ "$e" -gt "$now" ] && { [ -z "$d" ] || [ "$e" -lt "$d" ]; } && d=$e
-  # the second a load throttle lifts (lifted)
-  l=; read -r l 2>/dev/null < "$UNDER"
-  case "$l" in '' | *[!0-9]*) ;; *) e=$((l + LIFT_HOLD)); [ "$e" -gt "$now" ] && { [ -z "$d" ] || [ "$e" -lt "$d" ]; } && d=$e ;; esac
   for f in $SWITCHES; do
     [ -e "$OPS/$f" ] || continue
     switch_ends "$f"
@@ -1572,6 +1570,7 @@ cheap_idle() {
     [ -z "$DUE" ] || [ "$SECONDS" -lt "$DUE" ] || return 1
     cheap_load
     [ "$LOAD" = "$LOAD0" ] || return 1
+    under_seen || return 1
     [ -z "$BURST" ] || burst_held > /dev/null || return 1
     [ "$G0" = open ] && return 0
     gate_sig
@@ -1592,11 +1591,13 @@ look_mark() {
   SIG0=$SIG
   next_sig
   NSIG0=$NSIG
-  LOOKED=1 DUE= BURST=
+  LOOKED=1 DUE= BURST= LIFT_AT=
   cheap_load
   LOAD0=$LOAD
   d=$(due_at)
-  [ -z "$d" ] || DUE=$((SECONDS + d - $(date +%s)))
+  # the clock's second, read once a look while a turn is due or a lift mark stands (under_seen)
+  { [ -z "$d" ] && ! [ -e "$UNDER" ]; } || LIFT_AT=$(date +%s) LIFT_S=$SECONDS
+  [ -z "$d" ] || DUE=$((SECONDS + d - LIFT_AT))
   gate_sig
   G0=$G
   LANES=${G%% *}
@@ -1854,18 +1855,31 @@ load5_held() {
   [ "${HELD5-}" = unread ] && HELD5=$h
   [ "$h" = 1 ]
 }
-# whether single, 3-off and 4-off stand lifted: load5 has read under load_line's cap for LIFT_HOLD s, from the second UNDER holds (issue 1737, 11 Nov: single and a cap of 14 stood by timer at load5 5.6, and eight runs queued behind one lane); a reading at or over the cap removes UNDER, so the throttle holds again until its end time, and the first reading under writes it
+# whether single, 3-off and 4-off stand lifted: load5 has read under load_line's cap for LIFT_HOLD s, from the first of readings UNDER holds no more than LIFT_GAP s apart (issue 1737, 11 Nov: single and a cap of 14 stood by timer at load5 5.6, and eight runs queued behind one lane); a reading at or over the cap removes UNDER, so the throttle holds again until its end time, and a reading under after a longer gap, which may have hidden one over, starts the hold again
 lifted() {
-  local l5= since=
+  local l5= since= last= now
   read -r _ _ l5 _ <<< "$(loadavg)"; l5=${l5%%.*}
   case "$l5" in '' | *[!0-9]*) return 1 ;; esac
   if [ "$l5" -ge "$(load_line)" ]; then
     [ ! -e "$UNDER" ] || rm -f "$UNDER"
     return 1
   fi
-  read -r since 2>/dev/null < "$UNDER"
-  case "$since" in '' | *[!0-9]*) date +%s > "$UNDER"; return 1 ;; esac
-  [ $(($(date +%s) - since)) -ge "$LIFT_HOLD" ]
+  read -r since last 2>/dev/null < "$UNDER"
+  now=$(date +%s)
+  case "$since $last" in *[!0-9\ ]* | ' ' | *' ') since=$now ;; *) [ $((now - last)) -le "$LIFT_GAP" ] || since=$now ;; esac
+  echo "$since $now" > "$UNDER"
+  [ $((now - since)) -ge "$LIFT_HOLD" ]
+}
+# a waiting head's idle poll, with builtins alone, while its load reads as its look read it: false once the hold in UNDER has ended since that look, so the head looks again and the throttle lifts on time, a hold restarted in place included; else it writes the poll's second as UNDER's last again, at most every 30 s, so the hold counts across polls with no look of their own (a reading at or over the cap moves the load's whole numbers, so the head looks instead)
+under_seen() {
+  local first= last= now
+  [ -n "$LIFT_AT" ] || return 0
+  read -r first last 2>/dev/null < "$UNDER" || return 0
+  case "$first $last" in *[!0-9\ ]* | ' '* | *' ') return 0 ;; esac
+  now=$((LIFT_AT + SECONDS - LIFT_S))
+  [ "$LIFT_AT" -lt $((first + LIFT_HOLD)) ] && [ "$now" -ge $((first + LIFT_HOLD)) ] && return 1
+  [ $((now - last)) -lt 30 ] || echo "$first $now" > "$UNDER"
+  return 0
 }
 # whether the load rules open slot $1 to this run now
 slot_open() {

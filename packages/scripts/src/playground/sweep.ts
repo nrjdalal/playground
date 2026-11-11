@@ -8,9 +8,10 @@ import { leadOf } from "../ops-tick/tick"
 import { writeAtomic } from "../write-atomic"
 
 const LOAD_LINE = 15
-// run-slot.sh's load_line and lifted: single stands lifted once load5 has read under its cap (run-slot.load5-cap's last line while it stands, else 22, 22 at most) for LIFT_HOLD s from the second run-slot.under holds
-const LOAD_CAP = 22
-const LIFT_HOLD = 300
+// run-slot.sh's load_line and lifted: single stands lifted once load5 has read under its cap (run-slot.load5-cap's last line while it stands, else 22, 22 at most) for LIFT_HOLD s, from the first of the readings run-slot.under holds no more than LIFT_GAP s apart; a test holds them equal to run-slot.sh's
+export const LOAD_CAP = 22
+export const LIFT_HOLD = 300
+export const LIFT_GAP = 90
 const HOUR = 3_600_000
 // scripts/ops/run-slot.sh's SWITCHES, and the hours one with no expiry line stands from its mtime
 export const SWITCHES = [
@@ -288,16 +289,20 @@ const capOf = (ops: string, switches: Switch[]): number => {
   }
 }
 
-// run-slot.sh's lifted, read with no write: whether load5 under the cap has held LIFT_HOLD s from run-slot.under's second
+// run-slot.sh's lifted, read with no write: whether load5 under the cap has held LIFT_HOLD s from run-slot.under's first second, its last reading no more than LIFT_GAP s back
 const singleOf = (ops: string, on: boolean, cap: number, load5: number, now: Date): Single => {
   if (!on) return "off"
-  let under = NaN
+  let first = NaN
+  let last = NaN
   try {
-    under = Number(readFileSync(join(ops, "run-slot.under"), "utf8").trim())
+    const parts = readFileSync(join(ops, "run-slot.under"), "utf8").trim().split(" ")
+    first = Number(parts[0])
+    last = Number(parts[1])
   } catch {
     // no reading under the cap yet
   }
-  return load5 < cap && now.getTime() / 1000 - under >= LIFT_HOLD ? "lifted" : "held"
+  const at = now.getTime() / 1000
+  return load5 < cap && at - last <= LIFT_GAP && at - first >= LIFT_HOLD ? "lifted" : "held"
 }
 
 // `playground sweep <lead>`: one read of what changed since that lead's last sweep (and, for ops' lead, each switch on, once an hour), `quiet` when nothing did, its cursor in sweep/<lead>.json in the data folder.

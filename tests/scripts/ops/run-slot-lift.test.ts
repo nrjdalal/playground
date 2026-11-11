@@ -14,11 +14,14 @@ const now = () => Math.floor(Date.now() / 1000)
 const throttled = (load5: number, off: string[], under?: number) => {
   const m = machine({ load1: 2, load5, off })
   writeFileSync(join(m.ops, "run-slot.load5-cap"), "14\n")
-  if (under !== undefined) writeFileSync(join(m.ops, UNDER), `${now() - under}\n`)
+  if (under !== undefined) writeFileSync(join(m.ops, UNDER), `${now() - under} ${now() - 10}\n`)
   return m
 }
+// the second of the first reading under the cap that the mark holds, null with none
 const since = (m: ReturnType<typeof machine>) =>
-  existsSync(join(m.ops, UNDER)) ? Number(readFileSync(join(m.ops, UNDER), "utf8")) : null
+  existsSync(join(m.ops, UNDER))
+    ? Number(readFileSync(join(m.ops, UNDER), "utf8").split(" ")[0])
+    : null
 
 describe("a load throttle lifts by itself once load5 holds under its cap", () => {
   test("single lifts after 5 minutes under the cap, so all four slots open", () => {
@@ -39,6 +42,25 @@ describe("a load throttle lifts by itself once load5 holds under its cap", () =>
     const m = throttled(16, ["run-slot.single"], 3600)
     expect(slots(m)).toBe("1\n")
     expect(since(m)).toBeNull()
+  })
+
+  // a reviewer: with no run reading the load, a crossing over the cap and back left the old mark, and the next ask lifted at once
+  test("a mark whose last reading is over 90 s old starts the 5 minutes again, since a crossing may lie in the gap", () => {
+    const m = throttled(5, ["run-slot.single"])
+    writeFileSync(join(m.ops, UNDER), `${now() - 3600} ${now() - 91}\n`)
+    expect(slots(m)).toBe("2\n")
+    expect(Math.abs(since(m)! - now())).toBeLessThanOrEqual(2)
+  })
+
+  test("an expired throttle holds nothing, whatever the mark says", () => {
+    const m = throttled(5, [], 60)
+    const set = now() - 5 * 3600
+    const iso = (s: number) => new Date(s * 1000).toISOString().slice(0, 19) + "Z"
+    writeFileSync(
+      join(m.ops, "run-slot.single"),
+      `ops ${iso(set)} ${iso(set + 3600)} suites one at a time\n`,
+    )
+    expect(slots(m)).toBe("4\n")
   })
 
   test("3-off and 4-off lift the same way", () => {
