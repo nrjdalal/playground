@@ -1703,7 +1703,6 @@ else
   PROMPT="You are $NAME, $WHO. $READ$BINDS$REPORT"
   COMMAND="$LAUNCH --session-id $SID -n $NAME $FLAGS \"$PROMPT\""
 fi
-# The pane's shell runs this text, so the whole launch goes in a subshell: a failed Keychain read's exit ends only that, the message stays on the pane, and tk dies with it.
 # Codex's launch: its CODEX_HOME's files are written fresh each launch, and its hooks always run trusted, since a hook with no recorded trust is silently dropped (measured); the session id comes from the SessionStart beat its hook writes, read after the pane runs.
 BEAT=
 if [ "$HARNESS" = codex ]; then
@@ -1734,6 +1733,7 @@ PY
   fi
   [ -z "$PROMPT" ] || COMMAND="$COMMAND \"$PROMPT\""
 fi
+# The pane's shell runs this text, so the whole launch goes in a subshell: a failed Keychain read's exit ends only that, the message stays on the pane, and tk dies with it.
 COMMAND="($COMMAND)"
 
 # macOS types at most MAX_CANON 1024 bytes into a pane, and a GLM worker's launch line crosses it (1,025 bytes, measured), so the tail never arrives and the pane waits at >. The same text runs from a file instead: the typed line names the file alone, and the file, read by the pane's own shell, holds the Keychain lookup, never a token. Its first line removes the file, so no past launch outlives its pane to be rerun past this script's refusals.
