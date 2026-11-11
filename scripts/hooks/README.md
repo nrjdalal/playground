@@ -96,7 +96,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - A Codex session (spawn.sh's `--harness codex`) loads the factory's guards from the `hooks.json` spawn.sh writes at each launch: `codexHooks()` in `packages/scripts/src/codex-hooks.ts` renders it from `scripts/factory-settings.json`, each handler in its group on each event Codex has (it has no Notification, PermissionDenied, PostToolUseFailure or StopFailure),
   and spawn.sh adds the SessionStart beat beside them.
-  Each group keeps its matcher, but for a hook `CODEX_MATCHERS` names (writing-first, below), and each hook `LEFT_OUT` names is left out.
+  Each group keeps its matcher, but for a hook `CODEX_MATCHERS` names (writing-first, below), each hook `LEFT_OUT` names is left out, and each handler drops `onFailure`, a key Codex's hook handler lacks.
   session-state is left out, so a Codex session writes no state record, and the Dashboard's light reads it as idle, since `lightOf()` in `api/hono/src/lib/dashboard/workers.ts` reads a session with no record and no question as idle.
   Codex runs each command in the call's folder with `$PLAYGROUND_REPO` set by the launch, so every wrapper finds the main checkout as it does for Claude Code.
 - A Codex input carries a `turn_id`, which Claude Code's lacks (codex-cli 0.167.1).
@@ -210,7 +210,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
   Both settings files register it once on Bash, with `onFailure: "block"`, in place of each Bash guard's own Bash entry, and a guard that also guards another tool keeps its own entry for that tool.
   A test holds each file to that one Bash entry, so a guard a later PR registers on Bash fails it until the guard joins `GUARDS`.
-  A Codex session renders the same entry with no `onFailure`, which Codex's hooks.json lacks, so there a timeout lets the call run ([A Codex session's calls](#a-codex-sessions-calls)).
+  A Codex session loads the same entry with no `onFailure`, since `codexHooks()` drops that key, which Codex's hook handler lacks (`HookHandlerConfig::Command`, codex-cli 0.167.1), so there a timeout lets the call run ([A Codex session's calls](#a-codex-sessions-calls)).
   Its tests are `bun run test:file tests/scripts/hooks/guards.test.ts tests/scripts/hooks/refused-forms.test.ts`, the second feeding each Bash row of a guard it runs through its `check()`.
 
 ## no-bare-slack-link

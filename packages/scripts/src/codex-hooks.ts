@@ -1,5 +1,5 @@
 // The hooks.json a Codex launch loads (spawn.sh's --harness codex), rendered from the factory's settings and printed as JSON: `bun packages/scripts/src/codex-hooks.ts <factory-settings.json>`.
-type Hook = { command: string; timeout?: number; type: string }
+type Hook = { command: string; onFailure?: string; timeout?: number; type: string }
 type Group = { hooks: Hook[]; matcher?: string }
 export type Hooks = Record<string, Group[]>
 
@@ -24,12 +24,14 @@ export const CODEX_MATCHERS: Record<string, string> = {
 export const hookOf = (command: string): string | undefined =>
   command.match(/scripts\/hooks\/(?:bundled\/)?([\w-]+)\.(?:js|ts)\b/)?.[1]
 
-// Pure: every handler on each event Codex has, in its group with its matcher, but the hooks left out, and a group that keeps none goes too.
+// Pure: every handler on each event Codex has, in its group with its matcher and with no onFailure, a key Codex's handler lacks, but the hooks left out, and a group that keeps none goes too.
 export function codexHooks(hooks: Hooks): Hooks {
   const rendered: Hooks = {}
   for (const event of CODEX_EVENTS) {
     const groups = (hooks[event] ?? []).flatMap((group) => {
-      const kept = group.hooks.filter((hook) => !LEFT_OUT.has(hookOf(hook.command) ?? ""))
+      const kept = group.hooks
+        .filter((hook) => !LEFT_OUT.has(hookOf(hook.command) ?? ""))
+        .map(({ onFailure: _, ...hook }) => hook)
       if (kept.length === 0) return []
       const matcher =
         event === "PreToolUse"
