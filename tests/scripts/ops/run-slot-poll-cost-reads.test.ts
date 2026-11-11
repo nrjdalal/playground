@@ -9,12 +9,12 @@ setDefaultTimeout(360_000)
 describe("waiters cost close to nothing while they wait", () => {
   // a count of polls to look again on (an older copy's 20) sets each waiter looking within the window, about 900 to 2,200 processes a look with ten tickets
   // round 4 of the review: every waiter's mark shared one path, which a read subcommand's exit removed, so each run's end set every waiter looking
-  test("ten queue waiters across 25 polls, with nothing changed but a read of the slots, start fewer than 20 processes a poll", async () => {
+  test("five queue waiters across 25 polls, with nothing changed but a read of the slots, start fewer than 2 processes a poll each", async () => {
     const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
     m.hold("run-slot", 3, "big")
     m.hold("run-slot-2", 3, "big")
     const { count, path } = shim(m)
-    const waiters = Array.from({ length: 10 }, (_, i) =>
+    const waiters = Array.from({ length: 5 }, (_, i) =>
       waiter(m, path, `worker-${i}`, ["touch"], { RUN_SLOT_POLL: "1" }),
     )
     // a read subcommand, run outside the shims, so only the waiters' own starts count
@@ -28,8 +28,8 @@ describe("waiters cost close to nothing while they wait", () => {
         ops: m.ops,
       }).exited
     }
-    expect(await starts(count, waiters, new RegExp(WAITING.source, "m"), 25, slots)).toBeLessThan(
-      20,
-    )
+    // five waiters keep the first looks short, since ten took this row to 74 s in CI against a file's 60 s (issue 1671, measured); the bound is the old 20 a poll for ten, per waiter
+    const rate = await starts(count, waiters, new RegExp(WAITING.source, "m"), 25, slots)
+    expect(rate / waiters.length).toBeLessThan(2)
   })
 })
