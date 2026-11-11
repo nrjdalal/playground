@@ -138,6 +138,11 @@ describe("a list saved before the harness split", () => {
     const other = storedTemplates([{ ...old[0], backend: "gpt" }])
     expect(sessionTemplates.safeParse(other).success).toBe(false)
   })
+
+  test("refuses a Claude row that named glm as its model, which never ran, rather than read it as GLM", () => {
+    const named = storedTemplates([{ ...old[0], model: "glm" }])
+    expect(sessionTemplates.safeParse(named).success).toBe(false)
+  })
 })
 
 describe("saving sessions.templates", () => {
