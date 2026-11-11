@@ -1,56 +1,77 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, stop, machine } from "./run-slot-fake"
+import { SCRIPT, machine, stop } from "./run-slot-fake"
 
 // a check waits on a line its run prints or logs, so the timeout only catches a hang
 setDefaultTimeout(60_000)
 
 type Machine = ReturnType<typeof machine>
+const DROP = { RUN_SLOT_TEST_LOOP_END: "1" }
+const STOPPED = /wait loop ended with no slot taken .*, so \S+ stops with 143: run it again/gm
 const cloning = (m: Machine, who: string, extra: Record<string, string> = {}) => {
   mkdirSync(join(m.root, "node_modules"), { recursive: true })
   return m.start(who, extra, SCRIPT, ["cp", "-R", "node_modules"])
 }
-const places = (m: Machine) => readdirSync(join(m.ops, "run-slot.clone-waiters"))
-const log = (m: Machine) => {
+const places = (m: Machine) => {
+  const dir = join(m.ops, "run-slot.clone-waiters")
+  return existsSync(dir) ? readdirSync(dir) : []
+}
+const runsLog = (m: Machine) => {
   const path = join(m.ops, "run-slot.runs.log")
   return existsSync(path) ? readFileSync(path, "utf8") : ""
 }
-// the sessions whose clones have started, in the runs log's order
-const started = (m: Machine) =>
-  [...log(m).matchAll(/ start (\S+) \d+ run-slot-clone /g)].map((s) => s[1])
-const ordered = (m: Machine) => {
-  const names = places(m).sort()
-  return (
-    names.length === 2 &&
-    names.map((n) => n.split("-").slice(3).join("-")).join(",") === "worker-dropped,worker-newer"
-  )
+const starts = (m: Machine) =>
+  runsLog(m)
+    .split("\n")
+    .filter((l) => l.split(" ")[1] === "start")
+// waits up to 10 s for `done`, then fails naming what the machine holds, so a wrong order reads by name rather than as the test's timeout
+const within = async (m: Machine, what: string, done: () => boolean) => {
+  const end = Date.now() + 10_000
+  while (!done()) {
+    if (Date.now() > end)
+      throw new Error(
+        `${what} not seen in 10 s: places [${places(m).join(", ")}], starts [${starts(m).join(" | ")}]`,
+      )
+    await Bun.sleep(50)
+  }
 }
 
-// issue 1641: a waiter whose wait loop stops mid-wait lost its place in run-slot.clone-waiters and its run, with no word of why; RUN_SLOT_TEST_LOOP_END ends the loop once the way bash 5.2's loop drop (the rule at the load5 wait) does
-describe("a clone waiter whose wait loop stops mid-wait", () => {
-  test("says why, keeps its place, and runs once the lane frees", async () => {
+// issue 1641: a waiter whose wait loop bash drops (a TERM mid-expansion on bash 5.2, the rule at the load5 wait) stopped with 143 and no word of why; RUN_SLOT_TEST_LOOP_END drops the lane's wait loop once, as bash does
+describe("a waiter whose wait loop bash drops", () => {
+  test("a clone says why and exits 143 without running, and gives back its place", async () => {
     const m = machine()
     m.hold("run-slot-clone", 1, "small")
-    const run = cloning(m, "worker-dropped", { RUN_SLOT_TEST_LOOP_END: "1" })
-    expect(await run.saw(/ended without the slot/gm)).toBe(true)
-    expect(places(m).some((n) => n.endsWith("-worker-dropped"))).toBe(true)
-    m.release("run-slot-clone")
-    expect(await run.ran()).toBe(true)
-    await stop(run.p)
+    const run = cloning(m, "worker-dropped", DROP)
+    expect(await run.saw(STOPPED)).toBe(true)
+    expect(await run.p.exited).toBe(143)
+    expect(existsSync(run.marker)).toBe(false)
+    expect(places(m)).toEqual([])
   })
 
-  test("and a newer clone still waits behind it until its place goes on its own take", async () => {
+  // a reviewer: commit and quick waiters run the same lane loop as a clone
+  test("a commit-lane run says why and exits 143 without running", async () => {
+    const m = machine()
+    const run = m.start("worker-push", DROP, SCRIPT, ["git", "push"])
+    expect(await run.saw(STOPPED)).toBe(true)
+    expect(await run.p.exited).toBe(143)
+    expect(existsSync(run.marker)).toBe(false)
+  })
+
+  test("a newer clone is held by no place the stopped one left, and takes the lane once it frees", async () => {
     const m = machine()
     m.hold("run-slot-clone", 1, "small")
-    const older = cloning(m, "worker-dropped", { RUN_SLOT_TEST_LOOP_END: "1" })
-    expect(await older.saw(/ended without the slot/gm)).toBe(true)
+    const older = cloning(m, "worker-dropped", DROP)
+    expect(await older.saw(STOPPED)).toBe(true)
+    expect(await older.p.exited).toBe(143)
     const newer = cloning(m, "worker-newer")
-    while (!ordered(m)) await Bun.sleep(50)
+    await within(m, "the newer clone's place", () =>
+      places(m).some((n) => n.endsWith("-worker-newer")),
+    )
     m.release("run-slot-clone")
-    while (started(m).length === 0) await Bun.sleep(50)
-    await Promise.all([stop(older.p), stop(newer.p)])
-    expect(started(m)[0]).toBe("worker-dropped")
+    await within(m, "a clone's start", () => starts(m).some((l) => l.includes(" run-slot-clone ")))
+    await stop(newer.p)
+    expect(starts(m).map((l) => l.split(" ")[2])).toEqual(["worker-newer"])
   })
 })
