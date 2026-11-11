@@ -198,6 +198,21 @@ describe("the clone lane", () => {
     expect(started(m)[0]).toBe("ops-dashboard")
   })
 
+  // issue 1722: the class decides the line a waiting ship's clone prints, so the row reads either and the start order decides
+  test("and a ship's clone, class 0 as ops-ship, goes before an older worker's", async () => {
+    const m = machine()
+    m.hold("run-slot-clone", 1, "small")
+    const waiting = /^run-slot\.sh: (waiting for the clone slot|this clone waits behind)/gm
+    const worker = cloning(m, "worker-older")
+    expect(await worker.saw(waiting)).toBe(true)
+    const ship = cloning(m, "ops-ship")
+    expect(await ship.saw(waiting)).toBe(true)
+    m.release("run-slot-clone")
+    await within(() => started(m).length > 0, "a clone started", m)
+    await Promise.all([stop(worker.p), stop(ship.p)])
+    expect(started(m)[0]).toBe("ops-ship")
+  })
+
   // issue 1317's added Done when: a queue read sees each clone waiter
   test("lists each waiting clone in run-slot.clone-waiters", async () => {
     const m = machine()

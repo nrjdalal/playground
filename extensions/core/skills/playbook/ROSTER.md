@@ -42,6 +42,7 @@ Run each row as `bun <main checkout>/scripts/roster.ts <row>` (`$PLAYGROUND_REPO
   A session started before the `surface` key has a `workspace` alone until its next restart.
 - `assign` clears the previous task's `pr`, `branch`, `repo`, `ticket`, `owner`, report and `eta`, so an agent's next chore starts clean; a checker's `prs` stays, so the PRs it still serves keep it.
   A new task on an agent holding a `pr` goes through `assign`: `set` refuses `task=` there, naming `assign`; `set <name> title=<title>` renames the row and leaves its `pr`, `branch` and `repo` alone.
+  When a worker's PR closes unmerged and its work goes on, its lead runs `roster.ts assign` at once: auto-end ends a worker only when the PR on its row that closed last merged, and keeps one whose last closed unmerged, sending its lead one line to reassign or end it.
   A checker's `pr` or `worker` moves only through `assign`, given both `worker=` and `pr=`: `set` and `report` refuse any move of either, and `assign` one given alone, naming `assign`, since a checker left on its old worker keeps that worker's ended row in the sidebar.
 - `status` takes one word from `scripts/roster-statuses.json`: a `live` word while the session runs, a `finished` one once it stops, which ops-report reads so it never calls a finished session down.
   Progress text goes through `report <name> "<text>"` as `lastReport`: `set`, `report` and `assign` refuse any other `status`, naming `report`, and a row already holding text keeps it until its next `status=`.
