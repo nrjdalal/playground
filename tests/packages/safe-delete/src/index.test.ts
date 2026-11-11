@@ -1009,6 +1009,27 @@ describe("stripTrash", () => {
     expect(existsSync(join(roots.trash, batch, "1", "review-clone", "node_modules"))).toBe(false)
   })
 
+  test("a batch the strip cannot finish names itself in failed and holds no later batch back", async () => {
+    const roots = machine()
+    const bad = batchTree(roots, new Date(NOW.getTime() - 2 * DAY), "s")
+    file(join(roots.trash, bad, "1", "review-clone", "node_modules", "locked", "child.js"))
+    chmodSync(join(roots.trash, bad, "1", "review-clone", "node_modules", "locked"), 0o555)
+    const good = batchTree(roots, new Date(NOW.getTime() - DAY), "t")
+    const done = await stripTrash(roots.trash, { sleep: async () => {} })
+    expect(done.batches).toEqual([good])
+    expect(done.folders).toBe(3)
+    expect(done.failed).toEqual([bad])
+    expect(existsSync(join(roots.trash, bad, "1", "review-clone", "node_modules", "locked"))).toBe(
+      true,
+    )
+    expect(existsSync(join(roots.trash, good, "1", "review-clone", "node_modules"))).toBe(false)
+    const entry = JSON.parse(
+      readFileSync(join(roots.trash, bad, "manifest.jsonl"), "utf8").trim(),
+    ) as { stripped?: number }
+    expect(entry.stripped).toBeUndefined()
+    chmodSync(join(roots.trash, bad, "1", "review-clone", "node_modules", "locked"), 0o755)
+  })
+
   test("a carve-out batch keeps its tree whole at the strip", async () => {
     const roots = machine()
     const batch = batchTree(roots, new Date(NOW.getTime() - DAY), "s")
