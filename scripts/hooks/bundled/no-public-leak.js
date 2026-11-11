@@ -6457,12 +6457,12 @@ var storedTemplates = (value) => Array.isArray(value) ? value.map((row) => {
   if (typeof row !== "object" || row === null || !("backend" in row) || "harness" in row)
     return row;
   const { backend, ...rest } = row;
-  const claude = backend === "claude" && rest.model !== GLM_MODEL;
-  return {
-    ...rest,
-    harness: "claude-code",
-    ...backend === "glm" ? { model: GLM_MODEL } : claude ? {} : { backend }
-  };
+  const { model, ...modelless } = rest;
+  if (backend === "glm")
+    return { ...rest, harness: "claude-code", model: GLM_MODEL };
+  if (backend !== "claude")
+    return { ...rest, backend, harness: "claude-code" };
+  return { ...model === GLM_MODEL ? modelless : rest, harness: "claude-code" };
 }) : value;
 var sessionTemplates = array(sessionTemplate).refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "each id is listed once");
 var unknownAccounts = (templates, accounts) => {
