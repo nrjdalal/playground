@@ -6,7 +6,7 @@ Read a hook's section before you change the hook, its tests or its registration,
 Widen what a hook allows only by one literal form it reads whole, tracking no shell state (variables, functions, loops, traps), and have it refuse every other form with a reason that names the literal one.
 Every bypass form a review has found stays refused through a widening: each is a row of `tests/scripts/hooks/fixtures/refused-forms/`, one file a source (`<n>.ts` holds #<n>'s rows), which `tests/scripts/hooks/refused-forms.test.ts` runs through each guard it names, and a bypass a new review finds that canary refuses joins it as a row in the same PR.
 The test spells every path flag a row names again (its `PATH_FLAGS` lists each, with the joins its program reads), by its other joins, a relative folder, a `./` hop, an `<x>/../<x>` hop and a link, and holds each spelling to the row's verdict.
-`no-raw-spawn` guards `scripts/spawn.sh` and hc's trial world, so its text sits in [the spawn.sh section of scripts/README.md](../README.md#spawnsh).
+`no-raw-spawn` guards `scripts/spawn.sh` and refuses hc, so its text sits in [the spawn.sh section of scripts/README.md](../README.md#spawnsh).
 Their tests are `bun run test:file tests/scripts/hooks`.
 Every hook reads a wrapper (`doas`, `env`, `nice`, `nohup`, `stdbuf`, `sudo`, `time`, `timeout`, `xargs` and the rest of `WRAPPERS` in `scripts/hooks/shell.ts`) by that wrapper's own list of options, a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, so the program it finds is the one the wrapper runs.
 Homebrew coreutils' `genv`, `gnice`, `gnohup`, `gstdbuf` and `gtimeout` read as `env`, `nice`, `nohup`, `stdbuf` and `timeout`, with those options, and env's lone `-` reads as its `-i`, with env's options read on after it, as BSD env reads it; GNU env ends its options at a lone `-`, so this reads more of GNU's words than GNU runs.
@@ -824,6 +824,20 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   It is a speed bump, not a wall: a script file a session writes and runs passes it, as does an interpreter's own delete call (`fs.rmSync` in `bun -e`), and only an OS sandbox contains those.
   It fails closed only on a call it cannot read that reads as a delete, and its tests are `bun run test:file tests/scripts/hooks/no-raw-delete.test.ts tests/scripts/hooks/refused-forms.test.ts`.
   The repo's own scripts are held by `tests/no-raw-delete.test.ts` instead, which reads the repo's text and fails on a raw recursive delete outside its allowed folders and named carve-outs.
+
+## no-raw-wa
+
+- A factory session reaches ops-wa's folder only through `playground wa send <absolute file>`: `scripts/hooks/no-raw-wa.ts` refuses a call that reaches the data folder's `whatsapp/`, which holds the linked device's auth state, its socket and the owner's messages,
+  so no session can copy the device or write past the allowlist of one ([ADR 0023](../../.agents/adr/0023-the-owners-whatsapp-chat-is-the-owners-words.md)).
+  It reads the folder as typed and through its links, in any case, as macOS opens it.
+  On Bash it refuses a call whose text names that folder under `.playground`, `$PLAYGROUND_DATA_DIR` or the data folder's own path, whatever reads it (a script's string, a variable it cannot expand), then walks the call through `shell.ts`'s reader:
+  a word or a redirect target that reaches the folder (a glob segment that may match its name included, and an option's value after `=`), a command run in a folder inside it (`places`), and a recursive reader (`find`, `rg`, `tar`, `rsync`, `grep -r`, `cp -R` and the rest of `RECURSIVE`) given a folder above it.
+  On Read, Write, Edit, MultiEdit and NotebookEdit it refuses a path inside the folder; on Grep a path inside or above it, the session's folder when none is given; on Glob a path inside it, or a pattern that may reach into it.
+  `playground wa send` names no path there, so it runs, as does every path beside the folder (`~/.playground/whatsapp-notes.md`) and below the data folder elsewhere (`grep -r x ~/.playground/handoffs`).
+  It is a speed bump, as no-raw-delete is: a word it cannot expand, built from a variable no command on the call sets, and a program's own code that builds the path, pass it.
+  It fails open on a call it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-raw-wa.test.ts`.
+  Its script lands on `main` before its registration in both settings files, by the order in [Registered in both settings files](#registered-in-both-settings-files), so it is registered in WhatsApp's phase 2.
+  Until then ops-wa pairs no device (`unguarded()` in `packages/scripts/src/ops-wa/life.ts`), so no auth state exists for a session to reach.
 
 ## no-release-comment
 

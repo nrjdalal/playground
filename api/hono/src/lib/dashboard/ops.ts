@@ -40,6 +40,7 @@ export const OPS_DOES: Record<string, string> = {
   "ops-unstick": "Finds stuck sessions no hook reported, and clears the usage-limit dialog",
   "ops-usage": "Reads Claude's 5-hour and week usage",
   "ops-usage-post": "Keeps your usage post in Slack up to date",
+  "ops-wa": "Passes your WhatsApp messages to Playground and sends its replies",
   "ops-zai-usage": "Reads GLM's 5-hour and week usage",
 }
 
@@ -70,6 +71,7 @@ export const RUNNER_NAMES: Record<string, string> = {
   "ops-unstick": "Stuck session watcher",
   "ops-usage": "Claude usage readings",
   "ops-usage-post": "Slack usage post",
+  "ops-wa": "WhatsApp link",
   "ops-zai-usage": "GLM usage readings",
 }
 

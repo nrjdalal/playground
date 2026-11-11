@@ -95,6 +95,8 @@ describe("defineSettings", () => {
       "usage.accounts",
       "usage.keychainService",
       "usage.switchAccount",
+      "wa.device",
+      "wa.owner",
     ])
     const zone = settingFields().find(({ key }) => key === "clock.ownerZone")!.field.schema
     expect(zone.safeParse("Asia/Kolkata").success).toBe(true)
