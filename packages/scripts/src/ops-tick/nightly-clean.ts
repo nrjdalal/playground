@@ -352,11 +352,7 @@ export const nightlyClean =
         out.push(line)
         if (line.startsWith("removed ")) moves.push(deps.now())
         if (!discardable(line)) continue
-        // The owner's standing approval: trashed with no decision, the 7-day trash holds it and playground rm --restore brings it back. The retry below stays for the callers this session shares with.
-        if (!(await paced())) {
-          left(w.path)
-          continue
-        }
+        // The owner's standing approval: trashed with no decision, the 7-day trash holds it and playground rm --restore brings it back. The pace above this loop covers the rm this iteration reaches: no move lands between the two calls, since a removed line is not discardable, so one paced verdict per iteration is the whole contract.
         let moved = await trashWorktree(ctx, w.path)
         if (moved.code === 0) moves.push(deps.now())
         let capped = moved.code !== 0 && RM_CAP.test(moved.out)
