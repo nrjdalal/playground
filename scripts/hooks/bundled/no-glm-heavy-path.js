@@ -5178,7 +5178,7 @@ var ruleSettings = defineSettings({
       } catch {
         return false;
       }
-    }, "an IANA time zone, such as UTC or Asia/Kolkata")
+    }, "an IANA time zone, such as UTC or America/New_York")
   },
   "context.window": {
     default: 400000,
