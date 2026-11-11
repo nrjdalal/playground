@@ -76,7 +76,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   and a pin of the backend alone too,
   as one written before the harness split holds: it refuses `--backend` or `--harness` while a pin stands, a resume with no pin and neither given, and a pin that reads none of those.
   `--harness codex` starts the first dispatcher, and its resume alone, in Codex, on a scratch data folder alone until phase 3 of the harness layer (the `plan-harness-layer` doc) wires the guards, with the data folder's `codex/` as its `CODEX_HOME`, always with `--dangerously-bypass-hook-trust`, and fails closed:
-  a session whose SessionStart beat does not land within 60 seconds has its pane closed and its start refused, with no pin, record or roster row.
+  a session whose SessionStart beat does not land within 60 seconds has its pane closed and its start refused, with no new pin, record or roster row (a resume keeps its earlier pin and record), and a pane herdr will not close is named in the refusal, for you to close it.
   playbook's SPAWN.md (Launch, model and effort) holds the rest: the files each launch writes, the refusals beside it, and how the beat names the session.
   `--model <id>` picks the Claude model for a start or a resume, one of the `models.claude` setting, else `models.default` (the docs list each key and its default).
   It is refused for any other id, an empty or missing value, on GLM, which maps every model itself, and for a reviewer or tester (a column of either, or a resume of a `reviewer-` or `tester-` session) on anything but `models.checker`, which a checker runs on with no `--model`,
