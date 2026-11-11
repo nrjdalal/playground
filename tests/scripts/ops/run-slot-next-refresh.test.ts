@@ -7,7 +7,7 @@ import { SCRIPT, machine, runSlot, stop } from "./run-slot-fake"
 // a check waits on its run's exit, so the timeout only catches a hang
 setDefaultTimeout(60_000)
 
-// issue 1477, 7 Nov: a ticket sat 30 minutes while every fresh head read named it, because the oldest's look had named a bigger ticket under its own frozen lanes verdict and never looked again; capacity counts the slots the lanes open, and a waiter behind the head wakes on run-slot.next alone, so these rows hold the oldest to naming, within four polls, whoever a fresh read names
+// issue 1477, 7 Nov: a ticket sat 30 minutes while every fresh head read named it, because the oldest's look had named a bigger ticket under its own frozen lanes verdict and never looked again; capacity counts the slots the lanes open, and a waiter behind the head wakes on run-slot.next alone, so these rows hold the oldest to naming, within a poll, whoever a fresh read names
 type Machine = ReturnType<typeof machine>
 
 // the held slots and the two paper tickets behind the live oldest waiter, ns names after its spawn's so the oldest writes run-slot.next: a reviewer's medium, which fits the lanes open alone (4 held of 8, class 4 ahead of the plain), and a plain small, which fits both verdicts (4 held of 6 shut)
@@ -54,7 +54,7 @@ const namesWithin = async (named: () => string, ticket: string, seconds: number)
 }
 
 describe("the oldest names the queue's fresh pick through a lanes flip", () => {
-  test("one the gauges shut within four polls of its open-lanes look, as a fresh head read names it", async () => {
+  test("one the gauges shut within a poll of its open-lanes look, as a fresh head read names it", async () => {
     const { m, t2, t3, named } = setup(80)
     const w = m.start("worker-w", { RUN_SLOT_POLL: "0.2", RUN_SLOT_SIZE: "big" })
     // the open-lanes look names the reviewer's medium, the first in the order that fits 4 held of 8
@@ -68,7 +68,7 @@ describe("the oldest names the queue's fresh pick through a lanes flip", () => {
   })
 
   // the direction the head already watched, so the flip in both directions keeps its naming
-  test("and one the gauges open within four polls of its shut-lanes look, as a fresh head read names it", async () => {
+  test("and one the gauges open within a poll of its shut-lanes look, as a fresh head read names it", async () => {
     const { m, t2, t3, named } = setup(30)
     const w = m.start("worker-w", { RUN_SLOT_POLL: "0.2", RUN_SLOT_SIZE: "big" })
     // the shut-lanes look names the small ticket, the first in the order that fits 4 held of 6
