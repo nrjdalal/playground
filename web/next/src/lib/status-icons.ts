@@ -184,14 +184,13 @@ export type LightFacts = {
   waits?: Wait[]
 }
 
-// Pure: an agent's one state, the most urgent that applies: Stuck (Paused · usage limit when the account's usage limit alone holds it, since it waits on the reset rather than a person), Merged, Down (Ended when closed on purpose, Parked when the roster has it parked), Failing, State unknown (a session whose state no record tells, a Codex one), No progress, Fixing (at work on a pull request whose CI fails or whose review is below 5/5), Working, Waiting (idle with something it waits on still open), Waiting on approvals (one still needed, or two and more), Ready (5/5 at the head, CI green or none, no approval missing), Parked, Idle. A reviewer or tester idle after its verdict at the head is done.
+// Pure: an agent's one state, the most urgent that applies: Stuck (Paused · usage limit when the account's usage limit alone holds it, since it waits on the reset rather than a person), Merged, Down (Ended when closed on purpose, Parked when the roster has it parked), Failing, No progress, Fixing (at work on a pull request whose CI fails or whose review is below 5/5), Working, Waiting (idle with something it waits on still open), Waiting on approvals (one still needed, or two and more), Ready (5/5 at the head, CI green or none, no approval missing), Parked, Idle (State unknown for a session whose state no record tells, a Codex one). A reviewer or tester idle after its verdict at the head is done.
 export function lightOf(facts: LightFacts): ShownState {
   const { light, pr = null } = facts
   if (light === "needs-you") return facts.usageLimit ? "usage-limit" : "stuck"
   if (pr?.state === "merged") return "merged"
   if (light === "down") return facts.ended ? "ended" : facts.rosterParked ? "parked" : "down"
   if (facts.failed) return "failing"
-  if (light === "unknown") return "unknown"
   if (light === "working") {
     if ((facts.idleFor ?? 0) > NO_PROGRESS_MS) return "no-progress"
     const open = pr?.state === "open"
@@ -207,7 +206,7 @@ export function lightOf(facts: LightFacts): ShownState {
     if (pr.score === "5/5" && (pr.ci === "passing" || pr.ci === "none")) return "ready"
   }
   if (facts.parked) return "parked"
-  return "idle"
+  return light === "unknown" ? "unknown" : "idle"
 }
 
 // Pure: a state in words, as the row's tooltip and the table's Status column write it: the waiting state names what it waits on first, and Playground's own Stuck is on you, since his pickers are yours to answer.

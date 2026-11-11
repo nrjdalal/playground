@@ -177,7 +177,7 @@ export function factsOf(
   // a runner's job runs as a background task while its session idles, so it reads Working (the plan: "Runners use Working while their job runs, Stuck and Down")
   const runs =
     agent.role === "runner" && (live.worker?.tasks ?? []).some((task) => task.state === "running")
-  const light = held === "idle" && runs ? "working" : held
+  const light = (held === "idle" || held === "unknown") && runs ? "working" : held
   // No progress reads the session's own work alone: a quiet runner whose job runs is not hung
   const active = light === held ? (live.worker?.lastActiveAt ?? null) : null
   return {
