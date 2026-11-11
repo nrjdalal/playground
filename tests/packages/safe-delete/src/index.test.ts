@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { ROSTER_KINDS, ROSTER_ROLE_OF_KIND } from "../../../../packages/config/src/kinds"
 import {
   CARVE_OUTS,
   type CarveOut,
@@ -648,11 +649,11 @@ describe("worktreeRefusal", () => {
     // [folder, branch, live session, held]
     const cases: [string, string, string, boolean][] = [
       ["PG-864-second-dispatcher", "PG-864-second-dispatcher", "dispatcher", false],
-      ["PG-5-stops", "PG-5-stops", "ops", false],
-      ["PG-6-opsdesk", "PG-6-opsdesk", "ops", false],
-      ["PG-12-ops", "PG-12-ops", "ops", true],
-      ["PG-13-ops-job", "PG-13-ops-job", "ops", true],
-      ["PG-14-misc", "PG-14-ops-fix", "ops", true],
+      ["PG-5-splint", "PG-5-splint", "lint", false],
+      ["PG-6-lintdesk", "PG-6-lintdesk", "lint", false],
+      ["PG-12-lint", "PG-12-lint", "lint", true],
+      ["PG-13-lint-job", "PG-13-lint-job", "lint", true],
+      ["PG-14-misc", "PG-14-lint-fix", "lint", true],
     ]
     const seen = cases.map(([folder, branch, name]) => {
       const at = join(roots.main, ".claude", "worktrees", folder)
@@ -662,6 +663,63 @@ describe("worktreeRefusal", () => {
       return [folder, worktreeRefusal(at, roots, holders) === holds]
     })
     expect(seen).toEqual(cases.map(([folder, , , held]) => [folder, held]))
+  })
+
+  // A manager seat names the work it routes, not a worktree, so its name holds none, while its branch or PR still does
+  describe("a manager seat's name", () => {
+    const seat = (folder: string, agent: object) => {
+      const { holders, roots } = withWorktree()
+      const at = join(roots.main, ".claude", "worktrees", folder)
+      git(roots.main, "worktree", "add", "-q", "-b", folder, at)
+      writeFileSync(holders.roster, JSON.stringify({ agents: [agent] }))
+      return { at, holders, roots }
+    }
+
+    test("a live ops row holds no worktree by its name alone, so a clean one with a freed PR goes", () => {
+      const { at, holders, roots } = seat("PG-9-ops-thing", {
+        kind: "ops",
+        name: "ops",
+        status: "working",
+      })
+      const freed = { head: git(at, "rev-parse", "HEAD"), number: 9, state: "MERGED" as const }
+      expect(worktreeRefusal(at, roots, { ...holders, freed })).toBeNull()
+    })
+
+    test.each(ROSTER_KINDS.filter((kind) => ROSTER_ROLE_OF_KIND[kind] === "manager"))(
+      "a live %s row holds no worktree by its name alone",
+      (kind) => {
+        const { at, holders, roots } = seat(`PG-9-${kind}-thing`, {
+          kind,
+          name: kind,
+          status: "working",
+        })
+        const freed = { head: git(at, "rev-parse", "HEAD"), number: 9, state: "MERGED" as const }
+        expect(worktreeRefusal(at, roots, { ...holders, freed })).toBeNull()
+      },
+    )
+
+    test("a live ops row whose branch is the worktree's still holds it", () => {
+      const { at, holders, roots } = seat("PG-9-ops-thing", {
+        branch: "PG-9-ops-thing",
+        kind: "ops",
+        name: "ops",
+        status: "working",
+      })
+      expect(worktreeRefusal(at, roots, holders)).toBe(
+        `${at} is held by ops, which the roster lists as working`,
+      )
+    })
+
+    test("a live worker row still holds a worktree by its name", () => {
+      const { at, holders, roots } = seat("PG-9-ab12cd-worker-x", {
+        kind: "worker",
+        name: "ab12cd-worker",
+        status: "working",
+      })
+      expect(worktreeRefusal(at, roots, holders)).toBe(
+        `${at} is held by ab12cd-worker, which the roster lists as working`,
+      )
+    })
   })
 
   test("refuses a worktree a running node_modules clone reads from or copies into, naming the clone, and lets it go once the clone is gone", () => {

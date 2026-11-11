@@ -28,7 +28,7 @@ Read the section for the mode you start and for each flag you pass, and the sect
   the Builder and Ops (which `playground planner`, `playground builder` and `playground ops` start the first time the dispatcher routes work to each) open instead in a workspace of their own, named after each,
   in the main checkout's `.claude/worktrees/leads` (`manager <name> <brief>`, the optimizer by its name or its roster kind, a new name given `kind=optimizer` first the same way;
   an orchestrator of any other manager kind in `kinds.ts`, such as the Assistant or the seatless `orchestrator` kind the sidebar's plus starts, any number at once, opens there too, as a lead reporting to the session its row names, once `scripts/roster.ts set <name> kind=<kind> reportsTo=<session> task=<what it does>` has given it both, and spawn.sh refuses it naming that line until it has;
-  spawn.sh refuses the second dispatcher on Claude without `--account <email>`, a second account, so it never shares the first's login, and a resume of it whose pin reads claude needs `--account` again, since nothing records the account).
+  spawn.sh refuses the second dispatcher on Claude without `--account <email>`, a second account, so it never shares the first's login, and a resume of it whose pin names claude needs `--account` again, since nothing records the account).
 
 ## Capacity gate
 
@@ -130,7 +130,8 @@ The launch starts with `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, `ANT
 which carries 3x the plan's quota of glm-5.3 and keeps the 1M window the `[1m]` gives Claude Code; the small fast one `models.glm` bare), `ENABLE_TOOL_SEARCH=true`, since on a base URL that is not Anthropic's Claude Code would load every MCP tool's schema at start, past that window, and runs `--model 'glm-5.3-flash[1m]'` with `--settings ~/.playground/factory-settings-glm-400k.json`,
 which spawn.sh rebuilds from the factory's settings on every GLM launch with the telemetry turned off (`CLAUDE_CODE_ENABLE_TELEMETRY=0`, `OTEL_METRICS_EXPORTER=none`), since the user settings may export usage to an org's usage collector, which counts Claude usage alone; that file's env outranks the user settings' env, and it holds every factory hook.
 The session compacts in the factory's one 400k window (**context**).
-A start records its backend in `~/.playground/backends/<name>` once herdr has the session (`--backend claude` names the default), and a resume runs that backend: it refuses `--backend` while a pin stands, a resume with no pin and no `--backend`, and a pin that reads neither glm nor claude.
+A start records its harness and backend in `~/.playground/backends/<name>` once herdr has the session, as `claude-code glm` or `claude-code claude` (`--backend claude` names the default; `HARNESSES` in `packages/settings/src/harnesses.ts` lists each harness, Claude Code alone, with its backends), and a resume runs that backend, reading a pin of the backend alone too,
+as one written before the harness split holds: it refuses `--backend` while a pin stands, a resume with no pin and no `--backend`, and a pin that reads neither glm nor claude.
 So a running session moves to GLM only by a close and a fresh start under `--backend glm`.
 The 98% switch to GLM is retired by his decision on Inbox #i827: the account rotation moves the factory between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
 
