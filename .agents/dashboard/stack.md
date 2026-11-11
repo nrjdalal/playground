@@ -160,7 +160,7 @@
   Under `PLAYGROUND_HOSTED=1` Yard's routes take the `member` rung, or the one their route names, instead (the hosted rule above).
   An open WebSocket is authorised once, at its upgrade, so a demotion or sign-out elsewhere takes effect when it next reconnects.
   The hosted app answers a refused upgrade as a socket closed at once with close code 4000 + the status (4401, 4403) and the refusal's message as its reason (`refusedUpgradeCloses` in `api/hono/src/lib/server.ts`), since on Vercel a status thrown before `upgradeWebSocket` reaches no client.
-- ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: every Claude Code session the ingest stores, Playground's own on a stack that reads this machine (above), each transcript line as a `claude_entry`, and how far each file has been read) in the dashboard's local Postgres on 127.0.0.1, never a shared database:
+- ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: every Claude Code and Codex session the ingest stores, Playground's own on a stack that reads this machine (above), each transcript line as a `claude_entry`, and how far each file has been read) in the dashboard's local Postgres on 127.0.0.1, never a shared database:
   they hold whatever a session read or ran, secrets and customer data included.
   `api/hono/src/lib/sessions/lines.ts` turns a transcript line into an entry and its session's facts.
 - ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, one zod schema over env with generic defaults: the owner (`PLAYGROUND_OWNER_NAME`, Owner) and the work queue, off by default (`WORK_GITHUB_ORG`, a GitHub login or none, and `WORK_LABEL`, Work; dashboard.md).
