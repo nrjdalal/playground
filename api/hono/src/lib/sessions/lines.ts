@@ -20,11 +20,6 @@ export const ENTRY_KINDS = [
 
 export type EntryKind = (typeof ENTRY_KINDS)[number]
 
-// The harness a stored session ran on: a Claude Code transcript or a Codex rollout (rollout.ts).
-export const HARNESSES = ["claude-code", "codex"] as const
-
-export type Harness = (typeof HARNESSES)[number]
-
 export const SESSION_KINDS = ["fork", "headless", "interactive", "subagent"] as const
 
 type Json = Record<string, unknown>

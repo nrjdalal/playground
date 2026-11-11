@@ -36,7 +36,7 @@ export const claudeSession = pgTable(
     description: text("description"),
     entryCount: integer("entry_count").default(0).notNull(),
     gitBranch: text("git_branch"),
-    // The harness that ran the session, claude-code or codex (HARNESSES in api/hono/src/lib/sessions/lines.ts); every session stored before Codex's rollouts were read is Claude Code's.
+    // The harness that ran the session, a HarnessId of HARNESSES in packages/settings/src/harnesses.ts; every session stored before Codex's rollouts were read is Claude Code's.
     harness: text("harness").default("claude-code").notNull(),
     id: text("id").primaryKey(),
     inputTokens: bigint("input_tokens", { mode: "number" }).default(0).notNull(),
