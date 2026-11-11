@@ -587,9 +587,95 @@ describe("the slot-stuck alert", () => {
   }
 
   test("pages when the waiter could take run-slot", async () => {
-    const alert = (await queue(false)) as { kind: string; name: string }
+    const alert = (await queue(false)) as { case: string; kind: string; line: string; name: string }
     expect(alert.kind).toBe("slot-stuck")
     expect(alert.name).toBe("worker-m")
+    expect(alert.case).toBe("could-take")
+    expect(alert.line).toContain("could take it and takes nothing")
+    expect(alert.line).not.toContain("held by")
+  })
+
+  // issue 1842: under the battery's or focus's hold can-take reads closed, so the alert names the hold the queue waits on, not a stall, and sends nothing
+  const HOLD = `
+import importlib.util, json, os, sys
+spec = importlib.util.spec_from_file_location("run", sys.argv[1])
+run = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(run)
+clock = [1_800_000_000.0]
+run.time.time = lambda: clock[0]
+sent = []
+run.notify = lambda text, to="dispatcher": sent.append([to, text])
+run.log = lambda line: None
+for fn in ("stall", "ending_alert", "api_stop_alerts", "slot_idle_alerts", "docker_check", "memory_files", "heavy_jobs", "slot_alerts", "capped_alert"):
+    setattr(run, fn, lambda *a, **k: [])
+run.herdr_sessions = lambda: []
+run.moving = lambda now_t=None: None
+os.makedirs(run.HERE, exist_ok=True)
+state = {"blocks": {}}
+run.cycle(state)
+clock[0] += 200
+run.cycle(state)
+alerts = json.load(open(os.path.join(run.OPS, "alerts-pending.json")))["alerts"]
+print(json.dumps({"alerts": [a for a in alerts if a["kind"] == "slot-stuck"], "sent": sent}))
+`
+  const held = async (file: string, line: string) => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    mkdirSync(join(ops, "run-slot.waiters"), { recursive: true })
+    for (const off of ["run-slot.3-off", "run-slot.4-off"]) writeFileSync(join(ops, off), "")
+    writeFileSync(join(ops, file), line)
+    writeFileSync(join(ops, "run-slot.waiters", `2-${process.pid}-worker-m`), "s2 22 2 medium\n")
+    const proc = Bun.spawn([...PYTHON, "-I", "-c", HOLD, RUN_PY], {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+        RUN_SLOT_SIZE: "medium",
+        TZ: "UTC",
+        UV_CACHE_DIR: process.env.UV_CACHE_DIR,
+        UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
+    expect(code, err).toBe(0)
+    return JSON.parse(out) as {
+      alerts: { case: string; line: string; name: string }[]
+      sent: [string, string][]
+    }
+  }
+
+  test("names the battery's hold and sends no stall line", async () => {
+    const { alerts, sent } = await held(
+      "run-slot.battery",
+      "ops 2026-11-11T12:00:00Z 2099-01-01T00:00:00Z held for the row\n",
+    )
+    expect(sent).toEqual([])
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0].case).toBe("hold")
+    expect(alerts[0].name).toBe("worker-m")
+    expect(alerts[0].line).toContain("held by the battery's red mark (run-slot.battery)")
+    expect(alerts[0].line).not.toContain("fit no open slot")
+    expect(alerts[0].line).not.toContain("could take")
+  })
+
+  test("names the focus hold with its holder and sends no stall line", async () => {
+    const { alerts, sent } = await held(
+      "run-slot.focus",
+      "worker-f 2026-11-11T12:00:00Z 2099-01-01T00:00:00Z focus for the row\n",
+    )
+    expect(sent).toEqual([])
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0].case).toBe("hold")
+    expect(alerts[0].line).toContain("held by worker-f's focus (run-slot.focus)")
+    expect(alerts[0].line).not.toContain("fit no open slot")
+    expect(alerts[0].line).not.toContain("could take")
   })
 
   test("stays quiet while the waiter's units are not free", async () => {
