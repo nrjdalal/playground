@@ -1,5 +1,5 @@
 name: Install zsh
-description: Installs zsh from a cache of its .deb files, keyed on the runner image, and on a miss fetches them with apt, 2 tries of at most 140 s, then saves them; apt's lookup fails for hours at a time (exit 100), so after both tries it installs zsh with the image's Homebrew and puts it on PATH.
+description: Installs zsh from a cache of its .deb files, keyed on the runner image, and on a miss fetches them with apt, 2 tries of at most 140 s, then saves them; apt's lookup fails for hours at a time (exit 100), so after both tries it installs zsh with the image's Homebrew, links it at /usr/bin/zsh for tests that run on a narrow PATH, and puts its bin on PATH.
 
 runs:
   using: composite
@@ -41,6 +41,7 @@ runs:
         brew=/home/linuxbrew/.linuxbrew/bin/brew
         echo "apt is unreachable: zsh from Homebrew's bottles on ghcr.io"
         if HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 timeout 300 "$brew" install zsh; then
+          sudo ln -sf "$("$brew" --prefix)/bin/zsh" /usr/bin/zsh
           echo "$("$brew" --prefix)/bin" >> "$GITHUB_PATH"
           exit 0
         fi
