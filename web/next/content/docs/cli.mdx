@@ -148,7 +148,7 @@ The dashboard moves its own leftovers there too: a fixture stack's scratch folde
 `playground rm --list` prints what the trash holds, and `playground rm --restore <id>` puts one item back where it was, refusing when something already stands there, and a worktree's restore also refuses as its `--worktree` lines below say.
 It refuses, before moving anything:
 
-- HOME, any folder that holds it, and `~/.config`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/Library`, `~/Music` and `~/.playground` with everything in them, checked after symlinks resolve.
+- HOME, any folder that holds it, and `~/.config`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/Library`, `~/Music` and `~/.playground` with everything in them but the caller's own `scratch/<name>/` and `scratchpad/<name>/` there, checked after symlinks resolve.
 - The main checkout and everything in it but the worktrees under `.claude/worktrees/`.
 - A path over 5,000 files or 2 GB, and a fourth delete within a minute from one session; these and a protected path are also sent to the dispatcher, a session at the per-minute limit once for each burst, however many deletes it then tries.
 - A move to another disk, since that would copy rather than rename.
