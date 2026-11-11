@@ -952,6 +952,19 @@ describe("purgeTrash", () => {
     expect(existsSync(join(trash, old))).toBe(true)
   })
 
+  test("removes its batch at a load over the cap", () => {
+    const { trash } = machine()
+    const old = batchAt(trash, new Date(NOW.getTime() - 8 * DAY))
+    const done = purgeTrash(trash, {
+      free: () => 20 * GB,
+      load: () => 19,
+      loadCap: 15,
+      now: NOW,
+    })
+    expect(done.removed).toEqual([old])
+    expect(existsSync(join(trash, old))).toBe(false)
+  })
+
   test("stops between batches when the load reaches the cap mid-purge", () => {
     const { trash } = machine()
     const first = batchAt(trash, new Date(NOW.getTime() - 9 * DAY), "a")
@@ -984,4 +997,77 @@ describe("purgeTrash", () => {
     expect(done.leftForLoad).toEqual([])
     expect(existsSync(join(trash, young))).toBe(false)
   })
+})
+
+describe("stripTrash", () => {
+  const DAY = 86_400_000
+  const batchTree = (roots: Roots, at: Date, session: string) => {
+    const stamp = at.toISOString().replace(/[-:]|\.\d{3}/g, "")
+    const batch = `${stamp}-${session}`
+    const tree = join(roots.trash, batch, "1", "review-clone")
+    file(join(tree, "node_modules", "left-pad", "index.js"))
+    file(join(tree, "packages", "web", "node_modules", "react", "index.js"))
+    file(join(tree, "web", "next", ".next", "build-manifest.json"))
+    file(join(tree, "src", "index.ts"))
+    writeFileSync(
+      join(roots.trash, batch, "manifest.jsonl"),
+      `${JSON.stringify({
+        at: at.toISOString(),
+        files: 4,
+        id: `${batch}/1`,
+        path: join(roots.home, "review-clone"),
+        reason: "playground rm",
+        session,
+        size: 40,
+      })}\n`,
+    )
+    return batch
+  }
+
+  test("strips node_modules (root and a workspace's) and web/next/.next from a trashed batch, keeps the rest and the manifest, and a restore still works", async () => {
+    const roots = machine()
+    const old = batchTree(roots, new Date(NOW.getTime() - 2 * DAY), "s")
+    const young = batchTree(roots, new Date(NOW.getTime() - DAY), "t")
+    const slept: number[] = []
+    // A dynamic import cast keeps this row alone red while the strip is unbuilt, and the file still loads.
+    const { stripTrash } = (await import("../../../../packages/safe-delete/src")) as unknown as {
+      stripTrash: (
+        trash: string,
+        io?: { sleep?: (ms: number) => Promise<void> },
+      ) => Promise<{ batches: string[]; folders: number }>
+    }
+    const done = await stripTrash(roots.trash, { sleep: async (ms) => void slept.push(ms) })
+    expect(done.batches).toEqual([old, young])
+    expect(done.folders).toBe(6)
+    expect(slept).toHaveLength(6)
+    for (const batch of [old, young]) {
+      const tree = join(roots.trash, batch, "1", "review-clone")
+      expect(existsSync(join(tree, "node_modules"))).toBe(false)
+      expect(existsSync(join(tree, "packages", "web", "node_modules"))).toBe(false)
+      expect(existsSync(join(tree, "web", "next", ".next"))).toBe(false)
+      expect(existsSync(join(tree, "src", "index.ts"))).toBe(true)
+      const entry = JSON.parse(
+        readFileSync(join(roots.trash, batch, "manifest.jsonl"), "utf8").trim(),
+      ) as { stripped?: number }
+      expect(entry.stripped).toBe(3)
+    }
+    expect(restore(`${old}/1`, roots)).toEqual({ path: join(roots.home, "review-clone") })
+    expect(existsSync(join(roots.home, "review-clone", "src", "index.ts"))).toBe(true)
+  })
+})
+
+test("a path outside a tree's node_modules and web/next/.next is never removed outright", () => {
+  const roots = machine()
+  const tree = join(roots.home, "review-clone")
+  file(join(tree, "node_modules", "left-pad", "index.js"))
+  file(join(tree, "web", "next", ".next", "build-manifest.json"))
+  file(join(tree, "web", "next", ".next-cache", "y.js"))
+  file(join(tree, "packages", "app", ".next", "y.js"))
+  file(join(tree, "src", "index.ts"))
+  const done = quarantine(tree, opts, roots)
+  if (!("id" in done)) throw new Error(`quarantine refused: ${done.refused}`)
+  expect(restore(done.id, roots)).toEqual({ path: tree })
+  expect(existsSync(join(tree, "web", "next", ".next-cache", "y.js"))).toBe(true)
+  expect(existsSync(join(tree, "packages", "app", ".next", "y.js"))).toBe(true)
+  expect(existsSync(join(tree, "src", "index.ts"))).toBe(true)
 })

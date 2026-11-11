@@ -852,6 +852,26 @@ describe("the beats that send no line", () => {
     )
   })
 
+  test("the trash purge removes its batch at a load over the cap", async () => {
+    const ops = scratch()
+    const trash = join(ops, "..", "trash")
+    const now = new Date("2026-11-02T12:17:00Z")
+    mkdirSync(join(trash, "20261020T000000Z-s", "1"), { recursive: true })
+    mkdirSync(join(trash, "20261101T000000Z-s", "1"), { recursive: true })
+    const { ctx, runs, sent } = fake(ops, now)
+    await trashPurge(
+      undefined,
+      () => 20e9,
+      () => 25,
+    )(ctx)
+    expect(existsSync(join(trash, "20261020T000000Z-s"))).toBe(false)
+    expect(runs).toEqual([])
+    expect(sent).toEqual([])
+    expect(await Bun.file(join(ops, "log", "trash-purge.log")).text()).toContain(
+      "removed 1 (20261020T000000Z-s)",
+    )
+  })
+
   test("the trash purge waits at the load cap and names the batches it left", async () => {
     const ops = scratch()
     const trash = join(ops, "..", "trash")

@@ -98,6 +98,11 @@ const git = (cwd: string, ...args: string[]) => {
   return run.stdout.toString().trim()
 }
 
+const file = (path: string, text = "x"): void => {
+  mkdirSync(join(path, ".."), { recursive: true })
+  writeFileSync(path, text)
+}
+
 // A mkdtemp machine: HOME with its main checkout and data folder, and deps that record each notify line.
 const machine = () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "rm-")))
@@ -137,6 +142,63 @@ test("runRm moves a path, lists it and restores it, telling no one", async () =>
   expect(await runRm(["--restore", `${batch}/1`], deps)).toBe(0)
   expect(existsSync(path)).toBe(true)
   expect(told).toEqual([])
+})
+
+test("rm of a tree leaves its node_modules and web/next/.next out of the trash, keeps every other file, and the move and restore lines name the install", async () => {
+  const { deps, home } = machine()
+  const tree = join(home, "review-clone")
+  file(join(tree, "node_modules", "left-pad", "index.js"))
+  file(join(tree, "packages", "web", "node_modules", "react", "index.js"))
+  file(join(tree, "web", "next", ".next", "build-manifest.json"))
+  file(join(tree, "web", "next", ".next-cache", "y.js"))
+  file(join(tree, "src", "index.ts"))
+  const log = console.log
+  const said: string[] = []
+  console.log = (line: string) => void said.push(line)
+  const code = await runRm([tree, "--reason", "scratch"], deps)
+  expect(code).toBe(0)
+  const trash = join(deps.data, "trash")
+  const [batch] = readdirSync(trash)
+  const item = join(trash, batch, "1", "review-clone")
+  expect(existsSync(join(item, "node_modules"))).toBe(false)
+  expect(existsSync(join(item, "packages", "web", "node_modules"))).toBe(false)
+  expect(existsSync(join(item, "web", "next", ".next"))).toBe(false)
+  expect(existsSync(join(item, "web", "next", ".next-cache", "y.js"))).toBe(true)
+  expect(existsSync(join(item, "src", "index.ts"))).toBe(true)
+  expect(said.join("\n")).toContain("bun install")
+  expect(await runRm(["--restore", `${batch}/1`], deps)).toBe(0)
+  console.log = log
+  expect(existsSync(join(tree, "src", "index.ts"))).toBe(true)
+  expect(existsSync(join(tree, "node_modules"))).toBe(false)
+  expect(said.join("\n")).toContain("bun install")
+})
+
+test("the restore of a batch the strip took rebuildables from names the install", async () => {
+  const { deps, home } = machine()
+  const trash = join(deps.data, "trash")
+  const batch = "20261101T120000Z-xssrgq"
+  file(join(trash, batch, "1", "review-clone", "node_modules", "left-pad", "index.js"))
+  file(join(trash, batch, "1", "review-clone", "src", "index.ts"))
+  writeFileSync(
+    join(trash, batch, "manifest.jsonl"),
+    `${JSON.stringify({
+      at: "2026-11-01T12:00:00.000Z",
+      files: 2,
+      id: `${batch}/1`,
+      path: join(home, "review-clone"),
+      reason: "playground rm",
+      session: "xssrgq",
+      size: 20,
+      stripped: 1,
+    })}\n`,
+  )
+  const log = console.log
+  const said: string[] = []
+  console.log = (line: string) => void said.push(line)
+  expect(await runRm(["--restore", `${batch}/1`], deps)).toBe(0)
+  console.log = log
+  expect(existsSync(join(home, "review-clone", "src", "index.ts"))).toBe(true)
+  expect(said.join("\n")).toContain("bun install")
 })
 
 test("runRm tells the dispatcher once when a session hits the per-minute cap, however many tries it refuses", async () => {
