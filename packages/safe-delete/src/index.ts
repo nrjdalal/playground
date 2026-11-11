@@ -282,7 +282,7 @@ const recentMoves = (trash: string, session: string, now: Date): TrashEntry[] =>
     .filter((entry) => Date.parse(entry.at) > since)
 }
 
-// Whether a cap refusal is its burst's first, so it alerts once: a burst is the moves that filled the cap, keyed by the newest of them, and the told mark is a file named for that key, made with wx, so of two tries at the same instant the first alone creates it and alerts, and every later try inside the burst, whose key is already told, is a plain refusal. A mark of the old shape, a content file at the session's own path, is cleared at the session's first burst, since left alone it turns every write ENOTDIR and silences the session; the folder's removal runs for that case alone, since a concurrent try's fresh folder must stand and its wx answer decide.
+// Whether a cap refusal is its burst's first, so it alerts once: the told mark is a file named for the burst's key, made with wx, so of two tries at one instant the first alone creates it and alerts, and a later try inside the burst, whose key is already told, is a plain refusal. A mark of the old shape, a content file at the session's own path, is cleared at the session's first burst, the removal for that case alone, so a concurrent try's fresh folder stands; the design's history is in the PG-1733 commits.
 const firstOfBurst = (trash: string, session: string, recent: TrashEntry[]): boolean => {
   const key =
     recent
