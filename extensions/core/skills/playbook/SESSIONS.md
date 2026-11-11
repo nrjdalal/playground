@@ -191,7 +191,9 @@ A lead waits on the signals the **polling** rule names, never a `sleep` loop or 
 A signal that stops coming may be the Mac asleep: read `pmset -g log | grep -E ' (Sleep|Wake) {2,}'` before you name a gap in a relay, a tick or a sampled series, and leave the sleep out of any rate.
 A Monitor or watch script runs under zsh, which does not word-split `$list`: loop over literal values or write `${=list}`, since zsh reads `$list` as one item.
 Run each measurement as its own background task, since a chained task signals only when the whole chain ends, and a stall in its first stage once stayed hidden for 41 minutes.
-Done when every wait ends on a signal, each background task holds one measurement, and every gap you name is checked against the sleep log.
+A wait on an owner step starts with two checks: the step's card is open in the Inbox as an ask the owner can answer, and its precondition can come true (whatever writes the file or state it waits on is running).
+When either check fails, report it to your lead at once, since a dead waiter, one whose condition can never come true, waits for good: one sat about 3 hours on a file only a job that was off could write.
+Done when every wait ends on a signal, each background task holds one measurement, every wait on an owner step has its open card and a precondition that can come true, and every gap you name is checked against the sleep log.
 
 ## Answer a picker
 
