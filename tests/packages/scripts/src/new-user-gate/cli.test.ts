@@ -188,7 +188,6 @@ describe("step 2's database click", () => {
       },
       () => existsSync(env) && /^POSTGRES_URL=\S/m.test(readFileSync(env, "utf8")),
       { buttonMs: 1_000, pollMs: 1, urlMs: 2_000 },
-      // @ts-expect-error red first: databaseCheck takes no reopen yet
       () => opens++,
     )
     expect(got).toEqual({ detail: "", ok: true })
