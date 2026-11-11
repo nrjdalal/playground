@@ -63,6 +63,10 @@ export const groups: Group[] = [
         "bunx --package=turbo then sh -c after a light turbo call",
         "bunx --package=turbo sh -c 'turbo --version; turbo run test'",
       ],
+      ["bunx -p next then sh -c", "bunx -p next sh -c 'next build'"],
+      ["bunx -p next then env", "bunx -p next env next build"],
+      ["bun x -p next then bash -c", "bun x -p next bash -c 'cd . && next build'"],
+      ["npx -p next then sh -c", "npx -p next sh -c 'next build'"],
     ],
   },
 ]
