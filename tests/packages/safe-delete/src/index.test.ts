@@ -133,6 +133,13 @@ describe("isProtected", () => {
     expect(isProtected(`${own}/../a4b5c6-worker`, roots, opts.session)).toBeString()
   })
 
+  test("holds the exemption closed for a session name no session may hold", () => {
+    const roots = machine()
+    const inside = join(roots.home, ".playground", "scratch", "a", "b")
+    expect(isProtected(inside, roots, "a/b")).toBeString()
+    expect(isProtected(inside, roots)).toBeString()
+  })
+
   test("refuses a symlink inside the own scratch that points out of it", () => {
     const roots = machine()
     const own = join(roots.home, ".playground", "scratch", opts.session)
