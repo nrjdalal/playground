@@ -160,6 +160,14 @@ describe("the gauges", () => {
     ).toHaveLength(1)
   })
 
+  // an idle share that reads - is a dark sensor, not a busy CPU (issue 1818)
+  test("a top that prints no CPU usage line keeps them open", () => {
+    const m = machine()
+    writeFileSync(join(m.bin, "top"), "#!/bin/bash\necho no cpu usage reading\n")
+    chmodSync(join(m.bin, "top"), 0o755)
+    expect(look(m).slots).toBe("4\n")
+  })
+
   // top's first sample reads since boot, so a top that prints it alone gives no idle share, rather than its 98%, which no longer counts as busy (issue 1818)
   test("a top that prints its first sample alone keeps them open", () => {
     const m = machine()
