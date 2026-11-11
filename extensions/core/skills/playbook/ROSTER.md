@@ -87,5 +87,5 @@ Run each row as `bun <main checkout>/scripts/roster.ts <row>` (`$PLAYGROUND_REPO
   An entry whose issue is filed is settled too, since its work lives in the issue now: `backlog-done` puts `[#<issue>] ` in front of it, which also takes a `Fix: ` or `<owner>: ` entry out of Next up's priority groups, and whoever runs it tells the builder its index the same way.
 
 - `asks` on the dispatcher's or a lead's entry lists the Inbox decisions it posted, or sent up and the dispatcher posted as the #iN it names, and has not yet acted on.
-  A read mark (`bun run --cwd <dashboard checkout> ask get <id> --ack`) says an answer reached the asker, not that it was acted on, so the list stays; a go closes only with `bun run ask ack <id> --link <url>` or `--no-link "<why>"` once carried out (the **ask** rule).
+  A read mark (`playground ask get <id> --ack`) says an answer reached the asker, not that it was acted on, so the list stays; a go closes only with `playground ask ack <id> --link <url>` or `--no-link "<why>"` once carried out (the **ask** rule).
 - Pass no `updatedAt` or `lastReportAt`: roster.ts stamps them.

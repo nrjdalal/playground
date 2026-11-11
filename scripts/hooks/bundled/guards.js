@@ -2,7 +2,7 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-desktop-owner-app.ts
-import { realpathSync } from "fs";
+import { realpathSync as realpathSync2 } from "fs";
 import { join as join5, resolve as resolve3 } from "path";
 
 // packages/env/src/aliases.ts
@@ -168,6 +168,7 @@ var isRecord = (value) => typeof value === "object" && value !== null && !Array.
 
 // scripts/hooks/shell.ts
 import { AsyncLocalStorage } from "async_hooks";
+import { realpathSync } from "fs";
 import { homedir as homedir2 } from "os";
 import { basename, dirname as dirname2, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
@@ -932,6 +933,8 @@ function walk(lx, scope, nested, inherit) {
       if (after === "&&")
         done.chained = true;
       done.chain = lx.token;
+      if (lx.orRun)
+        done.orRun = true;
       const last = lx.commands[lx.commands.length - 1]?.words;
       const compound = !!done.group && last?.length === 1 && OPENS.has(reserved[0] ?? "") && !HELD.has(reserved[0] ?? "");
       if (reserved.some((w) => HELD.has(w)) || compound)
@@ -964,8 +967,10 @@ function walk(lx, scope, nested, inherit) {
         done.atLeastOnce = true;
       depth = Math.max(0, depth + opened - closed);
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0));
-      if (depth === 0 && FREES.has(op))
+      if (depth === 0 && FREES.has(op)) {
         lx.token = freshToken();
+        lx.orRun = op === "||";
+      }
       after = op;
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted)
@@ -1499,6 +1504,7 @@ async function runAll(lexed, env, visit, builtins) {
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
+  orElse(cmd, env);
   unchain(cmd, env);
   if (cmd.opaque) {
     env.cwdAnywhere = true;
@@ -1657,11 +1663,15 @@ function again(lexed, cmd, parsed) {
 async function nested(cmd, env, body) {
   const chain = env.cwdChain;
   const token = env.cwdChainToken;
+  const or = env.cwdOr;
   env.cwdChain = [];
   env.cwdChainToken = undefined;
+  env.cwdOr = undefined;
   try {
     return await body();
   } finally {
+    const own = env.cwdOr;
+    env.cwdOr = own && own.orChain === undefined ? { ...own, cdChain: cmd.chain, scope: cmd.scope } : or;
     const left = [...new Set([...chain ?? [], ...env.cwdChain ?? []])];
     env.cwdChain = keep(left, env);
     env.cwdChainToken = left.length > 0 ? chain?.length ? token : cmd.chain : undefined;
@@ -1712,7 +1722,8 @@ async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
     return homedir2();
-  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
+  const lexical = dir.value === "-" ? undefined : pathOf(dir, env);
+  const typed = await folder(lexical && physicalCd(args) ? kernelPath(dir, env.cwd, lexical) : lexical);
   const sign = typed ? undefined : tildeSign(name, dir, env);
   const base = sign && (sign === "-" ? env.old?.dir : env.cwd);
   return base ? await folder(base + dir.value.slice(2)) : typed;
@@ -1732,6 +1743,7 @@ function cdTargets(name, cmd, parsed, env, from) {
     return { back: true, paths: [], unread: true };
   const paths = new Set;
   const many = manyTimes(cmd, parsed);
+  const physical = physicalCd(parsed.args);
   let unread = dirs.length > 1;
   for (const typed of dirs.length > 1 ? dirs : [dir]) {
     const word = env.hold?.(typed, cmd, env) ?? typed;
@@ -1744,14 +1756,23 @@ function cdTargets(name, cmd, parsed, env, from) {
         unread = true;
         continue;
       }
-      paths.add(path);
+      const landed = physical ? kernelPath(word, base, path) : path;
+      paths.add(landed);
       if (many && word.value.split("/").includes("..")) {
-        for (const up of ancestors(path))
+        for (const up of ancestors(landed))
           paths.add(up);
       }
     }
   }
   return { back: dirs.length > 1, paths: [...paths], unread };
+}
+var physicalCd = (args) => args.some((a) => /^-[^-]/.test(a.value) && a.value.includes("P"));
+function kernelPath(word, base, lexical) {
+  try {
+    return realpathSync.native(isAbsolute2(word.value) ? word.value : `${base}/${word.value}`);
+  } catch {
+    return lexical;
+  }
 }
 function tildeMove(move, name, parsed, env, from, back) {
   const dir = parsed.args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
@@ -1794,6 +1815,7 @@ async function chdirTo(name, cmd, parsed, env) {
     env.cwdSure = paths[0];
     env.cwdMaybe = [];
     env.cwdUnread = false;
+    env.cwdOr = chained ? undefined : { before: from, cdChain: cmd.chain, scope: cmd.scope };
     if (env.old)
       env.oldFrom = bases;
     if (chained) {
@@ -1803,11 +1825,44 @@ async function chdirTo(name, cmd, parsed, env) {
     return;
   }
   env.cwdSure = undefined;
+  env.cwdOr = undefined;
   const behind = onceOrMore(cmd, parsed) && !unread && !move.back && paths.length > 0 && (chained || (await Promise.all(paths.map(isFolder))).every(Boolean));
   env.cwdMaybe = keep([...new Set([...move.back ? back : behind ? [] : from, ...paths])], env);
   env.cwdUnread = env.cwdUnread || unread || from.length === 0 && paths.length === 0;
 }
 var negated = (cmd) => markers(cmd.words).filter((word) => word === "!").length % 2 === 1;
+var EXITS = new Set(["exit"]);
+function orElse(cmd, env) {
+  const or = env.cwdOr;
+  if (!or)
+    return;
+  if (cmd.chain === or.orChain) {
+    if (or.exits && cmd.detached)
+      env.cwdOr = { ...or, exits: false };
+    return;
+  }
+  if (cmd.chain === or.cdChain) {
+    if (!or.joined)
+      env.cwdOr = { ...or, joined: true };
+    return;
+  }
+  if (or.orChain === undefined && cmd.orRun) {
+    env.cwdOr = {
+      ...or,
+      exits: EXITS.has(parse(cmd).name) && !cmd.detached && cmd.scope === or.scope,
+      landed: { maybe: env.cwdMaybe ?? [], sure: env.cwdSure },
+      orChain: cmd.chain
+    };
+    env.cwdMaybe = keep([...new Set([...startFolders(env), ...or.before])], env);
+    env.cwdSure = undefined;
+    return;
+  }
+  if ((or.joined || or.exits) && or.landed) {
+    env.cwdMaybe = or.landed.maybe;
+    env.cwdSure = or.landed.sure;
+  }
+  env.cwdOr = undefined;
+}
 function unchain(cmd, env) {
   if (!env.cwdChain?.length || cmd.chain === env.cwdChainToken)
     return;
@@ -2228,7 +2283,7 @@ var BUN_DATA_SCRIPTS = new Map([
 var PREBUILD = "bun --no-env-file packages/scripts/src/verify/prebuild.ts api";
 var realOf = (path) => {
   try {
-    return realpathSync(path);
+    return realpathSync2(path);
   } catch {
     return resolve3(path);
   }
@@ -10188,7 +10243,7 @@ async function eachInput(raw, guard, judge) {
 }
 
 // scripts/hooks/no-main-checkout.ts
-import { readdirSync as readdirSync3, readFileSync as readFileSync4, realpathSync as realpathSync2 } from "fs";
+import { existsSync as existsSync7, readdirSync as readdirSync3, readFileSync as readFileSync4, realpathSync as realpathSync3, statSync as statSync3 } from "fs";
 import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute4, join as join10, normalize, resolve as resolve5, sep } from "path";
 
 // packages/settings/src/live.ts
@@ -10833,6 +10888,19 @@ function liveCheckout(main, environment) {
     } catch {}
   }
 }
+function inWorktree(path, worktrees) {
+  if (!path.startsWith(worktrees))
+    return false;
+  const tree = join10(worktrees, path.slice(worktrees.length).split(sep)[0]);
+  return existsSync7(join10(tree, ".git")) || !isFolder2(tree);
+}
+var isFolder2 = (path) => {
+  try {
+    return statSync3(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
 function real(path) {
   const found = resolved(path);
   if (found !== undefined || !isAbsolute4(path))
@@ -10851,7 +10919,7 @@ function real(path) {
 }
 var resolved = (path) => {
   try {
-    return realpathSync2(path);
+    return realpathSync3(path);
   } catch {
     return;
   }
@@ -10947,6 +11015,16 @@ function bunCall(args, env) {
   }
   return { at: k, chained, cwd, filtered, sub, words, xCwd };
 }
+var landing = (word, env, from) => {
+  if (!word || pathOf(word, { ...env, cwd: from }) === undefined)
+    return;
+  const path = isAbsolute4(word.value) ? word.value : `${from}${sep}${word.value}`;
+  try {
+    return realpathSync3.native(path);
+  } catch {
+    return real(resolve5(path));
+  }
+};
 function gitCall(args, env) {
   let cwd = env.cwd;
   let gitDir;
@@ -10956,17 +11034,17 @@ function gitCall(args, env) {
   for (;k < args.length && args[k].value.startsWith("-"); k++) {
     const v = args[k].value;
     if (v === "-C")
-      cwd = args[k + 1] && pathOf(args[++k], { ...env, cwd });
+      cwd = args[k + 1] && landing(args[++k], env, cwd);
     else if (v === "--git-dir" || v.startsWith("--git-dir=")) {
       const word = value(k, "--git-dir");
       if (v === "--git-dir")
         k++;
-      gitDir = word && pathOf(word, { ...env, cwd });
+      gitDir = landing(word, env, cwd);
     } else if (v === "--work-tree" || v.startsWith("--work-tree=")) {
       const word = value(k, "--work-tree");
       if (v === "--work-tree")
         k++;
-      workTree = word && pathOf(word, { ...env, cwd });
+      workTree = landing(word, env, cwd);
     } else if (GIT_TAKES.has(v))
       k++;
   }
@@ -11310,7 +11388,7 @@ async function inspect3(raw, environment, main) {
   const worktrees = join10(checkout, ".claude", "worktrees") + sep;
   const inMain = (raw) => {
     const path = raw === undefined ? undefined : real(resolve5(directory ?? "", raw));
-    return path !== undefined && (path === checkout || path.startsWith(checkout + sep)) && !(path + sep).startsWith(worktrees);
+    return path !== undefined && (path === checkout || path.startsWith(checkout + sep)) && !inWorktree(path, worktrees);
   };
   let live;
   const inLive = (raw) => {
@@ -11699,7 +11777,7 @@ async function check6(raw, shell = process.env.SHELL ?? "zsh") {
 if (false) {}
 
 // scripts/hooks/no-glm-heavy-path.ts
-import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync5, readlinkSync, realpathSync as realpathSync3 } from "fs";
+import { existsSync as existsSync8, readdirSync as readdirSync4, readFileSync as readFileSync5, readlinkSync, realpathSync as realpathSync4 } from "fs";
 import { loadavg } from "os";
 import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute5, join as join13, resolve as resolve7 } from "path";
 
@@ -11742,7 +11820,7 @@ var ruleSettings = defineSettings({
       } catch {
         return false;
       }
-    }, "an IANA time zone, such as UTC or America/New_York")
+    }, "an IANA time zone, such as UTC or Asia/Kolkata")
   },
   "context.window": {
     default: 400000,
@@ -12413,7 +12491,7 @@ function gitOrg(parsed, env, dir, sub, orgs) {
 }
 var realOf2 = (path, depth = 0) => {
   try {
-    return realpathSync3(path);
+    return realpathSync4(path);
   } catch {}
   if (depth > 40)
     return path;
@@ -12434,7 +12512,7 @@ function checkoutOf(path, orgs, roots) {
       break;
     }
     walked.push(at);
-    if (existsSync7(join13(at, ".git"))) {
+    if (existsSync8(join13(at, ".git"))) {
       found = remotes(at).find((r) => isGuarded(orgs, r.owner));
       break;
     }
@@ -14182,7 +14260,7 @@ var factorySettings = defineSettings({
   },
   "factory.publicRepo": {
     default: "",
-    description: "The public repository, or a list of them, the checkout's origin when unset: no-public-leak refuses a write to one that holds private text, and the trace ratchet reads past each one's own name.",
+    description: "The public repository, or a list of them: no-public-leak refuses a write to one that holds private text, and the trace ratchet reads past each one's own name.",
     schema: union([repo, array(repo)])
   },
   "factory.repo": {
@@ -14268,11 +14346,6 @@ var ownerSettings = defineSettings({
     default: [],
     description: "The owner's first name and handles as chat writes them, lowercase: the inbox gate refuses a manager's stop on a line that addresses one of them and asks for an action, and never reads @<handle> as an agent.",
     schema: array(string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a name or handle, lowercase"))
-  },
-  "owner.voice": {
-    default: "",
-    description: "The voice a draft or a slack decision speaks in as the owner: singular has bun run ask refuse one that says we, us, our, ours or ourselves; empty checks none.",
-    schema: _enum(["", "singular"])
   }
 });
 // packages/settings/src/paths.ts
@@ -14408,33 +14481,16 @@ var whatsappSettings = defineSettings({
     schema: e1642
   }
 });
-// packages/scripts/src/playground/setting.ts
-import { resolve as resolve9 } from "path";
-var CHECKOUT2 = resolve9(__CHECKOUT + "/packages/scripts/src/playground", "../../../..");
-var origins = new Map;
-var originRepo = (checkout = CHECKOUT2) => {
-  if (!origins.has(checkout)) {
-    const run = Bun.spawnSync(["git", "-C", checkout, "remote", "get-url", "origin"], {
-      stderr: "ignore"
-    });
-    const url = run.stdout.toString().trim();
-    const slug = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(url)?.[1] ?? "";
-    origins.set(checkout, slug.toLowerCase());
-  }
-  return origins.get(checkout);
-};
-if (false)
-  ;
-
 // packages/scripts/src/trace-count/kinds.ts
-var reposOf = (settings, checkout) => {
+var TODAY_PUBLIC = ["nrjdalal/playground", "nrjdalal/playground-yard"];
+var reposOf = (settings) => {
   const archive = factorySettings.get(settings, "factory.archiveRepo").toLowerCase();
   const archiveOwner = archive ? [archive.split("/")[0]] : [];
   const set = [factorySettings.get(settings, "factory.publicRepo")].flat().filter(Boolean);
   return {
     archive,
     owner: [...new Set([...ownerSettings.get(settings, "owner.names"), ...archiveOwner])],
-    public: set.length ? set.map((repo) => repo.toLowerCase()) : [originRepo(checkout)].filter(Boolean)
+    public: set.length ? set.map((repo) => repo.toLowerCase()) : TODAY_PUBLIC
   };
 };
 var UNSET_REPOS = reposOf({ schemaVersion: 1, values: {} });
@@ -14572,8 +14628,8 @@ async function check16(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-raw-delete.ts
-import { realpathSync as realpathSync4 } from "fs";
-import { basename as basename7, dirname as dirname8, resolve as resolve10, sep as sep4 } from "path";
+import { realpathSync as realpathSync5 } from "fs";
+import { basename as basename7, dirname as dirname8, resolve as resolve9, sep as sep4 } from "path";
 var INSTEAD4 = "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
 var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it, it holds no uncommitted change and its work has landed on canary.";
 var refuse11 = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD4) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
@@ -14651,10 +14707,10 @@ var hidden = (word) => unreadable(word) || !!word.glob && /[*?]|\[[^\]]*\]/.test
 var prefixOf = (v, option, shortest) => v.length >= shortest && option.startsWith(v);
 function real3(path) {
   try {
-    return realpathSync4(path);
+    return realpathSync5(path);
   } catch {
     const parent = dirname8(path);
-    return parent === path ? path : resolve10(real3(parent), basename7(path));
+    return parent === path ? path : resolve9(real3(parent), basename7(path));
   }
 }
 function rootsOf(cwd, session) {
@@ -14870,7 +14926,7 @@ async function check17(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-raw-spawn.ts
-import { join as join16, resolve as resolve11, sep as sep5 } from "path";
+import { join as join16, resolve as resolve10, sep as sep5 } from "path";
 var SPAWN = join16(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
 var HEADS = new Set([
   "agent",
@@ -15013,7 +15069,7 @@ function scratchWorld(args, local, env) {
     return;
   const tmp = env.process.TMPDIR;
   const path = socket.value;
-  if (!tmp?.startsWith("/") || unreadable(socket) || !path.startsWith("/") || !resolve11(path).startsWith(resolve11(tmp) + sep5))
+  if (!tmp?.startsWith("/") || unreadable(socket) || !path.startsWith("/") || !resolve10(path).startsWith(resolve10(tmp) + sep5))
     return `a scratch herdr call whose HERDR_SOCKET_PATH is not a literal path under your TMPDIR (${tmp ?? "unset"}), where a scratch server's socket goes`;
   const servers = (env.process.PLAYGROUND_HERDR_SESSIONS ?? "").split(",");
   if (unreadable(session) || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(session.value) || ["default", "factory", "playground", "playground-probes", "probes", ...servers].includes(session.value))
@@ -15160,9 +15216,9 @@ async function check18(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-raw-wa.ts
-import { realpathSync as realpathSync5 } from "fs";
+import { realpathSync as realpathSync6 } from "fs";
 import { homedir as homedir4 } from "os";
-import { resolve as resolve12 } from "path";
+import { resolve as resolve11 } from "path";
 var refuse13 = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
 var RECURSIVE = new Set(["ack", "ag", "ditto", "find", "rg", "rsync", "tar"]);
 var RECURSIVE_WITH = {
@@ -15174,14 +15230,14 @@ var RECURSIVE_WITH = {
   zip: /^-[A-Za-z]*r/
 };
 var targetsOf = (environment) => {
-  const typed = resolve12(dataDirOf(environment), "whatsapp");
+  const typed = resolve11(dataDirOf(environment), "whatsapp");
   let real = typed;
   try {
-    real = resolve12(realpathSync5(dataDirOf(environment)), "whatsapp");
+    real = resolve11(realpathSync6(dataDirOf(environment)), "whatsapp");
   } catch {}
   return [...new Set([typed, real].map((p) => p.toLowerCase()))];
 };
-var segments = (path) => resolve12(path).toLowerCase().split("/").filter(Boolean);
+var segments = (path) => resolve11(path).toLowerCase().split("/").filter(Boolean);
 function reach(path, target, glob = false) {
   const p = segments(path);
   const t = segments(target);
@@ -15240,7 +15296,7 @@ async function judgeBash(command, cwd, environment) {
           continue;
         for (const raw of [word.value, word.value.slice(word.value.indexOf("=") + 1)]) {
           const value = /^~(?:\/|$)/.test(raw) ? `${homedir4()}${raw.slice(1)}` : raw;
-          const path = value.startsWith("/") ? value : place.cwd && resolve12(place.cwd, value);
+          const path = value.startsWith("/") ? value : place.cwd && resolve11(place.cwd, value);
           if (!path)
             continue;
           const stands = worst(path, targets, !!word.glob);
@@ -15279,7 +15335,7 @@ async function inspect15(raw, environment) {
     if (at === "inside" || tool === "Grep" && at === "above")
       return refuse13(`a ${tool} through ${path}, which reads whatsapp/ in the data folder`);
     const pattern = input?.pattern;
-    if (tool === "Glob" && typeof pattern === "string" && worst(resolve12(path, pattern), targets, true) === "inside")
+    if (tool === "Glob" && typeof pattern === "string" && worst(resolve11(path, pattern), targets, true) === "inside")
       return refuse13(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
   }
 }
@@ -15554,9 +15610,9 @@ async function inspect16(raw, environment) {
 if (false) {}
 
 // scripts/hooks/no-unslotted-run.ts
-import { existsSync as existsSync8, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync2 } from "fs";
+import { existsSync as existsSync9, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync2 } from "fs";
 import { tmpdir } from "os";
-import { join as join18, resolve as resolve13, sep as sep6 } from "path";
+import { join as join18, resolve as resolve12, sep as sep6 } from "path";
 var refuse15 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var COMMIT_TAKES3 = new Set([
@@ -15635,7 +15691,7 @@ async function commitLint(cmd, args, env, wrote) {
   });
   const root = top.success ? top.stdout.toString().trim() : "";
   const lint = join18(root, "node_modules", ".bin", "commitlint");
-  if (!root || !existsSync8(lint))
+  if (!root || !existsSync9(lint))
     return;
   const folder = mkdtempSync(join18(tmpdir(), "commit-msg-"));
   const file = join18(folder, "COMMIT_EDITMSG");
@@ -15850,7 +15906,7 @@ function inspect17(raw, environment, main) {
     join18(main, ".claude", "worktrees"),
     real(join18(main, ".claude", "worktrees"))
   ].map((w) => w + sep6);
-  const inWorktree = (dir) => dir !== undefined && [resolve13(dir), real(resolve13(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
+  const inWorktree = (dir) => dir !== undefined && [resolve12(dir), real(resolve12(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
   const directory = typeof cwd === "string" ? cwd : undefined;
   let line = [];
   let wrote = false;
@@ -15901,7 +15957,7 @@ function inspect17(raw, environment, main) {
       const line = words();
       if (line === undefined)
         return;
-      const moved = here.cwd !== undefined && (directory === undefined || resolve13(here.cwd) !== resolve13(directory));
+      const moved = here.cwd !== undefined && (directory === undefined || resolve12(here.cwd) !== resolve12(directory));
       const cd = moved ? `cd ${quotedDir(here.cwd)} && ` : "";
       return found.anywhere ? refuseDocker(found.what, cd, line, found.fix) : refuse15(found.what, cd, line);
     }
@@ -15918,7 +15974,7 @@ function inspect17(raw, environment, main) {
   line = lexed.commands;
   return run(lexed, env, visit);
 }
-async function check21(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
+async function check21(raw, environment = process.env, main = mainCheckout2(resolve12(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
     return await inspect17(raw, environment, main);
   } catch {
