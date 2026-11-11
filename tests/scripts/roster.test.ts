@@ -309,6 +309,11 @@ describe("set", () => {
         ["set", "k3v9q2-reviewer", "kind=reviewer", "status=starting", "prs=3", "pr=3"],
       ],
       [
+        "a restart of an ended checker on the PR it holds, whose worker has ended",
+        [gone, { ...checker, status: "ended" }],
+        ["set", "k3v9q2-reviewer", "kind=reviewer", "status=starting", "prs=1", "pr=1"],
+      ],
+      [
         "a restart of an ended checker with no worker, as a lead's column writes one",
         [{ ...bare, status: "ended" }],
         ["set", "k3v9q2-reviewer", "kind=reviewer", "status=starting", "prs=3", "pr=3"],
