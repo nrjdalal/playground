@@ -7142,6 +7142,7 @@ function writes(name, args) {
   }
   return out;
 }
+var BROWSER_SAVES = new Set(["pdf", "screenshot"]);
 function writeTargets(cmd, name, args) {
   const targets = [
     ...cmd.redirects.filter((r) => [">", ">>", ">|"].includes(r.op) || r.op === ">&" && !DUPLICATE.test(r.target?.value ?? "")).flatMap((r) => r.target ? [r.target] : []),

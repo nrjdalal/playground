@@ -7541,6 +7541,7 @@ var RUNNER_TAKES = new Set([
   "-p"
 ]);
 var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
+var BROWSER_SAVES = new Set(["pdf", "screenshot"]);
 var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 if (false) {}
 

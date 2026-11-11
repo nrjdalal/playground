@@ -7870,6 +7870,17 @@ function writes(name, args) {
   }
   return out;
 }
+var BROWSER_SAVES = new Set(["pdf", "screenshot"]);
+var BROWSER_FIX = "agent-browser saves a relative path in the folder its browser started in, which can be the main checkout, where playground rm cannot clean it. Name an absolute path under your scratchpad or your worktree: agent-browser screenshot <your scratchpad>/<name>.png.";
+function browserPathless(args, env) {
+  for (let k = 0;k < args.length; k++) {
+    const v = args[k].value;
+    if (BROWSER_SAVES.has(v))
+      return args.slice(k + 1).some((w) => pathOf(w, { ...env, cwd: undefined })) ? undefined : v;
+    if (!v.startsWith("-") && !args[k - 1]?.value.startsWith("-"))
+      return;
+  }
+}
 function writeTargets(cmd, name, args) {
   const targets = [
     ...cmd.redirects.filter((r) => [">", ">>", ">|"].includes(r.op) || r.op === ">&" && !DUPLICATE.test(r.target?.value ?? "")).flatMap((r) => r.target ? [r.target] : []),
@@ -7940,7 +7951,11 @@ async function inspect(raw, environment, main) {
   const known = knownVariables(command, environment, directory);
   const lexed = lex(command, known);
   const fed = codeFed(lexed.commands);
+  const browserOnly = new Set(lexed.commands.every((c) => c.words[0]?.source === "agent-browser") ? lexed.commands : []);
   const visit = async (cmd, parsed, env) => {
+    const pathless = browserOnly.has(cmd) ? browserPathless(parsed.args, env) : undefined;
+    if (pathless)
+      return refuse(`agent-browser ${pathless} with a relative path or none`, BROWSER_FIX);
     if (parsed.name === "" && !cmd.feedsShell || EXPORTS2.has(parsed.name)) {
       for (const here of places(env, directory)) {
         const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure;
