@@ -687,6 +687,11 @@ const liveNight: NightDeps = {
     const fs = statfsSync(dir)
     return fs.bavail * fs.bsize
   },
+  // imported at the call, since resume.ts's imports reach tick.ts, which builds this beat as it loads
+  live: async () => {
+    const { liveSessions } = await import("../ops-session-resume/resume")
+    return [...(await liveSessions(configDirOf())).values()].map((s) => s.name)
+  },
   now: () => Date.now(),
   prs: async (ctx, branches, numbers, dir = ctx.repo) => {
     const url = (await ctx.run(["git", "-C", dir, "remote", "get-url", "origin"])).out.trim()
@@ -712,11 +717,6 @@ const liveNight: NightDeps = {
       if (!readPrs(read.out, branches, numbers, prs)) return null
     }
     return prs
-  },
-  // imported at the call, since resume.ts's imports reach tick.ts, which builds this beat as it loads
-  live: async () => {
-    const { liveSessions } = await import("../ops-session-resume/resume")
-    return [...(await liveSessions(configDirOf())).values()].map((s) => s.name)
   },
   roots: async (data, checkout) => {
     const read = readPolicyOrDefaults(data)
