@@ -121,8 +121,10 @@ Checks (default: all)
                 its neighbours, and the sidebar body is never wider than it shows, so it
                 scrolls only up and down
   screenshots   each route, full page, at 1280x800, 1782x972 and 390x844, light then dark
-                (named -dark), named before-* or after-* by --label; only on a stack whose
-                /api/health reports dashboard: fixture, since any other shows live sessions
+                (named -dark), named before-* or after-* by --label, each from a fresh load
+                and shot once its data is in (again when the shot leaves it loading); only
+                on a stack whose /api/health reports dashboard: fixture, since any other
+                shows live sessions
   cls           each route loads cold (storage, page cookies and HTTP cache cleared) then warm
                 with no layout shift over 0.001 that input did not cause, naming each element
                 that moved; with /dashboard, a chat view with no composer loads too, and the

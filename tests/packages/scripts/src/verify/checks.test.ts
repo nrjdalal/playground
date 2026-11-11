@@ -361,11 +361,17 @@ describe("screenshot", () => {
     constructor(
       private marker: "late" | "never",
       private data: "late" | "never" = "late",
+      private afterShot: "settled" | "busy" = "settled",
     ) {
       super()
     }
     override async run(...args: string[]): Promise<Record<string, unknown>> {
       this.calls.push(args)
+      // the data check after a shot reads busy after the first shot alone, when afterShot is busy
+      if (args[0] === "eval" && args[1] === DATA_READY[1]) {
+        const shots = this.calls.filter((call) => call[0] === "screenshot").length
+        return { result: !(this.afterShot === "busy" && shots === 1) }
+      }
       const waitsOn =
         args[0] !== "wait"
           ? null
@@ -425,7 +431,9 @@ describe("screenshot", () => {
     }
     expect(order).toEqual([
       "fetch http://web/dashboard/system",
+      "open about:blank",
       "open http://web/dashboard/system",
+      "open about:blank",
       "open http://web/dashboard/system",
     ])
   })
@@ -482,6 +490,31 @@ describe("screenshot", () => {
     const data = browser.calls.findIndex((args) => args[0] === "wait" && args[2] === DATA_READY[1])
     expect(data).toBeGreaterThan(sidebar)
     expect(verbs.indexOf("screenshot --full")).toBeGreaterThan(data)
+  })
+
+  // An open whose URL differs from the page's only by its hash keeps the page (measured: performance.timeOrigin unchanged), so a route's later viewports and themes would shoot the page an earlier shot loaded.
+  test("every shot loads its page fresh, through a blank page first", async () => {
+    const browser = new FakeBrowser("late")
+    await shoot(browser)
+    const verbs = browser.calls.map((args) => args.slice(0, 2).join(" "))
+    const route = verbs.indexOf("open http://web/dashboard/system")
+    expect(route).toBeGreaterThan(0)
+    expect(verbs[route - 1]).toBe("open about:blank")
+  })
+
+  test("a shot that leaves the page busy is taken again once its data is back in", async () => {
+    const busy = new FakeBrowser("late", "late", "busy")
+    expect((await shoot(busy)).ok).toBe(true)
+    const shots = busy.calls.flatMap((args, i) => (args[0] === "screenshot" ? [i] : []))
+    expect(shots).toHaveLength(2)
+    const again = busy.calls.findIndex(
+      (args, i) => i > shots[0]! && args[0] === "wait" && args[2] === DATA_READY[1],
+    )
+    expect(again).toBeGreaterThan(shots[0]!)
+    expect(shots[1]).toBeGreaterThan(again)
+    const settled = new FakeBrowser("late")
+    await shoot(settled)
+    expect(settled.calls.filter((args) => args[0] === "screenshot")).toHaveLength(1)
   })
 
   test("a route READY does not name is shot once its data is in", async () => {
