@@ -35,7 +35,8 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 
 Plan the ships before you build a guard, since every wrapper runs its script from the main checkout, which follows `main` ([Registered in both settings files](#registered-in-both-settings-files)):
 
-1. Look for a hook script on `main` whose role read or input fits the new rule (`git show origin/main:scripts/hooks/<hook>.ts`), and extend it there: a new event or tool on a script `main` already holds lands in one PR and goes live with the next ship, as no-chat-question's PreToolUse path on `AskUserQuestion` beside its Stop gate and writing-first's events do, each branching on `hook_event_name`.
+1. Look for a hook script on `main` whose role read or input fits the new rule (`git show origin/main:scripts/hooks/<hook>.ts`), and add the rule to that script.
+   A new event or tool on a script `main` already holds lands in one PR and goes live with the next ship, branching on `hook_event_name`, as no-chat-question's `AskUserQuestion` path beside its Stop gate does.
 2. When no script fits, plan a new hook file as two PRs: the script and its tests in one ship, then its registration in both settings files and its bundle in a later one, since `bun run test:skills`'s hooks-on-main step fails a wrapper whose script `origin/main` lacks.
 
 Done when your plan names the hook script, whether it is on `origin/main`, and the ships the guard needs to go live: one, or two.
@@ -592,7 +593,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   each matched whole in any case, with `_` and `-` counting as edges, so `PLAYGROUND_ROLE` holds one and `the dashboard` does not):
   a Linear or Slack MCP tool that is not a read, a GitHub MCP write whose owner is a guarded org, a `gh` write (pr, issue, label, release, a non-GET `gh api`) or curl to Linear, Slack or a guarded org's repository, and `git commit` or `git push` in a guarded org's checkout, judged by its message, its branch and the messages of the commits the remote does not hold.
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, taking the word after each option it lists as that option's value, as git does (`--attr-source <tree>` and `--config-env <key>=<variable>` among them), so `git --attr-source HEAD push` reads as a push and `git -C log push` as a push from `log`.
-  `GIT_TAKES` is the one list every git-reading hook steps over (no-glm-heavy-path, no-main-checkout, no-playground-leak, no-stash, no-ours-merge through no-stash's `gitCommand`, and no-extensions-write through no-main-checkout's `gitCall`), and no-extension-repo-write reads git the same way.
+  `GIT_TAKES` is the one list every git-reading hook steps over (no-false-green, no-glm-heavy-path, no-main-checkout, no-playground-leak, no-stash, no-unslotted-run, no-ours-merge through no-stash's `gitCommand`, and no-extensions-write through no-main-checkout's `gitCall`), and no-extension-repo-write reads git the same way.
   Outside `anyWrite`, it follows a `-c alias.<name>=<value>` whose value is literal git words, reading that value as the subcommand, so `git -c alias.p=push p …` is judged as the push and `git -c alias.l=log l` runs;
   it refuses a `!` alias, an alias whose value or name it cannot read (a variable, a `--config-env` value), an alias that names another alias, and a subcommand it cannot read after one.
   A same-user session can still get past it, for example through a git alias set in a config file it does not read.
