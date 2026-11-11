@@ -7452,6 +7452,26 @@ function changedBy(dir, ours, theirs) {
   const base = names2(dir, ["merge-base", ours, theirs])?.[0];
   return base ? pathsOf(dir, ["diff", "--name-only", "--no-renames", base, theirs]) : null;
 }
+function mergedTree(dir, ours, theirs) {
+  const proc = Bun.spawnSync(["git", "-C", dir, "merge-tree", "--write-tree", ours, theirs], {
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    stderr: "ignore"
+  });
+  if (proc.exitCode !== 0 && proc.exitCode !== 1)
+    return null;
+  return proc.stdout.toString().split(`
+`)[0] || null;
+}
+function beyondMerge(files, ours, theirs, read, dir) {
+  const tree = mergedTree(dir, ours, theirs);
+  const lists = tree ? read(tree) : [null];
+  if (lists.some((l) => l === null))
+    return;
+  const own = new Set(lists.flat());
+  for (const file of files)
+    if (!own.has(file))
+      files.delete(file);
+}
 async function mergeHeads(dir) {
   const path = names2(dir, ["rev-parse", "--git-path", "MERGE_HEAD"])?.[0];
   if (!path)
@@ -7522,6 +7542,8 @@ async function commit(rest, dir, chained, forced) {
       if (differ[i].has(file))
         files.add(file);
   });
+  if (heads.length === 1)
+    beyondMerge(files, "HEAD", heads[0], against, dir);
   const heavyFiles = [...files].filter(heavy).sort();
   if (heavyFiles.length === 0)
     return;
@@ -7529,6 +7551,21 @@ async function commit(rest, dir, chained, forced) {
   if (chained && !all && paths.length === 0 && heavyFiles.every((f) => !staged.has(f)))
     return `no-glm-heavy-path hook refuses this git commit: ${heavyFiles.join(", ")} is on disk and not staged, and the hook cannot tell before the call runs whether the git add before it stages it, while this session runs on GLM and that is Opus work. Run git commit as its own call.`;
   return refuse("git commit", heavyFiles);
+}
+function rebased(dir, remote, source, dest, not) {
+  const branch = dest === "HEAD" ? names2(dir, ["symbolic-ref", "-q", "--short", "HEAD"])?.[0] : dest.replace(/^refs\/heads\//, "");
+  const old = branch && names2(dir, ["rev-parse", "-q", "--verify", `refs/remotes/${remote}/${branch}`])?.[0];
+  if (!old)
+    return;
+  const ancestor = Bun.spawnSync(["git", "-C", dir, "merge-base", "--is-ancestor", old, source], {
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    stderr: "ignore"
+  });
+  if (ancestor.exitCode !== 1)
+    return;
+  const oldest = names2(dir, ["rev-list", "--reverse", "--topo-order", source, "--not", not])?.[0];
+  const base = oldest && names2(dir, ["rev-parse", "-q", "--verify", `${oldest}^`])?.[0];
+  return base ? [old, base] : undefined;
 }
 function push(rest, dir, branchReads) {
   const { flags, positionals } = parseFlags(rest, PUSH_TAKES);
@@ -7543,14 +7580,19 @@ function push(rest, dir, branchReads) {
   if (given.has("--tags") || given.has("--follow-tags") || given.has("--mirror"))
     sources.push("--tags");
   const deleting = given.has("--delete") || given.has("-d");
+  const dests = [];
   for (const spec of refspecs) {
-    const [source] = spec.value.replace(/^\+/, "").split(":");
-    if (source !== "" && !deleting)
+    const [source, dest = source] = spec.value.replace(/^\+/, "").split(":");
+    if (source !== "" && !deleting) {
       sources.push(source);
+      dests.push(dest);
+    }
   }
   const replaced = ["--all", "--branches", "--mirror", "--tags"].some((f) => given.has(f));
-  if (refspecs.length === 0 && !replaced)
+  if (refspecs.length === 0 && !replaced) {
     sources.push("HEAD");
+    dests.push("HEAD");
+  }
   if (deleting && sources.length === 0)
     return;
   const name = remote && !/[:/]/.test(remote.value) ? remote.value : undefined;
@@ -7560,7 +7602,7 @@ function push(rest, dir, branchReads) {
     "log",
     "--name-only",
     "--no-renames",
-    "--diff-merges=dense-combined",
+    "--diff-merges=off",
     "--format=",
     ...sources,
     "--not",
@@ -7574,6 +7616,17 @@ function push(rest, dir, branchReads) {
     const [first, ...others] = names2(dir, ["rev-parse", `${merge}^@`]) ?? [];
     if (!first)
       return unread("git push", "the parents of a merge it pushes");
+    const own = pathsOf(dir, [
+      "show",
+      "--name-only",
+      "--no-renames",
+      "--diff-merges=dense-combined",
+      "--format=",
+      merge
+    ]);
+    if (own === null)
+      return unread("git push", "the files of the commits it pushes");
+    const made = new Set(own);
     for (const other of others) {
       const changed = changedBy(dir, first, other);
       const differs = pathsOf(dir, ["diff", "--name-only", "--no-renames", other, merge]);
@@ -7581,9 +7634,16 @@ function push(rest, dir, branchReads) {
         return unread("git push", "the files of the commits it pushes");
       for (const file of changed)
         if (differs.includes(file))
-          files.add(file);
+          made.add(file);
     }
+    if (others.length === 1)
+      beyondMerge(made, first, others[0], (tree) => [pathsOf(dir, ["diff", "--name-only", "--no-renames", tree, merge])], dir);
+    for (const file of made)
+      files.add(file);
   }
+  const bases = tracked && sources.length === 1 ? rebased(dir, name, sources[0], dests[0], not) : undefined;
+  if (bases)
+    beyondMerge(files, bases[0], bases[1], (tree) => [pathsOf(dir, ["diff", "--name-only", "--no-renames", tree, sources[0]])], dir);
   const heavyFiles = [...files].filter(heavy).sort();
   return heavyFiles.length > 0 ? refuse("git push", heavyFiles) : undefined;
 }
