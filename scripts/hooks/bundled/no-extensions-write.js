@@ -7408,6 +7408,10 @@ function bunCall(args, env) {
     else if (words[0] === "x" && RUNNER_TAKES.has(v))
       k++;
     else if (!v.startsWith("-")) {
+      if (v === "x" && words.length === 1 && words[0] === "x" && args[sub - 1]?.value.startsWith("-")) {
+        sub = k;
+        continue;
+      }
       if (words.push(v) === 1)
         sub = k;
       if (v !== "run" && v !== "x")
@@ -7752,7 +7756,8 @@ function cliCalls(parsed, env) {
   if (!first)
     return [];
   const words = [first, ...args];
-  const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined];
+  const call = name === "bun" ? bunCall(args, env) : undefined;
+  const dirs = [env.cwd, call?.cwd, call?.chained];
   return words.flatMap((word, at) => isCli(word, dirs) ? [words.slice(at + 1)] : []);
 }
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];

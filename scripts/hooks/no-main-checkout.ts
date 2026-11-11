@@ -136,7 +136,7 @@ const fixFor = (sure: boolean, own = INSTEAD) => (sure ? own : UNKNOWN_FIX)
 const BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"])
 const RUNNERS = new Set(["npx"])
 // bunx is bun x, read as one
-const X: Word = { quoted: false, value: "x" }
+export const X: Word = { quoted: false, value: "x" }
 const TOOLS = new Set(["lefthook", "turbo"])
 const DUPLICATE = /^(?:\d+|-)$/
 // The one turbo call the main checkout runs, after a pull that changes packages/ (the release skill's step 5): its CLI imports their dist
@@ -209,6 +209,16 @@ export function bunCall(
     // bun x's options that take a value (-p, --registry), so the word after one is the tool
     else if (words[0] === "x" && RUNNER_TAKES.has(v)) k++
     else if (!v.startsWith("-")) {
+      // bun takes its subcommand from the first word that is no option, an option's value included, then drops the first word after its options as that subcommand's own; so an x after an option's x (bun --env-file x … x turbo) is that dropped word, and the tool follows it
+      if (
+        v === "x" &&
+        words.length === 1 &&
+        words[0] === "x" &&
+        args[sub - 1]?.value.startsWith("-")
+      ) {
+        sub = k
+        continue
+      }
       if (words.push(v) === 1) sub = k
       if (v !== "run" && v !== "x") break
     }
@@ -443,7 +453,7 @@ function runs(
     return sub && gitMoves(sub, rest) ? { cwd, fix: GIT_FIX, what: `git ${sub}` } : undefined
   }
   if (name !== "bun") return
-  const { at, cwd, filtered, sub, words } = bunCall(args, env)
+  const { at, chained, cwd, filtered, sub, words } = bunCall(args, env)
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0]
   const packaged = words[0] === "x" ? packagedTools(args.slice(sub + 1)) : []
   const tool = [toolName(target), ...packaged].find((t) => TOOLS.has(t))
@@ -462,6 +472,17 @@ function runs(
   // bare, a script name runs the script, but build is bun's own bundler unless a --filter names the packages whose script it runs
   if (target && BUN_SCRIPTS.has(target) && (words[0] === "run" || filtered || target !== "build"))
     return { cwd, what: `bun ${words.join(" ")}` }
+  // bun x runs any program in the folder its --cwd options chain to, so that program is read as the shell would read it there
+  if (words[0] === "x" && target && args[at]?.value === target) {
+    const ran = runs(toolName(target), args.slice(at + 1), local, { ...env, cwd: chained })
+    return (
+      ran && {
+        ...ran,
+        also: [...(ran.also ?? []), ...(chained === undefined ? [undefined] : [])],
+        what: `bun x ${ran.what}`,
+      }
+    )
+  }
 }
 
 // How sed and perl read each flag letter that is more than a switch: edit (in place, -i and BSD sed's -I), script (carries the script) and value, each holding the rest of its word, else the next word; rest, holding the rest of its word alone; digits, holding the octal or x-hex digits after it, then reading on

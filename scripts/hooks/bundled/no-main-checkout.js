@@ -7479,6 +7479,10 @@ function bunCall(args, env) {
     else if (words[0] === "x" && RUNNER_TAKES.has(v))
       k++;
     else if (!v.startsWith("-")) {
+      if (v === "x" && words.length === 1 && words[0] === "x" && args[sub - 1]?.value.startsWith("-")) {
+        sub = k;
+        continue;
+      }
       if (words.push(v) === 1)
         sub = k;
       if (v !== "run" && v !== "x")
@@ -7684,7 +7688,7 @@ function runs(name, args, local, env) {
   }
   if (name !== "bun")
     return;
-  const { at, cwd, filtered, sub, words } = bunCall(args, env);
+  const { at, chained, cwd, filtered, sub, words } = bunCall(args, env);
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0];
   const packaged = words[0] === "x" ? packagedTools(args.slice(sub + 1)) : [];
   const tool = [toolName(target), ...packaged].find((t) => TOOLS.has(t));
@@ -7700,6 +7704,14 @@ function runs(name, args, local, env) {
     return { cwd: cwdFlag(args.slice(at + 1), { ...env, cwd }), what: "bun test" };
   if (target && BUN_SCRIPTS.has(target) && (words[0] === "run" || filtered || target !== "build"))
     return { cwd, what: `bun ${words.join(" ")}` };
+  if (words[0] === "x" && target && args[at]?.value === target) {
+    const ran = runs(toolName(target), args.slice(at + 1), local, { ...env, cwd: chained });
+    return ran && {
+      ...ran,
+      also: [...ran.also ?? [], ...chained === undefined ? [undefined] : []],
+      what: `bun x ${ran.what}`
+    };
+  }
 }
 var LETTERS = {
   perl: {
@@ -7945,6 +7957,7 @@ if (import.meta.main) {
 export {
   FILE_TOOLS,
   RUNNER_TAKES,
+  X,
   bunCall,
   check,
   cwdFlag,
