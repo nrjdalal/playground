@@ -164,16 +164,26 @@ test("runRm clears the caller's own scratch folder", async () => {
   expect(existsSync(scratch)).toBe(false)
 })
 
-test("runRm refuses another session's scratch folder, a .. escape out of the own one and a link out of it", async () => {
+test("runRm refuses another session's scratch folder", async () => {
   const { deps, home } = machine()
-  const scratch = join(home, ".playground", "scratch", "j6rjgy-worker")
   const other = join(home, ".playground", "scratch", "a4b5c6-worker")
   mkdirSync(other, { recursive: true })
   expect(await runRm([other], deps)).toBe(1)
   expect(existsSync(other)).toBe(true)
+})
+
+test("runRm refuses a .. escape out of the caller's own scratch folder", async () => {
+  const { deps, home } = machine()
+  const scratch = join(home, ".playground", "scratch", "j6rjgy-worker")
+  const other = join(home, ".playground", "scratch", "a4b5c6-worker")
+  mkdirSync(other, { recursive: true })
   expect(await runRm([`${scratch}/../a4b5c6-worker`], deps)).toBe(1)
   expect(existsSync(other)).toBe(true)
+})
 
+test("runRm refuses a symlink inside the caller's own scratch folder that points out of it", async () => {
+  const { deps, home } = machine()
+  const scratch = join(home, ".playground", "scratch", "j6rjgy-worker")
   mkdirSync(join(home, ".ssh"), { recursive: true })
   mkdirSync(scratch, { recursive: true })
   symlinkSync(join(home, ".ssh"), join(scratch, "keys"))

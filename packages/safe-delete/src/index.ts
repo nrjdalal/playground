@@ -147,12 +147,11 @@ const ownScratchOf = (home: string, session: string): string[] =>
       ].map(real)
     : []
 
-const whyProtected = (path: string, roots: Roots, session?: string): string | null => {
+const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string | null => {
   const held = whyHolds(path, roots)
   if (held) return held
   const main = real(roots.main)
   const subtrees = subtreesOf(real(roots.home), real(roots.trash))
-  const ownScratch = session === undefined ? [] : ownScratchOf(real(roots.home), session)
   for (const root of subtrees)
     if (inside(path, root)) {
       if (ownScratch.some((own) => inside(path, own))) return null
@@ -167,7 +166,8 @@ const whyProtected = (path: string, roots: Roots, session?: string): string | nu
 export function isProtected(path: string, roots: Roots, session?: string): string | null {
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
-  return whyProtected(own, roots, session) ?? whyProtected(real(abs), roots, session)
+  const scratch = session === undefined ? [] : ownScratchOf(real(roots.home), session)
+  return whyProtected(own, roots, scratch) ?? whyProtected(real(abs), roots, scratch)
 }
 
 // The carve-out named name when path is an entry directly in its folder, symlinks resolved, that is not and holds no protected root; else the refusal's text.
