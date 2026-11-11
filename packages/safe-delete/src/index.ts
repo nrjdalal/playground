@@ -703,11 +703,6 @@ export function purgeTrash(
         } catch {}
       }
     }
-    if (!entriesOf(at).length) {
-      try {
-        rmSync(at, { force: true, recursive: true })
-      } catch {}
-    }
   }
   return { removed, skipped }
 }
