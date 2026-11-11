@@ -178,9 +178,11 @@ describe("the clone lane", () => {
     utimesSync(`${copy}.new`, new Date(), new Date())
     renameSync(`${copy}.new`, copy)
     expect(await older.saw(/running the new copy/g)).toBe(true)
+    // the new copy's own waiting line comes after its ticket is written, so the count below reads both copies' tickets and cannot pass before the reread's write
+    expect(await older.saw(/^run-slot\.sh: waiting for the clone slot/gm, 2)).toBe(true)
     await within(() => readdirSync(queue).length === 1, "one ticket across the reread", m)
-    await stop(older.p)
     expect(readdirSync(queue)).toEqual(first)
+    await stop(older.p)
   })
 
   test("but the Dashboard roll's clone, class 0, goes before an older worker's", async () => {
