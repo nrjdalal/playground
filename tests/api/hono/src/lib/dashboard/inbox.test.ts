@@ -501,6 +501,21 @@ describe("what bun run ask takes", () => {
     ).toBe(true)
   })
 
+  // issue 1454: the voice is the owner.voice setting's, none by default, so the item's own shape passes a plural draft
+  test("a draft or a slack decision speaking as we parses, since no voice is set by default", () => {
+    expect(
+      inboxInputSchema.safeParse({
+        from: "dispatcher",
+        kind: "draft",
+        preview: { link: CHANNEL, text: "we will ship it.", to: "@Merritt" },
+        title: "Ask Merritt",
+      }).success,
+    ).toBe(true)
+    expect(
+      inboxInputSchema.safeParse(decision({ ...SLACK, text: "hi Merritt, we fixed it." })).success,
+    ).toBe(true)
+  })
+
   test("a draft or a slack decision may carry its thread so far, one gist line a message, and no raw mention in it (#2287)", () => {
     const thread = [
       { said: "The export stops at 100 rows; we need all of them.", who: "Merritt" },

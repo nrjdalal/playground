@@ -40,6 +40,14 @@ describe("futureNowTimes", () => {
     ])
   })
 
+  // issue 1454: the zone's short name comes from clock.ownerZone, so an owner in New York writes EST, with no fixed alias
+  test("reads the owner zone's own short name beside a clock time", () => {
+    const at = new Date("2026-01-15T15:30:00Z")
+    expect(futureNowTimes("measured 3:00 pm EST", at, "America/New_York")).toEqual([
+      '"measured 3:00 pm EST": 270 min ahead',
+    ])
+  })
+
   test("a bare clock time reads in the owner's zone", () => {
     expect(futureNowTimes("now 3:40 am", NOW, "Asia/Kolkata")).toEqual([
       '"now 3:40 am": 27 min ahead',
