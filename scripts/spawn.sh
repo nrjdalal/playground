@@ -1976,7 +1976,10 @@ except (ValueError, KeyError, TypeError):
   herdr_answer || true
 else
   # The world's core starts with its first call, and the probe runs as a terminal named for it with no parent, so no caller's exit ends it.
-  if ! said=$("$HC_WORLD/hc" run --bg --no-parent --name "$NAME" --cwd "$DIR" bash "$LAUNCH_FILE" 2>&1); then
+  # The wrapper runs a start only with the one-time word this start writes beside it, so no other route to the wrapper starts one.
+  token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n') && (umask 077 && printf '%s\n' "$token" > "$HC_WORLD/start") ||
+    { rm -f -- "$LAUNCH_FILE"; refuse "it cannot write $HC_WORLD/start"; }
+  if ! said=$(HC_TRIAL_START=$token "$HC_WORLD/hc" run --bg --no-parent --name "$NAME" --cwd "$DIR" bash "$LAUNCH_FILE" 2>&1); then
     rm -f -- "$LAUNCH_FILE"
     refuse "hc opened no session for $NAME ($(tr -s '\n' ' ' <<<"$said")), so nothing was started and no pin was written"
   fi

@@ -18,7 +18,7 @@ setDefaultTimeout(40_000)
 const FAKE_HC = `#!/bin/bash
 printf '%s\\x1f' "$@" >> "$HOME/hc.calls"
 printf '\\n' >> "$HOME/hc.calls"
-printf '%s\\n' "HC_SESSION=$HC_SESSION" "HERDR_PANE_ID=\${HERDR_PANE_ID-unset}" "SSH_CONNECTION=$SSH_CONNECTION" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" > "$HOME/hc.env"
+printf '%s\\n' "HC_SESSION=$HC_SESSION" "HC_TRIAL_START=\${HC_TRIAL_START:+set}" "HERDR_PANE_ID=\${HERDR_PANE_ID-unset}" "PLAYGROUND_ROLE=\${PLAYGROUND_ROLE-unset}" "SSH_CONNECTION=$SSH_CONNECTION" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" > "$HOME/hc.env"
 [ "$1" = --version ] && echo "hc 0.1.20"
 exit 0
 `
@@ -52,7 +52,7 @@ describe("a probe starts in hc's trial world with --runtime hc (#1715)", () => {
     const r = await spawn(
       ["probe", "probe-hc-a", "worker-x", "b.md", "--runtime", "hc"],
       [],
-      { HERDR_PANE_ID: "w1:p1" },
+      { HERDR_PANE_ID: "w1:p1", PLAYGROUND_ROLE: "worker" },
       undefined,
       undefined,
       world(),
@@ -68,7 +68,9 @@ describe("a probe starts in hc's trial world with --runtime hc (#1715)", () => {
     expect(readFileSync(join(r.home, "hc.env"), "utf8")).toBe(
       [
         "HC_SESSION=pgtrial",
+        "HC_TRIAL_START=",
         "HERDR_PANE_ID=unset",
+        "PLAYGROUND_ROLE=unset",
         "SSH_CONNECTION=127.0.0.1 1 127.0.0.1 22",
         `XDG_CONFIG_HOME=${realpathSync(lw(r.home, "hc-trial", "config"))}`,
         `XDG_STATE_HOME=${realpathSync(lw(r.home, "hc-trial", "state"))}`,

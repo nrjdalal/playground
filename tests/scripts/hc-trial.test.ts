@@ -43,8 +43,13 @@ const makeWorld = () => {
   chmodSync(join(world, "hc"), 0o755)
   return world
 }
-const hc = async (world: string, ...args: string[]) => {
-  const proc = Bun.spawn([join(world, "hc"), ...args], { stderr: "pipe", stdout: "pipe" })
+const hc = async (world: string, ...args: string[]) => hcWith(world, {}, ...args)
+const hcWith = async (world: string, extra: Record<string, string>, ...args: string[]) => {
+  const proc = Bun.spawn([join(world, "hc"), ...args], {
+    env: { ...process.env, ...extra },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
   return { code: await proc.exited, err: await new Response(proc.stderr).text() }
 }
 const calls = (world: string) =>
@@ -77,5 +82,83 @@ describe("the trial world's wrapper hashes its binary against the pin before eve
     expect(r.code).toBe(1)
     expect(r.err).toContain("(none in")
     expect(calls(world)).toBe("")
+  })
+})
+
+describe("the trial world's wrapper runs a start, an update or another machine only for spawn.sh's start (#1715)", () => {
+  test.each([
+    ["a start", ["run", "--bg", "claude"]],
+    ["a start behind an option", ["--json", "run", "bash"]],
+    ["an update", ["update"]],
+    ["another machine", ["machine", "add", "vps"]],
+    ["the API over stdin", ["connect"]],
+    ["exec on another machine", ["exec", "--on", "vps", "ls"]],
+    ["exec on another machine by its joined option", ["exec", "--on=vps", "ls"]],
+  ])("%s with no start word is refused, and never runs", async (_, args) => {
+    const world = makeWorld()
+    const r = await hc(world, ...args)
+    expect(r.code).toBe(1)
+    expect(r.err).toContain("only spawn.sh probe")
+    expect(calls(world)).toBe("")
+  })
+
+  test("a start runs once with the word spawn.sh wrote, which it then removes, and a second try is refused", async () => {
+    const world = makeWorld()
+    writeFileSync(join(world, "start"), "w0rd\n")
+    expect(await hcWith(world, { HC_TRIAL_START: "w0rd" }, "run", "bash")).toEqual({
+      code: 0,
+      err: "",
+    })
+    expect(existsSync(join(world, "start"))).toBe(false)
+    expect((await hcWith(world, { HC_TRIAL_START: "w0rd" }, "run", "bash")).code).toBe(1)
+    expect(calls(world)).toBe("run bash\n")
+  })
+
+  test("a start with a word other than the one written is refused, and the word is gone", async () => {
+    const world = makeWorld()
+    writeFileSync(join(world, "start"), "w0rd\n")
+    expect((await hcWith(world, { HC_TRIAL_START: "guess" }, "run", "bash")).code).toBe(1)
+    expect(existsSync(join(world, "start"))).toBe(false)
+    expect(calls(world)).toBe("")
+  })
+
+  test("the binary takes the shell basics alone of its caller's environment", async () => {
+    const world = makeWorld()
+    writeFileSync(
+      join(world, "bin", "herdr-core"),
+      `#!/bin/bash\nenv | sort > "$(dirname "$0")/../env"\n`,
+    )
+    writeFileSync(
+      join(world, "pin"),
+      `${new Bun.CryptoHasher("sha256").update(readFileSync(join(world, "bin", "herdr-core"))).digest("hex")}\n`,
+    )
+    expect(
+      (
+        await hcWith(
+          world,
+          { ANTHROPIC_API_KEY: "k", HERDR_PANE_ID: "w1:p1", PLAYGROUND_ROLE: "worker" },
+          "ls",
+        )
+      ).code,
+    ).toBe(0)
+    const names = readFileSync(join(world, "env"), "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.slice(0, line.indexOf("=")))
+      .filter((name) => name !== "_" && name !== "PWD" && name !== "SHLVL")
+    expect(names).toEqual([
+      "HC_SESSION",
+      "HOME",
+      "LANG",
+      "LOGNAME",
+      "PATH",
+      "SHELL",
+      "SSH_CONNECTION",
+      "TERM",
+      "USER",
+      "XDG_CONFIG_HOME",
+      "XDG_RUNTIME_DIR",
+      "XDG_STATE_HOME",
+    ])
   })
 })
