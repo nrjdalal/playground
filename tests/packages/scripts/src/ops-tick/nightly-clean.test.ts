@@ -948,6 +948,25 @@ describe("one night's run against a fixture data folder", () => {
     )
   })
 
+  test("a re-point whose old head is no ancestor of the new one keeps the old head at its own tag", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "git/refs": unknown,
+      "refs/tags/archive/scratch": "older",
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+      "merge-base --is-ancestor": { code: 1, err: "" },
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.endsWith("tag archive/scratch-older older"))).toBe(true)
+    expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(true)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain(
+      "kept scratch: its local archive/scratch tag held older, now holds s, the old head kept at archive/scratch-older",
+    )
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain("the old head kept at archive/scratch-older")
+  })
+
   // #1515
   test("a tag that fails keeps the branch, on origin and locally, and names it in the log", async () => {
     const { ctx, deps, ops, runs, sent } = night({

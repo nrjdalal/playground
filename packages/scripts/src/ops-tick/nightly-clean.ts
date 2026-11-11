@@ -539,11 +539,15 @@ export const nightlyClean =
           const local = await git(["rev-parse", "-q", "--verify", `refs/tags/${tag}`])
           const held = local.code === 0 ? (lines(local.out)[0] ?? "") : ""
           if (held === sha) continue
+          // -f drops the old head when it is no ancestor of the new one, so a moved branch's first archive is tagged beside the re-point, and git branch <name> <old> still brings it back
+          const rescued =
+            held !== "" && (await git(["merge-base", "--is-ancestor", held, sha])).code !== 0
+          if (rescued) await git(["tag", `${tag}-${held.slice(0, 7)}`, held])
           const said =
             (await git(["tag", "-f", tag, sha])).code !== 0
               ? `its head ${sha} is not on GitHub, and its local ${tag} tag failed`
               : held
-                ? `its local ${tag} tag held ${held}, now holds ${sha}`
+                ? `its local ${tag} tag held ${held}, now holds ${sha}${rescued ? `, the old head kept at ${tag}-${held.slice(0, 7)}` : ""}`
                 : `its head ${sha} is not on GitHub, so it is tagged ${tag} locally alone`
           out.push(`kept ${name}: ${said}`)
           kept.push(`branch ${name} kept: ${said}`)
