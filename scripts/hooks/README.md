@@ -691,7 +691,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-mac-web-build
 
-- A factory session builds the web image on the box: `scripts/hooks/no-mac-web-build.ts`, registered after no-raw-delete, five entries past no-glm-heavy-path, refuses a factory session's web image build on the Mac while the live dashboard's Postgres runs in the same Docker VM.
+- A factory session builds the web image on the box: `scripts/hooks/no-mac-web-build.ts`, registered after no-raw-wa, six entries past no-glm-heavy-path, refuses a factory session's web image build on the Mac while the live dashboard's Postgres runs in the same Docker VM.
   On 21 Oct a tester's web build took the 3.1 GB VM's out-of-memory killer to every Postgres in it, the dashboard's included, and the build peaks at about 4 GB over baseline (measured on the box), so no memory cap makes it safe here.
   It reads each docker call through `scripts/hooks/docker-build.ts`, which no-unslotted-run and run-slot read too.
   A web image build is `docker compose build` (or `docker-compose build`) with no service named, `web` among them or a service it cannot read, `docker compose up`, `create` or `run` on the same terms unless given `--no-build` (compose builds a missing image, and docker-compose.yml names none), and `docker build`, `buildx build`,
@@ -860,8 +860,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   `playground wa send` names no path there, so it runs, as does every path beside the folder (`~/.playground/whatsapp-notes.md`) and below the data folder elsewhere (`grep -r x ~/.playground/handoffs`).
   It is a speed bump, as no-raw-delete is: a word it cannot expand, built from a variable no command on the call sets, and a program's own code that builds the path, pass it.
   It fails open on a call it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-raw-wa.test.ts`.
-  Its script lands on `main` before its registration in both settings files, by the order in [Registered in both settings files](#registered-in-both-settings-files), so it is registered in WhatsApp's phase 2.
-  Until then ops-wa pairs no device (`unguarded()` in `packages/scripts/src/ops-wa/life.ts`), so no auth state exists for a session to reach.
+  It is registered in both settings files after no-raw-delete, for Bash, Edit, Glob, Grep, MultiEdit, NotebookEdit, Read and Write, after its script reached `main` by the order in [Registered in both settings files](#registered-in-both-settings-files).
+  ops-wa pairs a device only while that registration stands (`unguarded()` in `packages/scripts/src/ops-wa/life.ts`), so no auth state exists for a session to reach without it.
 
 ## no-release-comment
 
