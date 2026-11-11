@@ -5352,7 +5352,6 @@ var slice = (word, from) => {
   const dropped = word.value.slice(0, from).split(READ).length - 1;
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
-var visible = (value) => value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ");
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
 var PLAIN = /^[\w./=,:@%-]$/;
 var unreadWord = (word) => {
@@ -7385,17 +7384,23 @@ var RUNNERS = new Set(["npx"]);
 var TOOLS = new Set(["lefthook", "turbo"]);
 function bunCall(args, env) {
   let cwd = env.cwd;
+  let xCwd;
+  let chained = env.cwd;
   let filtered = false;
   let sub = -1;
   const words = [];
   let k = 0;
   for (;k < args.length; k++) {
     const v = args[k].value;
-    if (v === "--cwd")
-      cwd = args[k + 1] && pathOf(args[++k], env);
-    else if (v.startsWith("--cwd="))
-      cwd = pathOf({ ...args[k], value: v.slice(6) }, env);
-    else if (v === "--filter" || v === "-F") {
+    const value = v === "--cwd" ? args[k + 1] : v.startsWith("--cwd=") ? { ...args[k], value: v.slice(6) } : undefined;
+    if (v === "--cwd" || v.startsWith("--cwd=")) {
+      if (v === "--cwd")
+        k++;
+      cwd = value && pathOf(value, env);
+      chained = value && pathOf(value, { ...env, cwd: chained });
+      if (words[0] === "x")
+        xCwd = { dir: cwd };
+    } else if (v === "--filter" || v === "-F") {
       filtered = true;
       k++;
     } else if (v.startsWith("--filter="))
@@ -7403,13 +7408,17 @@ function bunCall(args, env) {
     else if (words[0] === "x" && RUNNER_TAKES.has(v))
       k++;
     else if (!v.startsWith("-")) {
+      if (v === "x" && words.length === 1 && words[0] === "x" && args[sub - 1]?.value.startsWith("-")) {
+        sub = k;
+        continue;
+      }
       if (words.push(v) === 1)
         sub = k;
       if (v !== "run" && v !== "x")
         break;
     }
   }
-  return { at: k, cwd, filtered, sub, words };
+  return { at: k, chained, cwd, filtered, sub, words, xCwd };
 }
 function gitCall(args, env) {
   let cwd = env.cwd;
@@ -7477,7 +7486,6 @@ var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings 
 var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
 var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
 var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
-var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(\u2026) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS = new Set([
   "[",
@@ -7627,33 +7635,6 @@ function ghFilters(parsed) {
       filters.add(args[k]);
   }
   return filters;
-}
-var GH_POSTS = new Set([
-  "issue comment",
-  "issue create",
-  "issue edit",
-  "pr comment",
-  "pr create",
-  "pr edit"
-]);
-function ghTexts(parsed) {
-  const { args, first, name } = parsed;
-  const texts = new Set;
-  if (name !== "gh" || !first || marked(first.value))
-    return texts;
-  const [verb, sub] = args.map((a) => a.value);
-  if (!GH_POSTS.has(`${verb} ${sub}`))
-    return texts;
-  if (args.some((a) => GH_WEB.test(a.value) || /^(?:-[^-=bt]*e|--editor(?:=|$))/.test(a.value)))
-    return texts;
-  for (let k = 0;k < args.length; k++) {
-    const { value } = args[k];
-    if (["-b", "--body", "-t", "--title"].includes(value) && args[k + 1])
-      texts.add(args[++k]);
-    else if (/^(?:-[bt].|--(?:body|title)=)/.test(value))
-      texts.add(args[k]);
-  }
-  return texts;
 }
 function gitConfigs(args) {
   const configs = [];
@@ -8026,57 +8007,6 @@ function perlReads({ args, local }, env) {
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
 }
-function ansiOut(text) {
-  let out = "";
-  let quote = "";
-  for (let i = 0;i < text.length; i++) {
-    const c = text[i];
-    if (quote === "'") {
-      if (c === "$" && text[i + 1] === "'") {
-        out += "q";
-        continue;
-      }
-      quote = c === "'" ? "" : quote;
-    } else if (c === "\\") {
-      out += c + (text[i + 1] ?? "");
-      i++;
-      continue;
-    } else if (quote === "" && c === "$" && text[i + 1] === "'") {
-      for (i += 2;i < text.length && text[i] !== "'"; i++)
-        if (text[i] === "\\")
-          i++;
-      out += "q";
-      continue;
-    } else if (c === "'" && quote === "")
-      quote = "'";
-    else if (c === '"')
-      quote = quote === '"' ? "" : '"';
-    out += c;
-  }
-  return out;
-}
-function evaluatedParts(text) {
-  const unquoted = singleQuotesOut(quotedBodiesOut(ansiOut(text)));
-  const outside = unquoted.replace(/(?<!e)"(?:[^"\\$]|\\.)*"/g, "q");
-  if (/@P\}|\$\{?~/.test(outside))
-    return [text];
-  const parts = [];
-  for (const [found, pattern] of [
-    [CODE_QUALIFIER, new RegExp(CODE_QUALIFIER.source, "g")],
-    [FLAG, FLAGS],
-    [FILE_RUN, FILE_RUNS]
-  ])
-    if (found.test(outside)) {
-      const written = [...unquoted.matchAll(pattern)].map(([part]) => part);
-      parts.push(...written.length > 0 ? written : [unquoted]);
-    }
-  return parts;
-}
-var CODE_QUALIFIER = new RegExp(QUALIFIER.source.replace("([^\\s[{<])[^]*?\\1", "([^\\s[{<\\w])[^\\n]*?\\1").replace("|\\+\\w+", ""));
-var FLAG = /\$\{\([^)]*[eP]/;
-var FLAGS = /\$\{\([^)]*[eP][^)]*\)[^}]*\}?/g;
-var FILE_RUN = /(?:^|[\s;&|(<>])=\(/;
-var FILE_RUNS = /=\([^)]*\)?/g;
 function narrow(cmd, env) {
   const parsed = parse3(cmd);
   const { args, first } = parsed;
@@ -8102,12 +8032,7 @@ function narrow(cmd, env) {
     return true;
   if (base === "gh") {
     const filters = ghFilters(parsed);
-    const texts = filters.size > 0 ? filters : ghTexts(parsed);
-    return texts.size > 0 && args.every((a) => texts.has(a) || !/\s/.test(a.value));
-  }
-  if (base === "cd") {
-    const [folder] = args;
-    return args.length === 1 && literal(folder) && !/^(?:-|~[-+0-9])/.test(folder.value);
+    return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value));
   }
   if (base === "sort")
     return !args.some(({ value }) => /^-[a-zA-Z]*o|^--./.test(value));
@@ -8309,8 +8234,7 @@ async function inspect(raw, environment, unknown = false) {
     const near = relative(env);
     return value.includes(needle) || !!near && value.includes(near);
   };
-  const touches = (body, env) => holds(body, env) || needle.split(sep2).filter(Boolean).some((part) => body.toLowerCase().includes(part.toLowerCase()));
-  const guarded = (body, env) => touches(body, env) || body.includes("~");
+  const guarded = (body, env) => holds(body, env) || body.includes("~") || needle.split(sep2).filter(Boolean).some((part) => body.toLowerCase().includes(part.toLowerCase()));
   const judged = new Map;
   const names = (word, env, remover, literal = false) => {
     const quotedGlob = literal && !word.glob;
@@ -8363,20 +8287,6 @@ async function inspect(raw, environment, unknown = false) {
   const visit = async (cmd, parsed, env) => {
     if (patterns.has(cmd))
       return;
-    if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
-      const shellCall = SHELLS.has(parsed.name);
-      const { inline, operand } = shellCall ? shellOperand(parsed.args, parsed.name) : { inline: false, operand: parsed.args[0] };
-      if (inline && operand && unreadWord(operand) && !/\S/.test(visible(operand.value)))
-        return refuse(`a ${parsed.name} -c of ${shown({ ...operand, raw: operand.raw ?? operand.source })}, a script the hook cannot read; run its commands as calls of their own`);
-      if (inline && operand && evaluatedParts(operand.value).some((part) => touches(part, env)))
-        return refuse(EVALUATES_ROOT);
-      const path = !inline && operand ? pathOf(operand, env) : undefined;
-      const written = path === undefined ? undefined : env.files.get(path);
-      if (written && (written.unknown || marked(written.value)))
-        return refuse(`${parsed.name} ${shown(operand)}, a script this line wrote with text the hook cannot read; run its commands as calls of their own`);
-      if (shellCall)
-        return;
-    }
     const slot = slotWords(parsed);
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
@@ -8543,12 +8453,9 @@ async function inspect(raw, environment, unknown = false) {
     known,
     old: { dir: directory },
     process: environment,
-    vars: new Map,
-    visitShells: true
+    vars: new Map
   };
   rootLine = rooted(lexed.commands);
-  if (evaluatedParts(command).some((part) => touches(part, env)))
-    return refuse(EVALUATES_ROOT);
   whole = rootLine || wholeLine(lexed.commands, env);
   patterns = casePatterns(lexed.commands);
   lineWrites = redirectsWrite(lexed.commands);

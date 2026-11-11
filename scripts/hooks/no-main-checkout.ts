@@ -136,7 +136,7 @@ const fixFor = (sure: boolean, own = INSTEAD) => (sure ? own : UNKNOWN_FIX)
 const BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"])
 const RUNNERS = new Set(["npx"])
 // bunx is bun x, read as one
-const X: Word = { quoted: false, value: "x" }
+export const X: Word = { quoted: false, value: "x" }
 const TOOLS = new Set(["lefthook", "turbo"])
 const DUPLICATE = /^(?:\d+|-)$/
 // The one turbo call the main checkout runs, after a pull that changes packages/ (the release skill's step 5): its CLI imports their dist
@@ -171,28 +171,59 @@ export function cwdFlag(args: Word[], env: Env): string | undefined {
 export function bunCall(
   args: Word[],
   env: Env,
-): { at: number; cwd: string | undefined; filtered: boolean; sub: number; words: string[] } {
+): {
+  at: number
+  chained: string | undefined
+  cwd: string | undefined
+  filtered: boolean
+  sub: number
+  words: string[]
+  xCwd?: { dir: string | undefined }
+} {
   let cwd = env.cwd
+  // bun x's own last --cwd, read from the shell's folder
+  let xCwd: { dir: string | undefined } | undefined
+  // the folder bun runs in: each --cwd read from the one before, as bun does
+  let chained = env.cwd
   let filtered = false
   let sub = -1
   const words: string[] = []
   let k = 0
   for (; k < args.length; k++) {
     const v = args[k].value
-    if (v === "--cwd") cwd = args[k + 1] && pathOf(args[++k], env)
-    else if (v.startsWith("--cwd=")) cwd = pathOf({ ...args[k], value: v.slice(6) }, env)
-    else if (v === "--filter" || v === "-F") {
+    const value =
+      v === "--cwd"
+        ? args[k + 1]
+        : v.startsWith("--cwd=")
+          ? { ...args[k], value: v.slice(6) }
+          : undefined
+    if (v === "--cwd" || v.startsWith("--cwd=")) {
+      if (v === "--cwd") k++
+      cwd = value && pathOf(value, env)
+      chained = value && pathOf(value, { ...env, cwd: chained })
+      if (words[0] === "x") xCwd = { dir: cwd }
+    } else if (v === "--filter" || v === "-F") {
       filtered = true
       k++
     } else if (v.startsWith("--filter=")) filtered = true
     // bun x's options that take a value (-p, --registry), so the word after one is the tool
     else if (words[0] === "x" && RUNNER_TAKES.has(v)) k++
     else if (!v.startsWith("-")) {
+      // when bun reads an option's value as its subcommand, it drops the next word naming that subcommand, so the tool is the word after it
+      if (
+        v === "x" &&
+        words.length === 1 &&
+        words[0] === "x" &&
+        args[sub - 1]?.value.startsWith("-")
+      ) {
+        sub = k
+        continue
+      }
       if (words.push(v) === 1) sub = k
       if (v !== "run" && v !== "x") break
     }
   }
-  return { at: k, cwd, filtered, sub, words }
+  return { at: k, chained, cwd, filtered, sub, words, xCwd }
 }
 
 // git's subcommand and its words, and the tree it acts on: the checkout a --git-dir of `<checkout>/.git` names, whose HEAD and index move, else its --work-tree, else the folder its -C options name (each relative to the one before); each counts only before the subcommand.
@@ -333,7 +364,7 @@ export const RUNNER_TAKES = new Set([
 ])
 
 // The tools a package runner's -p or --package names among its options: it puts that package's programs on PATH and may run any program there (a shell, env), so naming the tool runs it.
-function packagedTools(args: Word[]): string[] {
+export function packagedTools(args: Word[]): string[] {
   const tools: string[] = []
   for (let k = 0; k < args.length && args[k].value.startsWith("-"); k++) {
     const v = args[k].value
@@ -345,27 +376,19 @@ function packagedTools(args: Word[]): string[] {
   return tools
 }
 
-// A package runner's own --cwd among its options, the folder bunx and bun x run their tool in, judged beside the shell's folder: { dir } when one is named (dir undefined when its path cannot be read), else undefined.
-export function runnerCwd(
+// The folders bunx or bun x may run its tool in, judged beside the one runs() reads: the folder bun runs it in (each --cwd among bun's own options and bun x's read from the one before, as only x chains them, then the tool's own --cwd from there), and bun x's last --cwd read from the shell's folder; an entry is undefined when a path cannot be read, and the call is undefined for any other program or subcommand.
+export function runnerFolders(
   name: string,
   args: Word[],
   env: Env,
-): { dir: string | undefined } | undefined {
-  let options = args
-  if (name === "bun") {
-    const { sub, words } = bunCall(args, env)
-    if (words[0] !== "x") return
-    options = args.slice(sub + 1)
-  } else if (name !== "bunx") return
-  let found: { dir: string | undefined } | undefined
-  for (let k = 0; k < options.length && options[k].value.startsWith("-"); k++) {
-    const v = options[k].value
-    if (v === "--cwd") found = { dir: options[k + 1] && pathOf(options[++k], env) }
-    else if (v.startsWith("--cwd="))
-      found = { dir: pathOf({ ...options[k], value: v.slice("--cwd=".length) }, env) }
-    else if (RUNNER_TAKES.has(v)) k++
-  }
-  return found
+  tool: Word[],
+): (string | undefined)[] | undefined {
+  if (name === "bunx") return runnerFolders("bun", [X, ...args], env, tool)
+  if (name !== "bun") return
+  const { chained, words, xCwd } = bunCall(args, env)
+  if (words[0] !== "x") return
+  const folders = [cwdFlag(tool, { ...env, cwd: chained })]
+  return xCwd ? [...folders, xCwd.dir] : folders
 }
 
 // The word a package runner runs, past its options and their values (-y, --yes, -p turbo).
@@ -377,7 +400,8 @@ function runnerTarget(args: Word[]): number {
 }
 
 // A tool by name or path, or as a package at a version (turbo@latest)
-const toolName = (word: string | undefined) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""))
+export const toolName = (word: string | undefined) =>
+  program((word ?? "").replace(/(?<=.)@[^/]*$/, ""))
 const isTurbo = (word: string | undefined) => toolName(word) === "turbo"
 
 // Whether the build's settings reach turbo: from its own assignments or env wrapper, an export before it, or the session's environment.
@@ -387,9 +411,20 @@ function validationOff(local: Map<string, Text>, env: Env): boolean {
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true"
 }
 
-// Every folder a runs() hit runs in: its own, and a package runner's --cwd beside it.
-const ranIn = (ran: { also?: { dir: string | undefined }; cwd: string | undefined }) =>
-  ran.also ? [ran.cwd, ran.also.dir] : [ran.cwd]
+// The folders beside a program bun x runs: its own, and an unread one when the hook cannot read the folder bun's --cwd options chain to
+export const withChained = (
+  also: (string | undefined)[] | undefined,
+  chained: string | undefined,
+) => [...(also ?? []), ...(chained === undefined ? [undefined] : [])]
+
+// Every folder a hit runs in: its own, and those runnerFolders adds beside it.
+export const ranIn = (dir: string | undefined, also?: (string | undefined)[]) => [
+  dir,
+  ...(also ?? []),
+]
+
+// Whether a folder runnerFolders adds is one the hook cannot read, which could be any folder, so both hooks refuse it on every branch
+export const unreadFolder = (also?: (string | undefined)[]) => also?.includes(undefined) ?? false
 
 // What of the command would build, test, run lefthook or turbo, commit, or move the checkout with git, or undefined; fix, when set, replaces INSTEAD.
 function runs(
@@ -398,14 +433,14 @@ function runs(
   local: Map<string, Text>,
   env: Env,
 ):
-  | { also?: { dir: string | undefined }; cwd: string | undefined; fix?: string; what: string }
+  | { also?: (string | undefined)[]; cwd: string | undefined; fix?: string; what: string }
   | undefined {
   if (name === "bunx") return runs("bun", [X, ...args], local, env)
   const turbo = turboWords(name, args, env)
   if (turbo && packagesBuild(turbo)) {
     if (validationOff(local, env)) return
     return {
-      also: runnerCwd(name, args, env),
+      also: runnerFolders(name, args, env, turbo),
       cwd: cwdFlag(turbo, env),
       fix: BUILD_FIX,
       what: "the packages build without NODE_ENV and SKIP_ENV_VALIDATION=true",
@@ -425,15 +460,15 @@ function runs(
     return sub && gitMoves(sub, rest) ? { cwd, fix: GIT_FIX, what: `git ${sub}` } : undefined
   }
   if (name !== "bun") return
-  const { at, cwd, filtered, sub, words } = bunCall(args, env)
+  const { at, chained, cwd, filtered, sub, words } = bunCall(args, env)
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0]
   const packaged = words[0] === "x" ? packagedTools(args.slice(sub + 1)) : []
   const tool = [toolName(target), ...packaged].find((t) => TOOLS.has(t))
-  // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name; a tool reads its own --cwd too, and bun x is judged in the shell's folder and in the --cwd among its own options (also)
+  // bun runs a tool by its path, as lefthook.yml does, or as a script or package by its name; a tool reads its own --cwd too, and bun x is judged in the shell's folder and in every folder runnerFolders names (also)
   if (tool) {
     const dir = words[0] === "x" ? env.cwd : cwd
     return {
-      also: runnerCwd(name, args, env),
+      also: runnerFolders(name, args, env, args.slice(at + 1)),
       cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: dir }),
       what: `bun ${words.join(" ")}`,
     }
@@ -444,6 +479,17 @@ function runs(
   // bare, a script name runs the script, but build is bun's own bundler unless a --filter names the packages whose script it runs
   if (target && BUN_SCRIPTS.has(target) && (words[0] === "run" || filtered || target !== "build"))
     return { cwd, what: `bun ${words.join(" ")}` }
+  // bun x runs any program in the folder its --cwd options chain to, so that program is read as the shell would read it there
+  if (words[0] === "x" && target && args[at]?.value === target) {
+    const ran = runs(toolName(target), args.slice(at + 1), local, { ...env, cwd: chained })
+    return (
+      ran && {
+        ...ran,
+        also: withChained(ran.also, chained),
+        what: `bun x ${ran.what}`,
+      }
+    )
+  }
 }
 
 // How sed and perl read each flag letter that is more than a switch: edit (in place, -i and BSD sed's -I), script (carries the script) and value, each holding the rest of its word, else the next word; rest, holding the rest of its word alone; digits, holding the octal or x-hex digits after it, then reading on
@@ -651,7 +697,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const blind: Env = { ...env, cwd: undefined }
       const ran = runs(name, args, local, blind)
       // a folder the command names itself is judged by that path, as everywhere else; one the shell gives it could be the main checkout
-      if (ran && ranIn(ran).some((dir) => dir === undefined || inMain(dir)))
+      if (ran && ranIn(ran.cwd, ran.also).some((dir) => dir === undefined || inMain(dir)))
         return refuse(ran.what, ANYWHERE_FIX)
       const blindWrite = writeTargets(cmd, name, args).find((t) => {
         const path = pathOf(t, blind)
@@ -682,7 +728,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const script = await fedScript(cmd, here, sure, inMain, visit)
       if (script) return script
       const ran = runs(name, args, local, here)
-      if (ran && ranIn(ran).some((dir) => inMain(dir)))
+      if (ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)))
         return refuse(ran.what, fixFor(sure, ran.fix))
       const moved =
         name === "git" ? await liveRefusal(args, here, inLive, fixFor(sure, LIVE_FIX)) : undefined

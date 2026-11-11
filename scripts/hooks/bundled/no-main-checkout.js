@@ -7455,17 +7455,23 @@ function cwdFlag(args, env) {
 }
 function bunCall(args, env) {
   let cwd = env.cwd;
+  let xCwd;
+  let chained = env.cwd;
   let filtered = false;
   let sub = -1;
   const words = [];
   let k = 0;
   for (;k < args.length; k++) {
     const v = args[k].value;
-    if (v === "--cwd")
-      cwd = args[k + 1] && pathOf(args[++k], env);
-    else if (v.startsWith("--cwd="))
-      cwd = pathOf({ ...args[k], value: v.slice(6) }, env);
-    else if (v === "--filter" || v === "-F") {
+    const value = v === "--cwd" ? args[k + 1] : v.startsWith("--cwd=") ? { ...args[k], value: v.slice(6) } : undefined;
+    if (v === "--cwd" || v.startsWith("--cwd=")) {
+      if (v === "--cwd")
+        k++;
+      cwd = value && pathOf(value, env);
+      chained = value && pathOf(value, { ...env, cwd: chained });
+      if (words[0] === "x")
+        xCwd = { dir: cwd };
+    } else if (v === "--filter" || v === "-F") {
       filtered = true;
       k++;
     } else if (v.startsWith("--filter="))
@@ -7473,13 +7479,17 @@ function bunCall(args, env) {
     else if (words[0] === "x" && RUNNER_TAKES.has(v))
       k++;
     else if (!v.startsWith("-")) {
+      if (v === "x" && words.length === 1 && words[0] === "x" && args[sub - 1]?.value.startsWith("-")) {
+        sub = k;
+        continue;
+      }
       if (words.push(v) === 1)
         sub = k;
       if (v !== "run" && v !== "x")
         break;
     }
   }
-  return { at: k, cwd, filtered, sub, words };
+  return { at: k, chained, cwd, filtered, sub, words, xCwd };
 }
 function gitCall(args, env) {
   let cwd = env.cwd;
@@ -7619,26 +7629,16 @@ function packagedTools(args) {
   }
   return tools;
 }
-function runnerCwd(name, args, env) {
-  let options = args;
-  if (name === "bun") {
-    const { sub, words } = bunCall(args, env);
-    if (words[0] !== "x")
-      return;
-    options = args.slice(sub + 1);
-  } else if (name !== "bunx")
+function runnerFolders(name, args, env, tool) {
+  if (name === "bunx")
+    return runnerFolders("bun", [X, ...args], env, tool);
+  if (name !== "bun")
     return;
-  let found;
-  for (let k = 0;k < options.length && options[k].value.startsWith("-"); k++) {
-    const v = options[k].value;
-    if (v === "--cwd")
-      found = { dir: options[k + 1] && pathOf(options[++k], env) };
-    else if (v.startsWith("--cwd="))
-      found = { dir: pathOf({ ...options[k], value: v.slice("--cwd=".length) }, env) };
-    else if (RUNNER_TAKES.has(v))
-      k++;
-  }
-  return found;
+  const { chained, words, xCwd } = bunCall(args, env);
+  if (words[0] !== "x")
+    return;
+  const folders = [cwdFlag(tool, { ...env, cwd: chained })];
+  return xCwd ? [...folders, xCwd.dir] : folders;
 }
 function runnerTarget(args) {
   let k = 0;
@@ -7652,7 +7652,12 @@ function validationOff(local, env) {
   const read = (key) => local.get(key)?.value ?? env.vars.get(key)?.value ?? env.process[key];
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true";
 }
-var ranIn = (ran) => ran.also ? [ran.cwd, ran.also.dir] : [ran.cwd];
+var withChained = (also, chained) => [...also ?? [], ...chained === undefined ? [undefined] : []];
+var ranIn = (dir, also) => [
+  dir,
+  ...also ?? []
+];
+var unreadFolder = (also) => also?.includes(undefined) ?? false;
 function runs(name, args, local, env) {
   if (name === "bunx")
     return runs("bun", [X, ...args], local, env);
@@ -7661,7 +7666,7 @@ function runs(name, args, local, env) {
     if (validationOff(local, env))
       return;
     return {
-      also: runnerCwd(name, args, env),
+      also: runnerFolders(name, args, env, turbo),
       cwd: cwdFlag(turbo, env),
       fix: BUILD_FIX,
       what: "the packages build without NODE_ENV and SKIP_ENV_VALIDATION=true"
@@ -7684,14 +7689,14 @@ function runs(name, args, local, env) {
   }
   if (name !== "bun")
     return;
-  const { at, cwd, filtered, sub, words } = bunCall(args, env);
+  const { at, chained, cwd, filtered, sub, words } = bunCall(args, env);
   const target = words[0] === "run" || words[0] === "x" ? words[1] : words[0];
   const packaged = words[0] === "x" ? packagedTools(args.slice(sub + 1)) : [];
   const tool = [toolName(target), ...packaged].find((t) => TOOLS.has(t));
   if (tool) {
     const dir = words[0] === "x" ? env.cwd : cwd;
     return {
-      also: runnerCwd(name, args, env),
+      also: runnerFolders(name, args, env, args.slice(at + 1)),
       cwd: cwdFlag(args.slice(at + 1), { ...env, cwd: dir }),
       what: `bun ${words.join(" ")}`
     };
@@ -7700,6 +7705,14 @@ function runs(name, args, local, env) {
     return { cwd: cwdFlag(args.slice(at + 1), { ...env, cwd }), what: "bun test" };
   if (target && BUN_SCRIPTS.has(target) && (words[0] === "run" || filtered || target !== "build"))
     return { cwd, what: `bun ${words.join(" ")}` };
+  if (words[0] === "x" && target && args[at]?.value === target) {
+    const ran = runs(toolName(target), args.slice(at + 1), local, { ...env, cwd: chained });
+    return ran && {
+      ...ran,
+      also: withChained(ran.also, chained),
+      what: `bun x ${ran.what}`
+    };
+  }
 }
 var LETTERS = {
   perl: {
@@ -7878,7 +7891,7 @@ async function inspect(raw, environment, main) {
     if (env.cwdAnywhere) {
       const blind = { ...env, cwd: undefined };
       const ran = runs(name, args, local, blind);
-      if (ran && ranIn(ran).some((dir) => dir === undefined || inMain(dir)))
+      if (ran && ranIn(ran.cwd, ran.also).some((dir) => dir === undefined || inMain(dir)))
         return refuse(ran.what, ANYWHERE_FIX);
       const blindWrite = writeTargets(cmd, name, args).find((t) => {
         const path = pathOf(t, blind);
@@ -7904,7 +7917,7 @@ async function inspect(raw, environment, main) {
       if (script)
         return script;
       const ran = runs(name, args, local, here);
-      if (ran && ranIn(ran).some((dir) => inMain(dir)))
+      if (ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)))
         return refuse(ran.what, fixFor2(sure, ran.fix));
       const moved = name === "git" ? await liveRefusal(args, here, inLive, fixFor2(sure, LIVE_FIX)) : undefined;
       if (moved)
@@ -7945,14 +7958,20 @@ if (import.meta.main) {
 export {
   FILE_TOOLS,
   RUNNER_TAKES,
+  X,
   bunCall,
   check,
   cwdFlag,
   gitCall,
   liveCheckout,
   mainCheckout,
+  packagedTools,
+  ranIn,
   real,
-  runnerCwd,
+  runnerFolders,
+  toolName,
   turboWords,
+  unreadFolder,
+  withChained,
   writeTargets
 };

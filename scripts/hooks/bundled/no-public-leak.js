@@ -6169,6 +6169,10 @@ var JOBS = {
     neverPause: true,
     schedule: { every: 300 }
   }),
+  "ops-wa": terminal("ops-wa", `${bunJob("ops-wa")} --data {data}`, {
+    description: "Holds the WhatsApp link on the spare number: hands each owner message to the dispatcher, sends its replies, and drops every other message.",
+    schedule: { always: true }
+  }),
   "ops-zai-usage": launchd("ops-zai-usage", {
     description: "Reads the GLM plan's credits into zai-usage.json, which the spawn gate reads.",
     schedule: { every: 300 }
@@ -6492,6 +6496,20 @@ var slotSettings = defineSettings({
     schema: array(string2().regex(/^\/.+/, "an absolute path"))
   }
 });
+// packages/settings/src/whatsapp.ts
+var e1642 = string2().regex(/^(?:\+[1-9]\d{6,14})?$/, "a phone number in E.164, as +15550100001");
+var whatsappSettings = defineSettings({
+  "wa.device": {
+    default: "",
+    description: "The spare number ops-wa links to as a device, in E.164: its pairing code is for this number. Never the owner's own number; ops-wa does not run until it is set.",
+    schema: e1642
+  },
+  "wa.owner": {
+    default: "",
+    description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages and sends only to it; ops-wa does not run until it is set.",
+    schema: e1642
+  }
+});
 // packages/scripts/src/trace-count/kinds.ts
 var TODAY_PUBLIC = ["nrjdalal/playground", "nrjdalal/playground-yard"];
 var reposOf = (settings) => {
@@ -6519,16 +6537,16 @@ var isPublicList = (value) => typeof value === "object" && value !== null && !Ar
 });
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var anyOf = (items, tail = "") => items.length ? new RegExp(`(?<![a-z\\d])(?:${items.map(escape).join("|")})${tail}(?![a-z\\d])`, "gi") : undefined;
-var ownerWord = (name, archive) => {
+var ownerWord = (name) => {
   const cased = [...name].map((c) => /[a-z]/i.test(c) ? `[${c.toLowerCase()}${c.toUpperCase()}]` : escape(c));
-  return `(?<![a-zA-Z\\d])(?<![\\w.+-]@[\\w.-]*)${cased.join("")}(?![a-zA-Z\\d])(?![\\w.+-]*@)(?!/${escape(archive.split("/")[1] ?? "")}(?![\\w.-]))`;
+  return `(?<![a-zA-Z\\d])(?<![\\w.+-]@[\\w.-]*)${cased.join("")}(?![a-zA-Z\\d])(?!/[\\w-])(?![\\w.+-]*@)`;
 };
 var ownerName = (repos) => {
   if (!repos.owner.length)
     return;
   const MONTH = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*";
   return new RegExp([
-    ...repos.owner.map((name) => ownerWord(name, repos.archive)),
+    ...repos.owner.map(ownerWord),
     `\\b[Tt]he owner(?:,[^:"\\n]{0,40})?:\\s*["\u201C]`,
     "\\b[Tt]he owner (?:said|wrote)\\b",
     `\\b[A-Z][a-z]+, \\d{1,2} ${MONTH}\\b[^"\\n]{0,30}: *["\u201C]`
