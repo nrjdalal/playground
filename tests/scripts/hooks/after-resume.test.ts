@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -77,6 +77,61 @@ describe("after a restart, a resumed factory session re-arms its watches and re-
     expect(out.hookSpecificOutput.additionalContext).toContain(
       "10 minutes before 2026-10-25T21:58Z, the resume",
     )
+  })
+
+  describe("the edit lefthook set aside when a restart killed a commit", () => {
+    const git = (cwd: string, ...args: string[]) => {
+      const run = Bun.spawnSync(
+        ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", ...args],
+        { cwd },
+      )
+      if (run.exitCode !== 0) throw new Error(run.stderr.toString())
+    }
+    // A main checkout and a worktree whose folder is not its branch's name, since lefthook names its patch by the worktree's folder.
+    const scratch = () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "after-resume-git-")))
+      const main = join(root, "main")
+      mkdirSync(main)
+      git(main, "init", "-q", "-b", "canary")
+      git(main, "commit", "-q", "--allow-empty", "-m", "init")
+      git(main, "worktree", "add", "-q", join(root, "wt-folder"), "-b", "PG-9-slug")
+      const info = join(main, ".git", "info")
+      mkdirSync(info, { recursive: true })
+      return { info, main, worktree: join(root, "wt-folder") }
+    }
+    const resumedIn = async (cwd: string) => {
+      const raw = JSON.stringify({ ...JSON.parse(input), cwd })
+      const out = JSON.parse((await check(raw, { PLAYGROUND_ROLE: "worker" }, now)) ?? "null")
+      return out.hookSpecificOutput.additionalContext as string
+    }
+    const patch = "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -3 +3 @@ b\n-c\n+c2\n"
+
+    test("a worktree's patch left behind is named, with the command that puts it back before any commit", async () => {
+      const { info, worktree } = scratch()
+      const left = join(info, "lefthook-unstaged.wt-folder.patch")
+      writeFileSync(left, patch)
+      const text = await resumedIn(worktree)
+      expect(text).toContain(`git apply --unidiff-zero ${left}`)
+      expect(text).toContain("before any commit")
+    })
+
+    test("a main checkout's patch has no worktree name", async () => {
+      const { info, main } = scratch()
+      const left = join(info, "lefthook-unstaged.patch")
+      writeFileSync(left, patch)
+      expect(await resumedIn(main)).toContain(`git apply --unidiff-zero ${left}`)
+    })
+
+    test("with no patch left behind, it says nothing of one", async () => {
+      expect(await resumedIn(scratch().worktree)).not.toContain("lefthook")
+    })
+
+    test("another worktree's patch is not this session's to restore", async () => {
+      const { info, worktree } = scratch()
+      writeFileSync(join(info, "lefthook-unstaged.other-folder.patch"), patch)
+      writeFileSync(join(info, "lefthook-unstaged-all.wt-folder.patch"), patch)
+      expect(await resumedIn(worktree)).not.toContain("lefthook")
+    })
   })
 
   test("a session outside the factory, the owner's own, gets nothing", async () => {
