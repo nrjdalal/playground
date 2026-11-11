@@ -49,7 +49,10 @@ export function treeAt(root: string, oid: string): Tree {
       const nl = bytes.indexOf(10, at)
       if (nl === -1) break
       const header = decode.decode(bytes.subarray(at, nl))
-      const size = Number(header.slice(header.lastIndexOf(" ") + 1))
+      const frame = /^[0-9a-f]{40,64} blob (\d+)$/.exec(header)
+      if (!frame)
+        throw new Error(`hooks-bundle: git cat-file --batch read a tree blob as "${header}"`)
+      const size = Number(frame[1])
       bySha.set(
         header.slice(0, header.indexOf(" ")),
         decode.decode(bytes.subarray(nl + 1, nl + 1 + size)),

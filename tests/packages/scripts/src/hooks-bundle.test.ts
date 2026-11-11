@@ -600,6 +600,17 @@ describe("--check reads a tree git holds, never the working files", () => {
     expect(merged.stderr).toContain(join(HOOKS, "lib.ts"))
   })
 
+  // cat-file names a blob the object store has lost as `<sha> missing` in its header, and the read says so instead of stopping silently
+  test("a tree blob the object store has lost throws, naming the header", () => {
+    const { root } = checkout()
+    const sha = Bun.spawnSync(["git", "-C", root, "rev-parse", `HEAD:${join(HOOKS, "lib.ts")}`])
+      .stdout.toString()
+      .trim()
+    expect(sha).toMatch(/^[0-9a-f]{40,64}$/)
+    rmSync(join(root, ".git", "objects", sha.slice(0, 2), sha.slice(2)))
+    expect(() => treeAt(root, "HEAD").text(join(HOOKS, "lib.ts"))).toThrow("missing")
+  })
+
   // A source whose name is longer than the filesystem takes makes the mirror's write throw, and the mirror goes with it; the wait rides out a mirror another test's check holds up at the same moment
   test("a throw while the mirror is written leaves no temp folder behind", async () => {
     const { root } = checkout()
