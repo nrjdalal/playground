@@ -78,6 +78,8 @@ Each night at 3:00 am, ops-tick's nightly clean removes what no merge's cleanup 
 It keeps a worktree that another worktree or a scratch folder still links into, and names the first three links.
 A merged or closed PR's worktree goes to the trash whatever it holds, and one whose merge or close `playground rm` cannot confirm goes there too under the owner's standing approval, each move restorable with `playground rm --restore`.
 It spaces its deletes under `playground rm`'s limit of 3 a minute, so none is refused, and leaves what does not fit in a 10-minute wait for the next night.
+The same night it sweeps every other repo the factory works in: each checkout directly in the code root, or in `~/<org>` for an org `ext.links` guards.
+A worktree there goes by `git worktree remove`, its branch kept, only when its PR merged or closed (or it has none and every commit is pushed), it holds nothing but build output, and no live process or roster row has it; each one kept is named with why.
 An unmerged branch's head is tagged `archive/<branch>` on origin before any delete, so the tag holds it and `git branch <name> archive/<branch>` brings the branch back; one whose tag cannot be made, or whose origin head is not the local head the tag would hold, stays, named in the log.
 A branch never pushed stays too, with a local `archive/<branch>` tag alone, since a push would publish commits no one has reviewed, and is named once, the night that tag is made.
 Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch.

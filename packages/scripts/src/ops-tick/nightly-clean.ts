@@ -1,9 +1,10 @@
 import { statfsSync } from "node:fs"
-import { appendFile, lstat, mkdir, readdir, unlink } from "node:fs/promises"
+import { appendFile, lstat, mkdir, readdir, realpath, unlink } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 import { managerOf } from "@packages/config/kinds"
+import { codeRoot, guardedOrgs, readPolicyOrDefaults, type Settings } from "@packages/settings"
 
 import {
   type CleanupDeps,
@@ -13,7 +14,7 @@ import {
 import { writeAtomic } from "../write-atomic"
 import type { Context } from "./tick"
 
-// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), branches (each head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, and an Inbox update when 1 GB or more was freed. It asks no decision: each container or volume no rule removes is kept and named as kept.
+// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), every other repo's stale worktrees (git worktree remove, its branch kept), branches (each head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, and an Inbox update when 1 GB or more was freed. It asks no decision: each container or volume no rule removes is kept and named as kept.
 
 const GB = 1024 ** 3
 // The freed-space finding's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
@@ -26,12 +27,13 @@ export type Prs = { byBranch: Map<string, Pr>; byNumber: Map<number, Pr>; repo?:
 export type Ref = { name: string; sha: string }
 export type Worktree = { branch: string | null; path: string }
 
-// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers (null when GitHub cannot be read), the turbo cache's folder, the clock the cap's pacing reads, and the sleep it waits on.
+// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers in the repo a folder's origin names (the checkout's when none is given; null when GitHub cannot be read), the folders other repos are read in, the turbo cache's folder, the clock the cap's pacing reads, and the sleep it waits on.
 export type NightDeps = {
   cleanup: () => Promise<CleanupDeps | null>
   free: (dir: string) => number
   now: () => number
-  prs: (ctx: Context, branches: string[], numbers: number[]) => Promise<Prs | null>
+  prs: (ctx: Context, branches: string[], numbers: number[], dir?: string) => Promise<Prs | null>
+  roots: (data: string, checkout: string) => Promise<string[]>
   sleep: (ms: number) => Promise<void>
   turbo: string
 }
@@ -73,6 +75,53 @@ export const staleWorktrees = (worktrees: Worktree[], prs: Prs): (Worktree & { p
       (n === undefined ? undefined : prs.byNumber.get(n))
     return pr !== undefined && pr.state !== "OPEN" ? [{ ...w, pr }] : []
   })
+
+// An ignored path that is build output, cache or an .env copy, which a removed worktree may drop (issue 1778, from Ops's hand sweep of 229 worktrees).
+const BUILD_OUTPUT =
+  /(^|\/)(node_modules|\.next|\.turbo|dist|build|out|coverage|\.cache|\.vercel|\.eslintcache|[^/]*\.tsbuildinfo|\.DS_Store|next-env\.d\.ts|\.env(\.[^/]*)?|\.portless[^/]*|\.wrangler|\.output|storybook-static|\.generated|bundle|\.source|__pycache__|\.ruff_cache|\.pytest_cache)(\/|$)/
+
+// Pure: the work git status --porcelain --ignored shows in a worktree, as a keep reason: a tracked change or an untracked file, else an ignored path outside build output; undefined when there is none.
+export const workIn = (status: string): string | undefined => {
+  const all = lines(status)
+  if (all.some((l) => !l.startsWith("!! "))) return "uncommitted work"
+  const extra = all.map((l) => l.slice(3).replace(/\/$/, "")).filter((p) => !BUILD_OUTPUT.test(p))
+  return extra.length ? `ignored files outside build output: ${extra.join(", ")}` : undefined
+}
+
+// Pure: what a roster names, for the sweep of other repos: every string anywhere in it, and each row's branch.
+export const rosterNames = (roster: unknown): { branches: Set<string>; texts: string[] } => {
+  const texts: string[] = []
+  const branches = new Set<string>()
+  const walk = (v: unknown, key = "") => {
+    if (typeof v === "string") {
+      texts.push(v)
+      if (key === "branch") branches.add(v)
+    } else if (Array.isArray(v)) v.forEach((x) => walk(x))
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, k)
+  }
+  walk(roster)
+  return { branches, texts }
+}
+
+// Pure: the folders the factory works in, as spawn.sh trusts them: the code root, and ~/<org> for each org ext.links guards.
+export const rootsOf = (settings: Settings, checkout: string, home: string): string[] => [
+  codeRoot(settings, checkout),
+  ...guardedOrgs(settings.values).map((org) => join(home, org)),
+]
+
+// The real path of each checkout directly in a root that holds a .claude/worktrees folder, each once, the factory's own checkout aside, since its own step sweeps it.
+export const otherRepos = async (roots: string[], checkout: string): Promise<string[]> => {
+  const own = await realpath(checkout).catch(() => checkout)
+  const found = new Set<string>()
+  for (const root of roots)
+    for (const name of await readdir(root).catch(() => [] as string[])) {
+      const repo = await realpath(join(root, name)).catch(() => null)
+      if (!repo || repo === own) continue
+      const has = (path: string) => lstat(join(repo, path)).then(Boolean, () => false)
+      if ((await has(".git")) && (await has(join(".claude", "worktrees")))) found.add(repo)
+    }
+  return [...found]
+}
 
 // Pure: what the branch step does. A local branch merged into origin/canary, or one whose merged or closed PR still holds its head, goes with -D (the main checkout's HEAD is main, so -d would refuse one merged into canary alone), and a remote one whose merged or closed PR holds its head is deleted on origin, since GitHub restores it from the PR's page; an unmerged local branch with no PR, or one ahead of its PR's head, goes to the archive list, whose head is tagged on origin before any delete, so the tag holds the old head. A kept branch (canary, main, the live dashboard's), one a worktree has checked out, and one with an open PR stay.
 export const staleBranches = (input: {
@@ -325,6 +374,78 @@ export const nightlyClean =
       }
       return out.length ? out.join("; ") : "none stale"
     })
+    // Every other repo the factory works in: a worktree goes by git worktree remove, with no --force so git refuses a dirty tree, only when its PR merged or closed (or it has none and every commit is on a remote), it holds no work but build output, and no live process or roster row has it; each kept one is named with why, and its branch stays, so git worktree add <path> <branch> brings it back.
+    await step("other repos", async () => {
+      const repos = await otherRepos(await deps.roots(data, main), main)
+      if (!repos.length) return "none with a .claude/worktrees folder"
+      const cwds = lines((await ctx.run(["lsof", "-a", "-d", "cwd", "-F", "n"])).out)
+        .filter((l) => l.startsWith("n/"))
+        .map((l) => l.slice(1))
+      if (!cwds.length) return "lsof unreadable, none removed"
+      const roster = await Bun.file(join(data, "roster.json"))
+        .json()
+        .then(rosterNames, () => null)
+      if (roster === null) return "the roster unreadable, none removed"
+      const out: string[] = []
+      for (const repo of repos) {
+        const at = (dir: string, args: string[]) => ctx.run(["git", "-C", dir, ...args])
+        const trees = worktreesIn((await at(repo, ["worktree", "list", "--porcelain"])).out, repo)
+        const prs = trees.length
+          ? await deps.prs(
+              ctx,
+              trees.flatMap((t) => (t.branch ? [t.branch] : [])),
+              [],
+              repo,
+            )
+          : null
+        if (trees.length && !prs) {
+          out.push(`${repo}: GitHub unreadable, none read`)
+          continue
+        }
+        let gone = 0
+        for (const t of trees) {
+          const pr = t.branch ? prs?.byBranch.get(t.branch) : undefined
+          const why = await (async () => {
+            if (cwds.some((c) => c === t.path || c.startsWith(`${t.path}/`)))
+              return "a live process works in it"
+            if (
+              roster.texts.some((v) => v.includes(t.path)) ||
+              (t.branch && roster.branches.has(t.branch))
+            )
+              return "the roster names it"
+            if (pr?.state === "OPEN") return "its PR is open"
+            if (!pr) {
+              const ahead = await at(t.path, [
+                "rev-list",
+                "--max-count=1",
+                "HEAD",
+                "--not",
+                "--remotes",
+              ])
+              if (ahead.code !== 0) return "its commits could not be read"
+              if (ahead.out.trim()) return "it has no PR and a commit no remote holds"
+            }
+            const status = await at(t.path, ["status", "--porcelain", "--ignored"])
+            return status.code === 0 ? workIn(status.out) : "its status could not be read"
+          })()
+          if (why === undefined) {
+            const removal = await at(repo, ["worktree", "remove", t.path])
+            if (removal.code === 0) {
+              gone++
+              removed.push(
+                `worktree ${t.path} by git worktree remove${t.branch ? `, its branch ${t.branch} kept` : ""}`,
+              )
+              continue
+            }
+            kept.push(
+              `worktree ${t.path} kept: git worktree remove refused: ${lines(removal.out).at(-1) ?? ""}`,
+            )
+          } else kept.push(`worktree ${t.path} kept: ${why}`)
+        }
+        out.push(`${repo}: removed ${gone} of ${trees.length}`)
+      }
+      return out.join("; ")
+    })
     await step("branches", async () => {
       if (!prs) return "GitHub unreadable, none read"
       const listed = (await git(["worktree", "list", "--porcelain"])).out
@@ -530,8 +651,8 @@ const liveNight: NightDeps = {
     return fs.bavail * fs.bsize
   },
   now: () => Date.now(),
-  prs: async (ctx, branches, numbers) => {
-    const url = (await ctx.run(["git", "-C", ctx.repo, "remote", "get-url", "origin"])).out.trim()
+  prs: async (ctx, branches, numbers, dir = ctx.repo) => {
+    const url = (await ctx.run(["git", "-C", dir, "remote", "get-url", "origin"])).out.trim()
     const repo = /github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/.exec(url)
     if (!repo) return null
     const q = JSON.stringify
@@ -554,6 +675,10 @@ const liveNight: NightDeps = {
       if (!readPrs(read.out, branches, numbers, prs)) return null
     }
     return prs
+  },
+  roots: async (data, checkout) => {
+    const read = readPolicyOrDefaults(data)
+    return read.refusal === undefined ? rootsOf(read.settings, checkout, homedir()) : []
   },
   sleep: (ms) => Bun.sleep(ms),
   turbo: TURBO_CACHE,

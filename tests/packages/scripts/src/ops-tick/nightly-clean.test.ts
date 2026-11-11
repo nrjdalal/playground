@@ -21,12 +21,14 @@ import {
   type Prs,
   pruneTurbo,
   readPrs,
+  rootsOf,
   staleBranches,
   staleContainers,
   staleVolumes,
   staleWorktrees,
   trashIdOf,
   trashSince,
+  workIn,
   worktreesIn,
 } from "../../../../../packages/scripts/src/ops-tick/nightly-clean"
 import { BEATS, type Context } from "../../../../../packages/scripts/src/ops-tick/tick"
@@ -364,6 +366,7 @@ describe("one night's run against a fixture data folder", () => {
         }),
         repo: "https://github.com/acme/app",
       }),
+      roots: async () => [],
       sleep: async () => {},
       turbo: join(root, "turbo"),
     }
@@ -572,6 +575,7 @@ describe("one night's run against a fixture data folder", () => {
         ),
         repo: "https://github.com/acme/app",
       }),
+      roots: async () => [],
       sleep,
       turbo: join(root, "turbo"),
     }
@@ -655,6 +659,7 @@ describe("one night's run against a fixture data folder", () => {
         ),
         repo: "https://github.com/acme/app",
       }),
+      roots: async () => [],
       sleep: async (ms) => {
         waits.push(ms)
         t += ms
@@ -742,6 +747,7 @@ describe("one night's run against a fixture data folder", () => {
         ),
         repo: "https://github.com/acme/app",
       }),
+      roots: async () => [],
       sleep,
       turbo: join(root, "turbo"),
     }
@@ -831,6 +837,7 @@ describe("one night's run against a fixture data folder", () => {
         ),
         repo: "https://github.com/acme/app",
       }),
+      roots: async () => [],
       sleep,
       turbo: join(root, "turbo"),
     }
@@ -1219,4 +1226,27 @@ describe("other repos' worktrees", () => {
     expect(runs.some((r) => r.some((a) => a.startsWith(join(main, ".claude"))))).toBe(false)
     expect(runs.some((r) => r.includes("remove") && r.includes(main))).toBe(false)
   })
+})
+
+test("a worktree's work: a change or untracked file, else an ignored path outside build output", () => {
+  expect(
+    workIn("!! node_modules/\n!! web/next/.next/\n!! .env.local\n!! __pycache__/\n"),
+  ).toBeUndefined()
+  expect(workIn(" M a.ts\n!! node_modules/\n")).toBe("uncommitted work")
+  expect(workIn("?? new.ts\n")).toBe("uncommitted work")
+  expect(workIn("!! dist/\n!! notes.txt\n!! keys/\n")).toBe(
+    "ignored files outside build output: notes.txt, keys",
+  )
+})
+
+test("the folders other repos are read in: the code root, else the checkout's folder, and ~/<org> for each org ext.links guards", () => {
+  const settings = (values: Record<string, unknown>) => ({ schemaVersion: 1 as const, values })
+  expect(rootsOf(settings({}), "/code/playground", "/home/me")).toEqual(["/code"])
+  expect(
+    rootsOf(
+      settings({ "ext.links": { acme: ["acme", "*"] }, "paths.codeRoot": "/srv/src" }),
+      "/code/playground",
+      "/home/me",
+    ),
+  ).toEqual(["/srv/src", "/home/me/acme"])
 })
