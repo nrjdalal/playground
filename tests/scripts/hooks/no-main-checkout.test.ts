@@ -1157,3 +1157,15 @@ describe("a -C or a cd read where it lands", () => {
     expect(await bash(`cd ${WORKTREE} || { exit; }; git commit -m x`)).toBeUndefined()
   })
 })
+
+// #1663: a file in the worktrees folder is no folder git, turbo or bun can walk up from, so a write to it runs whether or not it is there yet, as the folder is git-ignored
+describe("a file in the worktrees folder", () => {
+  writeFileSync(join(MAIN, ".claude", "worktrees", "there.log"), "x\n")
+
+  test.each([
+    ["one that is there", `echo x > ${MAIN}/.claude/worktrees/there.log`],
+    ["one not there yet", `echo x > ${MAIN}/.claude/worktrees/new.log`],
+  ])("from the main checkout, a write to %s runs", async (_name, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+})
