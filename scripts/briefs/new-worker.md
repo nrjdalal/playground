@@ -17,7 +17,7 @@ CI starts only on a pull request into `canary`, so open your draft PR before you
 
 Every git call names its tree, `git -C <your worktree> ...`, so a shell left in another folder moves nothing there. Run spawn.sh by its absolute path, `"${PLAYGROUND_REPO:?}/scripts/spawn.sh"`, from your own folder.
 
-Your PR's checkers (its reviewer and tester) are yours to brief, as playbook's SESSIONS.md (Spawn) says: the spawn passes a filled copy of the template (`~/.playground/<name>-reviewer-<pr>.md`), never the bare template. A run your checker has already measured at the same head is not queued again: ask for its result and cite it. Your pushes carry fixes for blocking and should-fix findings alone; at 5/5 with green checks your PR merges as it stands, and its nits go to a follow-up PR, by code-review-loop's step 6.
+Your PR's checkers (its reviewer and tester) are yours to brief, as playbook's SESSIONS.md (Spawn) says: the spawn passes a filled copy of the template (`~/.playground/<name>-reviewer-<pr>.md`), never the bare template. A run your checker has already measured at the same head is not queued again: ask for its result and cite it. What a push after review carries, and where a 5/5's nits go, is code-review-loop's step 6.
 
 **stop**: an urgent ticket gets the Mac, so on your lead's stop commit your work, stop your own queued and running slot tasks by their own handle (`TaskStop`), and go idle, with no new round, merge or spawn; on your lead's all-clear, carry on where you stopped. Only the urgent ticket's own session and its checkers keep working, the stop naming that session.
 A runner keeps its long-running job up through an urgent stop; only its heavy upkeep (an install, a build, a clone) waits for the all-clear.
