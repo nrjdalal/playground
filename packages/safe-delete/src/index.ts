@@ -306,6 +306,10 @@ const firstOfBurst = (trash: string, session: string, recent: TrashEntry[]): boo
   }
   try {
     mkdirSync(join(trash, ".cap-told", session), { recursive: true })
+  } catch {
+    return true
+  }
+  try {
     writeFileSync(told, "", { flag: "wx" })
     return true
   } catch (err) {
