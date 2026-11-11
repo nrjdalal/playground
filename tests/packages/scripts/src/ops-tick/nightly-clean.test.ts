@@ -1114,7 +1114,7 @@ describe("other repos' worktrees", () => {
     return path
   }
 
-  const night = () => {
+  const night = (answers: Record<string, string> = {}) => {
     const root = scratch()
     const data = join(root, "data")
     const ops = join(data, "ops")
@@ -1151,6 +1151,7 @@ describe("other repos' worktrees", () => {
       "docker system df": JSON.stringify({ Volumes: [] }),
       lsof: `p1\nfcwd\nn${root}\np2\nfcwd\nn${join(w.held, "src")}\n`,
       "worktree list": `worktree ${main}\nHEAD a\nbranch refs/heads/main`,
+      ...answers,
     })
     // git runs for real in every scratch checkout but Playground's own, whose reads the fakes answer as the other rows do
     const runs: string[][] = []
@@ -1207,7 +1208,7 @@ describe("other repos' worktrees", () => {
       trashRoots: () => ({ home: root, main, trash: join(root, "trash") }),
       turbo: join(root, "turbo"),
     } as NightDeps
-    return { ctx, deps, lost, main, ops, runs, sent, w }
+    return { ctx, data, deps, lost, main, ops, runs, sent, w }
   }
   const outbox = (sent: { text: string; to: string }[]) =>
     sent.find((s) => s.to === "ops")?.text ?? ""
@@ -1238,6 +1239,37 @@ describe("other repos' worktrees", () => {
       expect(existsSync(path)).toBe(true)
       expect(outbox(sent)).toContain(`worktree ${path} kept: ${why}`)
     }
+  })
+
+  test("an lsof the step cannot read names the step's early exit and removes nothing", async () => {
+    const { ctx, deps, ops, w } = night({ lsof: "" })
+    await nightlyClean(deps)(ctx)
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toContain(
+      "other repos: lsof unreadable, none removed",
+    )
+    expect(existsSync(w.done)).toBe(true)
+    expect(existsSync(w.pushed)).toBe(true)
+  })
+
+  test("a roster the step cannot read names the step's early exit and removes nothing", async () => {
+    const { ctx, data, deps, ops, w } = night()
+    writeFileSync(join(data, "roster.json"), "not json")
+    await nightlyClean(deps)(ctx)
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toContain(
+      "other repos: the roster unreadable, none removed",
+    )
+    expect(existsSync(w.done)).toBe(true)
+    expect(existsSync(w.pushed)).toBe(true)
+  })
+
+  test("PRs the step cannot read name the repo's early exit and keep its worktrees", async () => {
+    const { ctx, deps, ops, w } = night()
+    deps.prs = async () => null
+    await nightlyClean(deps)(ctx)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("GitHub unreadable, none read")
+    expect(existsSync(w.done)).toBe(true)
+    expect(existsSync(w.pushed)).toBe(true)
   })
 
   test("a repo outside the code root and the org folders is never read", async () => {
