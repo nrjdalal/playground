@@ -207,6 +207,46 @@ function scratchWorld(args: Word[], local: Map<string, Text>, env: Env): string 
   return true
 }
 
+// herdr-core (hc): its socket has no access control past file permissions and gives a caller exec, file and keys, so it runs only through the trial world spawn.sh's probe start builds, by its wrapper's literal path, which pins the world's binary, folders and session word.
+const hcWrapper = (env: Env) =>
+  join(
+    env.process.PLAYGROUND_DATA_DIR || join(env.process.HOME ?? "~", ".playground"),
+    "hc-trial",
+    "hc",
+  )
+// hc's commands that a program the hook cannot read is judged as hc by; server reaches judgeHerdr through HERDR_HEADS.
+const HC_HEADS = new Set(["exec", "file", "keys", "send"])
+// The calls the trial world still refuses: a start, which spawn.sh alone makes; an update, which swaps the checked binary; and another machine.
+const HC_WORLD_REFUSED = new Set(["connect", "machine", "run", "update"])
+
+const refuseHc = (what: string, env: Env) =>
+  `no-raw-spawn hook refuses ${what}: herdr-core's socket has no access control and gives a caller exec, file and keys, so a factory session runs hc only through the trial world's wrapper, ${hcWrapper(env)}, which ${SPAWN} probe <name> <reports-to> <brief> --runtime hc builds; outside it only hc's --help and --version run.`
+
+function judgeHc(args: Word[], env: Env, program?: Text): string | undefined {
+  const given = args.map((a) => a.value)
+  const options = given.filter((v) => v.startsWith("-"))
+  if (options.length && options.every((v) => HELP.has(v)) && given.length - options.length <= 1)
+    return
+  if (given.length === 1 && (given[0] === "--version" || given[0] === "-V")) return
+  const [head] = given.filter((v) => !v.startsWith("-"))
+  const path = program && pathOf(program, env)
+  if (path && resolve(path) === hcWrapper(env)) {
+    if (
+      HC_WORLD_REFUSED.has(head ?? "") ||
+      given.some((v) => v === "--on" || v.startsWith("--on="))
+    )
+      return refuseHc(
+        `an hc ${head ?? "call"} in the trial world, which starts, updates or reaches past it`,
+        env,
+      )
+    return
+  }
+  return refuseHc(
+    `an hc ${head ?? "call with no command, which attaches"} outside the trial world`,
+    env,
+  )
+}
+
 function judgeHerdr(
   args: Word[],
   local: Map<string, Text>,
@@ -267,10 +307,16 @@ const visit: Visit = async (cmd, { args, first, local, name }, env) => {
   if (args.some((a) => a.value === "herdrdev/herdr"))
     return refuseHerdr("herdr's agent skill, which teaches typing into other panes")
   if (TERMINAL.test(name)) return judgeCmux(args)
+  if (name === "hc" || name === "herdr-core") return judgeHc(args, env, first)
   // herdr sets HERDR_BIN_PATH in every pane it opens, so a program word expanding it is herdr whatever follows.
   if (name === "herdr" || first?.variable === "HERDR_BIN_PATH") return judgeHerdr(args, local, env)
   if (first && (first.unknown || marked(first.value))) {
     if (HERDR_HEADS.has(herdrWords(args)[0] ?? "")) return judgeHerdr(args, local, env, first)
+    if (HC_HEADS.has(herdrWords(args)[0] ?? ""))
+      return refuseHc(
+        `an ${herdrWords(args)[0]} whose program is ${first.unknown ?? "a word it cannot read"}, which it cannot tell from hc`,
+        env,
+      )
     const [head] = positionals(beforeDashes(args))
     return head && HEADS.has(head) ? judgeCmux(args) : undefined
   }
@@ -279,7 +325,7 @@ const visit: Visit = async (cmd, { args, first, local, name }, env) => {
 
 const BARE = (command: string) => command.replace(/[\\'"]/g, "")
 const OPENS = new RegExp(
-  `\\b(?:cmux|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH|${[...HEADS, ...HERDR_HEADS].join("|")})\\b`,
+  `\\b(?:cmux|hc|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH|${[...HEADS, ...HERDR_HEADS, ...HC_HEADS].join("|")})\\b`,
   "i",
 )
 const REOPEN = /\bclaude\b[\s\S]*(?:\s-[cr]\b|--resume|--continue)/i
@@ -293,7 +339,7 @@ const candidate = (command: string): boolean =>
   UNIX.test(BARE(command))
 
 const spawnCall = (command: string): boolean =>
-  /\b(?:herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/i.test(BARE(command)) ||
+  /\b(?:hc|hc-trial|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/i.test(BARE(command)) ||
   (/\bcmux\b/i.test(BARE(command)) &&
     /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(
       BARE(command),

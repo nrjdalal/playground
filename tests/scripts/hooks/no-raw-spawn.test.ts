@@ -639,6 +639,111 @@ describe("herdr's reads run", () => {
   })
 })
 
+// The herdr-core (hc) trial world spawn.sh's probe start builds: its wrapper at <data folder>/hc-trial/hc, which sets the world's own HC_SESSION, XDG folders and SSH_CONNECTION and drops every HERDR_* and HC_* variable.
+const HC = "/Users/x/.playground/hc-trial/hc"
+const hc = (command: string, environment: Record<string, string | undefined> = {}) =>
+  check(
+    JSON.stringify({
+      cwd: root,
+      hook_event_name: "PreToolUse",
+      tool_input: { command },
+      tool_name: "Bash",
+    }),
+    { HOME: "/Users/x", TMPDIR: TMP, ...environment },
+  )
+
+describe("an hc call outside the trial world is refused, naming the world's wrapper", () => {
+  test.each([
+    ["exec", "hc exec ls"],
+    ["exec on another machine", "hc exec --on vps ls"],
+    ["a file read", "hc file read /etc/hosts"],
+    ["a file write", "printf x | hc file write /tmp/x"],
+    ["keys", "hc keys t1 enter"],
+    ["a forced send", "hc send --force t1 hi"],
+    ["a send", "hc send t1 hi"],
+    ["the server started", "hc server start"],
+    ["the server stopped", "hc server stop"],
+    ["a run of claude", "hc run --bg claude"],
+    ["a list", "hc ls"],
+    ["a bare hc, which attaches", "hc"],
+    ["herdr-core by its name", "herdr-core server status"],
+    [
+      "the trial's binary by its path, past the wrapper",
+      "/Users/x/.playground/hc-trial/bin/herdr-core send t1 hi",
+    ],
+    ["hc installed under HOME", "/Users/x/.local/bin/hc exec ls"],
+    ["hc in capitals", "HC keys t1 enter"],
+    ["hc behind env with the world's session word", "env HC_SESSION=pgtrial hc send t1 hi"],
+    [
+      "the world's word assigned before a bare hc",
+      "HC_SESSION=pgtrial XDG_STATE_HOME=/Users/x/.playground/hc-trial/state hc ls",
+    ],
+    ["a program it cannot read, then exec", "$X exec ls"],
+    ["a program it cannot read, then keys", "$X keys t1 enter"],
+    ["a program it cannot read, then send", "$X send --force t1 hi"],
+    ["a program it cannot read, then file", "$X file read /etc/hosts"],
+    ["nc on the trial world's socket", `nc -U ${TMP}pghc.Ab12/herdr-core/pgtrial.sock`],
+    [
+      "curl on the trial world's socket",
+      `curl --unix-socket ${TMP}pghc.Ab12/herdr-core/pgtrial.sock http://x/`,
+    ],
+  ])("%s", async (_name, command) => {
+    expect(await hc(command)).toMatch(/^no-raw-spawn hook refuses /)
+  })
+
+  test("the refusal names the trial world's wrapper", async () => {
+    expect(await hc("hc exec ls")).toContain(HC)
+  })
+})
+
+describe("an hc call through the trial world's wrapper runs, but a start, an update or another machine", () => {
+  test.each([
+    ["a list", `${HC} ls`],
+    ["a terminal's state", `${HC} get t1`],
+    ["a screen read", `${HC} read t1`],
+    ["a send", `${HC} send t1 'hello there'`],
+    ["keys", `${HC} keys t1 enter`],
+    ["a wait", `${HC} wait t1`],
+    ["an interrupt", `${HC} interrupt t1`],
+    ["the probe ended", `${HC} kill t1`],
+    ["the server restarted", `${HC} server restart`],
+    ["the server stopped, the issue's undo", `${HC} server stop`],
+    ["events followed", `${HC} events`],
+    ["the wrapper by its path under HOME", '"$HOME/.playground/hc-trial/hc" get t1'],
+  ])("%s", async (_name, command) => {
+    expect(await hc(command)).toBeUndefined()
+  })
+
+  test("the wrapper under PLAYGROUND_DATA_DIR runs, and the one under HOME is then outside", async () => {
+    expect(await hc("/d/hc-trial/hc ls", { PLAYGROUND_DATA_DIR: "/d" })).toBeUndefined()
+    expect(await hc(`${HC} ls`, { PLAYGROUND_DATA_DIR: "/d" })).toMatch(
+      /^no-raw-spawn hook refuses /,
+    )
+  })
+
+  test.each([
+    ["a run, which only spawn.sh starts", `${HC} run --bg claude`],
+    ["a run of a shell", `${HC} run bash`],
+    ["an update, which swaps the checked binary", `${HC} update`],
+    ["another machine added", `${HC} machine add vps`],
+    ["exec on another machine", `${HC} exec --on vps ls`],
+    ["the API over stdin", `${HC} connect`],
+  ])("%s is refused", async (_name, command) => {
+    expect(await hc(command)).toMatch(/^no-raw-spawn hook refuses /)
+  })
+})
+
+describe("hc's help and version run anywhere", () => {
+  test.each([
+    ["help", "hc --help"],
+    ["a command's help", "hc send --help"],
+    ["the version", "hc -V"],
+    ["the version by its long name", "herdr-core --version"],
+  ])("%s", async (_name, command) => {
+    expect(await hc(command)).toBeUndefined()
+  })
+})
+
 describe("it fails open", () => {
   test("input that is not JSON runs", async () => {
     expect(await check("claude --resume {")).toBeUndefined()
