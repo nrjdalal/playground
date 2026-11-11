@@ -32,18 +32,6 @@ test("scripts/hooks/bundled holds one bundle per PreToolUse guard and per worker
   expect(readdirSync(join(ROOT, BUNDLED)).sort()).toEqual(names)
 })
 
-// --check builds from a tree (the index, or the merged head), so guards.ts is bundled when that tree holds it, whatever the working copy holds.
-test("an always-bundled entry is built when the tree --check reads holds its source", async () => {
-  const tree = (paths: string[]) => ({
-    names: () => [],
-    paths: () => paths,
-    text: (path: string) => (paths.includes(path) ? "" : undefined),
-  })
-  const scratch = mkdtempSync(join(tmpdir(), "hooks-bundle-always-"))
-  expect(await entries(scratch, tree([join(HOOKS, "guards.ts")]))).toContain("guards")
-  expect(await entries(ROOT, tree([]))).not.toContain("guards")
-})
-
 // A guard that imports another guard keeps that guard's main block live when both are entry points of one build, and the imported block then reads stdin first and judges the call by its own rules.
 test("each guard bundle runs one main block, its own, and the worker bundle none", async () => {
   for (const name of await entries(ROOT)) {
@@ -65,15 +53,15 @@ describe("a bundle run as its wrapper runs it gives its source's verdict", () =>
     })
   test.each([
     [
-      "no-ours-merge",
+      "guards",
       "an ours merge",
       call(ROOT, "git merge -s ours origin/canary"),
       2,
       "no-ours-merge hook refuses",
     ],
-    ["no-ours-merge", "a stash, which no-stash judges", call(ROOT, "git stash"), 0, ""],
+    ["guards", "a plain call", call(ROOT, "true"), 0, ""],
     [
-      "no-unslotted-run",
+      "guards",
       "a worktree's suite with no slot",
       call(worktree, `bun run --cwd ${worktree} test`),
       2,
@@ -101,7 +89,7 @@ describe("a bundle run as its wrapper runs it gives its source's verdict", () =>
 })
 
 // A main checkout made in a scratch folder outside any repo, as the factory's sits, holding the bundle: with PLAYGROUND_REPO unset, as cmux restores a session, the bundle finds that checkout from its own folder, as the source does from its own, so an ask note there runs and the same note from another folder is refused.
-test("no-desktop-owner-app's bundle finds the main checkout it sits in, with PLAYGROUND_REPO unset", async () => {
+test("no-desktop-owner-app, run by guards' bundle, finds the main checkout it sits in, with PLAYGROUND_REPO unset", async () => {
   const main = realpathSync(mkdtempSync(join(tmpdir(), "hooks-bundle-main-")))
   expect(Bun.spawnSync(["git", "-C", main, "init", "-q"]).exitCode).toBe(0)
   mkdirSync(join(main, BUNDLED), { recursive: true })
@@ -113,10 +101,8 @@ test("no-desktop-owner-app's bundle finds the main checkout it sits in, with PLA
     join(main, "package.json"),
     `${JSON.stringify({ scripts: { ask: JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).scripts.ask } })}\n`,
   )
-  copyFileSync(
-    join(ROOT, BUNDLED, "no-desktop-owner-app.js"),
-    join(main, BUNDLED, "no-desktop-owner-app.js"),
-  )
+  for (const name of ["guards", "no-extensions-write-worker"])
+    copyFileSync(join(ROOT, BUNDLED, `${name}.js`), join(main, BUNDLED, `${name}.js`))
   const note = (cwd: string) =>
     JSON.stringify({
       cwd,
@@ -125,16 +111,13 @@ test("no-desktop-owner-app's bundle finds the main checkout it sits in, with PLA
       tool_name: "Bash",
     })
   const run = async (cwd: string) => {
-    const proc = Bun.spawn(
-      ["bun", "--no-env-file", join(main, BUNDLED, "no-desktop-owner-app.js")],
-      {
-        cwd: main,
-        env: { ...process.env, PLAYGROUND_REPO: "", PLAYGROUND_ROLE: "worker" },
-        stderr: "pipe",
-        stdin: new Blob([note(cwd)]),
-        stdout: "pipe",
-      },
-    )
+    const proc = Bun.spawn(["bun", "--no-env-file", join(main, BUNDLED, "guards.js")], {
+      cwd: main,
+      env: { ...process.env, PLAYGROUND_REPO: "", PLAYGROUND_ROLE: "worker" },
+      stderr: "pipe",
+      stdin: new Blob([note(cwd)]),
+      stdout: "pipe",
+    })
     return { code: await proc.exited, stderr: await new Response(proc.stderr).text() }
   }
   expect(await run(main)).toEqual({ code: 0, stderr: "" })

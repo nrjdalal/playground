@@ -155,17 +155,9 @@ const mirrorOf = async (tree: Tree, root: string): Promise<string> => {
   return mirror
 }
 
-// guards.ts runs every Bash guard in one process, bundled wherever its source is (the tree's, when one is given) before the settings register it, so its bundle reaches main a ship before its registration.
-const ALWAYS = ["guards"]
-
 export const entries = async (root: string, tree?: Tree): Promise<string[]> => [
   ...new Set([
     ...(tree ? guardsIn(tree.text(SETTINGS) ?? '{"hooks":{}}') : await preToolUseGuards(root)),
-    ...ALWAYS.filter((name) =>
-      tree
-        ? tree.text(join(HOOKS, `${name}.ts`)) !== undefined
-        : existsSync(join(root, HOOKS, `${name}.ts`)),
-    ),
     ...WORKERS,
   ]),
 ]

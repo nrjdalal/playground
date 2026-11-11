@@ -234,24 +234,52 @@ const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
 }
 
 // Each guard's bundle, copied into a scratch checkout with no node_modules above it, as a damaged install leaves one; the folders the bundles read beside them (extensions' lists, the settings reader role.ts runs in its own process) link to this checkout's.
-const BUNDLED_ROOT = join(SCRATCH, "bundled-checkout")
-const BUNDLED_DIR = join(BUNDLED_ROOT, "scripts", "hooks", "bundled")
-mkdirSync(BUNDLED_DIR, { recursive: true })
-for (const file of readdirSync(join(CHECKOUT, "scripts", "hooks", "bundled")))
-  copyFileSync(join(CHECKOUT, "scripts", "hooks", "bundled", file), join(BUNDLED_DIR, file))
-for (const path of [
-  "extensions",
-  "packages",
-  join("scripts", "roster-statuses.json"),
-  join("scripts", "spawn.sh"),
-])
-  symlinkSync(join(CHECKOUT, path), join(BUNDLED_ROOT, path))
+const bundledCheckout = (root: string) => {
+  const dir = join(root, "scripts", "hooks", "bundled")
+  mkdirSync(dir, { recursive: true })
+  for (const file of readdirSync(join(CHECKOUT, "scripts", "hooks", "bundled")))
+    copyFileSync(join(CHECKOUT, "scripts", "hooks", "bundled", file), join(dir, file))
+  for (const path of [
+    "extensions",
+    "packages",
+    join("scripts", "roster-statuses.json"),
+    join("scripts", "spawn.sh"),
+  ])
+    symlinkSync(join(CHECKOUT, path), join(root, path))
+  return dir
+}
+const BUNDLED_DIR = bundledCheckout(join(SCRATCH, "bundled-checkout"))
+// A guard registered on Bash alone has no bundle of its own: guards.js runs it, so its bundled check is guards.js's entry for it.
+type GuardsBundle = {
+  GUARDS: {
+    name: string
+    run: (raw: string, env: NodeJS.ProcessEnv) => Promise<string | undefined>
+  }[]
+}
+const GUARDS_BUNDLE = (await import(join(BUNDLED_DIR, "guards.js"))) as GuardsBundle
+// guards.js passes no main checkout, so no-unslotted-run reads its bundle's own: this copy sits in a worktree of PATHS.MAIN by its .git file, as its source is handed PATHS.MAIN
+const WORKTREE_BUNDLED = join(SCRATCH, "bundled-worktree")
+const WORKTREE_GUARDS_BUNDLE = (await import(
+  join(bundledCheckout(WORKTREE_BUNDLED), "guards.js")
+)) as GuardsBundle
+writeFileSync(
+  join(WORKTREE_BUNDLED, ".git"),
+  `gitdir: ${join(PATHS.MAIN, ".git", "worktrees", "bundled")}\n`,
+)
+const TAKES_MAIN = new Set(["no-unslotted-run"])
+const inGuardsBundle = (guard: string) =>
+  (TAKES_MAIN.has(guard) ? WORKTREE_GUARDS_BUNDLE : GUARDS_BUNDLE).GUARDS.find(
+    ({ name }) => name === guard,
+  )
 const BUNDLED: Checks = Object.fromEntries(
   await Promise.all(
-    CHECK_NAMES.map(async (name) => [
-      name,
-      (await import(join(BUNDLED_DIR, `${GUARD_OF[name]}.js`))).check,
-    ]),
+    CHECK_NAMES.map(async (name) => {
+      const own = join(BUNDLED_DIR, `${GUARD_OF[name]}.js`)
+      if (existsSync(own)) return [name, (await import(own)).check]
+      const entry = inGuardsBundle(GUARD_OF[name])
+      if (!entry) throw new Error(`${GUARD_OF[name]} has no bundle and guards.js runs none of it`)
+      return [name, (raw: string, env?: NodeJS.ProcessEnv) => entry.run(raw, env ?? process.env)]
+    }),
   ),
 ) as Checks
 
@@ -935,10 +963,13 @@ describe("each bundled guard gives its source's verdict with no node_modules rea
     expect(() => Bun.resolveSync("zod", BUNDLED_DIR)).toThrow()
   })
 
-  // A guard with a bundle goes through its bundle's check(), so registering one with no entry in GUARD_OF fails here rather than comparing its source with itself.
+  // A guard with a bundle, its own or guards.js running it, goes through that bundle, so registering one with no entry in GUARD_OF fails here rather than comparing its source with itself.
   test("every guard here has a bundle exactly when GUARD_OF names its check", () => {
     for (const guard of Object.keys(GUARDS))
-      expect({ bundled: existsSync(join(BUNDLED_DIR, `${guard}.js`)), guard }).toEqual({
+      expect({
+        bundled: existsSync(join(BUNDLED_DIR, `${guard}.js`)) || !!inGuardsBundle(guard),
+        guard,
+      }).toEqual({
         bundled: BUNDLED_PASS.has(guard as Guard),
         guard,
       })

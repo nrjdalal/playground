@@ -9,7 +9,7 @@ import { pastDeadline, withDeadline } from "../../../scripts/hooks/shell"
 const ROOT = join(import.meta.dir, "..", "..", "..")
 const HOOKS = join(ROOT, "scripts", "hooks")
 
-// The guards both settings files register on Bash, one entry each, which guards.ts runs in one process.
+// Every Bash guard, which guards.ts runs in one process.
 const BASH_GUARDS = [
   "no-desktop-owner-app",
   "no-env-dump",
