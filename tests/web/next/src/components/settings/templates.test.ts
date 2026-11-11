@@ -25,25 +25,26 @@ const { QueryClient, QueryClientProvider } = (await import(
 }
 
 const ORCHESTRATOR: Template = {
-  backend: "claude",
   brief: "orchestrator.md",
+  harness: "claude-code",
   id: "orchestrator",
   kind: "orchestrator",
   label: "Orchestrator",
 }
 const ASSISTANT: Template = {
-  backend: "claude",
   brief: "assistant.md",
+  harness: "claude-code",
   id: "assistant",
   kind: "assistant",
   label: "Assistant",
 }
 const NIGHT: Template = {
-  backend: "glm",
   brief: "night.md",
+  harness: "claude-code",
   id: "night-shift",
   kind: "orchestrator",
   label: "Night shift",
+  model: "glm",
 }
 
 const render = (rows?: Template[], scope: string | null = "made-up-me") => {

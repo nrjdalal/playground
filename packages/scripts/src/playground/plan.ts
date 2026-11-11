@@ -1,8 +1,8 @@
 import { getSessionNames, kindOfName, slotOfName } from "@packages/config/kinds"
+import { type Backend, HARNESSES } from "@packages/settings"
 
 import { LAPSE_HOURS } from "./priority"
 
-export type Backend = "claude" | "glm"
 export type Dispatcher = { backend: Backend | null; name: string }
 export type Probes = {
   api: boolean
@@ -14,7 +14,7 @@ export type Probes = {
 export type Step = "dispatcher" | "jobs" | "open" | "wait"
 
 export const NEW_WORKER_BRIEF = "handoffs/new-worker.md"
-const BACKENDS = ["claude", "glm"]
+const BACKENDS: readonly string[] = HARNESSES.flatMap((harness) => harness.backends)
 const KINDS = ["worker", "runner"]
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
 

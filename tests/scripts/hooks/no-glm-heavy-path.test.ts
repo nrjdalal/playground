@@ -756,14 +756,26 @@ describe("which sessions it acts for", () => {
       join(CONFIG, "sessions", "102.json"),
       JSON.stringify({ name: "worker-claude-pin", sessionId: "s-claude" }),
     )
+    await Bun.write(
+      join(CONFIG, "sessions", "103.json"),
+      JSON.stringify({ name: "worker-harness-glm-pin", sessionId: "s-harness-glm" }),
+    )
+    await Bun.write(
+      join(CONFIG, "sessions", "104.json"),
+      JSON.stringify({ name: "worker-harness-claude-pin", sessionId: "s-harness-claude" }),
+    )
     await pin("worker-glm-pin", "glm")
     await pin("worker-claude-pin", "claude")
+    await pin("worker-harness-glm-pin", "claude-code glm")
+    await pin("worker-harness-claude-pin", "claude-code claude")
   })
 
   test.each([
     { label: "GLM's base URL", env: { ...env, ...GLM }, session: "s-none", want: true },
     { label: "a glm pin with no base URL", env, session: "s-glm", want: true },
     { label: "a claude pin", env, session: "s-claude", want: false },
+    { label: "a claude-code glm pin", env, session: "s-harness-glm", want: true },
+    { label: "a claude-code claude pin", env, session: "s-harness-claude", want: false },
     { label: "no pin and no base URL", env, session: "s-none", want: false },
     {
       label: "a base URL that only holds z.ai in its path",
