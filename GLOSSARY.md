@@ -1,24 +1,8 @@
 # Playground
 
-Claude Code skills for an org's tickets, end to end, with the org's own skills in its extension.
+The factory's own terms. An org's ticket skills keep their terms in that org's extension, as its `doc glossary` (`playground ext show <org> doc glossary`).
 
 ## Language
-
-**Run**:
-One `/triage-and-implement` invocation, from its first turn until a marker ends it, the user starts a line with "work stop", or the user types `/triage-and-implement stop`.
-
-**Status block**:
-The summary that ends every turn of a run: the phase, the evidence for each step so far, and the next step.
-
-**Marker**:
-A line `✅ **Done** · …`, `⛔ **Blocked** · …` or `⏳ **Waiting** · …` that ends or pauses a run. The older `[work done]`, `[work blocked]` and `[work waiting]` still match.
-_Avoid_: status line
-
-**Keep-going hook**:
-The Stop hook (triage-and-implement's `scripts/keep-going.py`, in the org's extension) that sends a run back to work until a marker ends it.
-
-**Hand-off**:
-Passing a ticket that is not ours to its owner instead of implementing it.
 
 **Canary**:
 Running a test against the old code to prove it goes red.
@@ -39,35 +23,6 @@ The dashboard's middle region: a session's stream with its composer, the chat on
 **Aside** (also **aside window**):
 The dashboard's right half beside the chat: the Inbox, Pages and app tabs (on a phone they take the chat's place, with a tab bar at the bottom).
 _Avoid_: side panel
-
-**Board**:
-linear's default scope: the shared Developers view in Linear, which holds the AI Platform, Data, DevOps and QA teams today.
-_Avoid_: the org's board (its views also hold the product team)
-
-**Intake rules**:
-The four checks, owned by the `claim` skill, that decide whether a ticket is ours: team, assignee, in flight, owner now. linear applies them to the board, whose own query adds To do in the shared Bugs project.
-
-**Owner now**:
-Whoever is actively working on a ticket's area (its Linear project and its code paths) in the last 30 days. claim reads it live from the project, the code history and the ticket, never from a fixed list.
-_Avoid_: owner domain
-
-**Difficulty tier**:
-claim's estimate of a ticket's size: T1 small, T2 medium, T3 large (a schema change, another service, a backfill, an integration, or a design decision first).
-
-**Verdict**:
-claim's answer for one ticket, its first line: `✅ **Ours**`, `❓ **Ask first**` or `👤 **Theirs**`. triage-and-implement acts on it in phase 1.
-
-**Vault note**:
-The 1Password Secure Note holding the org's secrets, read through its extension's vault skill, which never prints a value.
-
-**Covering ticket**:
-Another open ticket, outside the Labs team and not the owner's, whose description shows that finishing it would meet a ticket's expected result. When someone holds it, claim asks that person and only them; when no one does, it is noted so the two get linked.
-
-**Mine**:
-A 💻 row on the linear skill's board for one of the owner's own started tickets, with its PR, review score and CI, before the board's tickets (linear-scan's Find step 2, in the org's extension, says which go here and which on the 🧪 line).
-
-**Claim**:
-A file saying which Claude session (by its session id) is working a ticket, so no other session takes it (triage-and-implement's CLAIMS.md, in the org's extension).
 
 **Inbox**:
 Playground's list of what the factory needs from the owner and what the owner should know, beside the owner's chat on the Dashboard: one `inbox_item` row each in the dashboard's local Postgres, posted only with `bun run ask`, shown by its `#i<ref>` id. Its three kinds are a **decision** (a preview of exactly what Approve does: an extension accept, a change to the owner's apps, a System Settings pane for a macOS permission, a guard setting or an own account change, which the Dashboard carries out itself, a Slack message, a ship, a new ticket, a delete, a schema, a budget, or a plain ask whose words say what its poster does, answered Approve, Deny or Archive, with an optional note; or a secret ask, answered with a value its card hands to a sink and keeps nowhere), a **draft** (a Slack message or Linear comment the owner edits, then sends or discards, or for a Slack message saves as a draft in Slack for the owner to finish; or, with no link, a public post's text for the owner to post, kept to the **public** rule) and an **update** (an outcome to read: merged, shipped, an alert, a finding or a decision made for the owner). It replaced the asks; the poster carries out the owner's answer and never waits on it (playbook's **ask** rule).
@@ -152,6 +107,3 @@ The owner's WhatsApp is a chat with the factory: the bundled `whatsapp` extensio
 
 **Slot**:
 One turn at a heavy run on this machine: `~/.playground/ops/run-slot.sh <name> -- <command>` takes a run slot by mkdir and gives it back however the run ends ([playbook](./extensions/core/skills/playbook/SKILL.md), the **slots** rule).
-
-**Template**:
-One message's shape, a file in the `templates/` folder of the org's extension's templates skill: frontmatter naming what it is for, where it goes, the skills that send it and its `{{variables}}`, then the message. The sending skill decides who gets it and what fills it; the template decides how it reads.
