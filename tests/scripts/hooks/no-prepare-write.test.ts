@@ -44,6 +44,41 @@ const WRITES = [
   "mcp__linear__save_comment",
   "mcp__slack-shared__chat_post_message",
   "mcp__github-shared__create_pull_request",
+  "mcp__github-shared__create_branch",
+  "mcp__github-shared__create_or_update_file",
+  "mcp__github-shared__delete_file",
+  "mcp__github__push_files",
+  "mcp__github-shared__merge_pull_request",
+  "mcp__github-shared__update_pull_request_branch",
+]
+const API_WRITES = [
+  "gh api repos/made-up/app/pulls -X POST -f title=t -f head=made-up -f base=main",
+  "gh api repos/made-up/app/pulls --method POST -F title=t -f head=made-up -f base=main",
+  "gh api /repos/made-up/app/pulls -f title=t -f head=made-up -f base=main",
+  "gh api https://api.github.com/repos/made-up/app/pulls -X post -f head=made-up",
+  "gh api repos/made-up/app/git/refs -X POST -f ref=refs/heads/made-up -f sha=abc123",
+  "gh api repos/made-up/app/git/refs/heads/made-up -X PATCH -f sha=abc123",
+  "gh api repos/made-up/app/git/refs/heads/made-up --method=PATCH -F force=true -f sha=abc123",
+  ...[
+    "createPullRequest",
+    "createRef",
+    "updateRef",
+    "updateRefs",
+    "deleteRef",
+    "createCommitOnBranch",
+    "mergeBranch",
+    "mergePullRequest",
+    "updatePullRequestBranch",
+  ].map((m) => `gh api graphql -f query='mutation { ${m}(input: {}) { clientMutationId } }'`),
+  'gh api "$ENDPOINT" -X POST -f title=t',
+  "gh api /graphql -f query='mutation { createRef(input: {}) { clientMutationId } }'",
+  "gh api https://api.github.com/graphql -f query='mutation { updateRef(input: {}) { clientMutationId } }'",
+  "gh api https://git.example.com/api/graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'",
+  "gh api repos/made-up/app/contents/README.md -X PUT -f message=m -f content=eA==",
+  "gh api repos/made-up/app/contents/docs/a.md --method DELETE -f message=m -f sha=abc123",
+  "gh api repos/made-up/app/merges -X POST -f base=main -f head=made-up",
+  "gh api repos/made-up/app/pulls/7/merge -X PUT",
+  "gh api repos/made-up/app/pulls/7/update-branch -X PUT",
 ]
 const PR_CREATES = [
   "gh pr create --draft --title made-up --body-file /made-up/body.md",
@@ -73,11 +108,17 @@ describe("no-prepare-write refuses a prepare-only session's writes", () => {
     expect(await check(bash(command), env)).toStartWith("no-prepare-write hook refused git push")
   })
 
+  test.each(API_WRITES)("refuses %s", async (command) => {
+    expect(await check(bash(command), env)).toStartWith("no-prepare-write hook refused gh api")
+  })
+
   test.each([
     "mcp__linear-shared__get_issue",
     "mcp__linear-shared__list_comments",
     "mcp__slack-shared__conversations_history",
     "mcp__github-shared__pull_request_read",
+    "mcp__github-shared__get_file_contents",
+    "mcp__github-shared__list_branches",
   ])("lets it read with %s", async (name) => {
     expect(await check(tool(name), env)).toBeUndefined()
   })
@@ -90,6 +131,17 @@ describe("no-prepare-write refuses a prepare-only session's writes", () => {
     "git log --oneline -1",
     "echo gh pr create",
     "echo git push",
+    "gh api repos/made-up/app/pulls",
+    "gh api repos/made-up/app/pulls -X GET -f state=open",
+    "gh api repos/made-up/app/git/refs/heads/made-up",
+    "gh api repos/made-up/app/issues/1/comments -X POST -f body=x",
+    "gh api graphql -f query='query { viewer { login } }'",
+    "gh api /graphql -f query='query { viewer { login } }'",
+    "gh api repos/made-up/app/contents/README.md",
+    "gh api repos/made-up/app/pulls/7/merge",
+    "gh api repos/made-up/app/git/commits -X POST -f message=m -f tree=abc123",
+    "gh api repos/made-up/app/git/trees -X POST -f base_tree=abc123",
+    "gh api graphql -f query='mutation { addComment(input: {}) { clientMutationId } }'",
   ])("lets it run %s", async (command) => {
     expect(await check(bash(command), env)).toBeUndefined()
   })
@@ -100,7 +152,7 @@ describe("no-prepare-write lets the same writes run for a session not marked pre
     "%s, whose roster row reads no mode or which the roster or the registry does not hold",
     async (session) => {
       for (const name of WRITES) expect(await check(tool(name, session), env)).toBeUndefined()
-      for (const command of [...PR_CREATES, ...PUSHES])
+      for (const command of [...PR_CREATES, ...PUSHES, ...API_WRITES])
         expect(await check(bash(command, session), env)).toBeUndefined()
     },
   )
@@ -116,7 +168,17 @@ describe("no-prepare-write lets the same writes run for a session not marked pre
     const claim = { ...env, PLAYGROUND_DATA_DIR: data }
     const assign = tool("mcp__linear-shared__save_issue")
     const push = bash("git push -u origin made-up")
+    const ref = bash(
+      "gh api repos/made-up/app/git/refs -X POST -f ref=refs/heads/made-up -f sha=abc123",
+    )
+    const branch = tool("mcp__github-shared__create_branch")
+    const merge = bash("gh api repos/made-up/app/pulls/7/merge -X PUT")
+    const mergeTool = tool("mcp__github-shared__merge_pull_request")
     expect(await check(assign, claim)).toStartWith("no-prepare-write hook refused")
+    expect(await check(ref, claim)).toStartWith("no-prepare-write hook refused gh api")
+    expect(await check(branch, claim)).toStartWith("no-prepare-write hook refused the tool")
+    expect(await check(merge, claim)).toStartWith("no-prepare-write hook refused gh api")
+    expect(await check(mergeTool, claim)).toStartWith("no-prepare-write hook refused the tool")
     expect(await check(push, claim)).toStartWith("no-prepare-write hook refused git push")
     const cleared = Bun.spawnSync(
       [process.execPath, join(ROOT, "scripts", "roster.ts"), "set", "worker-made-up-1", "mode="],
@@ -125,6 +187,10 @@ describe("no-prepare-write lets the same writes run for a session not marked pre
     expect(cleared.exitCode).toBe(0)
     expect(await check(assign, claim)).toBeUndefined()
     expect(await check(push, claim)).toBeUndefined()
+    expect(await check(ref, claim)).toBeUndefined()
+    expect(await check(branch, claim)).toBeUndefined()
+    expect(await check(merge, claim)).toBeUndefined()
+    expect(await check(mergeTool, claim)).toBeUndefined()
   })
 })
 

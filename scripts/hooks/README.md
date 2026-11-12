@@ -927,10 +927,17 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   An org's start job sets the mode at the prepare-only start (`roster.ts set <session> mode=prepare`) and clears it at the claim: the session's waiter runs `roster.ts set <session> mode=` the moment before it prints its Claim line, so the claim's own assign runs at once, and the job's next beat clears it too, as a backstop.
   A clear that fails still prints the Claim line, which then tells the worker to retry a refused assign after that beat, since the refusal is not final.
   The mark and this check each do nothing without the other, so the job's revision and this check go live in either order.
-- While the mode stands, `scripts/hooks/no-prepare-write.ts` refuses a factory session's tracker issue save (`save_issue`, an assign or a state change) and comment (`save_comment`) on a Linear server, a chat post (`chat_post_message`) on a Slack server,
-  a `git push`, past git's own options (`GIT_TAKES`), since a prepared branch on the org's remote reaches the org before the claim, and a new pull request:
-  `gh pr create` in any form the shared reader (`scripts/hooks/shell.ts`) finds, and a GitHub server's `create_pull_request`.
-  Every other call runs: reads, local git and every other gh call.
+- While the mode stands, `scripts/hooks/no-prepare-write.ts` refuses a factory session's writes that reach the org before the claim, a closed list, each in any form the shared reader (`scripts/hooks/shell.ts`) finds:
+  - `chat_post_message`, a chat post, on a Slack server;
+  - `create_branch`, `create_or_update_file`, `create_pull_request`, `delete_file`, `merge_pull_request`, `push_files` and `update_pull_request_branch` on a GitHub server;
+  - `gh api` with a write method (any but GET or HEAD) to `repos/<owner>/<repo>/` then `contents/<path>`, `git/refs`, `git/refs/<ref>`, `merges`, `pulls`, `pulls/<n>/merge` or `pulls/<n>/update-branch`, the endpoint in any spelling (a leading `/`, the API host), or to an endpoint it cannot read;
+  - `gh api graphql`, the endpoint in any spelling (`/graphql`, the API host, an Enterprise host's `api/graphql`), whose query names `createCommitOnBranch`, `createPullRequest`, `createRef`, `deleteRef`, `mergeBranch`, `mergePullRequest`, `updatePullRequestBranch`, `updateRef` or `updateRefs`, or whose query it cannot read;
+  - `gh pr create`;
+  - `git push`, past git's own options (`GIT_TAKES`), since a prepared branch on the org's remote reaches the org before the claim;
+  - `save_comment`, a tracker comment, and `save_issue`, a tracker issue save (an assign or a state change), on a Linear server.
+
+  Every other call runs: reads, local git, a GraphQL query or any other mutation, every other `gh api` write (a `git/commits` or `git/trees` POST, which moves no ref) and every other gh call.
+
 - It is a check with no process of its own: [guards](#guards) runs it on Bash, and [no-playground-leak](#no-playground-leak)'s process runs it first on the MCP tools, since that hook's matcher already takes every GitHub, Linear and Slack tool, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
 - It fails open, since the session's brief is the first bar: a session the registry or the roster does not hold is not marked, and a read that fails, a roster that does not parse among them, lets the call run and writes one JSON line naming the session, the tool and the error to the data folder's `ops/no-prepare-write.log`, so a broken read shows.
   Its tests are `tests/scripts/hooks/no-prepare-write.test.ts`.
