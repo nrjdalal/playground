@@ -96,7 +96,7 @@ const WORD = new RegExp(String.raw`^(?:(?:[\w./:=@%+,~-]|${READ})+|'[^']*'|"(?:$
 const REDIRECT = /^(?:[<>]&(?:\d+|-)|<<<|&>>?|>>?\|?|<>?)/
 // the reserved words and precommand modifiers after which the next word is still a program word
 const KEEPS_PROGRAM =
-  /^(?:builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/
+  /^(?:-|builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/
 // the prompt parameters zsh expands (under promptsubst for the PS/RPROMPT family), so a line that sets one, by assignment or as a `read` or `print -v` target, can run a captured body's text as a prompt, as `print -P` runs its argument; the name is matched as a bare word, so a mere mention reads the line whole too
 const PROMPT_PARAM = /^(?:PS[0-4]|PROMPT[2-4]?|RPROMPT2?|RPS[12]|SPROMPT)(?!\w)/
 // a heredoc operator whose delimiter is quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`), its word ending where a word does
