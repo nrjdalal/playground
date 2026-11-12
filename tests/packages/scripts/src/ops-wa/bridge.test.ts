@@ -437,6 +437,7 @@ const card = (
   over: Partial<Card> = {},
   preview: Partial<Card["preview"]> = {},
 ): Card => ({
+  answer: null,
   from: "builder",
   id: `id-${ref}`,
   kind: "decision",
@@ -505,16 +506,10 @@ describe("Inbox cards on WhatsApp", () => {
   })
 
   test("a kept card counts only while it still asks: replied and put-away cards stay out of the waiting line", async () => {
-    const answered = (c: Card, answer: Record<string, string>): Card => Object.assign(c, { answer })
     const h = await withCards([
       card(12, {}, { scope: undefined }),
-      answered(card(13, {}, { scope: undefined }), {
-        at: "2026-11-11T04:00:00Z",
-        choice: "replied",
-      }),
-      answered(card(14, {}, { scope: undefined }), {
-        snoozedUntil: "2026-11-12T00:00:00Z",
-      }),
+      card(13, { answer: { choice: "replied" } }, { scope: undefined }),
+      card(14, { answer: { snoozedUntil: "2026-11-12T00:00:00Z" } }, { scope: undefined }),
     ])
     expect(h.texts()).toEqual([waitingLine(1)])
   })
