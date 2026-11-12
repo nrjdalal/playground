@@ -31,6 +31,9 @@ const pageMax = /limit: z\.coerce\.number\(\)\.int\(\)\.min\(\d+\)\.max\((\d+)\)
 )![1]!
 // the log route's page, the size the Mac answers it in
 const logPage = /LOG_PAGE = (\d+)/.exec(dispatcher)?.[1] ?? "none"
+// the log's first cursor, the lowest after the Mac's route takes
+const logStart =
+  /after: z\.coerce\.number\(\)\.int\(\)\.min\((\d+)\)/.exec(dispatcher)?.[1] ?? "none"
 const STATUSES = ["201", "400", "401", "403", "404", "429", "503"]
 const held = [
   String(MAX_TEXT),
@@ -39,6 +42,7 @@ const held = [
   pageSize,
   pageMax,
   logPage,
+  logStart,
   ...STATUSES,
 ]
 

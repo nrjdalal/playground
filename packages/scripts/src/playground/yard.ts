@@ -1,4 +1,12 @@
-import { approvePath, botNameSchema, type Channel, MESSAGE_KINDS } from "@packages/message"
+import { dataDir } from "@packages/env/data-dir"
+import {
+  approvePath,
+  botLogin,
+  botNameSchema,
+  type Channel,
+  MESSAGE_KINDS,
+} from "@packages/message"
+import { loginOf, readPolicyOrDefaults, setSetting, yardSettings } from "@packages/settings"
 
 import { type YardClient, YardError, yardClient } from "../../../../api/hono/src/lib/yard/client"
 import {
@@ -18,6 +26,8 @@ export type YardIo = {
   client: (base: string, token: string) => YardClient
   err: (line: string) => void
   keychain: Keychain
+  // this Mac's yard.logReaders, the bots whose read of the dispatcher's log it answers
+  logReaders: { add: (login: string) => Promise<void>; remove: (login: string) => Promise<void> }
   out: (line: string) => void
   // one line read with no echo when stdin is a terminal, else stdin's first line
   readSecret: (prompt: string) => Promise<string>
@@ -25,7 +35,7 @@ export type YardIo = {
 }
 
 const USAGE =
-  "usage: playground yard login | logout | channels | read <channel> | post <channel> <text> [--kind <kind>] | bot add <name> | bot revoke <name>"
+  "usage: playground yard login | logout | channels | read <channel> | post <channel> <text> [--kind <kind>] | bot add <name> [--log] | bot revoke <name>"
 
 // A channel by its id, its name with or without #, or a DM by @login.
 const find = (channels: Channel[], name: string): Channel | undefined =>
@@ -125,11 +135,12 @@ export async function runYard(words: string[], io: YardIo): Promise<number> {
   return 2
 }
 
-// bot add makes a bot on Yard and writes its token straight to its own Keychain item, printing only the item's name, so the token never reaches a terminal, a log or a chat; bot revoke cuts it on Yard and deletes the item.
+// bot add makes a bot on Yard and writes its token straight to its own Keychain item, printing only the item's name, so the token never reaches a terminal, a log or a chat; with --log it also lets the bot read the dispatcher's log, on Yard and on this Mac's yard.logReaders; bot revoke cuts it on Yard, takes it off the list and deletes the item.
 async function bot(words: string[], client: YardClient, io: YardIo): Promise<number> {
-  const [action, name] = words
+  const [action, name, flag] = words
+  const log = flag === "--log"
   if (
-    words.length !== 2 ||
+    words.length !== (action === "add" && log ? 3 : 2) ||
     (action !== "add" && action !== "revoke") ||
     !botNameSchema.safeParse(name).success
   ) {
@@ -138,9 +149,10 @@ async function bot(words: string[], client: YardClient, io: YardIo): Promise<num
   }
   const item = io.botKeychain(name!)
   if (action === "add") {
-    const { bot, secret } = await client.addBot(name!)
+    const { bot, secret } = await client.addBot(name!, { log })
     try {
       await item.write(secret)
+      if (log) await io.logReaders.add(bot.login)
     } catch (error) {
       // a bot whose token no Keychain keeps could never be handed on, so it goes at once
       await client.revokeBot(name!).catch(() => {})
@@ -149,6 +161,8 @@ async function bot(words: string[], client: YardClient, io: YardIo): Promise<num
     io.out(
       `Made @${bot.login}, its DM ${bot.dm}; its token is in the Keychain item ${botService(name!)}`,
     )
+    if (log)
+      io.out(`@${bot.login} reads the dispatcher's log, hidden secrets and all, through this Mac`)
     io.out(
       `Next: a reveal card for ${botService(name!)}, so the owner copies the token into the bot`,
     )
@@ -160,6 +174,7 @@ async function bot(words: string[], client: YardClient, io: YardIo): Promise<num
     // revoked on Yard's web already: the Keychain item still goes
     if (!(error instanceof YardError && error.status === 404)) throw error
   }
+  await io.logReaders.remove(botLogin(name!))
   await item.remove()
   io.out(`Revoked the bot ${name} on Yard and deleted the Keychain item ${botService(name!)}`)
   return 0
@@ -180,7 +195,38 @@ const setting = async (name: string, live: string | null): Promise<string | unde
   )
 }
 
-export const yardIo = async (repo: string, readSecret: YardIo["readSecret"]): Promise<YardIo> => {
+// yard.logReaders at the login's scope, one commit per change, a login added once and taken off when it is there.
+const logReaders = (data: string): YardIo["logReaders"] => {
+  const change = async (login: string, add: boolean) => {
+    const read = readPolicyOrDefaults(data)
+    if (read.refusal !== undefined) throw new Error(read.refusal)
+    const now = yardSettings.get(read.settings, "yard.logReaders")
+    const has = now.includes(login)
+    if (has === add) return
+    const set = setSetting(
+      data,
+      {
+        key: "yard.logReaders",
+        scope: loginOf(data),
+        value: add ? [...now, login] : now.filter((each) => each !== login),
+      },
+      {
+        actor: "cli",
+        author: "owner",
+        inboxRef: null,
+        reason: `playground yard bot ${add ? "add --log" : "revoke"} ${login}`,
+      },
+    )
+    if (!set.ok) throw new Error(set.message)
+  }
+  return { add: (login) => change(login, true), remove: (login) => change(login, false) }
+}
+
+export const yardIo = async (
+  repo: string,
+  readSecret: YardIo["readSecret"],
+  data = dataDir(),
+): Promise<YardIo> => {
   const live = dashboardCheckout(repo)
   return {
     api: await setting("YARD_API_URL", live),
@@ -188,6 +234,7 @@ export const yardIo = async (repo: string, readSecret: YardIo["readSecret"]): Pr
     client: yardClient,
     err: console.error,
     keychain: keychain(),
+    logReaders: logReaders(data),
     out: console.log,
     readSecret,
     web: await setting("YARD_WEB_URL", live),

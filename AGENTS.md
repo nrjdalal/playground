@@ -167,14 +167,14 @@ Its rules live in one file per topic under `.agents/dashboard/`, and a change to
 Each topic below names when to read its file, and each ALWAYS line is that file's rule in short: the file holds it whole, with its reasons.
 When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
 
-- Stack: read `.agents/dashboard/stack.md` before you change how `bun run dev` starts, which machine a stack reads, the fixture (`api/hono/src/fixtures/dashboard.json`), the dashboard's data folder, the organisation's config (`packages/config/src/org.ts`), the hosted build or the `claude_*` tables.
+- Stack: read `.agents/dashboard/stack.md` before you change how `bun run dev` starts, which machine a stack reads, the fixture, the dashboard's data folder, the organisation's config (`packages/config/src/org.ts`), the hosted build or the `claude_*` tables.
   - ALWAYS: Start it (`bun run dev`) as a process of a herdr pane, or as a background task of an agent session in one, never detached with `( … &)` or `nohup`.
   - ALWAYS: Serve first run's setup with none of the app's database or auth code loaded: with `POSTGRES_URL` empty, `api/hono/src/main.ts` serves `firstRun()`'s setup routes, `GET /api/v1/onboard/checks`, the first run's fix routes and a `setup: true` `GET /api/health` alone until Start a local container finishes, whose database is pglaunch's as is.
   - ALWAYS: A person's stack reads their own machine, while factory, test and `PLAYGROUND_FIXTURE` stacks read the fixture, the live dashboard's checkout reads the live machine and a hosted build reads none, as `dashboardSource()` in `api/hono/src/lib/dashboard/fixture.ts` decides.
   - ALWAYS: Keep it on loopback: the API, `next dev` and the live dashboard's built next server bind 127.0.0.1, and the dashboard is never deployed.
     The hosted build is the one exception (stack.md's hosted rule): it deploys, mounting only sign-in, health and Yard's routes.
   - ALWAYS: Keep the hosted build to its allowlist: `api/hono/src/index.ts` imports `hosted.ts` under `PLAYGROUND_HOSTED=1` and `local.ts` otherwise, and fails closed: `hosted.ts` without the flag, and a local build on Vercel, refuse to start.
-  - ALWAYS: Carry only the GETs on `RELAY_GETS` and the POSTs on `RELAY_WRITES` that the paired key signs (`api/hono/src/lib/relay/protocol.ts`) through the relay.
+  - ALWAYS: Carry only the GETs on `RELAY_GETS` and the POSTs on `RELAY_WRITES` the paired key signs through the relay, and `BOT_GETS` alone for a bot on `yard.logReaders` (`api/hono/src/lib/relay/protocol.ts`).
   - ALWAYS: Stop `bun run dev` before running `bun run build`, `bun run check-types` or `bun run test`, or committing, in the same worktree.
   - ALWAYS: Keep the dashboard on the owner rung: every route and the WebSocket pass `requireConsoleRole("owner")`, but first run's setup routes, which serve before any user exists.
     Under `PLAYGROUND_HOSTED=1` Yard's routes take the `member` rung or the one their route names (stack.md's hosted rule).

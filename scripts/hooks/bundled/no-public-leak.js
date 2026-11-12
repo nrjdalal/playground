@@ -6617,6 +6617,14 @@ var whatsappSettings = defineSettings({
     schema: e1642
   }
 });
+// packages/settings/src/yard.ts
+var yardSettings = defineSettings({
+  "yard.logReaders": {
+    default: [],
+    description: "The bots whose read of the dispatcher's log this Mac answers through the relay, each by its Yard login; a bot Yard lets read the log reads nothing until its login is here.",
+    schema: array(string2().regex(/^[a-z\d][a-z\d-]{0,29}\[bot\]$/, "a bot's login, <name>[bot]"))
+  }
+});
 // packages/scripts/src/playground/setting.ts
 import { resolve as resolve2 } from "path";
 var CHECKOUT = resolve2(__CHECKOUT + "/packages/scripts/src/playground", "../../../..");
