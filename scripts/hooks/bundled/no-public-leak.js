@@ -9099,6 +9099,10 @@ function readOnly(raw) {
 }
 
 // scripts/hooks/no-playground-leak.ts
+var withPlace = (text, name, fix) => ({
+  ...text,
+  where: { fix, name }
+});
 var CHAT_TOOL = /^chat_(?:me_message|post_ephemeral|post_message|schedule_message|update)$/;
 var POST_KEYS = { channel: "channel", text: "text" };
 var CONNECTOR_TOOL = "slack_send_message";
@@ -9168,6 +9172,18 @@ var spec = (texts, files, others = []) => ({
   texts
 });
 var BODY = ["-b", "--body"];
+var FLAG_PLACES = {
+  "--body": "its body",
+  "--body-file": "its body file",
+  "--comment": "its comment",
+  "--notes": "its notes",
+  "--notes-file": "its notes file",
+  "--title": "its title"
+};
+function longName(name, flags) {
+  const next = flags[flags.indexOf(name) + 1];
+  return name.startsWith("--") || !next?.startsWith("--") ? name : next;
+}
 var BODY_FILE = ["-F", "--body-file"];
 var CLOSING = spec(["-c", "--comment"], [], ["-r", "--reason", "--duplicate-of"]);
 var EDIT = [
@@ -9353,14 +9369,19 @@ async function judge(what, target, texts, env, extras = []) {
     return refuseAny(what, target);
   const resolved = await Promise.all(texts.map((t) => resolveText(t, env)));
   const seen = (await Promise.all(extras.map((t) => resolveText(t, env)))).filter((t) => !t.unknown);
-  const hit = [...resolved, ...seen].map((t) => state().policy.find(t.value)).find(Boolean);
+  const hits = [...resolved, ...seen].map((t) => state().policy.find(t.value));
+  const at = hits.findIndex(Boolean);
+  const hit = hits[at];
+  const where = texts[at]?.where;
+  const holds = hit && `${hit.detail}${where ? `, in ${where.name}` : ""}`;
+  const fix = hit && (where?.fix ? `${hit.fix} ${where.fix}` : hit.fix);
   if (target.where === "unknown") {
     if (!hit)
       return;
-    return refuse(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${hit.detail}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(hit.fix)} ${NOT_RUN}`);
+    return refuse(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${holds}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(fix ?? "")} ${NOT_RUN}`);
   }
   if (hit)
-    return refuse(what, target, `its text holds ${hit.detail}`, hit.fix);
+    return refuse(what, target, `its text holds ${holds}`, fix ?? hit.fix);
   const hidden = resolved.find((t) => t.unknown);
   if (hidden) {
     return refuse(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`, READABLE);
@@ -9478,13 +9499,16 @@ async function gh(args, cmd, env, local, xargs) {
   const texts = [];
   for (const { name, value } of flags) {
     const posts = found.texts.includes(name) || found.files.includes(name);
+    const long = longName(name, found.texts.includes(name) ? found.texts : found.files);
+    const place = FLAG_PLACES[long] ?? `its ${long} value`;
     if (!value) {
       if (posts)
         texts.push(unknown2(`${name} with no value`));
     } else if (found.texts.includes(name))
-      texts.push(value);
+      texts.push(withPlace(value, place));
     else if (found.files.includes(name)) {
-      texts.push(value.value === "-" && !value.unknown ? await stdinOf(cmd, env) : await readPath(value, env));
+      const file = value.value === "-" && !value.unknown ? await stdinOf(cmd, env) : await readPath(value, env);
+      texts.push(withPlace(file, place));
     } else if (name === "-R" || name === "--repo")
       repos.push(value);
   }
@@ -9566,15 +9590,13 @@ function unplaced(what, source, env) {
 }
 function prCreate(rest, env) {
   const values = rest.map((w) => w.value);
-  const texts = [
-    gitText(env.cwd, ["log", "--format=%B", "-n", "500", "HEAD", "--not", "--remotes"], "the commits it may push")
-  ];
+  const texts = commitTexts(env.cwd, ["HEAD", "--not", "--remotes"], "the commits it may push", ", which it may push");
   if (!values.some((v) => /^(?:-H|--head)(?:=|$)/.test(v)))
-    texts.push(branch(env.cwd));
+    texts.push(withPlace(branch(env.cwd), "the branch it opens from"));
   if (values.some((v) => v === "-f" || v.startsWith("--fill"))) {
     const at = values.findIndex((v) => /^(?:-B|--base)(?:=|$)/.test(v));
     const base = at === -1 ? "HEAD" : values[at].includes("=") ? values[at].split("=")[1] : values[at + 1];
-    texts.push(base && !base.includes(UNKNOWN) ? gitText(env.cwd, ["log", "--format=%B", "-n", "500", `origin/${base}..HEAD`], "the commits --fill reads") : unknown2("the base --fill reads from"));
+    texts.push(...base && !base.includes(UNKNOWN) ? commitTexts(env.cwd, [`origin/${base}..HEAD`], "the commits --fill reads", ", which --fill reads") : [unknown2("the base --fill reads from")]);
   }
   return texts;
 }
@@ -9827,6 +9849,25 @@ function clearedPost(what, input, at, signedOnly) {
   if (signed && rich.every((k) => k === "blocks" && chipsSigned(input.blocks, signature)))
     return "";
   return `no-playground-leak hook refused ${what} to ${name}: every post there ends with the line ${signature}, since it goes out through the owner's Slack account and must never read as the owner's own. Put that line last in its text, with no attachments or markdown_text; blocks pass only as rich_text sections of text and links whose last line is that signature as italic text, then run it again.`;
+}
+var COMMIT_FIX = "Reword that commit's message (git commit --amend for the newest one), then run it again.";
+function commitTexts(dir, range, what, after = "") {
+  const log = gitText(dir, ["log", "--format=%h%x00%B%x1e", "-n", "500", ...range], what);
+  if (log.unknown)
+    return [log];
+  const texts = [];
+  for (const entry of log.value.split("\x1E")) {
+    const sha = /^\n?([\da-f]{4,64})\0/.exec(entry);
+    const last = texts.at(-1);
+    if (sha) {
+      const name = `the message of commit ${sha[1]}${after}`;
+      texts.push(withPlace({ value: entry.slice(sha[0].length) }, name, COMMIT_FIX));
+    } else if (last)
+      last.value += `\x1E${entry}`;
+    else
+      texts.push({ value: entry });
+  }
+  return texts;
 }
 function gitText(dir, args, what) {
   if (!dir)
@@ -10089,33 +10130,33 @@ async function push(rest, env, checkout, takes = PUSH_TAKES, plain = false) {
   }
   if (target.where === "other")
     return;
-  const texts = flags.flatMap((f) => f.value && (f.name === "-o" || f.name === "--push-option") ? [f.value] : []);
+  const texts = flags.flatMap((f) => f.value && (f.name === "-o" || f.name === "--push-option") ? [withPlace(f.value, "a push option")] : []);
   const sources = [];
   if (names.has("--all") || names.has("--branches") || names.has("--mirror")) {
-    texts.push(gitText(env.cwd, ["for-each-ref", "--format=%(refname:short)", "refs/heads"], "the branches it pushes"));
+    texts.push(withPlace(gitText(env.cwd, ["for-each-ref", "--format=%(refname:short)", "refs/heads"], "the branches it pushes"), "the branch names it pushes"));
     sources.push("--branches");
   }
   if (names.has("--tags") || names.has("--follow-tags") || names.has("--mirror")) {
-    texts.push(gitText(env.cwd, ["for-each-ref", "--format=%(refname:short)%0a%(contents)", "refs/tags"], "the tags it pushes"));
+    texts.push(withPlace(gitText(env.cwd, ["for-each-ref", "--format=%(refname:short)%0a%(contents)", "refs/tags"], "the tags it pushes"), "the tags it pushes"));
   }
   const deleting = names.has("--delete") || names.has("-d");
   for (const spec of refspecs) {
-    texts.push(spec);
+    texts.push(withPlace(spec, "a ref it pushes"));
     if (spec.unknown || spec.reads?.length || spec.value.includes(UNKNOWN))
       continue;
     const [source, destination] = spec.value.replace(/^\+/, "").split(":");
     if (destination === undefined && (source === "HEAD" || source === "@"))
-      texts.push(branch(env.cwd));
+      texts.push(withPlace(branch(env.cwd), "the branch name it pushes"));
     if (source !== "" && !deleting)
       sources.push(source);
   }
   if (refspecs.length === 0 && sources.length === 0) {
-    texts.push(branch(env.cwd));
+    texts.push(withPlace(branch(env.cwd), "the branch name it pushes"));
     sources.push("HEAD");
   }
   if (sources.length > 0) {
     const not = remoteName ? `--remotes=${remoteName}` : "--remotes";
-    texts.push(gitText(env.cwd, ["log", "--format=%B", "-n", "500", ...sources, "--not", not], "the messages of the commits it pushes"));
+    texts.push(...commitTexts(env.cwd, [...sources, "--not", not], "the messages of the commits it pushes"));
   }
   return judge("git push", target, texts, env);
 }
