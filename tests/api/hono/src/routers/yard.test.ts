@@ -13,6 +13,7 @@ const MIGRATIONS = join(ROOT, "packages/db/drizzle")
 const SCENARIO = join(import.meta.dir, "yard-scenario.ts")
 const RELAY = join(import.meta.dir, "yard-relay-scenario.ts")
 const GITHUB = join(import.meta.dir, "yard-github.ts")
+const BOT = join(import.meta.dir, "yard-bot-scenario.ts")
 const WEB = "http://127.0.0.1:3000"
 const PASSWORD = crypto.randomUUID()
 
@@ -235,6 +236,66 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       TOKEN: await tokenFor("fy"),
     })
     expect(JSON.parse(last(run.out))).toEqual([201, 201, 200])
+  })
+
+  test("the owner's token makes a bot that reads and posts in its own DM alone, never held, and a revoke cuts it with a 401", async () => {
+    await sql`insert into "user" (id, name, email, login, role) values ('ox', 'ox', ${["ox", "example.com"].join("@")}, 'ox', 'owner')`
+    await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update("yard_ox").digest("hex")}, ${"mac"}, 'ox')`
+    await sql`insert into "user" (id, name, email, login, role) values ('gh', 'ghost', ${["gh", "example.com"].join("@")}, 'ghost[bot]', 'member')`
+    await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update("yard_ghost").digest("hex")}, ${"bot"}, 'gh')`
+    const run = child(await Bun.file(BOT).text(), {
+      GHOST_TOKEN: "yard_ghost",
+      MEMBER_LOGIN: "mo",
+      MEMBER_TOKEN: await tokenFor("mo"),
+      OWNER_TOKEN: "yard_ox",
+      POSTGRES_URL: url,
+    })
+    expect(run.err).not.toContain("error:")
+    const out = JSON.parse(last(run.out))
+    const bot = {
+      createdAt: expect.any(String),
+      dm: expect.any(String),
+      login: "grok[bot]",
+      name: "grok",
+      readsLog: false,
+    }
+    expect(out).toEqual({
+      add: [201, bot, "string"],
+      addAgain: 409,
+      afterRevoke: 401,
+      badName: 400,
+      botPost: [201, "sent", { device: "bot", login: "grok[bot]" }],
+      botRead: ["hello owner", "hello bot"],
+      botReadAfter: [200, ["hello bot"]],
+      controls: [200, 200],
+      dmToBot: 400,
+      ghost: 401,
+      list: [bot],
+      listAfter: [],
+      memberAdd: 403,
+      memberList: 403,
+      memberRevoke: 403,
+      refused: {
+        bots: 403,
+        channels: 403,
+        dms: 403,
+        heldKind: 403,
+        link: 403,
+        me: 403,
+        mention: 403,
+        newChannel: 403,
+        otherPost: 403,
+        otherRead: 403,
+        read: 403,
+        tokens: 403,
+        waiting: 403,
+      },
+      revoke: 200,
+      revokeAgain: 404,
+    })
+    // the bot's token is stored only as its hash, and no log line of the hosted side holds it
+    expect(await sql`select count(*)::int as n from yard_bot`).toEqual([{ n: 0 }])
+    expect(run.out).not.toMatch(/yard_[A-Za-z0-9_-]{32}/)
   })
 
   test("GitHub's sign-in stamps the login and takes it from a stale holder, and no client sets one", async () => {
