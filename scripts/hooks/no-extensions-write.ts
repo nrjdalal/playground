@@ -489,13 +489,18 @@ function remoteName(v: string): boolean {
   return false
 }
 
+// a word macOS chmod takes as a dash-led mode (-w, -go+x) rather than an option
+const CHMOD_DASH_MODE = /^-[gorstuwXx]/
+
 // The words a program on neither REMOVERS nor WRITERS writes after a cd the hook cannot read: an in-place sed's or perl's files, every file chmod, truncate or shred names, tar's -C folder or the shell's when it extracts, curl's and sort's output files, git rm's pathspecs from git's own folder or its pathspec file's, and a mktemp template outside the temp folder
-function unreadCdWrites(tool: string, args: Word[], env: Env, getopt: boolean): Word[] {
+function unreadCdWrites(tool: string, args: Word[], env: Env, stopsAtOperand: boolean): Word[] {
   if (tool === "sed" || tool === "perl") return inPlace(tool, args)
   if (tool === "chmod") {
     // macOS chmod stops its options at its first operand, the mode, a dash-led one (-w) too, so every later word is a file, a dashed one too
-    const at = args.findIndex((w) => !/^-./.test(w.value) || /^-[gorstuwXx]/.test(w.value))
-    const files = getopt ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", [])
+    const at = args.findIndex((w) => !/^-./.test(w.value) || CHMOD_DASH_MODE.test(w.value))
+    const files = stopsAtOperand
+      ? args.slice(at === -1 ? args.length : at)
+      : operandsPast(args, "", [])
     return MODE.test(files[0]?.value ?? "") ? files.slice(1) : files
   }
   if (tool === "truncate") return operandsPast(args, "rs", ["--reference", "--size"])

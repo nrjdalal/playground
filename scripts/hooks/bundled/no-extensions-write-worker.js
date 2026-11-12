@@ -9547,12 +9547,13 @@ function remoteName(v) {
   }
   return false;
 }
-function unreadCdWrites(tool, args, env, getopt) {
+var CHMOD_DASH_MODE = /^-[gorstuwXx]/;
+function unreadCdWrites(tool, args, env, stopsAtOperand) {
   if (tool === "sed" || tool === "perl")
     return inPlace(tool, args);
   if (tool === "chmod") {
-    const at = args.findIndex((w) => !/^-./.test(w.value) || /^-[gorstuwXx]/.test(w.value));
-    const files = getopt ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", []);
+    const at = args.findIndex((w) => !/^-./.test(w.value) || CHMOD_DASH_MODE.test(w.value));
+    const files = stopsAtOperand ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", []);
     return MODE.test(files[0]?.value ?? "") ? files.slice(1) : files;
   }
   if (tool === "truncate")
