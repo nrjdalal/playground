@@ -120,7 +120,7 @@ export async function patchThread(
   return row ? toThread(row) : null
 }
 
-// A fixture stack's threads, written by bun run ingest once it has read the fixture's transcripts: each thread missing is added, and each message it names is tagged once read, so a change made from the dashboard stays. Any other source writes nothing, so made-up threads never reach the live dashboard's database.
+// A fixture stack's threads, written by bun run ingest once it has read the fixture's transcripts and by the API's start while the table is empty (seedFixtureThreadsAtStart): each thread missing is added, and each message it names is tagged once read, so a change made from the dashboard stays. Any other source writes nothing, so made-up threads never reach the live dashboard's database.
 export async function seedFixtureThreads(
   db: Database,
   source: DashboardSource = currentSource(),
