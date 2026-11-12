@@ -1,9 +1,9 @@
 // PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash test run that reads green while no test ran or a test failed: bun with an option given its value as the next word (--cwd <dir>, --env-file <file>) before its run or test subcommand, which then prints bun's usage and exits 0 (run) or runs package.json's test script with the paths appended in place of the tests (test), and a test run (bun's, or a pytest, ty or ruff run) or a git push piped into another command in a script that sets no pipefail and reads no pipe status of its own shell, whose exit status is then the last command's.
 
+import { gitCommand } from "./no-stash"
 import { fromFactory } from "./role"
 import {
   type Command,
-  GIT_TAKES,
   lex,
   parse,
   parseFlags,
@@ -60,17 +60,13 @@ function inner(cmd: Command, parsed: Parsed): Command[] | undefined {
   return inline && operand !== undefined ? lex(operand.value).commands : []
 }
 
-// Whether the command is a git push, past git's global options (-C <dir>, -c <key=value> and the rest of GIT_TAKES).
+// Whether the command is a git push, past git's global options (no-stash's gitCommand steps over GIT_TAKES).
 function pushes(cmd: Command): boolean {
   const parsed = parse(cmd)
   const commands = inner(cmd, parsed)
   if (commands) return commands.some(pushes)
   const { args, name } = parsed
-  if (name !== "git") return false
-  let k = 0
-  for (; k < args.length && args[k].value.startsWith("-"); k++)
-    if (GIT_TAKES.has(args[k].value)) k++
-  return args[k]?.value === "push"
+  return name === "git" && gitCommand(args).sub?.value === "push"
 }
 
 function runsTests(cmd: Command): boolean {

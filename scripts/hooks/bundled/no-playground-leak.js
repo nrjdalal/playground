@@ -7946,14 +7946,44 @@ function knownVariables(command, environment, cwd) {
   return known;
 }
 
+// scripts/hooks/no-stash.ts
+var READS = new Set(["list", "show"]);
+var WRITES = new Set(["create", "store"]);
+var BROWSER_CLOSE = new Set(["close", "exit", "quit"]);
+function gitCommand(args) {
+  const aliases = [];
+  let k = 0;
+  while (k < args.length && args[k].value.startsWith("-")) {
+    const v = args[k].value;
+    if (v === "-c")
+      aliases.push(args[k + 1]?.value ?? "");
+    else if (v.startsWith("-c"))
+      aliases.push(v.slice(2));
+    k += GIT_TAKES.has(v) ? 2 : 1;
+  }
+  return { aliases, rest: args.slice(k + 1), sub: args[k] };
+}
+if (false) {}
+
 // scripts/hooks/no-prepare-write.ts
 var MCP_TOOL = /^mcp__(.+?)__(.+)$/;
-var WRITES = [
-  [/github/i, new Set(["create_pull_request"])],
+var WRITES2 = [
+  [
+    /github/i,
+    new Set([
+      "create_branch",
+      "create_or_update_file",
+      "create_pull_request",
+      "delete_file",
+      "merge_pull_request",
+      "push_files",
+      "update_pull_request_branch"
+    ])
+  ],
   [/linear/i, new Set(["save_comment", "save_issue"])],
   [/slack/i, new Set(["chat_post_message"])]
 ];
-var refuse = (what) => `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post and no pull request. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`;
+var refuse = (what) => `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post, no push, no file write, no pull request and no merge. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`;
 var log = (environment, entry) => {
   try {
     const dir = join5(dataDirOf(environment), "ops");
@@ -7964,25 +7994,55 @@ var log = (environment, entry) => {
 };
 var mcpWrite = (tool) => {
   const [, server, name] = MCP_TOOL.exec(tool) ?? [];
-  return !!server && !!name && WRITES.some(([word, tools]) => word.test(server) && tools.has(name));
+  return !!server && !!name && WRITES2.some(([word, tools]) => word.test(server) && tools.has(name));
 };
 var prCreate = (args) => {
   const { head } = ghCommand(args);
   return head[0] === "pr" && head[1] === "create";
 };
-var visit = async (_cmd, { args, name }) => {
+var pushes = (args) => gitCommand(args).sub?.value === "push";
+var REF_MUTATION = /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/;
+var REF_ENDPOINT = /^repos\/[^/]+\/[^/]+\/(?:contents\/.+|git\/refs(?:\/.+)?|merges|pulls|pulls\/\d+\/(?:merge|update-branch))$/;
+async function apiWrite(rest, cmd, env, xargs) {
+  const request = await ghApi(rest, cmd, env, xargs);
+  if (!request)
+    return false;
+  const { endpoint, fields, inputs, method } = request;
+  const path = endpoint.value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "").split("?")[0];
+  if (path === "graphql" || path === "api/graphql")
+    return [...fields.filter((f) => f.key === "query").map((f) => f.text), ...inputs].some((d) => unreadable(d) || REF_MUTATION.test(d.value));
+  if (method === "GET" || method === "HEAD")
+    return false;
+  if (unreadable(endpoint))
+    return true;
+  return REF_ENDPOINT.test(path);
+}
+var ghWrite = async (args, cmd, env, xargs) => {
+  if (prCreate(args))
+    return "gh pr create";
+  const { head, rest } = ghCommand(args);
+  return head[0] === "api" && await apiWrite(rest, cmd, env, xargs) ? "gh api" : undefined;
+};
+var visit = async (cmd, { args, name, xargs }, env) => {
   if (name === "gh")
-    return prCreate(args) ? "gh pr create" : undefined;
-  if (PRINTERS.has(name))
+    return ghWrite(args, cmd, env, xargs);
+  if (name === "git")
+    return pushes(args) ? "git push" : undefined;
+  if (PRINTERS.has(name) || name === "man")
     return;
-  const nested = args.findIndex((a) => program(a.value) === "gh");
-  return nested !== -1 && prCreate(args.slice(nested + 1)) ? "gh pr create" : undefined;
+  const nested = args.findIndex((a) => program(a.value) === "gh" || program(a.value) === "git");
+  if (nested === -1)
+    return;
+  const rest = args.slice(nested + 1);
+  if (program(args[nested].value) === "git")
+    return pushes(rest) ? "git push" : undefined;
+  return ghWrite(rest, cmd, env, xargs);
 };
 async function writeOf(tool, input, cwd, environment) {
   if (mcpWrite(tool))
     return `the tool ${tool}`;
   const command = input?.command;
-  if (tool !== "Bash" || typeof command !== "string" || !/gh/.test(command))
+  if (tool !== "Bash" || typeof command !== "string" || !/gh|git/.test(command))
     return;
   const directory = typeof cwd === "string" ? cwd : undefined;
   const env = {
@@ -8677,7 +8737,7 @@ async function gh(args, cmd, env, local, xargs) {
   }
   const target = decide(named.length > 0 ? named : fallback);
   if (key === "pr create" && target.where !== "other")
-    texts.push(...prCreate2(rest, env));
+    texts.push(...prCreate2(rest, flags, env));
   return judge(`gh ${key}`, target, texts.map((t) => viaXargs(t, xargs)), env, positionals);
 }
 function destination(what, owner, name, fix) {
@@ -8730,11 +8790,12 @@ function unplaced(what, source, env) {
     return refuse2(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
   return refuse2(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
 }
-function prCreate2(rest, env) {
+function prCreate2(rest, flags, env) {
   const values = rest.map((w) => w.value);
-  const texts = commitTexts(env.cwd, ["HEAD", "--not", "--remotes"], "the commits it may push", ", which it may push");
-  if (!values.some((v) => /^(?:-H|--head)(?:=|$)/.test(v)))
-    texts.push(withPlace(branch(env.cwd), "the branch it opens from"));
+  const texts = [];
+  const head = flags.findLast((f) => f.name === "-H" || f.name === "--head")?.value;
+  if (!head || unreadable(head) || !head.value.trim() || /[$`*?[\]'"]/.test(head.value))
+    texts.push(...commitTexts(env.cwd, ["HEAD", "--not", "--remotes"], "the commits it may push", ", which it may push"), withPlace(branch(env.cwd), "the branch it opens from"));
   if (values.some((v) => v === "-f" || v.startsWith("--fill"))) {
     const at = values.findIndex((v) => /^(?:-B|--base)(?:=|$)/.test(v));
     const base = at === -1 ? "HEAD" : values[at].includes("=") ? values[at].split("=")[1] : values[at + 1];

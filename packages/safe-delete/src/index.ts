@@ -140,11 +140,35 @@ const inside = (path: string, root: string): boolean =>
 
 const worktreesOf = (roots: Roots): string => join(real(roots.main), ".claude", "worktrees")
 
-// Whether a path sits directly in the main checkout's .claude/worktrees, the one folder playground rm --worktree takes.
-export const inWorktrees = (path: string, roots: Roots): boolean => {
+// The repo whose .claude/worktrees directly holds a path playground rm --worktree takes: the main checkout for any folder in its own, or another repo when git proves the folder its worktree (its .git file points into that repo's .git/worktrees, and that repo's worktree list names it); else null.
+export const worktreeRepo = (path: string, roots: Roots): string | null => {
   const abs = resolve(path)
-  return dirname(join(real(dirname(abs)), basename(abs))) === worktreesOf(roots)
+  const at = join(real(dirname(abs)), basename(abs))
+  const folder = dirname(at)
+  if (folder === worktreesOf(roots)) return real(roots.main)
+  const repo = dirname(dirname(folder))
+  if (basename(folder) !== "worktrees" || basename(dirname(folder)) !== ".claude") return null
+  if (!lstat(at)?.isDirectory() || !lstat(join(repo, ".git"))?.isDirectory()) return null
+  let pointer = ""
+  try {
+    if (lstat(join(at, ".git"))?.isFile()) pointer = readFileSync(join(at, ".git"), "utf8")
+  } catch {}
+  const gitdir = /^gitdir: (.+)$/m.exec(pointer)?.[1]
+  if (!gitdir || dirname(real(resolve(at, gitdir))) !== join(repo, ".git", "worktrees")) return null
+  const list = Bun.spawnSync(["git", "-C", repo, "worktree", "list", "--porcelain"], {
+    stderr: "ignore",
+    stdout: "pipe",
+  })
+  const listed = list.stdout
+    .toString()
+    .split("\n")
+    .some((line) => line.startsWith("worktree ") && real(line.slice(9)) === at)
+  return list.exitCode === 0 && listed ? repo : null
 }
+
+// Whether a path is a worktree playground rm --worktree takes, by worktreeRepo.
+export const inWorktrees = (path: string, roots: Roots): boolean =>
+  worktreeRepo(path, roots) !== null
 
 // The folders under HOME that are protected whole, and the trash's parent.
 const subtreesOf = (home: string, trash: string): string[] => [
@@ -215,7 +239,7 @@ const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string 
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders and ended the scratchpad folders of ended sessions (endedPadOf), and nothing else.
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, and the folders in `ended`, ended sessions' scratchpad folders (endedPadOf), and nothing else.
 export function isProtected(
   path: string,
   roots: Roots,
@@ -423,8 +447,9 @@ export function quarantine(
       `${opts.session} quarantined ${recent.length} paths in the last minute, the most one session may`,
       firstOfBurst(trash, opts.session, recent) ? "tripwire" : "refused",
     )
-  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole.
-  const cap = carve ?? LIMITS
+  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratchpad folder skips the file count, keeping the byte cap.
+  const whole = ended && join(real(dirname(abs)), basename(abs)) === ended
+  const cap = carve ?? (whole ? { ...LIMITS, files: Infinity } : LIMITS)
   const { files, size } = measure(abs, {
     limits: opts.worktree ? undefined : cap,
     skip: carve ? undefined : isRebuildable,
@@ -579,10 +604,11 @@ export function linkPlaces(
   return [...marked, ...pads.flatMap((pad) => [pad, ...dirsIn(pad)])]
 }
 
-// The links outside a worktree that point into it, as its refusal naming the first three, or null: the entries of each other worktree and each place, and of its node_modules one level deep, as a node_modules clone makes them; a link whose target is missing or lies outside the worktree does not count.
+// The links outside a worktree that point into it, as its refusal naming the first three, or null: the entries of each other worktree, of the main checkout and of the worktree's own repo, and each place, and of its node_modules one level deep, as a node_modules clone makes them; a link whose target is missing or lies outside the worktree does not count.
 const linkHolder = (at: string, roots: Roots, places: string[]): string | null => {
   const links: string[] = []
-  for (const folder of new Set([...dirsIn(worktreesOf(roots)), ...places].map(real))) {
+  const siblings = [...dirsIn(worktreesOf(roots)), ...dirsIn(dirname(at))]
+  for (const folder of new Set([...siblings, ...places].map(real))) {
     if (inside(folder, at)) continue
     const modules = join(folder, "node_modules")
     const dirs = lstat(modules)?.isDirectory() ? [folder, modules] : [folder]
@@ -604,10 +630,11 @@ const linkHolder = (at: string, roots: Roots, places: string[]): string | null =
   return `${at} is linked into by ${links.sort().slice(0, 3).join(", ")}${more}: repoint or remove each link first`
 }
 
-// Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session, running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary.
+// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session, running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
-  if (dirname(at) !== worktreesOf(roots)) return `${at} is not a worktree in ${worktreesOf(roots)}`
+  if (worktreeRepo(at, roots) === null)
+    return `${at} is not a worktree in ${worktreesOf(roots)} or a git worktree in another repo's .claude/worktrees`
   let agents: ({
     branch?: unknown
     kind?: unknown

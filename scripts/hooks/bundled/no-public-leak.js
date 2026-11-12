@@ -8928,9 +8928,26 @@ function knownVariables(command, environment, cwd) {
   return known;
 }
 
+// scripts/hooks/no-stash.ts
+var READS = new Set(["list", "show"]);
+var WRITES = new Set(["create", "store"]);
+var BROWSER_CLOSE = new Set(["close", "exit", "quit"]);
+if (false) {}
+
 // scripts/hooks/no-prepare-write.ts
-var WRITES = [
-  [/github/i, new Set(["create_pull_request"])],
+var WRITES2 = [
+  [
+    /github/i,
+    new Set([
+      "create_branch",
+      "create_or_update_file",
+      "create_pull_request",
+      "delete_file",
+      "merge_pull_request",
+      "push_files",
+      "update_pull_request_branch"
+    ])
+  ],
   [/linear/i, new Set(["save_comment", "save_issue"])],
   [/slack/i, new Set(["chat_post_message"])]
 ];
@@ -9535,7 +9552,7 @@ async function gh(args, cmd, env, local, xargs) {
   }
   const target = decide(named.length > 0 ? named : fallback);
   if (key === "pr create" && target.where !== "other")
-    texts.push(...prCreate(rest, env));
+    texts.push(...prCreate(rest, flags, env));
   return judge(`gh ${key}`, target, texts.map((t) => viaXargs(t, xargs)), env, positionals);
 }
 function destination(what, owner, name, fix) {
@@ -9588,11 +9605,12 @@ function unplaced(what, source, env) {
     return refuse(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
   return refuse(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
 }
-function prCreate(rest, env) {
+function prCreate(rest, flags, env) {
   const values = rest.map((w) => w.value);
-  const texts = commitTexts(env.cwd, ["HEAD", "--not", "--remotes"], "the commits it may push", ", which it may push");
-  if (!values.some((v) => /^(?:-H|--head)(?:=|$)/.test(v)))
-    texts.push(withPlace(branch(env.cwd), "the branch it opens from"));
+  const texts = [];
+  const head = flags.findLast((f) => f.name === "-H" || f.name === "--head")?.value;
+  if (!head || unreadable(head) || !head.value.trim() || /[$`*?[\]'"]/.test(head.value))
+    texts.push(...commitTexts(env.cwd, ["HEAD", "--not", "--remotes"], "the commits it may push", ", which it may push"), withPlace(branch(env.cwd), "the branch it opens from"));
   if (values.some((v) => v === "-f" || v.startsWith("--fill"))) {
     const at = values.findIndex((v) => /^(?:-B|--base)(?:=|$)/.test(v));
     const base = at === -1 ? "HEAD" : values[at].includes("=") ? values[at].split("=")[1] : values[at + 1];

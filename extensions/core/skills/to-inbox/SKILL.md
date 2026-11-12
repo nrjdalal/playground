@@ -25,10 +25,10 @@ A message outside the Inbox, a dispatcher's reply in chat or a Slack or Yard DM,
 In chat, step 2's picture is a fenced block (an ASCII flow or a diff; a work status block lives in its card, which chat names by its `#iN`), since no-chat-question sends a table, or three or more numbered steps, to one Inbox card instead, unless every row or step names an issue or PR (`scripts/hooks/README.md`).
 
 Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, and you resolve your own update once it has settled: an alert that has fixed itself, a progress card whose last step is done.
-Until you resolve it or the owner presses Done or Dismiss, an update stays editable, as an ask stays editable, answered or not, until it closes, so a card you will replace (a mock's first version) or a progress you carry takes `playground ask edit` before that.
+Until you resolve it or the owner presses Dismiss, an update stays editable (below, Done), as an ask stays editable, answered or not, until it closes, so a card you will replace (a mock's first version) or a progress you carry takes `playground ask edit` before that.
 
 Beside its choices, every card offers the owner five verbs (asks.md's footer line): ✓ Seen, Later and Archive change only his view, so your item keeps waiting and nothing is typed to you; ✓✓ Done sends an update or an answered card to Done; and Dismiss sends any card to Done, typing you `set-aside` while it still waits, so you hold only its new step, and `dismiss`, drop it, once answered.
-On an update, Done types you `done` and Dismiss `dismiss`: post a new card for more, since `ask edit` refuses this one.
+On an update, Done types you `done`: edit the same card for more, which brings it back to his list unread and prints `reopened it`, so a thread keeps one card. Dismiss types you `dismiss`: post a new card for more, since `ask edit` refuses this one.
 
 ## Steps
 
@@ -41,6 +41,7 @@ On an update, Done types you `done` and Dismiss `dismiss`: post a new card for m
    | ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
    | A number or a short comparison                       | a markdown table of three columns or fewer                                                |
    | A UI not yet built, or a demo                        | an ASCII sketch of the page; one `html` attachment built by [HTML.md](references/HTML.md) |
+   | A PDF                                                | the PDF itself as one `pdf` attachment, by [HTML.md's A PDF](references/HTML.md#a-pdf)    |
    | A code change past a few lines                       | its patch as a file, `git diff > x.diff`, which the viewer draws as a patch view          |
    | A job of several steps (a plan, a lane, a PR series) | the **work status** block, built by [PROGRESS.md](references/PROGRESS.md)                 |
 

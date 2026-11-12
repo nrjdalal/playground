@@ -273,7 +273,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   An item reads `listed` while the Inbox lists it and it is not `open`, by the Inbox's own rule (`listed` in `web/next/src/lib/inbox.ts`, restated as `listedItem` in the hook, a test running both over the same items):
   a progress card (an `update`) is stored `done` from its post on, yet stays listed until the owner sends it to Done, dismisses it or its poster resolves it, so a reply naming it asks for no copy (on 7 Nov a gate that took `open` alone had the dispatcher post one card 5 times).
   A card the owner put off with Later counts too, though the list hides it until its time: it comes back on its own, and a copy would notify the owner of what they put off.
-  Once the owner sends the card to Done it reads `done` and counts no more, since `ask edit` refuses it and more progress goes on a new card (to-inbox's PROGRESS.md).
+  Once the owner sends the card to Done it reads `done` and counts no more, until its poster's `ask edit` that changes its words brings it back to the list (to-inbox's PROGRESS.md).
   An ask of the owner still waits on an open item, one the owner archived included (it reads `archived while open`), so a decision asked in chat beside a progress card is refused, and one beside an archived open decision passes.
   Any other item the owner archived reads `archived`, an item the owner dismissed `dismissed`, and a decision or draft its poster settled `settled`, each from the item's answer, so none counts, nor does a decision the owner denied.
   The reads run at once, each killed after 10s (one took 5.9s under load), and the first to read a status that counts passes the stop at once and ends every read still running.
@@ -695,9 +695,15 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   or any agent's name in the roster, both read on every call since skills are added and sessions renamed, leaving out one the file's `everyday` list names, such as `builder`, an org's own name, which its extension's copy adds, or `pr`, the public skill copied from upstream whose name is the word for a pull request, and adding none when the roster is missing or does not read;
   each matched whole in any case, with `_` and `-` counting as edges, so `PLAYGROUND_ROLE` holds one and `the dashboard` does not):
   a Linear or Slack MCP tool that is not a read, a GitHub MCP write whose owner is a guarded org, a `gh` write (pr, issue, label, release, a non-GET `gh api`) or curl to Linear, Slack or a guarded org's repository, and `git commit` or `git push` in a guarded org's checkout, judged by its message, its branch and the messages of the commits the remote does not hold.
-  Its refusal names which text held the term (`withPlace` in `scripts/hooks/no-playground-leak.ts`): a commit by its short sha, whose fix is to reword that message, a ref, a push option or the branch name a push carries, and a `gh` write's title, body, body file or comment by its flag.
+  Its refusal names which text held the term (`withPlace` in `scripts/hooks/no-playground-leak.ts`): a commit by its short sha, whose fix is to reword that message, a ref, a push option, the tags a push carries,
+  the branch names it pushes (each an `--all` push carries) or the branch `gh pr create` with no `--head` opens from, and a `gh` write's title, body, body file, comment, or a ship's notes or notes file,
+  by its flag.
+  `gh pr create` with no `--head` also carries the branch it opens from and the commits it may push, read from its checkout, so outside a checkout it is refused as text it cannot read.
+  With `--head` it opens from that pushed branch and pushes nothing, so it is judged on its own title, body and body file wherever it runs.
+  Only a parsed `-H` or `--head` flag counts, the last one given, as gh keeps it, and only when its value is a non-empty literal: one empty, only whitespace, unreadable, or holding `$`, a backtick, a glob character or a quote reads as no `--head`, so the commits and the branch are read as before.
+  The same pull request opened through `gh api repos/<owner>/<repo>/pulls -X POST` is judged on its `-F title=@<file>` and `-F body=@<file>` alike.
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, taking the word after each option it lists as that option's value, as git does (`--attr-source <tree>` and `--config-env <key>=<variable>` among them), so `git --attr-source HEAD push` reads as a push and `git -C log push` as a push from `log`.
-  `GIT_TAKES` is the one list every git-reading hook steps over (no-glm-heavy-path, no-main-checkout, no-playground-leak, no-stash, no-ours-merge through no-stash's `gitCommand`, and no-extensions-write through no-main-checkout's `gitCall`), and no-extension-repo-write reads git the same way.
+  `GIT_TAKES` is the one list every git-reading hook steps over (no-glm-heavy-path, no-main-checkout, no-playground-leak, no-stash, no-unslotted-run, no-false-green, no-ours-merge, no-prepare-write and no-raw-delete through no-stash's `gitCommand`, and no-extensions-write through no-main-checkout's `gitCall`), and no-extension-repo-write reads git the same way.
   Outside `anyWrite`, it follows a `-c alias.<name>=<value>` whose value is literal git words, reading that value as the subcommand, so `git -c alias.p=push p …` is judged as the push and `git -c alias.l=log l` runs;
   it refuses a `!` alias, an alias whose value or name it cannot read (a variable, a `--config-env` value), an alias that names another alias, and a subcommand it cannot read after one.
   A same-user session can still get past it, for example through a git alias set in a config file it does not read.
@@ -736,7 +742,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   An extensions root whose policy.json it cannot read for those two refuses the write, as a list it cannot trust does.
   Its reason names the kind, which text held it, as [no-playground-leak](#no-playground-leak)'s refusal does, and the plain-words fix, never the text.
   It reads every write through no-playground-leak's engine (`inspectAs` with its own `Policy`), so the shapes it reads are that guard's gh, `gh api`, curl and GitHub MCP writes; git commits and pushes, Linear and Slack are outside it.
-  `gh pr create` still reads the messages of the commits it may push, before a push the same call runs first, so a commit message holding a term refuses it, and its refusal names that commit by its short sha.
+  `gh pr create` with no `--head` still reads the messages of the commits it may push, before a push the same call runs first, so a commit message holding a term refuses it, and its refusal names that commit by its short sha.
   Each public repository's own name, which holds its owner's handle, is read past.
   So is the owner's own line in a ship's notes, as `bun run release:notes` writes it: in a plain `gh release create` or `edit` (one command, with no substitution, chain, pipe or redirect), a line that reads `- <names> @<login>` or `- @<login>` with the login and every name in `owner.names` (`ownerWords` in `notes.ts`, the renderer's own rule), inside the renderer's Contributors section.
   That section opens at the exact `### ❤️ Contributors` line and ends at the first line that is neither blank nor a contributor's, so a heading of any shape, a fence or prose closes it.
@@ -921,9 +927,18 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   An org's start job sets the mode at the prepare-only start (`roster.ts set <session> mode=prepare`) and clears it at the claim: the session's waiter runs `roster.ts set <session> mode=` the moment before it prints its Claim line, so the claim's own assign runs at once, and the job's next beat clears it too, as a backstop.
   A clear that fails still prints the Claim line, which then tells the worker to retry a refused assign after that beat, since the refusal is not final.
   The mark and this check each do nothing without the other, so the job's revision and this check go live in either order.
-- While the mode stands, `scripts/hooks/no-prepare-write.ts` refuses a factory session's tracker issue save (`save_issue`, an assign or a state change) and comment (`save_comment`) on a Linear server, a chat post (`chat_post_message`) on a Slack server, and a new pull request:
-  `gh pr create` in any form the shared reader (`scripts/hooks/shell.ts`) finds, and a GitHub server's `create_pull_request`.
-  Every other call runs: reads, local git, a push and every other gh call.
+- While the mode stands, `scripts/hooks/no-prepare-write.ts` refuses a factory session's writes that reach the org before the claim, a closed list, each in any form the shared reader (`scripts/hooks/shell.ts`) finds:
+  - `chat_post_message`, a chat post, on a Slack server;
+  - `create_branch`, `create_or_update_file`, `create_pull_request`, `delete_file`, `merge_pull_request`, `push_files` and `update_pull_request_branch` on a GitHub server;
+  - `gh api` with a write method (any but GET or HEAD) to `repos/<owner>/<repo>/` then `contents/<path>`, `git/refs`, `git/refs/<ref>`, `merges`, `pulls`, `pulls/<n>/merge` or `pulls/<n>/update-branch`, the endpoint in any spelling (a leading `/`, the API host), or to an endpoint it cannot read;
+  - `gh api graphql`, the endpoint in any spelling (`/graphql`, the API host, an Enterprise host's `api/graphql`), whose query names `createCommitOnBranch`, `createPullRequest`, `createRef`, `deleteRef`, `mergeBranch`, `mergePullRequest`, `updatePullRequestBranch`, `updateRef` or `updateRefs` anywhere in its text, a string or a comment included, or whose query it cannot read,
+    since a match that over-refuses fails safe;
+  - `gh pr create`;
+  - `git push`, past git's own options (`GIT_TAKES`, through no-stash's `gitCommand`), since a prepared branch on the org's remote reaches the org before the claim, and behind any other program but `echo`, `printf` and `man`, which only print it;
+  - `save_comment`, a tracker comment, and `save_issue`, a tracker issue save (an assign or a state change), on a Linear server.
+
+  Every other call runs: reads, local git, a GraphQL query or any other mutation, every other `gh api` write (a `git/commits` or `git/trees` POST, which moves no ref) and every other gh call.
+
 - It is a check with no process of its own: [guards](#guards) runs it on Bash, and [no-playground-leak](#no-playground-leak)'s process runs it first on the MCP tools, since that hook's matcher already takes every GitHub, Linear and Slack tool, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
 - It fails open, since the session's brief is the first bar: a session the registry or the roster does not hold is not marked, and a read that fails, a roster that does not parse among them, lets the call run and writes one JSON line naming the session, the tool and the error to the data folder's `ops/no-prepare-write.log`, so a broken read shows.
   Its tests are `tests/scripts/hooks/no-prepare-write.test.ts`.
@@ -941,7 +956,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 ## no-raw-delete
 
 - A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>` (with `--discard` once its PR has merged or closed, whatever it holds), so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
-  The trash takes up to 5,000 files or 2 GB, so the refusal also names the lead's cleanup for a bigger tree and `bun install` for a `node_modules`.
+  The trash takes up to 5,000 files or 2 GB, so the refusal also names the lead's cleanup for a bigger tree and `bun install` for a `node_modules`; an ended session's whole `scratchpad/<folder>/` skips the file count and keeps the 2 GB cap.
   Inside `~/.playground`, `playground rm` clears two places and refuses every other path: the caller's own `scratch/<name>/` and `scratchpad/<name>/`, by the session name Claude Code's registry gives it, and an ended session's whole `scratchpad/<folder>/`.
   A folder counts as ended when it is a real folder no live roster row names as itself or as `<folder>-<role>`, so Ops clears a closed session's folder on a lead's word (`endedPadOf` in `packages/safe-delete/src/index.ts`).
   `scripts/hooks/no-raw-delete.ts`, run on Bash by [guards](#guards), acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:
