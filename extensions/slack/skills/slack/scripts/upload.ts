@@ -59,8 +59,9 @@ export async function upload({
   return files.length
 }
 
-// A URL, its closing punctuation left out, or a mention as the Inbox reads one: an @ outside a word or an email, then the name.
-const PIECES = /(https?:\/\/[^\s<>]*[^\s<>.,;:!?)'"])|(?<![\w.])@(\w(?:[\w.-]*\w)?)/gi
+// What the words hold, read left to right: a fenced block, a code span or a Slack token already written (`<...>`), each kept as written; a URL, its closing punctuation left out; or a mention as the Inbox reads one: an @ outside a word or an email, then the name.
+const PIECES =
+  /(```[\s\S]*?```|`[^`\n]*`|<[^<>\s][^<>]*>)|(https?:\/\/[^\s<>|`]*[^\s<>|`.,;:!?)'"])|(?<![\p{L}\p{N}_.])@([\p{L}\p{N}_](?:[\p{L}\p{N}_.-]*[\p{L}\p{N}_])?)/giu
 
 // Every member of the workspace, a page of users.list at a time.
 async function members(slack: Slack): Promise<Member[]> {
@@ -76,7 +77,7 @@ async function members(slack: Slack): Promise<Member[]> {
 
 // The words as the files' message carries them, as the poster would post them: each @name as the token of the one member whose username, display name or real name it is, and each URL as a link labelled without its scheme, as a link chip shows it; a name that matches no member or more than one throws, naming it.
 async function slackWords(slack: Slack, words: string): Promise<string> {
-  const names = [...words.matchAll(PIECES)].flatMap((piece) => (piece[2] ? [piece[2]] : []))
+  const names = [...words.matchAll(PIECES)].flatMap((piece) => (piece[3] ? [piece[3]] : []))
   const ids = new Map<string, string>()
   const all = names.length ? (await members(slack)).filter((member) => !member.deleted) : []
   for (const name of names) {
@@ -88,12 +89,16 @@ async function slackWords(slack: Slack, words: string): Promise<string> {
     )
     if (found.length !== 1)
       throw new Error(
-        `@${name} matches ${found.length ? `${found.length} Slack users` : "no Slack user"}`,
+        `@${name} matches ${found.length ? `${found.length} Slack users` : "no Slack user: only a person can be tagged"}`,
       )
     ids.set(key, found[0]!.id)
   }
-  return words.replace(PIECES, (_, url?: string, name?: string) =>
-    url ? `<${url}|${url.replace(/^https?:\/\//i, "")}>` : `<@${ids.get(name!.toLowerCase())}>`,
+  return words.replace(PIECES, (kept: string, written?: string, url?: string, name?: string) =>
+    written
+      ? kept
+      : url
+        ? `<${url}|${url.replace(/^https?:\/\//i, "")}>`
+        : `<@${ids.get(name!.toLowerCase())}>`,
   )
 }
 

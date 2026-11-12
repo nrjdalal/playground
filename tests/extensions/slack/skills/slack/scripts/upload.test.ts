@@ -36,6 +36,7 @@ const MEMBERS: Member[] = [
     name: "ida",
     profile: { display_name: "Ida", real_name: "Ida Gone" },
   },
+  { id: "U0MADEUP05", name: "jose", profile: { display_name: "José", real_name: "José Ruiz" } },
 ]
 
 // Slack's HTTP, stubbed: each getUploadURLExternal hands back its own URL and file id, users.list hands back the members a page at a time, and every step lands in one log, so the order reads whole.
@@ -270,19 +271,38 @@ describe("dm upload (PG-649)", () => {
       await shared
       expect(steps.at(-1)?.params?.initial_comment).toBe("cc <@U0MADEUP01>, (<@U0MADEUP01>)")
       expect(steps.filter((step) => step.at === "users.list").map((s) => s.params?.cursor)).toEqual(
-        [undefined, "1", "2", "3"],
+        [undefined, "1", "2", "3", "4"],
       )
     })
 
     test("a name that matches no member, a removed one alone, or two, fails the share naming it, before any file reaches Slack (PG-1983)", async () => {
       for (const [text, reason] of [
-        ["@nobody hi", "@nobody matches no Slack user"],
+        ["@nobody hi", "@nobody matches no Slack user: only a person can be tagged"],
+        ["@here hi", "@here matches no Slack user: only a person can be tagged"],
         ["@Ida hi", "@Ida matches no Slack user"],
         ["@alex hi", "@alex matches 2 Slack users"],
       ] as const) {
         const { shared, steps } = sharing(text)
         await expect(shared).rejects.toThrow(reason)
         expect(steps.map((step) => step.at)).not.toContain("files.getUploadURLExternal")
+      }
+    })
+
+    test("a code span, a fenced block and a Slack link already in the words stay exactly as written, and a name past ASCII reads whole (PG-1983)", async () => {
+      const fenced = "run\n```\nnpm i @types/node\nhttps://example.com/b\n```"
+      for (const [text, comment] of [
+        ["see `https://example.com/a` now", "see `https://example.com/a` now"],
+        ["install `@types/node` first", "install `@types/node` first"],
+        [fenced, fenced],
+        [
+          "@Merritt see <https://example.com|the doc>",
+          "<@U0MADEUP01> see <https://example.com|the doc>",
+        ],
+        ["@José hi", "<@U0MADEUP05> hi"],
+      ] as const) {
+        const { shared, steps } = sharing(text)
+        await shared
+        expect(steps.at(-1)?.params?.initial_comment).toBe(comment)
       }
     })
 
