@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { toast } from "@/components/ui/toast"
 import { inviteRequests } from "@/lib/yard"
 import { BOTS_KEY, INVITES_KEY, TOKENS_KEY, yardApi } from "@/lib/yard-api"
@@ -145,7 +146,7 @@ const None = ({ children }: { children: string }) => (
   </Empty>
 )
 
-// The bots the owner made from the Mac, each with Revoke, which cuts its token and its DM at once.
+// The bots the owner made from the Mac, each with its log switch, which lets it read the dispatcher's log through the Mac (off until `bot add --log` or the switch turns it on, and read only while the Mac lists it too), and Revoke, which cuts its token and its DM at once.
 function Bots() {
   const client = useQueryClient()
   const { data: bots } = useQuery({
@@ -160,6 +161,14 @@ function Bots() {
       toast.add({ title: (error as Error).message, type: "error" })
     }
   }
+  const setReadsLog = async (name: string, readsLog: boolean) => {
+    try {
+      await yardApi.setReadsLog(name, readsLog)
+      await client.invalidateQueries({ queryKey: BOTS_KEY })
+    } catch (error) {
+      toast.add({ title: (error as Error).message, type: "error" })
+    }
+  }
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-sm font-medium">Bots</h2>
@@ -169,16 +178,21 @@ function Bots() {
         <ul className="divide-y rounded-md border text-sm">
           {bots?.map((bot) => (
             <li key={bot.name} className="flex items-center gap-3 px-3 py-2">
-              <span className="font-medium">{bot.login}</span>
-              <span className="text-muted-foreground text-xs">
-                Made {new Date(bot.createdAt).toLocaleString()}
-              </span>
-              <Button
-                className="ml-auto"
-                onClick={() => void revoke(bot.name)}
-                size="sm"
-                variant="outline"
-              >
+              <div className="flex min-w-0 flex-col sm:flex-row sm:items-center sm:gap-3">
+                <span className="font-medium">{bot.login}</span>
+                <span className="text-muted-foreground text-xs text-balance">
+                  Made {new Date(bot.createdAt).toLocaleString()}
+                </span>
+              </div>
+              <label className="ml-auto flex shrink-0 items-center gap-2 text-xs whitespace-nowrap">
+                <Switch
+                  checked={bot.readsLog}
+                  onCheckedChange={(checked) => void setReadsLog(bot.name, checked)}
+                  size="sm"
+                />
+                Reads the log
+              </label>
+              <Button onClick={() => void revoke(bot.name)} size="sm" variant="outline">
                 Revoke
               </Button>
             </li>

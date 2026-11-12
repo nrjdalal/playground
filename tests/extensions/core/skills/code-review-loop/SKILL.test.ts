@@ -296,7 +296,7 @@ describe("code-review-loop's round 1 greps each changed term", () => {
   test("step 4 runs the changed-term grep in round 1, names its finding's shape and its Done when, with its measured case", async () => {
     const step = await stepFour()
     expect(step).toContain(
-      "the changed-term grep (`git grep -l <term>` over the agent-facing and web docs) for each term whose meaning the diff changes",
+      "the changed-term grep (`git grep -l <term>` over the whole repo, code and command help text included) for each term whose meaning the diff changes",
     )
     expect(step).toContain(
       "file every list or doc either leaves behind as one such finding, each as `file:line`",
@@ -306,13 +306,13 @@ describe("code-review-loop's round 1 greps each changed term", () => {
       "its changed-term grep for each term whose meaning it changes",
     )
     expect(await page()).toContain("each term whose meaning the diff changes")
-    expect(await page()).toContain("greps the agent-facing and web docs")
+    expect(await page()).toContain("greps the whole repo, code and command help text included")
   })
 
   test("AGENTS.md's pre-review pass runs the same grep before round 1", async () => {
     const agents = await Bun.file(join(root, "AGENTS.md")).text()
     const line = agents.split("\n").find((l) => l.includes("changed-term grep")) ?? ""
-    expect(line).toContain("`git grep -l <term>` over the agent-facing and web docs")
+    expect(line).toContain("`git grep -l <term>` over the whole repo, code and help text too")
     expect(line).toContain("each term whose meaning the diff changes")
     expect(agents).toContain("each list grep and changed-term grep with its hits")
   })
@@ -363,7 +363,7 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
       "a wording you suggest in a finding included, and run the checks its files call for (`bun run docs:wrap --check` on a wrapped doc, `bun run test:file tests/packages/scripts/src/trace-count/count.test.ts` and `scripts/check-em-dashes.sh` on any doc, the test that pins the wording, `bun run test:file` on the file's mirrored test",
     )
     expect(step).toContain(
-      "post the saved `fix.patch` inline as a `diff` block, pasted whole and unedited with every context line kept so `git apply` takes the block as it stands, or the wording, with those results in the verdict",
+      "check the patch applies at the PR's head with `git -C <clone> apply --check <scratch>/fix.patch`, and post the saved `fix.patch` as a `diff` block, unedited: the file appended verbatim to the verdict's body file between the fence lines (`cat <scratch>/fix.patch >> <body file>`) rather than retyped, every context line kept so `git apply` takes the block as it stands, or the wording, with those results in the verdict",
     )
     expect(step.split("**Done when**")[1] ?? "").toContain("its checks' results posted with it")
     expect(await page()).toContain("runs the checks its files call for before it posts")

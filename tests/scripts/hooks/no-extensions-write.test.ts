@@ -978,6 +978,14 @@ describe("a quoted argument is read as a command line only where a program runs 
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | pkexec cat",
     ],
     [
+      "zsh's dash modifier ahead of a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | - ls",
+    ],
+    [
+      "cat reading the text from stdin by its lone dash",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | cat -",
+    ],
+    [
       "env's lone dash ahead of a harmless program",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - ls",
     ],
@@ -1760,6 +1768,90 @@ describe("a quoted argument is read as a command line only where a program runs 
   )
 })
 
+// #1887: a perl edit's script, a browser eval's script, a commit message and a jq filter are text no shell runs, so each runs from the home on a line read whole, beside the same programs' ordinary calls, which ran before too
+describe("text no program runs as a shell line stays text on a line read whole", () => {
+  test.each([
+    [
+      "an in-place perl edit holding a parenthesised conditional",
+      `perl -pi -e 's/\\(a \\? b\\)/(a ? c : "")/' ${WORK}/f`,
+    ],
+    ["an in-place perl edit by -i and -pe", `perl -i -pe 's/(a)/b/' ${WORK}/f`],
+    ["a browser eval holding ?? beside a sleep", "sleep 1; agent-browser eval 'a?.b ?? 1'"],
+    [
+      "a browser eval by session beside a sleep",
+      "sleep 1; agent-browser --session t eval 'a ?? 1'",
+    ],
+    ["a jq alternative in a loop", `for p in 1 2; do gh api x --jq '"\\(.a)/\\(.b // "-")"'; done`],
+    [
+      "a jq alternative beside an assignment",
+      `h=$(gh api x --jq .sha); gh api x --jq '(.b // "-")'`,
+    ],
+    ["a perl reader", `perl -ne 'print if /a/' ${WORK}/f`],
+    ["an in-place sed", `sed -i '' 's/a/b/' ${WORK}/f`],
+    ["a plain browser eval", "agent-browser eval 'document.title'"],
+    ["a gh read", "gh api x --jq .sha"],
+    ["a plain commit", 'git commit -q -m "a b"'],
+    [
+      "a read-only sed's address range beside another call (PG-1931)",
+      `bun x.ts; sed -n '/^if (import.meta.main)/,/^}/p' ${WORK}/f`,
+    ],
+    [
+      "a playground call whose reason holds a regex (PG-1931)",
+      `playground ext score login x 5 --reason "matches /^(\\d+)(?: (\\S+) \\S+)?/ now"`,
+    ],
+    [
+      "a reason attached by =, holding a regex (PG-1931)",
+      `playground ext score login x 5 --reason="/^(\\d+)(?: (\\S+))?/ x"`,
+    ],
+  ])("%s runs", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    ["an in-place perl edit of a file in the root", `perl -pi -e 's/a/b/' ${LIST}`],
+    ["a browser eval whose output a shell runs", `sleep 1; agent-browser eval 'a ?? 1' | sh`],
+    [
+      "an in-place sed of a file in the root beside another call",
+      `bun x.ts; sed -i '' 's/a/b/' ${LIST}`,
+    ],
+    [
+      "a sed w command writing into the root beside another call",
+      `bun x.ts; sed -n 'w ${LIST}' ${WORK}/f`,
+    ],
+    ["a read-only sed's file in the root beside another call", `bun x.ts; sed -n '/(a)/p' ${LIST}`],
+    [
+      "a read-only sed's glob in the root beside another call",
+      `bun x.ts; sed -n '/(a)/p' ${ROOT}/*/x.md`,
+    ],
+    ["a reason that names the root", `playground ext score login x 5 --reason "see ${LIST}"`],
+  ])("%s is still refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook ")
+  })
+
+  // a commit's message holds a bare cd, which the shell reads as a cd to the process's home, so these run from a worktree under it
+  const tree = join(homedir(), "x", ".claude", "worktrees", "y")
+  const fromTree = (command: string) =>
+    check(JSON.stringify({ cwd: tree, tool_input: { command }, tool_name: "Bash" }), {
+      HOME: homedir(),
+    })
+  const message = '-m "x" -m "y\ncd && make || true, then . ./env"'
+  test("a commit by -C to the folder the shell is in, its message holding a cd line, runs", async () => {
+    expect(await fromTree(`git -C ${tree} commit -q ${message}`)).toBeUndefined()
+    expect(await fromTree(`git -C ~/x/.claude/worktrees/y commit -q ${message}`)).toBeUndefined()
+  })
+  test.each([
+    ["another folder", `git -C /tmp commit -q ${message}`],
+    ["a relative folder", `git -C y commit -q ${message}`],
+    ["the folder by a variable", `git -C "$PWD" commit -q ${message}`],
+    ["the folder with -c beside it", `git -c x.y=z -C ${tree} commit -q ${message}`],
+  ])(
+    "a commit by -C to %s, its message holding a cd line, is still refused",
+    async (_, command) => {
+      expect(await fromTree(command)).toContain("no-extensions-write hook ")
+    },
+  )
+})
+
 describe("a read of the root, and writes elsewhere, run", () => {
   test.each([
     ["cat of a list", `cat ${LIST}`],
@@ -1851,6 +1943,94 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["git status after a cd to a variable", `cd "$X" && git status`],
     ["a redirect to an absolute path after a cd to a variable", `cd "$X"; echo x > /tmp/y`],
     ["rm of an absolute path after a cd to a variable", `cd "$X"; rm -rf /tmp/scratch-dir`],
+    [
+      "rm under xargs fed an absolute path after a cd to a variable",
+      `cd "$X"; echo /tmp/scratch-dir | xargs rm -rf`,
+    ],
+    [
+      "touch under xargs fed an absolute path after a cd to a variable",
+      `cd "$X"; echo /tmp/y | xargs touch`,
+    ],
+    [
+      "a reader under xargs fed a relative name after a cd to a variable",
+      `cd "$X"; echo notes.txt | xargs wc -l`,
+    ],
+    ["a reader under xargs fed by ls after a cd to a variable", `cd "$X"; ls | xargs cat`],
+    ["a find listing with no path after a cd to a variable", `cd "$X"; find -name x`],
+    ["BSD find -x on an absolute path after a cd to a variable", `cd "$X"; find -x /tmp/a -delete`],
+    [
+      "BSD find -xd clustered on an absolute path after a cd to a variable",
+      `cd "$X"; find -xd /tmp/a -delete`,
+    ],
+    ["BSD find -E on an absolute path after a cd to a variable", `cd "$X"; find -E /tmp/a -delete`],
+    [
+      "BSD find -f naming an absolute path after a cd to a variable",
+      `cd "$X"; find -f /tmp/x -delete`,
+    ],
+    [
+      "BSD find -x then -f naming an absolute path after a cd to a variable",
+      `cd "$X"; find -x -f /tmp/x -delete`,
+    ],
+    [
+      "a reader under xargs -a reading an absolute list after a cd to a variable",
+      `cd "$X" && xargs -a /tmp/list wc -l`,
+    ],
+    ["a writer under xargs -a with no cd, as canary reads it", "xargs -a /tmp/list touch"],
+    [
+      "a test run under xargs -a with no cd, as canary reads it",
+      "xargs -a /tmp/touched.txt bun run --cwd /tmp/tree test:file > /tmp/t.log 2>&1",
+    ],
+    ["a writer under xargs -E with absolute words and no cd", "echo /tmp/x | xargs -E -a touch"],
+    // xargs' options that leave where its words land alone, each with absolute words after a cd to a variable
+    ...[
+      "-0",
+      "-E END",
+      "-e",
+      "--eof=END",
+      "-P 2 -n1",
+      "--process-slot-var S",
+      "-p -t -r -x -n1",
+    ].map((options): [string, string] => [
+      `rm under xargs ${options} fed an absolute path after a cd to a variable`,
+      `cd "$X" && echo /tmp/x | xargs ${options} rm -r`,
+    ]),
+    [
+      "a reader under every option xargs reads after a cd to a variable",
+      `cd "$X" && echo .x | xargs -0 -E END -P 2 -n1 -t wc -l`,
+    ],
+    [
+      "find -fprint to an absolute file after a cd to a variable",
+      `cd "$X"; find /tmp/a -fprint /tmp/out`,
+    ],
+    [
+      "find -newer a relative file, a read, after a cd to a variable",
+      `cd "$X"; find /tmp/a -newer .x -print`,
+    ],
+    [
+      "rm under xargs fed a quoted absolute path after a cd to a variable",
+      `cd "$X" && echo "'/tmp/x'" | xargs rm -rf`,
+    ],
+    [
+      "rm under xargs -0 fed a name whose quotes it keeps, so it names no root",
+      `echo ".play'ground'/extensions" | xargs -0 rm -r`,
+    ],
+    [
+      "rm under xargs fed a relative name by printf -- with no cd",
+      "printf -- 'sub' | xargs rm -rf",
+    ],
+    ["printf -v of a dash-led value after --", "printf -v v -- '-delete'"],
+    [
+      "a printer under xargs with no xargs after it after a cd to a variable",
+      `cd "$X"; echo notes | xargs echo`,
+    ],
+    [
+      "rm under xargs fed a relative name with no cd, so the hook knows the folder it lands in",
+      "echo build | xargs rm -rf",
+    ],
+    [
+      "a writer under xargs fed a program's output with no -a or cd, as on canary",
+      "git ls-files | xargs sed -i s/a/b/",
+    ],
     ["cp of a relative file to an absolute path after a cd to a variable", `cd "$X"; cp a /tmp/b`],
     [
       "a redirect to a file the line holds after a cd to a variable",
@@ -2806,5 +2986,73 @@ describe("the Ops lead's tuning of a guard setting", () => {
     ],
   ])("the Ops lead is refused %s", async (_, command) => {
     expect(await ops(command)).toContain("no-extensions-write hook refuses playground settings")
+  })
+})
+
+// An ops job row that names an extension script: the write lands outside the root, and only its text names the root.
+describe("a write outside the root whose text names an extension script runs, and one into the root stays refused", () => {
+  const JOBS = join(DATA, "ops", "jobs.json")
+  const SCRIPT = join(SCOPE, "skills", "vault", "scripts", "vault.py")
+
+  test.each([
+    ["a Write of jobs.json", "Write", { content: `{"command":"${SCRIPT}"}`, file_path: JOBS }],
+    [
+      "an Edit of jobs.json",
+      "Edit",
+      { file_path: JOBS, new_string: `"${SCRIPT}"`, old_string: '"x"' },
+    ],
+  ])("%s", async (_, name, input) => {
+    expect(await tool(name, input)).toBeUndefined()
+  })
+
+  test.each([
+    ["jq to a file beside jobs.json", `jq '.jobs[0].command = "${SCRIPT}"' ${JOBS} > ${JOBS}.new`],
+    ["a heredoc to cat into jobs.json", `cat > ${JOBS} <<'EOF'\n{"command":"${SCRIPT}"}\nEOF`],
+    ["a heredoc to tee into jobs.json", `tee ${JOBS} <<'EOF'\n{"command":"${SCRIPT}"}\nEOF`],
+    [
+      "an unquoted heredoc to tee into jobs.json",
+      `tee ${JOBS} <<EOF\n{"command":"${SCRIPT}"}\nEOF`,
+    ],
+    [
+      "a heredoc to tee -a into jobs.json, quiet",
+      `tee -a ${JOBS} > /dev/null <<'EOF'\n{"command":"${SCRIPT}"}\nEOF`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "a Write into the root",
+      "Write",
+      { content: `{"command":"${SCRIPT}"}`, file_path: join(ROOT, "policy.json") },
+    ],
+  ])("%s is refused", async (_, name, input) => {
+    expect(await tool(name, input)).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each([
+    [
+      "a heredoc to tee into the root",
+      `tee ${ROOT}/policy.json <<'EOF'\n{"command":"${SCRIPT}"}\nEOF`,
+    ],
+    ["a heredoc to tee into jobs.json and the root", `tee ${JOBS} ${LIST} <<'EOF'\n[]\nEOF`],
+    ["a heredoc to tee piped into a shell", `tee ${JOBS} <<'EOF' | sh\ntouch ${LIST}\nEOF`],
+    [
+      "a heredoc to tee piped into python",
+      `tee ${JOBS} <<'EOF' | python3\nopen("${LIST}", "w")\nEOF`,
+    ],
+    [
+      "a heredoc to tee into a shell's process substitution",
+      `tee >(sh) <<'EOF'\ntouch ${LIST}\nEOF`,
+    ],
+    ["a heredoc to tee into a shell's stdin", `tee /dev/stdout <<'EOF' | bash\ntouch ${LIST}\nEOF`],
+    [
+      "a heredoc to python naming the root",
+      `python3 - <<'EOF'\nopen("${JOBS}", "w").write("${SCRIPT}")\nEOF`,
+    ],
+    ["sed -i of jobs.json naming the root", `sed -i '' 's#x#${SCRIPT}#' ${JOBS}`],
+  ])("%s is refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
   })
 })

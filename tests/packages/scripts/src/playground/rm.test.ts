@@ -10,12 +10,13 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { CARVE_OUTS } from "../../../../../packages/safe-delete/src"
+import { CARVE_OUTS, listTrash } from "../../../../../packages/safe-delete/src"
 import {
   callerOf,
   clonesOf,
@@ -271,6 +272,162 @@ test("runRm refuses a symlink inside the caller's own scratch folder that points
   symlinkSync(join(home, ".ssh"), join(scratch, "keys"))
   expect(await runRm([join(scratch, "keys")], deps)).toBe(1)
   expect(existsSync(join(scratch, "keys"))).toBe(true)
+})
+
+// The machine's scratchpad, with a roster of the given rows.
+const pads = (rows: { name: string; status: string }[]) => {
+  const m = machine()
+  writeFileSync(join(m.deps.data, "roster.json"), JSON.stringify({ agents: rows }))
+  return { ...m, pad: join(m.deps.data, "scratchpad") }
+}
+
+test("runRm clears a path in the caller's own scratchpad folder", async () => {
+  const { deps, pad } = pads([{ name: "j6rjgy-worker", status: "working" }])
+  mkdirSync(join(pad, "j6rjgy-worker", "1929"), { recursive: true })
+  writeFileSync(join(pad, "j6rjgy-worker", "1929", "probe.log"), "x")
+  expect(await runRm([join(pad, "j6rjgy-worker", "1929")], deps)).toBe(0)
+  expect(existsSync(join(pad, "j6rjgy-worker", "1929"))).toBe(false)
+  expect(existsSync(join(pad, "j6rjgy-worker"))).toBe(true)
+})
+
+test("runRm clears the whole scratchpad folder of a session the roster lists as finished, or lists not at all, and --restore brings it back", async () => {
+  const { deps, pad } = pads([
+    { name: "a4b5c6-reviewer", status: "ended" },
+    { name: "d7e8f9-runner", status: "parked" },
+  ])
+  for (const name of ["a4b5c6-reviewer", "d7e8f9-runner", "q1w2e3"]) {
+    mkdirSync(join(pad, name, "shots"), { recursive: true })
+    writeFileSync(join(pad, name, "shots", "a.png"), "x")
+    expect(await runRm([join(pad, name)], deps)).toBe(0)
+    expect(existsSync(join(pad, name))).toBe(false)
+  }
+  expect(existsSync(pad)).toBe(true)
+  const moved = listTrash(join(deps.data, "trash")).find(
+    (entry) => entry.path === join(pad, "q1w2e3"),
+  )!
+  expect(await runRm(["--restore", moved.id], deps)).toBe(0)
+  expect(existsSync(join(pad, "q1w2e3", "shots", "a.png"))).toBe(true)
+})
+
+test("runRm refuses a live session's scratchpad folder, every path in it, and its bare id's folder while any of that id's rows is live, to any other session", async () => {
+  const { deps, pad, told } = pads([
+    { name: "j6rjgy-worker", status: "working" },
+    { name: "a4b5c6-reviewer", status: "waiting" },
+    { name: "h1j2k3-tester", status: "starting" },
+    { name: "p4q5r6-worker", status: "ended" },
+    { name: "p4q5r6-reviewer", status: "working" },
+  ])
+  for (const path of [
+    join(pad, "a4b5c6-reviewer"),
+    join(pad, "a4b5c6-reviewer", "r1.md"),
+    join(pad, "h1j2k3-tester"),
+    join(pad, "h1j2k3"),
+    join(pad, "p4q5r6"),
+  ]) {
+    mkdirSync(join(pad, "a4b5c6-reviewer"), { recursive: true })
+    mkdirSync(join(pad, "h1j2k3-tester"), { recursive: true })
+    mkdirSync(join(pad, "h1j2k3"), { recursive: true })
+    mkdirSync(join(pad, "p4q5r6"), { recursive: true })
+    writeFileSync(join(pad, "a4b5c6-reviewer", "r1.md"), "x")
+    expect(await runRm([path], deps)).toBe(1)
+    expect(existsSync(path)).toBe(true)
+  }
+  expect(told.every((line) => line.includes("is inside the protected"))).toBe(true)
+})
+
+// A folder of one file more than the tripwire's count, spread over subfolders.
+const overCount = (dir: string) => {
+  for (let i = 0; i <= 5000; i++) {
+    const sub = join(dir, "clone", String(i % 50))
+    if (i < 50) mkdirSync(sub, { recursive: true })
+    writeFileSync(join(sub, String(i)), "x")
+  }
+}
+
+test("runRm clears an ended session's whole scratchpad folder over the tripwire's file count, and --restore brings back every file", async () => {
+  const { deps, pad } = pads([{ name: "a4b5c6-worker", status: "ended" }])
+  const folder = join(pad, "a4b5c6-worker")
+  overCount(folder)
+  expect(await runRm([folder], deps)).toBe(0)
+  expect(existsSync(folder)).toBe(false)
+  const moved = listTrash(join(deps.data, "trash")).find((entry) => entry.path === folder)!
+  expect(moved.files).toBe(5001)
+  expect(await runRm(["--restore", moved.id], deps)).toBe(0)
+  expect(
+    readdirSync(folder, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()),
+  ).toHaveLength(5001)
+})
+
+// the file count does not apply to an ended session's whole folder, so its refusal names the byte cap alone
+test("runRm refuses an ended session's whole scratchpad folder over 2 GB, naming the 2 GB cap alone", async () => {
+  const { deps, pad, told } = pads([{ name: "a4b5c6-worker", status: "ended" }])
+  const folder = join(pad, "a4b5c6-worker")
+  mkdirSync(folder, { recursive: true })
+  writeFileSync(join(folder, "big.bin"), "")
+  truncateSync(join(folder, "big.bin"), 2 * 1024 ** 3 + 1)
+  expect(await runRm([folder], deps)).toBe(1)
+  expect(existsSync(join(folder, "big.bin"))).toBe(true)
+  expect(told.filter((line) => line.includes("past the tripwire"))).toEqual([
+    expect.stringContaining(" holds over 2 GB, past the tripwire"),
+  ])
+})
+
+test("runRm keeps the tripwire's file count for the caller's own scratchpad folder, a path inside an ended folder and any other path", async () => {
+  for (const at of [
+    (pad: string) => join(pad, "j6rjgy-worker"),
+    (pad: string) => join(pad, "a4b5c6-worker", "1938"),
+    (pad: string) => join(pad, "..", "..", "big"),
+  ]) {
+    const { deps, pad, told } = pads([
+      { name: "j6rjgy-worker", status: "working" },
+      { name: "a4b5c6-worker", status: "ended" },
+    ])
+    const path = at(pad)
+    overCount(path)
+    expect(await runRm([path], deps)).toBe(1)
+    expect(existsSync(join(path, "clone", "0", "0"))).toBe(true)
+    expect(told.some((line) => line.includes("past the tripwire"))).toBe(true)
+  }
+})
+
+test("--restore refuses a path inside an ended folder while a symlink stands at that folder or at a folder between", async () => {
+  const { deps, home, pad } = pads([])
+  mkdirSync(join(home, "kept"), { recursive: true })
+  for (const [moved, link] of [
+    [join(pad, "q1w2e3", "shots"), join(pad, "q1w2e3")],
+    [join(pad, "z9x8c7", "a", "shots"), join(pad, "z9x8c7", "a")],
+  ] as const) {
+    mkdirSync(moved, { recursive: true })
+    writeFileSync(join(moved, "a.png"), "x")
+    expect(await runRm([moved], deps)).toBe(0)
+    const entry = listTrash(join(deps.data, "trash")).find((e) => e.path === moved)!
+    rmSync(link, { recursive: true })
+    symlinkSync(join(home, "kept"), link)
+    expect(await runRm(["--restore", entry.id], deps)).toBe(1)
+    expect(existsSync(join(home, "kept", "shots"))).toBe(false)
+  }
+})
+
+test("runRm refuses the scratchpad folder itself, every other path in the data folder, an ended session's folder that is a symlink, and any of them while the roster cannot be read", async () => {
+  const { deps, home, pad } = pads([{ name: "a4b5c6-reviewer", status: "ended" }])
+  mkdirSync(join(pad, "a4b5c6-reviewer"), { recursive: true })
+  mkdirSync(join(deps.data, "briefs"), { recursive: true })
+  mkdirSync(join(home, "kept"), { recursive: true })
+  symlinkSync(join(deps.data, "briefs"), join(pad, "x9y8z7-worker"))
+  symlinkSync(join(home, "kept"), join(pad, "m5n6b7-worker"))
+  for (const path of [
+    pad,
+    join(deps.data, "roster.json"),
+    join(deps.data, "briefs"),
+    join(pad, "x9y8z7-worker"),
+    join(pad, "m5n6b7-worker"),
+  ]) {
+    expect(await runRm([path], deps)).toBe(1)
+    expect(existsSync(path)).toBe(true)
+  }
+  writeFileSync(join(deps.data, "roster.json"), "{")
+  expect(await runRm([join(pad, "a4b5c6-reviewer")], deps)).toBe(1)
+  expect(existsSync(join(pad, "a4b5c6-reviewer"))).toBe(true)
 })
 
 test("runRm tells the dispatcher of a protected path, and not of a missing one", async () => {
@@ -681,12 +838,155 @@ test("a session's --worktree --discard on a folder outside the worktrees folder 
       console.error = error
     }
     expect(said).toEqual([
-      `playground: --worktree takes a folder in ${worktrees}, not ${outside}: playground rm ${outside} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
+      `playground: --worktree takes a folder in ${worktrees} or a git worktree in another repo's .claude/worktrees, not ${outside}: playground rm ${outside} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
     ])
     expect(existsSync(outside)).toBe(true)
   }
   expect(await runRm([outside], session)).toBe(0)
   expect(existsSync(outside)).toBe(false)
+})
+
+// Another repo in HOME, on main with a remote, and its worktree <repo>/.claude/worktrees/app-1 on APP-1-thing, holding one commit not pushed and an installed node_modules.
+const otherRepo = (root: string, home: string) => {
+  const repo = join(home, "code", "app")
+  git(root, "init", "--bare", "-q", join(root, "app.git"))
+  mkdirSync(repo, { recursive: true })
+  git(repo, "init", "-q", "-b", "main")
+  file(join(repo, ".gitignore"), "node_modules\n")
+  git(repo, "add", ".")
+  git(repo, "commit", "-qm", "init")
+  git(repo, "remote", "add", "origin", join(root, "app.git"))
+  git(repo, "push", "-q", "origin", "main")
+  const worktrees = join(repo, ".claude", "worktrees")
+  const wt = join(worktrees, "app-1")
+  git(repo, "worktree", "add", "-q", "-b", "APP-1-thing", wt)
+  file(join(wt, "work.txt"))
+  git(wt, "add", ".")
+  git(wt, "commit", "-qm", "work")
+  file(join(wt, "node_modules", "dep", "index.js"))
+  return { repo, worktrees, wt }
+}
+
+// runRm's exit, and what it printed to stderr.
+const rmSaid = async (words: string[], deps: RmDeps) => {
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    return { code: await runRm(words, deps), said }
+  } finally {
+    console.error = error
+  }
+}
+
+// PG-1942: a finished worktree of another repo, in that repo's own .claude/worktrees, goes as one of this checkout's does
+test("--worktree takes another repo's worktree once its PR merged or closed: git in its own repo forgets it, its node_modules stays out of the trash, and --restore brings it back there", async () => {
+  for (const state of ["MERGED", "CLOSED"] as const) {
+    const { deps, home, root } = machine()
+    const { repo, wt } = otherRepo(root, home)
+    const head = git(wt, "rev-parse", "HEAD")
+    const asked: string[] = []
+    const finished: RmDeps = {
+      ...deps,
+      caller: async () => "a session (role worker)",
+      merged: (sha, at) => (asked.push(`merged ${at}`), state === "MERGED" && sha === head),
+      prState: async (path) => (asked.push(`pr ${path}`), { head, number: 7, state }),
+    }
+    expect(await rmSaid([wt], finished)).toEqual({
+      code: 1,
+      said: [`playground: ${wt} is a worktree: playground rm --worktree removes it`],
+    })
+    const words = state === "MERGED" ? ["--worktree", wt] : ["--worktree", wt, "--discard"]
+    expect(await rmSaid(words, finished)).toEqual({ code: 0, said: [] })
+    expect(existsSync(wt)).toBe(false)
+    expect(asked.every((line) => line.endsWith(` ${wt}`))).toBe(true)
+    expect(asked).toContain(`pr ${wt}`)
+    expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(wt)
+    const [entry] = listTrash(join(deps.data, "trash"))
+    expect(entry).toMatchObject({ path: wt, stripped: 1 })
+    expect(existsSync(join(deps.data, "trash", entry!.id, "app-1", "work.txt"))).toBe(true)
+    expect(existsSync(join(deps.data, "trash", entry!.id, "app-1", "node_modules"))).toBe(false)
+    expect(await runRm(["--restore", entry!.id], finished)).toBe(0)
+    expect(git(wt, "symbolic-ref", "--short", "HEAD")).toBe("APP-1-thing")
+    expect(git(wt, "rev-parse", "HEAD")).toBe(head)
+    expect(git(repo, "worktree", "list", "--porcelain")).toContain(`worktree ${wt}\n`)
+  }
+})
+
+test("--worktree refuses another repo's worktree with unpushed commits and no finished PR as it refuses one here, and --discard --decision takes it on an approved delete decision", async () => {
+  const { deps, home, root } = machine()
+  const { repo, wt } = otherRepo(root, home)
+  const discard = `playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`
+  expect(await rmSaid(["--worktree", wt], deps)).toEqual({
+    code: 1,
+    said: [
+      `playground: ${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): ${discard}`,
+    ],
+  })
+  const session = { ...deps, caller: async () => "a session (role worker)" }
+  expect(await rmSaid(["--worktree", wt, "--discard"], session)).toEqual({
+    code: 1,
+    said: [
+      `playground: a session (role worker) passes --discard only with --decision <id>: post an Inbox delete decision with bun run ask new naming ${wt} and why (bun run ask example delete prints one to start from), then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`,
+    ],
+  })
+  expect(existsSync(wt)).toBe(true)
+  const approved = async (id: string): Promise<Decision | null> =>
+    id === "#i9"
+      ? {
+          kind: "decision",
+          preview: { type: "delete", what: `the worktree ${wt}` },
+          status: "approved",
+        }
+      : null
+  const words = ["--worktree", wt, "--discard", "--decision", "#i9"]
+  expect(await rmSaid(words, { ...session, decision: approved })).toEqual({ code: 0, said: [] })
+  expect(existsSync(wt)).toBe(false)
+  expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(wt)
+})
+
+test("--worktree refuses, in another repo, a folder in its .claude/worktrees git does not list as its worktree, the repo's own checkout, and its worktree outside .claude/worktrees", async () => {
+  const { deps, home, root } = machine()
+  const { repo, worktrees, wt } = otherRepo(root, home)
+  const plain = join(worktrees, "plain")
+  file(join(plain, "index.html"))
+  const clone = join(worktrees, "clone")
+  mkdirSync(clone)
+  git(clone, "init", "-q", "-b", "main")
+  const forged = join(worktrees, "forged")
+  mkdirSync(forged)
+  writeFileSync(join(forged, ".git"), readFileSync(join(wt, ".git")))
+  const third = join(home, "code", "third")
+  mkdirSync(third, { recursive: true })
+  git(third, "init", "-q", "-b", "main")
+  file(join(third, "README.md"))
+  git(third, "add", ".")
+  git(third, "commit", "-qm", "init")
+  const stranger = join(worktrees, "stranger")
+  git(third, "worktree", "add", "-q", "-b", "other", stranger)
+  const outside = join(home, "code", "app-wt")
+  git(repo, "worktree", "add", "-q", "-b", "APP-2-thing", outside)
+  const session = {
+    ...deps,
+    caller: async () => "a session (role worker)",
+    merged: () => true,
+    prState: async () => ({ head: "x", number: 7, state: "MERGED" as const }),
+  }
+  const ours = join(deps.main, ".claude", "worktrees")
+  for (const path of [plain, clone, forged, stranger, repo, outside])
+    for (const words of [
+      ["--worktree", path],
+      ["--worktree", path, "--discard"],
+    ]) {
+      expect(await rmSaid(words, session)).toEqual({
+        code: 1,
+        said: [
+          `playground: --worktree takes a folder in ${ours} or a git worktree in another repo's .claude/worktrees, not ${path}: playground rm ${path} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
+        ],
+      })
+      expect(existsSync(path)).toBe(true)
+    }
+  expect(git(repo, "worktree", "list", "--porcelain")).toContain(`worktree ${outside}\n`)
 })
 
 // PG-825: a Bash prefix drops PLAYGROUND_ROLE, but not the claude process above the call

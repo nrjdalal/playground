@@ -34,6 +34,13 @@ Moving a schedule or pausing a job with `pausedFor` is the same kind of write, n
 A job with a `config`, the settings of its own it reads on each pass, shows a card under its row in Settings > Jobs: the config as JSON in a box you edit, and Save, which writes the new object at the job's scope at once, over the rest of the value there.
 Playground checks only that it is a JSON object; the job checks each field itself, and when it refuses one it writes why as `configRefused` in its heartbeat, which the card shows in red under the box until a beat holds none.
 
+## Restore now
+
+The ops-restore row in Settings > Jobs holds Restore now, your way back when the main checkout's guards are gone and no session can repair it, with the job on or off.
+It runs ops-restore's own steps once, from the Dashboard's server: it puts the checkout's files back, installs, runs `link-skills.sh`, and checks the guards again.
+The Dashboard runs from its own checkout, so the page still works while the main checkout is broken.
+Under the button it says what it restored, that every guard is in place so nothing was, or the step it stopped at; ops and the dispatcher get the same words.
+
 ## How a change reaches the runner
 
 At the top of every pass, the ops runner (`scripts/ops/up.py`) renders the jobs from your extensions into `<data>/ops/jobs.json` and writes a plist for each launchd job that is on into `<data>/ops/launch-agents`.
@@ -43,6 +50,8 @@ When that render cannot be trusted, the runner keeps the last `jobs.json` and wr
 A job the registry does not know, such as one of your own scripts, stays in `jobs.json` as it is, unless an org's own job of its name ([below](#an-orgs-own-job)) replaces it.
 Each `script` item an org holds as a folder is installed into `<data>/ops/<key>/` in the same pass, beside the state its job keeps there, which the render never touches.
 The folder's `.revision` names the accepted revision that last wrote it, and a job running from the folder restarts onto a new one at its next idle moment, never in the middle of a pass, logging the revision it picked up; a job that runs a skill's script from the extensions folder restarts the same way on accepted revisions of that skill or of any other its scripts import.
+A job's command names such a script by its place in your extensions, `ext:<scope>/<path>` (`python3 -I ext:<org>/skills/vault/scripts/vault.py run`), in place of a folder path: the runner turns each `ext:` word into the path `bun packages/scripts/src/playground/rendered.ts <scope>/<path>` prints, at each start, so the job runs the latest accepted revision with no row to repoint.
+A start whose `ext:` word your extensions lack opens no pane, and the runner writes the reader's refusal to `<data>/ops/up.log`.
 
 launchd reads `~/Library/LaunchAgents`, not `<data>/ops/launch-agents`, so the same pass installs each launchd job you turn on: while launchd has not loaded it, its rendered plist is copied into `~/Library/LaunchAgents` when none is there and loaded with `launchctl bootstrap`, tried again on the next pass when launchd refuses, and a plist already there stays as it is.
 Only Playground's own labels (`com.playground.*`) are installed or removed, so no other app's agent is touched.

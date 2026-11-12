@@ -371,7 +371,7 @@ const picker = async (args: string[]): Promise<number> => {
   return code
 }
 
-// playground alerts-wait: blocks until the next alert for a manager, a stuck session's or the relay watch's late-stop line (alerts-wait.ts), then prints it.
+// playground alerts-wait: blocks until the next outbox line for a manager, a stuck session's alert, the relay watch's late-stop line or any job's line addressed to it (alerts-wait.ts), then prints it.
 const alertsWaitFor = async (name: string): Promise<number> => {
   const { alertsWait } = await import("./alerts-wait")
   console.log(await alertsWait(name, join(dataDir(), "ops", "outbox")))
