@@ -10,6 +10,7 @@ import { coreDir, readPolicy, readPolicySync } from "../../packages/settings/src
 import { gatedSendsSchema } from "../../packages/settings/src/slack"
 import { implicitRepos, type Repo, remoteRepo, remotes, repoOf } from "./github"
 import { guardList, isRecord, isStrings } from "./lists"
+import { check as prepareWrite } from "./no-prepare-write"
 import { readOnly } from "./read-only"
 import { fromFactory } from "./role"
 import {
@@ -1648,7 +1649,10 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
 
 if (import.meta.main) {
   const raw = await Bun.stdin.text()
-  const reason = (await fromFactory(raw)) ? await check(raw) : undefined
+  // a prepare-only session's tracker, chat and pull request writes wait for its claim (no-prepare-write), checked here since this hook's matcher takes those MCP tools
+  const reason = (await fromFactory(raw))
+    ? ((await prepareWrite(raw)) ?? (await check(raw)))
+    : undefined
   if (reason) {
     console.error(reason)
     process.exit(2)

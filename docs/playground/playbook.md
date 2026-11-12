@@ -1,7 +1,7 @@
 ## What it does
 
 `playbook` holds the operating rules of Playground's factory, the Claude Code sessions herdr runs on the owner's behalf: who does what, who reports to whom, how sessions start and end, how the leads keep watch,
-and the standing rules (ask, battery, ci, classified, clock, comments, context, correction, dashboard, eta, gate, github, glm, local page, main, meetings, memory, override, polling, public, release, roster, rounds, signal, slots, talk, terminal, tickets, unstick, upstream, usage, verify, voice, workers, writing).
+and the standing rules (ask, battery, ci, classified, clock, comments, context, correction, dashboard, eta, gate, github, glm, local page, main, memory, override, polling, public, release, roster, rounds, signal, slots, talk, terminal, tickets, unstick, upstream, usage, verify, voice, workers, writing).
 It lives in the repo rather than in one session's memory, so every session loads the same rules.
 
 ## When to reach for it
@@ -74,6 +74,7 @@ it counts no sessions, so Ops watches the live board, since cmux once stopped an
 A heavy run, such as a suite, takes one of a few run slots and gives it back when it ends, so nothing long-lived holds one.
 Nobody builds a demo stack for the owner: he tries changes on the live dashboard alone.
 A runner hosts long-running jobs and closes when none is left; the ops jobs Ops runs are scripts with no session and show on the Dashboard under Runners from the heartbeat each writes.
+An ops job that runs an extension's skill or script restarts by itself onto each accepted revision of it, between passes, and logs the revision it picked up, so Ops restarts none by hand after an accept.
 A job launchd runs starts on the next pass after you turn it on in Settings > Jobs and stops after you turn it off, and one still down 3 passes in a row is told to Ops once, and again only after it has run healthy.
 One of them, ops-unstick, reads every session's screen every 2 minutes, clears a usage-limit dialog when there is room, takes one with no room on a probe to its spawner, names each capped account's live sessions to the builder and ops once a reset, and takes any other block no hook recorded to the session's manager,
 as the session-state hook does for one it did,
@@ -115,7 +116,7 @@ For a focused stretch, such as a timed test, a demo or an hour of deep work, `pl
 While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep and that session's own reviewer and tester keep running.
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
 A priority start (spawn.sh's `--priority`) passes the load gate and a full run-slot queue at the slots gate while a priority file stands, and the memory gate still applies to it.
-It passes focus too on `priority.json`, an org's own `priority-<name>.json` or a session's own window, while a job's own `priority-start.json` never does.
+It passes focus too on any of them: `priority.json`, an org's own `priority-<name>.json`, a session's own window or a job's own `priority-start.json`.
 A session's window opens only with `playground priority on <session> --reason "<why>"`, and a lead opens one only on the owner's or the dispatcher's word; `playground priority off <session> --reason "<why>"` lifts it, ops-tick lifts one left standing after a set age, and each opening and lift is a line in `ops/priority.log`.
 A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the load gate as well, as a Claude Code update's close and resume do, and the memory gate still applies to it.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
@@ -233,7 +234,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - No session writes Claude Code memory: every learning arrives as a PR to this repo.
 - Every skill, agent guide, docs page, handoff and brief a session writes reads as writing-for-agents shapes it: lean, each step ending on a completion criterion, phrased as what to do, a hook turns back a factory session's write to one until it has loaded the skill,
   and the reviewer scores the changed ones against it.
-- After each of the owner's meetings, Playground reads its transcript from Wispr Flow on this Mac (`bun run wispr:latest`) and acts on the follow-ups, so he never pastes one by hand, and no transcript text leaves Playground's own chat and the Dashboard's local tables for Slack, Linear, GitHub, Notion or another session.
+- After each of the owner's meetings, Playground reads its transcript on this Mac with the login extension's meetings script, which its own **meetings** rule names, and acts on the follow-ups, so he never pastes one by hand, and no transcript text leaves Playground's own chat and the Dashboard's local tables for Slack, Linear, GitHub, Notion or another session.
 - No brief agrees in advance to raising a ratchet, or loosening any check whose own rule says it never rises: that call goes to the rule's owner, on the PR or directly, before the code relies on it.
 - Every Linear ticket a factory session files traces to an Inbox decision the owner approved, and none names Playground.
 - No guarded org's ticket, PR, commit, branch, comment or Slack message names Playground, a lead, a factory session or the live dashboard.

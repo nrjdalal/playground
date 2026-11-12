@@ -149,11 +149,11 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   The commands after that run keep both where the `||` follows the `cd` itself (`cd <path> || echo no; git commit -m x`), and go back to the folder the `cd` named where it follows a later command of the run, or runs an `exit` in the line's own shell, which ends the line where the `cd` failed (`cd <path> || exit; git commit -m x` runs).
   A `return` there keeps both folders, since `bash -c` fails a top-level `return` and carries on (`cd <path> || return; git commit -m x`, refused from the main checkout).
   An `exit` in a subshell or a pipeline ends that alone, a brace group piped on included, so the line keeps both folders after it (`cd <path> || (exit); …`, `cd <path> || exit | cat; …`, `cd <path> || { exit; } | cat; …`).
-  A `cd -P` takes the folder the kernel lands in, each link followed before a `..` after it, where a plain `cd` folds the `..` by text (`cd -P <link>/..`); any `-P` among a `cd`'s or `pushd`'s options counts, whatever else is there (`-qP`, `-PL`, `-P -L`), since zsh lands physical for each.
   A `!` in front of the `cd` keeps the folders from before it from the start, since it turns the `cd`'s own failure into success and the run carries on with the shell where it was (`! cd <path> && git commit -m x`); an even count of them reads as none.
   A script a command reads (`sh -c`, `eval`, `source`) reads with no run of the line's, since every command in it runs because that command ran; what the script's own trailing run leaves joins the line's on the way out, under the reading command's run,
   since a `cd` an `&&` made sure at the end of an `eval` or a `source` may not have run either (`eval 'true && cd <path>'; git commit -m x`, refused in both folders).
   A sure `cd` the script ends on is the line's for an `||` after the reading command (`eval 'cd <path>' || git commit -m x`, refused from the main checkout).
+- A `cd -P` takes the folder the kernel lands in, each link followed before a `..` after it, where a plain `cd` folds the `..` by text (`cd -P <link>/..`); any `-P` among a `cd`'s or `pushd`'s options counts, whatever else is there (`-qP`, `-PL`, `-P -L`), since zsh lands physical for each.
 - Every other `cd` leaves `Env.cwdSure` unnamed and keeps each folder the shell may be in: the folder before it, and each folder its target names, read against every folder the shell may already be in (`Env.cwdMaybe`).
   A relative target that climbs adds every folder above it wherever the shell may run that `cd` more than once: under a count (`repeat`, `timeout`), in a loop's body, between a loop's head and its `do` (a `while`'s or `until`'s condition, the body of zsh's short `for`, `select` and `foreach`), in a function's body, and in the script an `eval` or a `source` reads in such a place.
   A function's body, a brace group or any compound (`f() if …; fi`), runs once when the line names the function just twice, by its definition and one call outside every loop and body, a redirect's target being a file rather than a call.
@@ -220,6 +220,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
   Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
+  no-prepare-write, a check with no process of its own, runs behind `fromFactory` through its `check`.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
@@ -486,9 +487,20 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   and `settings import-jobs` but its `--dry-run`, which writes a `jobs.<name>` for each job its file lists,
   whose refusal names the Inbox guard decision whose Approve writes it.
   A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
+  Two of them only tune a number, so the Ops lead sets them as it sets spawn.sh's `gates.*`, on a line that holds the `playground` call alone.
+  The Ops lead is `opsLead` in `role.ts`: the lead role, whose name in Claude Code's registry has the roster's `ops` kind.
+  It sets `glm.readOnlyLoad5` to a positive number.
+  It sets a `jobs.<name>` whose new row equals the row the login's scope stores (`{}` when it stores none), field for field, but a `schedule` of `{"every": <positive integer>}`.
+  That needs the job's rendered row (`policy.json`'s, else the registry's entry) to run on an interval already.
+  A set replaces the stored row, and the render reads each field it leaves out from the registry's entry, since a job's setting merges over it.
+  So the hook compares the stored row, never the rendered one, whose copy would pin the registry's fields.
+  A row that drops a field, turns a job on or off, moves its command, program or folder, or changes a `config` number stays the owner's.
+  So do a reset, `import-jobs`, a `--scope`, a job another scope stores a row for or any scope stores under an old name, and a job neither `policy.json` nor the registry holds.
+  So do an `always` schedule, and a login, `settings.json` or `policy.json` that does not read.
+  A line holding more than the call (an assignment, `export`, `env`, wrapper, group, substitution or second command) tunes nothing, since `PLAYGROUND_LOGIN` or the data folder set there would move the write to another scope than the one the hook reads.
   A command, verb, kind or key word it cannot read, or any such word among the words of `ext put` or `settings set` or `reset`, counts as the write.
   `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score` and `reject`, a score of 5 included, which accepts the proposal itself (`judgeItem` in `packages/settings/src/items.ts`) with no `accept` card after it, `settings set` of any other key, `settings import-jobs --dry-run` and writes elsewhere in the data folder (handoffs, the roster) run.
-  Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which runs without hooks and which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note in a session's own call frees it.
+  Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which runs without hooks and which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note in a session's own call frees it, the Ops lead's two tuning sets above alone running.
   A `settings set` or `reset` of `owner.names` or `factory.archiveRepo` with no `--scope` names Privacy on the Dashboard's Settings page instead, which saves both at your login's scope: the dispatcher asks the owner to save it there.
   An accept's refusal names its own route: the session posts an `accept` decision with `playground ask new` (`.agents/dashboard/asks.md`), and the owner's Approve has the Dashboard run the accept with no role.
   The CLI refuses an accept with a role set too, for a caller no hook reads (a script run by its path, an ops job), naming the same decision.
@@ -579,7 +591,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD commit` reads as a commit.
   An Opus path's refusal comes first, since that change moves to a Claude worker whatever the load.
   A session is on GLM when its `ANTHROPIC_BASE_URL` points at `api.z.ai`, or when the backend pin spawn.sh keeps under its registry name names `glm` (`glm`, or `claude-code glm` since the harness split); a Claude session commits those paths as before.
-  It fails closed only on a call that reads as a git commit or push, an org tool or a database client whose host it cannot read (below), a call it cannot parse inside a guarded checkout (below), or over that load as an install or clone (one whose directory, paths or refs it cannot read, or whose input does not parse), and passes every other call.
+  It fails closed only on a call that reads as a git commit or push, an org tool or a database client whose host or input it cannot read, a call it cannot parse inside a guarded checkout,
+  a read path it cannot read or a recursive read past its walk (each below), or over that load as an install or clone (one whose directory, paths or refs it cannot read, or whose input does not parse), and passes every other call.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
 - A factory session on GLM keeps off every org's tracker, chat, docs, repos, checkouts and databases, and off a headless Claude run, as the **glm** rule says: the same hook refuses each such call, naming the rule and its fix: report to your lead, who moves the task to a Claude worker.
   It refuses a headless `claude` (`-p` or `--print`, read by `headless` in `scripts/hooks/no-headless-login.ts`), and Claude Code's npm package run that way by a package runner (`npx`, `npx --package=`, `bunx`, `pnpm dlx`).
@@ -601,19 +614,29 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It refuses a read of a guarded org's checkout: a `Read` of a file in one (a leading `~/` read as the home folder), a `Grep` or `Glob` of a path in one (the session's folder when the call gives none), and a shell call that opens a path in one, `cd` included.
   A shell call opens its folder, each argument, each file a redirect names (`<`, `<>`, `>`, `>>`), each file a word's substitution reads (`$(< f)`, `$(cat f)`), each match on disk of a glob or a brace (`**` read as `*`, at most 64 brace alternatives and 200 matches), `~+` (the folder the call runs in) and a link, read by its real path.
   A checkout is the nearest folder at or above the path's real form holding `.git`, read once a call through `git config` for its remotes; a path in no checkout, or in one whose remotes git cannot read, runs, since only an owner the policy guards refuses.
+  A read path the hook cannot read fails closed: a word holding a variable or a substitution it cannot read, xargs's `-I` word, `~-` before a `cd` on the line, and the folder a `cd` it cannot follow left.
+  It reads the shell's own values first: the line's steady variables, the session's own variables the line never names, a for loop's literal values, and a `${NAME:-word}` or `${NAME:?}` as the session's value or the literal word.
+  It also reads a pure substitution: `$(cat f)`, `$(pwd)`, `$(echo ...)`, git's own folders (`$(git rev-parse --show-toplevel)`, `--git-dir`, `--git-common-dir`), and `$(dirname ...)` or `$(basename ...)` of a path it holds, so the worktree recipe's path reads.
+  It refuses after the org tools' and the database rules, so their reason names the call.
+  A command that reads nothing (below), the shell's own `for`, `select` and `case` words, `[`, `[[`, `test`, `exit`, `basename` and `dirname` take such a word as text.
+  So do the words a program takes as code or an assignment: awk's program and `-v` values, sed's script (`-e`, else its first operand), and inline code (`python -c`, `node` or `bun -e`, `perl` or `ruby -e`).
+  A recursive read is read all the way down: `rg`, `find`, and `grep` and its kin under `-r`, `-R` or their long forms, each folder they name, a `Grep`'s folder, a `Glob` pattern's literal start (absolute too), and the folder a `**` in a shell word starts from.
+  `find` walks its own folder when it names no starting point; `rg` and `grep` take their first operand as the pattern unless `-e`, `-f`, `--regexp` or `--file` gives it, read past each option's value, and walk their own folder too when no operand follows the pattern or a long option it does not know comes.
+  The walk goes 4 folders deep and at most 5000 folders (`BELOW_DEPTH`, `BELOW_FOLDERS`), passing over `.git` and `node_modules` and reading a link by its real path without walking into it, and a read past 5000 folders refuses.
   A policy the hook cannot read guards no org for this check, so a read tool and a shell call run where `gh`, `git` and the fetchers fail closed: a read of a checkout needs the policy to name its owner.
   While the policy guards an org, the hook parses every shell call, since a bare word (`ls <checkout>`) can name a checkout, and refuses a call it cannot parse in a guarded checkout; `date`, `echo`, `printf`, `pwd` and `true` read no file, so they run there and open only a redirect, a substitution and an argument holding a slash or a tilde.
   It refuses a database client aimed off this machine, every host the call names read: `psql`, `pgbench`, `pgcli` and every `pg_*` program by `-h`, `--host`, a conninfo `host=` or `hostaddr=`, a database URL's host list or its `host`, `hostaddr` or `service` parameter, and `PGHOST`, `PGHOSTADDR` or `PGSERVICE` from the call, the line or the session.
   `mycli`, `mysql` and `mysqldump` read `MYSQL_HOST` too, `mongo` and `mongosh` take `--host`, a URL or a positional `host:port/db` (their `-h` is help), `redis-cli` takes `-h` and `--host`, and any command but a pure one given such a URL is refused.
   A client run inside a container by `docker`, `podman` or `nerdctl` `exec`, `run`, `compose exec` or `compose run` is read as the client itself, with the `-e` and `--env` values the runner gives it.
+  A client's own input is read for a connect line too: a heredoc's or here-string's body, a file a `<` names, and a script `psql` or `pgcli` runs by `-f` or `--file`, or `mongosh` by `--file` or a `.js` argument, for `\c` or `\connect`, `mysql`'s `connect` or `\r`, and `mongosh`'s `connect()` or `Mongo()`.
+  Input it cannot read (a script missing or fetched on the line, a value the line holds, a script inside a container) refuses as a host it cannot read does.
   This machine is loopback, a socket's folder (percent-encoded in a URL too) or no host, since the factory's own databases are loopback containers and settings name no org's database host; a client given a value the hook cannot read, a service name included, is refused, failing closed.
   The read tools' check acts once both settings files' matcher takes `Read`, `Grep` and `Glob`, in a ship after the one that carries this script (the ship rule at the top of this file).
   Its prefilter (`mayRefuse`, with `RUNNER_CALL` for the runners and paths the folder rules read) and its catch path stay apart: a call the parse cannot read is refused only when it reads as a call the hook refuses, so widening what reaches the parse is tested against what the catch path refuses (`a runner the prefilter lets through to the parse runs when the parse fails` in its test).
   `RUNNER_CALL` takes its database clients from `DB_CLIENTS`, so every client the database rule reads reaches the parse, whatever orgs the policy guards.
   A replay of its verdicts tells a GLM session's calls apart by each transcript entry's `message.model` (`glm-5.3`, `glm-5.3-flash`), not the session's name, and reads every GLM transcript on disk, since a day's window can hold none.
   Out of its reach, as residual risk: a URL held in a variable, a program named through one (`G="git -C <dir>"; $G log`), a program that fetches by itself (`bun -e`, Python's urllib), and an org script found through a `PATH` the call sets or run through a link the call makes, each tracked as its own follow-up issue.
-  So are a read path held in a variable or built by a substitution the hook cannot read (xargs's `-I` word and `~-` included), a recursive read of a folder above a checkout (`rg` or a `Grep` on the parent, a `**` glob, an absolute `Glob` pattern) and a connection named inside a client's own input (`\connect` in a heredoc or an `-f` file), each tracked as its own follow-up issue.
-  A glob or brace past its 200-match or 64-alternative cap leaves its further paths unchecked, tracked with the recursive read.
+  So are a client fed its input by a pipe or by `mysql`'s `source`, a recursive reader other than those above, a checkout more than 4 folders below a recursive read, a path built by arithmetic, and a file a program's inline code opens, and a glob or brace past its 200-match or 64-alternative cap leaves its further paths unchecked.
   A database URL in a container runner's own words (an `-e` value) goes unchecked once a client word follows, tracked as its own follow-up issue.
 
 ## no-headless-login
@@ -683,7 +706,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 ## no-public-leak
 
 - ALWAYS: Write each public repository's pull requests, issues, reviews and comments in plain words, naming no person, company or private record, since everything written there is public once the repository is and stays cached after.
-  `scripts/hooks/no-public-leak.ts`, run on Bash by [guards](#guards) and registered in both settings files on the GitHub MCP tools, refuses a write to a public repository (`factory.publicRepo`, one or a list, or while unset `TODAY_PUBLIC` in trace-count's `kinds.ts`, the factory's and Yard's)
+  `scripts/hooks/no-public-leak.ts`, run on Bash by [guards](#guards) and registered in both settings files on the GitHub MCP tools, refuses a write to a public repository (`factory.publicRepo`, one or a list, or while unset the main checkout's origin, as trace-count's `kinds.ts` reads it)
   whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or any email address or link into the archive repository (`factory.archiveRepo`).
   An extensions root whose policy.json it cannot read for those two refuses the write, as a list it cannot trust does.
   Its reason names the kind and the plain-words fix, never the text.
@@ -771,6 +794,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A command run through `run-slot.sh`, typed bare or as a shell's script (`bash <path>/run-slot.sh <who> -- <command>`, `shellSlot`), is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, which no-glm-heavy-path and no-false-green read it by too), so a commit, a build or a write through run-slot is refused as the same command typed bare.
   It refuses a git move there too: `add` (but `-n` or `--dry-run`), `am`, `apply` (but `--check`, `--numstat`, `--stat` or `--summary` without `--apply`), `bisect`, `branch -f`, `checkout`, `cherry-pick`, `clean` (but `-n`), `merge`, `mv`, `pull`, `rebase`, `reset` (but the one below), `restore`, `revert`, `rm`, `stash` (but `list` and `show`), `switch` and `update-ref`,
   whose tree it reads from a `--git-dir` of `<checkout>/.git`, else `--work-tree`, else the cwd after every `-C` in turn, each read where git lands (`landing`), naming the fix: `git -C <your worktree>`, after `git -C <your worktree> rev-parse --show-toplevel` names it.
+  It judges the trees `GIT_DIR` and `GIT_WORK_TREE` name beside that one, read the same way from where the `-C` options land, whether set for the call, through `env` or earlier on the line (`GIT_DIR=<main>/.git git commit`, `export GIT_WORK_TREE=<main>; git reset --hard`), and refuses a value it cannot read, since it may name any tree.
   It finds the subcommand past git's other options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD checkout <ref>` reads as a checkout.
   The one reset it lets through is exactly `git reset --keep origin/main`, on the main checkout's `main`, while `git status --porcelain` is empty and no remote-tracking ref holds any commit of `origin/main..main`.
   It is the way back from a stray local commit there, which `playground update`'s fast-forward stops on, since `--keep` keeps uncommitted work and the check keeps every commit someone else holds.
@@ -801,7 +825,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A ship's pull is a fast-forward and runs no pre-commit, and the step's test is in `tests/lefthook.test.ts`.
 - The same hook keeps the live Dashboard's checkout to the sessions that own it: a git write there (a commit, a merge, a reset and every other git move above, step 5's fast-forward and the keep reset included, since those two are the main checkout's own) is refused to every factory session but the runner that holds it, by `PLAYGROUND_ROLE` `runner`, and the ops lead,
   a `lead` whose name in Claude Code's registry has the roster's `ops` kind, naming the route: ask Ops.
-  The live checkout is the worktree of the main checkout's repository on the branch `live.branch` names (`liveCheckout`, read from `.git/worktrees`), judged by the same folder reading as the main checkout: the cwd, `git -C`, `--git-dir`, `--work-tree`, run-slot and a shell's script.
+  The live checkout is the worktree of the main checkout's repository on the branch `live.branch` names (`liveCheckout`, read from `.git/worktrees`), judged by the same folder reading as the main checkout: the cwd, `git -C`, `--git-dir`, `--work-tree`, `GIT_DIR`, `GIT_WORK_TREE`, run-slot and a shell's script.
   Reads there (`status`, `log`, `diff`, `fetch`) run for every session, and so does every write outside it.
   The ops-dashboard supervisor's roll and `playground update`'s pull are shell processes that no Claude Code hook sees, so they move the checkout as before.
   Its tests are in `bun run test:file tests/scripts/hooks/no-main-checkout.test.ts`.
@@ -864,6 +888,19 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A checker in read mode cannot run the PR's tests, by design, so CI is its test signal.
   Its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts`.
   Its registration in both settings files lands in a later ship than its script, as [Registered in both settings files](#registered-in-both-settings-files) says.
+
+## no-prepare-write
+
+- A prepare-only session, one whose roster row reads `mode=prepare`, works a ticket the org has registered and not yet posted: its brief keeps it to the local branch until it claims, and this check holds it there.
+  An org's start job sets the mode at the prepare-only start (`roster.ts set <session> mode=prepare`) and clears it at the claim: the session's waiter runs `roster.ts set <session> mode=` the moment before it prints its Claim line, so the claim's own assign runs at once, and the job's next beat clears it too, as a backstop.
+  A clear that fails still prints the Claim line, which then tells the worker to retry a refused assign after that beat, since the refusal is not final.
+  The mark and this check each do nothing without the other, so the job's revision and this check go live in either order.
+- While the mode stands, `scripts/hooks/no-prepare-write.ts` refuses a factory session's tracker issue save (`save_issue`, an assign or a state change) and comment (`save_comment`) on a Linear server, a chat post (`chat_post_message`) on a Slack server, and a new pull request:
+  `gh pr create` in any form the shared reader (`scripts/hooks/shell.ts`) finds, and a GitHub server's `create_pull_request`.
+  Every other call runs: reads, local git, a push and every other gh call.
+- It is a check with no process of its own: [guards](#guards) runs it on Bash, and [no-playground-leak](#no-playground-leak)'s process runs it first on the MCP tools, since that hook's matcher already takes every GitHub, Linear and Slack tool, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
+- It fails open, since the session's brief is the first bar: a session the registry or the roster does not hold is not marked, and a read that fails, a roster that does not parse among them, lets the call run and writes one JSON line naming the session, the tool and the error to the data folder's `ops/no-prepare-write.log`, so a broken read shows.
+  Its tests are `tests/scripts/hooks/no-prepare-write.test.ts`.
 
 ## no-prompt-stop
 

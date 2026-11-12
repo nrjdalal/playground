@@ -1256,6 +1256,7 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
   })
 
   test("a database client on this machine passes on GLM", async () => {
+    await write("scripts/seed.js", "db.items.insertOne({ a: 1 })\n")
     for (const command of [
       "psql -h 127.0.0.1 -U postgres app",
       "psql -h localhost app",
@@ -1277,6 +1278,151 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
       `psql "postgresql:///app?host=/tmp"`,
     ])
       expect(await refusal(input(command), ON_GLM, CALM)).toBeUndefined()
+  })
+
+  // issue 1448: a read path the hook cannot read, a variable, an unreadable substitution, xargs's -I word, ~- and a cd it cannot follow, fails closed on GLM
+  test("a read through a path the hook cannot read is refused on GLM, naming the glm rule, and passes on Claude", async () => {
+    for (const command of [
+      "cat $ORG_DIR/README.md",
+      `cat "$(git -C ${ORG} rev-parse --show-toplevel)/README.md"`,
+      'cat "${ORG_DIR:?}/README.md"',
+      `cat \${UNSET_DIR:-${ORG}}/README.md`,
+      "awk '{ print }' $ORG_DIR/README.md",
+      "sed -n p $ORG_DIR/README.md",
+      'sed -e p "$ORG_DIR/README.md"',
+      "sed -f $ORG_DIR/x.sed README.md",
+      "cat $(cat paths.txt)",
+      "ls .. | xargs -I{} cat ../{}/README.md",
+      "cat ~-/README.md",
+      'cd "$X" && cat README.md',
+      `for d in docs ${ORG}; do cat "$d/README.md"; done`,
+    ]) {
+      const { claude, glm } = await both(input(command))
+      expect({ command, claude }).toEqual({ command, claude: undefined })
+      expect({ command, glm }).toEqual({ command, glm: expect.stringContaining("glm rule") })
+      expect(glm).toContain("report to your lead")
+    }
+  })
+
+  test("a read of its own checkout through the line's own variable, a pure substitution or a ~- the line sets runs on GLM", async () => {
+    for (const command of [
+      "D=.; cat $D/README.md",
+      'D="$PWD"; cat "$D/README.md"',
+      'cat "$(pwd)/README.md"',
+      'cat "$(echo docs)/a.md"',
+      "cd docs && cat ~-/README.md",
+      'echo "$X"',
+      'for f in README.md docs/a.md; do cat "$f"; done',
+      "ls | xargs -I{} echo {}",
+      "for i in $(seq 1 3); do echo $i; done",
+      '[ -n "$(git status --porcelain)" ] && echo dirty',
+      'dirname "$(git rev-parse --git-common-dir)"',
+      'cat "$(git rev-parse --show-toplevel)/README.md"',
+      'git worktree add --no-track "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/x" -b x origin/canary',
+      "ls -dt ${TMPDIR:-/tmp}run-slot-*",
+      "cat ${UNSET_DIR:-docs}/a.md",
+      "until awk -v l=\"$(sysctl -n vm.loadavg | awk '{print $2}')\" 'BEGIN{exit !(l <= 15)}'; do sleep 5; done",
+      'L=$(sysctl -n vm.loadavg); python3 -c "print(1 if $L <= 15 else 0)"',
+      `sed -n "$(grep -n '^x()' README.md | cut -d: -f1),+12p" README.md`,
+      `sed -i '' "s/^K=.*/K=$(openssl rand -hex 32)/" README.md`,
+      'sed -e "s/x/$V/" README.md',
+    ])
+      expect({ command, glm: await refusal(input(command), ON_GLM, CALM) }).toEqual({
+        command,
+        glm: undefined,
+      })
+  })
+
+  // issue 1449: a recursive read that starts above an org's checkout reaches it, by the shell, a Grep or Glob, or a ** glob
+  test("a recursive read of a folder holding an org's checkout is refused on GLM, naming the org, and passes on Claude", async () => {
+    const nest = join(DIR, "read-nest", "acme", "demo")
+    mkdirSync(join(DIR, "read-nest", "acme"), { recursive: true })
+    git(DIR, "init", "-q", nest)
+    git(nest, "remote", "add", "origin", "https://github.com/acme-blue/nested.git")
+    writeFileSync(join(DIR, "token"), "x\n")
+    mkdirSync(join(DIR, "notes"), { recursive: true })
+    for (const raw of [
+      input("rg token .."),
+      input("rg token", DIR),
+      input("rg notes", DIR),
+      input("grep -r token", DIR),
+      input("grep -rn notes", DIR),
+      input("rg -g '*.md' notes", DIR),
+      input("rg --hidden token notes", DIR),
+      input("find -name notes", DIR),
+      input("grep -r token .."),
+      input("grep -Rn token .."),
+      input("find .. -name README.md"),
+      input("cat ../read-nest/**/README.md"),
+      call("Grep", { path: DIR, pattern: "token" }),
+      call("Grep", { pattern: "token" }, DIR),
+      call("Glob", { path: join(DIR, "read-nest"), pattern: "**/*.md" }),
+      call("Glob", { pattern: join(DIR, "read-nest", "**", "*.md") }),
+    ]) {
+      const { claude, glm } = await both(raw)
+      expect({ raw, claude }).toEqual({ raw, claude: undefined })
+      expect({ raw, glm }).toEqual({ raw, glm: expect.stringContaining("acme-blue/") })
+      expect(glm).toContain("glm rule")
+    }
+  })
+
+  // the session's repo holds org-link.md, a link into the org's checkout, which a recursive read reaches, so these read a folder with none
+  test("a recursive read of a folder holding no guarded checkout runs on GLM", async () => {
+    mkdirSync(join(LOOSE, "deep", "er"), { recursive: true })
+    for (const raw of [
+      input("rg token .", LOOSE),
+      input("grep -rn token .", LOOSE),
+      input("find . -name '*.ts'", LOOSE),
+      input("rg token ../read-loose"),
+      input("rg -g '*.md' -e token ../read-loose"),
+      input("grep -rn -m 1 token ../read-loose"),
+      input("cat docs/**/*.md"),
+      call("Grep", { path: LOOSE, pattern: "token" }),
+      call("Glob", { path: LOOSE, pattern: "**/*" }),
+      call("Glob", { pattern: join(LOOSE, "**", "*.md") }),
+    ])
+      expect({ raw, glm: await refusal(raw, ON_GLM, CALM) }).toEqual({ raw, glm: undefined })
+  })
+
+  // issue 1450: a connection named inside the input a client reads, a heredoc, a here-string or a script file, is read for its host
+  test("a database client whose own input connects off this machine is refused on GLM, naming the host, and passes on Claude", async () => {
+    await write("remote.sql", "select 1;\n\\c host=db.example.com dbname=app\n")
+    await write("remote.js", "db = connect('mongodb://app@db.example.com:27017/app')\n")
+    for (const [command, names] of [
+      ["psql <<'EOF'\n\\connect postgres://app@db.example.com/app\nEOF", "db.example.com"],
+      ["psql <<< '\\c host=db.example.com dbname=app'", "db.example.com"],
+      ["psql <<'EOF'\n\\c app app db.example.com 5432\nEOF", "db.example.com"],
+      ["psql -f remote.sql", "db.example.com"],
+      ["psql --file=remote.sql app", "db.example.com"],
+      ["psql app < remote.sql", "db.example.com"],
+      ["mysql <<'EOF'\nconnect app db.example.com\nEOF", "db.example.com"],
+      ["mongosh remote.js", "db.example.com"],
+      ["psql -f missing.sql", "cannot tell"],
+      ["psql <<EOF\n\\c host=$DB_HOST\nEOF", "cannot tell"],
+    ]) {
+      const { claude, glm } = await both(input(command))
+      expect({ command, claude }).toEqual({ command, claude: undefined })
+      expect({ command, glm }).toEqual({ command, glm: expect.stringContaining(names) })
+      expect(glm).toContain("glm rule")
+    }
+  })
+
+  test("a database client fed input that connects on this machine, or names no connection, runs on GLM", async () => {
+    await write("local.sql", "\\c postgres://postgres@127.0.0.1:5432/app\nselect 1;\n")
+    await write("local.js", "db = connect('mongodb://localhost:27017/app')\n")
+    for (const command of [
+      "psql -f local.sql",
+      "psql < local.sql",
+      "psql <<'EOF'\n\\c app postgres 127.0.0.1\nEOF",
+      "psql <<'EOF'\nselect 1;\nEOF",
+      "psql <<< 'select 1'",
+      "mongosh local.js",
+      "cat remote.sql",
+    ])
+      expect({ command, glm: await refusal(input(command), ON_GLM, CALM) }).toEqual({
+        command,
+        glm: undefined,
+      })
   })
 })
 

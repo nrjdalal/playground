@@ -13,8 +13,8 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
 import { jobsExit, renderJobsFile } from "../../../../../packages/scripts/src/playground/jobs"
-import { writeFiles, writeRoot } from "../../../../../packages/settings/src/folder"
-import { extensionsDir } from "../../../../../packages/settings/src/rendered"
+import { extGit, writeFiles, writeRoot } from "../../../../../packages/settings/src/folder"
+import { extensionsDir, scopeDir } from "../../../../../packages/settings/src/rendered"
 
 const CHECKOUT = resolve(import.meta.dir, "../../../../..")
 const scratch = mkdtempSync(join(tmpdir(), "jobs-render-"))
@@ -332,12 +332,46 @@ test("each org's script folder is installed under ops beside the state its job k
   const jobs = join(scratch, "scripts-jobs.json")
   const first = await run(data, jobs)
   expect(first.code).toBe(0)
-  expect(first.out).toBe("jobs: rendered jobs.json, watch/config.json, watch/run.py, watch/run.sh")
+  expect(first.out).toBe(
+    "jobs: rendered jobs.json, watch/config.json, watch/run.py, watch/run.sh, watch/.revision",
+  )
   expect(readFileSync(join(data, "ops", "watch", "run.py"), "utf8")).toBe("print('watch')")
   expect(statSync(join(data, "ops", "watch", "run.sh")).mode & 0o777).toBe(0o755)
   expect(readFileSync(join(data, "ops", "watch", "state.json"), "utf8")).toBe('{"seen":1}')
   expect(existsSync(join(data, "ops", "backup.sh"))).toBe(false)
   expect((await run(data, jobs)).out).toBe("jobs: unchanged")
+})
+
+test("an org's script folder carries the accepted revision that last wrote it, which only a change to that folder moves (#1880)", async () => {
+  const data = storeWith("revision", {}, [["acme/scripts/ops-watch/cli.ts", "console.log('one')"]])
+  const jobs = join(scratch, "revision-jobs.json")
+  const revision = () =>
+    extGit(scopeDir(data, "acme"), [
+      "log",
+      "-1",
+      "--format=%h",
+      "--",
+      "scripts/ops-watch",
+    ]).out.trim()
+  const held = () => readFileSync(join(data, "ops", "ops-watch", ".revision"), "utf8")
+  expect((await run(data, jobs)).code).toBe(0)
+  const first = revision()
+  expect(held()).toBe(`${first}\n`)
+  // an item elsewhere in the scope leaves the folder's revision as it was
+  writeFiles(data, "acme", new Map([["notes/elsewhere.md", "x"]]), {
+    author: "test",
+    reason: "seed",
+  })
+  expect((await run(data, jobs)).out).toBe("jobs: unchanged")
+  expect(held()).toBe(`${first}\n`)
+  writeFiles(data, "acme", new Map([["scripts/ops-watch/cli.ts", "console.log('two')"]]), {
+    author: "test",
+    reason: "accept",
+  })
+  const next = await run(data, jobs)
+  expect(revision()).not.toBe(first)
+  expect(held()).toBe(`${revision()}\n`)
+  expect(next.out).toBe("jobs: rendered ops-watch/cli.ts, ops-watch/.revision")
 })
 
 test("an org's own job row renders from its installed script folder, and a row pointing elsewhere is refused on stderr, exit 1 (PG-1335)", async () => {

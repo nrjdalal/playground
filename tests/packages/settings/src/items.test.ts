@@ -53,6 +53,16 @@ test("show --rev prints the revision's own files and state, a proposal beside an
   expect(showItem(scratch, { ...ref, key: "other" }, v2)).toBeNull()
 })
 
+// PG-1892: show reads the stored bytes whole, so a body's final newline survives --rev and plain alike
+test("show keeps a body's final newline by --rev and plain alike", () => {
+  const doc = { ...ref, key: "newline", kind: "doc" as const }
+  const body = { attachments: [], body: "made-up line\n", files: null, value: null }
+  setSetting(scratch, { key: "clock.ownerZone", scope: ME, value: "Europe/Lisbon" }, OWNER)
+  const rev = revOf(putItem(scratch, doc, body, OWNER, true))
+  expect(showItem(scratch, doc, rev)?.content.body).toBe("made-up line\n")
+  expect(showItem(scratch, doc)?.content.body).toBe("made-up line\n")
+})
+
 // guards that a revision written for another item reads this item from that tree as it stood, its accepted copy first, never from the other item's trailers
 test("show --rev of a revision that wrote another item prints this item as that revision's tree held it", () => {
   const mine = { ...ref, key: "mine" }
