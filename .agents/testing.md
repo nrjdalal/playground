@@ -16,8 +16,9 @@ It does the same when those files leave a key the apps' schemas require unset or
 
 `bun run test` builds `packages/*` first, because a test reaches a shared package through its `exports`, which point at `dist`, so on a fresh checkout an unbuilt package resolves to nothing.
 It builds them under `NODE_ENV=production SKIP_ENV_VALIDATION=true`, as `prebuildTests` does, since `@packages/auth`'s build validates the env, which a worktree with no `.env` leaves empty.
-Only the shared packages are built, not the apps: a test imports app code by source path and never through `dist`.
-`bun run test:file <paths>` first builds only the packages its files import whose `dist` is missing, is older than a file under its package's `src` while no stack runs in this worktree, or lacks a name they import, those reached through relative, `@/` and absolute imports into this checkout included,
+Only the shared packages (`@packages/*` and `@api/hono`) are built, never the web: a test imports the web's code by source path and never through a `dist`.
+`bun run test:file <paths>` builds every shared package whose `dist` is missing (`@packages/*` and `@api/hono`, turbo's cache keeping the rest cheap),
+beside the packages its files import whose `dist` is missing, is older than a file under its package's `src` while no stack runs in this worktree, or lacks a name they import, those reached through relative, `@/` and absolute imports into this checkout included,
 and writes the data table's metrics when missing (`prebuildTests` in `packages/scripts/src/verify/prebuild.ts`, under `NODE_ENV=production SKIP_ENV_VALIDATION=true`), so a fresh clone runs it directly.
 So a scratch test outside the checkout that imports its modules by absolute path builds what they import, while an absolute import into another clone stays unread.
 It also builds a package whose dist file a test names by path (`packages/env/dist/gaps.mjs`), when that package's `dist` folder is missing.
