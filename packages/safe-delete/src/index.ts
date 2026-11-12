@@ -514,15 +514,23 @@ export function restore(
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
-  // an ended session's folder comes back only into scratchpad/, and only while nothing but a real folder stands there
-  const pad = real(join(roots.home, ".playground", "scratchpad"))
-  const back =
-    entry.ended &&
-    dirname(entry.ended) === pad &&
-    inside(entry.path, entry.ended) &&
-    (!lstat(entry.ended) || lstat(entry.ended)!.isDirectory())
-      ? [entry.ended]
-      : []
+  // an ended session's item comes back only into its folder directly in scratchpad/, reached through no symlink (at the folder or between), and is refused anywhere else
+  let back: string[] = []
+  if (entry.ended) {
+    const pad = real(join(roots.home, ".playground", "scratchpad"))
+    const parent = dirname(entry.path)
+    const at = existsSync(parent) ? join(real(parent), basename(entry.path)) : entry.path
+    const stands = lstat(entry.ended)
+    if (
+      dirname(entry.ended) !== pad ||
+      !inside(at, entry.ended) ||
+      (stands && !stands.isDirectory())
+    )
+      return refused(
+        `${entry.path} came from ${entry.ended}, an ended session's folder, which no longer reaches it as a real folder in ${pad}`,
+      )
+    back = [entry.ended]
+  }
   const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts, entry.session, back)
   if (carve && "refused" in carve) return carve
   if (lstat(entry.path)) return refused(`${entry.path} already exists; move it aside first`)
