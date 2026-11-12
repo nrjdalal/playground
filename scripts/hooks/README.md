@@ -931,8 +931,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   - `chat_post_message`, a chat post, on a Slack server;
   - `create_branch`, `create_or_update_file`, `create_pull_request`, `delete_file`, `merge_pull_request`, `push_files` and `update_pull_request_branch` on a GitHub server;
   - `gh api` with a write method (any but GET or HEAD) to `repos/<owner>/<repo>/` then `contents/<path>`, `git/refs`, `git/refs/<ref>`, `merges`, `pulls`, `pulls/<n>/merge` or `pulls/<n>/update-branch`, the endpoint in any spelling (a leading `/`, the API host), or to an endpoint it cannot read;
-  - `gh api graphql`, the endpoint in any spelling (`/graphql`, the API host, an Enterprise host's `api/graphql`), whose query names `createCommitOnBranch`, `createPullRequest`, `createRef`, `deleteRef`, `mergeBranch`, `mergePullRequest`, `updatePullRequestBranch`, `updateRef` or `updateRefs` outside its strings and `#` comments, or whose query it cannot read,
-    where an `--input` body, JSON whose one string holds the query, is read whole;
+  - `gh api graphql`, the endpoint in any spelling (`/graphql`, the API host, an Enterprise host's `api/graphql`), whose query names `createCommitOnBranch`, `createPullRequest`, `createRef`, `deleteRef`, `mergeBranch`, `mergePullRequest`, `updatePullRequestBranch`, `updateRef` or `updateRefs` anywhere in its text, a string or a comment included, or whose query it cannot read,
+    since a match that over-refuses fails safe;
   - `gh pr create`;
   - `git push`, past git's own options (`GIT_TAKES`, through no-stash's `gitCommand`), since a prepared branch on the org's remote reaches the org before the claim, and behind any other program but `echo`, `printf` and `man`, which only print it;
   - `save_comment`, a tracker comment, and `save_issue`, a tracker issue save (an assign or a state change), on a Linear server.
