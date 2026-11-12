@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { dispatcherOf } from "@packages/config/kinds"
 import { configDirOf, dataDir } from "@packages/env/data-dir"
 
+import { ruleText } from "../../../../scripts/hooks/rules"
 import { herdrDir, serverEnv, sessionsOf } from "../ops-herdr/herdr"
 import { herdrPath } from "../ops-herdr/pin"
 import {
@@ -30,6 +31,8 @@ export type PickerDeps = {
   now: () => Date
   queue: (to: string, text: string) => Promise<void>
   reportsTo: (sessionId: string) => Promise<string | undefined>
+  // A standing rule's text by its name, as `playground rules <name>` prints it, or undefined when no rules file holds it.
+  rule: (name: string) => Promise<string | undefined>
   servers: string[]
   transcript: (sessionId: string) => Promise<string>
 }
@@ -155,6 +158,7 @@ export async function pickerDeps(
     queue: (to, text) => queueLine(env, "picker", to, text),
     reportsTo: async (sessionId) =>
       reportsToOf(await transcriptPathOf(configDirOf(env), sessionId)),
+    rule: (name) => ruleText(name, process.cwd(), env),
     servers: sessionsOf(env),
     transcript: (sessionId) => transcriptOf(configDirOf(env), sessionId),
   }
