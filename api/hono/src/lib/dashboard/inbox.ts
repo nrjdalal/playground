@@ -1151,9 +1151,11 @@ export function answerPayload(
     case "discard":
       return { ...head, ...comment, close: read, go: false, next: "close", verb: "discard" }
     case "send":
-      // a Slack draft's words already went with its files (filesToUpload), so the poster only closes it
-      if (answer.uploaded)
-        return { ...head, ...comment, close: ack, go: true, next: "close", verb: "send" }
+      // a Slack draft's words already went with its files, so the poster only closes it
+      if (answer.uploaded && wordsWithFiles(item, answer) && "link" in item.preview) {
+        const close = `${ask} ack ${tag} --link "${item.preview.link}"`
+        return { ...head, ...comment, close, go: true, next: "close", verb: "send" }
+      }
       return { ...head, ...comment, ...text, close: ack, go: true, next: "carry-out", verb: "send" }
     case "draft": {
       const converter = slack("slack.linkConverter")
@@ -1312,7 +1314,20 @@ export function slackPlace(link: string | undefined): UploadPlace | null {
   return word === "thread" && thread && more.length === 0 ? { channel, thread } : null
 }
 
-// Pure: the files a go shares into Slack before its answer reaches the poster: a Slack draft's on Send, with its words (the owner's changed ones, else the draft's) as their message, or a slack decision's on Approve or Edit, when its link names a Slack place and it has shared none yet; null for anything else, whose files stay on the card.
+// A mention (@name) or a URL in a draft's words: the poster posts those words after the files, resolving each mention and sending each link as a chip, which a file's message cannot carry.
+const POSTER_WORDS = /(?<![\w.])@\w|https?:\/\//i
+
+// Pure: the words a Slack draft's Send posts with its files as their message: the owner's changed ones, else the draft's; none for any other answer, and none for words holding a mention or a URL (POSTER_WORDS).
+export function wordsWithFiles(
+  item: InboxItem,
+  answer: { choice?: string; editedText?: string },
+): string | undefined {
+  if (item.kind !== "draft" || answer.choice !== "send") return undefined
+  const words = answer.editedText ?? ("text" in item.preview ? item.preview.text : undefined)
+  return words && !POSTER_WORDS.test(words) ? words : undefined
+}
+
+// Pure: the files a go shares into Slack before its answer reaches the poster: a Slack draft's on Send, with its words as their message (wordsWithFiles), or a slack decision's on Approve or Edit, when its link names a Slack place and it has shared none yet; null for anything else, whose files stay on the card.
 export function filesToUpload(
   item: InboxItem,
 ): { files: InboxAttachment[]; place: UploadPlace; text?: string } | null {
@@ -1330,8 +1345,7 @@ export function filesToUpload(
   if (!go || !("attachments" in preview) || !preview.attachments?.length) return null
   const place = slackPlace("link" in preview ? preview.link : undefined)
   if (!place) return null
-  const words = item.kind === "draft" && "editedText" in answer ? answer.editedText : undefined
-  const text = item.kind === "draft" && "text" in preview ? (words ?? preview.text) : undefined
+  const text = wordsWithFiles(item, answer)
   return { files: preview.attachments, place, ...(text && { text }) }
 }
 
