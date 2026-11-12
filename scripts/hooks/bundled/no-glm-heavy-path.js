@@ -8446,10 +8446,11 @@ function packageScripts(dir) {
   }
 }
 var FOLDER_FIX = "Name the folder literally, in a call of its own, or report to your lead.";
+var programWord = (w, env) => (w.raw && marked(w.value) ? heldWord({ ...w, raw: defaulted(w.raw, env.known, () => false) }, env, NONE2) : undefined) ?? w;
 function orgScript(parsed, env) {
   const { args, first, name } = parsed;
   if (first?.value.includes("/")) {
-    const program = pathOf(first, env);
+    const program = pathOf(programWord(first, env), env);
     if (!program)
       return {
         fix: FOLDER_FIX,
@@ -9443,9 +9444,13 @@ async function inspect(raw, environment, load5, limit) {
   const text = command.replace(/["'\\]/g, "");
   if (!guarding && !mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text))
     return;
-  const known = knownVariables(command, environment, directory);
-  const lexed = lex(command, known);
   const named = namings(command);
+  const repo = named.blind || named.counts.has("PLAYGROUND_REPO") ? undefined : environment.PLAYGROUND_REPO;
+  const known = {
+    ...knownVariables(command, environment, directory),
+    ...repo ? { PLAYGROUND_REPO: repo } : {}
+  };
+  const lexed = lex(command, known);
   const steadyAt = steadyNames(named, lexed.commands);
   const own = named.blind ? {} : Object.fromEntries(Object.entries(environment).filter((entry) => typeof entry[1] === "string" && !named.counts.has(entry[0])));
   const env = {
