@@ -783,7 +783,8 @@ test("a worktree's PR state counts only when exactly one PR answers, as a branch
   })
   expect(prStateOf([pr("other", "MERGED")], at, holds)).toBeNull()
   expect(prStateOf([pr("head", "MERGED"), pr("older", "OPEN")], at, holds)).toBeNull()
-  expect(prStateOf([], at, holds)).toBeNull()
+  // #1962: gh's clean answer of no PR reads as none, apart from a read gh could not make
+  expect(prStateOf([], at, holds) as unknown).toBe("none")
   expect(prStateOf(null, at, holds)).toBeNull()
   // a stacked child: its parent's PR is another branch's, whose head is only an ancestor of HEAD
   expect(prStateOf([pr("older", "MERGED", "PG-0-parent")], at, holds)).toBeNull()
@@ -944,6 +945,11 @@ const archiveOf = (data: string, repo: string, wt: string) =>
 const patchesIn = (dir: string) =>
   readdirSync(dir).map((f) => /^From ([0-9a-f]+) /.exec(readFileSync(join(dir, f), "utf8"))?.[1])
 const unlanded = (wt: string) => git(wt, "rev-list", "HEAD", "--not", "--remotes").split("\n")
+// rm's PR read of otherRepo's worktree as rmDeps reads it, through prStateOf, from what gh lists: [] for no PR, null for a list gh could not read
+const readPrs =
+  (prs: Parameters<typeof prStateOf>[0]): RmDeps["prState"] =>
+  async () =>
+    prStateOf(prs, { branch: "APP-1-thing", head: "h" }, () => false)
 
 // #1962
 test("--worktree archives another repo's worktree with no PR and commits no remote holds under the data folder's scratchpad/archive, then takes it with no decision", async () => {
@@ -955,7 +961,7 @@ test("--worktree archives another repo's worktree with no PR and commits no remo
   const shas = unlanded(wt)
   expect(shas).toHaveLength(2)
   const archive = archiveOf(deps.data, repo, wt)
-  const session = { ...deps, caller: async () => "a session (role worker)" }
+  const session = { ...deps, caller: async () => "a session (role worker)", prState: readPrs([]) }
   expect(await rmSaid(["--worktree", wt], session)).toEqual({ code: 0, said: [] })
   expect(existsSync(wt)).toBe(false)
   expect(patchesIn(archive).sort()).toEqual([...shas].sort())
@@ -974,7 +980,7 @@ test("--worktree keeps another repo's worktree with no PR whose archive holds pa
     `From ${"0".repeat(40)} Mon Sep 17 00:00:00 2001\n`,
   )
   const discard = `playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`
-  expect(await rmSaid(["--worktree", wt], deps)).toEqual({
+  expect(await rmSaid(["--worktree", wt], { ...deps, prState: readPrs([]) })).toEqual({
     code: 1,
     said: [
       `playground: ${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since), and its archive at ${archive} holds 1 patch, 0 of its 1 commit no remote holds: ${discard}`,
@@ -984,9 +990,41 @@ test("--worktree keeps another repo's worktree with no PR whose archive holds pa
   expect(readdirSync(archive)).toEqual(["0001-other.patch"])
 })
 
+// #1962: the archive route runs only on gh's clean answer of no PR; a read gh could not make, two PRs answering, or one that is not the worktree's own keep canary's refusal
+test.each([
+  ["a PR read gh could not make", null],
+  [
+    "two PRs answering",
+    [
+      { headRefName: "APP-1-thing", headRefOid: "a", number: 1, state: "OPEN" as const },
+      { headRefName: "APP-1-thing", headRefOid: "b", number: 2, state: "CLOSED" as const },
+    ],
+  ],
+  [
+    "a PR whose head is not HEAD or an ancestor of it",
+    [{ headRefName: "APP-1-thing", headRefOid: "f".repeat(40), number: 1, state: "OPEN" as const }],
+  ],
+])(
+  "--worktree refuses another repo's worktree with commits no remote holds on %s, writing no archive",
+  async (_, prs) => {
+    const { deps, home, root } = machine()
+    const { wt } = otherRepo(root, home)
+    const discard = `playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`
+    expect(await rmSaid(["--worktree", wt], { ...deps, prState: readPrs(prs) })).toEqual({
+      code: 1,
+      said: [
+        `playground: ${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): ${discard}`,
+      ],
+    })
+    expect(existsSync(wt)).toBe(true)
+    expect(existsSync(join(deps.data, "scratchpad"))).toBe(false)
+  },
+)
+
 // #1962's controls: a live session's tree and one holding an untracked file, in another repo, and this checkout's own worktree, each with a commit no remote holds and no PR, are refused as before, with no archive written
 test("--worktree refuses, with no PR and a commit no remote holds, a live session's tree and an untracked file's in another repo, and this checkout's own worktree, writing no archive", async () => {
-  const { deps, home, main, root } = machine()
+  const { deps: base, home, main, root } = machine()
+  const deps = { ...base, prState: readPrs([]) }
   const { repo, wt } = otherRepo(root, home)
   const held = { command: "zsh", cwd: wt, pid: 7, sockets: [] }
   expect(await rmSaid(["--worktree", wt], { ...deps, procs: () => [held] })).toEqual({
