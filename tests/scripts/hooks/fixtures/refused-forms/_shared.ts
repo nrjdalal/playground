@@ -27,6 +27,8 @@ export type Folder =
   | "checkout"
   | "cli folder"
   | "data folder"
+  | "extension clone"
+  | "extension clone on a branch"
   | "extensions root"
   | "glm org repo"
   | "glm repo"

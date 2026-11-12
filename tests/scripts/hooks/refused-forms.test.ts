@@ -97,6 +97,13 @@ symlinkSync(DATA, join(HOME, "pg"))
 symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, "pc"))
 git(SCRATCH, "init", "-q", OTHER)
 git(OTHER, "remote", "add", "origin", "https://github.com/acme-labs/demo.git")
+// Two clones of the synced extension repository, one on the default branch and one on another, for #2004's commit rows.
+const EXT_CLONE = join(SCRATCH, "ext-clone")
+const EXT_BRANCH = join(SCRATCH, "ext-branch")
+git(SCRATCH, "init", "-q", "-b", "main", EXT_CLONE)
+git(SCRATCH, "init", "-q", "-b", "feature", EXT_BRANCH)
+for (const clone of [EXT_CLONE, EXT_BRANCH])
+  git(clone, "remote", "add", "origin", "https://github.com/quillco/acme-skills.git")
 // Another repository and two worktrees it lists, whose .git file and admin gitdir point at each other, for #1653's rows: one outside the main checkout and one under its .claude/worktrees.
 const FOREIGN = join(SCRATCH, "foreign")
 git(SCRATCH, "init", "-q", "-b", "canary", FOREIGN)
@@ -351,7 +358,11 @@ const guardsOf = (
   },
   "no-env-dump": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => c.envDump(raw) },
   "no-extension-repo-write": {
-    folders: { checkout: [OTHER, HOME] },
+    folders: {
+      checkout: [OTHER, HOME],
+      "extension clone": [EXT_CLONE, HOME],
+      "extension clone on a branch": [EXT_BRANCH, HOME],
+    },
     run: (raw, home) =>
       c.extensionRepoWrite(raw, {
         HOME: home,
