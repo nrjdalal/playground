@@ -76,7 +76,7 @@ const postCard = async (card: UpdateCard, refusalAlert = false): Promise<string 
   if (posted.code === 0 && id !== undefined) return id
   const why = posted.code === 0 ? "ask printed no id" : lastLine(posted.out)
   if (refusalAlert) {
-    console.error(`ops-wa: the Inbox refused the refusal's alert for "${card.title}": ${why}`)
+    console.error(`ops-wa: ${card.preview.text}, and the Inbox refused its alert too: ${why}`)
     return undefined
   }
   await postCard(
