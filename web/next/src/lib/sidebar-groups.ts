@@ -82,3 +82,32 @@ export function useGroupOpen(
   )
   return [groupOpen(parseGroups(raw), group, initial), setOpen]
 }
+
+// Every group you can drag into another place, in the order the sidebar draws them until you do; Threads stays first.
+export const ORDERED_GROUPS = [
+  "Channels",
+  "Direct messages",
+  "Orchestrators",
+  "Subagents",
+  "AI Runners",
+  "Scripts",
+  "Other",
+] as const satisfies readonly NavGroup[]
+
+export type OrderedGroup = (typeof ORDERED_GROUPS)[number]
+
+export const groupOrder = (_raw: string | null): OrderedGroup[] => [...ORDERED_GROUPS]
+
+export const moveGroup = (
+  order: OrderedGroup[],
+  _shown: OrderedGroup[],
+  _from: number,
+  _to: number,
+): OrderedGroup[] => order
+
+export function orderState(
+  _store: () => Pick<Storage, "getItem" | "setItem">,
+  _account: string,
+): { read: () => string | null; set: (order: OrderedGroup[]) => void } {
+  return { read: () => null, set: () => {} }
+}
