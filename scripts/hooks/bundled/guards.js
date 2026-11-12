@@ -10193,6 +10193,157 @@ if (false) {}
 // scripts/hooks/no-extensions-write.ts
 import { dirname as dirname5, join as join11, resolve as resolve6, sep as sep2 } from "path";
 
+// packages/settings/src/jobs.ts
+var jobSchema = strictObject({
+  callsModel: boolean2(),
+  command: string2().min(1).optional(),
+  config: record2(string2(), unknown2()).optional(),
+  cwd: string2().min(1).optional(),
+  description: string2().min(1),
+  disabledWhy: string2().optional(),
+  enabled: boolean2(),
+  heartbeat: string2().min(1),
+  launchd: string2().min(1).optional(),
+  model: string2().min(1).optional(),
+  neverPause: boolean2().optional(),
+  pausedFor: string2().optional(),
+  program: array(string2().min(1)).min(1).optional(),
+  runtime: _enum(["herdr"]).optional(),
+  schedule: union([
+    strictObject({ always: literal(true) }),
+    strictObject({ every: number2().int().positive() })
+  ]),
+  stop: string2().min(1).optional()
+});
+var fromStored = (row) => {
+  if (!row || typeof row !== "object" || Array.isArray(row))
+    return row;
+  const kept = Object.fromEntries(Object.entries(row).filter(([key]) => Object.hasOwn(jobSchema.shape, key)));
+  return kept.runtime === undefined ? kept : { ...kept, runtime: "herdr" };
+};
+var jobRowSchema = jobSchema.partial();
+var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
+var terminal = (name, command, job) => ({
+  callsModel: false,
+  command,
+  cwd: "{checkout}",
+  enabled: false,
+  heartbeat: name,
+  runtime: "herdr",
+  ...job
+});
+var launchd = (name, job) => ({
+  callsModel: false,
+  cwd: "{checkout}",
+  enabled: false,
+  heartbeat: name,
+  launchd: `com.playground.${name}`,
+  program: ["{bun}", "--no-env-file", `{checkout}/packages/scripts/src/${name}/cli.ts`],
+  ...job
+});
+var bunJob = (name, root = "{checkout}") => `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`;
+var JOBS = {
+  "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
+    description: "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
+    schedule: { always: true }
+  }),
+  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
+    cwd: "{dashboard}",
+    description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
+    schedule: { every: 300 }
+  }),
+  "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
+    cwd: "{dashboard}",
+    description: "Keeps the live dashboard running on its branch's latest head.",
+    enabled: true,
+    schedule: { every: 60 },
+    stop: "dashboard"
+  }),
+  "ops-dm-watch": terminal("ops-dm-watch", bunJob("ops-dm-watch"), {
+    description: "In Slack mode, hands each message in the owner's DM to the dispatcher, the session in the assistant seat too when no reply lands in 3 minutes.",
+    schedule: { every: 60 }
+  }),
+  "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
+    description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
+    schedule: { every: 86400 }
+  }),
+  "ops-flow": launchd("ops-flow", {
+    description: "Tells the leads when a session holds a run slot over 15 minutes, or a model slot over 120.",
+    schedule: { every: 60 }
+  }),
+  "ops-herdr": launchd("ops-herdr", {
+    description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
+    schedule: { every: 60 }
+  }),
+  "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
+    description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
+    schedule: { every: 60 }
+  }),
+  "ops-merge-train": terminal("ops-merge-train", "python3 -I {checkout}/scripts/ops/merge-train/run.py", {
+    description: "Runs the merge train: builds a train of ready PRs and checks each step.",
+    neverPause: true,
+    schedule: { every: 60 }
+  }),
+  "ops-restore": {
+    ...launchd("ops-restore", {
+      description: "Restores a lost main checkout by the playbook's steps once a guard is gone on two looks 5 minutes apart.",
+      schedule: { every: 60 }
+    }),
+    cwd: "{dashboard}",
+    program: [
+      "{bun}",
+      "--no-env-file",
+      "{dashboard}/packages/scripts/src/ops-restore/cli.ts",
+      "--main",
+      "{checkout}"
+    ]
+  },
+  "ops-session-resume": launchd("ops-session-resume", {
+    description: "Queues a carry-on line for each factory session once its usage limit resets.",
+    schedule: { every: 60 }
+  }),
+  "ops-sweep": terminal("ops-sweep", bunJob("ops-sweep"), {
+    description: "The Ops lead's sweep: runners, probes, asks, heartbeats and the forecast.",
+    schedule: { every: 300 }
+  }),
+  "ops-tick": launchd("ops-tick", {
+    description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
+    schedule: { every: 60 }
+  }),
+  "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
+    description: "Reads every live session's screen and clears a factory session stuck on a prompt.",
+    neverPause: true,
+    schedule: { every: 120 }
+  }),
+  "ops-usage": terminal("ops-usage", "python3 -I {checkout}/scripts/ops/usage/run.py", {
+    description: "Reads the account's usage windows into usage.json every 5 minutes.",
+    enabled: true,
+    neverPause: true,
+    schedule: { every: 300 }
+  }),
+  "ops-wa": terminal("ops-wa", `${bunJob("ops-wa")} --data {data}`, {
+    description: "Holds the WhatsApp link on the spare number: hands each owner message to the dispatcher, sends its replies, and drops every other message.",
+    schedule: { always: true }
+  }),
+  "ops-zai-usage": launchd("ops-zai-usage", {
+    description: "Reads the GLM plan's credits into zai-usage.json, which the spawn gate reads.",
+    schedule: { every: 300 }
+  })
+};
+var OLD_KEYS = { "ops-dashboard": ["jobs.opsDesk"] };
+var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([name, job]) => [
+  jobKey(name),
+  {
+    aliases: OLD_KEYS[name],
+    default: job,
+    description: `The ${name} ops job: ${job.description}`,
+    merge: true,
+    schema: jobRowSchema,
+    stored: fromStored
+  }
+])));
+var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
+
 // scripts/hooks/codex.ts
 import { isAbsolute as isAbsolute3, resolve as resolve4 } from "path";
 var HEADERS = ["*** Add File: ", "*** Delete File: ", "*** Update File: ", "*** Move to: "];
@@ -14370,157 +14521,6 @@ var contentFields = {
 };
 // packages/settings/src/items.ts
 var ATTACHMENT_LIMIT = 50 * 1024 * 1024;
-
-// packages/settings/src/jobs.ts
-var jobSchema = strictObject({
-  callsModel: boolean2(),
-  command: string2().min(1).optional(),
-  config: record2(string2(), unknown2()).optional(),
-  cwd: string2().min(1).optional(),
-  description: string2().min(1),
-  disabledWhy: string2().optional(),
-  enabled: boolean2(),
-  heartbeat: string2().min(1),
-  launchd: string2().min(1).optional(),
-  model: string2().min(1).optional(),
-  neverPause: boolean2().optional(),
-  pausedFor: string2().optional(),
-  program: array(string2().min(1)).min(1).optional(),
-  runtime: _enum(["herdr"]).optional(),
-  schedule: union([
-    strictObject({ always: literal(true) }),
-    strictObject({ every: number2().int().positive() })
-  ]),
-  stop: string2().min(1).optional()
-});
-var fromStored = (row) => {
-  if (!row || typeof row !== "object" || Array.isArray(row))
-    return row;
-  const kept = Object.fromEntries(Object.entries(row).filter(([key]) => Object.hasOwn(jobSchema.shape, key)));
-  return kept.runtime === undefined ? kept : { ...kept, runtime: "herdr" };
-};
-var jobRowSchema = jobSchema.partial();
-var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
-var terminal = (name, command, job) => ({
-  callsModel: false,
-  command,
-  cwd: "{checkout}",
-  enabled: false,
-  heartbeat: name,
-  runtime: "herdr",
-  ...job
-});
-var launchd = (name, job) => ({
-  callsModel: false,
-  cwd: "{checkout}",
-  enabled: false,
-  heartbeat: name,
-  launchd: `com.playground.${name}`,
-  program: ["{bun}", "--no-env-file", `{checkout}/packages/scripts/src/${name}/cli.ts`],
-  ...job
-});
-var bunJob = (name, root = "{checkout}") => `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`;
-var JOBS = {
-  "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
-    description: "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
-    schedule: { always: true }
-  }),
-  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
-    cwd: "{dashboard}",
-    description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
-    schedule: { every: 300 }
-  }),
-  "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
-    cwd: "{dashboard}",
-    description: "Keeps the live dashboard running on its branch's latest head.",
-    enabled: true,
-    schedule: { every: 60 },
-    stop: "dashboard"
-  }),
-  "ops-dm-watch": terminal("ops-dm-watch", bunJob("ops-dm-watch"), {
-    description: "In Slack mode, hands each message in the owner's DM to the dispatcher, the session in the assistant seat too when no reply lands in 3 minutes.",
-    schedule: { every: 60 }
-  }),
-  "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
-    description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
-    schedule: { every: 86400 }
-  }),
-  "ops-flow": launchd("ops-flow", {
-    description: "Tells the leads when a session holds a run slot over 15 minutes, or a model slot over 120.",
-    schedule: { every: 60 }
-  }),
-  "ops-herdr": launchd("ops-herdr", {
-    description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
-    schedule: { every: 60 }
-  }),
-  "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
-    description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
-    schedule: { every: 60 }
-  }),
-  "ops-merge-train": terminal("ops-merge-train", "python3 -I {checkout}/scripts/ops/merge-train/run.py", {
-    description: "Runs the merge train: builds a train of ready PRs and checks each step.",
-    neverPause: true,
-    schedule: { every: 60 }
-  }),
-  "ops-restore": {
-    ...launchd("ops-restore", {
-      description: "Restores a lost main checkout by the playbook's steps once a guard is gone on two looks 5 minutes apart.",
-      schedule: { every: 60 }
-    }),
-    cwd: "{dashboard}",
-    program: [
-      "{bun}",
-      "--no-env-file",
-      "{dashboard}/packages/scripts/src/ops-restore/cli.ts",
-      "--main",
-      "{checkout}"
-    ]
-  },
-  "ops-session-resume": launchd("ops-session-resume", {
-    description: "Queues a carry-on line for each factory session once its usage limit resets.",
-    schedule: { every: 60 }
-  }),
-  "ops-sweep": terminal("ops-sweep", bunJob("ops-sweep"), {
-    description: "The Ops lead's sweep: runners, probes, asks, heartbeats and the forecast.",
-    schedule: { every: 300 }
-  }),
-  "ops-tick": launchd("ops-tick", {
-    description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
-    schedule: { every: 60 }
-  }),
-  "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
-    description: "Reads every live session's screen and clears a factory session stuck on a prompt.",
-    neverPause: true,
-    schedule: { every: 120 }
-  }),
-  "ops-usage": terminal("ops-usage", "python3 -I {checkout}/scripts/ops/usage/run.py", {
-    description: "Reads the account's usage windows into usage.json every 5 minutes.",
-    enabled: true,
-    neverPause: true,
-    schedule: { every: 300 }
-  }),
-  "ops-wa": terminal("ops-wa", `${bunJob("ops-wa")} --data {data}`, {
-    description: "Holds the WhatsApp link on the spare number: hands each owner message to the dispatcher, sends its replies, and drops every other message.",
-    schedule: { always: true }
-  }),
-  "ops-zai-usage": launchd("ops-zai-usage", {
-    description: "Reads the GLM plan's credits into zai-usage.json, which the spawn gate reads.",
-    schedule: { every: 300 }
-  })
-};
-var OLD_KEYS = { "ops-dashboard": ["jobs.opsDesk"] };
-var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([name, job]) => [
-  jobKey(name),
-  {
-    aliases: OLD_KEYS[name],
-    default: job,
-    description: `The ${name} ops job: ${job.description}`,
-    merge: true,
-    schema: jobRowSchema,
-    stored: fromStored
-  }
-])));
-var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
 // packages/settings/src/factory.ts
 var repo = string2().regex(/^(?:[A-Za-z0-9-]+\/[A-Za-z0-9._-]+)?$/, "a repository as owner/name, or empty for unset");
 var factorySettings = defineSettings({
