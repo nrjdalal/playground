@@ -271,6 +271,10 @@ if (command === "new" || command === "edit") {
     // the id alone on stdout, as a poster's `id=$(bun run ask new < f)` takes it; the tag the owner sees beside it on stderr
     if (command === "new") console.log(result.item.id)
     console.error(`ask: ${command === "edit" ? "edited" : "posted"} ${itemTag(result.item.ref)}`)
+    if ("reopened" in result && result.reopened)
+      console.error(
+        "ask: reopened it: the owner had marked it Done, and it is back in the list as unread",
+      )
     // a draft whose link is a Slack message replies to it, so the poster checks it is still unanswered
     const link = (result.item.preview as { link?: string }).link ?? ""
     if (result.item.kind === "draft" && link.includes("/thread/")) {
