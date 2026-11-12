@@ -17,6 +17,64 @@ export const groups: Group[] = [
       ["git rm after a cd to a variable", `cd "$X"; git rm -q policy.json`],
       ["mktemp of a template after a cd to a variable", `cd "$X"; mktemp policy.XXXX`],
       ["chmod under xargs after a cd to a variable", `cd "$X"; xargs chmod 644 policy.json`],
+      // round 1: GNU builds by their g name, a shortened long option, macOS's mktemp -t beside a template, a value word that looks like tar's -C, curl's other writing options, git rm's pathspec file, and macOS chmod's dashed operand
+      ["GNU chmod after a cd to a variable", `cd "$X"; gchmod 644 policy.json`],
+      ["GNU truncate after a cd to a variable", `cd "$X"; gtruncate -s 0 policy.json`],
+      ["GNU shred after a cd to a variable", `cd "$X"; gshred -u policy.json`],
+      ["GNU sort's -o after a cd to a variable", `cd "$X"; gsort -o policy.json /tmp/a`],
+      ["GNU sed in place after a cd to a variable", `cd "$X"; gsed -i s/a/b/ policy.json`],
+      ["GNU tar extracting after a cd to a variable", `cd "$X"; gtar -xf /tmp/a.tar`],
+      [
+        "sort's shortened --output after a cd to a variable",
+        `cd "$X"; sort --outp policy.json /tmp/a`,
+      ],
+      ["tar's shortened --extract after a cd to a variable", `cd "$X"; tar --extr -f /tmp/a.tar`],
+      ["tar's shorter --extract after a cd to a variable", `cd "$X"; tar --ext -f /tmp/a.tar`],
+      [
+        "macOS mktemp -t beside a template after a cd to a variable",
+        `cd "$X"; mktemp -t x policy.XXXX`,
+      ],
+      [
+        "tar whose -f value looks like -C after a cd to a variable",
+        `cd "$X"; tar -x -f -C/tmp/out`,
+      ],
+      [
+        "tar whose --exclude value is a -C after a cd to a variable",
+        `cd "$X"; tar -xf /tmp/a.tar --exclude -C /tmp/out`,
+      ],
+      [
+        "curl's --trace after a cd to a variable",
+        `cd "$X"; curl --trace policy.json https://example.com`,
+      ],
+      [
+        "curl's --trace-ascii after a cd to a variable",
+        `cd "$X"; curl --trace-ascii policy.json https://example.com`,
+      ],
+      [
+        "curl's --stderr after a cd to a variable",
+        `cd "$X"; curl --stderr policy.json https://example.com`,
+      ],
+      [
+        "curl's --libcurl after a cd to a variable",
+        `cd "$X"; curl --libcurl policy.json https://example.com`,
+      ],
+      [
+        "curl's --etag-save after a cd to a variable",
+        `cd "$X"; curl --etag-save policy.json https://example.com`,
+      ],
+      [
+        "curl's --hsts after a cd to a variable",
+        `cd "$X"; curl --hsts policy.json https://example.com`,
+      ],
+      [
+        "curl's --alt-svc after a cd to a variable",
+        `cd "$X"; curl --alt-svc policy.json https://example.com`,
+      ],
+      [
+        "git rm of a pathspec file after a cd to a variable",
+        `cd "$X"; git rm --pathspec-from-file=list`,
+      ],
+      ["macOS chmod of a dashed file after a cd to a variable", `cd "$X"; chmod 644 -policy.json`],
     ],
   },
 ]
