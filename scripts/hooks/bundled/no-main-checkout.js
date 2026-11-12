@@ -8128,6 +8128,7 @@ export {
   check,
   cwdFlag,
   gitCall,
+  inPlace,
   liveCheckout,
   mainCheckout,
   packagedTools,

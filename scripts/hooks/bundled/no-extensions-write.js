@@ -9110,7 +9110,75 @@ var RUNNER_TAKES = new Set([
   "--registry",
   "-p"
 ]);
+var LETTERS = {
+  perl: {
+    "0": "digits",
+    C: "rest",
+    D: "rest",
+    E: "script",
+    F: "rest",
+    I: "rest",
+    M: "rest",
+    V: "rest",
+    d: "rest",
+    e: "script",
+    i: "edit",
+    l: "digits",
+    m: "rest",
+    x: "rest"
+  },
+  sed: { I: "edit", e: "script", f: "script", i: "edit", l: "value" }
+};
 var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
+var BSD_SUFFIX = /^(\.[\w.-]*)?$/;
+function inPlace(name, args) {
+  const letters = LETTERS[name];
+  if (!letters)
+    return [];
+  let edits = false;
+  let scripted = false;
+  const positionals = [];
+  for (let k = 0;k < args.length; k++) {
+    const v = args[k].value;
+    if (v === "--") {
+      positionals.push(...args.slice(k + 1));
+      break;
+    }
+    if (name === "sed" && v.startsWith("--")) {
+      const flag = v.split("=")[0];
+      if (flag === "--in-place")
+        edits = true;
+      else if (SED_VALUES.has(flag)) {
+        scripted ||= flag !== "--line-length";
+        if (!v.includes("="))
+          k++;
+      }
+    } else if (/^-[^-]/.test(v)) {
+      for (let j = 1;j < v.length; j++) {
+        const kind = letters[v[j]];
+        const rest = v.slice(j + 1);
+        if (kind === "digits")
+          j += /^(x[0-9A-Fa-f]*|[0-7]*)/.exec(rest)[0].length;
+        else if (kind === "edit") {
+          edits = true;
+          if (name === "sed" && rest === "" && BSD_SUFFIX.test(args[k + 1]?.value ?? "-"))
+            k++;
+          break;
+        } else if (kind === "script" || kind === "value") {
+          scripted ||= kind === "script";
+          if (rest === "")
+            k++;
+          break;
+        } else if (kind === "rest")
+          break;
+      }
+    } else if (!v.startsWith("-"))
+      positionals.push(args[k]);
+  }
+  if (!edits)
+    return [];
+  return scripted ? positionals : positionals.slice(1);
+}
 var BROWSER_SAVES = new Set(["pdf", "screenshot"]);
 var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 if (false) {}
@@ -9170,7 +9238,7 @@ var RSYNC_PATHS = [
 var RSYNC_FLAGS = new Set(["backup", "partial"]);
 var RSYNC_TEMP = /^-[^-@BefMT]*T/;
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
-var GNU_NAMED = /^g(cp|dd|find|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink|xargs)$/;
+var GNU_NAMED = /^g(chmod|cp|dd|find|install|ln|mkdir|mktemp|mv|rm|rmdir|sed|shred|sort|tar|tee|touch|truncate|unlink|xargs)$/;
 var WRITER_TAKES = {
   cp: { gnu: "S", long: ["no-preserve", "sparse", "suffix"], short: "" },
   install: {
@@ -9322,6 +9390,208 @@ var after = (word, cut) => ({
   raw: word.raw?.startsWith(word.value.slice(0, cut)) ? word.raw.slice(cut) : undefined,
   value: word.value.slice(cut)
 });
+var SHELL_FOLDER = { quoted: false, value: "." };
+var longOf = (name, long) => long.find((l) => l === name) ?? (name.length > 2 ? long.find((l) => l.startsWith(name)) : undefined);
+function operandsPast(args, takes, long) {
+  const out = [];
+  for (let k = 0;k < args.length; k++) {
+    const v = args[k].value;
+    if (v === "--")
+      return [...out, ...args.slice(k + 1)];
+    if (v.startsWith("--")) {
+      if (!v.includes("=") && longOf(v, long))
+        k++;
+    } else if (/^-./.test(v)) {
+      const at = v.slice(1).split("").findIndex((c) => takes.includes(c));
+      if (at !== -1 && at === v.length - 2)
+        k++;
+    } else
+      out.push(args[k]);
+  }
+  return out;
+}
+function optionValues(args, short, takes, long, exact = false) {
+  const out = [];
+  for (let k = 0;k < args.length && args[k].value !== "--"; k++) {
+    const v = args[k].value;
+    const eq = v.indexOf("=");
+    if (v.startsWith("--")) {
+      const name = eq === -1 ? v : v.slice(0, eq);
+      if (exact ? long.includes(name) : longOf(name, long)) {
+        if (eq !== -1)
+          out.push(after(args[k], eq + 1));
+        else if (args[k + 1])
+          out.push(args[++k]);
+      }
+    } else if (/^-./.test(v))
+      for (let j = 1;j < v.length; j++) {
+        if (!takes.includes(v[j]))
+          continue;
+        const last = j + 1 === v.length;
+        const value = last ? args[++k] : after(args[k], j + 1);
+        if (short.includes(v[j]) && value)
+          out.push(value);
+        break;
+      }
+  }
+  return out;
+}
+var TAR_TAKES = "bCfFgHIKLNTVX";
+var TAR_LONG_TAKES = [
+  "--block-size",
+  "--blocking-factor",
+  "--cd",
+  "--directory",
+  "--exclude",
+  "--exclude-from",
+  "--exclude-tag",
+  "--file",
+  "--files-from",
+  "--format",
+  "--gid",
+  "--gname",
+  "--group",
+  "--include",
+  "--index-file",
+  "--label",
+  "--listed-incremental",
+  "--mode",
+  "--mtime",
+  "--newer",
+  "--newer-mtime",
+  "--newer-mtime-than",
+  "--newer-than",
+  "--older",
+  "--older-mtime",
+  "--older-mtime-than",
+  "--older-than",
+  "--options",
+  "--owner",
+  "--passphrase",
+  "--record-size",
+  "--strip-components",
+  "--suffix",
+  "--to-command",
+  "--transform",
+  "--uid",
+  "--uname",
+  "--use-compress-program"
+];
+function tarWrites(args) {
+  const into = [];
+  let extracts = false;
+  let k = 0;
+  const first = args[0]?.value ?? "";
+  if (/^[A-Za-z]+$/.test(first)) {
+    k = 1;
+    for (const c of first) {
+      if (c === "x")
+        extracts = true;
+      if (!TAR_TAKES.includes(c) || !args[k])
+        continue;
+      if (c === "C")
+        into.push(args[k]);
+      k++;
+    }
+  }
+  for (;k < args.length && args[k].value !== "--"; k++) {
+    const v = args[k].value;
+    const eq = v.indexOf("=");
+    if (v.startsWith("--")) {
+      const name = eq === -1 ? v : v.slice(0, eq);
+      if (longOf(name, ["--extract", "--get"]))
+        extracts = true;
+      const takes = longOf(name, TAR_LONG_TAKES);
+      if (!takes)
+        continue;
+      const value = eq !== -1 ? after(args[k], eq + 1) : args[++k];
+      if ((takes === "--directory" || takes === "--cd") && value)
+        into.push(value);
+    } else if (/^-./.test(v))
+      for (let j = 1;j < v.length; j++) {
+        if (v[j] === "x")
+          extracts = true;
+        if (!TAR_TAKES.includes(v[j]))
+          continue;
+        const value = j + 1 === v.length ? args[++k] : after(args[k], j + 1);
+        if (v[j] === "C" && value)
+          into.push(value);
+        break;
+      }
+  }
+  if (!extracts)
+    return [];
+  return into.length > 0 ? into : [SHELL_FOLDER];
+}
+var MODE = /^(?:[0-7]+|[ugoa]*[-+=][-+=rwxXstugo,]*)$/;
+var CURL_TAKES2 = "AbcCdDeEFHKmoPQrtTuUwxXyYz";
+var CURL_WRITES = [
+  "--alt-svc",
+  "--cookie-jar",
+  "--dump-header",
+  "--etag-save",
+  "--hsts",
+  "--libcurl",
+  "--output",
+  "--output-dir",
+  "--stderr",
+  "--trace",
+  "--trace-ascii"
+];
+function remoteName(v) {
+  if (!/^-[^-]/.test(v))
+    return false;
+  for (const c of v.slice(1)) {
+    if (c === "O")
+      return true;
+    if (CURL_TAKES2.includes(c))
+      return false;
+  }
+  return false;
+}
+function unreadCdWrites(tool, args, env, getopt) {
+  if (tool === "sed" || tool === "perl")
+    return inPlace(tool, args);
+  if (tool === "chmod") {
+    const at = args.findIndex((w) => !/^-./.test(w.value) || /^-[gorstuwXx]/.test(w.value));
+    const files = getopt ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", []);
+    return MODE.test(files[0]?.value ?? "") ? files.slice(1) : files;
+  }
+  if (tool === "truncate")
+    return operandsPast(args, "rs", ["--reference", "--size"]);
+  if (tool === "shred")
+    return operandsPast(args, "ns", ["--iterations", "--random-source", "--size"]);
+  if (tool === "tar")
+    return tarWrites(args);
+  if (tool === "curl") {
+    const files = optionValues(args, "cDo", CURL_TAKES2, CURL_WRITES, true);
+    const named = args.some((a) => a.value.startsWith("--remote-name") || remoteName(a.value));
+    return named && !args.some((a) => a.value.startsWith("--output-dir")) ? [...files, SHELL_FOLDER] : files;
+  }
+  if (tool === "sort")
+    return optionValues(args, "o", "koStT", ["--output"]);
+  if (tool === "git") {
+    const { cwd, rest, sub } = gitCall(args, { ...env, cwd: undefined });
+    if (sub !== "rm")
+      return [];
+    const words = args.slice(args.length - rest.length);
+    const listed = words.some((w) => longOf(w.value.split("=")[0], ["--pathspec-from-file"]));
+    const specs = [
+      ...operandsPast(words, "", ["--pathspec-from-file"]),
+      ...listed ? [SHELL_FOLDER] : []
+    ];
+    return cwd === undefined ? specs : specs.map((w) => w.value.startsWith("/") ? w : { ...w, value: join7(cwd, w.value) });
+  }
+  if (tool === "mktemp") {
+    if (args.some((a) => a.value === "--tmpdir"))
+      return [];
+    if (args.some((a) => /^-[^-]*t/.test(a.value)))
+      return operandsPast(args, "pt", ["--suffix"]);
+    const into = optionValues(args, "p", "p", ["--tmpdir"]);
+    return into.length > 0 ? into : operandsPast(args, "p", ["--suffix"]);
+  }
+  return [];
+}
 function writeTargets(name, args, gnu, posix = false) {
   const splits = args.filter((word) => word.splits);
   if (name === "dd")
@@ -10265,7 +10535,8 @@ async function inspect(raw, environment, unknown = false) {
       ...args.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)),
       ...values
     ] : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : [];
-    const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined;
+    const unlisted = env.cwdUnread && !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env, !gnu || posix) : [];
+    const loose = env.cwdUnread ? [...operands, ...unlisted].find((word) => !placed(word, env, steady)) : undefined;
     if (loose)
       return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`));
   };
