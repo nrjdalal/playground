@@ -49,7 +49,13 @@ const PR_CREATES = [
   "gh pr create --draft --title made-up --body-file /made-up/body.md",
   "cd /made-up && gh -R made-up/app pr create --fill",
   "env GH_TOKEN=x gh pr create --fill",
+  "git commit -m made-up && gh pr create --fill",
+]
+const PUSHES = [
+  "git push -u origin made-up",
   "git push -u origin made-up && gh pr create --fill",
+  "git -C /made-up push origin HEAD:made-up",
+  "env GIT_TRACE=0 git push",
 ]
 
 describe("no-prepare-write refuses a prepare-only session's writes", () => {
@@ -61,6 +67,10 @@ describe("no-prepare-write refuses a prepare-only session's writes", () => {
     expect(await check(bash(command), env)).toStartWith(
       "no-prepare-write hook refused gh pr create",
     )
+  })
+
+  test.each(PUSHES)("refuses %s", async (command) => {
+    expect(await check(bash(command), env)).toStartWith("no-prepare-write hook refused git push")
   })
 
   test.each([
@@ -76,8 +86,10 @@ describe("no-prepare-write refuses a prepare-only session's writes", () => {
     "gh pr view 1 --json state",
     "gh pr list",
     "git commit -m made-up",
-    "git push -u origin made-up",
+    "git fetch origin",
+    "git log --oneline -1",
     "echo gh pr create",
+    "echo git push",
   ])("lets it run %s", async (command) => {
     expect(await check(bash(command), env)).toBeUndefined()
   })
@@ -88,7 +100,7 @@ describe("no-prepare-write lets the same writes run for a session not marked pre
     "%s, whose roster row reads no mode or which the roster or the registry does not hold",
     async (session) => {
       for (const name of WRITES) expect(await check(tool(name, session), env)).toBeUndefined()
-      for (const command of PR_CREATES)
+      for (const command of [...PR_CREATES, ...PUSHES])
         expect(await check(bash(command, session), env)).toBeUndefined()
     },
   )
@@ -103,13 +115,16 @@ describe("no-prepare-write lets the same writes run for a session not marked pre
     )
     const claim = { ...env, PLAYGROUND_DATA_DIR: data }
     const assign = tool("mcp__linear-shared__save_issue")
+    const push = bash("git push -u origin made-up")
     expect(await check(assign, claim)).toStartWith("no-prepare-write hook refused")
+    expect(await check(push, claim)).toStartWith("no-prepare-write hook refused git push")
     const cleared = Bun.spawnSync(
       [process.execPath, join(ROOT, "scripts", "roster.ts"), "set", "worker-made-up-1", "mode="],
       { env: { ...process.env, ...claim } },
     )
     expect(cleared.exitCode).toBe(0)
     expect(await check(assign, claim)).toBeUndefined()
+    expect(await check(push, claim)).toBeUndefined()
   })
 })
 
