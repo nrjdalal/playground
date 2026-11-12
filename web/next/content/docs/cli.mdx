@@ -126,11 +126,12 @@ It opens nothing on your screen: the agent sends you the page as an Inbox card, 
 The page then shows on the [Pages](/docs/agents#pages) tab of both sessions and of your chat, and in the Previews app.
 It refuses a file that is not an HTML page, and a `--by` or `--for` that names no session on the roster.
 
-## Wait for stuck alerts: `playground alerts-wait`
+## Wait for alerts: `playground alerts-wait`
 
-`playground alerts-wait <name>` waits until the next alert for a session that `<name>` manages, a stuck session's or the relay watch's late-stop line, prints the alert, and exits.
+`playground alerts-wait <name>` waits until the next line in the outbox addressed to `<name>`, prints it, and exits: a stuck session's alert or the relay watch's late-stop line first, else any job's line, such as a firefighting heads-up to the Builder.
+Each name keeps its own place in each queue, so a printed line is not printed again, and a line addressed to another session waits for that session.
 It wakes on the stuck alerts a session's own hook sends; the 5-minute reminder to the dispatcher and the alert for a session quiet 15 minutes come by the relay alone.
-A manager keeps it running as a background task and starts it again after each alert, so it hears in a second or two rather than waiting for the relay.
+A manager keeps it running as a background task and starts it again after each line, so it hears in a second or two rather than waiting for the relay.
 
 ## Answer a permission prompt: `playground picker`
 

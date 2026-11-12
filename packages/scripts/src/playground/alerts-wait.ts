@@ -12,14 +12,18 @@ const queues = async (outbox: string): Promise<string[]> =>
     .filter((f) => /^ops-.+\.jsonl$/.test(f))
     .sort((a, b) => Number(b === ALERTS) - Number(a === ALERTS) || a.localeCompare(b))
 
-// alerts-wait/<name> holds a byte offset per queue; a bare number, from when the waiter read the stuck alerts alone, is that queue's offset.
-const readCursor = async (path: string): Promise<Record<string, number> | undefined> => {
+// alerts-wait/<name> holds a byte offset per queue, each queue the outbox held when it was written, so a queue it does not name was made since and is read from its start; a bare number, from when the waiter read the stuck alerts alone, is that queue's offset, and the other queues start at their end, as every queue does on a first wait.
+const readCursor = async (
+  path: string,
+): Promise<{ at: Record<string, number>; whole: boolean }> => {
   const raw = await Bun.file(path)
     .text()
     .catch(() => undefined)
-  if (raw === undefined) return undefined
+  if (raw === undefined) return { at: {}, whole: false }
   const parsed: unknown = JSON.parse(raw.trim() || "0")
-  return typeof parsed === "number" ? { [ALERTS]: parsed } : (parsed as Record<string, number>)
+  return typeof parsed === "number"
+    ? { at: { [ALERTS]: parsed }, whole: false }
+    : { at: parsed as Record<string, number>, whole: true }
 }
 
 // An alert queued WAITER_GRACE_MS before the wait began is past answering, since a prompt times out in 120s: a waiter started after days down skips its backlog rather than replaying it one run at a time (62 alerts on 7 Nov).
@@ -33,9 +37,9 @@ export async function alertsWait(
   const cursorPath = join(outbox, "alerts-wait", name)
   await mkdir(join(outbox, "alerts-wait"), { recursive: true })
   await Bun.write(waiterPidPath(outbox, name), String(process.pid))
-  // a queue the cursor does not name starts at its end, and one made while the wait runs at its start
-  const at: Record<string, number> = { ...(await readCursor(cursorPath)) }
-  for (const file of await queues(outbox)) at[file] ??= Bun.file(join(outbox, file)).size
+  const { at, whole } = await readCursor(cursorPath)
+  if (!whole)
+    for (const file of await queues(outbox)) at[file] ??= Bun.file(join(outbox, file)).size
   let skipped = 0
   for (;;) {
     for (const file of await queues(outbox)) {

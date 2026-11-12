@@ -72,7 +72,7 @@ describe("playground alerts-wait (PG-2184)", () => {
     expect(await Bun.file(waiterPidPath(outbox, "builder")).exists()).toBe(false)
   })
 
-  test("a printed line is delivered, so the next wait goes past it, and a line addressed to another session waits for that session", async () => {
+  test("a printed line is delivered, so the next wait goes past it, a line addressed to another session waits for that session, and a queue the cursor does not name is read from its start", async () => {
     const outbox = join(dir, "delivered")
     const file = join(outbox, "ops-firefighting-headsup.jsonl")
     await Bun.write(join(outbox, "alerts-wait", "builder"), "{}")
