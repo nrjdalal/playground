@@ -91,6 +91,7 @@ const PUSHES = [
   "git push -u origin made-up && gh pr create --fill",
   "git -C /made-up push origin HEAD:made-up",
   "env GIT_TRACE=0 git push",
+  "uv run git push",
 ]
 
 describe("no-prepare-write refuses a prepare-only session's writes", () => {
@@ -110,6 +111,20 @@ describe("no-prepare-write refuses a prepare-only session's writes", () => {
 
   test.each(API_WRITES)("refuses %s", async (command) => {
     expect(await check(bash(command), env)).toStartWith("no-prepare-write hook refused gh api")
+  })
+
+  test.each([
+    `gh api graphql -f query='mutation { addComment(input: {body: "x"}) { clientMutationId } createRef(input: {}) { clientMutationId } }'`,
+    `gh api graphql -f query='mutation { addComment(input: {body: "a \\" b"}) { clientMutationId } createRef(input: {}) { clientMutationId } }'`,
+    `gh api graphql -f query='mutation { addComment(input: {body: "unclosed createRef(input: {}) { clientMutationId } }'`,
+  ])("refuses a listed mutation beside a string, %s", async (command) => {
+    expect(await check(bash(command), env)).toStartWith("no-prepare-write hook refused gh api")
+  })
+
+  test("its refusal names a file write and a merge", async () => {
+    expect(await check(tool("mcp__github-shared__merge_pull_request"), env)).toContain(
+      "no push, no file write, no pull request and no merge",
+    )
   })
 
   test.each([
@@ -142,6 +157,10 @@ describe("no-prepare-write refuses a prepare-only session's writes", () => {
     "gh api repos/made-up/app/git/commits -X POST -f message=m -f tree=abc123",
     "gh api repos/made-up/app/git/trees -X POST -f base_tree=abc123",
     "gh api graphql -f query='mutation { addComment(input: {}) { clientMutationId } }'",
+    `gh api graphql -f query='mutation { addComment(input: {body: "see createRef"}) { clientMutationId } }'`,
+    `gh api graphql -f query='mutation { addComment(input: {body: """mergePullRequest"""}) { clientMutationId } }'`,
+    "gh api graphql -f query='# createRef comes later\nmutation { addComment(input: {}) { clientMutationId } }'",
+    "man git push",
   ])("lets it run %s", async (command) => {
     expect(await check(bash(command), env)).toBeUndefined()
   })
