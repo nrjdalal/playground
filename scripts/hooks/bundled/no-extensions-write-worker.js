@@ -9962,7 +9962,7 @@ function sedReads(args) {
     const { value } = args[k];
     if (value === "-e" || value === "--expression") {
       if (!args[k + 1])
-        return false;
+        return;
       scripts.push(args[++k]);
     } else if (value.startsWith("--expression="))
       scripts.push({ ...args[k], value: value.slice("--expression=".length) });
@@ -9971,12 +9971,18 @@ function sedReads(args) {
       break;
     } else if (value.startsWith("-") && value !== "-") {
       if (!SED_FLAG.test(value))
-        return false;
+        return;
     } else
       operands.push(args[k]);
   }
   const read = scripts.length ? scripts : operands.slice(0, 1);
-  return read.length > 0 && read.every((w) => literal2(w) && SED_SCRIPT.test(w.value));
+  return read.length > 0 && read.every((w) => literal2(w) && SED_SCRIPT.test(w.value)) ? read : undefined;
+}
+var TEXT_FLAGS = new Set(["--body", "--reason", "--title"]);
+function textFlagValues({ args, name }) {
+  if (program(name) !== "playground")
+    return [];
+  return args.filter((word, k) => TEXT_FLAGS.has(args[k - 1]?.value ?? "") || [...TEXT_FLAGS].some((flag) => word.value.startsWith(`${flag}=`)));
 }
 var SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/;
 var SED_SUFFIX = /^(?:\.[\w.~-]*)?$/;
@@ -10162,7 +10168,7 @@ function narrow(cmd, env) {
   if (base === "git")
     return reads(parsed, env) && !args.some(({ value }) => marked(value));
   if (SEDS.has(base))
-    return sedReads(args);
+    return !!sedReads(args);
   if (base === "perl")
     return perlReads(parsed, env);
   if (base === "cut" || base === "date" || base === "echo" || base === "lsof")
@@ -10505,7 +10511,12 @@ async function inspect(raw, environment, unknown = false) {
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env);
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined;
-    const wholeText = new Set(whole && !rootLine && ownProgram(cmd, parsed) && ![...parsed.local.keys(), ...env.vars.keys()].some((key) => TEXT_RUNS.test(key) || marked(key)) ? [...ghFilters(parsed), ...browserCode ? [browserCode] : []] : []);
+    const wholeText = new Set(whole && !rootLine && ownProgram(cmd, parsed) && ![...parsed.local.keys(), ...env.vars.keys()].some((key) => TEXT_RUNS.test(key) || marked(key)) ? [
+      ...ghFilters(parsed),
+      ...browserCode ? [browserCode] : [],
+      ...SEDS.has(program(name)) ? sedReads(parsed.args) ?? [] : [],
+      ...textFlagValues(parsed)
+    ] : []);
     const xargsOwn = xargs ? xargsOptions(cmd, first) : [];
     const delimiter = xargsOwn.some((word) => XARGS_DELIMITER.test(word));
     const argFile = xargsOwn.some((word) => XARGS_ARG_FILE.test(word));
