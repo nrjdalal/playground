@@ -4,6 +4,7 @@ import * as fsp from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { inboxInputSchema } from "../../../../../api/hono/src/lib/dashboard/inbox"
 import {
   BACKOFF,
   backoffMs,
@@ -15,7 +16,12 @@ import {
   SOCKET,
   takeLock,
 } from "../../../../../packages/scripts/src/ops-wa/habits"
-import { life, PAIRING, unguarded } from "../../../../../packages/scripts/src/ops-wa/life"
+import {
+  life,
+  PAIRING,
+  pairingCard,
+  unguarded,
+} from "../../../../../packages/scripts/src/ops-wa/life"
 import { fakeSocket, OWNER, SPARE } from "./fake-socket"
 
 const dirs: string[] = []
@@ -288,5 +294,24 @@ describe("ops-wa's ban-safety habits", () => {
     expect(SOCKET.shouldSyncHistoryMessage()).toBe(false)
     expect(SOCKET.generateHighQualityLinkPreview).toBe(false)
     expect(KEEP_ALIVE_DAYS).toBe(12)
+  })
+})
+
+describe("the pairing card as the Inbox takes it", () => {
+  test("the pairing card's JSON passes the Inbox's input schema", () => {
+    expect(
+      inboxInputSchema.safeParse(JSON.parse(JSON.stringify(pairingCard("12345678", "ops"))))
+        .success,
+    ).toBe(true)
+  })
+  test("the reminder card's outcome passes the schema too", () => {
+    expect(
+      inboxInputSchema.safeParse({
+        from: "ops",
+        kind: "update",
+        preview: { outcome: "finding", text: "Open WhatsApp on the spare phone." },
+        title: "Open WhatsApp on the spare phone",
+      }).success,
+    ).toBe(true)
   })
 })

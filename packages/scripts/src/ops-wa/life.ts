@@ -50,6 +50,14 @@ export const RELINK = "playground wa relink"
 export const PAIRING =
   "On the spare phone, open WhatsApp Business. On Android tap ⋮ then Linked devices; on iPhone tap Settings then Linked devices. Tap Link a device, then Link with phone number instead, and type this code.\n\nKeep the Business profile unverified, with no Meta Verified: a verified business account has been banned when it linked a device."
 
+// The pairing card as the Inbox takes it, its outcome an alert, since a code times out unheard while focus holds the Inbox quiet. Pure and whole, so the schema check runs against the card the code sends.
+export const pairingCard = (code: string, from: string) => ({
+  from,
+  kind: "update" as const,
+  preview: { outcome: "alert" as const, text: PAIRING },
+  title: `Link WhatsApp: code ${code.slice(0, 4)}-${code.slice(4)}`,
+})
+
 // Pairing waits for no-raw-wa's registration in the factory's settings, so no auth state exists while a session could still reach it.
 export async function unguarded(settings: string): Promise<string | undefined> {
   const text = await Bun.file(settings)
