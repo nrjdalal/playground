@@ -17,7 +17,7 @@ export const groups: Group[] = [
       ["git rm after a cd to a variable", `cd "$X"; git rm -q policy.json`],
       ["mktemp of a template after a cd to a variable", `cd "$X"; mktemp policy.XXXX`],
       ["chmod under xargs after a cd to a variable", `cd "$X"; xargs chmod 644 policy.json`],
-      // round 1: GNU builds by their g name, a shortened long option, macOS's mktemp -t beside a template, a value word that looks like tar's -C, curl's other writing options, git rm's pathspec file, and macOS chmod's dashed operand
+      // GNU builds by their g name, a shortened long option, macOS's mktemp -t beside a template, a value word that looks like tar's -C, curl's other writing options, git rm's pathspec file, and macOS chmod's dashed operand
       ["GNU chmod after a cd to a variable", `cd "$X"; gchmod 644 policy.json`],
       ["GNU truncate after a cd to a variable", `cd "$X"; gtruncate -s 0 policy.json`],
       ["GNU shred after a cd to a variable", `cd "$X"; gshred -u policy.json`],
@@ -75,7 +75,7 @@ export const groups: Group[] = [
         `cd "$X"; git rm --pathspec-from-file=list`,
       ],
       ["macOS chmod of a dashed file after a cd to a variable", `cd "$X"; chmod 644 -policy.json`],
-      // round 2: a one-letter long prefix, more of tar's value options before a word that looks like -C, and macOS chmod's dash-led mode
+      // a one-letter long prefix, more of tar's value options before a word that looks like -C, and macOS chmod's dash-led mode
       [
         "sort's one-letter --output after a cd to a variable",
         `cd "$X"; sort --o policy.json /tmp/a`,

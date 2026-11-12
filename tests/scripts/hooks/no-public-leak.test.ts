@@ -214,6 +214,101 @@ describe("a write to the public repository holding private text is refused", () 
   })
 })
 
+// Checkouts of the public repository with nothing pushed: `mailed`, whose newest commit's message holds a made-up address, and `clean`, whose messages hold none; gh pr create reads the commits it may push before a push the same call runs first.
+describe("a refusal names the text that held the term", () => {
+  const dirs = { clean: "", mailed: "", separated: "" }
+  let sha = ""
+  let separated = ""
+  const git = (dir: string, ...args: string[]): string => {
+    const proc = Bun.spawnSync(
+      ["git", "-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args],
+      { stderr: "pipe" },
+    )
+    if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${proc.stderr.toString()}`)
+    return proc.stdout.toString().trim()
+  }
+  const checkout = async (name: string, message: string): Promise<string> => {
+    const dir = join(scratch, name)
+    await mkdir(dir, { recursive: true })
+    git(dir, "init", "-q", "-b", "main")
+    git(dir, "remote", "add", "origin", "https://github.com/quillco/playground.git")
+    git(dir, "commit", "-q", "--allow-empty", "-m", "Fix the export")
+    git(dir, "commit", "-q", "--allow-empty", "-m", message)
+    return dir
+  }
+  const at = (command: string, cwd: string) =>
+    run(
+      JSON.stringify({
+        cwd,
+        hook_event_name: "PreToolUse",
+        tool_input: { command },
+        tool_name: "Bash",
+      }),
+    )
+  const CHAIN = `git push origin HEAD:fix && gh pr create --title "Fix the import"`
+
+  beforeAll(async () => {
+    dirs.mailed = await checkout("mailed", "Fix the import\n\nReported-by: quilla@madeup.test")
+    dirs.clean = await checkout("clean", "Fix the import")
+    sha = git(dirs.mailed, "rev-parse", "--short", "HEAD")
+    dirs.separated = await checkout(
+      "separated",
+      "Fix the import\x1eReported-by: quilla@madeup.test",
+    )
+    separated = git(dirs.separated, "rev-parse", "--short", "HEAD")
+  })
+
+  test("a commit message holding the byte that splits the log keeps the text after it, under that commit", async () => {
+    const reason = await at(`gh pr create --title "Fix the import" --body ok`, dirs.separated)
+    expect(reason).toContain(
+      `an email address, in the message of commit ${separated}, which it may push`,
+    )
+  })
+
+  test("a ship's notes file names its notes file", async () => {
+    const file = join(scratch, "notes-mailed.md")
+    await Bun.write(file, "Mail quilla@madeup.test\n")
+    const reason = await at(`gh release create v1 ${R} -F ${file}`, dirs.clean)
+    expect(reason).toContain("an email address, in its notes file")
+  })
+
+  test("a commit message alone holding an address names that commit, which gh pr create may push", async () => {
+    const reason = await at(`${CHAIN} --body "Fixes the import"`, dirs.mailed)
+    expect(reason).toContain("no-public-leak hook refused gh pr create")
+    expect(reason).toContain(`an email address, in the message of commit ${sha}, which it may push`)
+    expect(reason).toContain("git commit --amend")
+    expect(reason).not.toContain("quilla@madeup.test")
+  })
+
+  test("gh pr create alone names that commit too", async () => {
+    const reason = await at(`gh pr create --title "Fix the import" --body ok`, dirs.mailed)
+    expect(reason).toContain(`an email address, in the message of commit ${sha}, which it may push`)
+  })
+
+  test("a body alone holding an address names gh pr create and its body", async () => {
+    const reason = await at(`${CHAIN} --body "Mail quilla@madeup.test"`, dirs.clean)
+    expect(reason).toContain("no-public-leak hook refused gh pr create")
+    expect(reason).toContain("an email address, in its body")
+    expect(reason).not.toContain("quilla@madeup.test")
+  })
+
+  test("a title holding an address names its title", async () => {
+    const reason = await at(`gh pr create --title "quilla@madeup.test" --body ok`, dirs.clean)
+    expect(reason).toContain("an email address, in its title")
+  })
+
+  test.each([
+    ["the chain with clean messages and body", `${CHAIN} --body "Fixes the import"`],
+    ["git log", "git log --oneline -5"],
+  ])("lets %s run", async (_, command) => {
+    expect(await at(command, dirs.clean)).toBeUndefined()
+  })
+
+  test("leaves git push alone, since its policy reads no git push", async () => {
+    expect(await at("git push origin HEAD:fix", dirs.mailed)).toBeUndefined()
+  })
+})
+
 describe("what it lets through", () => {
   test.each([
     ["plain words", `gh pr comment 1 ${R} --body "Fixes the export button"`],

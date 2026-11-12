@@ -367,6 +367,22 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       expect([await status("now plain"), await status("@di see")]).toEqual(["sent", "pending"])
     })
 
+    test("the maker's token sends its first plain post into the DM bot add made at once, while a mention and each held kind there still wait", async () => {
+      const { bot } = await store.createBot(db, web("ada", true), "greeter")
+      const status = async (kind: Parameters<typeof send>[2]["kind"], text: string) =>
+        (await send(token("ada", true), bot.dm, { kind, text })).status
+      expect(await status("text", `@${bot.login} see`)).toBe("pending")
+      for (const kind of ["bug", "fix", "log", "steps"] as const)
+        expect(await status(kind, "run the suite")).toBe("pending")
+      expect(await status("text", "hi")).toBe("sent")
+    })
+
+    test("another member's first post into a DM with that bot still waits", async () => {
+      const { bot } = await store.createBot(db, web("ada", true), "porter")
+      const { id } = await store.openDm(db, web("bo"), bot.login)
+      expect((await send(token("bo"), id, { kind: "text", text: "hi" })).status).toBe("pending")
+    })
+
     test("an owner-only channel takes the owner alone, and holds the owner's token post", async () => {
       const { id } = await both("owner-only")
       await sql`update yard_channel set post_rule = 'owner' where id = ${id}`

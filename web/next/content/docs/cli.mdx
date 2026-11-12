@@ -126,18 +126,18 @@ It opens nothing on your screen: the agent sends you the page as an Inbox card, 
 The page then shows on the [Pages](/docs/agents#pages) tab of both sessions and of your chat, and in the Previews app.
 It refuses a file that is not an HTML page, and a `--by` or `--for` that names no session on the roster.
 
-## Wait for stuck alerts: `playground alerts-wait`
+## Wait for alerts: `playground alerts-wait`
 
-`playground alerts-wait <name>` waits until the next alert for a session that `<name>` manages, a stuck session's or the relay watch's late-stop line, prints the alert, and exits.
-It wakes on the stuck alerts a session's own hook sends; the 5-minute reminder to the dispatcher and the alert for a session quiet 15 minutes come by the relay alone.
-A manager keeps it running as a background task and starts it again after each alert, so it hears in a second or two rather than waiting for the relay.
+`playground alerts-wait <name>` waits until the next line in the outbox addressed to `<name>`, prints it, and exits: a stuck session's alert or the relay watch's late-stop line first, else any job's line, such as a firefighting heads-up to the Builder.
+Each name keeps its own place in each queue, so a printed line is not printed again, and a line addressed to another session waits for that session.
+A manager keeps it running as a background task and starts it again after each line, so it hears in a second or two rather than waiting for the relay.
 
 ## Answer a permission prompt: `playground picker`
 
 `playground picker <session> allow <key>` or `playground picker <session> deny <key> "<reason>"` is how a manager answers the permission prompt a session it runs is stuck on, once that session's alert reaches it with the command and its key.
 `allow` presses Yes, once, in the session's own pane after reading that the pane's prompt shows that command; `deny` presses No and sends the session the reason, so it can try a simpler way.
 Each answer is a line in `ops/picker.log` under `~/.playground`, naming who answered, the session and the start of the command.
-When one of your standing rules settles the answer, `--rule <name>` after the key records that rule in the line and in a deny's message; a name that matches no rule presses nothing.
+When one of your standing rules settles the answer, `--rule <name>` after the key, a hyphen for each space in the name (`--rule local-page`), records that rule in the line and in a deny's message; a name that matches no rule presses nothing.
 It refuses anyone but the session's manager or the primary dispatcher, a deny with no reason, a session that is not running or runs in no herdr pane, a dispatcher's own prompt, a key that no prompt showing matches, and a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
 For that last one, since a herdr pane takes no key from a session's hand, the manager closes the session with `spawn.sh close` and resumes it under its name by its session id, with the reason as its brief and, for a reviewer or tester, `--pr` with the PRs its roster row names, so the prompted call never runs.
 
@@ -150,7 +150,7 @@ The dashboard moves its own leftovers there too: a fixture stack's scratch folde
 `playground rm --list` prints what the trash holds, and `playground rm --restore <id>` puts one item back where it was, refusing when something already stands there, and a worktree's restore also refuses as its `--worktree` lines below say.
 It refuses, before moving anything:
 
-- HOME, any folder that holds it, and `~/.config`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/Library`, `~/Music` and `~/.playground` with everything in them but the caller's own `scratch/<name>/` and `scratchpad/<name>/` there, checked after symlinks resolve.
+- HOME, any folder that holds it, and `~/.config`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/Library`, `~/Music` and `~/.playground` with everything in them but the caller's own `scratch/<name>/` and `scratchpad/<name>/` there, checked after symlinks resolve, and an ended session's whole `scratchpad/<folder>/`: a real folder, not a symlink, that no live roster row names as itself or as `<folder>-<role>` (refused while the roster cannot be read), which `--restore` puts back.
 - The main checkout and everything in it but the worktrees under `.claude/worktrees/`.
 - A path over 5,000 files or 2 GB, and a fourth delete within a minute from one session; these and a protected path are also sent to the dispatcher, a session at the per-minute limit once for each burst, however many deletes it then tries.
 - A move to another disk, since that would copy rather than rename.

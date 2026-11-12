@@ -6449,6 +6449,7 @@ var onlyReserved = (cmd) => cmd.words.length > 0 && cmd.words.every((w) => !w.qu
 var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
+  "-": ["", ""],
   builtin: ["", ""],
   busybox: ["", ""],
   caffeinate: ["-d -i -m -s -u", "-t -w"],
@@ -8420,7 +8421,7 @@ var READ2 = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})(?!\[)/.source;
 var TEXT = /[^"$`\\]/.source;
 var WORD = new RegExp(String.raw`^(?:(?:[\w./:=@%+,~-]|${READ2})+|'[^']*'|"(?:${TEXT}|${READ2})*")`);
 var REDIRECT2 = /^(?:[<>]&(?:\d+|-)|<<<|&>>?|>>?\|?|<>?)/;
-var KEEPS_PROGRAM = /^(?:builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/;
+var KEEPS_PROGRAM = /^(?:-|builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/;
 var PROMPT_PARAM = /^(?:PS[0-4]|PROMPT[2-4]?|RPROMPT2?|RPS[12]|SPROMPT)(?!\w)/;
 var QUOTED_DOC = /^<<(-?)[ \t]*((?:[\w.-]*(?:'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])[\w.-]*)+)(?=[\s;&|<>]|$)/;
 function quotedBodiesOut(command) {
@@ -9209,6 +9210,48 @@ var READERS = new Set([
   "wc"
 ]);
 var FIND_ACTS = /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/;
+var XARGS_ARG_FILE = /^-[0oprtx]*a|^--a(?:r(?:g(?:-(?:f(?:i(?:le?)?)?)?)?)?)?(?:=|$)/;
+var XARGS_NUL = /^-[0oprtx]*0|^--nu(?:ll?)?$/;
+var XARGS_DELIMITER = /^-[0oprtx]*d|^--d(?:e(?:l(?:i(?:m(?:i(?:t(?:er?)?)?)?)?)?)?)?(?:=|$)/;
+function xargsOptions(cmd, first) {
+  const start = cmd.words.findIndex((word) => /(?:^|\/)g?xargs$/i.test(word.value));
+  if (start === -1)
+    return [];
+  const end = first ? cmd.words.indexOf(first) : -1;
+  return cmd.words.slice(start + 1, end > start ? end : undefined).map((word) => word.value);
+}
+function xargsWords(text) {
+  const words = [];
+  let word;
+  let quote;
+  for (let i = 0;i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote)
+        quote = undefined;
+      else if (c === `
+`)
+        return;
+      else
+        word += c;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      word ??= "";
+    } else if (c === "\\")
+      word = (word ?? "") + (text[++i] ?? "");
+    else if (/\s/.test(c)) {
+      if (word !== undefined)
+        words.push(word);
+      word = undefined;
+    } else
+      word = (word ?? "") + c;
+  }
+  if (quote)
+    return;
+  if (word !== undefined)
+    words.push(word);
+  return words;
+}
 var FIND_WRITES = /^-(?:fls|fprint|fprint0|fprintf)$/;
 var GIT_READS = new Set([
   "blame",
@@ -9280,6 +9323,7 @@ function casePatterns(commands) {
 }
 var GLOB = /[*?[{(]/;
 var RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/;
+var TEXT_RUNS = new RegExp(`${RUNS.source}|^(?:AGENT_BROWSER_[A-Z0-9_]+|BROWSER|GH_[A-Z0-9_]+)$`);
 var GIT_TEXT = /^GIT_(?:AUTHOR|COMMITTER)_/;
 var CLI = join7("packages", "scripts", "src", "playground", "cli.ts");
 var varsRun = new WeakMap;
@@ -9546,12 +9590,13 @@ function remoteName(v) {
   }
   return false;
 }
-function unreadCdWrites(tool, args, env, getopt) {
+var CHMOD_DASH_MODE = /^-[gorstuwXx]/;
+function unreadCdWrites(tool, args, env, stopsAtOperand) {
   if (tool === "sed" || tool === "perl")
     return inPlace(tool, args);
   if (tool === "chmod") {
-    const at = args.findIndex((w) => !/^-./.test(w.value) || /^-[gorstuwXx]/.test(w.value));
-    const files = getopt ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", []);
+    const at = args.findIndex((w) => !/^-./.test(w.value) || CHMOD_DASH_MODE.test(w.value));
+    const files = stopsAtOperand ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", []);
     return MODE.test(files[0]?.value ?? "") ? files.slice(1) : files;
   }
   if (tool === "truncate")
@@ -9917,7 +9962,7 @@ function sedReads(args) {
     const { value } = args[k];
     if (value === "-e" || value === "--expression") {
       if (!args[k + 1])
-        return false;
+        return;
       scripts.push(args[++k]);
     } else if (value.startsWith("--expression="))
       scripts.push({ ...args[k], value: value.slice("--expression=".length) });
@@ -9926,12 +9971,18 @@ function sedReads(args) {
       break;
     } else if (value.startsWith("-") && value !== "-") {
       if (!SED_FLAG.test(value))
-        return false;
+        return;
     } else
       operands.push(args[k]);
   }
   const read = scripts.length ? scripts : operands.slice(0, 1);
-  return read.length > 0 && read.every((w) => literal2(w) && SED_SCRIPT.test(w.value));
+  return read.length > 0 && read.every((w) => literal2(w) && SED_SCRIPT.test(w.value)) ? read : undefined;
+}
+var TEXT_FLAGS = new Set(["--body", "--reason", "--title"]);
+function textFlagValues({ args, name }) {
+  if (program(name) !== "playground")
+    return [];
+  return args.filter((word, k) => TEXT_FLAGS.has(args[k - 1]?.value ?? "") || [...TEXT_FLAGS].some((flag) => word.value.startsWith(`${flag}=`)));
 }
 var SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/;
 var SED_SUFFIX = /^(?:\.[\w.~-]*)?$/;
@@ -9975,6 +10026,42 @@ function sedInPlace(cmd, parsed) {
     return;
   return new Set(read);
 }
+function perlInPlace(cmd, parsed, env) {
+  const { args, local, name } = parsed;
+  if (program(name) !== "perl" || !ownProgram(cmd, parsed))
+    return;
+  if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL")))
+    return;
+  const scripts = [];
+  let inPlace = false;
+  let k = 0;
+  for (;k < args.length && args[k].value.startsWith("-") && args[k].value !== "-"; k++) {
+    const { value } = args[k];
+    if (value === "--") {
+      k++;
+      break;
+    }
+    if (!PERL_IN_PLACE.test(value))
+      return;
+    if (value.endsWith("i"))
+      inPlace = true;
+    if (value.endsWith("e")) {
+      if (!args[k + 1])
+        return;
+      scripts.push(args[++k]);
+    }
+  }
+  const files = args.slice(k);
+  if (!inPlace || scripts.length === 0 || files.length === 0)
+    return;
+  if (!scripts.every((w) => literal2(w) && PERL_SCRIPT.test(w.value)))
+    return;
+  if (!files.every((w) => literal2(w) && PERL_FILE.test(w.value)))
+    return;
+  return new Set(scripts);
+}
+var PERL_IN_PLACE = /^-[lnpw]*[ei]?$/;
+var inPlaceScripts = (cmd, parsed, env) => sedInPlace(cmd, parsed) ?? perlInPlace(cmd, parsed, env);
 var PERL_FLAG = /^-[alnpw]*[eE]?$/;
 var PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
 var PERL_RE = `/${PERL_BODY}`;
@@ -10081,7 +10168,7 @@ function narrow(cmd, env) {
   if (base === "git")
     return reads(parsed, env) && !args.some(({ value }) => marked(value));
   if (SEDS.has(base))
-    return sedReads(args);
+    return !!sedReads(args);
   if (base === "perl")
     return perlReads(parsed, env);
   if (base === "cut" || base === "date" || base === "echo" || base === "lsof")
@@ -10110,6 +10197,7 @@ function rooted(commands) {
     return true;
   return commands.some((cmd) => !!stdinShell(cmd) || !!cmd.inner && rooted(cmd.inner()) || [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => !!word.procs && rooted(word.procs)));
 }
+var ownFolder = (word, env) => !!word && literal2(word) && word.value.startsWith("/") && env.cwdSure !== undefined && places(env).every(({ cwd }) => cwd === resolve5(word.value));
 function quietCommit(cmd, parsed, env) {
   const { args, local, name } = parsed;
   if (name !== "git" || local.size > 0 || !ownProgram(cmd, parsed))
@@ -10117,8 +10205,8 @@ function quietCommit(cmd, parsed, env) {
   const { rest, sub } = gitCall(args, env);
   if (sub !== "commit")
     return false;
-  const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
-  if (before.some((w) => w === "-c" || w === "-C" || /^--(?:config-env|exec-path|git-dir|work-tree)/.test(w)))
+  const before = args.slice(0, args.length - rest.length - 1);
+  if (before.some(({ value }, k) => value === "-c" || /^--(?:config-env|exec-path|git-dir|work-tree)/.test(value) || value === "-C" && !ownFolder(before[k + 1], env)))
     return false;
   return args.every((word, at) => !/\s/.test(word.value) || word.quoted && !marked(word.value) && (/^(?:-[a-zA-Z]*m|--message)$/.test(args[at - 1]?.value ?? "") || word.value.startsWith("--message=")));
 }
@@ -10137,7 +10225,7 @@ function wholeLine(commands, env, readsOnly = false) {
     if (!readsOnly && quietRun(cmd, parsed, env))
       return false;
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
-    return writes || !(narrow(cmd, env) || !readsOnly && sedInPlace(cmd, parsed));
+    return writes || !(narrow(cmd, env) || !readsOnly && inPlaceScripts(cmd, parsed, env));
   });
 }
 function quietRun(cmd, parsed, env) {
@@ -10145,7 +10233,7 @@ function quietRun(cmd, parsed, env) {
   const commit = slot ? { ...cmd, words: slot } : cmd;
   return quietCommit(commit, slot ? parse3(commit) : parsed, env);
 }
-var edits = (cmd, parsed, env) => quietRun(cmd, parsed, env) || sedInPlace(cmd, parsed) !== undefined;
+var edits = (cmd, parsed, env) => quietRun(cmd, parsed, env) || inPlaceScripts(cmd, parsed, env) !== undefined;
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
 var SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g;
 var SHELL_WORD = /(["']?)\bshell\b\1(\s*:\s*false\b(?=\s*[,})]))?/g;
@@ -10204,18 +10292,18 @@ function shellRunnerArgs(text) {
   }
   return out;
 }
-function runsOf(parsed, vars, whole, rootLine) {
+function runsOf(parsed, vars, whole, rootLine, plain) {
   const { args, first, local } = parsed;
   const values = [...local.values(), ...vars].flatMap((text) => {
     tick();
     return text.unknown ? [] : [text.value];
   });
   for (const word of whole ? first ? [first, ...args] : args : [])
-    for (const text of texts(word)) {
-      values.push(text.value.replace(/^!/, ""));
+    for (const piece of plain.has(word) ? [] : texts(word)) {
+      values.push(piece.value.replace(/^!/, ""));
       if (rootLine)
-        values.push(...text.value.split("\\n"));
-      values.push(...shellRunnerArgs(text.value));
+        values.push(...piece.value.split("\\n"));
+      values.push(...shellRunnerArgs(piece.value));
     }
   values.push(...programLines(parsed, rootLine));
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value));
@@ -10422,8 +10510,23 @@ async function inspect(raw, environment, unknown = false) {
     if (unplaced?.target)
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env);
+    const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined;
+    const wholeText = new Set(whole && !rootLine && ownProgram(cmd, parsed) && ![...parsed.local.keys(), ...env.vars.keys()].some((key) => TEXT_RUNS.test(key) || marked(key)) ? [
+      ...ghFilters(parsed),
+      ...browserCode ? [browserCode] : [],
+      ...SEDS.has(program(name)) ? sedReads(parsed.args) ?? [] : [],
+      ...textFlagValues(parsed)
+    ] : []);
+    const xargsOwn = xargs ? xargsOptions(cmd, first) : [];
+    const delimiter = xargsOwn.some((word) => XARGS_DELIMITER.test(word));
+    const argFile = xargsOwn.some((word) => XARGS_ARG_FILE.test(word));
+    const argWord = argFile ? { quoted: false, value: UNKNOWN } : undefined;
     const fed = xargs ? await stdinOf(cmd, env) : undefined;
-    const stdinWords = !fed ? [] : fed.unknown ? [{ quoted: false, value: UNKNOWN }] : fed.value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
+    const fedSplit = !fed || fed.unknown ? undefined : delimiter || xargsOwn.some((word) => XARGS_NUL.test(word)) ? fed.value.split(/\s+/).filter(Boolean) : xargsWords(fed.value);
+    const stdinWords = [
+      ...!fed ? [] : fedSplit ? fedSplit.map((value) => ({ quoted: false, value })) : [{ quoted: false, value: UNKNOWN }],
+      ...argWord ? [argWord] : []
+    ];
     const calls = reader ? [] : cliCalls(parsed, env);
     const write = calls.map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords], tuning)).find(Boolean) ?? (calls.some((words) => scoreAsOther(words, cmd, parsed, env)) ? SCORE_AS_OTHER : undefined);
     if (write)
@@ -10442,8 +10545,13 @@ async function inspect(raw, environment, unknown = false) {
     const away = places(env).every(({ cwd }) => cwd !== undefined && !above(cwd, true) && !inRoot(cwd));
     const evaluated = rootLine || cmd.scope !== 0 || !away ? undefined : evalProgram(parsed);
     const masked = evaluated && !evaluated.glob && !marked(evaluated.value) ? maskRegexes(evaluated.value, (body) => guarded(body, env)) : undefined;
-    const own = (word) => word === evaluated && masked !== undefined ? { ...word, value: masked } : word;
-    for (const raw of reader ? [] : [...script, ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine)]) {
+    const shownEval = evaluated && masked !== undefined ? { ...evaluated, value: masked } : undefined;
+    const own = (word) => word === evaluated && shownEval ? shownEval : word;
+    const shownText = new Set([...wholeText].map(own));
+    for (const raw of reader ? [] : [
+      ...script,
+      ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine, shownText)
+    ]) {
       const line = xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw;
       if (seen.has(line))
         continue;
@@ -10454,7 +10562,7 @@ async function inspect(raw, environment, unknown = false) {
         return verdict;
     }
     const quiet = !whole && quietCommit(cmd, parsed, env);
-    const sedScripts = whole ? undefined : sedInPlace(cmd, parsed);
+    const sedScripts = whole ? undefined : inPlaceScripts(cmd, parsed, env);
     if (!first || EXPORTS3.has(name) || reader)
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
@@ -10465,7 +10573,7 @@ async function inspect(raw, environment, unknown = false) {
     if (env.cwdAnywhere)
       return refuse(`${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`);
     const steady = steadyAt(cmd);
-    const filters = whole ? new Set : ghFilters(parsed);
+    const filters = whole ? shownText : ghFilters(parsed);
     for (const here of places(env)) {
       if (inRoot(here.cwd))
         return refuse(`${verb} run inside ${root}`);
@@ -10507,35 +10615,62 @@ async function inspect(raw, environment, unknown = false) {
       }
       if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`);
-      if (fed && remover && (fed.unknown || marked(fed.value)))
-        return refuse(`${verb} under xargs fed by ${fed.unknown ?? "a value it cannot read"}, a value the hook does not hold; write the paths literally in the call`);
+      const unreadFeed = fed && remover ? argFile ? "the file its -a names" : fed.unknown || marked(fed.value) || !fedSplit ? fed.unknown ?? (fedSplit ? "a value it cannot read" : "stdin holding a quote it does not close") : undefined : undefined;
+      if (unreadFeed)
+        return refuse(`${verb} under xargs fed by ${unreadFeed}, a value the hook does not hold; write the paths literally in the call`);
       if (fed) {
-        const named = !fed.unknown && fed.value.split(/\s+/).filter(Boolean).map((value) => names({ quoted: false, value }, here, remover)).find(Boolean);
+        const named = !fed.unknown && [...fed.value.split(/\s+/), ...fedSplit ?? []].filter(Boolean).map((value) => names({ quoted: false, value }, here, remover)).find(Boolean);
         if (named)
           return refuse(`${verb} under xargs on ${named}`);
       }
     }
-    const end = args.findIndex((word) => word.value === "--");
+    if (!env.cwdUnread)
+      return;
+    const unsplit = fed && !fed.unknown && (marked(fed.value) || delimiter || !fedSplit);
+    const fedWords = unsplit ? [{ quoted: false, value: UNKNOWN }, ...argWord ? [argWord] : []] : stdinWords;
+    const replace = xargs?.replace;
+    const fromStdin = new Set(fedWords);
+    const fromArgFile = new Set(argWord ? [argWord] : []);
+    const inPlace = (word) => args.map((arg) => {
+      if (!replace || !arg.value.includes(replace))
+        return arg;
+      const put = { ...arg, value: arg.value.replaceAll(replace, word.value) };
+      fromStdin.add(put);
+      if (fromArgFile.has(word))
+        fromArgFile.add(put);
+      return put;
+    });
+    const shapes = [
+      args,
+      ...!xargs ? [] : replace ? fedWords.map(inPlace) : [[...args, ...fedWords], ...fedWords.map((word) => [...args, word])]
+    ];
     const option = (word) => /^-./.test(word.value);
-    const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(args[0]?.value === "--") : args.findIndex((word) => !option(word));
-    const values = tool === "mv" ? writeTargets(tool, args, gnu, posix) : tool === "rsync" ? args.flatMap((word, k) => {
-      const long = /^--([^=]+)=?/.exec(word.value);
-      const path = long && !RSYNC_FLAGS.has(long[1]) && RSYNC_PATHS.some((name) => name.startsWith(long[1]));
-      const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length;
-      if (!cut)
-        return [];
-      if (cut < word.value.length)
-        return [after(word, cut)];
-      return args[k + 1] ? [args[k + 1]] : [];
-    }) : tool === "find" ? args.flatMap((word, k) => FIND_WRITES.test(word.value) && args[k + 1] ? [args[k + 1]] : []) : [];
-    const operands = remover ? [
-      ...args.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)),
-      ...values
-    ] : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : [];
-    const unlisted = env.cwdUnread && !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env, !gnu || posix) : [];
-    const loose = env.cwdUnread ? [...operands, ...unlisted].find((word) => !placed(word, env, steady)) : undefined;
-    if (loose)
-      return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`));
+    const operandsOf = (typed) => {
+      const lead = typed.findIndex((word, i) => !/^-(?:[EHLPXdsx]+|O\d*|D)$/.test(word.value) && typed[i - 1]?.value !== "-D");
+      const given = tool === "find" && (lead === -1 || /^[-(!]/.test(typed[lead].value) && typed[lead].value !== "-f") ? [{ quoted: false, value: "." }, ...typed] : typed;
+      const end = given.findIndex((word) => word.value === "--");
+      const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(given[0]?.value === "--") : given.findIndex((word) => !option(word));
+      const values = tool === "mv" ? writeTargets(tool, given, gnu, posix) : tool === "rsync" ? given.flatMap((word, k) => {
+        const long = /^--([^=]+)=?/.exec(word.value);
+        const path = long && !RSYNC_FLAGS.has(long[1]) && RSYNC_PATHS.some((name) => name.startsWith(long[1]));
+        const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length;
+        if (!cut)
+          return [];
+        if (cut < word.value.length)
+          return [after(word, cut)];
+        return given[k + 1] ? [given[k + 1]] : [];
+      }) : tool === "find" ? given.flatMap((word, k) => FIND_WRITES.test(word.value) && given[k + 1] ? [given[k + 1]] : []) : [];
+      return remover ? [
+        ...given.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)),
+        ...values
+      ] : WRITERS.has(tool) ? writeTargets(tool, given, gnu, posix) : [];
+    };
+    const unlisted = !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env, !gnu || posix) : [];
+    const loose = [...shapes.flatMap(operandsOf), ...unlisted].find((word) => !placed(word, env, steady));
+    if (!loose)
+      return;
+    const unread = fromArgFile.has(loose) ? "the file its -a names" : fed && fromStdin.has(loose) && (fed.unknown || unsplit) ? fed.unknown ?? (delimiter ? "stdin split on its -d delimiter" : fedSplit ? "stdin holding a part it cannot read" : "stdin holding a quote it does not close") : undefined;
+    return refuse(afterUnreadCd(unread ? `${verb} under xargs on the words it reads from ${unread}` : `${verb} on ${shown(loose)}`));
   };
   const named = namings(command);
   const known = knownVariables(command, environment, directory);

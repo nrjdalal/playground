@@ -52,7 +52,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    whose `Audit, Lint, and Build` and `test` checks gate the head (**ci**).
    A brief names a `CLOCK_AHEAD_DAYS=30` run only for touched test files outside `CLOCK_EXEMPT` (`packages/scripts/src/clock-exempt.ts`), since a run over exempt files alone runs nothing, a no-op its report names as one rather than a pass: on one PR all 3 files a brief named were exempt.
    A brief that has its session clone a repo no org guards places the clone under `.claude/worktrees/<name>` in the Playground checkout and has the session name the clone's path in its last report, since no automated cleanup reaches a plain clone (two clones left in a session's scratch folder stayed behind), so its lead removes it by hand with `playground rm --worktree <path>`;
-   under `~/.playground` only the caller's own `scratch/<name>/` and `scratchpad/<name>/` clear, through a plain `playground rm <path>`, and every other path there stays refused.
+   under `~/.playground` only the caller's own `scratch/<name>/` and `scratchpad/<name>/` and an ended session's whole `scratchpad/<folder>/` clear, through a plain `playground rm <path>`, and every other path there stays refused.
    A guarded org's clone goes where `scripts/briefs/new-reviewer.md` puts it, in the org's folder (code-review-loop says why).
    A worker's brief says that a PR holding a long-lived connection (a socket, a pub/sub subscriber, a retrying client) puts code-review-loop's lifecycle table in its Evidence before round 1, one row per path from connect to close.
    A worker's brief says that a PR loosening a guard puts code-review-loop's refusal table in its Evidence before round 1: a `canary | head` row for each row it adds to `tests/scripts/hooks/fixtures/refused-forms/` or names in a source file's `allowed` list, and the refused-forms test's pass count at canary and at the head for the rest.
@@ -163,7 +163,7 @@ playground picker <session> deny <key> "<why, and the simpler shape to run inste
 playground picker <session> allow <key> --rule <name>
 ```
 
-When a standing rule settles the answer, add `--rule <name>`, the name `playground rules` lists it under, to either form; picker refuses a name no rules file holds and presses nothing.
+When a standing rule settles the answer, add `--rule <name>`, the name `playground rules` lists it under with a hyphen for each space (`--rule local-page`), to either form; picker refuses a name no rules file holds and presses nothing.
 
 Allow presses Yes once in the session's herdr pane while its prompt shows that call, a subagent's command included; deny presses No (Escape), and the relay sends the session the reason.
 Each answer is a line in `ops/picker.log`: the time, the manager, the answer, the session, the command's first 120 characters and, with `--rule`, `under **<name>**`, which a deny's message to the session names too.
@@ -192,17 +192,18 @@ Done when `CronList` shows both.
 A lead's new session creates both again.
 Ops, when it slows or pauses its own sweep on purpose, a usage squeeze or maintenance, writes `~/.playground/ops/sweep-hold-until` one future ISO 8601 time with its zone, so ops-tick's relay watch stays quiet until it passes (it lapses on its own, and a missing, empty, past or unreadable time leaves the watch on; [LIFECYCLE.md](LIFECYCLE.md#starts-and-ends), the relay watch).
 
-Every manager (the dispatcher, the Planner and each lead) also keeps one background task waiting on its queue of alerts (ops-stuck-alert.jsonl, where a session's own hook queues its stuck alerts and ops-tick's relay watch queues its late-stop line), so a stuck session reaches it in seconds rather than after the relay's turn (**unstick**), and a late sweep reaches Ops, then the dispatcher,
-the same way:
+Every manager (the dispatcher, the Planner and each lead) also keeps one background task waiting on the outbox for lines addressed to it, so a stuck session reaches it in seconds rather than after the relay's turn (**unstick**), and a late sweep reaches Ops, then the dispatcher, the same way.
+It reads its stuck alerts first (ops-stuck-alert.jsonl, where a session's own hook queues them and ops-tick's relay watch its late-stop line), then every other job's line, such as a firefighting heads-up to the Builder:
 
 ```bash
 playground alerts-wait <your name>
 ```
 
-Run it with Bash `run_in_background`; when it exits it has printed one alert: start it again at once, then act on the alert, a stuck session's or a late sweep's, whose line Ops answers by running its sweep or resuming the relay, and the dispatcher by resolving the stop, posting to the owner's Inbox only if it cannot.
+Run it with Bash `run_in_background`; when it exits it has printed one line: start it again at once, then act on the line, a stuck session's alert, a job's line such as a heads-up, or a late sweep's, whose line Ops answers by running its sweep or resuming the relay, and the dispatcher by resolving the stop, posting to the owner's Inbox only if it cannot.
 A waiter started after time down skips the alerts queued over 5 minutes before it began and names how many, since the relay sent each; while none runs, each alert also goes to Ops to send on, which is fast only while Ops' own waiter runs, so each line to Ops names Ops' restart while it does not.
 A worker a probe reports to keeps no waiter, and its probe's alert comes by the relay alone.
-Done when the task is running; the relay sends the same alert later, so drop that copy.
+Each waiter keeps its own cursor (`alerts-wait/<name>` in the outbox), so a printed line is not printed again and a line addressed to another session waits for that session's waiter; Ops' `cursor.json` stays the drain's.
+Done when the task is running; the relay sends the same line later, so drop that copy.
 
 ## Wait on a signal
 
@@ -248,7 +249,8 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
   Then it goes to the 7-day trash through `playground rm --worktree` (`--pr <url>` at a merge), which keeps one a process holds,
   its `node_modules` folders and `web/next/.next` removed from the trashed copy, which a `bun install` rebuilds, and then loses its `playground-<worktree>-db` and `-redis` containers (`docker rm -fv`, each name matched whole, never the live dashboard's database) and its local branch.
   Another repo's worktree goes through `git -C <repo> worktree remove <path>` with no force flag, then `git worktree prune` and `git branch -D`; the main checkout is never one.
-  A session clears its own scratch itself before it ends, with `playground rm <path>`: its `~/.playground/scratch/<name>/` and `scratchpad/<name>/`, each path resolved past symlinks, are the one place `playground rm` clears there, for that session alone, and every other path there, another session's scratch included, stays refused.
+  A session clears its own scratch itself before it ends, with `playground rm <path>`: its `~/.playground/scratch/<name>/` and `scratchpad/<name>/`, each path resolved past symlinks, are the one place `playground rm` clears there for that session alone, and a live session's scratch stays refused to every other.
+  A `scratchpad/<folder>/` whose session has ended, a real folder no live roster row names as itself or as `<folder>-<role>`, clears whole through `playground rm <path>`, so Ops clears it on its lead's word as it does a worktree.
   A `scratch/` folder left once its session is gone, with no live session and no roster row naming it that has not ended, the nightly clean moves to the trash ([LIFECYCLE.md](LIFECYCLE.md)).
 - Guards: only a worker, reviewer or tester, not busy for 10+ minutes, with no uncommitted or unpushed work in a worktree it used (the main checkout, where every session starts, is not one, nor a Playground worktree whose PR `playground rm` confirms merged or closed, which the cleanup discards); otherwise its lead gets a `Not ended` line saying why, and the session waits.
 - A reviewer ended idle is resumed by its worker on the next push, under the same name (**rounds**): `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir> --pr <its PR's URL>`, or its extension item as `<scope>/<kind>/<key>` (the `--pr` rule is [SPAWN.md](SPAWN.md#modes)'s); its `Ended` line goes to its worker too.
