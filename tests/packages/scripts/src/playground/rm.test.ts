@@ -10,6 +10,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -355,6 +356,20 @@ test("runRm clears an ended session's whole scratchpad folder over the tripwire'
   expect(
     readdirSync(folder, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()),
   ).toHaveLength(5001)
+})
+
+// the file count does not apply to an ended session's whole folder, so its refusal names the byte cap alone
+test("runRm refuses an ended session's whole scratchpad folder over 2 GB, naming the 2 GB cap alone", async () => {
+  const { deps, pad, told } = pads([{ name: "a4b5c6-worker", status: "ended" }])
+  const folder = join(pad, "a4b5c6-worker")
+  mkdirSync(folder, { recursive: true })
+  writeFileSync(join(folder, "big.bin"), "")
+  truncateSync(join(folder, "big.bin"), 2 * 1024 ** 3 + 1)
+  expect(await runRm([folder], deps)).toBe(1)
+  expect(existsSync(join(folder, "big.bin"))).toBe(true)
+  expect(told.filter((line) => line.includes("past the tripwire"))).toEqual([
+    expect.stringContaining(" holds over 2 GB, past the tripwire"),
+  ])
 })
 
 test("runRm keeps the tripwire's file count for the caller's own scratchpad folder, a path inside an ended folder and any other path", async () => {
