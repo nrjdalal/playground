@@ -273,6 +273,84 @@ test("runRm refuses a symlink inside the caller's own scratch folder that points
   expect(existsSync(join(scratch, "keys"))).toBe(true)
 })
 
+// The machine's scratchpad, with a roster of the given rows.
+const pads = (rows: { name: string; status: string }[]) => {
+  const m = machine()
+  writeFileSync(join(m.deps.data, "roster.json"), JSON.stringify({ agents: rows }))
+  return { ...m, pad: join(m.deps.data, "scratchpad") }
+}
+
+test("runRm clears a path in the caller's own scratchpad folder", async () => {
+  const { deps, pad } = pads([{ name: "j6rjgy-worker", status: "working" }])
+  mkdirSync(join(pad, "j6rjgy-worker", "1929"), { recursive: true })
+  writeFileSync(join(pad, "j6rjgy-worker", "1929", "probe.log"), "x")
+  expect(await runRm([join(pad, "j6rjgy-worker", "1929")], deps)).toBe(0)
+  expect(existsSync(join(pad, "j6rjgy-worker", "1929"))).toBe(false)
+  expect(existsSync(join(pad, "j6rjgy-worker"))).toBe(true)
+})
+
+test("runRm clears the whole scratchpad folder of a session the roster lists as finished, or lists not at all", async () => {
+  const { deps, pad } = pads([
+    { name: "a4b5c6-reviewer", status: "ended" },
+    { name: "d7e8f9-runner", status: "parked" },
+  ])
+  for (const name of ["a4b5c6-reviewer", "d7e8f9-runner", "q1w2e3"]) {
+    mkdirSync(join(pad, name, "shots"), { recursive: true })
+    writeFileSync(join(pad, name, "shots", "a.png"), "x")
+    expect(await runRm([join(pad, name)], deps)).toBe(0)
+    expect(existsSync(join(pad, name))).toBe(false)
+  }
+  expect(existsSync(pad)).toBe(true)
+})
+
+test("runRm refuses a live session's scratchpad folder, every path in it, and its bare id's folder while any of that id's rows is live, to any other session", async () => {
+  const { deps, pad, told } = pads([
+    { name: "j6rjgy-worker", status: "working" },
+    { name: "a4b5c6-reviewer", status: "waiting" },
+    { name: "h1j2k3-tester", status: "starting" },
+    { name: "p4q5r6-worker", status: "ended" },
+    { name: "p4q5r6-reviewer", status: "working" },
+  ])
+  for (const path of [
+    join(pad, "a4b5c6-reviewer"),
+    join(pad, "a4b5c6-reviewer", "r1.md"),
+    join(pad, "h1j2k3-tester"),
+    join(pad, "h1j2k3"),
+    join(pad, "p4q5r6"),
+  ]) {
+    mkdirSync(join(pad, "a4b5c6-reviewer"), { recursive: true })
+    mkdirSync(join(pad, "h1j2k3-tester"), { recursive: true })
+    mkdirSync(join(pad, "h1j2k3"), { recursive: true })
+    mkdirSync(join(pad, "p4q5r6"), { recursive: true })
+    writeFileSync(join(pad, "a4b5c6-reviewer", "r1.md"), "x")
+    expect(await runRm([path], deps)).toBe(1)
+    expect(existsSync(path)).toBe(true)
+  }
+  expect(told.every((line) => line.includes("is inside the protected"))).toBe(true)
+})
+
+test("runRm refuses the scratchpad folder itself, every other path in the data folder, an ended session's folder that is a symlink, and any of them while the roster cannot be read", async () => {
+  const { deps, home, pad } = pads([{ name: "a4b5c6-reviewer", status: "ended" }])
+  mkdirSync(join(pad, "a4b5c6-reviewer"), { recursive: true })
+  mkdirSync(join(deps.data, "briefs"), { recursive: true })
+  mkdirSync(join(home, "kept"), { recursive: true })
+  symlinkSync(join(deps.data, "briefs"), join(pad, "x9y8z7-worker"))
+  symlinkSync(join(home, "kept"), join(pad, "m5n6b7-worker"))
+  for (const path of [
+    pad,
+    join(deps.data, "roster.json"),
+    join(deps.data, "briefs"),
+    join(pad, "x9y8z7-worker"),
+    join(pad, "m5n6b7-worker"),
+  ]) {
+    expect(await runRm([path], deps)).toBe(1)
+    expect(existsSync(path)).toBe(true)
+  }
+  writeFileSync(join(deps.data, "roster.json"), "{")
+  expect(await runRm([join(pad, "a4b5c6-reviewer")], deps)).toBe(1)
+  expect(existsSync(join(pad, "a4b5c6-reviewer"))).toBe(true)
+})
+
 test("runRm tells the dispatcher of a protected path, and not of a missing one", async () => {
   const { deps, home, told } = machine()
   expect(await runRm([home], deps)).toBe(1)
