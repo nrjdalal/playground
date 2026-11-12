@@ -126,14 +126,17 @@ export async function requireSignedWrite(
 // Pure but for seen, which it shares with requireRelay: the bot's read a frame holds, or the answer that refuses it, before any route runs. It refuses as refuseStale does, then a bot off readers (the yard.logReaders setting), then a path off BOT_GETS, so a bot reaches no RELAY_GETS or RELAY_WRITES route.
 export function requireBotRead(
   raw: string,
-  { readers, ...deps }: { login: string; now: Date; readers: readonly string[]; seen: SeenIds },
+  {
+    readers,
+    ...deps
+  }: { login: string; now: Date; readers: () => readonly string[]; seen: SeenIds },
 ): { read: RelayBotRead } | { refused: RelayResponse } | null {
   const frame = relayBotSchema.safeParse(parse(raw))
   if (!frame.success) return null
   const read = frame.data
   const stale = refuseStale(read, deps)
   if (stale) return { refused: stale }
-  if (!readers.some((reader) => sameLogin(reader, read.bot)))
+  if (!readers().some((reader) => sameLogin(reader, read.bot)))
     return { refused: json(read.id, 403, "FORBIDDEN", "This Mac lets no such bot read its log") }
   if (!pathOn(BOT_GETS, read.path))
     return { refused: json(read.id, 403, "FORBIDDEN", "A bot reads the dispatcher's log alone") }
@@ -258,10 +261,10 @@ export async function answerRelay(
       .catch((error: unknown) => console.error("[relay] the audit line was not written", error))
     return answer
   }
-  if (relayBotSchema.safeParse(parse(raw)).success) {
-    const checked = requireBotRead(raw, { login, now, readers: readers(), seen })
-    if (checked === null || "refused" in checked) return checked?.refused ?? null
-    const { read } = checked
+  const bot = requireBotRead(raw, { login, now, readers, seen })
+  if (bot) {
+    if ("refused" in bot) return bot.refused
+    const { read } = bot
     try {
       const response = await dispatch(
         new Request(`http://127.0.0.1${read.path}`, { headers: { cookie: await cookie() } }),

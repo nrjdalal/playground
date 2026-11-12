@@ -162,7 +162,7 @@ async function bot(words: string[], client: YardClient, io: YardIo): Promise<num
       `Made @${bot.login}, its DM ${bot.dm}; its token is in the Keychain item ${botService(name!)}`,
     )
     if (log)
-      io.out(`@${bot.login} reads the dispatcher's log, hidden secrets and all, through this Mac`)
+      io.out(`@${bot.login} reads the dispatcher's log through this Mac, every secret hidden`)
     io.out(
       `Next: a reveal card for ${botService(name!)}, so the owner copies the token into the bot`,
     )

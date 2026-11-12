@@ -231,7 +231,7 @@ Adding an account that is already listed replaces its secret and leaves its row 
 `playground yard bot add <name>` makes a bot on Yard, `<name>[bot]`, with its own DM with you and its own token, which goes straight into the Keychain item `playground-yard-bot-<name>` and never shows; it prints the item's name and the DM's id, and a reveal card in your [Inbox](/docs/inbox) copies the token for you to paste into the bot.
 The bot's token reads and posts only in that DM; hand the bot [Connect a bot](/docs/yard-bot), which says how.
 `playground yard bot add <name> --log` also lets the bot read your dispatcher's log through this Mac, with every secret hidden first and each read noted in its DM; the switch beside it on Yard's Account page turns that off or on again.
-`playground yard bot revoke <name>` revokes it, stops this Mac answering its reads of the log and deletes its Keychain item; Revoke beside it on Yard's Account page revokes it on Yard alone, so run the command after it to delete the item too.
+`playground yard bot revoke <name>` revokes it, stops this Mac answering its reads of the log and deletes its Keychain item; Revoke beside it on Yard's Account page revokes it on Yard alone, so run the command after it to delete the item and stop this Mac answering its reads too.
 
 ## Skill sets: `playground orgs`
 
