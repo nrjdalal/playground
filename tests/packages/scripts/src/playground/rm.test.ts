@@ -838,7 +838,7 @@ test("a session's --worktree --discard on a folder outside the worktrees folder 
       console.error = error
     }
     expect(said).toEqual([
-      `playground: --worktree takes a folder in ${worktrees}, not ${outside}: playground rm ${outside} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
+      `playground: --worktree takes a folder in ${worktrees} or a git worktree in another repo's .claude/worktrees, not ${outside}: playground rm ${outside} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
     ])
     expect(existsSync(outside)).toBe(true)
   }
@@ -981,7 +981,7 @@ test("--worktree refuses, in another repo, a folder in its .claude/worktrees git
       expect(await rmSaid(words, session)).toEqual({
         code: 1,
         said: [
-          `playground: --worktree takes a folder in ${ours}, not ${path}: playground rm ${path} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
+          `playground: --worktree takes a folder in ${ours} or a git worktree in another repo's .claude/worktrees, not ${path}: playground rm ${path} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
         ],
       })
       expect(existsSync(path)).toBe(true)

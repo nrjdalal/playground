@@ -435,7 +435,7 @@ export function quarantine(
     return refused(`${abs} is a worktree: playground rm --worktree removes it`)
   if (!isWorktree && opts.worktree)
     return refused(
-      `--worktree takes a folder in ${worktreesOf(roots)}, not ${abs}: playground rm ${abs} moves a folder outside it to the trash, with no --worktree or --discard, up to ${LIMITS.files.toLocaleString("en-US")} files or ${LIMITS.bytes / 1024 ** 3} GB; leave a bigger tree in place for your lead's cleanup`,
+      `--worktree takes a folder in ${worktreesOf(roots)} or a git worktree in another repo's .claude/worktrees, not ${abs}: playground rm ${abs} moves a folder outside it to the trash, with no --worktree or --discard, up to ${LIMITS.files.toLocaleString("en-US")} files or ${LIMITS.bytes / 1024 ** 3} GB; leave a bigger tree in place for your lead's cleanup`,
     )
   const held = opts.worktree && worktreeRefusal(abs, roots, opts.worktree)
   if (held) return refused(held)
