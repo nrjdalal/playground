@@ -6,6 +6,7 @@ import { dirname, join, relative, resolve, sep } from "node:path"
 import { dataDirOf } from "@packages/env/data-dir"
 import { extensionsDir, extGit, scopeDir } from "@packages/settings"
 
+import { sourceOf } from "../ops-restart/restart"
 import {
   beat,
   type Beat,
@@ -126,15 +127,20 @@ export async function hold(
 // The file in an org's script folder under ops naming the accepted revision the render last wrote there (installScripts in playground/jobs.ts).
 export const REVISION = ".revision"
 
-// A scope's last commit on one item's path in its clone, as a short sha, else "".
-export const lastRevision = (data: string, scope: string, path: string): string =>
-  extGit(scopeDir(data, scope), ["log", "-1", "--format=%h", "--", path]).out.trim()
+// A scope's last commit on any of the paths in its clone, as a short sha, else "".
+export const lastRevision = (data: string, scope: string, ...paths: string[]): string =>
+  extGit(scopeDir(data, scope), ["log", "-1", "--format=%h", "--", ...paths]).out.trim()
 
-// The accepted revision of the code a job's entry file runs, else null: an extension item's run in place (<data>/extensions/<scope>/<kinds>/<key>/), its clone's last commit there, which no proposal makes since one sits under proposed/; an org's script folder's under ops, from its REVISION file; none for a job of the checkout's own.
+// The accepted revision of the code a job's entry file runs, else null: an extension item's run in place (<data>/extensions/<scope>/<kinds>/<key>/), its clone's last commit on that item or any other item of the scope its imports reach (sourceOf), which no proposal makes since one sits under proposed/; an org's script folder's under ops, from its REVISION file; none for a job of the checkout's own.
 export const revisionOf = (main: string, data: string): string | null => {
   const [scope, kinds, key, ...file] = relative(extensionsDir(data), main).split(sep)
-  if (scope && kinds && key && file.length && scope !== ".." && kinds !== "proposed")
-    return lastRevision(data, scope, `${kinds}/${key}`) || null
+  if (scope && kinds && key && file.length && scope !== ".." && kinds !== "proposed") {
+    const items = sourceOf(scopeDir(data, scope), main)
+      .map((path) => path.split("/").slice(0, 2))
+      .filter(([folder, name]) => name && folder !== "packages" && folder !== "proposed")
+      .map((parts) => parts.join("/"))
+    return lastRevision(data, scope, ...new Set(items)) || null
+  }
   const [folder, ...rest] = relative(join(data, "ops"), main).split(sep)
   if (!folder || folder === ".." || !rest.length) return null
   try {
@@ -179,11 +185,10 @@ export function scheduled(
   void pulse()
   const pulses = setInterval(() => void pulse(), CYCLE_SECONDS * 1000)
   const ticks = setInterval(() => {
+    // the beats due start first, so a restart waits for a tick with none running and none due
+    void cycle({ now: new Date(), ops, repo: REPO, run, send }, state, beats)
     const next = restartFor(revision, revisionOf(main, data), state)
-    if (!next) {
-      void cycle({ now: new Date(), ops, repo: REPO, run, send }, state, beats)
-      return
-    }
+    if (!next) return
     clearInterval(ticks)
     clearInterval(pulses)
     void beat(
