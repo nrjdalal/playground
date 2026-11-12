@@ -75,6 +75,32 @@ export const groups: Group[] = [
         `cd "$X"; git rm --pathspec-from-file=list`,
       ],
       ["macOS chmod of a dashed file after a cd to a variable", `cd "$X"; chmod 644 -policy.json`],
+      // round 2: a one-letter long prefix, more of tar's value options before a word that looks like -C, and macOS chmod's dash-led mode
+      [
+        "sort's one-letter --output after a cd to a variable",
+        `cd "$X"; sort --o policy.json /tmp/a`,
+      ],
+      [
+        "tar whose --include value is a -C after a cd to a variable",
+        `cd "$X"; tar -xf /tmp/a.tar --include -C /tmp/out`,
+      ],
+      [
+        "tar whose --uid value is a -C after a cd to a variable",
+        `cd "$X"; tar -xf /tmp/a.tar --uid -C /tmp/out`,
+      ],
+      [
+        "tar whose --options value is a -C after a cd to a variable",
+        `cd "$X"; tar -xf /tmp/a.tar --options -C /tmp/out`,
+      ],
+      [
+        "tar whose --newer-mtime value is a -C after a cd to a variable",
+        `cd "$X"; tar -xf /tmp/a.tar --newer-mtime -C /tmp/out`,
+      ],
+      [
+        "GNU tar whose --index-file value is a -C after a cd to a variable",
+        `cd "$X"; gtar -xf /tmp/a.tar --index-file -C /tmp/out`,
+      ],
+      ["macOS chmod's dash-led mode after a cd to a variable", `cd "$X"; chmod -w -policy.json`],
     ],
   },
 ]
