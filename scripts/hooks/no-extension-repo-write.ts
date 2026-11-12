@@ -85,7 +85,7 @@ const policy = (repos: Set<string>): Policy => ({
   hosts: false,
   place: "an extension repository",
   what: "a write to an extension repository",
-  why: `The sync renders each extension repository's main into every session's store. A session pushes a branch other than the default by its remote and refspec (git push origin HEAD:<branch>), opens a pull request, and lands it with bun run ext:merge <owner>/<repo> <n> at the review's 5/5. For anything else: ${OWNER_ROUTE}`,
+  why: `The sync renders each extension repository's main into every session's store. A session commits in its clone on a branch other than the default, as a git commit call of its own, pushes that branch by its remote and refspec (git push origin HEAD:<branch>), opens a pull request, and lands it with bun run ext:merge <owner>/<repo> <n> at the review's 5/5. For anything else: ${OWNER_ROUTE}`,
 })
 
 // Passes every call with no extensions root, since nothing is synced; fails closed, as the leak guards do, only on a call that may write, when policy.json or the login does not read.

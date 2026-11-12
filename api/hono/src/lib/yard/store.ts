@@ -297,7 +297,7 @@ const shownAt = sql<string>`date_trunc('milliseconds', coalesce(${yardMessage.de
 
 export type Waiting = { held: boolean; message: Message; shownAt: string }
 
-// What waits on the caller past a mark, which the local Playground cards in its Inbox, oldest first by when it showed, then by id: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, every message a bot they made sends, which reaches only its DM with them, but the line each read of the log posts (kind log, which no bot posts itself), and their own posts held for their approval; the mark is a time and, from the second read on, the last item's id, so rows in that item's millisecond still wait; each list reads at most limit rows, and when one comes back full both stop at the earlier full list's last row, so the next mark skips no row either list left out.
+// What waits on the caller past a mark, which the local Playground cards in its Inbox (a bot's message told to its dispatcher instead), oldest first by when it showed, then by id: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, every message a bot they made sends, which reaches only its DM with them, but the line each read of the log posts (kind log, which no bot posts itself), and their own posts held for their approval; the mark is a time and, from the second read on, the last item's id, so rows in that item's millisecond still wait; each list reads at most limit rows, and when one comes back full both stop at the earlier full list's last row, so the next mark skips no row either list left out.
 export const waiting = async (
   db: Database,
   caller: Caller,
@@ -667,18 +667,27 @@ export const setReadsLog = async (
   return (await bots(db, caller)).find((bot) => bot.name === name)!
 }
 
+// A bot's one DM, with the owner who made it, found from its token alone.
+export const botDm = async (
+  db: Database,
+  caller: Caller & { bot: { madeBy: string } },
+): Promise<string> => {
+  const [dm] = await db
+    .select({ id: yardChannel.id })
+    .from(yardChannel)
+    .where(eq(yardChannel.name, dmName(caller.id, caller.bot.madeBy)))
+  if (!dm) throw notFound("Bot")
+  return dm.id
+}
+
 // A bot's read of the log reaches its maker's Mac: the maker's login, which the Mac checks against its own token's, and the bot's DM, where the read's line goes.
 export const logReadOf = async (db: Database, caller: Caller & { bot: { madeBy: string } }) => {
   const [maker] = await db
     .select({ login: user.login })
     .from(user)
     .where(eq(user.id, caller.bot.madeBy))
-  const [dm] = await db
-    .select({ id: yardChannel.id })
-    .from(yardChannel)
-    .where(eq(yardChannel.name, dmName(caller.id, caller.bot.madeBy)))
-  if (!maker?.login || !dm) throw notFound("Bot")
-  return { dm: dm.id, login: maker.login }
+  if (!maker?.login) throw notFound("Bot")
+  return { dm: await botDm(db, caller), login: maker.login }
 }
 
 // The line a read of the log leaves in the bot's DM, as the bot's, kind log, so its maker sees each read and the Inbox cards none (waiting).

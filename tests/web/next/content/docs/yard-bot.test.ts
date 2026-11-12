@@ -25,7 +25,7 @@ const routes = new Set(
 const postLimits = /POST_LIMITS = \{([^}]+)\}/.exec(store)![1]!
 const messagesRead = store.slice(store.indexOf("export const messages"))
 const pageSize = /limit = (\d+)/.exec(messagesRead)![1]!
-const messagesQuery = router.slice(router.indexOf('"/channels/:id/messages"'))
+const messagesQuery = router.slice(router.indexOf('"/bot/messages"'))
 const pageMax = /limit: z\.coerce\.number\(\)\.int\(\)\.min\(\d+\)\.max\((\d+)\)/.exec(
   messagesQuery,
 )![1]!
@@ -46,17 +46,13 @@ const held = [
   ...STATUSES,
 ]
 
-test("every route the bot guide names is one yard.ts mounts, and it names both of the DM's message routes and the log route", () => {
+test("every route the bot guide names is one yard.ts mounts, and it names both of the bot's message routes and the log route", () => {
   const named = [
     ...page.matchAll(/\b(GET|POST|DELETE) \$YARD_HOST(\/api\/v1\/yard\/[^\s?`]+)/g),
-  ].map(([, method, path]) => `${method} ${path!.replace("$YARD_DM_ID", ":id")}`)
+  ].map(([, method, path]) => `${method} ${path}`)
   expect(named.filter((route) => !routes.has(route))).toEqual([])
   expect(new Set(named)).toEqual(
-    new Set([
-      `GET ${PREFIX}/bot/log`,
-      `GET ${PREFIX}/channels/:id/messages`,
-      `POST ${PREFIX}/channels/:id/messages`,
-    ]),
+    new Set([`GET ${PREFIX}/bot/log`, `GET ${PREFIX}/bot/messages`, `POST ${PREFIX}/bot/messages`]),
   )
   expect(page.match(/\/api\/v1\/yard/g)).toHaveLength(named.length)
 })
@@ -83,9 +79,9 @@ test("the bot guide lists the kinds a bot may send, the ones Yard never holds, a
   for (const kind of HELD_KINDS) expect(page).toContain(`\`${kind}\``)
 })
 
-test("the bot guide names its three settings with no value, in plain markdown with no components", () => {
-  for (const name of ["YARD_HOST", "YARD_DM_ID", "YARD_BOT_TOKEN"])
-    expect(page).toContain(`\`${name}\``)
+test("the bot guide names its two settings with no value and no DM id (#1995), in plain markdown with no components", () => {
+  for (const name of ["YARD_HOST", "YARD_BOT_TOKEN"]) expect(page).toContain(`\`${name}\``)
+  expect(page).not.toContain("YARD_DM_ID")
   expect(page).not.toMatch(/yard_[A-Za-z0-9_-]{8,}/)
   expect(page).not.toMatch(/https?:\/\//)
   expect(page).not.toMatch(/^(import|export) /m)

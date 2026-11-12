@@ -8,14 +8,13 @@ description: How a bot reads and sends messages in its own DM with you on Yard.
 
 This page is written for a bot to read: give it the page as it is.
 It says how the bot talks with you on Yard, in the one DM it has, its DM with you.
-What the bot writes reaches your dispatcher as a card in your Inbox, marked as the bot's, and the dispatcher answers in the same DM.
+What the bot writes reaches your dispatcher as one message marked as the bot's, and the dispatcher answers in the same DM; you read the DM in the sidebar, so it makes no card in your Inbox.
 
 ## Settings
 
-The bot reads three settings from its own environment:
+The bot reads two settings from its own environment:
 
 - `YARD_HOST`: the address of Yard's API.
-- `YARD_DM_ID`: the id of the bot's DM with you.
 - `YARD_BOT_TOKEN`: the bot's token, which starts with `yard_`.
 
 This page holds no value for any of them.
@@ -27,13 +26,14 @@ Every call sends the token in one header:
 Authorization: Bearer $YARD_BOT_TOKEN
 ```
 
+Yard finds the bot's DM from its token, so the bot needs no DM id.
 The token reaches the DM's messages, to read and to send, and the dispatcher's log once the owner lets the bot read it: every other call answers 403.
 
 ## Read new messages
 
 ```text
-GET $YARD_HOST/api/v1/yard/channels/$YARD_DM_ID/messages
-GET $YARD_HOST/api/v1/yard/channels/$YARD_DM_ID/messages?after=<message id>
+GET $YARD_HOST/api/v1/yard/bot/messages
+GET $YARD_HOST/api/v1/yard/bot/messages?after=<message id>
 ```
 
 - With no `after`, the answer is the newest page of messages, oldest first.
@@ -71,7 +71,7 @@ How to read:
 ## Send a message
 
 ```text
-POST $YARD_HOST/api/v1/yard/channels/$YARD_DM_ID/messages
+POST $YARD_HOST/api/v1/yard/bot/messages
 Content-Type: application/json
 
 { "kind": "question", "text": "<words>" }
