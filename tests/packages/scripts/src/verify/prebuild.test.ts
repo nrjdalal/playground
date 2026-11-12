@@ -668,9 +668,9 @@ test(
   within(2),
 )
 
-// issue 1964: a test's child process may import a package no reached source names, so test:file builds every workspace package whose dist is missing, whatever its files import
+// issue 1964: a test's child process may import a package no reached source names, so test:file builds every shared package whose dist is missing, whatever its files import
 test(
-  "test:file builds every workspace package whose dist is missing, so a child process's import the test file does not import resolves, and then nothing",
+  "test:file builds every shared package whose dist is missing, so a child process's import the test file does not import resolves, and then nothing",
   () => {
     const { dir, log, run } = clone()
     try {
@@ -781,7 +781,8 @@ test(
       expect(log()).toBe(
         "run build --filter=@packages/one --filter=@api/hono --filter=@packages/three --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
       )
-      rmSync(join(dir, "packages/two/dist"), { recursive: true, force: true })
+      for (const path of ["packages/three/dist", "packages/two/dist"])
+        rmSync(join(dir, path), { recursive: true, force: true })
       const types = run(["--types", "tests/one.test.ts", "tests/two.test.ts"])
       expect(types.stderr).toContain("check-types:tests: building what @packages/two needs")
       expect(types.exitCode).toBe(0)
@@ -791,6 +792,7 @@ test(
       ])
       expect(run(["--types", "tests/one.test.ts", "tests/two.test.ts"]).exitCode).toBe(0)
       expect(log().split("\n").filter(Boolean)).toHaveLength(2)
+      expect(existsSync(join(dir, "packages/three/dist"))).toBe(false)
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
