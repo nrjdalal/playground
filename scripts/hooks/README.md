@@ -1026,6 +1026,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - Every factory session starts with its standing rules in context: `scripts/hooks/rules.ts`, a SessionStart hook with no matcher (startup, resume, compact and clear) in both settings files, renders the core extension's rules, then each stacked org's, then the signed-in login's,
   each `{key}` slot filled from the extensions' `policy.json` (the values for the session's repo's GitHub owner when `ext.links` guards it, else the factory's), and a key they do not set from its default in `packages/settings/src/rules.ts`.
+  A session's folder with no GitHub origin takes the org whose own folder `~/<org>` holds it, by `orgFolderOf` in `packages/settings/src/ext.ts`, the same reader `playground orgs resolve` uses for skills, so a worker the start job opens in `~/<org>` gets that org's rules.
   Each scope's rules are `<scope>/rules/*.md`: `core`'s from the checkout's `extensions/core/rules/` (`CORE_RULES`);
   each extension `ext.links` links to the session's repo, in `ext.order`'s order (`extChain` in `packages/settings/src/settings.ts`), and the login's (`loginOf`: `PLAYGROUND_LOGIN`, else the extensions' `login` file, else no login rules), through the extensions' reader (`readRendered` in `packages/settings/src/rendered.ts`).
   A rule file is one rule, named by its file, a hyphen read as a space (`local-page.md` holds **local page**): optional frontmatter whose one line, `decisions: [i<n>, ...]`, cites the Inbox items behind it,

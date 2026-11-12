@@ -3,7 +3,7 @@ import { dirname, join } from "node:path"
 
 import type { Database } from "@packages/db"
 import { env } from "@packages/env/api-hono"
-import { approvePath, type Channel, type Message } from "@packages/message"
+import { approvePath, type Channel, isBotLogin, type Message } from "@packages/message"
 
 import { postItem } from "@/lib/dashboard/inbox"
 import { dataDir } from "@/lib/sessions/paths"
@@ -37,13 +37,16 @@ export const untrusted = (message: Message, channel: Channel): string => {
   return `${fence}text\n${body}\n${fence}`
 }
 
-// Whether an inbound message calls on the owner, decided by its channel's kind, so a new kind (`self`, for remote work) adds one branch here.
+const mentioned = (message: Message, login: string) =>
+  mentionsOf(message.text).includes(login.toLowerCase())
+
+// Whether an inbound message calls on the owner, decided by its channel's kind, so a new kind (`self`, for remote work) adds one branch here; in a DM, a bot's every message does, since a bot's one DM is with the owner who made it.
 const CALLS_ON: Record<Channel["kind"], (message: Message, login: string) => boolean> = {
-  channel: (message, login) => mentionsOf(message.text).includes(login.toLowerCase()),
-  dm: (message, login) => mentionsOf(message.text).includes(login.toLowerCase()),
+  channel: mentioned,
+  dm: (message, login) => isBotLogin(message.from.login) || mentioned(message, login),
 }
 
-// The Inbox card for a message someone else sent that calls on the owner, or null.
+// The Inbox card for a message someone else sent that calls on the owner, or null: a finding to read, never an Approve, a bot's named as the bot's.
 export const inboundCard = (message: Message, channel: Channel, login: string): Card | null => {
   if (message.from.login.toLowerCase() === login.toLowerCase()) return null
   if ((message.status ?? "sent") !== "sent" || !CALLS_ON[channel.kind](message, login)) return null
@@ -51,7 +54,9 @@ export const inboundCard = (message: Message, channel: Channel, login: string): 
     from: YARD_FROM,
     kind: "update",
     preview: { outcome: "finding", text: untrusted(message, channel) },
-    title: `@${message.from.login} mentioned you in ${place(channel)}`,
+    title: isBotLogin(message.from.login)
+      ? `@${message.from.login} (bot) wrote in a DM`
+      : `@${message.from.login} mentioned you in ${place(channel)}`,
   }
 }
 
@@ -89,7 +94,7 @@ const saveMark = async (file: string, mark: Mark) => {
   await Bun.write(file, `${JSON.stringify(mark)}\n`)
 }
 
-// Cards what waits on the owner since the last mark, oldest first by when it showed: each mention, a thread's reply or an approved held post included, and each post of theirs Yard holds. It saves the mark after each card, so a failed post retries from the first one not carded. The first run only sets the mark.
+// Cards what waits on the owner since the last mark, oldest first by when it showed: each mention, a thread's reply or an approved held post included, each message from a bot of theirs, and each post of theirs Yard holds. It saves the mark after each card, so a failed post retries from the first one not carded. The first run only sets the mark.
 export async function pollWaiting(
   client: YardClient,
   post: (card: Card) => Promise<void>,

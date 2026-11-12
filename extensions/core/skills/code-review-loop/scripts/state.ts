@@ -398,10 +398,49 @@ export const number = (text: string): number => {
   return Number(text)
 }
 
+// The factory repo's own name, lowercased: PLAYGROUND_FACTORY_REPO when set (the tests' seam), else factory.repo from the data folder's policy.json (setting.ts's factoryRepo rule), else this checkout's origin. A plan row whose pr is a bare number names a PR of this repo alone; empty when none of the three reads, so no number row matches.
+const factoryRepoCache: { repo?: string } = {}
+export const factoryRepoName = (): string => {
+  const named = process.env.PLAYGROUND_FACTORY_REPO
+  if (named) return named.toLowerCase()
+  if (factoryRepoCache.repo === undefined) {
+    let repo = ""
+    try {
+      const policy = JSON.parse(
+        readFileSync(join(dataDir(), "extensions", "policy.json"), "utf8"),
+      ) as Json
+      const value = ((policy || {}).values || {})["factory.repo"]
+      if (typeof value === "string" && value) repo = value.toLowerCase()
+    } catch {}
+    if (!repo) {
+      try {
+        const url = io.run(
+          "git",
+          "-C",
+          join(import.meta.dir, "..", "..", "..", "..", ".."),
+          "remote",
+          "get-url",
+          "origin",
+        )
+        repo = (
+          /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(url.trim())?.[1] ?? ""
+        ).toLowerCase()
+      } catch {}
+    }
+    factoryRepoCache.repo = repo
+  }
+  return factoryRepoCache.repo
+}
+
 const planNaming = (plan: Json[], repo: string, n: number): Json[] => {
   const url = prUrl(repo, n)
+  const factory = factoryRepoName() === repo.toLowerCase()
   return plan.filter(
-    (i) => typeof i === "object" && i !== null && typeof i.pr === "string" && url.test(i.pr),
+    (i) =>
+      typeof i === "object" &&
+      i !== null &&
+      ((typeof i.pr === "string" && url.test(i.pr)) ||
+        (factory && typeof i.pr === "number" && i.pr === n)),
   )
 }
 

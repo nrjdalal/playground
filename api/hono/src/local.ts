@@ -3,6 +3,7 @@ import { db } from "@packages/db"
 import { getBuildVersion } from "@packages/env"
 import { env } from "@packages/env/api-hono"
 import { answerKind } from "@packages/message"
+import { readPolicyOrDefaults, yardSettings } from "@packages/settings"
 import { describeRoute, openAPIRouteHandler, resolver } from "hono-openapi"
 import { HTTPException } from "hono/http-exception"
 import { z } from "zod"
@@ -17,6 +18,7 @@ import { globalErrorResponses } from "@/lib/error"
 import { DB_TIMEOUT_MS, healthData } from "@/lib/health"
 import { startRelay } from "@/lib/relay/mac"
 import { createServer, upgradeWebSocket } from "@/lib/server"
+import { dataDir } from "@/lib/sessions/paths"
 import { sessionCookie } from "@/lib/sign-in"
 import { yardClient } from "@/lib/yard/client"
 import { startYardPoll } from "@/lib/yard/inbound"
@@ -324,6 +326,11 @@ if (env.YARD_API_URL && readsLive()) {
       return answerKind(item)
     },
     login: async (token) => (await yardClient(api, token).me()).login,
+    // read at each bot's read, so a bot add --log or a revoke counts from the next one, and a policy.json that does not parse lets no bot read
+    readers: () => {
+      const read = readPolicyOrDefaults(dataDir())
+      return read.refusal === undefined ? yardSettings.get(read.settings, "yard.logReaders") : {}
+    },
     token: () => keychain().read(),
   })
 }

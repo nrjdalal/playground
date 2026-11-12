@@ -36,7 +36,8 @@ For every agent of yours that `ListAgents` lists, or the roster shows with a sta
 - **Waiting** on a picker, which **ask** keeps factory sessions from raising: end it by a close and a resume whose brief gives the answer when a rule or a sound default decides it, or has the session post anything only the owner decides to the Inbox; otherwise leave it for the owner in that pane ([SESSIONS.md](SESSIONS.md#answer-a-picker)).
 - **Stuck** on a permission prompt: allow it when the command is needed, else deny it with a simpler shape ([SESSIONS.md](SESSIONS.md#answer-a-permission-prompt), **unstick**).
   When the command's shape prompted (a shell wrapper, a compound one-liner), deny it and have the session rerun it as plain commands.
-  When the action itself prompted and you cannot judge it (a delete, a protected path), deny it and send it to the dispatcher as a decision, which it posts (**ask**).
+  When a standing rule settles the answer, give it with `--rule <name>`, which records that rule.
+  When the action itself prompted and no rule settles it (a delete, a protected path), deny it and send it to the dispatcher as a decision, which it posts (**ask**).
   An allow is your own call as its manager, never presented as the owner's, and the action never moves to another session to dodge the prompt.
 - **Idle**, and its last turn ended without a report to you: ask it for its report, unless it idles under an urgent ticket's stop, which holds it idle until the all-clear (its brief's **stop**).
 - **Silent**: a worker with no push and no report to you for 60 minutes after a review round, the time under a stop left out (one worker chased a side bug for 3.5 hours unreported).
