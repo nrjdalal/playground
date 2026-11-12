@@ -79,11 +79,11 @@ describe("hold", () => {
 
 // A scheduled job's entry file at path, beating into ops: one beat each minute that, once started, waits for ops/pass-release, a restart that prints its call, on a 100 ms tick.
 const JOB = join(import.meta.dir, "../../../../../packages/scripts/src/ops-job/job.ts")
-const entry = (path: string, ops: string) => {
+const entry = (path: string, ops: string, tickMs = 100, head = "") => {
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(
     path,
-    `import { existsSync, writeFileSync } from "node:fs"
+    `${head}import { existsSync, writeFileSync } from "node:fs"
 import { scheduled } from ${JSON.stringify(JOB)}
 const ops = ${JSON.stringify(ops)}
 const pass = async () => {
@@ -92,7 +92,7 @@ const pass = async () => {
 }
 scheduled("ops-watch", [{ cron: "* * * * *", name: "pass", run: pass, to: "ops" }], ops, {
   restart: (job: string) => console.log("restart " + job),
-  tickMs: 100,
+  tickMs: ${tickMs},
 })
 `,
   )
@@ -126,15 +126,17 @@ const waitFor = async (check: () => boolean, ms = 5_000) => {
 }
 
 // One job run from a skill's folder in an extension's clone, as a skill-run job runs in place.
-const skillJob = () => {
+// Its entry imports a sibling skill's script, as a skill-run job may.
+const skillJob = (tickMs = 100) => {
   const data = scratch()
   const ops = join(data, "ops")
   mkdirSync(ops)
   const scope = join(data, "extensions", "acme")
-  mkdirSync(scope, { recursive: true })
+  mkdirSync(join(scope, "skills", "shared", "scripts"), { recursive: true })
+  writeFileSync(join(scope, "skills", "shared", "scripts", "lib.ts"), "export const one = 1\n")
   git(scope, "init", "-q")
   const main = join(scope, "skills", "watch", "scripts", "main.ts")
-  entry(main, ops)
+  entry(main, ops, tickMs, 'import "../../shared/scripts/lib.ts"\n')
   git(scope, "add", "-A")
   git(scope, "commit", "-q", "-m", "seed")
   return { data, first: git(scope, "rev-parse", "--short", "HEAD"), main, ops, scope }
@@ -171,6 +173,28 @@ describe("scheduled, on an accepted revision of the code it runs (#1880)", () =>
     expect(proc.exitCode).toBeNull()
     writeFileSync(join(ops, "pass-release"), "")
     expect(await proc.exited).toBe(0)
+  }, 20_000)
+
+  test("an accept of a sibling skill its entry imports restarts it too (#1880)", async () => {
+    const { ops, main, scope } = skillJob()
+    writeFileSync(join(ops, "pass-release"), "")
+    const proc = spawn(main)
+    expect(await waitFor(() => existsSync(join(ops, "ops-watch.json")))).toBe(true)
+    const second = commit(scope, "skills/shared/scripts/lib.ts", "export const one = 2\n")
+    expect(await proc.exited).toBe(0)
+    expect(heartbeat(ops, "ops-watch").lastResult).toBe(
+      `loop exited: revision ${second} accepted, restarting`,
+    )
+  }, 20_000)
+
+  test("a beat due on the tick that finds an accept runs before the job stops (#1880)", async () => {
+    const { main, ops, scope } = skillJob(1_000)
+    writeFileSync(join(ops, "pass-release"), "")
+    const proc = spawn(main)
+    expect(await waitFor(() => existsSync(join(ops, "ops-watch.json")))).toBe(true)
+    commit(scope, "skills/watch/scripts/lib.ts", "export const two = 2\n")
+    expect(await proc.exited).toBe(0)
+    expect(existsSync(join(ops, "pass-started"))).toBe(true)
   }, 20_000)
 
   test("the controls keep running: a change outside its own skill, a proposal under proposed/, and a core job with no revision", async () => {
