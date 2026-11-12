@@ -33,6 +33,7 @@ import {
   pathOf,
   program,
   pythonModule,
+  readPath,
   resolveText,
   run,
   slotWords,
@@ -1139,26 +1140,47 @@ function containedClient(parsed: Parsed): Parsed | undefined {
   }
   return { ...parsed, args: args.slice(at + 1), local: given, name: words[at] }
 }
+// The hosts a database value names, pushed onto hosts, undefined for one the hook cannot place: a host list read whole (each host a comma separates), a URL's host list and its query's host, hostaddr and service parameters
+type Hosts = (string | undefined)[]
+const namedHosts = (hosts: Hosts, value: string, service = false) => {
+  if (service) hosts.push(undefined)
+  else for (const host of value.split(",")) hosts.push(hostOf(host))
+}
+const urlHosts = (hosts: Hosts, value: string) => {
+  for (const m of value.matchAll(DB_URL)) {
+    namedHosts(hosts, m[1])
+    for (const pair of (m[2] ?? "").split("&")) {
+      const eq = pair.indexOf("=")
+      const key = eq < 0 ? pair : pair.slice(0, eq)
+      if (key === "host" || key === "hostaddr") namedHosts(hosts, pair.slice(eq + 1))
+      else if (key === "service") namedHosts(hosts, "", true)
+    }
+  }
+}
+// The refusal for the first host off this machine, or one the hook cannot place, a client's hosts name
+function hostRefusal(name: string, hosts: Hosts): string | undefined {
+  const at = hosts.findIndex((h) => h === undefined || !onThisMachine(h))
+  if (at < 0) return
+  const host = hosts[at]
+  return host === undefined
+    ? orgRefusal(
+        `this ${name} call`,
+        "the hook cannot tell which database it reaches, since a value it cannot read names it",
+        DB_FIX,
+      )
+    : orgRefusal(
+        `this ${name} call`,
+        `it reaches ${host}, a database off this machine, which may be an org's`,
+      )
+}
 // A database call the glm rule keeps a GLM session off: a client, or any command but a pure one, given a database URL, a conninfo, a host option, a positional host or a host variable naming a host off this machine, every host it names read; a client given a value the hook cannot read, a service name included, fails closed
 function dbCall(parsed: Parsed, env: Env): string | undefined {
   const inner = CONTAINER_RUNNERS.has(parsed.name) ? containedClient(parsed) : undefined
   if (inner) return dbCall(inner, env)
   const { args, local, name } = parsed
   const client = dbClient(name)
-  const hosts: (string | undefined)[] = []
-  // each host a value names, a comma-separated list read whole; a service name is one the hook cannot place
-  const named = (value: string, service = false) => {
-    if (service) hosts.push(undefined)
-    else for (const host of value.split(",")) hosts.push(hostOf(host))
-  }
-  const queried = (query: string) => {
-    for (const pair of query.split("&")) {
-      const eq = pair.indexOf("=")
-      const key = eq < 0 ? pair : pair.slice(0, eq)
-      if (key === "host" || key === "hostaddr") named(pair.slice(eq + 1))
-      else if (key === "service") named("", true)
-    }
-  }
+  const hosts: Hosts = []
+  const named = (value: string, service = false) => namedHosts(hosts, value, service)
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (unreadValue(a)) {
@@ -1166,10 +1188,7 @@ function dbCall(parsed: Parsed, env: Env): string | undefined {
       continue
     }
     const v = a.value
-    for (const m of v.matchAll(DB_URL)) {
-      named(m[1])
-      if (m[2]) queried(m[2])
-    }
+    urlHosts(hosts, v)
     if (!client) continue
     for (const m of v.matchAll(CONNINFO)) named(m[2], m[1] === "service")
     const mongo = mongoClient(name)
@@ -1204,19 +1223,76 @@ function dbCall(parsed: Parsed, env: Env): string | undefined {
     if (unreadValue(set as Word) || key === "PGSERVICE") hosts.push(undefined)
     else named(set.value)
   }
-  const at = hosts.findIndex((h) => h === undefined || !onThisMachine(h))
-  if (at < 0) return
-  const host = hosts[at]
-  return host === undefined
-    ? orgRefusal(
-        `this ${name} call`,
-        "the hook cannot tell which database it reaches, since a value it cannot read names it",
-        DB_FIX,
-      )
-    : orgRefusal(
-        `this ${name} call`,
-        `it reaches ${host}, a database off this machine, which may be an org's`,
-      )
+  return hostRefusal(name, hosts)
+}
+
+// A client's connect meta-command and its kin in the input it reads: psql's and pgcli's \c or \connect (a URL, a conninfo, or dbname user host port), mysql's connect or \r (db host), and mongosh's connect() (a URL, or host:port/db) or Mongo() (a URL or a host), given a literal
+const PG_CONNECT = /^[ \t]*\\(?:c|connect)(?:[ \t]+([^\n]*))?$/gm
+const MYSQL_CONNECT = /^[ \t]*(?:connect|\\r)(?:[ \t]+([^\n;]*))?;?[ \t]*$/gim
+const MONGO_CONNECT = /\b(connect|Mongo)\s*\(\s*([^),]*)/g
+const unquote = (word: string) => word.replace(/^['"`]|['"`]$/g, "")
+// The hosts the connect lines in a client's input name, pushed onto hosts, undefined for one holding a value the hook cannot read
+function inputHosts(name: string, text: string, hosts: Hosts) {
+  if (pgClient(name))
+    for (const m of text.matchAll(PG_CONNECT)) {
+      const rest = (m[1] ?? "").replace(/(?:^|\s)-reuse-previous=\S+/g, " ").trim()
+      const before = hosts.length
+      if (marked(rest)) hosts.push(undefined)
+      else urlHosts(hosts, rest)
+      if (hosts.length > before) continue
+      if (rest.includes("="))
+        for (const c of rest.matchAll(CONNINFO))
+          namedHosts(hosts, unquote(c[2]), c[1] === "service")
+      else {
+        const host = rest.split(/\s+/)[2]
+        if (host && host !== "-") namedHosts(hosts, unquote(host))
+      }
+    }
+  else if (mysqlClient(name))
+    for (const m of text.matchAll(MYSQL_CONNECT)) {
+      const rest = (m[1] ?? "").trim()
+      const host = rest.split(/\s+/)[1]
+      if (marked(rest)) hosts.push(undefined)
+      else if (host) namedHosts(hosts, unquote(host))
+    }
+  else if (mongoClient(name))
+    for (const [, call, arg] of text.matchAll(MONGO_CONNECT)) {
+      const value = /^(['"`])([^'"`]*)\1\s*$/.exec(arg.trim())?.[2]
+      if (arg.trim() === "") continue
+      if (value === undefined || marked(value)) hosts.push(undefined)
+      else if (value.includes("://")) urlHosts(hosts, value)
+      else if (call === "Mongo" || /[:/]/.test(value)) namedHosts(hosts, value.split(/[:/]/)[0])
+    }
+}
+// The input a database client reads: a heredoc's or here-string's body, a file a < redirect names, and a script its options or arguments name (psql's and pgcli's -f or --file, mongosh's --file or a .js argument), read for a connect line; a host off this machine, or input the hook cannot read, refuses, and a script inside a container is one it cannot read
+async function dbInput(cmd: Command, parsed: Parsed, env: Env): Promise<string | undefined> {
+  const contained = CONTAINER_RUNNERS.has(parsed.name) ? containedClient(parsed) : undefined
+  const { args, name } = contained ?? parsed
+  if (!dbClient(name)) return
+  const texts: Text[] = []
+  for (const r of cmd.redirects) {
+    if (r.body) texts.push(r.body)
+    else if (r.op === "<" && r.target) texts.push(await readPath(r.target, env))
+  }
+  const files = pgClient(name) || mongoClient(name)
+  const scripts: Word[] = []
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    const v = a.value
+    if (files && (v === "-f" || v === "--file")) {
+      const next = args[++i]
+      if (next) scripts.push(next)
+    } else if (files && v.startsWith("--file=")) scripts.push({ ...a, value: v.slice(7) })
+    else if (pgClient(name) && /^-f./.test(v)) scripts.push({ ...a, value: v.slice(2) })
+    else if (mongoClient(name) && !v.startsWith("-") && /\.[cm]?js$/.test(v)) scripts.push(a)
+  }
+  for (const script of scripts)
+    texts.push(contained ? unknown("a script inside the container") : await readPath(script, env))
+  const hosts: Hosts = []
+  for (const text of texts)
+    if (text.unknown) hosts.push(undefined)
+    else inputHosts(name, text.value, hosts)
+  return hostRefusal(name, hosts)
 }
 
 // The org tools the glm rule keeps a GLM session off: a headless Claude run, a fetch of an org service's host, a Linear script, and gh or git on a guarded org's repository.
@@ -1321,7 +1397,11 @@ const visitor = (load5: number, limit: number, orgs: Orgs, roots: Roots, held = 
       else if (!v.startsWith("-")) break
     }
     const sub = isGit ? args[k]?.value : undefined
-    const org = orgCall(parsed, env, dir, sub, orgs) ?? dbCall(parsed, env) ?? blind
+    const org =
+      orgCall(parsed, env, dir, sub, orgs) ??
+      dbCall(parsed, env) ??
+      (await dbInput(cmd, parsed, env)) ??
+      blind
     if (org) return org
     if (
       isGit &&

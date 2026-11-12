@@ -1256,6 +1256,7 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
   })
 
   test("a database client on this machine passes on GLM", async () => {
+    await write("scripts/seed.js", "db.items.insertOne({ a: 1 })\n")
     for (const command of [
       "psql -h 127.0.0.1 -U postgres app",
       "psql -h localhost app",

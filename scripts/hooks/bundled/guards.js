@@ -12790,6 +12790,33 @@ function containedClient(parsed) {
   }
   return { ...parsed, args: args.slice(at + 1), local: given, name: words[at] };
 }
+var namedHosts = (hosts, value, service = false) => {
+  if (service)
+    hosts.push(undefined);
+  else
+    for (const host of value.split(","))
+      hosts.push(hostOf2(host));
+};
+var urlHosts = (hosts, value) => {
+  for (const m of value.matchAll(DB_URL)) {
+    namedHosts(hosts, m[1]);
+    for (const pair of (m[2] ?? "").split("&")) {
+      const eq = pair.indexOf("=");
+      const key = eq < 0 ? pair : pair.slice(0, eq);
+      if (key === "host" || key === "hostaddr")
+        namedHosts(hosts, pair.slice(eq + 1));
+      else if (key === "service")
+        namedHosts(hosts, "", true);
+    }
+  }
+};
+function hostRefusal(name, hosts) {
+  const at = hosts.findIndex((h) => h === undefined || !onThisMachine(h));
+  if (at < 0)
+    return;
+  const host = hosts[at];
+  return host === undefined ? orgRefusal(`this ${name} call`, "the hook cannot tell which database it reaches, since a value it cannot read names it", DB_FIX) : orgRefusal(`this ${name} call`, `it reaches ${host}, a database off this machine, which may be an org's`);
+}
 function dbCall(parsed, env) {
   const inner = CONTAINER_RUNNERS.has(parsed.name) ? containedClient(parsed) : undefined;
   if (inner)
@@ -12797,23 +12824,7 @@ function dbCall(parsed, env) {
   const { args, local, name } = parsed;
   const client = dbClient(name);
   const hosts = [];
-  const named = (value, service = false) => {
-    if (service)
-      hosts.push(undefined);
-    else
-      for (const host of value.split(","))
-        hosts.push(hostOf2(host));
-  };
-  const queried = (query) => {
-    for (const pair of query.split("&")) {
-      const eq = pair.indexOf("=");
-      const key = eq < 0 ? pair : pair.slice(0, eq);
-      if (key === "host" || key === "hostaddr")
-        named(pair.slice(eq + 1));
-      else if (key === "service")
-        named("", true);
-    }
-  };
+  const named = (value, service = false) => namedHosts(hosts, value, service);
   for (let i = 0;i < args.length; i++) {
     const a = args[i];
     if (unreadValue(a)) {
@@ -12822,11 +12833,7 @@ function dbCall(parsed, env) {
       continue;
     }
     const v = a.value;
-    for (const m of v.matchAll(DB_URL)) {
-      named(m[1]);
-      if (m[2])
-        queried(m[2]);
-    }
+    urlHosts(hosts, v);
     if (!client)
       continue;
     for (const m of v.matchAll(CONNINFO))
@@ -12855,11 +12862,91 @@ function dbCall(parsed, env) {
     else
       named(set.value);
   }
-  const at = hosts.findIndex((h) => h === undefined || !onThisMachine(h));
-  if (at < 0)
+  return hostRefusal(name, hosts);
+}
+var PG_CONNECT = /^[ \t]*\\(?:c|connect)(?:[ \t]+([^\n]*))?$/gm;
+var MYSQL_CONNECT = /^[ \t]*(?:connect|\\r)(?:[ \t]+([^\n;]*))?;?[ \t]*$/gim;
+var MONGO_CONNECT = /\b(connect|Mongo)\s*\(\s*([^),]*)/g;
+var unquote = (word) => word.replace(/^['"`]|['"`]$/g, "");
+function inputHosts(name, text, hosts) {
+  if (pgClient(name))
+    for (const m of text.matchAll(PG_CONNECT)) {
+      const rest = (m[1] ?? "").replace(/(?:^|\s)-reuse-previous=\S+/g, " ").trim();
+      const before = hosts.length;
+      if (marked(rest))
+        hosts.push(undefined);
+      else
+        urlHosts(hosts, rest);
+      if (hosts.length > before)
+        continue;
+      if (rest.includes("="))
+        for (const c of rest.matchAll(CONNINFO))
+          namedHosts(hosts, unquote(c[2]), c[1] === "service");
+      else {
+        const host = rest.split(/\s+/)[2];
+        if (host && host !== "-")
+          namedHosts(hosts, unquote(host));
+      }
+    }
+  else if (mysqlClient(name))
+    for (const m of text.matchAll(MYSQL_CONNECT)) {
+      const rest = (m[1] ?? "").trim();
+      const host = rest.split(/\s+/)[1];
+      if (marked(rest))
+        hosts.push(undefined);
+      else if (host)
+        namedHosts(hosts, unquote(host));
+    }
+  else if (mongoClient(name))
+    for (const [, call, arg] of text.matchAll(MONGO_CONNECT)) {
+      const value = /^(['"`])([^'"`]*)\1\s*$/.exec(arg.trim())?.[2];
+      if (arg.trim() === "")
+        continue;
+      if (value === undefined || marked(value))
+        hosts.push(undefined);
+      else if (value.includes("://"))
+        urlHosts(hosts, value);
+      else if (call === "Mongo" || /[:/]/.test(value))
+        namedHosts(hosts, value.split(/[:/]/)[0]);
+    }
+}
+async function dbInput(cmd, parsed, env) {
+  const contained = CONTAINER_RUNNERS.has(parsed.name) ? containedClient(parsed) : undefined;
+  const { args, name } = contained ?? parsed;
+  if (!dbClient(name))
     return;
-  const host = hosts[at];
-  return host === undefined ? orgRefusal(`this ${name} call`, "the hook cannot tell which database it reaches, since a value it cannot read names it", DB_FIX) : orgRefusal(`this ${name} call`, `it reaches ${host}, a database off this machine, which may be an org's`);
+  const texts = [];
+  for (const r of cmd.redirects) {
+    if (r.body)
+      texts.push(r.body);
+    else if (r.op === "<" && r.target)
+      texts.push(await readPath(r.target, env));
+  }
+  const files = pgClient(name) || mongoClient(name);
+  const scripts = [];
+  for (let i = 0;i < args.length; i++) {
+    const a = args[i];
+    const v = a.value;
+    if (files && (v === "-f" || v === "--file")) {
+      const next = args[++i];
+      if (next)
+        scripts.push(next);
+    } else if (files && v.startsWith("--file="))
+      scripts.push({ ...a, value: v.slice(7) });
+    else if (pgClient(name) && /^-f./.test(v))
+      scripts.push({ ...a, value: v.slice(2) });
+    else if (mongoClient(name) && !v.startsWith("-") && /\.[cm]?js$/.test(v))
+      scripts.push(a);
+  }
+  for (const script of scripts)
+    texts.push(contained ? unknown("a script inside the container") : await readPath(script, env));
+  const hosts = [];
+  for (const text of texts)
+    if (text.unknown)
+      hosts.push(undefined);
+    else
+      inputHosts(name, text.value, hosts);
+  return hostRefusal(name, hosts);
 }
 function orgCall(parsed, env, dir, sub, orgs) {
   const { args, name } = parsed;
@@ -12942,7 +13029,7 @@ var visitor = (load5, limit, orgs, roots, held = UNHELD) => {
         break;
     }
     const sub = isGit ? args[k]?.value : undefined;
-    const org = orgCall(parsed, env, dir, sub, orgs) ?? dbCall(parsed, env) ?? blind;
+    const org = orgCall(parsed, env, dir, sub, orgs) ?? dbCall(parsed, env) ?? await dbInput(cmd, parsed, env) ?? blind;
     if (org)
       return org;
     if (isGit && !writes2(cmd) && BRANCH_READS.has(args.slice(k).map((a) => a.value).join(" "))) {
