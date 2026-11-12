@@ -149,7 +149,7 @@ describe("POST /ops/restore (#1919)", () => {
     expect(existsSync(join(main, "linked"))).toBe(true)
   }, 120_000)
 
-  test("with its .git gone too, the press restores it in place from the origin URL ops-restore kept, and names the worktrees that lost their link (#1382)", async () => {
+  test("with its .git gone too, the press restores it in place from the origin URL ops-restore kept, and says every worktree of the lost .git has lost its link (#1382)", async () => {
     const main = scratchCheckout()
     const origin = git(main, "remote", "get-url", "origin").trim()
     git(main, "worktree", "add", "-q", "-b", "desk", join(main, ".claude", "worktrees", "desk"))
