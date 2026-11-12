@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 
 import { CARVE_OUTS, listTrash } from "../../../../../packages/safe-delete/src"
 import {
@@ -898,9 +898,11 @@ test("--worktree takes another repo's worktree once its PR merged or closed: git
   }
 })
 
-test("--worktree refuses another repo's worktree with unpushed commits and no finished PR as it refuses one here, and --discard --decision takes it on an approved delete decision", async () => {
-  const { deps, home, root } = machine()
+test("--worktree refuses another repo's worktree with unpushed commits and an open PR as it refuses one here, and --discard --decision takes it on an approved delete decision", async () => {
+  const { deps: base, home, root } = machine()
   const { repo, wt } = otherRepo(root, home)
+  const head = git(wt, "rev-parse", "HEAD")
+  const deps: RmDeps = { ...base, prState: async () => ({ head, number: 7, state: "OPEN" }) }
   const discard = `playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`
   expect(await rmSaid(["--worktree", wt], deps)).toEqual({
     code: 1,
@@ -928,6 +930,89 @@ test("--worktree refuses another repo's worktree with unpushed commits and no fi
   expect(await rmSaid(words, { ...session, decision: approved })).toEqual({ code: 0, said: [] })
   expect(existsSync(wt)).toBe(false)
   expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(wt)
+})
+
+// The folder playground rm archives another repo's worktree in, by its repo, its folder and its HEAD, and the commit each of its patches' From line names.
+const archiveOf = (data: string, repo: string, wt: string) =>
+  join(
+    data,
+    "scratchpad",
+    "archive",
+    basename(repo),
+    `${basename(wt)}-${git(wt, "rev-parse", "HEAD").slice(0, 7)}`,
+  )
+const patchesIn = (dir: string) =>
+  readdirSync(dir).map((f) => /^From ([0-9a-f]+) /.exec(readFileSync(join(dir, f), "utf8"))?.[1])
+const unlanded = (wt: string) => git(wt, "rev-list", "HEAD", "--not", "--remotes").split("\n")
+
+// #1962
+test("--worktree archives another repo's worktree with no PR and commits no remote holds under the data folder's scratchpad/archive, then takes it with no decision", async () => {
+  const { deps, home, root } = machine()
+  const { repo, wt } = otherRepo(root, home)
+  file(join(wt, "more.txt"))
+  git(wt, "add", ".")
+  git(wt, "commit", "-qm", "more")
+  const shas = unlanded(wt)
+  expect(shas).toHaveLength(2)
+  const archive = archiveOf(deps.data, repo, wt)
+  const session = { ...deps, caller: async () => "a session (role worker)" }
+  expect(await rmSaid(["--worktree", wt], session)).toEqual({ code: 0, said: [] })
+  expect(existsSync(wt)).toBe(false)
+  expect(patchesIn(archive).sort()).toEqual([...shas].sort())
+  expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(wt)
+  expect(listTrash(join(deps.data, "trash"))).toMatchObject([{ path: wt }])
+})
+
+// #1962
+test("--worktree keeps another repo's worktree with no PR whose archive holds patches other than its commits no remote holds, naming why, and writes over no archive already there", async () => {
+  const { deps, home, root } = machine()
+  const { repo, wt } = otherRepo(root, home)
+  const archive = archiveOf(deps.data, repo, wt)
+  mkdirSync(archive, { recursive: true })
+  writeFileSync(
+    join(archive, "0001-other.patch"),
+    `From ${"0".repeat(40)} Mon Sep 17 00:00:00 2001\n`,
+  )
+  const discard = `playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`
+  expect(await rmSaid(["--worktree", wt], deps)).toEqual({
+    code: 1,
+    said: [
+      `playground: ${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since), and its archive at ${archive} holds 1 patch, 0 of its 1 commit no remote holds: ${discard}`,
+    ],
+  })
+  expect(existsSync(wt)).toBe(true)
+  expect(readdirSync(archive)).toEqual(["0001-other.patch"])
+})
+
+// #1962's controls: a live session's tree and one holding an untracked file, in another repo, and this checkout's own worktree, each with a commit no remote holds and no PR, are refused as before, with no archive written
+test("--worktree refuses, with no PR and a commit no remote holds, a live session's tree and an untracked file's in another repo, and this checkout's own worktree, writing no archive", async () => {
+  const { deps, home, main, root } = machine()
+  const { repo, wt } = otherRepo(root, home)
+  const held = { command: "zsh", cwd: wt, pid: 7, sockets: [] }
+  expect(await rmSaid(["--worktree", wt], { ...deps, procs: () => [held] })).toEqual({
+    code: 1,
+    said: [`playground: ${wt} is held by pid 7 (zsh) working in ${wt}`],
+  })
+  file(join(wt, "wip.ts"))
+  expect((await rmSaid(["--worktree", wt], deps)).said[0]).toStartWith(
+    `playground: ${wt} holds 1 uncommitted change (wip.ts): `,
+  )
+  expect(existsSync(wt)).toBe(true)
+  git(main, "init", "-q", "-b", "canary")
+  file(join(main, "README.md"))
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  const own = join(main, ".claude", "worktrees", "pg-1")
+  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", own)
+  file(join(own, "work.txt"))
+  git(own, "add", ".")
+  git(own, "commit", "-qm", "work")
+  expect((await rmSaid(["--worktree", own], deps)).said[0]).toStartWith(
+    `playground: ${own}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): `,
+  )
+  expect(existsSync(own)).toBe(true)
+  expect(existsSync(join(deps.data, "scratchpad"))).toBe(false)
+  expect(repo).not.toBe(main)
 })
 
 test("--worktree refuses, in another repo, a folder in its .claude/worktrees git does not list as its worktree, the repo's own checkout, and its worktree outside .claude/worktrees", async () => {
