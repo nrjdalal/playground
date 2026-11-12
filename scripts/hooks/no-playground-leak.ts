@@ -672,7 +672,7 @@ async function gh(
     if (refused) return refused
   }
   const target = decide(named.length > 0 ? named : fallback)
-  if (key === "pr create" && target.where !== "other") texts.push(...prCreate(rest, env))
+  if (key === "pr create" && target.where !== "other") texts.push(...prCreate(rest, flags, env))
   return judge(
     `gh ${key}`,
     target,
@@ -764,17 +764,21 @@ function unplaced(what: string, source: (Repo | undefined)[], env: Env): string 
   )
 }
 
-// What `gh pr create` publishes beyond its flags: the branch it opens from and the commits it may push, and with --fill the messages it reads.
-function prCreate(rest: Word[], env: Env): Placed[] {
+// What `gh pr create` publishes beyond its flags: with no --head, the branch it opens from and the commits it may push (with --head it opens from that branch, already pushed, and pushes nothing; gh keeps the last --head, and only a non-empty literal counts, so one empty, only whitespace, unreadable, or holding $, a backtick, a glob character or a quote reads as none), and with --fill the messages it reads.
+function prCreate(rest: Word[], flags: Flag[], env: Env): Placed[] {
   const values = rest.map((w) => w.value)
-  const texts = commitTexts(
-    env.cwd,
-    ["HEAD", "--not", "--remotes"],
-    "the commits it may push",
-    ", which it may push",
-  )
-  if (!values.some((v) => /^(?:-H|--head)(?:=|$)/.test(v)))
-    texts.push(withPlace(branch(env.cwd), "the branch it opens from"))
+  const texts: Placed[] = []
+  const head = flags.findLast((f) => f.name === "-H" || f.name === "--head")?.value
+  if (!head || unreadable(head) || !head.value.trim() || /[$`*?[\]'"]/.test(head.value))
+    texts.push(
+      ...commitTexts(
+        env.cwd,
+        ["HEAD", "--not", "--remotes"],
+        "the commits it may push",
+        ", which it may push",
+      ),
+      withPlace(branch(env.cwd), "the branch it opens from"),
+    )
   if (values.some((v) => v === "-f" || v.startsWith("--fill"))) {
     const at = values.findIndex((v) => /^(?:-B|--base)(?:=|$)/.test(v))
     const base =

@@ -1,4 +1,4 @@
-// A check for a prepare-only session (its roster row reads mode=prepare, which an org's start job sets at a prepare-only start): it refuses the writes that would reach the org before the session claims its ticket, a tracker issue save (an assign or a state change), a tracker comment, a chat post and a new pull request (`gh pr create` or the GitHub tool), and lets them run once the mode clears at the claim. guards.ts runs it on Bash and no-playground-leak's process on the MCP tools, so it has no main block of its own. It fails open, since the session's brief is the first bar: a read that fails lets the call run and writes a line to the data folder's ops/no-prepare-write.log.
+// A check for a prepare-only session (its roster row reads mode=prepare, which an org's start job sets at a prepare-only start): it refuses the writes that would reach the org before the session claims its ticket, a tracker issue save (an assign or a state change), a tracker comment, a chat post, a new pull request (`gh pr create` or the GitHub tool) and a `git push`, and lets them run once the mode clears at the claim. guards.ts runs it on Bash and no-playground-leak's process on the MCP tools, so it has no main block of its own. It fails open, since the session's brief is the first bar: a read that fails lets the call run and writes a line to the data folder's ops/no-prepare-write.log.
 import "../../packages/env/src/aliases"
 import { appendFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
@@ -8,6 +8,7 @@ import { registryName } from "./role"
 import {
   type Env,
   ghCommand,
+  GIT_TAKES,
   knownVariables,
   lex,
   PRINTERS,
@@ -28,7 +29,7 @@ const WRITES: [RegExp, Set<string>][] = [
 ]
 
 const refuse = (what: string): string =>
-  `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post and no pull request. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`
+  `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post, no push and no pull request. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`
 
 const log = (environment: Environment, entry: Record<string, unknown>) => {
   try {
@@ -51,11 +52,23 @@ const prCreate = (args: Word[]): boolean => {
   return head[0] === "pr" && head[1] === "create"
 }
 
+// Whether git's subcommand, past its global options (GIT_TAKES), is push.
+const pushes = (args: Word[]): boolean => {
+  let k = 0
+  for (; k < args.length && args[k].value.startsWith("-"); k++)
+    if (GIT_TAKES.has(args[k].value)) k++
+  return args[k]?.value === "push"
+}
+
 const visit: Visit = async (_cmd, { args, name }) => {
   if (name === "gh") return prCreate(args) ? "gh pr create" : undefined
+  if (name === "git") return pushes(args) ? "git push" : undefined
   if (PRINTERS.has(name)) return
-  const nested = args.findIndex((a) => program(a.value) === "gh")
-  return nested !== -1 && prCreate(args.slice(nested + 1)) ? "gh pr create" : undefined
+  const nested = args.findIndex((a) => program(a.value) === "gh" || program(a.value) === "git")
+  if (nested === -1) return
+  const rest = args.slice(nested + 1)
+  if (program(args[nested].value) === "git") return pushes(rest) ? "git push" : undefined
+  return prCreate(rest) ? "gh pr create" : undefined
 }
 
 // The write the call makes, named, or undefined for any other call.
@@ -67,7 +80,7 @@ async function writeOf(
 ): Promise<string | undefined> {
   if (mcpWrite(tool)) return `the tool ${tool}`
   const command = input?.command
-  if (tool !== "Bash" || typeof command !== "string" || !/gh/.test(command)) return
+  if (tool !== "Bash" || typeof command !== "string" || !/gh|git/.test(command)) return
   const directory = typeof cwd === "string" ? cwd : undefined
   const env: Env = {
     cwd: directory,
