@@ -149,6 +149,28 @@ describe("POST /ops/restore (#1919)", () => {
     expect(existsSync(join(main, "linked"))).toBe(true)
   }, 120_000)
 
+  test("with its .git gone too, the press restores it in place from the origin URL ops-restore kept, and says every worktree of the lost .git has lost its link (#1382)", async () => {
+    const main = scratchCheckout()
+    const origin = git(main, "remote", "get-url", "origin").trim()
+    git(main, "worktree", "add", "-q", "-b", "desk", join(main, ".claude", "worktrees", "desk"))
+    const { dataDir } = await import("../../../../../../api/hono/src/lib/sessions/paths")
+    mkdirSync(join(dataDir(), "ops", "restore"), { recursive: true })
+    writeFileSync(join(dataDir(), "ops", "restore", "origin.txt"), `${origin}\n`)
+    wipe(main)
+    rmSync(join(main, ".git"), { force: true, recursive: true })
+    spies.push(signedIn("owner"))
+    const response = await press({ origin: trusted() }, peer("127.0.0.1"))
+    expect(response.status).toBe(200)
+    const { data } = (await response.json()) as { data: { status: string; text: string } }
+    expect(data.status).toBe("restored")
+    expect(data.text).toContain("had no .git and was restored in place")
+    expect(data.text).toContain("has lost its link to it")
+    expect(existsSync(join(main, ...GUARD))).toBe(true)
+    expect(existsSync(join(main, "linked"))).toBe(true)
+    expect(git(main, "remote", "get-url", "origin").trim()).toBe(origin)
+    expect(git(main, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main\n")
+  }, 120_000)
+
   test("a checkout whose guards are all there is left as it is", async () => {
     const main = scratchCheckout()
     spies.push(signedIn("owner"))

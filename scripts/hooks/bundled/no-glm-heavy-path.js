@@ -9348,7 +9348,7 @@ var visitor = (load5, limit, orgs, roots, held = UNHELD) => {
   const visit = async (cmd, parsed, env) => {
     const slot = slotWords(parsed);
     if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
+      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, { ...env, files: new Map(env.files), vars: new Map(env.vars) }, visit, false);
     const { args, name } = parsed;
     let blind;
     if (Array.isArray(orgs) && orgs.length > 0) {
