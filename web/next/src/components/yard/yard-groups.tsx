@@ -6,7 +6,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 
 import { GroupCount } from "@/components/shell/group-count"
-import { ToggleLabel } from "@/components/shell/movable-groups"
+import { MovableGroupLabel } from "@/components/shell/movable-group"
 import { ROW_BOX } from "@/components/shell/row-box"
 import {
   SidebarGroup,
@@ -38,7 +38,7 @@ export function YardGroups({ shell }: { shell: YardShell }) {
   )
 }
 
-// One of Yard's two groups, absent while it has no rows. It collapses as every sidebar group does, its label the toggle, open to start and kept as you left it across reloads, and counts its rows; in the dashboard's sidebar its label also moves it (ToggleLabel).
+// One of Yard's two groups, absent while it has no rows. It collapses as every sidebar group does, its label the toggle, open to start and kept as you left it across reloads, and counts its rows; in the dashboard's sidebar its label also moves it (MovableGroupLabel).
 export function YardGroup({
   group,
   shell,
@@ -62,15 +62,15 @@ export function YardGroup({
     <SidebarGroup>
       {/* each label written out, so the dashboard map reads its words */}
       {group === "Channels" ? (
-        <ToggleLabel open={open} setOpen={setOpen}>
+        <MovableGroupLabel open={open} setOpen={setOpen}>
           Channels
           {tail}
-        </ToggleLabel>
+        </MovableGroupLabel>
       ) : (
-        <ToggleLabel open={open} setOpen={setOpen}>
+        <MovableGroupLabel open={open} setOpen={setOpen}>
           Direct messages
           {tail}
-        </ToggleLabel>
+        </MovableGroupLabel>
       )}
       {open && <YardRows rows={rows} shell={shell} />}
     </SidebarGroup>

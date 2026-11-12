@@ -70,7 +70,7 @@ import { TemplatePicker } from "@/components/dashboard/template-picker"
 import { StatusIcon } from "@/components/dashboard/worker-light"
 import { Hint, OFF_FOCUSABLE } from "@/components/hint"
 import { GroupCount } from "@/components/shell/group-count"
-import { SortableGroups, ToggleLabel } from "@/components/shell/movable-groups"
+import { MovableGroups, MovableGroupLabel } from "@/components/shell/movable-group"
 import { ROW_BOX } from "@/components/shell/row-box"
 import type { MenuUpdate } from "@/components/shell/sidebar-user-menu"
 import { Button } from "@/components/ui/button"
@@ -1319,11 +1319,11 @@ function ScriptsGroup({
   const rail = scriptsRail(ops)
   return (
     <SidebarGroup>
-      <ToggleLabel open={open} setOpen={setOpen}>
+      <MovableGroupLabel open={open} setOpen={setOpen}>
         Scripts
         <LabelChevron open={open} />
         <GroupCount count={scriptCount(ops)} />
-      </ToggleLabel>
+      </MovableGroupLabel>
       <SidebarMenu
         aria-busy={muted || undefined}
         className={cn("space-y-0.5", muted && "opacity-60")}
@@ -1428,7 +1428,7 @@ function ManagersGroup({
   return (
     <SidebarGroup>
       {/* the managers' order is a write, so the hosted build keeps A to Z with no Reset and no row drag */}
-      <ToggleLabel
+      <MovableGroupLabel
         open={open}
         setOpen={setOpen}
         menu={
@@ -1446,7 +1446,7 @@ function ManagersGroup({
         Orchestrators
         <LabelChevron open={open} />
         <GroupCount count={count} />
-      </ToggleLabel>
+      </MovableGroupLabel>
       <SidebarMenu
         aria-busy={muted || undefined}
         className={cn("space-y-0.5", muted && "opacity-60")}
@@ -1532,11 +1532,11 @@ function OtherGroup({
   })
   return (
     <SidebarGroup>
-      <ToggleLabel open={open} setOpen={setOpen}>
+      <MovableGroupLabel open={open} setOpen={setOpen}>
         Other
         <LabelChevron open={open} />
         <GroupCount count={count} />
-      </ToggleLabel>
+      </MovableGroupLabel>
       <SidebarMenu className="space-y-0.5">
         {rows.map((worker) => row(worker))}
         {open && idle > 0 && (
@@ -1952,11 +1952,11 @@ function SessionsGroup({
   const [open, setOpen] = useGroupOpen(label, true)
   return (
     <SidebarGroup>
-      <ToggleLabel open={open} setOpen={setOpen}>
+      <MovableGroupLabel open={open} setOpen={setOpen}>
         {label}
         <LabelChevron open={open} />
         {count !== null && <GroupCount count={count} />}
-      </ToggleLabel>
+      </MovableGroupLabel>
       <SidebarMenu {...menu}>{open ? children : kept}</SidebarMenu>
     </SidebarGroup>
   )
@@ -2263,7 +2263,7 @@ const isRosterAgent = (agent: Agent): boolean =>
   agent.role === "worker" &&
   !checkerOf(agent.name, agent.kind)
 
-// Sidebar-nav slot: your threads, then Yard's Channels and Direct messages (YardGroups, each while it has rows), then every live session but the dispatchers (the header's, DashboardDispatchers), grouped by role into Orchestrators, Subagents (each reviewer and tester nested under its worker, a gone worker's under its muted roster row), AI Runners, Scripts (the ops jobs jobs.json does not pause, which have no session, collapsed until opened) and Other (each by status, as orderByStatus sets), each label with how many sessions it holds. Orchestrators, Subagents, AI Runners and Scripts always show, and Other follows while a probe or a session outside the factory's names is live; until the board is read they show the stored sidebar, muted, or nothing yet (useSidebarSource), so the first live frame replaces rows of the same count and order rather than moving any. Every group's label opens and closes it, kept across reloads (useGroupOpen), and a closed group still shows a session waiting on you or open in the view (keepsOther).
+// Sidebar-nav slot: your threads, then the other groups in the order you left them (MovableGroups, useGroupOrder), at first Yard's Channels and Direct messages (YardGroup, each while it has rows), then every live session but the dispatchers (the header's, DashboardDispatchers), grouped by role into Orchestrators, Subagents (each reviewer and tester nested under its worker, a gone worker's under its muted roster row), AI Runners, Scripts (the ops jobs jobs.json does not pause, which have no session, collapsed until opened) and Other (each by status, as orderByStatus sets), each label with how many sessions it holds. Orchestrators, Subagents, AI Runners and Scripts always show, and Other follows while a probe or a session outside the factory's names is live; until the board is read they show the stored sidebar, muted, or nothing yet (useSidebarSource), so the first live frame replaces rows of the same count and order rather than moving any. Every group's label opens and closes it, kept across reloads (useGroupOpen), and a closed group still shows a session waiting on you or open in the view (keepsOther).
 export function DashboardNav({ account }: { account: string }) {
   const { allowed, board, selected } = useDashboard()
   const [order, setOrder] = useGroupOrder(account)
@@ -2392,12 +2392,12 @@ export function DashboardNav({ account }: { account: string }) {
       {threads.data && (
         <ThreadsGroup data={threads.data} onPage={threads.setPage} onPatch={threads.patch} />
       )}
-      <SortableGroups
+      <MovableGroups
         groups={moved}
         onMove={(from, to) => setOrder(moveGroup(order, moved, from, to))}
       >
         {(label) => draw(label, sessionsOf.get(label) ?? [])}
-      </SortableGroups>
+      </MovableGroups>
     </>
   )
 }

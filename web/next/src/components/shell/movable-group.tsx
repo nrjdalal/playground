@@ -69,7 +69,7 @@ function SortableGroup({
 }
 
 // The sidebar's groups in the order given, each one block dragged by its label: the pointer, or Space, the arrows and Space on the focused label, or Move up and Move down in the label's menu; each move calls onMove with the group's place among these and its new one.
-export function SortableGroups<T extends string>({
+export function MovableGroups<T extends string>({
   children,
   groups,
   onMove,
@@ -137,8 +137,8 @@ export function SortableGroups<T extends string>({
   )
 }
 
-// A group's label, one button that opens and closes it; inside SortableGroups it also drags the group and opens a menu of Move up and Move down, with any items of the group's own (menu) after them.
-export function ToggleLabel({
+// A group's label, one button that opens and closes it; inside MovableGroups it also drags the group and opens a menu of Move up and Move down, with any items of the group's own (menu) after them.
+export function MovableGroupLabel({
   children,
   menu,
   open,

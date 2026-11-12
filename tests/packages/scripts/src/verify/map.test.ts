@@ -60,17 +60,17 @@ describe("groupLabelChildren", () => {
     expect(groupLabelChildren(source)).toEqual([{ text: "Other" }])
   })
 
-  test("a ToggleLabel's label is read as a SidebarGroupLabel's, and a wrapper's bare children are skipped", () => {
-    const source = `<ToggleLabel open={open} setOpen={setOpen}>
+  test("a MovableGroupLabel's label is read as a SidebarGroupLabel's, and a wrapper's bare children are skipped", () => {
+    const source = `<MovableGroupLabel open={open} setOpen={setOpen}>
         Scripts
         <LabelChevron open={open} />
-      </ToggleLabel>
+      </MovableGroupLabel>
       <SidebarGroupLabel className="w-full pl-2.5" render={toggle}>
         {children}
       </SidebarGroupLabel>
-      <ToggleLabel open={open} setOpen={setOpen}>
+      <MovableGroupLabel open={open} setOpen={setOpen}>
         {label}
-      </ToggleLabel>`
+      </MovableGroupLabel>`
     expect(groupLabelChildren(source)).toEqual([{ text: "Scripts" }, { expression: true }])
   })
 

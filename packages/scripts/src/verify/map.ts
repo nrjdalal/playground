@@ -49,10 +49,10 @@ export const routeOf = (pageFile: string): string => {
 // A <SidebarGroupLabel>'s label: its text (the words before any element or expression, as in a toggle's Other and its chevron, or Threads and its pager), or an expression ({label}), whose groups dashboardGroups reads from GROUP_ORDER.
 export type LabelChild = { text: string } | { expression: true }
 
-// The label of every <SidebarGroupLabel> or <ToggleLabel> (the shell's group label, which wraps one) in a source file; a wrapper's own label, its bare {children}, is its callers', so it is skipped. Its opening tag can hold JSX of its own (a render={<Link … />}), so the tag ends at the first > outside braces and quotes.
+// The label of every <SidebarGroupLabel> or <MovableGroupLabel> (the shell's group label, which wraps one) in a source file; a wrapper's own label, its bare {children}, is its callers', so it is skipped. Its opening tag can hold JSX of its own (a render={<Link … />}), so the tag ends at the first > outside braces and quotes.
 export const groupLabelChildren = (source: string): LabelChild[] => {
   const found: LabelChild[] = []
-  const tag = /<(SidebarGroupLabel|ToggleLabel)[\s>]/g
+  const tag = /<(SidebarGroupLabel|MovableGroupLabel)[\s>]/g
   for (let match = tag.exec(source); match; match = tag.exec(source)) {
     const name = match[1]!
     let depth = 0
