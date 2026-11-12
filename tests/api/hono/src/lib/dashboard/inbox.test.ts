@@ -2482,7 +2482,12 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     })
     expect(moved).toMatchObject({ item: { preview: { text: "80%" }, status: "done" }, ok: true })
     await store.dismissItems(db, [update.id])
-    expect(await store.editItem(db, update.id, progress)).toMatchObject({
+    expect(
+      await store.editItem(db, update.id, {
+        ...progress,
+        preview: { outcome: "finding", text: "80%" },
+      }),
+    ).toMatchObject({
       code: "CONFLICT",
       ok: false,
     })
@@ -2602,6 +2607,84 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         await store.answerItem(db, approved.id, { action: "dismiss" }, { actor }),
       ).toMatchObject({ ok: true })
       expect(await store.editItem(db, approved.id, decision(SLACK))).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
+    })
+  })
+
+  describe("an edit after the owner's Done brings the update back, so a thread keeps one card (PG-1926)", () => {
+    const progress = (text: string) => ({
+      from: "builder",
+      kind: "update",
+      preview: { outcome: "finding", text },
+      title: "Round 2",
+    })
+
+    test("an edit that changes a Done card's text brings it back to the list unread", async () => {
+      const update = await post(progress("40%"))
+      expect(await store.dismissItems(db, [update.id])).toBe(1)
+      const done = await store.getItem(db, update.id)
+      expect(done?.readAt).not.toBeNull()
+      expect(store.inboxCount([done!])).toBe(0)
+      const edited = await store.editItem(db, update.id, progress("80%"))
+      expect(edited).toMatchObject({
+        item: { answer: null, preview: { text: "80%" }, readAt: null },
+        ok: true,
+        reopened: true,
+      })
+      if (!edited.ok) return
+      expect(store.inboxCount([edited.item])).toBe(1)
+      // a second Done sends it back, and the next edit brings it back again
+      expect(await store.dismissItems(db, [update.id])).toBe(1)
+      expect(await store.editItem(db, update.id, progress("100%"))).toMatchObject({
+        ok: true,
+        reopened: true,
+      })
+    })
+
+    test("an edit that changes nothing leaves a Done card on Done", async () => {
+      const update = await post(progress("40%"))
+      await store.dismissItems(db, [update.id])
+      const done = await store.getItem(db, update.id)
+      expect(await store.editItem(db, update.id, progress("40%"))).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
+      expect(await store.getItem(db, update.id)).toEqual(done)
+    })
+
+    test("an edit to a card still in the list edits it as before, its read mark kept", async () => {
+      const update = await post(progress("40%"))
+      await store.markRead(db, [update.id])
+      const read = await store.getItem(db, update.id)
+      const edited = await store.editItem(db, update.id, progress("80%"))
+      expect(edited).toMatchObject({ item: { answer: null, readAt: read?.readAt }, ok: true })
+      expect(edited).not.toHaveProperty("reopened")
+    })
+
+    test("an update reads status done from the start, which is no owner Done, so an edit reopens nothing", async () => {
+      const update = await post(progress("40%"))
+      expect(update).toMatchObject({ answer: null, readAt: null, status: "done" })
+      const edited = await store.editItem(db, update.id, progress("80%"))
+      expect(edited).toMatchObject({ item: { answer: null, readAt: null }, ok: true })
+      expect(edited).not.toHaveProperty("reopened")
+    })
+
+    test("a dismissed or resolved update stays closed to an edit", async () => {
+      const dismissed = await post(progress("40%"))
+      expect(
+        await store.answerItem(db, dismissed.id, { action: "dismiss" }, { actor }),
+      ).toMatchObject({ ok: true })
+      expect(await store.editItem(db, dismissed.id, progress("80%"))).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
+      const resolved = await post(progress("40%"))
+      expect(await store.resolveItem(db, resolved.id, { by: "builder" })).toMatchObject({
+        ok: true,
+      })
+      expect(await store.editItem(db, resolved.id, progress("80%"))).toMatchObject({
         code: "CONFLICT",
         ok: false,
       })
