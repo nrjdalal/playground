@@ -137,7 +137,7 @@ export const yardToken = pgTable(
   (table) => [uniqueIndex("yard_token_user_name_idx").on(table.userId, table.name)],
 )
 
-// A user row that is a bot, which its maker (the owner) made with `playground yard bot add`: its token reaches only its DM with made_by, and reads_log lets it read the dispatcher's log; it goes with its maker, and a bot's login with no row here reads as no one (yardCaller).
+// A user row that is a bot, which its maker (the owner) made with `playground yard bot add`: its token reaches only its DM with made_by, and reads_log lets it read the dispatcher's log; the row goes with its maker while the bot's user and token stay, and a bot's login with no row here reads as no one (yardCaller).
 export const yardBot = pgTable(
   "yard_bot",
   {
