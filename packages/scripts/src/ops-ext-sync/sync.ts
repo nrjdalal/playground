@@ -63,10 +63,11 @@ const syncScope = async (data: string, scope: string, slug: string, run: Run): P
     if (done.code !== 0) throw new Error(`${scope}: git ${args[0]} failed: ${done.err}`)
     return done.out
   }
-  if (extGit(dir, ["remote", "set-url", "origin", where.url]).code !== 0)
-    git("remote", "add", "origin", where.url)
-  git("fetch", "-q", "origin")
+  // every git write here, the fetch and the push included, runs under the one lock, which lifts a locked root for it
   withLock(data, () => {
+    if (extGit(dir, ["remote", "set-url", "origin", where.url]).code !== 0)
+      git("remote", "add", "origin", where.url)
+    git("fetch", "-q", "origin")
     if (extGit(dir, ["rev-parse", "-q", "--verify", "origin/main"]).code !== 0) return
     // a rebase commits again, so a machine with no git identity (a fresh runner) takes writeFiles' committer, and one with its own keeps it
     const committer = Object.fromEntries(
@@ -83,7 +84,7 @@ const syncScope = async (data: string, scope: string, slug: string, run: Run): P
       `${scope}: its commits do not rebase onto ${slug}'s; nothing pushed, so resolve it by hand in ${dir}`,
     )
   })
-  git("push", "-q", "origin", "HEAD:main")
+  withLock(data, () => git("push", "-q", "origin", "HEAD:main"))
   return `${scope} synced with ${slug} at ${git("rev-parse", "--short", "HEAD")}`
 }
 

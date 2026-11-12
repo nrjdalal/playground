@@ -175,12 +175,15 @@ export const withLock = <T>(data: string, run: () => T, wait = 30_000): T =>
       const root = extensionsDir(data)
       if (!rootLocked(root)) return run()
       let took = 0
+      let lifted = false
       try {
         took += flagRoot(root, false)
+        lifted = true
         return run()
       } finally {
         took += flagRoot(root, true)
-        console.error(`extensions' lock: lifted and relocked ${root} in ${Math.round(took)} ms`)
+        if (lifted)
+          console.error(`extensions' lock: lifted and relocked ${root} in ${Math.round(took)} ms`)
       }
     },
     wait,
