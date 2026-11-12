@@ -220,6 +220,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
   Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
+  no-prepare-write, a check with no process of its own, runs behind `fromFactory` through its `check`.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
@@ -876,6 +877,17 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A checker in read mode cannot run the PR's tests, by design, so CI is its test signal.
   Its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts`.
   Its registration in both settings files lands in a later ship than its script, as [Registered in both settings files](#registered-in-both-settings-files) says.
+
+## no-prepare-write
+
+- A prepare-only session, one whose roster row reads `mode=prepare`, works a ticket the org has registered and not yet posted: its brief keeps it to the local branch until it claims, and this check holds it there.
+  An org's start job sets the mode at the prepare-only start (`roster.ts set <session> mode=prepare`) and clears it at the claim: the session's waiter runs `roster.ts set <session> mode=` the moment before it prints its Claim line, so the claim's own assign runs at once, and the job's next beat clears it too, as a backstop.
+- While the mode stands, `scripts/hooks/no-prepare-write.ts` refuses a factory session's tracker issue save (`save_issue`, an assign or a state change) and comment (`save_comment`) on a Linear server, a chat post (`chat_post_message`) on a Slack server, and a new pull request:
+  `gh pr create` in any form the shared reader (`scripts/hooks/shell.ts`) finds, and a GitHub server's `create_pull_request`.
+  Every other call runs: reads, local git, a push and every other gh call.
+- It is a check with no process of its own: [guards](#guards) runs it on Bash, and [no-playground-leak](#no-playground-leak)'s process runs it first on the MCP tools, since that hook's matcher already takes every GitHub, Linear and Slack tool, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
+- It fails open, since the session's brief is the first bar: a session the registry or the roster does not hold is not marked, and a read that fails, a roster that does not parse among them, lets the call run and writes one JSON line naming the session, the tool and the error to the data folder's `ops/no-prepare-write.log`, so a broken read shows.
+  Its tests are `tests/scripts/hooks/no-prepare-write.test.ts`.
 
 ## no-prompt-stop
 
