@@ -9,7 +9,7 @@ The Yard relay carried the owner's own reads and the writes the paired key signs
 - **The Mac answers `BOT_GETS` alone.** `requireBotRead` (`api/hono/src/lib/relay/mac.ts`) refuses as `requireRelay` does (a stale frame, a seen id, another owner's login), then a bot off `yard.logReaders` or one whose DM is not the one its login is listed with, then a path off `BOT_GETS`, which holds the dispatcher's log alone (`GET /api/v1/dashboard/dispatcher/log`), so a bot's frame on any `RELAY_GETS` or `RELAY_WRITES` route is refused before a route runs. The owner's own relayed read never reaches the log route, since `BOT_GETS` is on neither of the owner's lists.
 - **The Mac hides every secret first.** Before the page leaves, the Mac runs `hideSecrets` (`packages/settings/src/secrets.ts`) over each string of it, then turns every value of 8 characters or more in its checkout's `.env` into `[hidden]` (`api/hono/src/lib/relay/redact.ts`).
 - **Each read leaves a line.** The hub posts one line in the bot's DM per read, from the bot, of the kind `log`: the time and the seqs the page held. A bot cannot post that kind itself, and the Inbox cards none of these lines (`waiting` in `api/hono/src/lib/yard/store.ts`), so the owner sees every read in the DM without a card for each.
-- **Reading gives no write.** The bot's own words still reach the Inbox fenced as the bot's, and it never answers a decision.
+- **Reading gives no write.** The bot's own words still reach the dispatcher fenced as the bot's, as one relayed line, and it never answers a decision.
 
 ## Threat model
 
