@@ -668,17 +668,26 @@ export const setReadsLog = async (
 }
 
 // A bot's read of the log reaches its maker's Mac: the maker's login, which the Mac checks against its own token's, and the bot's DM, where the read's line goes.
+// A bot's one DM, with the owner who made it, found from its token alone.
+export const botDm = async (
+  db: Database,
+  caller: Caller & { bot: { madeBy: string } },
+): Promise<string> => {
+  const [dm] = await db
+    .select({ id: yardChannel.id })
+    .from(yardChannel)
+    .where(eq(yardChannel.name, dmName(caller.id, caller.bot.madeBy)))
+  if (!dm) throw notFound("Bot")
+  return dm.id
+}
+
 export const logReadOf = async (db: Database, caller: Caller & { bot: { madeBy: string } }) => {
   const [maker] = await db
     .select({ login: user.login })
     .from(user)
     .where(eq(user.id, caller.bot.madeBy))
-  const [dm] = await db
-    .select({ id: yardChannel.id })
-    .from(yardChannel)
-    .where(eq(yardChannel.name, dmName(caller.id, caller.bot.madeBy)))
-  if (!maker?.login || !dm) throw notFound("Bot")
-  return { dm: dm.id, login: maker.login }
+  if (!maker?.login) throw notFound("Bot")
+  return { dm: await botDm(db, caller), login: maker.login }
 }
 
 // The line a read of the log leaves in the bot's DM, as the bot's, kind log, so its maker sees each read and the Inbox cards none (waiting).

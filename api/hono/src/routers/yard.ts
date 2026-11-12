@@ -95,10 +95,24 @@ const webOrigin = env.HONO_WEB_URL ? new URL(env.HONO_WEB_URL).origin : null
 const member = yardCaller()
 const web = yardCaller({ web: true })
 const owner = yardCaller({ rung: "owner", web: true })
-// the two message routes, and the log route, the only ones a bot's token reaches, the message routes only in its DM with its maker
+// the message routes, by a channel's id or a bot's own, and the log route, the only ones a bot's token reaches, the message routes only in its DM with its maker
 const memberOrBot = yardCaller({ bots: true })
 // the owner's session or the owner's own token, since `playground yard bot add` makes a bot from the Mac: the one token route that makes a credential, safe as the bot it makes reaches only its DM with the owner
 const botMaker = yardCaller({ rung: "owner" })
+
+// A post's body, the same on a channel's route and a bot's own
+const postBody = z.object({
+  kind: z.enum(MESSAGE_KINDS),
+  links: messageSchema.shape.links,
+  parent: z.string().min(1).optional(),
+  text: z.string().min(1).max(MAX_TEXT),
+})
+
+// The caller's bot DM, found from its token: a person's token has none
+const botDmOf = (caller: store.Caller) => {
+  if (!caller.bot) throw new ApiError(403, "FORBIDDEN", "Only a bot's token has a bot DM")
+  return store.botDm(db, { ...caller, bot: caller.bot })
+}
 
 // The line a read of the log leaves in the bot's DM: when, and the seqs the page held.
 const readLine = (body: string, at: Date): string => {
@@ -258,15 +272,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       201,
     ),
     memberOrBot,
-    valid(
-      "json",
-      z.object({
-        kind: z.enum(MESSAGE_KINDS),
-        links: messageSchema.shape.links,
-        parent: z.string().min(1).optional(),
-        text: z.string().min(1).max(MAX_TEXT),
-      }),
-    ),
+    valid("json", postBody),
     async (c) => {
       const caller = c.get("caller")
       const message = await store.post(db, caller, c.req.param("id"), c.req.valid("json"))
@@ -399,6 +405,45 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
           ),
         },
       }),
+  )
+  .get(
+    "/bot/messages",
+    doc(
+      "A page of a bot's DM with its maker, found from its token, so a bot needs no DM id: what GET /channels/<its DM>/messages answers, the newest page by default or the one after a message's id with after; a person's token reads 403",
+      z.object({ messages: z.array(messageSchema), hasMore: z.boolean() }),
+      [validationErrorResponses, notFoundErrorResponses],
+    ),
+    memberOrBot,
+    valid(
+      "query",
+      z.object({
+        after: z.string().min(1).optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+      }),
+    ),
+    async (c) => {
+      const caller = c.get("caller")
+      return c.json({
+        data: await store.messages(db, caller, await botDmOf(caller), c.req.valid("query")),
+      })
+    },
+  )
+  .post(
+    "/bot/messages",
+    doc(
+      "Posts in a bot's DM with its maker, found from its token: what POST /channels/<its DM>/messages does, never a held kind, a mention or a link, and its post never waits; a person's token reads 403",
+      z.object({ message: messageSchema }),
+      [validationErrorResponses, notFoundErrorResponses],
+      201,
+    ),
+    memberOrBot,
+    valid("json", postBody),
+    async (c) => {
+      const caller = c.get("caller")
+      const message = await store.post(db, caller, await botDmOf(caller), c.req.valid("json"))
+      await fanOut(caller, message)
+      return c.json({ data: { message } }, 201)
+    },
   )
   .get(
     "/bot/log",
