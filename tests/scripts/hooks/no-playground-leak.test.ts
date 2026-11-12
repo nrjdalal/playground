@@ -361,6 +361,16 @@ describe(`a Acme write holding a ${OLD.dispatcher} term is refused`, () => {
     expect(await bash("git push -u origin main", dirs.leaky)).toContain('"worker-envy"')
   })
 
+  test("a push's refusal names the commit whose message held the term, and the branch it names", async () => {
+    const sha = Bun.spawnSync(["git", "-C", dirs.leaky, "rev-parse", "--short", "HEAD"])
+      .stdout.toString()
+      .trim()
+    const message = await bash("git push", dirs.leaky)
+    expect(message).toContain(`, in the message of commit ${sha}`)
+    expect(message).toContain("git commit --amend")
+    expect(await bash("git push", dirs.named)).toContain(", in the branch name it pushes")
+  })
+
   test("git commit and git push carry the branch name", async () => {
     expect(await bash(`git commit -m "Fix"`, dirs.named)).toContain(`"${OLD.builder}"`)
     expect(await bash("git push", dirs.named)).toContain(`"${OLD.builder}"`)
