@@ -2910,6 +2910,22 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
     })
 
+    test("a waiting card that carries an earlier failed send still archives, as before (PG-1909)", async () => {
+      const posted = await post(decision(PREVIEWS.ship))
+      const writer = new SQL(url, { max: 1 })
+      try {
+        await writer`update inbox_item set delivery = ${JSON.stringify({ code: "LOST", reason: "lost", status: "failed" })}::jsonb where id = ${posted.id}`
+      } finally {
+        await writer.close()
+      }
+      const archived = await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      expect(archived.ok && archived.item).toMatchObject({
+        delivery: { status: "failed" },
+        status: "open",
+      })
+      expect(await store.settleItem(db, posted.id)).toMatchObject({ ok: true })
+    })
+
     test("an item the owner dismissed still refuses Archive (PG-1909)", async () => {
       const dismissedUpdate = await update()
       await store.answerItem(db, dismissedUpdate.id, { action: "dismiss" }, { actor })

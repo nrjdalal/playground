@@ -1835,18 +1835,14 @@ async function archive(
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const answer = current.answer
   const dismissed = answer !== null && "dismissed" in answer && answer.dismissed === true
-  // a card on Done archives too: one he sent there, or one answered that its poster no longer carries out, never one In progress or a set-aside one, which the Archive shelf already holds (PG-1909)
+  // a card on Done archives too: one he sent there, or one answered that its poster no longer carries out, never one In progress, one whose send failed or a set-aside one, which the Archive shelf already holds (PG-1909)
   const done =
     current.status !== "cleared" &&
+    current.delivery?.status !== "failed" &&
     answer !== null &&
     ("dismissedAt" in answer ||
       (current.status !== "open" && "choice" in answer && !carrying(current)))
-  if (
-    (!waits(current) && current.kind !== "update" && !done) ||
-    dismissed ||
-    current.delivery?.status === "failed" ||
-    archivedAt(current)
-  ) {
+  if ((!waits(current) && current.kind !== "update" && !done) || dismissed || archivedAt(current)) {
     return {
       code: "CONFLICT",
       message:
