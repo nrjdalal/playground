@@ -10613,7 +10613,7 @@ async function inspect(raw, environment, unknown = false) {
         if (named)
           return (unwritten(named, cmd, here) ? refuseUnwritten : refuse)(`${verb} on ${named}`);
       }
-      if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
+      if (!(name === "tee" && !rootLine) && cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`);
       const unreadFeed = fed && remover ? argFile ? "the file its -a names" : fed.unknown || marked(fed.value) || !fedSplit ? fed.unknown ?? (fedSplit ? "a value it cannot read" : "stdin holding a quote it does not close") : undefined : undefined;
       if (unreadFeed)
