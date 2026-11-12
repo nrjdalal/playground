@@ -2036,7 +2036,7 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["git rm in an absolute -C", `cd "$X"; git -C /tmp/repo rm -q p`],
     ["a bare mktemp", `cd "$X"; mktemp`],
     ["mktemp of a template in the temp folder", `cd "$X"; mktemp -t x.XXXX`],
-    ["mktemp of a template in an absolute folder", `cd "$X"; mktemp -p /tmp x.XXXX`],
+    ["mktemp of a template in an absolute folder", `cd "$X"; mktemp -p /tmp/scratch x.XXXX`],
     ["chmod under xargs of an absolute file", `cd "$X"; xargs chmod 644 /tmp/p`],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
