@@ -1120,6 +1120,36 @@ describe("one night's run against a fixture data folder", () => {
     await nightlyClean(deps)(ctx)
     expect(inputs).toEqual([])
   })
+
+  // #1346: a factory script left with parent pid 1 after its worktree went is ended by its own pid, TERM then KILL past the grace, and logged; the signals are fakeRun's, so nothing real is signalled
+  test("an orphan of a gone worktree's script is ended by its pid, logged with pid, age and command, and no decision is asked", async () => {
+    const { ctx, deps, inputs, ops, runs, sent, wt } = night({}, undefined, 0.01)
+    const orphan = `bash ${wt("review-947")}/scripts/ops/run-slot.sh worker-a -- sleep 5`
+    const listed = [
+      `58523     1  1-04:05:06 ${orphan}`,
+      `58524     1    00:10:00 bash ${wt("pg-3")}/scripts/ops/run-slot.sh w -- sleep 5`,
+      `58525 58000    00:10:00 bash ${wt("review-948")}/scripts/ops/run-slot.sh w -- sleep 5`,
+    ].join("\n")
+    const fake = ctx.run
+    let reads = 0
+    ctx.run = async (argv, timeoutMs, stdin) =>
+      argv[0] === "ps" && reads++ === 0 ? { code: 0, out: listed } : fake(argv, timeoutMs, stdin)
+    const waits: number[] = []
+    deps.sleep = async (ms) => {
+      waits.push(ms)
+    }
+    await nightlyClean(deps)(ctx)
+    expect(runs.filter((r) => r[0] === "kill").map((r) => r.join(" "))).toEqual([
+      "kill -TERM 58523",
+    ])
+    expect(waits).toContain(5000)
+    const said = `orphan pid 58523 ended by TERM (age 1-04:05:06, its worktree ${wt("review-947")} gone): ${orphan}`
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toContain(
+      `orphans: ${said}`,
+    )
+    expect(sent.find((s) => s.to === "ops")?.text).toContain(said)
+    expect(inputs).toEqual([])
+  })
 })
 
 // #1778: the stale worktrees of every other repo the factory works in, each a real git checkout under a fake code root and org folder, PRs, lsof and the roster faked
