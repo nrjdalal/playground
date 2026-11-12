@@ -429,6 +429,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
           args.path,
           {
             ...(git ? { git } : {}),
+            ended: { live: STATUSES.live, roster: join(deps.data, "roster.json") },
             reason: args.reason,
             session,
             worktree: args.worktree
