@@ -1289,6 +1289,7 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
       "ls .. | xargs -I{} cat ../{}/README.md",
       "cat ~-/README.md",
       'cd "$X" && cat README.md',
+      `for d in docs ${ORG}; do cat "$d/README.md"; done`,
     ]) {
       const { claude, glm } = await both(input(command))
       expect({ command, claude }).toEqual({ command, claude: undefined })
@@ -1305,6 +1306,11 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
       'cat "$(echo docs)/a.md"',
       "cd docs && cat ~-/README.md",
       'echo "$X"',
+      'for f in README.md docs/a.md; do cat "$f"; done',
+      "ls | xargs -I{} echo {}",
+      "for i in $(seq 1 3); do echo $i; done",
+      '[ -n "$(git status --porcelain)" ] && echo dirty',
+      'dirname "$(git rev-parse --git-common-dir)"',
     ])
       expect({ command, glm: await refusal(input(command), ON_GLM, CALM) }).toEqual({
         command,

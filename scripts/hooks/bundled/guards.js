@@ -10834,6 +10834,23 @@ function forList(cmd, named) {
     return;
   return { key: key.value, values: values.map((w) => w.value) };
 }
+function heldReadings(word, env, steady) {
+  if (!word.raw || !marked(word.value))
+    return;
+  const known = heldVars(env, { has: (key) => steady.has(key) || !!steady.exported?.(key) });
+  let sets = [known];
+  for (const key of new Set(word.raw.match(/[A-Za-z_]\w*/g) ?? [])) {
+    const values = steady.loop?.(key);
+    if (!values)
+      continue;
+    sets = sets.flatMap((s) => values.map((v) => ({ ...s, [key]: v })));
+    if (sets.length > LOOP_READINGS)
+      return;
+  }
+  const words = sets.map((s) => relexed(word.raw, s));
+  return words.every(Boolean) ? words : undefined;
+}
+var LOOP_READINGS = 64;
 function heldWord(word, env, steady) {
   return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env, steady)) : undefined;
 }
@@ -12597,6 +12614,17 @@ function globRoot(pattern, base) {
 }
 var READ_TOOLS = { Glob: "path", Grep: "path", Read: "file_path" };
 var READS_NOTHING = new Set(["date", "echo", "printf", "pwd", "true"]);
+var UNREAD_TEXT = new Set([
+  "[",
+  "[[",
+  "basename",
+  "case",
+  "dirname",
+  "exit",
+  "for",
+  "select",
+  "test"
+]);
 var PATH_LIKE = /[/~]/;
 var GLOB_CHARS2 = /[*?[]/;
 var namesFile = (r) => r.target !== undefined && !r.body && (r.op === "<" || r.op === "<>" || r.op.startsWith(">") && !r.op.startsWith(">&"));
@@ -12672,15 +12700,19 @@ var pureFilled = (raw, cwd) => raw.replace(/\$\(\s*pwd(?:\s+-[LP])?\s*\)|`\s*pwd
 async function readable(w, env, steady, own) {
   if (w.reads?.length && !w.unknown) {
     const text = await resolveText(w, env);
-    return text.unknown || marked(text.value) ? undefined : { ...w, reads: undefined, value: text.value };
+    return text.unknown || marked(text.value) ? undefined : [{ ...w, reads: undefined, value: text.value }];
   }
   if (!w.raw)
     return;
-  return heldWord({ ...w, raw: pureFilled(w.raw, env.cwd) }, { ...env, known: { ...own, ...env.known } }, steady);
+  const filled = { ...w, raw: pureFilled(w.raw, env.cwd) };
+  const here = { ...env, known: { ...own, ...env.known } };
+  const word = heldWord(filled, here, steady);
+  return word ? [word] : heldReadings(filled, here, steady);
 }
 async function opened(cmd, parsed, env, steady, own) {
   const { args, name, xargs } = parsed;
   const plain = READS_NOTHING.has(name);
+  const text = plain || UNREAD_TEXT.has(name);
   const out = { below: [], places: [] };
   const blind = (why) => {
     out.unread ??= why;
@@ -12699,20 +12731,22 @@ async function opened(cmd, parsed, env, steady, own) {
         blind(`a file a substitution reads by ${read.unknown ?? "a value it cannot expand"}`);
     }
     if (fromXargs(w, xargs))
-      return blind(`the word xargs fills in place of ${xargs?.replace}`);
-    const word = unreadValue(w) ? await readable(w, env, steady, own) : w;
-    if (!word)
-      return plain ? undefined : blind(w.unknown ?? "a value it cannot expand");
-    if (plain && argument && !PATH_LIKE.test(word.value))
-      return;
-    const path = pathOf(word, env);
-    if (!path)
-      return;
-    out.places.push(path);
-    if (argument)
-      named.push(path);
-    if (word.glob)
-      out.places.push(...globbed(word.value, env.cwd, out.below));
+      return text ? undefined : blind(`the word xargs fills in place of ${xargs?.replace}`);
+    const words = unreadValue(w) ? await readable(w, env, steady, own) : [w];
+    if (!words)
+      return text ? undefined : blind(w.unknown ?? "a value it cannot expand");
+    for (const word of words) {
+      if (plain && argument && !PATH_LIKE.test(word.value))
+        continue;
+      const path = pathOf(word, env);
+      if (!path)
+        continue;
+      out.places.push(path);
+      if (argument)
+        named.push(path);
+      if (word.glob)
+        out.places.push(...globbed(word.value, env.cwd, out.below));
+    }
   };
   for (const a of args)
     await open(a, true);

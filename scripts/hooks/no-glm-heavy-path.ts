@@ -44,7 +44,7 @@ import {
   type Visit,
   type Word,
 } from "./shell"
-import { heldWord, namings, NONE, type Steady, steadyNames } from "./steady"
+import { heldReadings, heldWord, namings, NONE, type Steady, steadyNames } from "./steady"
 
 type Environment = Record<string, string | undefined>
 
@@ -919,6 +919,18 @@ function globRoot(
 const READ_TOOLS: Record<string, string> = { Glob: "path", Grep: "path", Read: "file_path" }
 // the shell's commands that read no file, which run inside an org's checkout and open only an argument with a slash or a tilde, since their plain words are text
 const READS_NOTHING = new Set(["date", "echo", "printf", "pwd", "true"])
+// the shell's own headers and tests and the path-name programs, which take a word the hook cannot read as text and open no file by it, though they run in their folder: a for or select list, a case word, [ and test, exit's status, basename's and dirname's string
+const UNREAD_TEXT = new Set([
+  "[",
+  "[[",
+  "basename",
+  "case",
+  "dirname",
+  "exit",
+  "for",
+  "select",
+  "test",
+])
 const PATH_LIKE = /[/~]/
 const GLOB_CHARS = /[*?[]/
 // a redirect that names a file: an input, a read-write or an output, not a duplicated descriptor, a heredoc or a here-string
@@ -998,19 +1010,23 @@ const pureFilled = (raw: string, cwd: string | undefined) =>
     .replace(/\$\(\s*pwd(?:\s+-[LP])?\s*\)|`\s*pwd(?:\s+-[LP])?\s*`/g, (m) => cwd ?? m)
     .replace(/\$\(\s*echo\s+([^$`()'"\\|;&<>]*?)\s*\)/g, (_, words: string) => words)
 // A word the lexer could not read, read with what the hook holds: its file reads filled in, else lexed again with a pure substitution's output, the line's steady variables and the session's own; undefined while it still holds a value the hook cannot read
-async function readable(w: Word, env: Env, steady: Steady, own: Record<string, string>) {
+async function readable(
+  w: Word,
+  env: Env,
+  steady: Steady,
+  own: Record<string, string>,
+): Promise<Word[] | undefined> {
   if (w.reads?.length && !w.unknown) {
     const text = await resolveText(w, env)
     return text.unknown || marked(text.value)
       ? undefined
-      : { ...w, reads: undefined, value: text.value }
+      : [{ ...w, reads: undefined, value: text.value }]
   }
   if (!w.raw) return undefined
-  return heldWord(
-    { ...w, raw: pureFilled(w.raw, env.cwd) },
-    { ...env, known: { ...own, ...env.known } },
-    steady,
-  )
+  const filled = { ...w, raw: pureFilled(w.raw, env.cwd) }
+  const here = { ...env, known: { ...own, ...env.known } }
+  const word = heldWord(filled, here, steady)
+  return word ? [word] : heldReadings(filled, here, steady)
 }
 // The paths a command opens (its folder, each argument, each file a redirect names, each file a substitution in a word reads ($(< f), $(cat f)) and each match of a glob or a brace), the folders it reads all the way down (a recursive search's, else its own folder, and each folder a ** starts from), and the first path it opens that the hook cannot read: a value it cannot expand, xargs's -I word, a file a substitution reads by such a value, or the folder a cd it cannot follow left it in; a command that reads nothing gives no folder and only a path-like argument, its other words text
 type Opened = { below: string[]; places: string[]; unread?: string }
@@ -1023,6 +1039,7 @@ async function opened(
 ): Promise<Opened> {
   const { args, name, xargs } = parsed
   const plain = READS_NOTHING.has(name)
+  const text = plain || UNREAD_TEXT.has(name)
   const out: Opened = { below: [], places: [] }
   const blind = (why: string) => {
     out.unread ??= why
@@ -1037,15 +1054,18 @@ async function opened(
       if (path) out.places.push(path)
       else blind(`a file a substitution reads by ${read.unknown ?? "a value it cannot expand"}`)
     }
-    if (fromXargs(w, xargs)) return blind(`the word xargs fills in place of ${xargs?.replace}`)
-    const word = unreadValue(w) ? await readable(w, env, steady, own) : w
-    if (!word) return plain ? undefined : blind(w.unknown ?? "a value it cannot expand")
-    if (plain && argument && !PATH_LIKE.test(word.value)) return
-    const path = pathOf(word, env)
-    if (!path) return
-    out.places.push(path)
-    if (argument) named.push(path)
-    if (word.glob) out.places.push(...globbed(word.value, env.cwd, out.below))
+    if (fromXargs(w, xargs))
+      return text ? undefined : blind(`the word xargs fills in place of ${xargs?.replace}`)
+    const words = unreadValue(w) ? await readable(w, env, steady, own) : [w]
+    if (!words) return text ? undefined : blind(w.unknown ?? "a value it cannot expand")
+    for (const word of words) {
+      if (plain && argument && !PATH_LIKE.test(word.value)) continue
+      const path = pathOf(word, env)
+      if (!path) continue
+      out.places.push(path)
+      if (argument) named.push(path)
+      if (word.glob) out.places.push(...globbed(word.value, env.cwd, out.below))
+    }
   }
   for (const a of args) await open(a, true)
   for (const r of cmd.redirects) if (namesFile(r)) await open(r.target as Word, false)
