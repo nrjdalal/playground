@@ -18,6 +18,34 @@ export const groups: Group[] = [
         "a pull request whose short title is --head, with no --head",
         "gh pr create -R acme-blue/app -t --head --body ok",
       ],
+      [
+        "a pull request whose --head is empty",
+        'gh pr create -R acme-blue/app --head "" --title x --body ok',
+      ],
+      [
+        "a pull request whose --head= is empty",
+        "gh pr create -R acme-blue/app --head= --title x --body ok",
+      ],
+      [
+        "a pull request whose -H is empty",
+        "gh pr create -R acme-blue/app -H '' --title x --body ok",
+      ],
+      [
+        "a pull request whose last --head is empty",
+        "gh pr create -R acme-blue/app --head main --head '' --title x --body ok",
+      ],
+      [
+        "a pull request whose --head it cannot read",
+        'gh pr create -R acme-blue/app --head "$B" --title x --body ok',
+      ],
+      [
+        "a pull request whose --head is only whitespace",
+        'gh pr create -R acme-blue/app --head " " --title x --body ok',
+      ],
+      [
+        "a pull request whose --head holds a glob character",
+        "gh pr create -R acme-blue/app --head 'fix*' --title x --body ok",
+      ],
     ],
   },
 ]
