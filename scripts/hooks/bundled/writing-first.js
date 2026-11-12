@@ -7555,6 +7555,9 @@ if (import.meta.main) {
   }
 }
 export {
+  LOADS,
   SKILL,
-  check
+  TYPED,
+  check,
+  markOf
 };
