@@ -26,7 +26,7 @@ import {
   settingRows,
 } from "@packages/settings"
 
-import { engineDataOf } from "../ops-job/job"
+import { engineDataOf, lastRevision, REVISION } from "../ops-job/job"
 import { dashboardPath } from "./probe"
 
 const USAGE =
@@ -51,14 +51,15 @@ const orgScripts = (data: string, login: string): Map<string, string[][]> =>
       .map((org) => [org, scriptFilesOf(data, org)]),
   )
 
-// Each org's script folder, <org>/scripts/<key>/, into <data>/ops/<key>/, beside the state its job keeps there, which no item holds and this never touches; a file the extensions cannot vouch for is left as it was, with the reason on stderr.
+// Each org's script folder, <org>/scripts/<key>/, into <data>/ops/<key>/, beside the state its job keeps there, which no item holds and this never touches; a file the extensions cannot vouch for is left as it was, with the reason on stderr. Once an org's files are in, each folder's .revision holds the accepted revision that last wrote it, which a job running from the folder restarts on (scheduled in ops-job/job.ts).
 const installScripts = async (
   data: string,
   scripts: Map<string, string[][]>,
   err: (line: string) => void,
 ): Promise<string[]> => {
   const changed: string[] = []
-  for (const [org, files] of scripts)
+  for (const [org, files] of scripts) {
+    const folders = new Set(files.filter((parts) => parts.length > 2).map((parts) => parts[1]!))
     for (const parts of files) {
       const file = parts.join("/")
       const read = await readRendered(data, `${org}/${file}`)
@@ -71,6 +72,12 @@ const installScripts = async (
       if (writeIfChanged(join(data, "ops", to), text, to.endsWith(".sh") ? 0o755 : 0o644))
         changed.push(to)
     }
+    for (const key of folders) {
+      const revision = lastRevision(data, org, `scripts/${key}`)
+      if (revision && writeIfChanged(join(data, "ops", key, REVISION), `${revision}\n`))
+        changed.push(`${key}/${REVISION}`)
+    }
+  }
   return changed
 }
 

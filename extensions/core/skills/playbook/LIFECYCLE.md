@@ -116,6 +116,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   ops-ext-sync is `bun run ops:ext-sync`, off until its registry setting `jobs.opsExtSync` is enabled (`packages/settings/src/jobs.ts`).
   At 02:30 machine time it syncs each scope's clone in the data folder's `extensions/` with its private repository, `<login>/playground-<scope>` unless the setting `ext.repos` names another: a pull with rebase, then a push, so every machine's commits meet in one history.
   It scans every file with the extensions' secret shapes and the history with gitleaks when installed, and pushes only when clean; a public repository is refused, a scope with no repository stays on the machine, a refusal or failure goes to ops naming the scope, the file and the kind of secret, never its text, and `--once [<scope>]` runs one sync.
+  An ops job that runs a skill or script an accept changed restarts by itself at its next idle tick, never mid-pass, and logs the revision it picked up ([scripts/ops/README.md](../../../../scripts/ops/README.md#when-a-job-restarts-onto-new-code)), so Ops restarts none by hand.
   ops-zai-usage is `bun run ops:zai-usage`: every 5 minutes it reads Z.ai's quota endpoint, retrying for about 2 minutes a fetch that never reached Z.ai (DNS or the network just after boot),
   writes `zai-usage.json`, the readings the GLM spawn gate reads, with `balance` marked empty for an hour after a session-state record's `balance` failure (the quota endpoint never reports the balance) and `error` over the last windows on a failed read, and beats its own heartbeat;
   `--once` runs one read and writes only `zai-usage.json`, no beat.
@@ -184,7 +185,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   The dispatcher spawns a manager under its fixed name when `ListAgents` lists none.
   A fresh the dispatcher session, after a restart, reads the previous the dispatcher transcript and re-checks its open items against the roster and the managers before it answers the owner.
   A session resumed after any restart, an account switch included, re-arms its background tasks and re-sends its unanswered messages first, by the **context** rule ([rules/context.md](../../rules/context.md)), which the `after-resume` hook puts in front of it.
-  When the restart killed a commit mid pre-commit, the same hook names the patch lefthook left in the shared git folder for the session's worktree, `info/lefthook-unstaged.<worktree folder>.patch`, and the session restores it with `git -C <worktree> apply --unidiff-zero <patch>` before any commit ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#after-resume)).
+  When the restart killed a commit mid pre-commit, the same hook names the patch lefthook left and the command that restores it, which the session runs before any commit ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#after-resume)).
   No session reports Playground as running until its own `ListAgents` lists a session named `dispatcher`; a roster entry, a resume record or a Dashboard row does not count.
   Ops' sweep has each factory session resumed without the factory's hooks respawned with its settings ([SWEEP.md](SWEEP.md)).
 

@@ -199,6 +199,11 @@ One `up.py --restarted <names>` pass then starts the stopped herdr jobs again: o
 It first renders `jobs.json` from the settings with the new code, as `up.py` does, so a job whose default the move turned on reads as on; when it stopped no herdr job, a plain `up.py` pass starts each herdr job that is on and whose heartbeat pid runs nowhere.
 A paused job stays down, ops-herdr is left running for Ops, and ops-dashboard rolls onto new code itself (`dashboard/supervisor.sh`'s reload).
 
+A job that runs an extension's code restarts by itself when an accepted revision of that code lands, by ext-sync's pull or by an accept on this machine.
+Core's `scheduled()` (`packages/scripts/src/ops-job/job.ts`) reads the revision its entry file runs (`revisionOf`): for a skill's or script's folder run in place under `extensions/<scope>/`, the clone's last commit on that item, which no proposal makes, since a proposal sits under `proposed/`; for an org's script folder under `ops/<key>/`, its `.revision`, which `up.py`'s render writes after the folder's files.
+On a new revision it waits for its next 20-second tick with no beat running, so a pass is never cut, beats `loop exited: revision <rev> accepted, restarting`, and runs `up.py --restarted <job>` in a process group of its own, which starts it again in its pane within seconds; the new copy logs `<job> runs revision <rev>`.
+A job of the checkout's own has no such revision and moves only through `ops-restart`, above.
+
 ## runner-host
 
 A VPS that runs the suite for run-slot through `ci.sh`, so the suite leaves this Mac's run slots; GitHub's workflows run on hosted runners alone ([README's CI](../../README.md#ci)). `host.sh` reaches it as root with `~/.ssh/playground_runner`, whose public half goes into the VPS provider's panel first.
