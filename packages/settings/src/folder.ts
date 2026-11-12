@@ -151,6 +151,11 @@ export const withLock = <T>(data: string, run: () => T, wait = 30_000): T => {
   }
 }
 
+// Stubs for the red commit; the next commit builds them.
+export const rootLocked = (_root: string): boolean => false
+export const setRootLock = (_data: string, _locked: boolean): void => {}
+export const relockRoot = (_data: string): boolean => false
+
 // A file written whole under a temp name, then renamed into place, so a hook reading it meets the old file or the new one.
 export const writeAtomically = (path: string, data: string | Uint8Array) => {
   mkdirSync(dirname(path), { recursive: true })
