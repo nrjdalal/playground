@@ -1,10 +1,10 @@
 import { afterAll, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { setSetting, type Who } from "../../../../packages/settings/src"
-import { judgeItem, putItem, showItem } from "../../../../packages/settings/src/items"
+import { mustGit, scopeDir, setSetting, type Who } from "../../../../packages/settings/src"
+import { importFrom, judgeItem, putItem, showItem } from "../../../../packages/settings/src/items"
 
 process.env.PLAYGROUND_LOGIN = "made-up-me"
 const ME = "made-up-me"
@@ -140,4 +140,24 @@ test("put refuses an executable name the item does not hold", () => {
       true,
     ),
   ).toEqual(refusal)
+})
+
+// PG-1924: an import carries a source script's executable bit, and never strips a stored script's own
+test("import stores a source folder's 755 script as 100755 and keeps the stored bit on a re-import", () => {
+  const from = join(scratch, "import-src", "made-up-new")
+  mkdirSync(join(from, "scripts"), { recursive: true })
+  const source = join(from, "scripts", "run.sh")
+  writeFileSync(source, "#!/bin/sh\necho made-up\n")
+  writeFileSync(join(from, "readme.md"), "made-up note\n")
+  chmodSync(source, 0o755)
+  expect(importFrom(scratch, join(scratch, "import-src"), false, OWNER).ok).toBe(true)
+  const dir = scopeDir(scratch, "made-up-new")
+  const at = join(dir, "scripts", "run.sh")
+  expect(mustGit(dir, ["ls-files", "-s", "scripts/run.sh"])).toContain("100755")
+  expect(statSync(at).mode & 0o777).toBe(0o755)
+  expect(mustGit(dir, ["ls-files", "-s", "readme.md"])).toContain("100644")
+  chmodSync(source, 0o644)
+  expect(importFrom(scratch, join(scratch, "import-src"), false, OWNER).ok).toBe(true)
+  expect(mustGit(dir, ["ls-files", "-s", "scripts/run.sh"])).toContain("100755")
+  expect(statSync(at).mode & 0o777).toBe(0o755)
 })

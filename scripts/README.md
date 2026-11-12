@@ -2,7 +2,7 @@
 
 The factory's own scripts: `spawn.sh`, which starts and resumes every factory session, `link-skills.sh`, which installs the skills, the herdr servers' ops job, a worktree's `node_modules` clone and `bun run test:skills`.
 AGENTS.md keeps one line for each, and this file holds the text that line stands for.
-It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes, and the rule for an edit script's replacements.
+It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes, the rule for an edit script's replacements, and where a factory script's orphan is ended.
 Read a section before you change its script or its tests, or when it refuses a start you did not expect.
 The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
@@ -28,7 +28,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   for a fresh worker start alone, room for its runs:
   `scripts/ops/run-slot.sh room`'s lanes, held lanes, free lanes (open and unheld while the queue's next run fits its load units by run-slot's one gate, `unit_fits`, or a medium run with no waiter, `slots.peers`' holders counted; none while the battery's or focus's hold stands, which the wait loop obeys too) and live waiters, refusing while no lane is free and a run waits in the queue,
   or when room gives no reading, so a new worker never joins a queue it has no room in,
-  while a `--priority` start passes a full queue with a priority file standing, as it passes the load gate, its row's `readings.priority` naming the file, and a reviewer, tester
+  while a `--priority` start passes a full queue with a priority file standing, as it passes the load gate, its row's `readings.priority` naming the file,
+  a `--reads-only` worker start (`spawn.sh --help`) passes it with its row's `readings.reads_only` true, since a worker that only reads runs nothing through run-slot, while the load, memory and usage gates still hold it, and a reviewer, tester
   or resume skips it and work already admitted finishes; and the launching backend's usage:
   Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, which never sits below one day's share of 14.3 points, so a week that has just reset passes its first day,
   or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone, which ops-sweep writes and renews while an account the split can pick projects under 100% at its week reset (`scripts/ops/README.md`'s Usage forecasts), or a person writes by hand, and the pass line names, a missing, empty, past or unreadable time leaving the pace on;
@@ -252,6 +253,13 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - In single-slot mode (`run-slot.single`) the machine holds 4 units across slots 1 and 2, so beside a big run's 3 units only a 1-unit run fits, by design, and a 2-unit waiter waits for the big to end (measured: it started 22.2 s after it arrived, when the big's 20 s hold ended, and the free slot stood idle the whole hold);
   the rule and its 7 Nov window are written in [ops/README.md](ops/README.md#run-slot).
 - A backlog drains spaced: a small run that has waited past `BACKLOG_WAIT` waits for `burst_held` as medium and big runs do, since load5 shows a draining queue's starts only about a minute later, while a fresh small run starts at once; the rule and its 7 Nov burst are in [ops/README.md](ops/README.md#run-slot).
+
+## A factory script's orphan
+
+- A factory script left running after its starter and its worktree are gone (parent pid 1) belongs to no session, so the signal rule gives it to Ops: ops-tick's nightly clean ends it by its own pid, TERM then KILL past a 5-second grace, and names each in `ops/log/nightly-clean.log` and its outbox line, with nothing to the Inbox.
+  The check lives in `packages/scripts/src/ops-tick/orphans.ts`: `orphansOf` selects a process whose parent is pid 1 and whose command names a script file of this repo (`.sh`, `.ts`, `.js`, `.py`) in a worktree under the checkout's `.claude/worktrees`, read by its whole folder name, once every worktree its command names is gone,
+  never a dependency's binary under `node_modules` such as the shared portless proxy, nor an app opened on a folder or a reader of a log, and `endOrphans` sends KILL only to a pid `ps` still lists with the same command.
+  Tests: `bun run test:file tests/packages/scripts/src/ops-tick/orphans.test.ts tests/packages/scripts/src/ops-tick/nightly-clean.test.ts`.
 
 ## bun run test:skills
 
