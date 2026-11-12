@@ -245,10 +245,11 @@ It restores the checkout only once a guard's bundle and source are both gone on 
 2. It runs `bun install --cwd <main checkout>` through its own checkout's run-slot, then `<main checkout>/scripts/link-skills.sh`, for the hooks and scripts that run from source.
 3. It checks the guards again and tells ops and the dispatcher what it did.
    A step that fails is told to them once, naming the step, and the job runs no step again until the guards have come back; a stop that leaves them back (at the install or `link-skills.sh`) is Ops' to finish by hand from a session whose guards start.
-   While the guards stay gone, after a stopped restore or with the job turned off, no factory session's Bash runs: that is a true block, so the session that finds it tells the dispatcher by SendMessage, and the owner's way back is one GUI action, the Dashboard's restore control, which runs steps 1 to 3 from the dashboard's server, where no factory Bash runs (not built yet).
+   While the guards stay gone, after a stopped restore or with the job turned off, no factory session's Bash runs: that is a true block, so the session that finds it tells the dispatcher by SendMessage, and the owner's way back is one GUI action, Restore now on the ops-restore row of the Dashboard's Settings > Jobs,
+   which runs these same steps 1 to 3 at once (`cli.ts --now`, through `POST /api/v1/ops/restore`) from the Dashboard's server, where no factory Bash runs; the Dashboard runs from its own checkout, so the page stays up while the main checkout's guards are gone, and the button names in the page what it restored or the step it stopped at.
 
 With every guard there, the same beat puts back a tracked file modified in place, which `no-main-checkout` keeps every session from restoring: a file `git status --porcelain` reads as ` M`, `M ` or `MM`, on two looks in a row by the same rule and with no upkeep held.
 It copies each stray file into its own scratch folder, `scratch/ops-restore/<time>/`, moves that folder to the trash with safe-delete, the undo, runs `git checkout HEAD -- <file>`, and writes one line per file to `ops/log/ops-restore.log` naming the file and its copy's trash path, with no report to a session.
 An untracked file, a staged add, a delete and a rename stay as they are.
 
-**Done when** ops-restore's report reads that every guard's script is back, or Ops, else the owner's restore control on a true block, has finished a stopped restore's steps.
+**Done when** ops-restore's report reads that every guard's script is back, or Ops, else the owner's Restore now on a true block, has finished a stopped restore's steps.

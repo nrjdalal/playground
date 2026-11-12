@@ -34,6 +34,13 @@ Moving a schedule or pausing a job with `pausedFor` is the same kind of write, n
 A job with a `config`, the settings of its own it reads on each pass, shows a card under its row in Settings > Jobs: the config as JSON in a box you edit, and Save, which writes the new object at the job's scope at once, over the rest of the value there.
 Playground checks only that it is a JSON object; the job checks each field itself, and when it refuses one it writes why as `configRefused` in its heartbeat, which the card shows in red under the box until a beat holds none.
 
+## Restore now
+
+The ops-restore row in Settings > Jobs holds Restore now, your way back when the main checkout's guards are gone and no session can repair it, with the job on or off.
+It runs ops-restore's own steps once, from the Dashboard's server: it puts the checkout's files back, installs, runs `link-skills.sh`, and checks the guards again.
+The Dashboard runs from its own checkout, so the page still works while the main checkout is broken.
+Under the button it says what it restored, that every guard is in place so nothing was, or the step it stopped at; ops and the dispatcher get the same words.
+
 ## How a change reaches the runner
 
 At the top of every pass, the ops runner (`scripts/ops/up.py`) renders the jobs from your extensions into `<data>/ops/jobs.json` and writes a plist for each launchd job that is on into `<data>/ops/launch-agents`.
