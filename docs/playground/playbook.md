@@ -69,7 +69,7 @@ A lane's item aims at about 1,000 changed lines or fewer, and a bigger diff spli
 Anything else bundles into one PR or sequences one PR after the other.
 A worker is spawned for one chore and ends when the chore is done, so the room it held fills again as work finishes: a fix for live breakage or security first, then a queued org ticket, else the next item of the planner's first lane with no worker, where his own asks sit ahead of the chores the factory proposed.
 Before a lead spawns a worker it reads the machine's room, the Dashboard's System panel through `bun run verify system`, so the factory grows as far as the Mac allows, counting every membership rather than holding for usage.
-Every factory session starts through one script, `scripts/spawn.sh`, which refuses when the machine has no room for it (its gate reads the load against the cores, memory pressure, for a new worker a free run slot with the load room for a run, or an empty run queue, and the model's usage windows, and names the reading that failed),
+Every factory session starts through one script, `scripts/spawn.sh`, which refuses when the machine has no room for it (its gate reads the load against the cores, memory pressure, for a new worker (a `--reads-only` one aside) a free run slot with the load room for a run, or an empty run queue, and the model's usage windows, and names the reading that failed),
 or a live session already holds the name it would start;
 it counts no sessions, so Ops watches the live board, since cmux once stopped answering at 49 live sessions and load 97; a hook turns back a session started any other way; a worker runs its dev stack only while it tests.
 A heavy run, such as a suite, takes one of a few run slots and gives it back when it ends, so nothing long-lived holds one.
@@ -171,7 +171,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - A manager starts no hidden helper: its settings deny it the Agent and Workflow tools, so every build, read or research it hands off shows as a worker in the sidebar.
 - A heavy run in a worktree (an install, a `node_modules` copy, a build, a type check or the whole test suite) waits for a free run slot, so the machine runs a few at a time: the `no-unslotted-run` hook refuses one typed without `run-slot.sh`, naming the form to use.
   A docker image build waits too, from any folder, one at a time in a builder capped at half the Docker VM's memory, so a build that grows too big fails alone and the live dashboard's database keeps running.
-- No factory session starts unless the machine has room: `scripts/spawn.sh` refuses while the load is at or over the core count, while memory pressure is critical or free memory is under 8%, for a new worker while no run slot can take a run and other runs wait for one, or while the model's usage window is near its cap, naming what it read,
+- No factory session starts unless the machine has room: `scripts/spawn.sh` refuses while the load is at or over the core count, while memory pressure is critical or free memory is under 8%, for a new worker (a `--reads-only` one aside) while no run slot can take a run and other runs wait for one, or while the model's usage window is near its cap, naming what it read,
   and when a live session already holds the name, so a respawned session starts only once the old one has closed,
   and the `no-raw-spawn` hook refuses a session not started through it.
   A session started with `--account <email>` runs on that account, and its token shows in no command, message or log.
