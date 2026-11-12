@@ -7949,7 +7949,16 @@ function knownVariables(command, environment, cwd) {
 // scripts/hooks/no-prepare-write.ts
 var MCP_TOOL = /^mcp__(.+?)__(.+)$/;
 var WRITES = [
-  [/github/i, new Set(["create_pull_request"])],
+  [
+    /github/i,
+    new Set([
+      "create_branch",
+      "create_or_update_file",
+      "create_pull_request",
+      "delete_file",
+      "push_files"
+    ])
+  ],
   [/linear/i, new Set(["save_comment", "save_issue"])],
   [/slack/i, new Set(["chat_post_message"])]
 ];
@@ -7977,9 +7986,31 @@ var pushes = (args) => {
       k++;
   return args[k]?.value === "push";
 };
-var visit = async (_cmd, { args, name }) => {
+var REF_MUTATION = /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|updateRef|updateRefs)\b/;
+var REF_ENDPOINT = /^repos\/[^/]+\/[^/]+\/(?:pulls|git\/refs(?:\/.+)?)$/;
+async function apiWrite(rest, cmd, env, xargs) {
+  const request = await ghApi(rest, cmd, env, xargs);
+  if (!request)
+    return false;
+  const { endpoint, fields, inputs, method } = request;
+  if (endpoint.value === "graphql")
+    return [...fields.filter((f) => f.key === "query").map((f) => f.text), ...inputs].some((d) => unreadable(d) || REF_MUTATION.test(d.value));
+  if (method === "GET" || method === "HEAD")
+    return false;
+  if (unreadable(endpoint))
+    return true;
+  const path = endpoint.value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "").split("?")[0];
+  return REF_ENDPOINT.test(path);
+}
+var ghWrite = async (args, cmd, env, xargs) => {
+  if (prCreate(args))
+    return "gh pr create";
+  const { head, rest } = ghCommand(args);
+  return head[0] === "api" && await apiWrite(rest, cmd, env, xargs) ? "gh api" : undefined;
+};
+var visit = async (cmd, { args, name, xargs }, env) => {
   if (name === "gh")
-    return prCreate(args) ? "gh pr create" : undefined;
+    return ghWrite(args, cmd, env, xargs);
   if (name === "git")
     return pushes(args) ? "git push" : undefined;
   if (PRINTERS.has(name))
@@ -7990,7 +8021,7 @@ var visit = async (_cmd, { args, name }) => {
   const rest = args.slice(nested + 1);
   if (program(args[nested].value) === "git")
     return pushes(rest) ? "git push" : undefined;
-  return prCreate(rest) ? "gh pr create" : undefined;
+  return ghWrite(rest, cmd, env, xargs);
 };
 async function writeOf(tool, input, cwd, environment) {
   if (mcpWrite(tool))

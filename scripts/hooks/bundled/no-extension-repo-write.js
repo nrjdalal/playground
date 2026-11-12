@@ -7967,7 +7967,16 @@ function knownVariables(command, environment, cwd) {
 
 // scripts/hooks/no-prepare-write.ts
 var WRITES = [
-  [/github/i, new Set(["create_pull_request"])],
+  [
+    /github/i,
+    new Set([
+      "create_branch",
+      "create_or_update_file",
+      "create_pull_request",
+      "delete_file",
+      "push_files"
+    ])
+  ],
   [/linear/i, new Set(["save_comment", "save_issue"])],
   [/slack/i, new Set(["chat_post_message"])]
 ];
