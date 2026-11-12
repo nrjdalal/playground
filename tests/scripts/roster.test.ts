@@ -679,6 +679,89 @@ describe("an extension item as a checker's pr (#1851)", () => {
   })
 })
 
+// a checker scoring an extension revision has no pull request, so assign names the item it scores now by item=, beside pr= for a pull request (#1932)
+describe("item= on a checker (#1932)", () => {
+  const pull = (n: number) => `https://github.com/acme/app/pull/${n}`
+  const REF = "acme/script/start-up"
+  const live: Agent = {
+    kind: "worker",
+    name: "b4n8tz-worker",
+    role: "worker",
+    status: "working",
+    task: "Fix #3",
+  }
+  const checker: Agent = {
+    kind: "reviewer",
+    name: "k3v9q2-reviewer",
+    pr: pull(1),
+    prs: [pull(1)],
+    role: "worker",
+    status: "working",
+    task: "Review #1",
+    title: "Reviewer of x7mh4d-worker",
+    worker: "x7mh4d-worker",
+  }
+  const assign = (...pairs: string[]) => [
+    "assign",
+    "k3v9q2-reviewer",
+    "Review: the start-up script",
+    "Score the item",
+    "worker=b4n8tz-worker",
+    ...pairs,
+  ]
+
+  test("assign with item= sets the checker's worker, title and item, keeps the item in prs and clears its pr", async () => {
+    const r = await run(configWith([live, checker]), assign(`item=${REF}`))
+    expect(r.code).toBe(0)
+    const row = agentOf(r.roster, "k3v9q2-reviewer")
+    expect(row).toMatchObject({
+      item: REF,
+      prs: [pull(1), REF],
+      status: "working",
+      task: "Score the item",
+      title: "Review: the start-up script",
+      worker: "b4n8tz-worker",
+    })
+    expect(row).not.toHaveProperty("pr")
+  })
+
+  test("assign with pr= sets the pr as today, and clears an item the row held", async () => {
+    const r = await run(configWith([live, { ...checker, item: REF }]), assign(`pr=${pull(3)}`))
+    expect(r.code).toBe(0)
+    const row = agentOf(r.roster, "k3v9q2-reviewer")
+    expect(row).toMatchObject({ pr: pull(3), prs: [pull(1), pull(3)], worker: "b4n8tz-worker" })
+    expect(row).not.toHaveProperty("item")
+  })
+
+  test("assign with both pr= and item= is refused, and writes nothing", async () => {
+    const agents = [live, checker]
+    const r = await run(configWith(agents), assign(`pr=${pull(3)}`, `item=${REF}`))
+    expect(r.code).toBe(2)
+    expect(r.err).toContain("pr= or item=, not both")
+    expect(r.roster?.agents).toEqual(agents)
+  })
+
+  for (const bad of ["start-up", "acme/script", "acme/widget/start-up", pull(3)])
+    test(`a malformed item=${bad} is refused with the shape it takes, and writes nothing`, async () => {
+      const agents = [live, checker]
+      const r = await run(configWith(agents), assign(`item=${bad}`))
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("<scope>/<kind>/<key>")
+      expect(r.roster?.agents).toEqual(agents)
+    })
+
+  test("item= is refused on a worker, and through set on a checker, which moves through assign", async () => {
+    const agents = [live, { ...checker, worker: "b4n8tz-worker" }]
+    const worker = await run(configWith(agents), ["set", "b4n8tz-worker", `item=${REF}`])
+    expect(worker.code).toBe(2)
+    expect(worker.roster?.agents).toEqual(agents)
+    const set = await run(configWith(agents), ["set", "k3v9q2-reviewer", `item=${REF}`])
+    expect(set.code).toBe(1)
+    expect(set.err).toContain("roster.ts assign k3v9q2-reviewer")
+    expect(set.roster?.agents).toEqual(agents)
+  })
+})
+
 describe("prs (#706)", () => {
   const pull = (n: number) => `https://github.com/acme/app/pull/${n}`
   const ISSUE = "https://github.com/acme/app/issues/9"
