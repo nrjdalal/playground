@@ -154,9 +154,9 @@ Playground's sessions run as a factory: the dispatcher manages, the Builder lead
 - ALWAYS: Load [playbook](./extensions/core/skills/playbook/SKILL.md) when you are one of those sessions, or before you spawn, brief, rename or end a session.
   Its roles, chain, lifecycle, sweep and standing rules bind every session in the factory.
 - ALWAYS: Signal only processes you started; never select pids by name or pattern.
-  A pattern matches the live dashboard and every worker's stack.
-  A port is no narrower: whoever holds portless's proxy port is the proxy every worktree routes through, the live dashboard's included.
-  Stop a background task with `TaskStop`, a dev stack whose starting session has gone with `bun run dev:stop` (it signals only the process groups of the launcher its checkout recorded), and a child you spawned through its own pid or process group; every brief you write carries this rule.
+  A name, pattern or port also matches the live dashboard, the proxy every worktree routes through and every worker's stack.
+  Stop a background task with `TaskStop`, a dev stack whose starting session has gone with `bun run dev:stop`, and a child you spawned through its own pid or process group; every brief you write carries this rule.
+  A factory script's orphan (parent pid 1, its worktree gone) is the nightly clean's to end by its pid (`packages/scripts/src/ops-tick/orphans.ts`).
   The `no-kill-by-name` hook refuses a kill by name, pattern or port in a factory session's command, and `tests/test_kill_by_name.py` fails on one anywhere in the repo's text.
 
 ### The dashboard app

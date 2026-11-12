@@ -84,6 +84,7 @@ Each night at 3:00 am, ops-tick's nightly clean removes what no merge's cleanup 
 It keeps a worktree that another worktree or a scratch folder still links into, and names the first three links.
 A merged or closed PR's worktree goes to the trash whatever it holds, and one whose merge or close `playground rm` cannot confirm goes there too under the owner's standing approval, each move restorable with `playground rm --restore`.
 It spaces its deletes under `playground rm`'s limit of 3 a minute, so none is refused, and leaves what does not fit in a 10-minute wait for the next night.
+It then ends each script the factory left running after its worktree was removed, one whose parent process is gone, by its own process id, so no one ends it by hand in Activity Monitor; each one is named in the same log and outbox line.
 The same night it sweeps every other repo the factory works in: each checkout directly in the code root, or in `~/<org>` for an org `ext.links` guards.
 A worktree there goes by `git worktree remove`, its branch kept, only when its PR merged or closed (or it has none, and every commit is pushed or saved as a patch in the data folder's `scratchpad/archive/`, which stays on this Mac), it holds nothing but build output, and no live process or roster row has it; each one kept is named with why.
 It also moves to the trash each folder in the data folder's `scratch/` whose session is gone, with no live session and no roster row naming it that has not ended, each restorable with `playground rm --restore`.
