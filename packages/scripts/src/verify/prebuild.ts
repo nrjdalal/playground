@@ -398,6 +398,22 @@ export const prebuildTests = async (paths: string[], types = false): Promise<num
     types ? {} : importedNames(sources),
     (specifier) => builtFile(specifier, ROOT, conditions),
   )
+  // a test's child process may load code no source names (a path read at run time, an aliased spawn), so test:file also builds every shared package whose dist is missing, whatever its files import; a dist that is present stays as it is
+  if (!types) {
+    const named = new Set(missing.map(packageOf))
+    missing.push(
+      ...workspaces(ROOT)
+        .filter(
+          ({ dir, path, pkg }) =>
+            pkg.scripts?.build &&
+            /^(?:api|packages)\//.test(dir) &&
+            !existsSync(join(path, "dist")) &&
+            !named.has(packageOf(dir)),
+        )
+        .map(({ dir }) => `${dir}/dist`)
+        .sort(),
+    )
+  }
   return prebuild(types ? "check-types:tests" : "test:file", missing)
 }
 
