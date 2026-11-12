@@ -115,7 +115,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Done: move the updates and answered decisions and drafts named to Done at once, where no clock would move them, recording when in their answer, waking any put off or archived, and marking an update read; with tell, a card's own Done, each update's poster is told done through the delivery adapter, so it posts a new card rather than editing this one, while a shelf's bulk types nothing; an open decision or draft is left as it is",
+        "Done: move the updates and answered decisions and drafts named to Done at once, where no clock would move them, recording when in their answer, waking any put off or archived, and marking an update read; with tell, a card's own Done, each update's poster is told done through the delivery adapter, and its next edit that changes the card's words brings it back to the list unread, while a shelf's bulk types nothing; an open decision or draft is left as it is",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
