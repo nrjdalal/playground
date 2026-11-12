@@ -191,9 +191,9 @@ describe("POST /ops/restore (#1919)", () => {
     expect(existsSync(join(main, ...GUARD))).toBe(false)
   })
 
-  // A real install and link-skills.sh outlast Bun.serve's 10 s idle limit, which drops a quiet request, so the press runs on a real server with a link-skills.sh that takes 11 s; a second press while it runs is refused.
+  // A real install and link-skills.sh outlast Bun.serve's 10 s idle limit, which drops a quiet request, so the press runs on a real server with a link-skills.sh that takes 15 s, past the 12 s a dropped request was measured to fail at; a second press while it runs is refused.
   test("a restore longer than the server's idle limit still answers with its words, and a second press meanwhile is refused", async () => {
-    const main = scratchCheckout('sleep 11\ntouch "$(dirname "$0")/../linked"\n')
+    const main = scratchCheckout('sleep 15\ntouch "$(dirname "$0")/../linked"\n')
     wipe(main)
     spies.push(signedIn("owner"))
     const server = Bun.serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 })
