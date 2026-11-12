@@ -116,6 +116,45 @@ describe("playground ext", () => {
     expect(why.map((entry) => entry.reason)).toEqual(["clear", "shorter replies"])
   })
 
+  test("why keeps a score below 5 with its reason between the revision it scored and the next one, and a 5 that accepts", async () => {
+    const at = folder("why-rounds")
+    const put = async (text: string, reason: string) => {
+      writeFileSync(join(scratch, "rounds.md"), text)
+      const out = await ext(
+        at,
+        ["put", "tester", "rule", "rounds", join(scratch, "rounds.md"), "--reason", reason],
+        "",
+        "worker",
+        "a-worker",
+      )
+      return (JSON.parse(out.out) as { rev: string }).rev
+    }
+    const score = (rev: string, n: string, reason: string) =>
+      ext(
+        at,
+        ["score", "tester", "rule", "rounds", rev, n, "--reason", reason],
+        "",
+        "reviewer",
+        "b-reviewer",
+      )
+    const first = await put("Name the rounds.\n", "first draft")
+    expect((await score(first, "4", "round 1: name each case")).out).toContain("is proposed")
+    const second = await put("Name each round and its case.\n", "second draft")
+    expect((await score(second, "5", "round 2: clear")).out).toContain("is accepted")
+    const why = JSON.parse((await ext(at, ["why", "tester", "rule", "rounds"])).out) as {
+      reason: string
+      trailers: [string, string][]
+    }[]
+    expect(
+      why.map((entry) => [entry.reason, Object.fromEntries(entry.trailers).Score ?? "-"]),
+    ).toEqual([
+      ["round 2: clear", "5"],
+      ["second draft", "-"],
+      ["round 1: name each case", "4"],
+      ["first draft", "-"],
+    ])
+  })
+
   test("a write's author is the calling session, its role when no name is known and the owner with no role, and --by is refused", async () => {
     const at = folder("author")
     writeFileSync(join(scratch, "author.md"), "Name the caller.\n")
