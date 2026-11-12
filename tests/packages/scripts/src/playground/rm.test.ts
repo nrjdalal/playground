@@ -334,6 +334,24 @@ test("runRm refuses a live session's scratchpad folder, every path in it, and it
   expect(told.every((line) => line.includes("is inside the protected"))).toBe(true)
 })
 
+test("--restore refuses a path inside an ended folder while a symlink stands at that folder or at a folder between", async () => {
+  const { deps, home, pad } = pads([])
+  mkdirSync(join(home, "kept"), { recursive: true })
+  for (const [moved, link] of [
+    [join(pad, "q1w2e3", "shots"), join(pad, "q1w2e3")],
+    [join(pad, "z9x8c7", "a", "shots"), join(pad, "z9x8c7", "a")],
+  ] as const) {
+    mkdirSync(moved, { recursive: true })
+    writeFileSync(join(moved, "a.png"), "x")
+    expect(await runRm([moved], deps)).toBe(0)
+    const entry = listTrash(join(deps.data, "trash")).find((e) => e.path === moved)!
+    rmSync(link, { recursive: true })
+    symlinkSync(join(home, "kept"), link)
+    expect(await runRm(["--restore", entry.id], deps)).toBe(1)
+    expect(existsSync(join(home, "kept", "shots"))).toBe(false)
+  }
+})
+
 test("runRm refuses the scratchpad folder itself, every other path in the data folder, an ended session's folder that is a symlink, and any of them while the roster cannot be read", async () => {
   const { deps, home, pad } = pads([{ name: "a4b5c6-reviewer", status: "ended" }])
   mkdirSync(join(pad, "a4b5c6-reviewer"), { recursive: true })
