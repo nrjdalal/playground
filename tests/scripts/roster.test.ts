@@ -529,6 +529,81 @@ describe("set", () => {
   })
 })
 
+// a mistyped key once left two rows reading working for over an hour, counted live by the Dashboard and the sweep (#1290).
+describe("unknown keys (#1290)", () => {
+  test("a mistyped status is refused by set, report and assign, naming status as the nearest field, and writes nothing", async () => {
+    const config = configWith([WITH_PR])
+    for (const args of [
+      ["set", "worker-greed", "stauts=working"],
+      ["report", "worker-greed", "r1", "stauts=working"],
+      ["assign", "worker-greed", "Chore", "Do it", "stauts=working"],
+    ]) {
+      const r = await run(config, args)
+      expect(r.code).toBe(2)
+      expect(r.err).toContain('did you mean "status"?')
+      expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
+    }
+  })
+
+  test("a key far from every field is refused with no guess, naming the keys it takes", async () => {
+    const config = configWith([WITH_PR])
+    const r = await run(config, ["set", "worker-greed", "wibble=1", "task=t"])
+    expect(r.code).toBe(2)
+    expect(r.err).toContain('not "wibble"')
+    expect(r.err).toContain("reportsTo")
+    expect(r.err).not.toContain("did you mean")
+    expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
+  })
+
+  test("every key a caller sets still sets", async () => {
+    // a fresh row without a pr, since task= on a row holding one goes through assign
+    const config = configWith([])
+    const seeded = await run(config, ["set", "worker-greed", "task=Seed"])
+    expect(seeded.code).toBe(0)
+    expect(agentOf(seeded.roster, "worker-greed")?.task).toBe("Seed")
+    const values: Record<string, string> = {
+      asks: "#i1 #i2",
+      backlogNext: "3",
+      backlogTaken: "1 2",
+      branch: "pg-1290-roster-unknown-key",
+      eta: inMinutes(90),
+      kind: "worker",
+      lastReport: "r1",
+      lastReportAt: "2026-10-01T00:00:00Z",
+      lead: "builder",
+      memory: "off",
+      mode: "prepare",
+      owner: "PG-1290",
+      pr: "2",
+      prs: "2",
+      "prs+": "3",
+      reportsTo: "builder",
+      repo: "acme/app",
+      role: "worker",
+      schedule: "always",
+      size: "medium",
+      slot: "2",
+      status: "working",
+      surface: "surface:3",
+      ticket: "ENG-1290",
+      title: "Fix the export",
+      worker: "x7mh4d-worker",
+      workspace: "workspace:3",
+    }
+    for (const [key, value] of Object.entries(values)) {
+      const stored = key === "prs+" ? "prs" : key
+      const r = await run(config, ["set", "worker-greed", `${key}=${value}`])
+      expect([key, r.code]).toEqual([key, 0])
+      expect(agentOf(r.roster, "worker-greed")?.[stored]).toBeDefined()
+    }
+    const parked = await run(config, ["set", "worker-greed", "status=parked", "hold=#12"])
+    expect(parked.code).toBe(0)
+    expect(agentOf(parked.roster, "worker-greed")?.hold).toBe("#12")
+    const cleared = await run(config, ["set", "worker-greed", "prs-=3", "mode="])
+    expect(cleared.code).toBe(0)
+  })
+})
+
 // a reviewer scoring an extension item kept the ended worker it last served, since pr= took a GitHub PR alone, and the checker reaper ended it mid-review (#1851).
 describe("an extension item as a checker's pr (#1851)", () => {
   const pull = (n: number) => `https://github.com/acme/app/pull/${n}`
