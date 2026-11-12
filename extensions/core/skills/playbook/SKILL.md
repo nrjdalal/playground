@@ -40,7 +40,7 @@ How the Dashboard shows each role, how a session is named and when a dev stack r
 - The dispatcher talks to the owner, the Planner, the Builder, Ops, the Optimizer and the Assistant alone; whatever another session sends it goes on to the manager it concerns.
   A new ask runs the dispatcher, the Planner, the Builder, Ops, by [DISPATCH.md](DISPATCH.md)'s first rule.
 - Each worker reports to the Builder, each runner to Ops, each probe to the session that spawned it, and the Planner, the Optimizer and the Assistant to the dispatcher.
-  Your brief names yours; when `ListAgents` lists no session by that name, send to the dispatcher.
+  Your brief names yours, and a checker whose worker has ended reports to that worker's lead; when `ListAgents` lists no session by that name, send to the dispatcher.
 - The Builder and Ops send merges, ETA moves, new PRs, staffing and plan updates to the Planner directly.
   They send the dispatcher only what the owner must see or decide: the status of the owner's own asks, any org work, a blocker or slip on something the owner waits for, a decision only the owner can make, and a finding for the playbook.
 - Orders reach you from that one place (a checker also from its worker's lead, below), or from the owner typing in your own pane, which outranks it: do what he says, then send his words verbatim up the chain.
