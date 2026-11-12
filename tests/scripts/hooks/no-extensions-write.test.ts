@@ -263,10 +263,6 @@ describe("a direct write into the extensions root is refused, naming the owner's
       "the CLI as git's --config-env pager",
       "X='playground ext sync' git --config-env=core.pager=X log",
     ],
-    [
-      "a commit message holding a gated call",
-      `git commit -m "docs: the hook refuses playground ext sync now"`,
-    ],
     ["a write after a word with an unbalanced quote", `git commit -m "it's"; rm -rf ${ROOT}`],
     [
       "the CLI by name from a cwd holding a folder named playground",
@@ -585,8 +581,56 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
   })
 })
 
-// A quoted argument with a space is read as a command line unless every command on the line is on a closed list of readers (awk with a program that runs nothing, cat, grep, head, tail, wc, sort, uniq, cut), with no redirect that writes a file; an awk program that runs a command has its literals read wherever it stands, and sed keeps canary's reading.
+// A quoted argument with a space is read as a command line unless every command on the line is on a closed list of readers (awk with a program that runs nothing, cat, grep, head, tail, wc, sort, uniq, cut, echo, lsof), with no redirect that writes a file; an awk program that runs a command has its literals read wherever it stands, and sed keeps canary's reading.
 describe("a quoted argument is read as a command line only where a program runs it", () => {
+  // #1455: a quiet commit's message is text git never runs, so a gated call it names runs, in any case of git, while a gated call beside it stays refused
+  test.each([
+    ["names playground ext sync", `git commit -m "docs: the hook refuses playground ext sync now"`],
+    ["names playground migrate", "git commit -q -m 'fix: playground migrate seeds the lists'"],
+    ["names a gated call under Git", "Git commit -m 'docs: playground ext sync'"],
+  ])("a quiet commit whose message %s runs from the home", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  // #1799: a quiet commit's message names the home by ~/ as text, under run-slot and with its own log redirect too; the real home, since the shell reads ~ as the process's home
+  const atHome = (command: string) =>
+    check(JSON.stringify({ cwd: tmpdir(), tool_input: { command }, tool_name: "Bash" }), {
+      HOME: homedir(),
+    })
+  const log = join(tmpdir(), "commit.log")
+  test.each([
+    [
+      "under run-slot, with its log redirect",
+      `~/.playground/ops/run-slot.sh w -- git commit -q -m "fix(x): reads each checkout in ~/<org>" > ${log} 2>&1`,
+    ],
+    [
+      "under run-slot",
+      `~/.playground/ops/run-slot.sh w -- git commit -q -m "fix(x): files in ~/ stay"`,
+    ],
+    ["with its log redirect", `git commit -q -m "fix(x): files in ~/ stay" > ${log} 2>&1`],
+  ])("a quiet commit whose message names ~/ runs %s", async (_, command) => {
+    expect(await atHome(command)).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "a substitution in its message writes into the root",
+      `~/.playground/ops/run-slot.sh w -- git commit -q -m "fix(x): $(touch ~/.playground/extensions/f)" > ${log} 2>&1`,
+    ],
+    [
+      "its redirect writes into the root",
+      `git commit -q -m "fix(x): y" > ~/.playground/extensions/f`,
+    ],
+  ])("a quiet commit stays refused when %s", async (_, command) => {
+    expect(await atHome(command)).toContain("no-extensions-write hook refuses")
+  })
+
+  test("a gated call after a quiet commit stays refused", async () => {
+    expect(await bash("git commit -m 'fix: x' && playground migrate")).toContain(
+      "playground migrate",
+    )
+  })
+
   const real = { HOME: homedir() }
   const at = (command: string, cwd: string) =>
     check(JSON.stringify({ cwd, tool_input: { command }, tool_name: "Bash" }), real)
@@ -756,8 +800,26 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["gh api with a Go template", `gh api x --template '{{range .}}{{.a}} {{end}}'`],
     ["gh api with a Go template by -t", `gh api x -t '{{range .}}{{.a}} {{end}}'`],
     ["gh pr view with a Go template", `gh pr view 1 --json a --template '{{.a}} x'`],
+    [
+      "gh issue create with a title naming the data folder",
+      `gh issue create --title "a note about ~/.playground" --body x`,
+    ],
+    ["gh pr comment with a body naming the data folder", `gh pr comment 1 -b "see ~/.playground"`],
+    [
+      "a cd to a folder, then a sed range from a bracket regex",
+      "cd /tmp && sed -n '/[Ff]ollow/,$p' f",
+    ],
+    [
+      "a cd to the checkout, then gh's jq body through a sed range and head",
+      `cd ${CHECKOUT} && gh api repos/o/r/issues/comments/1 --jq .body | sed -n '/[Ff]ollow/,$p' | head -40`,
+    ],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
+  })
+
+  test("a gh post that opens an editor keeps canary's reading of its title", async () => {
+    const command = `gh issue create --editor --title "a note about ~/.playground"`
+    for (const cwd of homes) expect(await at(command, cwd)).toContain("no-extensions-write hook ")
   })
 
   test.each([
@@ -1361,8 +1423,6 @@ describe("a quoted argument is read as a command line only where a program runs 
       "a function by the function keyword",
       `function f { eval "$@"; }; f 'rm -rf ~/.playground/extensions/.no-such-folder'`,
     ],
-    ["a gated message under git in capitals", "GIT commit -m 'docs: playground ext sync'"],
-    ["a gated message under Git", "Git commit -m 'docs: playground ext sync'"],
     [
       "a payload set as an argument, then evaluated",
       `set -- 'rm -rf ~/.playground/extensions/.no-such-folder'; eval "$1"`,
@@ -1560,6 +1620,34 @@ describe("a quoted argument is read as a command line only where a program runs 
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
   })
 
+  // #1599: a refusal of a command that shows no write routes to the lead as a likely false positive, while one that writes keeps the owner's route
+  test("a refusal of a command that shows no write asks for a false-positive report", async () => {
+    const reason = await at("lsof -nP | awk 'NR>1 {print $2}'", homedir())
+    expect(reason).toContain(
+      "If this command writes nothing, report it to your lead as a false positive.",
+    )
+    expect(reason).not.toContain("the dispatcher hands the owner the command")
+  })
+
+  // a program that writes as called keeps the owner's route, whether or not the hook lists it as a writer
+  test.each([
+    ["touch on a file in the root", "touch ~/.playground/extensions/login/x"],
+    [
+      "an in-place sed on a file in the root",
+      "sed -i '' 's/a/b/' ~/.playground/extensions/login/x.json",
+    ],
+    [
+      "an in-place perl on a file in the root",
+      "perl -pi -e 's/a/b/' ~/.playground/extensions/login/x.json",
+    ],
+    ["a chmod on a file in the root", "chmod 644 ~/.playground/extensions/login/x.json"],
+    ["a chmod on a glob above the root", "chmod 644 ~/.playground/e*"],
+  ])("%s keeps the owner's route", async (_, command) => {
+    const reason = await at(command, homedir())
+    expect(reason).toContain("the dispatcher hands the owner the command")
+    expect(reason).not.toContain("report it to your lead as a false positive")
+  })
+
   test("a refusal names a program it cannot read as such", async () => {
     expect(await at("git -c alias.x='!$1 ~' x rm", homedir())).toContain(
       "refuses a program it cannot read on",
@@ -1604,12 +1692,8 @@ describe("a quoted argument is read as a command line only where a program runs 
       `git commit -m "fix(x): y"; sh -c 'true'`,
     ],
     [
-      "a redirect that writes a file, dropping its redirect guard runs it",
-      `git commit -m "fix(x): y" > f`,
-    ],
-    [
-      "a message naming a gated call, dropping its message guard runs it",
-      `git commit -m "docs: the hook refuses playground ext sync now"`,
+      "a redirect that writes a file from another call on the line, dropping its redirect guard runs it",
+      `git commit -m "fix(x): y"; echo x > f`,
     ],
     [
       "a message holding the root's path as text, dropping its text guard runs it",
@@ -2136,7 +2220,7 @@ describe("a factory session's ext accept is refused, since accepting a proposal 
     ],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toContain(
-      "refuses playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role",
+      "refuses playground ext accept, the owner's own call: post it as an accept decision with playground ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role",
     )
   })
 })
@@ -2310,7 +2394,7 @@ describe("a guard decision's keys are the keys the hook gates (PG-1090)", () => 
 
 // PG-1196: the guard decision also sets a job's enabled field, so a session's own write of it stays refused, the owner's Approve or Settings > Jobs the one way in.
 describe("a job's setting is the owner's alone (PG-1196)", () => {
-  test.each(["jobs.opsTicketCard", "jobs.opsSweep", "jobs.opsFirefightingStart"])(
+  test.each(["jobs.opsZaiUsage", "jobs.opsSweep"])(
     "a session's own settings set and reset of %s are refused",
     async (key) => {
       expect(await bash(`playground settings set ${key} '{"enabled":true}' --reason r`)).toContain(
@@ -2330,7 +2414,7 @@ describe("a job's setting is the owner's alone (PG-1196)", () => {
   ])("a session's own %s is refused, naming the guard decision", async (command) => {
     const refusal = await bash(command)
     expect(refusal).toContain("no-extensions-write hook refuses")
-    expect(refusal).toContain("post a guard decision with bun run ask new")
+    expect(refusal).toContain("post a guard decision with playground ask new")
   })
 })
 
@@ -2414,6 +2498,51 @@ describe("a held path past any other heredoc or a quote the scan cannot place is
       "cp into the guarded folder after a quoted heredoc",
       `cat > /tmp/s.sh <<'EOF'\necho $((i))\nEOF\ncp x ${LIST}`,
     ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeDefined()
+  })
+})
+
+// #1616: the subscript scan read quoted text, so a selector or a jq filter in single quotes left no variable held on its line
+describe("a single-quoted subscript no command reads as a name leaves the line's variables held", () => {
+  test.each([
+    [
+      "cp to a held path beside an assignment's single-quoted value",
+      `D=/tmp/d; ST='x[y]'; cp x "$D/y"`,
+    ],
+    [
+      "tee to a held path beside an assignment's single-quoted value",
+      `D=/tmp/d; ST='x[\\"'; echo x | tee "$D/a.log"`,
+    ],
+    ["cp to a held path beside a jq filter", `D=/tmp/d; jq '.a[b]' f; cp x "$D/y"`],
+    [
+      "cp to a held path beside a selector an echo prints",
+      `D=/tmp/d; echo 'q("a[href]")'; cp x "$D/y"`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+})
+
+describe("a single-quoted subscript a command reads as a name still holds no variable", () => {
+  test.each([
+    ["read", `D=/tmp/d; read 'a[i]' < /tmp/f; cp x "$D/y"`],
+    ["printf -v", `D=/tmp/d; printf -v 'a[i]' x; cp x "$D/y"`],
+    ["unset", `D=/tmp/d; unset 'a[i]'; cp x "$D/y"`],
+    ["[[ -v", `D=/tmp/d; [[ -v 'a[i]' ]]; cp x "$D/y"`],
+    ["declare", `D=/tmp/d; declare 'a[i]=1'; cp x "$D/y"`],
+    ["declare -n", `D=/tmp/d; declare -n r='a[i]'; cp x "$D/y"`],
+    ["getopts", `D=/tmp/d; getopts ab 'a[i]'; cp x "$D/y"`],
+    ["mapfile", `D=/tmp/d; mapfile 'a[i]' < /tmp/f; cp x "$D/y"`],
+    ["wait -p", `D=/tmp/d; wait -p 'a[i]'; cp x "$D/y"`],
+    ["test -v", `D=/tmp/d; test -v 'a[i]'; cp x "$D/y"`],
+    ["unset behind command", `D=/tmp/d; command unset 'a[i]'; cp x "$D/y"`],
+    ["let", `D=/tmp/d; let 'a[i]'; cp x "$D/y"`],
+    ["arithmetic", `D=/tmp/d; (( 'a[i]' )); cp x "$D/y"`],
+    ["eval", `D=/tmp/d; eval 'a[i]=1'; cp x "$D/y"`],
+    ["read of a held value", `D=/tmp/d; X='a[i]'; read "$X" < /tmp/f; cp x "$D/y"`],
+    ["unset of a held value", `D=/tmp/d; X='a[i]'; unset "$X"; cp x "$D/y"`],
+    ["printf -v of a held value", `D=/tmp/d; X='a[i]'; printf -v "$X" x; cp x "$D/y"`],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeDefined()
   })

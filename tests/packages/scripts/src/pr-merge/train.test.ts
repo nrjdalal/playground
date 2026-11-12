@@ -7,6 +7,7 @@ import type { Check, PrFacts } from "../../../../../packages/scripts/src/pr-merg
 import { FREEZE_LAPSE_MS, heldOf } from "../../../../../packages/scripts/src/pr-merge/held"
 import type { Run, RunResult } from "../../../../../packages/scripts/src/pr-merge/merge"
 import { forecast, gatedOf, resolve } from "../../../../../packages/scripts/src/pr-merge/train"
+import { SKILL_BODY } from "./bodies"
 import "./scratch-config"
 import { greenChecks } from "./suite"
 
@@ -189,6 +190,41 @@ describe("pr:train", () => {
     ])
     const lapsed = await gatedOf(h.run, REPO, reading(frozen(FREEZE_LAPSE_MS)), local.queue)
     expect(lapsed.order.map((c) => c.n)).toEqual([3, 5])
+  })
+
+  test("a stacked PR whose parent is open is held, and one whose parent merged is gated (PG-1274)", async () => {
+    const w = world({ 3: { "a.txt": edit("3") }, 5: { "b.txt": edit("5") } })
+    const h = hub(w, [3, 5])
+    const local = localOf(w, h, { queue: [3, 5] })
+    const stacked =
+      (states: Record<number, string>) =>
+      async (run: Run, repo: string, n: number): Promise<PrFacts> => ({
+        ...(await local.facts(run, repo, n)),
+        body: `${SKILL_BODY}\n- Stacked on #12`,
+        parents: [{ n: 12, state: states[n] ?? "MERGED" }],
+      })
+    const { held, order } = await gatedOf(h.run, REPO, stacked({ 3: "OPEN" }), local.queue)
+    expect(order.map((c) => c.n)).toEqual([5])
+    expect(held).toEqual([{ n: 3, why: "not gated: parent" }])
+  })
+
+  test("a PR whose facts cannot be read is held with why, and the others are gated as before", async () => {
+    const w = world({
+      3: { "a.txt": edit("3") },
+      5: { "b.txt": edit("5") },
+      7: { "c.txt": edit("7") },
+    })
+    const h = hub(w, [3, 5, 7])
+    const local = localOf(w, h, { queue: [3, 5, 7] })
+    const unreadable = async (run: Run, repo: string, n: number): Promise<PrFacts> => {
+      if (n === 5) throw new Error("git fetch exited 128: couldn't find remote ref")
+      return local.facts(run, repo, n)
+    }
+    const { held, order } = await gatedOf(h.run, REPO, unreadable, local.queue)
+    expect(order.map((c) => c.n)).toEqual([3, 7])
+    expect(held).toEqual([
+      { n: 5, why: "not gated: facts unreadable (git fetch exited 128: couldn't find remote ref)" },
+    ])
   })
 
   test("outside a scratch lock folder and a git stub, it refuses to run", async () => {

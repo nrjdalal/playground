@@ -226,13 +226,13 @@ describe("answerPrompt", () => {
   test("every refusal becomes the API's error, with its reason and its code under feed", async () => {
     const expected: Record<string, [number, string]> = {
       BUSY: [409, "CONFLICT"],
-      CMUX_FAILED: [502, "CMUX_FAILED"],
       DISABLED: [403, "FORBIDDEN"],
       FORBIDDEN: [403, "FORBIDDEN"],
       INVALID: [400, "VALIDATION_ERROR"],
       NOT_FOUND: [404, "NOT_FOUND"],
       NOT_PENDING: [409, "CONFLICT"],
-      UNCONFIRMED: [502, "CMUX_FAILED"],
+      SESSIONS_FAILED: [502, "SESSIONS_FAILED"],
+      UNCONFIRMED: [502, "SESSIONS_FAILED"],
     }
     for (const [code, [status, apiCode]] of Object.entries(expected)) {
       const answer = async () => ({
@@ -487,15 +487,15 @@ describe("sendMessage", () => {
   test("every refusal becomes the API's error, with its reason and its code under delivery", async () => {
     const expected: Record<string, [number, string]> = {
       AMBIGUOUS: [409, "CONFLICT"],
-      CMUX_FAILED: [502, "CMUX_FAILED"],
       COMMAND: [400, "VALIDATION_ERROR"],
       EMPTY: [400, "VALIDATION_ERROR"],
       INPUT_NOT_EMPTY: [409, "CONFLICT"],
-      INTERRUPTED: [502, "CMUX_FAILED"],
+      INTERRUPTED: [502, "SESSIONS_FAILED"],
       LOST: [409, "CONFLICT"],
       NOT_FOUND: [404, "NOT_FOUND"],
       ON_PICKER: [409, "CONFLICT"],
       QUEUED: [409, "CONFLICT"],
+      SESSIONS_FAILED: [502, "SESSIONS_FAILED"],
       TOO_LONG: [400, "VALIDATION_ERROR"],
     }
     expect(Object.keys(expected)).toEqual([...DELIVERY_FAILURES])

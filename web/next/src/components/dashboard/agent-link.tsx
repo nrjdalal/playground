@@ -2,11 +2,12 @@
 
 import { cn } from "cn"
 import Link from "next/link"
+import { use } from "react"
 
-import { useDashboard } from "@/components/dashboard/dashboard"
+import { SessionsContext } from "@/components/dashboard/dashboard"
 import { Hint } from "@/components/hint"
 import { agentLabel, chatLabel, labelSplit, withoutRef } from "@/lib/agent-label"
-import { useAgentsBoard } from "@/lib/agents"
+import { labelBoard, useAgentsBoard } from "@/lib/agents"
 
 // An agent named by its label (labelOf: AB-262#7 Worker, AB-262#7 Reviewer, Builder; a live dispatcher as its chat names it, Alpha or Bravo; a name the board does not hold keeps agentLabel's), linked to its own view while its session is live and plain text otherwise, with the raw name on hover. A peer's socket address (`uds:/tmp/cc-socks/<pid>.sock`) is first resolved to the session it belongs to, from the board's sockets, and a recipient's ` [ref]` is dropped. A caller that knows the agent's session passes sessionId (null for none); else the live session of that name is found. With truncate, a label too long for its cell cuts its text and keeps the kind that follows it (` · reviewer`) whole.
 export function AgentLink({
@@ -22,13 +23,13 @@ export function AgentLink({
   sessionId?: string | null
   truncate?: boolean
 }) {
-  const { dispatcher, workers } = useDashboard()
-  const { data } = useAgentsBoard()
+  const { dispatcher, sessions } = use(SessionsContext)
+  const { data } = useAgentsBoard(labelBoard)
   const resolved = data?.sockets[name] ?? withoutRef(name)
   const live =
     sessionId === undefined
-      ? workers?.find((w) => w.name === resolved)
-      : workers?.find((w) => w.sessionId === sessionId)
+      ? sessions?.find((w) => w.name === resolved)
+      : sessions?.find((w) => w.sessionId === sessionId)
   const agentOf = (agent: string) => data?.agents.find((a) => a.name === agent)
   const facts = agentOf(resolved)
   const { kind, text } =

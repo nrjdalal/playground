@@ -12,6 +12,7 @@
 set -m   # each background child gets its own process group, so stopping one never touches this script
 D=$(cd "$(dirname "$0")" && pwd)
 # The data folder, as packages/env/src/data-dir.ts resolves it: PLAYGROUND_DATA_DIR, else ~/.playground
+case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "supervisor.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 DATA=${PLAYGROUND_DATA_DIR:-$HOME/.playground}
 S=$DATA/ops/dashboard; mkdir -p "$S"
 WT=$PWD
@@ -74,7 +75,7 @@ build_head() {
 slot_step() {
   local name=$1 dir=$2 p rc mark t0 line said= down=; shift 2
   [ -x "$RS" ] || { (cd "$dir" && "$@"); return; }
-  mark=$(wc -l < "$RUNS" 2>/dev/null | tr -d ' '); t0=$(date +%s)
+  mark=$(wc -l 2>/dev/null < "$RUNS" | tr -d ' '); t0=$(date +%s)
   (cd "$dir" && exec "$RS" ops-dashboard -- "$@") & p=$!
   echo "$p" > "$S/prebuild.pid"
   step_started() { tail -n +"$((${mark:-0} + 1))" "$RUNS" 2>/dev/null | awk -v p="$p" '$2 == "start" && $4 == p' | tail -1; }
@@ -359,7 +360,7 @@ finish_roll() {
     # bad-builds first: a supervisor the fallback reloads into keeps off the target at its start; a refusal dev_reason names is no bad build, but the head's own, its settings refusal (its env schema asks for what .env lacks), counts in refused, its third joining bad-builds
     # every other refusal is the machine's or the checkout's (the database, another stack, portless's proxy, whose `portless service install` needs the owner's sudo), so a retry each ROLL_GAP is all the supervisor can do, and a refusal no one listed stays out of bad-builds
     local refusal="" n note="not the head's, no bad build"
-    [ "$pulled" -ne 0 ] || refusal=$(dev_reason < "$DEVLOG" 2>/dev/null | sed -n 's/^dev: refusing to start: //p')
+    [ "$pulled" -ne 0 ] || refusal=$(dev_reason 2>/dev/null < "$DEVLOG" | sed -n 's/^dev: refusing to start: //p')
     if [ -z "$refusal" ]; then
       echo "$target" >> "$BAD"
     else

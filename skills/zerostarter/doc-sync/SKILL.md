@@ -21,7 +21,7 @@ Hand-authored, keep each in step with the code:
 | `web/next/docs.config.ts` | the docs nav and page registry, the single source the sidebar, `meta.json`, and MDX frontmatter all derive from | a doc page is added, removed, renamed, or re-slugged |
 | `README.md` | top-level story: stack, structure, quick start, scripts, deployment | the stack, setup, scripts, or pitch changes |
 | `.agents/skills/<name>/SKILL.md` | one task procedure each (canonical; `.claude` and `.github` symlink in) | a command, path, convention, or tooling a skill encodes changes, or a skill is added or removed |
-| `AGENTS.md` (`CLAUDE.md` symlinks in) | the rules and the skills catalog table; ships to every fork whole, so a rule must read true there too | a rule changes, or the skill set changes |
+| `AGENTS.md` (`CLAUDE.md` symlinks in) | the rules; ships to every fork whole, so a rule must read true there too | a rule changes |
 | `.agents/dashboard/<topic>.md` | the dashboard app's rules, one file per topic, each reached from `AGENTS.md` by a pointer naming when to read it, each ALWAYS rule also there in one line | a dashboard rule changes: edit the topic file that holds it, and its one-line form in `AGENTS.md` when its meaning moves; a new topic file gets its pointer, and a new ALWAYS rule its line under that pointer |
 | `.agents/testing.md` | the test suite's reference (the sandbox, the parallel pass, its traps), reached from `AGENTS.md`'s test rule by a pointer | the suite's runner or its sandbox changes |
 | `scripts/README.md`, `scripts/hooks/README.md` | spawn.sh's and ops-herdr's full rules, each reached from its one line in `AGENTS.md`, and the factory hooks', one section per hook, each named in `AGENTS.md`'s hooks pointer | a hook, spawn.sh or ops-herdr changes: edit its section, and spawn.sh's or ops-herdr's line in `AGENTS.md` when its meaning moves; a new hook gets a section and its name in that pointer |
@@ -45,7 +45,7 @@ rg -n "<changed-path-or-command>" web/next/content/docs README.md AGENTS.md .age
 
 Fix each hit in the same change. Before the first edit to an agent-facing surface (a `SKILL.md` or a file beside it, `AGENTS.md`, an `.agents/dashboard` file, `.agents/testing.md`, `scripts/README.md` or `scripts/hooks/README.md`, a `docs/<bucket>/<name>.md` page), call the Skill tool with `writing-for-agents` when it is installed, and follow it; that page also follows `.agents/writing-docs.md` where that file exists. Three couplings are easy to miss:
 
-- **Adding or removing a skill** touches the `AGENTS.md` skills table (generated, so run `bun packages/scripts/src/skills-manager.ts`). A vendored one also touches `skills-lock.json` when it is a stub pinned for integrity (`agent-browser`); one copied in full (`portless`) has no lock entry.
+- **Adding or removing a skill** touches the skills table in `skills/zerostarter/README.md` (generated, so run `bun packages/scripts/src/skills-manager.ts`). A vendored one also touches `skills-lock.json` when it is a stub pinned for integrity (`agent-browser`); one copied in full (`portless`) has no lock entry.
 - **Adding, removing, or renaming a doc page** touches `web/next/docs.config.ts`, not the `.mdx` alone.
 - **Editing a wrapped doc** (`PATTERNS` in `packages/scripts/src/docs-wrap/cli.ts`) means one sentence per line, a sentence over 400 characters broken at a comma, colon or semicolon: run `bun run docs:wrap` after the edit, and its `--check`, which pre-commit and `test:skills` run, passes.
 

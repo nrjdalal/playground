@@ -57,7 +57,7 @@ describe("a delete the hook lets run", () => {
     "while gh pr checks 1 >/dev/null 2>&1; [ $? -eq 8 ]; do sleep 120; done",
     '[ -n "$R" ] && [ -f $R/x ] && echo ok',
     "$T git clone -q $S/mirror.git $S/home",
-    "$R/scripts/spawn.sh column reviewer $W",
+    "$R/scripts/spawn.sh column reviewer $W --pr 1",
     "gh pr checks $N -R owner/repo",
     "'/bin/r?' -rf sub",
     'rmdir "${S:?}/${m:?}"',
@@ -145,5 +145,37 @@ describe("a delete the hook refuses, naming playground rm", () => {
       "no-raw-delete hook ",
     )
     expect(await check("not json")).toBeUndefined()
+  })
+})
+
+describe("agent-browser eval's script is JavaScript, never a shell command line (PG-1695)", () => {
+  const INBOX = `agent-browser eval 'document.querySelector("section[aria-busy][aria-label=Inbox]")?.outerHTML.slice(0,1500) ?? "no busy inbox"'`
+
+  test("the cause: a spaced word read as a shell line holds a glob program word and a ?? that may expand to -r", async () => {
+    expect(await check(input("a?.b ?? 1"))).toContain(
+      "a program the hook cannot read (a?.b) given -r",
+    )
+    expect(await check(input("some-tool 'a?.b ?? 1'"))).toContain(
+      "a program the hook cannot read (a?.b) given -r",
+    )
+  })
+
+  test.each([
+    "agent-browser eval 'a?.b ?? 1'",
+    `agent-browser eval 'f("x")?.outerHTML ?? "none"'`,
+    INBOX,
+    "agent-browser open http://x.localhost && agent-browser eval 'a?.b ?? 1'",
+  ])("%s runs", async (command) => {
+    expect(await check(input(command))).toBeUndefined()
+  })
+
+  test.each([
+    "$RM -r x",
+    "r? -rf x",
+    "agent-browser eval 'a?.b ?? 1' && r? -rf x",
+    `agent-browser eval "$(rm -rf ${NEVER_MADE})"`,
+    `agent-browser rm -rf ${NEVER_MADE}`,
+  ])("%s is still refused", async (command) => {
+    expect(await check(input(command))).toContain("no-raw-delete hook ")
   })
 })

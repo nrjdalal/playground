@@ -6,6 +6,7 @@
 # stack by the recorded process groups (procs.sh, never by name), so a detached stack never keeps the portless names.
 D=$(cd "$(dirname "$0")" && pwd); OPS=$(dirname "$D")
 # The data folder, as packages/env/src/data-dir.ts resolves it: PLAYGROUND_DATA_DIR, else ~/.playground
+case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "run.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 DATA=${PLAYGROUND_DATA_DIR:-$HOME/.playground}
 S=$DATA/ops/dashboard; mkdir -p "$S"
 touch "$S/results.log"; n=$(wc -l < "$S/results.log")

@@ -27,14 +27,22 @@ const spawn = (...answers: { code: number; stderr?: string }[]) => {
 }
 
 describe("a restart after a login expires", () => {
-  test("a checker's resume names its pr first, then the rest of its prs, and one with neither reads null, which the route refuses before the close; a session that is no checker or has no row names none (#1135)", () => {
+  test("a checker's resume names its pr first, then the rest of its prs, and one naming no pull request, issues alone included, reads null, which the route refuses before the close; a session that is no checker or has no row names none (#1135)", () => {
     const A = "https://github.com/acme/factory/pull/1"
     const B = "https://github.com/acme/factory/pull/2"
+    const ISSUE = "https://github.com/acme/factory/issues/5"
     expect(restartPrs(true, { pr: A, prs: [A, B] })).toEqual([A, B])
     expect(restartPrs(true, { pr: B, prs: [A, B] })).toEqual([B, A])
     expect(restartPrs(true, { prs: [A, B] })).toEqual([A, B])
     expect(restartPrs(true, { pr: B })).toEqual([B])
     expect(restartPrs(true, {})).toBeNull()
+    expect(restartPrs(true, { prs: [ISSUE] })).toBeNull()
+    expect(restartPrs(true, { pr: A, prs: [ISSUE, A] })).toEqual([A, ISSUE])
+    expect(restartPrs(true, { prs: ["acme/script/start-up"] })).toBeNull()
+    expect(restartPrs(true, { pr: A, prs: [A, "acme/script/start-up"] })).toEqual([
+      A,
+      "acme/script/start-up",
+    ])
     expect(restartPrs(true, undefined)).toBeUndefined()
     expect(restartPrs(false, { pr: A, prs: [A] })).toBeUndefined()
   })

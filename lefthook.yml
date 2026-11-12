@@ -18,7 +18,7 @@ pre-commit:
       glob:
         - "skills/zerostarter/**/*.md"
         - "packages/scripts/src/skills-manager.ts"
-      run: bun packages/scripts/src/skills-manager.ts && git add AGENTS.md
+      run: bun packages/scripts/src/skills-manager.ts && git add skills/zerostarter/README.md
     lint-staged:
       # --no-stash: lint-staged keeps no backup in the stash list every worktree shares, so no session's pop can take it
       priority: 3
@@ -66,11 +66,11 @@ pre-commit:
         - "web/next/content/docs/dashboard.mdx"
       run: bun --no-env-file packages/scripts/src/docs-wrap/cli.ts --check
     hooks-bundle:
-      # a stale guard bundle turns CI red, so a commit touching a bundle's inputs (the guards, the package folders the bundles import, which tests/lefthook.test.ts derives from the bundles, and bun.lock for the packages they inline) checks them first; after lint-staged, whose formatter can rewrite a guard, and skipped in a merge, whose bundles hooks-merge-canary rebuilds in a commit of their own; it refuses a bundle change left unstaged first, since --check reads the bundles on disk and would pass a commit that carries the old one
+      # a stale guard bundle turns CI red, so a commit touching a bundle's inputs (the guards, the package folders the bundles import, which tests/lefthook.test.ts derives from the bundles, and bun.lock for the packages they inline) checks them first; after lint-staged, whose formatter can rewrite a guard, and skipped in a merge, whose bundles hooks-merge-canary rebuilds in a commit of their own; --check reads the index, what the commit carries, so an unstaged edit to a file's text beside it decides nothing
       priority: 4
       skip:
         - merge
-      glob:
+      glob: &bundle-inputs
         - "bun.lock"
         - "packages/config/src/*"
         - "packages/env/src/*"
@@ -79,9 +79,7 @@ pre-commit:
         - "packages/settings/src/*"
         - "scripts/hooks/*.ts"
         - "scripts/hooks/bundled/*"
-      run: >-
-        if ! git diff --quiet -- scripts/hooks/bundled || [ -n "$(git ls-files --others --exclude-standard -- scripts/hooks/bundled)" ]; then echo "hooks-bundle: scripts/hooks/bundled holds changes this commit leaves unstaged, so the check would read bundles the commit does not carry; run git add scripts/hooks/bundled, then commit again" >&2; exit 1; fi;
-        bun --no-env-file packages/scripts/src/hooks-bundle.ts --check
+      run: bun --no-env-file packages/scripts/src/hooks-bundle.ts --check
     trace-count:
       # the trace ratchet's test, as CI runs it: it counts every file git's index holds, as it stands on disk, and a commit of images and fonts alone skips it; then the list kinds from this machine's list, which the test's sandbox hides
       priority: 4
@@ -94,6 +92,18 @@ pre-commit:
         - "*.webp"
         - "*.woff2"
       run: bun run test:file tests/packages/scripts/src/trace-count/count.test.ts && bun --no-env-file packages/scripts/src/trace-count/cli.ts --lists
+    text-tests:
+      # the two tests that scan the tracked tree's text, as CI runs them, so a commit that breaks one stops here rather than going red in CI; a commit of images and fonts alone skips it
+      priority: 4
+      exclude:
+        - "*.gif"
+        - "*.ico"
+        - "*.jpeg"
+        - "*.jpg"
+        - "*.png"
+        - "*.webp"
+        - "*.woff2"
+      run: bun run test:file tests/cmux.test.ts tests/shell-read-redirect.test.ts
     dev-stack:
       # the build below rebuilds packages/* under this checkout's running `bun run dev` and hangs it, so the commit waits for the stack to stop
       priority: 4
@@ -148,6 +158,12 @@ pre-push:
         - ref: canary
     ensure-branches:
       run: bun packages/scripts/src/ensure-remote-branches.ts {1}
+    hooks-bundle:
+      # CI builds a PR on its merge ref, the head merged with canary, so a canary change to a bundle input can stale a head whose own bundles are fresh; a push of a branch that touched a bundle input since it forked from the local origin/canary, a docs-only push included, checks the bundles of the head merged with it, in about a second, so it takes no run slot
+      files: git diff --name-only origin/canary...HEAD
+      glob: *bundle-inputs
+      # lefthook reads files: only for a run that names {files}, so the list goes in a shell comment, quoted so YAML keeps it
+      run: "bun --no-env-file packages/scripts/src/hooks-bundle.ts --check --merged origin/canary # {files}"
   # the jobs that read the pushed refs on stdin run from .lefthook/pre-push/, since lefthook skips every pre-push command while the checked-out branch has nothing new against its upstream, and runs a script on every push
   scripts:
     # what each pushed ref sends, so a commit made with hooks off is refused before it reaches the remote

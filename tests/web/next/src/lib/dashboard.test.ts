@@ -68,8 +68,8 @@ describe("liveState", () => {
     expect(liveState(false, [])).toBe("Reconnecting")
   })
 
-  test("lost while the open socket's last frame is cmux's error; a closed socket is reconnecting whatever it last said", () => {
-    const problem = { code: "CMUX_FAILED", message: "cmux refused the API's socket" }
+  test("lost while the open socket's last frame is the sessions read's error; a closed socket is reconnecting whatever it last said", () => {
+    const problem = { code: "SESSIONS_FAILED", message: "cmux refused the API's socket" }
     expect(liveState(true, [], problem)).toBe("Lost")
     expect(liveState(true, null, problem)).toBe("Lost")
     expect(liveState(false, [], problem)).toBe("Reconnecting")
@@ -81,6 +81,7 @@ describe("LIGHT_LABELS", () => {
     expect(LIGHT_LABELS).toEqual({
       idle: "Idle",
       "needs-you": "Waiting on you",
+      unknown: "State unknown",
       working: "Working",
     })
     for (const label of Object.values(LIGHT_LABELS)) expect(label).toMatch(/^\p{Lu}/u)
@@ -737,7 +738,9 @@ process.exit(0)
 
   test("shows a session in each light, a reviewer, a tester and a name outside the factory's, and an agent that is down", async () => {
     const { board, workers } = await fixture()
-    expect(new Set(workers.map((w) => w.light))).toEqual(new Set(["idle", "needs-you", "working"]))
+    expect(new Set(workers.map((w) => w.light))).toEqual(
+      new Set(["idle", "needs-you", "unknown", "working"]),
+    )
     const names = workers.map((w) => w.name)
     for (const name of [
       "h4n8zt-reviewer",
@@ -1256,7 +1259,7 @@ describe("history", () => {
 })
 
 describe("afterFrame", () => {
-  const failure = { code: "CMUX_FAILED", message: "cmux sessions failed: no answer from cmux" }
+  const failure = { code: "SESSIONS_FAILED", message: "cmux sessions failed: no answer from cmux" }
   const clear = { misses: 0, problem: null }
 
   test("one failed read raises nothing", () => {

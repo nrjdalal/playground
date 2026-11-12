@@ -5,14 +5,8 @@ import { CORE } from "./rendered"
 import { defineSettings } from "./settings"
 
 // The ops job registry: one setting per job, `jobs.<camelName>`, whose row holds the fields it changes (its enabled field alone, for a job turned on) and reads over the job's registry entry, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR, and the rest still follows the registry. The runner renders <data>/ops/jobs.json and each launchd job's plist from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard) and ops-usage, so the Dashboard shows the account's week with no setting. In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
-// A row stored before needsCmux left the schema loads without it, and one that set it with no runtime is a terminal job, which runs in herdr.
-const withoutNeedsCmux = (row: unknown): unknown => {
-  if (!row || typeof row !== "object" || !("needsCmux" in row)) return row
-  const { needsCmux, ...rest } = row as Record<string, unknown>
-  return needsCmux === true && rest.runtime === undefined ? { ...rest, runtime: "herdr" } : rest
-}
-
-const jobFields = z.strictObject({
+// A job row as a write takes it, every field named and none it does not have; a stored row reads through fromStored first.
+export const jobSchema = z.strictObject({
   callsModel: z.boolean(),
   // A job a terminal holds (herdr): its command, run from cwd.
   command: z.string().min(1).optional(),
@@ -29,13 +23,8 @@ const jobFields = z.strictObject({
   neverPause: z.boolean().optional(),
   pausedFor: z.string().optional(),
   program: z.array(z.string().min(1)).min(1).optional(),
-  // A stored row's old cmux or auto reads as herdr, where every terminal job runs.
-  runtime: z
-    .preprocess(
-      (runtime) => (runtime === "cmux" || runtime === "auto" ? "herdr" : runtime),
-      z.enum(["herdr"]),
-    )
-    .optional(),
+  // The terminal a job runs in: herdr, the one runtime.
+  runtime: z.enum(["herdr"]).optional(),
   schedule: z.union([
     z.strictObject({ always: z.literal(true) }),
     z.strictObject({ every: z.number().int().positive() }),
@@ -43,11 +32,19 @@ const jobFields = z.strictObject({
   // The process group name a job's stop keys on (procs.sh), for a job that holds a stack.
   stop: z.string().min(1).optional(),
 })
-export const jobSchema = z.preprocess(withoutNeedsCmux, jobFields)
 export type Job = z.infer<typeof jobSchema>
 
+// A stored job row as a read takes it, so no row an older install wrote loses its job: each key the schema does not name is dropped, and a runtime of any word reads as herdr; a write is checked by the schema alone, so a misspelled key is refused there.
+export const fromStored = (row: unknown): unknown => {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return row
+  const kept = Object.fromEntries(
+    Object.entries(row).filter(([key]) => Object.hasOwn(jobSchema.shape, key)),
+  )
+  return kept.runtime === undefined ? kept : { ...kept, runtime: "herdr" }
+}
+
 // A job's stored row: any of its fields, none it does not have, read over the registry's entry (settingsFor's merge).
-const jobRowSchema = z.preprocess(withoutNeedsCmux, jobFields.partial())
+const jobRowSchema = jobSchema.partial()
 
 // A job's name as its setting key: ops-merge-train is jobs.opsMergeTrain.
 export const jobKey = (name: string): string =>
@@ -111,17 +108,9 @@ export const JOBS: Record<string, Job> = {
       "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
     schedule: { every: 86400 },
   }),
-  "ops-firefighting-start": terminal(
-    "ops-firefighting-start",
-    `${bunJob("ops-firefighting-start")} --data {data}`,
-    {
-      description:
-        "Starts a firefighting worker for each open ticket no session holds, Urgent first, and holds focus for an Urgent one's.",
-      schedule: { every: 60 },
-    },
-  ),
   "ops-flow": launchd("ops-flow", {
-    description: "Tells the leads when a ready PR's checks stall or a run slot is held too long.",
+    description:
+      "Tells the leads when a session holds a run slot over 15 minutes, or a model slot over 120.",
     schedule: { every: 60 },
   }),
   "ops-herdr": launchd("ops-herdr", {
@@ -172,11 +161,6 @@ export const JOBS: Record<string, Job> = {
       "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
     schedule: { every: 60 },
   }),
-  "ops-ticket-card": terminal("ops-ticket-card", bunJob("ops-ticket-card"), {
-    description:
-      "Keeps one Inbox card of the day's watched tickets, edited in place on every change.",
-    schedule: { every: 60 },
-  }),
   "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
     description:
       "Reads every live session's screen and clears a factory session stuck on a prompt.",
@@ -188,6 +172,11 @@ export const JOBS: Record<string, Job> = {
     enabled: true,
     neverPause: true,
     schedule: { every: 300 },
+  }),
+  "ops-wa": terminal("ops-wa", `${bunJob("ops-wa")} --data {data}`, {
+    description:
+      "Holds the WhatsApp link on the spare number: hands each owner message to the dispatcher, sends its replies, and drops every other message.",
+    schedule: { always: true },
   }),
   "ops-zai-usage": launchd("ops-zai-usage", {
     description: "Reads the GLM plan's credits into zai-usage.json, which the spawn gate reads.",
@@ -208,6 +197,7 @@ export const jobSettings = defineSettings(
         description: `The ${name} ops job: ${job.description}`,
         merge: true,
         schema: jobRowSchema,
+        stored: fromStored,
       },
     ]),
   ),
@@ -248,7 +238,7 @@ const plistOf = (name: string, job: Job, fill: Fill): string => {
   ].join("\n")
 }
 
-// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs, each row marked with its org) as jobs.json in the shape every reader parses, and an enabled launchd job's plist by label. A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands, less an old needsCmux (withoutNeedsCmux); one an org's row rendered before, whose row is now refused or gone, is kept paused, so the runner stops it, and kept as it stands when the orgs could not be read (org null).
+// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs, each row marked with its org) as jobs.json in the shape every reader parses, and an enabled launchd job's plist by label. Each value reads as a stored row (fromStored). A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands; one an org's row rendered before, whose row is now refused or gone, is kept paused, so the runner stops it, and kept as it stands when the orgs could not be read (org null).
 export const renderJobs = (
   values: Record<string, unknown>,
   existing: { name?: unknown }[],
@@ -273,16 +263,15 @@ export const renderJobs = (
   }
   const jobs: Record<string, unknown>[] = [
     ...Object.entries(JOBS).map(([name, fallback]) => {
-      const set = jobSchema.safeParse(values[jobKey(name)])
+      const set = jobSchema.safeParse(fromStored(values[jobKey(name)]))
       return row(name, set.success ? set.data : fallback)
     }),
     ...Object.entries(org ?? {}).map(([name, job]) => row(name, job)),
   ]
   const known = new Set([...Object.keys(JOBS), ...Object.keys(org ?? {})])
   jobs.push(
-    ...existing
+    ...(existing as Record<string, unknown>[])
       .filter((job) => typeof job.name === "string" && !known.has(job.name))
-      .map((job) => withoutNeedsCmux(job) as Record<string, unknown>)
       .map((job) => (org && typeof job.org === "string" ? { ...job, disabled: true } : job)),
   )
   return { jobs: jobs.sort((a, b) => String(a.name).localeCompare(String(b.name))), plists }
@@ -344,7 +333,7 @@ const REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.value
 export const orgJobKey = (key: string): boolean =>
   key.startsWith("jobs.") && !REGISTRY_KEYS.has(key)
 
-// One scope's row for a job the registry lacks as that org's job, by its name, or why it is refused; a write of the row checks it the same way, against the scope's own script folders.
+// One scope's row for a job the registry lacks as that org's job, by its name, or why it is refused; a write of the row checks it the same way, as it stands, against the scope's own script folders, while a read hands it a stored row through fromStored.
 export const orgJob = (
   key: string,
   scope: string,
@@ -368,7 +357,7 @@ export const orgJob = (
   return "refused" in runs ? runs : { job: { ...parsed.data, cwd: runs.cwd, org: scope }, name }
 }
 
-// Pure: each org's own jobs from every scope's settings rows: an org scope's jobs.<camelName> row for a job the registry lacks, by its name, which runs a script from a folder that org ships (scripts[org], each <org>/scripts/<key>/), from that folder unless its cwd names one under it. Each row refused is a line naming its scope, its key and why: a login's or core's row for such a job, a row off the job's schema or out of its folder, and a second org's row for a job the first in scope order adds.
+// Pure: each org's own jobs from every scope's settings rows, each read through fromStored: an org scope's jobs.<camelName> row for a job the registry lacks, by its name, which runs a script from a folder that org ships (scripts[org], each <org>/scripts/<key>/), from that folder unless its cwd names one under it. Each row refused is a line naming its scope, its key and why: a login's or core's row for such a job, a row off the job's schema or out of its folder, and a second org's row for a job the first in scope order adds.
 export const orgJobs = (
   rows: { key: string; scope: string; value: unknown }[],
   login: string,
@@ -378,7 +367,7 @@ export const orgJobs = (
   const refused: string[] = []
   for (const { key, scope, value } of rows) {
     if (!orgJobKey(key)) continue
-    const read = orgJob(key, scope, value, login, scripts[scope] ?? [])
+    const read = orgJob(key, scope, fromStored(value), login, scripts[scope] ?? [])
     if ("refused" in read) refused.push(`jobs: refused ${scope} ${key}: ${read.refused}`)
     else if (jobs[read.name])
       refused.push(
@@ -419,7 +408,7 @@ export const plistProgram = (xmlText: string): { cwd?: string; program: string[]
   return { program, ...(cwd ? { cwd: unescape(cwd) } : {}) }
 }
 
-// Pure: one job jobs.json lists as the registry's setting, its fields over the job's default, enabled unless it is disabled, and a launchd job's program from its plist; a job the registry does not know is kept in jobs.json, and one its schema refuses says why.
+// Pure: one job jobs.json lists as the registry's setting, its fields over the job's default read as a stored row (fromStored), enabled unless it is disabled, and a launchd job's program from its plist; a job the registry does not know is kept in jobs.json, and one its schema refuses says why.
 export const importedJob = (
   listed: Record<string, unknown>,
   plist: { cwd?: string; program: string[] } | null,
@@ -430,14 +419,16 @@ export const importedJob = (
   const fields = Object.fromEntries(
     LISTED_FIELDS.filter((f) => f in listed).map((f) => [f, listed[f]]),
   )
-  const parsed = jobSchema.safeParse({
-    ...fallback,
-    ...(listed.launchd && plist ? plist : {}),
-    ...fields,
-    ...(listed.launchd && !listed.command ? { command: undefined } : {}),
-    ...(listed.command && !listed.launchd ? { launchd: undefined, program: undefined } : {}),
-    enabled: listed.disabled !== true,
-  })
+  const parsed = jobSchema.safeParse(
+    fromStored({
+      ...fallback,
+      ...(listed.launchd && plist ? plist : {}),
+      ...fields,
+      ...(listed.launchd && !listed.command ? { command: undefined } : {}),
+      ...(listed.command && !listed.launchd ? { launchd: undefined, program: undefined } : {}),
+      enabled: listed.disabled !== true,
+    }),
+  )
   if (!parsed.success)
     return {
       problem: `${name}: ${parsed.error.issues.map((issue) => `${issue.path.join(".")} ${issue.message}`).join("; ")}`,

@@ -4,6 +4,7 @@ import { join } from "node:path"
 
 const root = join(import.meta.dir, "..", "..")
 
+// The shared files keep it off for every session spawn.sh did not start; the trial's own built files turn it on, as tests/scripts/spawn-memory.test.ts holds (ADR 0022)
 describe("auto-memory", () => {
   for (const file of [join("scripts", "factory-settings.json"), join(".claude", "settings.json")])
     test(`${file} turns it off`, async () => {
@@ -38,27 +39,17 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
       expect(project).toContainEqual(hook)
   })
 
+  // guards runs every Bash guard (tests/scripts/hooks/guards.test.ts), and the rest keep their own entry for the tools other than Bash they guard
   test.each([
+    "guards",
     "no-bare-slack-link",
-    "no-desktop-owner-app",
-    "no-env-dump",
     "no-extension-repo-write",
     "no-extensions-write",
-    "no-false-green",
     "no-glm-heavy-path",
-    "no-headless-login",
-    "no-kill-by-name",
     "no-linear-ticket",
     "no-main-checkout",
-    "no-manager-subagent",
-    "no-ours-merge",
     "no-playground-leak",
-    "no-prompt-stop",
-    "no-raw-delete",
-    "no-raw-spawn",
     "no-release-comment",
-    "no-stash",
-    "no-unslotted-run",
   ])("%s is a factory hook", async (name) => {
     const commands = (await preToolUse(join("scripts", "factory-settings.json"))).flatMap((h) =>
       h.hooks.map((x) => x.command),
@@ -66,10 +57,22 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
     expect(commands.some((c) => c.includes(`scripts/hooks/bundled/${name}.js`))).toBe(true)
   })
 
-  // a Write into the main checkout passed while no-main-checkout heard only Bash
+  // spawn.sh's deny keeps a manager off the Agent and Workflow tools (tests/scripts/spawn-manager-deny.test.ts), so no hook guards them; the guard's script stays one ship past its registration, for a worktree whose settings still name it (scripts/hooks/README.md)
+  test.each([join("scripts", "factory-settings.json"), join(".claude", "settings.json")])(
+    "%s registers no no-manager-subagent hook",
+    async (file) => {
+      const hooks = await preToolUse(file)
+      expect(hooks.filter((h) => /Agent|Workflow/.test(h.matcher ?? ""))).toEqual([])
+      expect(hooks.flatMap((h) => h.hooks.map((x) => x.command)).join("\n")).not.toContain(
+        "no-manager-subagent",
+      )
+    },
+  )
+
+  // a Write into the main checkout passed while no-main-checkout heard only Bash, which now reaches both through guards
   test.each(
     ["no-extensions-write", "no-main-checkout"].flatMap((name) =>
-      ["Bash", "Edit", "MultiEdit", "NotebookEdit", "Write"].map((tool) => [name, tool]),
+      ["Edit", "MultiEdit", "NotebookEdit", "Write"].map((tool) => [name, tool]),
     ),
   )("%s hears %s", async (name, tool) => {
     const hook = (await preToolUse(join("scripts", "factory-settings.json"))).find((h) =>
@@ -267,13 +270,15 @@ describe("the standing rules at session start", () => {
   })
 })
 
-// playbook's **local page**: a page for the owner is a local HTML file, since an artifact publishes under whichever account the session holds; a bare tool name in permissions.deny takes the tool out of the session's context, bypass mode included (https://code.claude.com/docs/en/permissions)
+// playbook's **local page**: a page for the owner is a local HTML file, since an artifact publishes under whichever account the session holds; enableArtifact false is Claude Code's own off switch, honored from a project or --settings file and turned back on by none (https://code.claude.com/docs/en/artifacts#disable-artifacts)
 describe("the Artifact tool", () => {
   for (const file of [join("scripts", "factory-settings.json"), join(".claude", "settings.json")])
-    test(`${file} denies it`, async () => {
+    test(`${file} turns it off with enableArtifact false, not a deny rule`, async () => {
       const settings = (await Bun.file(join(root, file)).json()) as {
+        enableArtifact?: boolean
         permissions?: { deny?: string[] }
       }
-      expect(settings.permissions?.deny).toContain("Artifact")
+      expect(settings.enableArtifact).toBe(false)
+      expect(settings.permissions?.deny ?? []).not.toContain("Artifact")
     })
 })

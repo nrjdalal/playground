@@ -33,7 +33,7 @@ describe("updateSteps", () => {
     expect(
       updateSteps([
         "extensions/core/skills/pr/SKILL.md",
-        "extensions/core/skills/code-review-loop/scripts/state.py",
+        "extensions/core/skills/code-review-loop/scripts/state.ts",
         "extensions/core/skills/code-review-loop/SKILL.md",
         "skills/zerostarter/ui-verify/SKILL.md",
         "skills/playground/README.md",

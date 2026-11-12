@@ -149,14 +149,14 @@ describe("with no --runtime, a start opens in herdr whatever its spawner's termi
     expect(readFileSync(lw(r.home, "runtimes", "probe-x"), "utf8")).toBe("herdr\n")
   })
 
-  test("a column beside a cmux surface:N, from cmux, is refused, naming #2076", async () => {
+  test("a column beside an old cmux surface:N, from cmux, is refused as no herdr pane id", async () => {
     const r = await spawn(
       ["column", "lead", OLD.planner, OLD.dispatcher, "surface:1", "handoff.md"],
       [],
       { CMUX_SOCKET_PATH: join(scratch, "cmux.sock") },
     )
     expect(r.code).toBe(1)
-    expect(r.err).toContain("surface:1 is a cmux surface, and spawn.sh starts nothing in cmux")
+    expect(r.err).toContain("surface:1 is not a herdr pane id (w1:p2)")
     expect(r.cmux).toBeUndefined()
     expect(placing(r)).toEqual([])
   })
@@ -176,15 +176,15 @@ describe("with no --runtime, a start opens in herdr whatever its spawner's termi
     expect(readFileSync(lw(r.home, "runtimes", "worker-brave-otter"), "utf8")).toBe("herdr\n")
   })
 
-  // spawn.sh starts nothing in cmux: --runtime cmux is refused in every mode, before any cmux or herdr call and any pin.
+  // spawn.sh opens every session in herdr: --runtime cmux is refused in every mode as any runtime but herdr is, before any cmux or herdr call and any pin.
   test.each([
     ["a worker", ["worker", "worker-brave-otter", "b.md"]],
-    ["a column", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"]],
+    ["a column", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"]],
     ["a probe", ["probe", "probe-x", OLD.ops, "p.md"]],
     ["a manager", ["manager", "optimizer", "b.md"]],
     ["a resume", ["resume", "worker-x", root, "0b6e3c1a-4d2f-4e8a-9c7b-1f2e3d4c5b6a"]],
     ["a --check", ["worker", "worker-brave-otter", "b.md", "--check"]],
-  ])("--runtime cmux on %s is refused, naming #2076", async (_, args) => {
+  ])("--runtime cmux on %s is refused as any runtime but herdr is", async (_, args) => {
     const r = await spawn(
       [...args, "--runtime", "cmux"],
       [],
@@ -193,7 +193,7 @@ describe("with no --runtime, a start opens in herdr whatever its spawner's termi
       { name: String(args[0] === "column" ? args[2] : args[1]), backend: "claude" },
     )
     expect(r.code).toBe(2)
-    expect(r.err).toContain("--runtime cmux is refused: spawn.sh starts nothing in cmux")
+    expect(r.err).toContain('--runtime takes herdr alone, not "cmux"')
     expect(r.cmux).toBeUndefined()
     expect(herdrCalls(r)).toEqual([])
     expect(existsSync(lw(r.home, "runtimes"))).toBe(false)
@@ -409,15 +409,15 @@ describe("a resume opens in herdr, whatever runtime its start recorded", () => {
     ).toEqual(["pane", "run", "w5:p1"])
   })
 
-  // A session that started in cmux, before herdr took over, resumes in herdr, and its pin then reads herdr.
-  test("a resume whose pin reads cmux opens in herdr and rewrites the pin (#2076)", async () => {
+  // The pin is rewritten at every resume, so one holding any word from an older install opens in herdr.
+  test("a resume whose pin holds another word opens in herdr and rewrites the pin", async () => {
     const r = await spawn(
       ["resume", "worker-x", root, SESSION],
       [],
-      { CMUX_SOCKET_PATH: join(scratch, "cmux.sock") },
+      {},
       undefined,
       claude,
-      pinned("cmux"),
+      pinned("made-up"),
     )
     expect(r.code, r.err).toBe(0)
     expect(r.cmux).toBeUndefined()
@@ -429,18 +429,5 @@ describe("a resume opens in herdr, whatever runtime its start recorded", () => {
     expect(launchOf(r)).toContain(`claude --resume ${SESSION} -n worker-x`)
     expect(execLine(r, "worker-x")).toBe(`exec spawn.sh resume worker-x ${root} ${SESSION}`)
     expect(readFileSync(lw(r.home, "runtimes", "worker-x"), "utf8")).toBe("herdr\n")
-  })
-
-  test("a runtime pin that reads neither is refused", async () => {
-    const r = await spawn(
-      ["resume", "worker-x", root, SESSION],
-      [],
-      {},
-      undefined,
-      claude,
-      pinned("tmux"),
-    )
-    expect(r.code).toBe(1)
-    expect(r.err).toContain("the runtime pin for worker-x reads neither cmux nor herdr")
   })
 })

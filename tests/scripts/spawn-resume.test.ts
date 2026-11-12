@@ -359,7 +359,8 @@ describe("restore resumes the herdr sessions its resume files list", () => {
         lw(home, "resume", `${name}.sh`),
         `#!/bin/bash\nexec /x/scripts/spawn.sh resume ${name} ${root} ${sid}${extra}\n`,
       )
-      writeFileSync(lw(home, "runtimes", name), k === "c" ? "cmux\n" : "herdr\n")
+      // worker-c's pin holds a word from an older install, which restore reads as herdr
+      writeFileSync(lw(home, "runtimes", name), k === "c" ? "made-up\n" : "herdr\n")
       writeFileSync(lw(home, "backends", name), "claude\n")
       transcript(home, sid)
     }
@@ -371,7 +372,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
     ],
   })
 
-  test("it resumes each one not live with its account and model, skips what the roster ended, what runs in cmux and a live one", async () => {
+  test("it resumes each one not live with its account and model, a pin holding another word included, and skips what the roster ended and a live one", async () => {
     const r = await spawn(
       ["restore"],
       [{ name: "worker-d", pid: 5100 }],
@@ -381,18 +382,99 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       listed,
     )
     expect(r.out).toBe(
-      "restored worker-a\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nskipped worker-d: live\n",
+      "restored worker-a\nskipped worker-b: its roster row reads ended\nrestored worker-c\nskipped worker-d: live\n",
     )
     expect(r.code).toBe(0)
     expect(placing(r).filter((c) => c[1] === "run")).toEqual([
       ["pane", "run", "w5:p1", `exec bash '${lw(r.home, "launch", "worker-a.sh")}'`],
+      ["pane", "run", "w5:p1", `exec bash '${lw(r.home, "launch", "worker-c.sh")}'`],
     ])
-    const launch = launchOf(r)
+    expect(readFileSync(lw(r.home, "runtimes", "worker-c"), "utf8")).toBe("herdr\n")
+    // two sessions restore here, and a folder lists its files in no fixed order on Linux, so worker-a's launch is read by its name
+    const launch = readFileSync(lw(r.home, "launch", "worker-a.sh"), "utf8")
     expect(launch).toContain(`--resume ${ids.a} -n worker-a --model claude-sonnet-5-5`)
     expect(launch).toContain("acme@example.net")
     expect(execLine(r, "worker-a")).toBe(
       `exec spawn.sh resume worker-a ${root} ${ids.a} --account acme@example.net --model claude-sonnet-5-5`,
     )
+  })
+
+  test("with the load gate held, the first dispatcher comes back first and past it, the next record waits, and the restore exits 0 (#1682)", async () => {
+    const sids = { "2bcdfg-worker": ids.a, dispatcher: ids.b }
+    const r = await spawn(
+      ["restore"],
+      [],
+      { FAKE_LOAD5: "24.00" },
+      undefined,
+      undefined,
+      (home) => {
+        herdrPin()(home)
+        for (const dir of ["resume", "runtimes", "backends"])
+          mkdirSync(lw(home, dir), { recursive: true })
+        for (const [name, sid] of Object.entries(sids)) {
+          writeFileSync(
+            lw(home, "resume", `${name}.sh`),
+            `#!/bin/bash\nexec /x/scripts/spawn.sh resume ${name} ${root} ${sid}\n`,
+          )
+          writeFileSync(lw(home, "runtimes", name), "herdr\n")
+          writeFileSync(lw(home, "backends", name), "claude\n")
+          transcript(home, sid)
+        }
+      },
+    )
+    const [first, second] = r.out.split("\n")
+    expect(first).toBe("restored dispatcher")
+    expect(second).toStartWith("waiting 2bcdfg-worker: ")
+    expect(second).toContain("the load gate holds it")
+    expect(r.code).toBe(0)
+    expect(placing(r).filter((c) => c[1] === "run")).toHaveLength(1)
+    expect(capacityLog(r)).toEqual([
+      expect.objectContaining({ gate: "load", session: "dispatcher", verdict: "skipped" }),
+      expect.objectContaining({ gate: "load", session: "2bcdfg-worker", verdict: "refused" }),
+    ])
+  })
+
+  test("a checker's resume carries the PRs its roster row serves, its pr first, and one whose row names none is not restored (#1400)", async () => {
+    const [pr1, pr2] = [1, 2].map((n) => `https://github.com/acme/factory/pull/${n}`)
+    const rows = [
+      {
+        kind: "reviewer",
+        name: "reviewer-a",
+        pr: pr2,
+        prs: [pr1, pr2],
+        status: "working",
+        task: "t",
+      },
+      { kind: "tester", name: "tester-b", status: "working", task: "t" },
+    ]
+    const r = await spawn(
+      ["restore"],
+      [],
+      { ROSTER_JSON: JSON.stringify({ agents: rows }) },
+      undefined,
+      undefined,
+      (home) => {
+        herdrPin()(home)
+        for (const dir of ["resume", "runtimes", "backends"])
+          mkdirSync(lw(home, dir), { recursive: true })
+        for (const [name, sid] of [
+          ["reviewer-a", ids.a],
+          ["tester-b", ids.b],
+        ]) {
+          writeFileSync(
+            lw(home, "resume", `${name}.sh`),
+            `#!/bin/bash\nexec /x/scripts/spawn.sh resume ${name} ${root} ${sid}\n`,
+          )
+          writeFileSync(lw(home, "runtimes", name), "herdr\n")
+          writeFileSync(lw(home, "backends", name), "claude\n")
+          transcript(home, sid)
+        }
+      },
+    )
+    expect(r.out).toContain("restored reviewer-a\n")
+    expect(r.out).toContain("not restored tester-b: a tester starts with --pr <pull url>")
+    expect(r.roster).toContain(`prs+=${pr2},${pr1}`)
+    expect(r.code).toBe(1)
   })
 
   test("a session whose roster row reads done stays down, as an ended one does", async () => {
@@ -412,10 +494,12 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       listed,
     )
     expect(r.out).toBe(
-      "skipped worker-a: its roster row reads done\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nskipped worker-d: live\n",
+      "skipped worker-a: its roster row reads done\nskipped worker-b: its roster row reads ended\nrestored worker-c\nskipped worker-d: live\n",
     )
     expect(r.code).toBe(0)
-    expect(placing(r).filter((c) => c[1] === "run")).toEqual([])
+    expect(placing(r).filter((c) => c[1] === "run")).toEqual([
+      ["pane", "run", "w5:p1", `exec bash '${lw(r.home, "launch", "worker-c.sh")}'`],
+    ])
   })
 
   test("under inscope it reads the roster roster.ts writes, ~/.claude's", async () => {
@@ -464,7 +548,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       },
     )
     expect(r.out).toBe(
-      "skipped worker-a: its exec line is not a resume restore runs\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nrestored worker-d\n",
+      "skipped worker-a: its exec line is not a resume restore runs\nskipped worker-b: its roster row reads ended\nrestored worker-c\nrestored worker-d\n",
     )
   })
 
@@ -486,7 +570,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       onProbes,
     )
     expect(factory.out).toBe(
-      "restored worker-a\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\n",
+      "restored worker-a\nskipped worker-b: its roster row reads ended\nrestored worker-c\n",
     )
     const probes = await spawn(
       ["restore"],
@@ -597,7 +681,7 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
   const socketOf = (r: { home: string }) =>
     readFileSync(join(r.home, "herdr.env"), "utf8").trim().split(" ")[1]
 
-  test("it closes the one pane labelled with the name on the server its resume record names, ends its roster row and keeps its pins and record", async () => {
+  test("it closes the one pane labelled with the name on the server its resume record names, ends its roster row before the pane closes and keeps its pins and record", async () => {
     const r = await spawn(["close", "worker-x"], [], {}, undefined, undefined, opened())
     expect(r.err).toBe("")
     expect(r.code).toBe(0)
@@ -606,6 +690,8 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
     expect(socketOf(r)).toBe(lw(r.home, "herdr", "factory.sock"))
     expect(r.cmux).toBeUndefined()
     expect(r.rosterLog).toEqual(["set worker-x status=ended"])
+    // the row reads ended before the pane closes, so a restore that finds the session gone leaves it down (#1696)
+    expect(r.rosterAtClose).toEqual(["set worker-x status=ended"])
     expect(readFileSync(lw(r.home, "runtimes", "worker-x"), "utf8")).toBe("herdr\n")
     expect(existsSync(lw(r.home, "resume", "worker-x.sh"))).toBe(true)
   })
@@ -650,7 +736,12 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
   })
 
   test.each([
-    ["a cmux session", {}, opened({ runtime: "cmux" }), "does not read herdr"],
+    [
+      "a session whose pin holds another word",
+      {},
+      opened({ runtime: "made-up" }),
+      "does not read herdr",
+    ],
     ["a session with no runtime pin", {}, opened({ runtime: null }), "does not read herdr"],
     ["a session with no resume record", {}, opened({ record: null }), "has no resume record"],
     [
@@ -698,19 +789,31 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
     expect(r.roster).toBeUndefined()
   })
 
-  test("a close herdr refuses names herdr's own words", async () => {
-    const r = await spawn(
-      ["close", "worker-x"],
-      [],
-      { FAKE_HERDR_CLOSE_FAIL: "1" },
-      undefined,
-      undefined,
-      opened(),
-    )
-    expect(r.code).toBe(1)
-    expect(r.err).toContain("herdr would not close pane w2:p3 (error: pane w2:p3 not found)")
-    expect(r.roster).toBeUndefined()
-  })
+  test.each([
+    ["working", {}, "status=working"],
+    ["parked", { hold: "#12" }, "status=parked hold=#12"],
+  ])(
+    "a close herdr refuses names herdr's own words and puts a %s row back",
+    async (status, extra, back) => {
+      const r = await spawn(
+        ["close", "worker-x"],
+        [],
+        {
+          FAKE_HERDR_CLOSE_FAIL: "1",
+          ROSTER_JSON: JSON.stringify({
+            agents: [{ name: "worker-x", role: "worker", status, task: "t", ...extra }],
+          }),
+        },
+        undefined,
+        undefined,
+        opened(),
+      )
+      expect(r.code).toBe(1)
+      expect(r.err).toContain("herdr would not close pane w2:p3 (error: pane w2:p3 not found)")
+      expect(r.rosterLog).toEqual(["set worker-x status=ended", `set worker-x ${back}`])
+      expect(existsSync(lw(r.home, "closes", "worker-x"))).toBe(false)
+    },
+  )
 
   test.each([
     ["no name", ["close"]],
@@ -907,7 +1010,7 @@ describe("a resume of a checker whose roster worker has ended", () => {
   ])("a checker with %s resumes as before", async (_, agents) => {
     const name = "k3m9px-reviewer"
     const env = { NO_SESSION_TRANSCRIPT: "1", ROSTER_JSON: JSON.stringify({ agents }) }
-    const r = await spawn(["resume", name, root, SESSION], [], env, undefined, {
+    const r = await spawn(["resume", name, root, SESSION, "--pr", "1"], [], env, undefined, {
       name,
       backend: "claude",
     })
@@ -918,7 +1021,7 @@ describe("a resume of a checker whose roster worker has ended", () => {
   test("a checker whose worker is live resumes as before", async () => {
     const name = "k3m9px-reviewer"
     const r = await spawn(
-      ["resume", name, root, SESSION],
+      ["resume", name, root, SESSION, "--pr", "1"],
       [],
       roster(name, "reviewer", "working"),
       undefined,

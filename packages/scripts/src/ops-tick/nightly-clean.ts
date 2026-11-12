@@ -1,19 +1,23 @@
 import { statfsSync } from "node:fs"
-import { appendFile, lstat, mkdir, readdir, unlink } from "node:fs/promises"
+import { appendFile, lstat, mkdir, readdir, realpath, unlink } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 import { managerOf } from "@packages/config/kinds"
+import { configDirOf } from "@packages/env/data-dir"
+import { quarantine, type Roots } from "@packages/safe-delete"
+import { codeRoot, guardedOrgs, readPolicyOrDefaults, type Settings } from "@packages/settings"
 
 import {
   type CleanupDeps,
   cleanupDeps,
   cleanWorktree,
 } from "../../../../scripts/ops/optimizer/auto_end"
+import { machineRoots } from "../trash"
 import { writeAtomic } from "../write-atomic"
 import type { Context } from "./tick"
 
-// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees, branches, worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, an Inbox update when 1 GB or more was freed, and one delete decision for what only the owner's Approve may remove.
+// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), every other repo's stale worktrees (git worktree remove, its branch kept), the scratch folders of sessions that are gone (trashed, each restorable), branches (each head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, and an Inbox update when 1 GB or more was freed. It asks no decision: each container or volume no rule removes is kept and named as kept.
 
 const GB = 1024 ** 3
 // The freed-space finding's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
@@ -21,28 +25,27 @@ export const FREED_LINK = "- 💾 Free disk shows on the [System page](/dashboar
 const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
 
 export type Pr = { headRefOid: string; state: "CLOSED" | "MERGED" | "OPEN"; url: string }
-// repo is the repository's https URL, which a branch with no PR links its compare under.
+// repo is the repository's https URL, which the branch step's archive tags are pushed through.
 export type Prs = { byBranch: Map<string, Pr>; byNumber: Map<number, Pr>; repo?: string }
 export type Ref = { name: string; sha: string }
-// link is the page the owner opens to judge it: a worktree's or branch's PR, else a pushed branch's compare.
-export type Target = {
-  kind: "branch" | "container" | "volume" | "worktree"
-  link?: string
-  name: string
-}
 export type Worktree = { branch: string | null; path: string }
 
-// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers (null when GitHub cannot be read), and the turbo cache's folder.
+// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers in the repo a folder's origin names (the checkout's when none is given; null when GitHub cannot be read), the folders other repos are read in, the names of the live sessions, the roots safe-delete's quarantine reads, the turbo cache's folder, the clock the cap's pacing reads, and the sleep it waits on.
 export type NightDeps = {
   cleanup: () => Promise<CleanupDeps | null>
   free: (dir: string) => number
-  prs: (ctx: Context, branches: string[], numbers: number[]) => Promise<Prs | null>
+  live: () => Promise<string[]>
+  now: () => number
+  prs: (ctx: Context, branches: string[], numbers: number[], dir?: string) => Promise<Prs | null>
+  roots: (data: string, checkout: string) => Promise<string[]>
+  sleep: (ms: number) => Promise<void>
+  trashRoots: () => Roots
   turbo: string
 }
 
-type State = { at?: string; decision?: { id: string; targets: Target[] }; denied?: string[] }
+// The beat's own record: the last run's time alone; a decision or denied key an older run wrote is read past and dropped on the next write.
+type State = { at?: string }
 
-const keyOf = (t: Target): string => `${t.kind} ${t.name}`
 const lines = (out: string): string[] => out.split("\n").filter((l) => l.trim())
 const gbOf = (bytes: number): string => (bytes / GB).toFixed(1)
 
@@ -78,7 +81,64 @@ export const staleWorktrees = (worktrees: Worktree[], prs: Prs): (Worktree & { p
     return pr !== undefined && pr.state !== "OPEN" ? [{ ...w, pr }] : []
   })
 
-// Pure: what the branch step does. A local branch merged into origin/canary, or one whose merged or closed PR still holds its head, goes with -D (the main checkout's HEAD is main, so -d would refuse one merged into canary alone), and a remote one whose merged or closed PR holds its head is deleted on origin, since GitHub restores it from the PR's page; an unmerged local branch with no PR, or one ahead of its PR's head, goes to the decision list. A kept branch (canary, main, the live dashboard's), one a worktree has checked out, and one with an open PR stay.
+// An ignored path that is build output, cache or an .env copy, which a removed worktree may drop (issue 1778, from Ops's hand sweep of 229 worktrees).
+const BUILD_OUTPUT =
+  /(^|\/)(node_modules|\.next|\.turbo|dist|build|out|coverage|\.cache|\.vercel|\.eslintcache|[^/]*\.tsbuildinfo|\.DS_Store|next-env\.d\.ts|\.env(\.[^/]*)?|\.portless[^/]*|\.wrangler|\.output|storybook-static|\.generated|bundle|\.source|__pycache__|\.ruff_cache|\.pytest_cache)(\/|$)/
+
+// Pure: the work git status --porcelain --ignored shows in a worktree, as a keep reason: a tracked change or an untracked file, else an ignored path outside build output; undefined when there is none.
+export const workIn = (status: string): string | undefined => {
+  const all = lines(status)
+  if (all.some((l) => !l.startsWith("!! "))) return "uncommitted work"
+  const extra = all.map((l) => l.slice(3).replace(/\/$/, "")).filter((p) => !BUILD_OUTPUT.test(p))
+  return extra.length ? `ignored files outside build output: ${extra.join(", ")}` : undefined
+}
+
+// Pure: what a roster names, for the sweep of other repos: every string anywhere in it, and each row's branch.
+export const rosterNames = (roster: unknown): { branches: Set<string>; texts: string[] } => {
+  const texts: string[] = []
+  const branches = new Set<string>()
+  const walk = (v: unknown, key = "") => {
+    if (typeof v === "string") {
+      texts.push(v)
+      if (key === "branch") branches.add(v)
+    } else if (Array.isArray(v)) v.forEach((x) => walk(x))
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, k)
+  }
+  walk(roster)
+  return { branches, texts }
+}
+
+// The roster's names for one step, whole or with the rows a predicate keeps, or null when the file cannot be read.
+const readRoster = async (data: string, keep?: (row: { status?: unknown }) => boolean) =>
+  Bun.file(join(data, "roster.json"))
+    .json()
+    .then(
+      (r: { agents?: { status?: unknown }[] }) =>
+        rosterNames(keep ? { ...r, agents: (r.agents ?? []).filter(keep) } : r),
+      () => null,
+    )
+
+// Pure: the folders the factory works in, as spawn.sh trusts them: the code root, and ~/<org> for each org ext.links guards.
+export const rootsOf = (settings: Settings, checkout: string, home: string): string[] => [
+  codeRoot(settings, checkout),
+  ...guardedOrgs(settings.values).map((org) => join(home, org)),
+]
+
+// The real path of each checkout directly in a root that holds a .claude/worktrees folder, each once, the factory's own checkout aside, since its own step sweeps it.
+export const otherRepos = async (roots: string[], checkout: string): Promise<string[]> => {
+  const own = await realpath(checkout).catch(() => checkout)
+  const found = new Set<string>()
+  for (const root of roots)
+    for (const name of await readdir(root).catch(() => [] as string[])) {
+      const repo = await realpath(join(root, name)).catch(() => null)
+      if (!repo || repo === own) continue
+      const has = (path: string) => lstat(join(repo, path)).then(Boolean, () => false)
+      if ((await has(".git")) && (await has(join(".claude", "worktrees")))) found.add(repo)
+    }
+  return [...found]
+}
+
+// Pure: what the branch step does. A local branch merged into origin/canary, or one whose merged or closed PR still holds its head, goes with -D (the main checkout's HEAD is main, so -d would refuse one merged into canary alone), and a remote one whose merged or closed PR holds its head is deleted on origin, since GitHub restores it from the PR's page; an unmerged local branch with no PR, or one ahead of its PR's head, goes to the archive list, whose head is tagged on origin before any delete, so the tag holds the old head. A kept branch (canary, main, the live dashboard's), one a worktree has checked out, and one with an open PR stay.
 export const staleBranches = (input: {
   checkedOut: Set<string>
   keep: Set<string>
@@ -86,11 +146,11 @@ export const staleBranches = (input: {
   merged: Set<string>
   prs: Map<string, Pr>
   remote: Ref[]
-}): { decide: string[]; local: string[]; remote: string[] } => {
+}): { archive: string[]; local: string[]; remote: string[] } => {
   const done = (pr: Pr | undefined, sha: string) =>
     pr !== undefined && pr.state !== "OPEN" && pr.headRefOid === sha
   const out = {
-    decide: [] as string[],
+    archive: [] as string[],
     local: [] as string[],
     remote: [] as string[],
   }
@@ -98,32 +158,32 @@ export const staleBranches = (input: {
     if (input.keep.has(b.name) || input.checkedOut.has(b.name)) continue
     const pr = input.prs.get(b.name)
     if (input.merged.has(b.name) || done(pr, b.sha)) out.local.push(b.name)
-    else if (pr?.state !== "OPEN") out.decide.push(b.name)
+    else if (pr?.state !== "OPEN") out.archive.push(b.name)
   }
   for (const r of input.remote)
     if (!input.keep.has(r.name) && done(input.prs.get(r.name), r.sha)) out.remote.push(r.name)
   return out
 }
 
-// Pure: what the docker step removes and asks. An exited playground-<worktree>-db or -redis container whose worktree folder is gone is removed; the live dashboard's database (and pglaunch's beside it), a Vibeground copy and a running container stay, and any other container over 1 GB goes to the decision list.
+// Pure: what the docker step removes and names as kept. An exited playground-<worktree>-db or -redis container whose worktree folder is gone is removed; the live dashboard's database (and pglaunch's beside it), a Vibeground copy, a running container and any other name stay, and one over 1 GB is named as kept, but the live dashboard's, pglaunch's and a Vibeground copy, which stay unnamed.
 export const staleContainers = (
   listed: { name: string; size: number; state: string }[],
   folders: string[],
   live: (container: string) => boolean,
-): { decide: string[]; remove: string[] } => {
+): { keep: string[]; remove: string[] } => {
   const here = new Set(folders.map((f) => f.replace(/[^a-zA-Z0-9_.-]/g, "-").toLowerCase()))
-  const out = { decide: [] as string[], remove: [] as string[] }
+  const out = { keep: [] as string[], remove: [] as string[] }
   for (const c of listed) {
     if (live(c.name) || c.name.startsWith("playground-vibe-")) continue
     const worktree = /^playground-(.+)-(?:db|redis)$/.exec(c.name)?.[1]
     if (worktree && c.state === "exited" && !here.has(worktree.toLowerCase()))
       out.remove.push(c.name)
-    else if (c.size > GB) out.decide.push(c.name)
+    else if (c.size > GB) out.keep.push(c.name)
   }
   return out
 }
 
-// Pure: docker system df -v's volumes no container uses (its Links a string, "0") that hold over 1 GB, for the decision list.
+// Pure: docker system df -v's volumes no container uses (its Links a string, "0") that hold over 1 GB, each kept and named as kept.
 export const staleVolumes = (df: string): string[] => {
   try {
     const volumes = (
@@ -176,48 +236,14 @@ export async function pruneTurbo(dir: string, now: Date, days = 2): Promise<stri
   return `removed ${removed}, kept ${kept}, freed ${Math.round(freed / 1_048_576)} MB`
 }
 
-// Pure: the page a branch on the decision list links: its newest PR, else its compare once it is pushed, else none, since an unpushed branch has no page.
-export const branchLink = (name: string, prs: Prs, pushed: Set<string>): string | undefined =>
-  prs.byBranch.get(name)?.url ??
-  (prs.repo && pushed.has(name) ? `${prs.repo}/compare/${name}` : undefined)
+// rm quarantines at most 3 paths a session per minute; the beat paces every move its worktree step makes under that cap, cleanWorktree's own included, waiting before a 4th inside the minute so rm's tripwire stays quiet, retries a refused move once the minute is out, and names what a bound on the total wait leaves for the next run. Other beats run beside this one (tick.ts starts each due beat on its own), so the wait holds up nothing.
+const RM_CAP = /quarantined \d+ paths in the last minute/
+const CAP_WAIT_MS = 60_000
+const CAP_WAIT_BOUND_MS = 600_000
+// The refs API's answer for a sha GitHub does not hold (measured, 422).
+const UNKNOWN_SHA = /Object does not exist/
 
-const WHY =
-  "The nightly cleanup found these left over: a worktree with work no merge landed, a branch with no merged PR, or a container or volume over 1 GB that no rule removes. Approve removes each on the next night's run; Deny keeps them, and they are not asked again."
-
-// Pure: the night's delete decision, each target named whole (playground rm --decision matches full paths), as many as fit the Inbox's 4,000 characters, the rest waiting for the next night; its why links each named target's PR or compare, as many as fit.
-export const decisionOf = (
-  from: string,
-  targets: Target[],
-): { item: object; targets: Target[] } => {
-  const named: Target[] = []
-  let what = ""
-  let why = WHY
-  for (const t of targets) {
-    const line = `- ${t.kind} \`${t.name}\`\n`
-    if (what.length + line.length > 3800) break
-    named.push({ kind: t.kind, name: t.name })
-    what += line
-    if (!t.link) continue
-    const pr = /\/pull\/(\d+)$/.exec(t.link)?.[1]
-    const linked = `${why === WHY ? "\n\n" : "\n"}- ${t.kind} \`${t.kind === "worktree" ? basename(t.name) : t.name}\`: [${pr ? `#${pr}` : "compare"}](${t.link})`
-    if (why.length + linked.length <= 3900) why += linked
-  }
-  return {
-    item: {
-      from,
-      kind: "decision",
-      preview: {
-        type: "delete",
-        what: what.trimEnd(),
-        why,
-      },
-      title: `Delete ${named.length} leftover${named.length === 1 ? "" : "s"} the nightly cleanup found`,
-    },
-    targets: named,
-  }
-}
-
-// Pure: whether a cleanWorktree line kept work only the owner's Approve may drop: uncommitted or unpushed work, or rm's unlanded-work refusal that names --discard.
+// Pure: whether a cleanWorktree line kept work the standing approval may trash: uncommitted or unpushed work, or rm's unlanded-work refusal that names --discard.
 export const discardable = (line: string): boolean =>
   /: (uncommitted work|unpushed commits)$/.test(line) ||
   line.includes("--discard removes it anyway")
@@ -226,72 +252,26 @@ export const discardable = (line: string): boolean =>
 const ask = async (ctx: Context, args: string[], stdin?: string) =>
   ctx.run(["bun", "run", "--silent", "--cwd", ctx.repo, "ask", ...args], 120_000, stdin)
 
-const idOf = (out: string): string | undefined =>
-  lines(out)
-    .map((l) => l.trim())
-    .find((l) => /^[0-9a-f-]{36}$/.test(l))
+const cliOf = (ctx: Context): string =>
+  join(ctx.repo, "packages", "scripts", "src", "playground", "cli.ts")
 
-// Carries out last night's approved targets, closes a denied or set-aside one (a denied one's targets kept out of later asks, a set-aside one's asked again), and answers whether it is still open.
-async function settleLast(
-  ctx: Context,
-  state: State,
-  main: string,
-  done: string[],
-): Promise<boolean> {
-  const last = state.decision
-  if (!last) return false
-  const got = await ask(ctx, ["get", last.id])
-  const status = (() => {
-    try {
-      return (JSON.parse(got.out) as { status?: string }).status
-    } catch {
-      return undefined
-    }
-  })()
-  if (got.code !== 0 || !status) {
-    done.push(`decision ${last.id} unreadable, dropped`)
-    state.decision = undefined
-    return false
-  }
-  if (status === "open") return true
-  if (status === "approved") {
-    const cli = join(ctx.repo, "packages", "scripts", "src", "playground", "cli.ts")
-    const runs: Record<Target["kind"], (name: string) => string[]> = {
-      branch: (name) => ["git", "-C", main, "branch", "-D", name],
-      container: (name) => ["docker", "rm", "-fv", name],
-      volume: (name) => ["docker", "volume", "rm", name],
-      worktree: (name) => [
-        "bun",
-        "--no-env-file",
-        cli,
-        "rm",
-        "--worktree",
-        name,
-        "--discard",
-        "--decision",
-        last.id,
-        "--reason",
-        "nightly-clean, approved",
-      ],
-    }
-    let gone = 0
-    for (const t of last.targets) if ((await ctx.run(runs[t.kind](t.name))).code === 0) gone++
-    await ask(ctx, [
-      "ack",
-      last.id,
-      "--no-link",
-      `nightly-clean removed ${gone} of ${last.targets.length}`,
-    ])
-    done.push(`decision ${last.id} approved: removed ${gone} of ${last.targets.length}`)
-  } else {
-    await ask(ctx, ["get", last.id, "--ack"])
-    if (status === "denied")
-      state.denied = [...new Set([...(state.denied ?? []), ...last.targets.map(keyOf)])]
-    done.push(`decision ${last.id} ${status}: its ${last.targets.length} kept`)
-  }
-  state.decision = undefined
-  return false
-}
+// A worktree's trash move under the owner's standing approval, the nightly cleanup acting on its own: playground rm --worktree --discard with the fixed reason nightly-clean, no delete decision asked, the id it prints the one playground rm --restore brings back.
+const trashWorktree = (ctx: Context, path: string) =>
+  ctx.run([
+    "bun",
+    "--no-env-file",
+    cliOf(ctx),
+    "rm",
+    "--worktree",
+    path,
+    "--discard",
+    "--reason",
+    "nightly-clean",
+  ])
+
+// Pure: the trash id a playground rm trash move printed, the one playground rm --restore takes.
+export const trashIdOf = (out: string): string | undefined =>
+  /\d{8}T\d{6}Z-[A-Za-z0-9][A-Za-z0-9-]*\/\d+/.exec(out)?.[0]
 
 // One night's run: each step logged, a failed step named and the rest run on.
 export const nightlyClean =
@@ -304,7 +284,9 @@ export const nightlyClean =
     const data = dirname(ctx.ops)
     const before = deps.free(data)
     const said: string[] = []
-    const decide: Target[] = []
+    // Each removal and each kept leftover, named for the outbox line to ops: a removal with its trash id or archive tag, a keep with why.
+    const removed: string[] = []
+    const kept: string[] = []
     let mark = before
     const step = async (name: string, body: () => Promise<string>) => {
       const line = await body().catch((err: Error) => `failed: ${err.message}`)
@@ -315,10 +297,6 @@ export const nightlyClean =
     const cleanup = await deps.cleanup()
     const main = cleanup?.main ?? ctx.repo
     const git = (args: string[]) => ctx.run(["git", "-C", main, ...args])
-    const open = await settleLast(ctx, state, main, said).catch((err: Error) => {
-      said.push(`last decision: failed: ${err.message}`)
-      return false
-    })
     const fetched = await ctx.run(
       [
         join(ctx.ops, "run-slot.sh"),
@@ -352,38 +330,268 @@ export const nightlyClean =
       if (!cleanup) return "no main checkout found, none read"
       if (!prs) return "GitHub unreadable, none read"
       const out: string[] = []
+      let waited = 0
+      const moves: number[] = []
+      const left = (path: string) => {
+        out.push(
+          `left ${path} for the next run: rm's cap held past the ${CAP_WAIT_BOUND_MS / 60_000}-minute wait`,
+        )
+        kept.push(`worktree ${path} left for the next run: rm's cap held past the wait bound`)
+      }
+      // The pace goes before every call that can reach rm, cleanWorktree's own move included, so a 4th move inside the minute never lands and rm's tripwire pages no one, under the same bound as the retry; false past the bound, where the worktree is named for the next run and rm is not called.
+      const paced = async (): Promise<boolean> => {
+        const recent = moves.filter((at) => deps.now() - at < CAP_WAIT_MS)
+        if (recent.length < 3) return true
+        if (waited + CAP_WAIT_MS > CAP_WAIT_BOUND_MS) return false
+        const pause = CAP_WAIT_MS - (deps.now() - recent[0]!)
+        if (pause > 0) {
+          await deps.sleep(pause)
+          waited += pause
+        }
+        return true
+      }
       for (const w of staleWorktrees(worktrees, prs)) {
+        if (!(await paced())) {
+          left(w.path)
+          continue
+        }
         const line = await cleanWorktree(w.path, "nightly-clean", cleanup, {
           pr: w.pr.url,
           pushed: w.pr.headRefOid,
         })
         out.push(line)
-        if (discardable(line)) decide.push({ kind: "worktree", link: w.pr.url, name: w.path })
+        if (line.startsWith("removed ")) moves.push(deps.now())
+        if (!discardable(line)) continue
+        // The owner's standing approval: trashed with no decision, the 7-day trash holds it and playground rm --restore brings it back. The pace above this loop covers the rm this iteration reaches: no move lands between the two calls, since a removed line is not discardable, so one paced verdict per iteration is the whole contract.
+        let moved = await trashWorktree(ctx, w.path)
+        if (moved.code === 0) moves.push(deps.now())
+        let capped = moved.code !== 0 && RM_CAP.test(moved.out)
+        while (capped && waited + CAP_WAIT_MS <= CAP_WAIT_BOUND_MS) {
+          await deps.sleep(CAP_WAIT_MS)
+          waited += CAP_WAIT_MS
+          moved = await trashWorktree(ctx, w.path)
+          if (moved.code === 0) moves.push(deps.now())
+          capped = moved.code !== 0 && RM_CAP.test(moved.out)
+        }
+        const id = trashIdOf(moved.out)
+        if (moved.code === 0 && id) {
+          out.push(`trashed ${w.path} as ${id}, restorable with playground rm --restore ${id}`)
+          removed.push(`worktree ${w.path} as trash ${id} (playground rm --restore ${id})`)
+        } else if (capped) left(w.path)
+        else {
+          out.push(`kept ${w.path}: its trash move failed: ${lines(moved.out).at(-1) ?? ""}`)
+          kept.push(`worktree ${w.path} kept: its trash move failed`)
+        }
       }
       return out.length ? out.join("; ") : "none stale"
+    })
+    // Every other repo the factory works in: a worktree goes by git worktree remove, with no force flag, so git refuses a dirty tree, only when its PR merged or closed (or it has none and every commit is on a remote), it holds no work but build output, and no live process or roster row has it; each kept one is named with why, and its branch stays, so git worktree add <path> <branch> brings it back.
+    await step("other repos", async () => {
+      const repos = await otherRepos(await deps.roots(data, main), main)
+      if (!repos.length) return "none with a .claude/worktrees folder"
+      const cwds = lines((await ctx.run(["lsof", "-a", "-d", "cwd", "-F", "n"])).out)
+        .filter((l) => l.startsWith("n/"))
+        .map((l) => l.slice(1))
+      if (!cwds.length) return "lsof unreadable, none removed"
+      const roster = await readRoster(data)
+      if (roster === null) return "the roster unreadable, none removed"
+      const out: string[] = []
+      for (const repo of repos) {
+        const at = (dir: string, args: string[]) => ctx.run(["git", "-C", dir, ...args])
+        const trees = worktreesIn((await at(repo, ["worktree", "list", "--porcelain"])).out, repo)
+        const prs = trees.length
+          ? await deps.prs(
+              ctx,
+              trees.flatMap((t) => (t.branch ? [t.branch] : [])),
+              [],
+              repo,
+            )
+          : null
+        if (trees.length && !prs) {
+          out.push(`${repo}: GitHub unreadable, none read`)
+          continue
+        }
+        let gone = 0
+        for (const t of trees) {
+          const pr = t.branch ? prs?.byBranch.get(t.branch) : undefined
+          const why = await (async () => {
+            if (cwds.some((c) => c === t.path || c.startsWith(`${t.path}/`)))
+              return "a live process works in it"
+            if (
+              roster.texts.some((v) => v.includes(t.path)) ||
+              (t.branch && roster.branches.has(t.branch))
+            )
+              return "the roster names it"
+            if (pr?.state === "OPEN") return "its PR is open"
+            if (!pr) {
+              const ahead = await at(t.path, [
+                "rev-list",
+                "--max-count=1",
+                "HEAD",
+                "--not",
+                "--remotes",
+              ])
+              if (ahead.code !== 0) return "its commits could not be read"
+              if (ahead.out.trim()) return "it has no PR and a commit no remote holds"
+            }
+            const status = await at(t.path, ["status", "--porcelain", "--ignored"])
+            return status.code === 0 ? workIn(status.out) : "its status could not be read"
+          })()
+          if (why === undefined) {
+            const removal = await at(repo, ["worktree", "remove", t.path])
+            if (removal.code === 0) {
+              gone++
+              removed.push(
+                `worktree ${t.path} by git worktree remove${t.branch ? `, its branch ${t.branch} kept` : ""}`,
+              )
+              continue
+            }
+            kept.push(
+              `worktree ${t.path} kept: git worktree remove refused: ${lines(removal.out).at(-1) ?? ""}`,
+            )
+          } else kept.push(`worktree ${t.path} kept: ${why}`)
+        }
+        out.push(`${repo}: removed ${gone} of ${trees.length}`)
+      }
+      return out.join("; ")
+    })
+    // Each folder in the data folder's scratch/ whose session is gone: no live session and no roster row whose status is not ended shares its leading id, so a session's scratch/<id>-<task> stays while it lives or its row is not ended. It goes to the trash through quarantine under that session's own name, the route safe-delete gives a session for its own scratch, so the data folder stays protected and playground rm --restore brings it back.
+    await step("gone sessions", async () => {
+      const dir = join(data, "scratch")
+      const entries = await readdir(dir, { withFileTypes: true }).catch(() => null)
+      if (!entries) return "none: the data folder holds no folder of theirs"
+      // a row whose status is ended holds no folder
+      const roster = await readRoster(data, (row) => row?.status !== "ended")
+      if (roster === null) return "the roster unreadable, none removed"
+      const idOf = (name: string) => name.split("-")[0]!
+      const live = new Set((await deps.live()).map(idOf))
+      let gone = 0
+      for (const entry of entries) {
+        const id = idOf(entry.name)
+        if (!entry.isDirectory() || live.has(id) || roster.texts.some((t) => t.includes(id)))
+          continue
+        const path = join(dir, entry.name)
+        const moved = quarantine(
+          path,
+          {
+            reason: "nightly-clean: the scratch folder of a session that is gone",
+            session: entry.name,
+          },
+          deps.trashRoots(),
+        )
+        if ("refused" in moved) kept.push(`scratch ${path} kept: ${moved.refused}`)
+        else {
+          gone++
+          removed.push(`scratch ${path} as trash ${moved.id} (playground rm --restore ${moved.id})`)
+        }
+      }
+      return `trashed ${gone}`
     })
     await step("branches", async () => {
       if (!prs) return "GitHub unreadable, none read"
       const listed = (await git(["worktree", "list", "--porcelain"])).out
       const checkedOut = [...listed.matchAll(/^branch refs\/heads\/(.+)$/gm)].map((m) => m[1]!)
       const merged = await git(["branch", "--merged", "origin/canary", "--format=%(refname:short)"])
+      const locals = await local()
       const plan = staleBranches({
         checkedOut: new Set(checkedOut),
         keep: new Set(["canary", "main", cleanup?.liveBranch ?? ""]),
-        local: await local(),
+        local: locals,
         merged: new Set(merged.code === 0 ? lines(merged.out) : []),
         prs: prs.byBranch,
         remote,
       })
-      let locals = 0
-      for (const name of plan.local) if ((await git(["branch", "-D", name])).code === 0) locals++
+      let deleted = 0
+      for (const name of plan.local) if ((await git(["branch", "-D", name])).code === 0) deleted++
       let remotes = 0
       for (const name of plan.remote)
         if ((await git(["push", "-q", "origin", "--delete", name])).code === 0) remotes++
-      const pushed = new Set(remote.map((r) => r.name))
-      for (const name of plan.decide)
-        decide.push({ kind: "branch", link: branchLink(name, prs, pushed), name })
-      return `deleted ${locals} local, ${remotes} remote; ${plan.decide.length} to decide`
+      // The archive tag is pushed through the git refs API, as the ship's tag step does, before any delete, so the tag holds the old head and git branch <name> archive/<name> brings the branch back. A branch whose origin head is not the local head the tag would hold stays whole, since the tag would not hold what the origin delete drops.
+      const shas = new Map(locals.map((r) => [r.name, r.sha]))
+      const api = prs.repo?.replace(/^https:\/\/github\.com\//, "repos/")
+      const out: string[] = []
+      for (const name of plan.archive) {
+        const tag = `archive/${name}`
+        const sha = shas.get(name) ?? ""
+        const originRef = remote.find((r) => r.name === name)
+        if (originRef && originRef.sha !== sha) {
+          const why = `origin's head is ${originRef.sha}, not the local head ${sha}`
+          out.push(`kept ${name}: ${why}`)
+          kept.push(`branch ${name} kept: ${why}`)
+          continue
+        }
+        const made = api
+          ? await ctx.run([
+              "gh",
+              "api",
+              "-X",
+              "POST",
+              `${api}/git/refs`,
+              "-f",
+              `ref=refs/tags/${tag}`,
+              "-f",
+              `sha=${sha}`,
+            ])
+          : { code: 1, out: "no repository read" }
+        // A head GitHub does not hold, a branch never pushed, would go public with a push, so it stays with a local archive tag alone, named the night that tag is made or re-pointed and quiet on every night after. The existing tag's commit is read first, as the same-head case reads it, and -f re-points one at an older head, so the branch is not named as failed every night.
+        if (made.code !== 0 && UNKNOWN_SHA.test(made.out)) {
+          const local = await git(["rev-parse", "-q", "--verify", `refs/tags/${tag}`])
+          const held = local.code === 0 ? (lines(local.out)[0] ?? "") : ""
+          if (held === sha) continue
+          // -f drops the old head when it is no ancestor of the new one, so a moved branch's first archive is tagged beside the re-point, and git branch <name> <old> still brings it back; is-ancestor's 1 alone says no, and a failed rescue leaves the old tag standing, skips the re-point, and names why
+          const rescued =
+            held !== "" && (await git(["merge-base", "--is-ancestor", held, sha])).code === 1
+          if (rescued) {
+            const rescue = await git(["tag", `${tag}-${held.slice(0, 7)}`, held])
+            if (rescue.code !== 0) {
+              const why = `its local ${tag} tag held ${held}, and keeping it at ${tag}-${held.slice(0, 7)} failed: ${lines(rescue.out).at(-1) ?? ""}`
+              out.push(`kept ${name}: ${why}`)
+              kept.push(`branch ${name} kept: ${why}`)
+              continue
+            }
+          }
+          const said =
+            (await git(["tag", "-f", tag, sha])).code !== 0
+              ? `its head ${sha} is not on GitHub, and its local ${tag} tag failed`
+              : held
+                ? `its local ${tag} tag held ${held}, now holds ${sha}${rescued ? `, the old head kept at ${tag}-${held.slice(0, 7)}` : ""}`
+                : `its head ${sha} is not on GitHub, so it is tagged ${tag} locally alone`
+          out.push(`kept ${name}: ${said}`)
+          kept.push(`branch ${name} kept: ${said}`)
+          continue
+        }
+        if (made.code !== 0) {
+          // The tag already at this head, as a retried night finds, holds it: the deletes go on.
+          const there = await git(["ls-remote", "origin", `refs/tags/${tag}`])
+          const at =
+            lines(there.out)[0]?.split(/\t/)[1] === `refs/tags/${tag}`
+              ? (lines(there.out)[0]?.split(/\t/)[0] ?? "")
+              : ""
+          if (there.code !== 0 || at !== sha) {
+            out.push(`kept ${name}: its ${tag} tag failed: ${lines(made.out).at(-1) ?? ""}`)
+            kept.push(`branch ${name} kept: its ${tag} tag failed`)
+            continue
+          }
+        }
+        const originDeleted =
+          !originRef || (await git(["push", "-q", "origin", "--delete", name])).code === 0
+        if (!originDeleted) {
+          out.push(`kept ${name}: its origin delete failed, its ${tag} tag holds the head`)
+          kept.push(`branch ${name} kept: its origin delete failed`)
+          continue
+        }
+        const localDeleted = (await git(["branch", "-D", name])).code === 0
+        if (localDeleted) {
+          out.push(
+            `archived ${name} as ${tag} at ${sha}, deleted${originRef ? " on origin and" : ""} locally`,
+          )
+          removed.push(`branch ${name} as tag ${tag} at ${sha}`)
+        } else {
+          out.push(`kept ${name}: its local delete failed, its ${tag} tag holds the head`)
+          kept.push(`branch ${name} kept: its local delete failed`)
+        }
+      }
+      return `deleted ${deleted} local, ${remotes} remote; ${out.length ? out.join("; ") : "none to archive"}`
     })
     await step("docker", async () => {
       const listed = await ctx.run([
@@ -405,17 +613,24 @@ export const nightlyClean =
         folders,
         cleanup?.live ?? (() => true),
       )
-      let removed = 0
+      const gone: string[] = []
+      const left: string[] = []
       for (const name of plan.remove)
-        if ((await ctx.run(["docker", "rm", "-fv", name])).code === 0) removed++
-      for (const name of plan.decide) decide.push({ kind: "container", name })
+        if ((await ctx.run(["docker", "rm", "-fv", name])).code === 0)
+          gone.push(`container ${name}`)
+        else left.push(`container ${name} kept: its removal failed`)
+      for (const name of plan.keep)
+        left.push(`container ${name} kept: over 1 GB, no rule removes it`)
       const df = await ctx.run(["docker", "system", "df", "-v", "--format", "{{json .}}"])
-      for (const name of staleVolumes(df.out)) decide.push({ kind: "volume", name })
+      for (const name of staleVolumes(df.out))
+        left.push(`volume ${name} kept: unused and over 1 GB, no rule removes it`)
+      removed.push(...gone)
+      kept.push(...left)
       const slot = (argv: string[]) =>
         ctx.run([join(ctx.ops, "run-slot.sh"), "ops-tick", "--", ...argv], 30 * 60_000)
       const images = await slot(["docker", "image", "prune", "-f"])
       const cache = await slot(["docker", "builder", "prune", "-f"])
-      return `removed ${removed} containers; image prune ${images.code === 0 ? "ran" : "failed"}, build cache prune ${cache.code === 0 ? "ran" : "failed"}`
+      return `removed ${gone.length} containers${gone.length ? ` (${gone.join(", ")})` : ""}; ${left.length ? left.join("; ") : "none kept"}; image prune ${images.code === 0 ? "ran" : "failed"}, build cache prune ${cache.code === 0 ? "ran" : "failed"}`
     })
     await step("turbo", () => pruneTurbo(deps.turbo, ctx.now))
     const purged = trashSince(
@@ -425,31 +640,17 @@ export const nightlyClean =
       Date.parse(state.at ?? "") || ctx.now.getTime() - 86_400_000,
     )
     said.push(`trash: ${purged} batches purged since the last run`)
+    const named = [...removed, ...kept]
+    if (named.length)
+      await ctx.send(
+        "ops",
+        `nightly-clean removed ${removed.length}, kept ${kept.length}: ${named.join("; ")}`,
+      )
     const after = deps.free(data)
     const roster = await Bun.file(join(data, "roster.json"))
       .json()
       .catch(() => null)
     const from = managerOf((roster as { agents?: unknown } | null)?.agents, "ops")
-    const asked = decide.filter((t) => !(state.denied ?? []).includes(keyOf(t)))
-    if (asked.length) {
-      const { item, targets } = decisionOf(from, asked)
-      const posted = await ask(ctx, ["new"], JSON.stringify(item))
-      const id = idOf(posted.out)
-      if (id) {
-        if (open && state.decision)
-          await ask(ctx, [
-            "settle",
-            state.decision.id,
-            "--note",
-            `Carried into the next night's decision, ${id}`,
-          ])
-        state.decision = { id, targets }
-        said.push(`decision ${id}: ${targets.length} targets`)
-      } else said.push(`decision: not posted: ${lines(posted.out).at(-1) ?? ""}`)
-    } else if (open && state.decision) {
-      await ask(ctx, ["settle", state.decision.id, "--note", "Its targets are gone"])
-      state.decision = undefined
-    }
     if (after - before >= GB)
       await ask(
         ctx,
@@ -461,9 +662,8 @@ export const nightlyClean =
           title: `The nightly cleanup freed ${gbOf(after - before)} GB: free disk ${gbOf(before)} GB, now ${gbOf(after)} GB`,
         }),
       )
-    state.at = ctx.now.toISOString()
     await mkdir(join(ctx.ops, "tick"), { recursive: true })
-    await writeAtomic(statePath, JSON.stringify(state))
+    await writeAtomic(statePath, JSON.stringify({ at: ctx.now.toISOString() } satisfies State))
     await mkdir(join(ctx.ops, "log"), { recursive: true })
     await appendFile(
       join(ctx.ops, "log", "nightly-clean.log"),
@@ -494,15 +694,21 @@ export const readPrs = (out: string, branches: string[], numbers: number[], prs:
   return true
 }
 
-// This machine's: auto_end's cleanup deps, statfs, GitHub's PRs in batched GraphQL reads through gh, and the shared turbo cache.
+// This machine's: auto_end's cleanup deps, statfs, GitHub's PRs in batched GraphQL reads through gh, the shared turbo cache, and a real sleep.
 const liveNight: NightDeps = {
   cleanup: cleanupDeps,
   free: (dir) => {
     const fs = statfsSync(dir)
     return fs.bavail * fs.bsize
   },
-  prs: async (ctx, branches, numbers) => {
-    const url = (await ctx.run(["git", "-C", ctx.repo, "remote", "get-url", "origin"])).out.trim()
+  // imported at the call, since resume.ts's imports reach tick.ts, which builds this beat as it loads
+  live: async () => {
+    const { liveSessions } = await import("../ops-session-resume/resume")
+    return [...(await liveSessions(configDirOf())).values()].map((s) => s.name)
+  },
+  now: () => Date.now(),
+  prs: async (ctx, branches, numbers, dir = ctx.repo) => {
+    const url = (await ctx.run(["git", "-C", dir, "remote", "get-url", "origin"])).out.trim()
     const repo = /github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/.exec(url)
     if (!repo) return null
     const q = JSON.stringify
@@ -526,5 +732,11 @@ const liveNight: NightDeps = {
     }
     return prs
   },
+  roots: async (data, checkout) => {
+    const read = readPolicyOrDefaults(data)
+    return read.refusal === undefined ? rootsOf(read.settings, checkout, homedir()) : []
+  },
+  sleep: (ms) => Bun.sleep(ms),
+  trashRoots: machineRoots,
   turbo: TURBO_CACHE,
 }

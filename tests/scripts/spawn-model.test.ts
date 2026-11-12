@@ -134,7 +134,7 @@ describe("--model picks the Claude model a session runs on", () => {
     expect(start.code).toBe(0)
     const pins = join(start.home, ".playground", "backends")
     expect(readdirSync(pins)).toEqual(["worker-brave-otter"])
-    expect(readFileSync(join(pins, "worker-brave-otter"), "utf8")).toBe("claude\n")
+    expect(readFileSync(join(pins, "worker-brave-otter"), "utf8")).toBe("claude-code claude\n")
   })
 
   test.each([
@@ -167,6 +167,8 @@ describe("--model picks the Claude model a session runs on", () => {
 
   // A checker never runs on a fast small model: a checker's verdict gates a merge, so it stays on Opus.
   const checkerColumn = (role: string, name: string): string[] => [
+    "--pr",
+    "1",
     "column",
     role,
     name,
@@ -201,13 +203,13 @@ describe("--model picks the Claude model a session runs on", () => {
     },
     {
       label: "a reviewer's resume on claude-haiku-5-5",
-      args: ["resume", "reviewer-x", root, "--model", "claude-haiku-5-5"],
+      args: ["resume", "reviewer-x", root, "--model", "claude-haiku-5-5", "--pr", "1"],
       role: "reviewer",
       pin: { name: "reviewer-x", backend: "claude" },
     },
     {
       label: "a tester's resume on claude-sonnet-5-5",
-      args: ["resume", "tester-x", root, "--model", "claude-sonnet-5-5"],
+      args: ["resume", "tester-x", root, "--model", "claude-sonnet-5-5", "--pr", "1"],
       role: "tester",
       pin: { name: "tester-x", backend: "claude" },
     },
@@ -227,7 +229,7 @@ describe("--model picks the Claude model a session runs on", () => {
     },
     {
       label: "a tester's resume",
-      args: ["resume", "tester-x", root, "--model", "claude-opus-5-5"],
+      args: ["resume", "tester-x", root, "--model", "claude-opus-5-5", "--pr", "1"],
       pin: { name: "tester-x", backend: "claude" },
     },
   ])("$label takes --model claude-opus-5-5", async ({ args, pin }) => {

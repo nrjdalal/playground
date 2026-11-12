@@ -30,7 +30,7 @@ const LOAD_WARN = 15
 const PRESSURE_NAMES: Record<number, string> = { 1: "normal", 2: "warning", 4: "critical" }
 const SESSIONS_WITHIN_MS = 2 * 3600_000
 
-// Pure: spawn.sh's memory gate for a Claude start (its gate 2; a GLM start takes a stricter one), which passes a start at pressure level 1 or 2 and free at the gates.memoryFreeMin setting's floor or more (8% by default).
+// Pure: the pressure and free checks of spawn.sh's memory gate for a Claude start (its gate 2; a GLM start takes a stricter one, and a fresh worker also waits while the machine pages), which passes a start at pressure level 1 or 2 and free at the gates.memoryFreeMin setting's floor or more (8% by default).
 export const memoryPasses = (pressure: number, freePct: number, freeMin: number): boolean =>
   (pressure === 1 || pressure === 2) && freePct >= freeMin
 

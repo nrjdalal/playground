@@ -18,18 +18,18 @@ const EVALUATES = [
   /@P\}/,
 ]
 
-// A subscript, which both shells evaluate as arithmetic naming a variable, but an empty one, `@`, `*`, digits with only `-`, `:`, `,` and spaces among them, or one that starts with `^`, where both shells stop on a math error before reading a name (`a[]`, `a[@]`, `a[-1]`, `a[0:9]`, `a[1,5]`, `a[^;]`); read on the line as written and on its unquoted text, since the shell removes a quote or a backslash between a name and its `[` before read, unset or printf -v sees it (`${a[V]}`, zsh's `$a[V]`, `a[V]=`, `read 'a[V]'`, `printf -v 'a[V]'`, `[[ -v a[V] ]]`)
+// A subscript, which both shells evaluate as arithmetic naming a variable, but an empty one, `@`, `*`, digits with only `-`, `:`, `,` and spaces among them, or one that starts with `^`, where both shells stop on a math error before reading a name (`a[]`, `a[@]`, `a[-1]`, `a[0:9]`, `a[1,5]`, `a[^;]`); read on the line with its single-quoted spans put as one letter, as written and with its quotes and backslashes removed, since the shell removes a quote or a backslash between a name and its `[` (`${a[V]}`, zsh's `$a[V]`, `a[V]=`); a quoted name a setter or a test reads (`read 'a[V]'`, `printf -v 'a[V]'`, `[[ -v 'a[V]' ]]`) is steadyNames' own word-by-word check
 const SUBSCRIPT = /\w\[(?!(?:[@*]|[-\d:,\s]*)\]|\^)/
 
 // bash's indirection, `${!…}` through any parameter, a positional or special one included, which assigns (`${!N:=…}`) or evaluates any subscript the parameter's value holds; only the name list and an array's keys closed right after (`${!N*}`, `${!N[@]}`) and `${!}`, the last background job's pid, are no indirection
 const INDIRECTS = /\$\{!(?!\}|[A-Za-z_]\w*(?:[*@]|\[[*@]\])\})/
 
 // zsh's glob qualifiers that run code, an e with its code up to its separator's match (`[`, `{` and `<` pair with their closers, any other character with itself) or a `+` with a function's name, closed at a word's end (`*(e:…:)`, `*(.e{…})`, `*(+f)`); read on singleQuotesOut's text, since a qualifier acts only on unquoted text
-const QUALIFIER =
+export const QUALIFIER =
   /[^\s(|&;<>$=]\((?:#q)?[^()\s|]*?(?:e(?:\[[^]*?\]|\{[^]*?\}|<[^]*?>|([^\s[{<])[^]*?\1)|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>`}])/
 
 // The line with each single-quoted span outside double quotes, comments, backslash escapes and heredoc bodies put as one letter, so a jq filter's `select(…)` reads as no qualifier while `'f1'(e:…:)` still does; a heredoc's body is kept as written, and the line as written when a quote or a heredoc is left open or the line holds `$'…'`, whose quoting this scan does not read
-function singleQuotesOut(command: string): string {
+export function singleQuotesOut(command: string): string {
   if (command.includes("$'")) return command
   let out = ""
   let double = false
@@ -104,7 +104,7 @@ const QUOTED_DOC =
   /^<<(-?)[ \t]*((?:[\w.-]*(?:'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])[\w.-]*)+)(?=[\s;&|<>]|$)/
 
 // The line with each body of a heredoc whose delimiter is quoted put as an empty line, since the shell expands nothing in it, so its text reads as no evaluation, subscript or qualifier; only a line whose text outside the bodies is blanks, WORD's parts, `;`, `&&`, `||`, `|`, REDIRECT's and QUOTED_DOC's is scanned, so the bodies start and end where the shell's do, and any other line, one whose step's program word holds a read among them, comes back as written
-function quotedBodiesOut(command: string): string {
+export function quotedBodiesOut(command: string): string {
   let out = ""
   const docs: { delim: string; strip: boolean }[] = []
   // the next word is a step's program word, unless it is an assignment or a redirection's target
@@ -179,11 +179,13 @@ export function namings(command: string): Namings {
   const add = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
   // a name indirection sets or evaluates a variable whose name the hook cannot read: an assignment sets it, and a read evaluates any subscript the name's value holds (`N=a; N+=[V]; : ${!N}`), so zsh's P flag holds nothing, nor does a flag with a delimited argument (`${(j:…:)…}`), since its argument can hide a `)` and a P, nor do the e, % and # flags, which evaluate a value as shell text, a prompt or arithmetic
   const text = quotedBodiesOut(command)
+  // a single-quoted span is text no command evaluates, but a setter's or a test's name, which steadyNames reads word by word
+  const singleQuotedOut = singleQuotesOut(text)
   let blind =
     EVALUATES.some((evaluates) => evaluates.test(text)) ||
-    SUBSCRIPT.test(text) ||
-    SUBSCRIPT.test(unquoted(text)) ||
-    QUALIFIER.test(singleQuotesOut(text)) ||
+    SUBSCRIPT.test(singleQuotedOut) ||
+    SUBSCRIPT.test(unquoted(singleQuotedOut)) ||
+    QUALIFIER.test(singleQuotedOut) ||
     INDIRECTS.test(text)
   for (const [, flags, closed] of text.matchAll(/\$\{\(([^)]*)(\)?)/g))
     if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags)) blind = true

@@ -48,9 +48,13 @@ export type Field<S extends z.ZodType = z.ZodType> = {
   against?(value: z.output<S>, read: (key: string) => unknown): Refusal[]
   default: z.output<S>
   description: string
+  // A value the API gives the page by its last 4 characters alone, so it never reaches a browser whole (a phone number).
+  masked?: boolean
   // A row holding some of the value's fields, read over the default, so the rest still follow the default as it changes (a job's row, which may hold its enabled field alone).
   merge?: boolean
   schema: S
+  // How a stored value reads before its schema checks it, where a read takes more than a write: a job row's unknown keys are dropped and its runtime reads as herdr, while checkSetting refuses both.
+  stored?(value: unknown): unknown
 }
 
 export type Settings = { schemaVersion: typeof SCHEMA_VERSION; values: Record<string, unknown> }
@@ -81,6 +85,13 @@ export const defineSettings = <T extends Record<string, Field>>(defined: T) => {
 // The current name of a key, through its alias, or undefined for a key no piece defines.
 export const resolveKey = (key: string): string | undefined =>
   fields.has(key) ? key : aliases.get(key)
+
+// A stored value as its key reads it: through its field's stored where it has one, else as it stands, a key no piece defines included.
+export const storedValue = (key: string, value: unknown): unknown => {
+  const name = resolveKey(key)
+  const field = name ? fields.get(name) : undefined
+  return field?.stored ? field.stored(value) : value
+}
 
 // A key's value in the settings a session reads, through its alias, else its default; undefined for a key no piece defines.
 export const settingValue = (settings: Settings, key: string): { value: unknown } | undefined => {
@@ -165,7 +176,7 @@ const mergedValue = (key: string, value: unknown): unknown => {
   return field.merge ? { ...(field.default as object), ...(value as object) } : value
 }
 
-// The settings a session in a repo of owner reads (the home set with none): a value at an extension earlier in extChain's order beats a later one's, core's comes last before the default; a key set under its current name beats one set under an alias at the same scope, and a row whose key no piece defines, at a scope the chain leaves out, or of an ext.* key at a scope but the login's and core's, is left out.
+// The settings a session in a repo of owner reads (the home set with none), each row as its key reads a stored value (storedValue): a value at an extension earlier in extChain's order beats a later one's, core's comes last before the default; a key set under its current name beats one set under an alias at the same scope, and a row whose key no piece defines, at a scope the chain leaves out, or of an ext.* key at a scope but the login's and core's, is left out.
 export const settingsFor = (
   rows: { key: string; scope: string; value: unknown }[],
   login: string,
@@ -186,10 +197,11 @@ export const settingsFor = (
   for (const row of rows) {
     const key = resolveKey(row.key)
     const at = chain.indexOf(row.scope)
-    if (!key || at < 0 || !fields.get(key)!.schema.safeParse(row.value).success) continue
+    const value = storedValue(row.key, row.value)
+    if (!key || at < 0 || !fields.get(key)!.schema.safeParse(value).success) continue
     if (key.startsWith("ext.") && row.scope !== login && row.scope !== CORE) continue
     const score = (chain.length - at) * 2 + (key === row.key ? 1 : 0)
-    if ((best.get(key)?.score ?? -1) < score) best.set(key, { score, value: row.value })
+    if ((best.get(key)?.score ?? -1) < score) best.set(key, { score, value })
   }
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -197,4 +209,12 @@ export const settingsFor = (
       [...best.entries()].map(([key, { value }]) => [key, mergedValue(key, value)]),
     ),
   }
+}
+
+// A value as the API gives it to the page: a masked key's non-empty string as its last 4 characters behind dots, anything else as it stands.
+export const shownValue = (key: string, value: unknown): unknown => {
+  const name = resolveKey(key)
+  return name && fields.get(name)?.masked && typeof value === "string" && value
+    ? `••••${value.slice(-4)}`
+    : value
 }

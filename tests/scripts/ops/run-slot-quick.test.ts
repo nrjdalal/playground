@@ -10,7 +10,7 @@ import {
 } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, WAITING, stop, machine } from "./run-slot-fake"
+import { SCRIPT, WAITING, runSlot, stop, machine } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang: 60s, twice the slowest case under SLOW_CHILD=1.5 but local CI's, which sets its own
 setDefaultTimeout(60_000)
@@ -245,20 +245,25 @@ describe("a node_modules clone waits for its spacing", () => {
 test("run-slot.sh kind prints the lane a command takes and runs nothing", async () => {
   const m = machine()
   const kind = async (words: string[]) => {
-    const p = Bun.spawn(["bash", SCRIPT, "kind", "--", ...words], {
+    const p = runSlot(["bash", SCRIPT, "kind", "--", ...words], {
       cwd: m.root,
       env: m.env(),
       stdout: "pipe",
+      ops: m.ops,
     })
     expect(await p.exited).toBe(0)
     return (await new Response(p.stdout).text()).trim()
   }
   expect(await kind(["cp", "-R", "node_modules", join(m.root, "made")])).toBe("clone")
   expect(await kind(["touch", join(m.root, "made")])).toBe("")
+  // issue 1722: env's no-argument flags and the VAR=x words before it wrap the command, so the lane and size read the command itself
+  expect(await kind(["env", "-i", "X=Y", "bun", "install"])).toBe("quick")
   // review round 1: a run run-slot refuses reads as refuse, a dev stack's among them
   expect(await kind(["bun", "run", "dev"])).toBe("refuse")
-  // a chain's git steps take the commit lane only in a repo, so these name this checkout, which kind never runs them in
-  const repo = join(import.meta.dir, "../../..")
+  // a chain's git steps take the commit lane only in a repo, so these name a throwaway one: kind runs nothing, but the lane decision reads the named repo's index and lefthook.yml, and naming this checkout let a staged packages/ file answer for it (issue 1487)
+  const repo = join(m.root, "repo")
+  mkdirSync(repo)
+  expect(Bun.spawnSync(["git", "-C", repo, "init"]).exitCode).toBe(0)
   for (const shell of ["sh", "dash", "ksh"])
     expect([
       shell,
@@ -308,10 +313,11 @@ describe("a quick run takes its own slot past a full queue", () => {
           )
           .join(""),
     )
-    const p = Bun.spawn(["bash", SCRIPT, who, "--", ...argv, marker], {
+    const p = runSlot(["bash", SCRIPT, who, "--", ...argv, marker], {
       cwd: m.root,
       env: m.env({ RUN_SLOT_SIZE: "medium", ...as.env }),
       stderr: "pipe",
+      ops: m.ops,
     })
     let err = ""
     let ended = false
@@ -363,15 +369,52 @@ describe("a quick run takes its own slot past a full queue", () => {
   })
 
   // retro 2, 31 Oct: 408 of 686 CPU-lane runs ended in 10 s or less and queued 2,004 min against 17 min of running
-  // a plain install also runs past this queue now, as a light run in run-slot-2, so the slot it took is the check
   test("bun install --ignore-scripts", async () => {
     expect(await quick(["bun", "install", "--ignore-scripts"])).toBe(true)
     expect(took).toBe("run-slot-quick")
   })
 
-  // a light run of 1 unit, it fits the slot the big holder leaves, but through the queue
-  test("but a bun install that runs its scripts takes a queue slot", async () => {
-    await quick(["bun", "install"])
+  // PG-1344: a full install ran 1.9 to 3.3 s on a warm cache, its root scripts included, and waited 3 to 6 min in the queue
+  test("and so does a bun install that runs its scripts", async () => {
+    expect(await quick(["bun", "install"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  // a new worktree installs by path, a line no earlier run shares, so the rule, not ran_short, takes it there
+  test("and one with --cwd", async () => {
+    expect(await quick(["bun", "install", "--cwd", "/x/worktrees/a"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  test("and one with --frozen-lockfile", async () => {
+    expect(await quick(["bun", "install", "--frozen-lockfile"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  test("and a bun --cwd=<dir> install", async () => {
+    expect(await quick(["bun", "--cwd=/x/worktrees/a", "install"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  // a bare --cwd before install is no install: bun 1.4.4 runs that shape as package.json's install script (Script not found "install"), as it misreads one before test; it still runs as a light run, on the queue's small share
+  test("but a bun --cwd <dir> install, which bun runs as package.json's install script, takes the queue", async () => {
+    expect(await quick(["bun", "--cwd", "/x/worktrees/a", "install"])).toBe(true)
+    expect(took).toBe("run-slot-2")
+  })
+
+  test("and an env NODE_ENV=x bun install takes run-slot-quick", async () => {
+    expect(await quick(["env", "NODE_ENV=x", "bun", "install"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  // install after another subcommand is that subcommand's word: a script named install, or a package bunx runs
+  test("but a bun run install takes the queue", async () => {
+    expect(await quick(["bun", "run", "install"])).toBe(true)
+    expect(took).toBe("run-slot-2")
+  })
+
+  test("and so does a bun x install", async () => {
+    expect(await quick(["bun", "x", "install"])).toBe(true)
     expect(took).toBe("run-slot-2")
   })
 
@@ -444,6 +487,53 @@ describe("a quick run takes its own slot past a full queue", () => {
       ["bun run test:file tests/slow.test.ts tests/e.test.ts", "run-slot-2", 9],
     ])
     expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(true)
+  })
+
+  // issue 1507: 3 big heavy runs that name a slow file pushed its long quick run out of the file history, and the file returned to the one quick slot (measured: run-slot-commit-lane.test.ts's quick runs at 766, 864 and 1046 s, 1227 s of quick-lane waits behind them)
+  test("a file whose last quick run was long stays out of quick after 3 big heavy runs that name it", async () => {
+    const log = history([
+      ["bun run test:file tests/slow.test.ts", "run-slot-quick", 400],
+      [
+        "bun run test:file tests/slow.test.ts tests/a.test.ts tests/b.test.ts tests/c.test.ts",
+        "run-slot-2",
+        30,
+      ],
+      [
+        "bun run test:file tests/slow.test.ts tests/a.test.ts tests/b.test.ts tests/c.test.ts",
+        "run-slot-2",
+        30,
+      ],
+      [
+        "bun run test:file tests/slow.test.ts tests/a.test.ts tests/b.test.ts tests/c.test.ts",
+        "run-slot-2",
+        30,
+      ],
+    ])
+    expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(false)
+  })
+
+  test("and a file that ran long alone in run-slot-2 stays out of quick", async () => {
+    const log = history([["bun run test:file tests/slow.test.ts", "run-slot-2", 400]])
+    expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(false)
+  })
+
+  // the skip's boundaries: a run outside quick naming exactly 3 files still counts, and a quick run naming any number counts
+  test("and a file that ran long in a 3-file run outside quick still stays out of quick", async () => {
+    const log = history([
+      ["bun run test:file tests/slow.test.ts tests/a.test.ts tests/b.test.ts", "run-slot-2", 400],
+    ])
+    expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(false)
+  })
+
+  test("and a file named by a quick run of 4 files stays out of quick", async () => {
+    const log = history([
+      [
+        "bun run test:file tests/slow.test.ts tests/a.test.ts tests/b.test.ts tests/c.test.ts",
+        "run-slot-quick",
+        400,
+      ],
+    ])
+    expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(false)
   })
 
   test("and so does a docs:wrap that ran long", async () => {

@@ -31,7 +31,8 @@ for link in "$DEST"/*; do
 done
 
 # A link into this checkout whose file a pull removed goes, in the folders doctor reads (linksInto in packages/scripts/src/playground/links.ts); a live one, and every link elsewhere, stays
-DATA="$HOME/.playground"
+case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "link-skills.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
+DATA="${PLAYGROUND_DATA_DIR:-$HOME/.playground}"
 for dir in "$HOME/.bun/bin" "$DATA" "$DATA/handoffs" "$DATA/ops" "$DATA"/ops/*/; do
   dir="${dir%/}"
   case "$dir" in "$DATA"/ops/*) [ ! -L "$dir" ] || continue ;; esac
@@ -46,7 +47,7 @@ done
 
 # Links the factory's settings, which every factory session is spawned with
 # (--settings), so a pull updates its hooks too. A real file there is left alone.
-SETTINGS="$HOME/.playground/factory-settings.json"
+SETTINGS="$DATA/factory-settings.json"
 mkdir -p "$(dirname "$SETTINGS")"
 if [ -e "$SETTINGS" ] && [ ! -L "$SETTINGS" ]; then
   echo "skipped factory settings: $SETTINGS is a real file, move it aside first" >&2
@@ -69,10 +70,10 @@ link_file() {
   fi
 }
 for brief in new-reviewer new-tester new-worker; do
-  link_file "$REPO/scripts/briefs/$brief.md" "$HOME/.playground/handoffs/$brief.md"
+  link_file "$REPO/scripts/briefs/$brief.md" "$DATA/handoffs/$brief.md"
 done
 # brief-rush.md sits beside the state files, not in handoffs/; a copy from before it was versioned moves aside like beat.py's
-RUSH="$HOME/.playground/brief-rush.md"
+RUSH="$DATA/brief-rush.md"
 if [ -f "$RUSH" ] && [ ! -L "$RUSH" ]; then
   mv "$RUSH" "$RUSH.replaced-$(date -u +%Y%m%dT%H%M%SZ)"
   echo "moved aside $RUSH: a copy from before scripts/briefs/brief-rush.md held it"
@@ -80,15 +81,15 @@ fi
 link_file "$REPO/scripts/briefs/brief-rush.md" "$RUSH"
 link_file "$REPO/packages/scripts/src/playground/cli.ts" "$HOME/.bun/bin/playground"
 # run-slot.sh keeps its state in the state folder (ops/run-slot*) beside the link, so every heavy run follows the checkout's copy
-link_file "$REPO/scripts/ops/run-slot.sh" "$HOME/.playground/ops/run-slot.sh"
-BEAT="$HOME/.playground/ops/beat.py"
+link_file "$REPO/scripts/ops/run-slot.sh" "$DATA/ops/run-slot.sh"
+BEAT="$DATA/ops/beat.py"
 if [ -f "$BEAT" ] && [ ! -L "$BEAT" ]; then
   mv "$BEAT" "$BEAT.replaced-$(date -u +%Y%m%dT%H%M%SZ)"
   echo "moved aside $BEAT: a copy the scripts' checkout() lookup lacks"
 fi
 # The merge train's and usage's scripts name their state folders by path, so their state stays there whichever path runs them; beat.py is the module they import for the heartbeat and the checkout, and notify.sh the line the merge train queues its alerts through
 for script in beat.py merge-train/run.py notify.sh usage/account-watch.py usage/glm-credits.py usage/login-flip.py usage/near-limit.py usage/run.py usage/week-marks.py; do
-  link_file "$REPO/scripts/ops/$script" "$HOME/.playground/ops/$script"
+  link_file "$REPO/scripts/ops/$script" "$DATA/ops/$script"
 done
 # orgs.ts home loads the workspace packages, and playground update runs this script before its own install, so a pull that declared a dependency the checkout has not linked (settings' safe-delete, on the hop to v0.0.34) installs first (the check exits 3 for that alone); a fully linked checkout skips it, and a check that fails another way marks the run failed
 unlinked=0

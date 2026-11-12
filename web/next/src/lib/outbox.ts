@@ -55,11 +55,11 @@ const QUEUED = "QUEUED"
 
 // Refusals the API gives before typing anything, or with the message left pasted and unsent for a retry's Enter (INPUT_NOT_EMPTY, deliver.ts), which a later try can pass: the session is on a picker, its input holds a draft, its terminal stumbled reading it, the session is between lives, or the rate limit is full. QUEUED is Claude Code holding it, which each try reads again and types nothing, until the API reads it delivered or lost. These are retried on their own.
 const AUTO_RETRY = new Set([
-  "CMUX_FAILED",
   "INPUT_NOT_EMPTY",
   "NOT_FOUND",
   "ON_PICKER",
   QUEUED,
+  "SESSIONS_FAILED",
   "TOO_MANY_REQUESTS",
 ])
 
@@ -91,8 +91,6 @@ export const retryDelay = (attempts: number): number =>
 // Why a message waits, in a few plain words, for each refusal the outbox retries; null for a code it has no words for. A session at its usage limit refuses as one on a prompt (deliver() types nothing into either), so `limited`, read from the board when the words are shown, tells the two apart.
 export const waitWhy = (code: string, label: string, limited = false): string | null => {
   switch (code) {
-    case "CMUX_FAILED":
-      return "the terminal did not answer"
     case "INPUT_NOT_EMPTY":
       return `waiting for ${label}'s input to clear`
     case "NETWORK_ERROR":
@@ -103,6 +101,8 @@ export const waitWhy = (code: string, label: string, limited = false): string | 
       return limited ? `${label} is at its usage limit` : `${label} is on a prompt`
     case QUEUED:
       return `${label} has it, or takes it once free`
+    case "SESSIONS_FAILED":
+      return "the terminal did not answer"
     case "TOO_MANY_REQUESTS":
       return "too many messages this minute"
     case "UNKNOWN_ERROR":
@@ -512,7 +512,8 @@ export function statusLine(
 ): string {
   switch (message.state) {
     case "sending":
-      return "Sending…"
+      // a held message read again keeps its held words, as it keeps its one tick (statusMark)
+      return message.code === QUEUED ? `Queued: ${queuedWhy(message, limited)}` : "Sending…"
     case "queued":
       if (message.reason) return `Queued: ${queuedWhy(message, limited) ?? message.reason}`
       return next ? "Sending…" : "Queued: waiting its turn"
@@ -525,18 +526,21 @@ export function statusLine(
   }
 }
 
-// The mark his footer draws for a message, one at a time in one fixed-width slot: a spinner until the session's transcript holds it, then one tick, or a red mark when it failed; statusLine's words are its hover and its screen-reader text.
-export type StatusMarkKind = "delivered" | "failed" | "sending"
+// The mark his footer draws for a message, one at a time in one fixed-width slot: a spinner until the session has it, one tick once typed into it or held by Claude Code (QUEUED), a double tick once its transcript holds it, or a red mark when it failed; statusLine's words are its hover and its screen-reader text.
+export type StatusMarkKind = "delivered" | "failed" | "sending" | "typed"
 
 export const statusMark = ({
+  code,
   entryId,
   state,
-}: Pick<OutboxMessage, "entryId" | "state">): StatusMarkKind =>
+}: Pick<OutboxMessage, "code" | "entryId" | "state">): StatusMarkKind =>
   state === "failed"
     ? "failed"
     : state === "delivered" || entryId !== null
       ? "delivered"
-      : "sending"
+      : state === "typed" || code === QUEUED
+        ? "typed"
+        : "sending"
 
 // The one action his pending message's footer offers in its slot: Unsend while it waits here, Dismiss once typed into an idle session and held a moment (typedHeld); none while Claude Code holds it, since it goes on its own.
 export const pendingAction = (

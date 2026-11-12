@@ -1,6 +1,5 @@
 "use client"
 
-import { RiFullscreenLine, RiWindowLine } from "@remixicon/react"
 import { cn } from "cn"
 import { type KeyboardEvent, useState } from "react"
 
@@ -9,9 +8,15 @@ import { HTML_VIEWER } from "@/components/dashboard/viewer/documents"
 import { FileIcon } from "@/components/dashboard/viewer/file-icons"
 import { type ViewerItem, VIEWERS } from "@/components/dashboard/viewer/registry"
 import { useAttachment } from "@/components/dashboard/viewer/use-attachment-url"
-import { Download, Missing, Viewer } from "@/components/dashboard/viewer/viewer"
+import {
+  Download,
+  FullScreen,
+  Missing,
+  OpenInNewTab,
+  SidePanel,
+  Viewer,
+} from "@/components/dashboard/viewer/viewer"
 import { Hint } from "@/components/hint"
-import { Button } from "@/components/ui/button"
 import { fileDoc, opensInAside } from "@/lib/aside-docs"
 import { BAR_ITEM, FLOATING_BAR } from "@/lib/floating-bar"
 import { foldPairs } from "@/lib/pictures"
@@ -49,10 +54,14 @@ function Thumb({
   onOpen: (index: number) => void
 }) {
   const viewer = VIEWERS[item.kind]
-  const { missing, url } = useAttachment(item.id, Boolean(viewer?.Thumb))
+  const { failed, missing, url } = useAttachment(item.id, Boolean(viewer?.Thumb))
   return (
     <div className="group/tile relative">
-      <Hint content={missing ? `${item.name} is missing` : item.name}>
+      <Hint
+        content={
+          missing ? `${item.name} is missing` : failed ? `${item.name} did not load` : item.name
+        }
+      >
         <button
           aria-label={`Open ${item.name}`}
           className={TILE}
@@ -66,7 +75,7 @@ function Thumb({
             <span className="flex w-full min-w-0 flex-col items-center gap-2 px-2">
               <FileIcon className="size-8 shrink-0" name={item.name} />
               <span className="text-2xs w-full truncate text-center">
-                {missing ? "Missing" : item.name}
+                {missing ? "Missing" : failed ? "Did not load" : item.name}
               </span>
             </span>
           )}
@@ -110,7 +119,7 @@ function WideSide({
   label: string
   onOpen: () => void
 }) {
-  const { missing, url } = useAttachment(item.id)
+  const { failed, missing, url } = useAttachment(item.id)
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-muted-foreground text-xs">{label}</span>
@@ -124,8 +133,8 @@ function WideSide({
         >
           {url ? (
             <img alt={item.name} className="size-full object-contain" src={url} />
-          ) : missing ? (
-            <Missing />
+          ) : missing || failed ? (
+            <Missing failed={failed} />
           ) : null}
         </button>
         <TileDownload item={item} />
@@ -137,46 +146,55 @@ function WideSide({
 // a card has no slide before or after to hand the arrows to
 const stay = () => {}
 
-// A lone HTML page live in the card at its full width, through the viewer's own HTML view (its sandboxed frame, links opened in a tab, a page that leaves put back, Spinner and Unreadable), never taking the focus, with a floating bar in its corner that saves it (Download) and opens it in an aside tab, or full screen outside the aside.
-function LivePage({ item, onOpen }: { item: ViewerItem; onOpen: () => void }) {
-  const { missing, url } = useAttachment(item.id, true)
-  const inTab = useAsideDocs() !== null
+// A lone HTML page live in the card at its full width, through the viewer's own HTML view (its sandboxed frame, links opened in a tab, a page that leaves put back, Spinner and Unreadable), never taking the focus, with a floating bar in its corner: Download, Open in new tab, Open in side panel where the card shows in the aside (onSidePanel), and Full screen, which opens the viewer.
+function LivePage({
+  item,
+  onFullScreen,
+  onSidePanel,
+}: {
+  item: ViewerItem
+  onFullScreen: () => void
+  onSidePanel?: () => void
+}) {
+  const { failed, missing, url } = useAttachment(item.id, true)
   return (
     <div className="relative flex h-80 items-center justify-center overflow-hidden rounded-md border">
       {url ? (
         <HTML_VIEWER.View active={false} item={item} onEdge={stay} url={url} />
-      ) : missing ? (
-        <Missing />
+      ) : missing || failed ? (
+        <Missing failed={failed} />
       ) : null}
       <div className={cn(FLOATING_BAR, "absolute top-2 right-2")}>
         <Download className={cn("size-8", BAR_ITEM)} item={item} />
-        <Button
-          aria-label={`Open ${item.name} ${inTab ? "in a tab" : "full screen"}`}
-          className={cn("size-8", BAR_ITEM)}
-          onClick={onOpen}
-          size="icon-sm"
-          variant="ghost"
-        >
-          {inTab ? <RiWindowLine /> : <RiFullscreenLine />}
-        </Button>
+        <OpenInNewTab item={item} />
+        {onSidePanel && <SidePanel onClick={onSidePanel} />}
+        <FullScreen onClick={onFullScreen} />
       </div>
     </div>
   )
 }
 
-// An ask's, a draft's, a Slack decision's or a read-only update's files under its text: a lone HTML page live (LivePage), a lone before/after pair at full width, Before over After, else up to GRID_TILES thumbnails (a kind with no Thumb a titled tile, its icon over its name), then a +N tile that opens the first one it stands for; each opens the viewer at its own place, and each tile but +N saves its file, a pair's both, with its corner Download.
+// An ask's, a draft's, a Slack decision's or a read-only update's files under its text: a lone HTML page live (LivePage), a lone before/after pair at full width, Before over After, else up to GRID_TILES thumbnails (a kind with no Thumb a titled tile, its icon over its name), then a +N tile that opens the first one it stands for; each opens at its own place (onOpen), the lone page's Full screen in the viewer (onFullScreen) and its Open in side panel in an aside tab (onSidePanel, in the aside alone), and each tile but +N saves its file, a pair's both, with its corner Download.
 export function AttachmentThumbs({
   items,
+  onFullScreen,
   onOpen,
+  onSidePanel,
 }: {
   items: ViewerItem[]
+  onFullScreen?: (index: number) => void
   onOpen: (index: number) => void
+  onSidePanel?: (index: number) => void
 }) {
   const page = items.length === 1 && items[0]?.kind === "html" ? items[0] : undefined
   if (page)
     return (
       <div aria-label="Attached files" data-slot="attachment-thumbs" role="group">
-        <LivePage item={page} onOpen={() => onOpen(0)} />
+        <LivePage
+          item={page}
+          onFullScreen={() => (onFullScreen ?? onOpen)(0)}
+          onSidePanel={onSidePanel && (() => onSidePanel(0))}
+        />
       </div>
     )
   const lone = items.length === 1 ? items[0]?.pair : undefined
@@ -223,29 +241,46 @@ export function AttachmentThumbs({
   )
 }
 
-// The one component a surface drops in for a set of files: the thumbnails, and what they open: in the aside, a page, a markdown document or a PDF in an aside tab of its own, and anything else the viewer, at its place.
+// The one component a surface drops in for a set of files: the thumbnails, and what they open: in the aside, a page, a markdown document or a PDF in an aside tab of its own, and anything else the viewer, at its place; a lone page's Full screen opens the viewer wherever it shows, and the viewer offers the aside tab too.
 export function Attachments({ items: files }: { items: ViewerItem[] }) {
   const items = foldPairs(files)
   const [open, setOpen] = useState(false)
   const [index, setIndex] = useState(0)
   const openInAside = useAsideDocs()
+  const view = (at: number) => {
+    setIndex(at)
+    setOpen(true)
+  }
+  const toAside = openInAside
+    ? (item: ViewerItem) => {
+        setOpen(false)
+        openInAside(fileDoc(item))
+      }
+    : undefined
   return (
     <>
       <AttachmentThumbs
         items={items}
+        onFullScreen={view}
         onOpen={(at) => {
           const item = items[at]
-          if (openInAside && item && !item.pair && opensInAside(item.kind))
-            return openInAside(fileDoc(item))
-          setIndex(at)
-          setOpen(true)
+          if (toAside && item && !item.pair && opensInAside(item.kind)) return toAside(item)
+          view(at)
         }}
+        onSidePanel={
+          toAside &&
+          ((at) => {
+            const item = items[at]
+            if (item) toAside(item)
+          })
+        }
       />
       <Viewer
         index={index}
         items={items}
         onIndexChange={setIndex}
         onOpenChange={setOpen}
+        onSidePanel={toAside}
         open={open}
       />
     </>

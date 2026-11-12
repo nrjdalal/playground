@@ -15,6 +15,7 @@ import {
   scopeDir,
 } from "../../packages/settings/src/rendered"
 import { settingFields } from "../../packages/settings/src/settings"
+import { eachInput } from "./codex"
 import { bunCall, FILE_TOOLS, gitCall, real } from "./no-main-checkout"
 import { fromFactory, opsLead } from "./role"
 import {
@@ -37,6 +38,8 @@ import {
   program,
   READ,
   run,
+  SHELLS,
+  shellOperand,
   slotWords,
   stdinOf,
   stdinShell,
@@ -45,6 +48,7 @@ import {
   UNKNOWN,
   unreadWord,
   varsSince,
+  visible,
   type Visit,
   withDeadline,
   type Word,
@@ -55,6 +59,9 @@ import {
   heldWord,
   namings,
   NONE,
+  QUALIFIER,
+  quotedBodiesOut,
+  singleQuotesOut,
   type Steady,
   steadyNames,
   unquoted,
@@ -66,8 +73,11 @@ type Environment = Record<string, string | undefined>
 const shown = (word: Word): string =>
   (word.raw ?? word.value).replaceAll(UNKNOWN, () => "$…").replaceAll(READ, () => "$…")
 
-const ROUTE =
-  "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand."
+// Why a write under the root is refused, which both routes below open with
+const WHY_ROOT =
+  "every guard reads its list and policy.json from there, so a session's write would change what a guard allows."
+
+const ROUTE = `${WHY_ROOT} A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand.`
 
 // The guard keys Privacy on the Dashboard's Settings page saves at your login's scope, so a write there names that page as its route.
 const PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"])
@@ -78,6 +88,13 @@ const PRIVACY_ROUTE =
 const refuse = (what: string) =>
   `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`
 
+// A refusal that likely names no write (`unwritten`), which the reader most often reaches by reading text as a path, so it routes to the lead as a likely false positive
+const refuseUnwritten = (what: string) =>
+  `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`
+
+// text the shell runs as code where the lexer reads a plain word (evaluatedParts), read past by the reader, so code naming the root's folders may write there
+const EVALUATES_ROOT =
+  "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(…) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates"
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
 
@@ -159,6 +176,42 @@ const DUPLICATE = /^(?:\d+|-)$/
 // Whether a redirect writes a file: >, >>, >|, <> or >& to a name, not an fd
 const writer = ({ op, target }: { op: string; target?: Word }): boolean =>
   [">", ">>", ">|", "<>"].includes(op) || (op === ">&" && !DUPLICATE.test(target?.value ?? ""))
+
+// Whether a line as typed holds a redirect that writes a file, a subshell's included; a redirect read out of a quoted text (`awk 'NR>1'` read as a line) is none
+function redirectsWrite(commands: Command[]): boolean {
+  return commands.some(
+    (cmd) => cmd.redirects.some(writer) || (!!cmd.inner && redirectsWrite(cmd.inner())),
+  )
+}
+
+// A case statement's opener, `case <word> in <pattern>`, its reserved words before it skipped
+function caseOpener(cmd: Command): boolean {
+  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted)
+  const before = cmd.words.slice(0, Math.max(at, 0))
+  const word = cmd.words[at + 2]
+  return (
+    at !== -1 &&
+    (before.length === 0 || onlyReserved({ ...cmd, words: before })) &&
+    word?.value === "in" &&
+    !word.quoted
+  )
+}
+
+// The commands of a line that are a case statement's patterns, which the shell matches and never runs: the run of piped alternatives a ) ends, after the opener's `in` or a `;;`, with no redirect of its own
+function casePatterns(commands: Command[]): Set<Command> {
+  const out = new Set<Command>()
+  for (let k = 0; k < commands.length; k++) {
+    if (!caseOpener(commands[k]) && commands[k].follows !== ";;") continue
+    let end = k
+    while (commands[end + 1]?.follows === "|") end++
+    const body = commands[end + 1]
+    const run = commands.slice(k, end + 1)
+    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
+      continue
+    for (const c of run) out.add(c)
+  }
+  return out
+}
 const GLOB = /[*?[{(]/
 // Variables that make git or a pager run a program, or point git at a config file that can, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/
@@ -226,6 +279,33 @@ function ghFilters(parsed: Parsed): Set<Word> {
     else if (/^(?:-[qt].|--(?:jq|template)=)/.test(value)) filters.add(args[k])
   }
   return filters
+}
+
+// gh's calls that post a title or a body, which gh sends as text and never runs
+const GH_POSTS = new Set([
+  "issue comment",
+  "issue create",
+  "issue edit",
+  "pr comment",
+  "pr create",
+  "pr edit",
+])
+
+// The words of a gh post's title or body (`--title '<text>'`, `-b '<text>'`, `--body=<text>`), read as text rather than a command line; none for any other gh call, nor for one that opens an editor or a browser
+function ghTexts(parsed: Parsed): Set<Word> {
+  const { args, first, name } = parsed
+  const texts = new Set<Word>()
+  if (name !== "gh" || !first || marked(first.value)) return texts
+  const [verb, sub] = args.map((a) => a.value)
+  if (!GH_POSTS.has(`${verb} ${sub}`)) return texts
+  if (args.some((a) => GH_WEB.test(a.value) || /^(?:-[^-=bt]*e|--editor(?:=|$))/.test(a.value)))
+    return texts
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (["-b", "--body", "-t", "--title"].includes(value) && args[k + 1]) texts.add(args[++k])
+    else if (/^(?:-[bt].|--(?:body|title)=)/.test(value)) texts.add(args[k])
+  }
+  return texts
 }
 
 // The values git's -c options set before its subcommand (`-c k=v`, `-ck=v`)
@@ -443,7 +523,7 @@ const loneCall = (commands: Command[]): boolean => {
 }
 
 const BY_APPROVE =
-  "a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it"
+  "a key only the owner sets: post a guard decision with playground ask new (.agents/dashboard/asks.md), whose Approve writes it"
 // ext verbs that change a scope's lists or settings, or which scopes the lists and policy.json render from
 const EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"])
 // the ext verbs whose --dry-run writes nothing
@@ -515,9 +595,12 @@ function scoreAsOther(words: Word[], cmd: Command, parsed: Parsed, env: Env): bo
 }
 
 const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
-// what lets an awk program run a command or write a file: system(), getline, a > redirect or an @ directive, and a | pipe outside the literals awkPipe allows
-const AWK_RUNS = /system|getline|[>@]/
-const awkRuns = (program: string) => AWK_RUNS.test(program) || awkPipe(program)
+// what lets an awk program run a command or write a file: system(), a > redirect or an @ directive, and a | pipe outside the literals awkPipe allows, the one way a getline runs a command (`"cmd" | getline`), since a plain getline or one from a file only reads
+const AWK_RUNS = /system|[>@]/
+// a regex literal where awk reads only a pattern: at the program's start or after {, }, ;, !, (, ,, ~, &&, || or a newline, holding no quote, no [ and no newline, so a > in it (`/^>>>>>>> /`) is a character it matches, never a redirect
+const AWK_PATTERN = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.)*\//g
+const awkRuns = (program: string) =>
+  AWK_RUNS.test(program.replace(AWK_PATTERN, "$1$2RE")) || awkPipe(program)
 
 // The literals a | may sit in without piping: a regex that is the program's whole leading pattern (`/a|b/`, `/a|b/ {…}`), and a regex or a string right after ~ (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, no [ and no newline
 const AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/
@@ -675,6 +758,46 @@ function sedReads(args: Word[]): boolean {
   return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value))
 }
 
+// sed's in-place option as macOS sed reads it: -i after any of -E, -n, -r, -s, -u and -z, its backup suffix attached (holding no / or *, which GNU writes into another folder) or, when nothing is attached, the next word
+const SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/
+// a bare -i's suffix word: empty or a dot and letters, so a GNU sed, which reads that word as its script, reads it as no command or none it knows
+const SED_SUFFIX = /^(?:\.[\w.~-]*)?$/
+const SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
+const SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}${SED_TEXT}[gpI0-9]*)[ \t]*`
+// an in-place sed's script read whole by its allowlist: line, $ or /regex/ addresses and their ranges, then d, p, or s/// with flags from g, p, I and digits; every other command and flag (w, W, r, R, e, s///w, s///e) is off it
+const SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`)
+
+// The scripts of a sed call that edits its files in place and writes nothing else, or undefined, its argv read as macOS sed reads it: sed as its own program (ownProgram) with no variable set in the call, an in-place option (SED_IN_PLACE) whose bare form takes the next word as its suffix (SED_SUFFIX), every other option on -E, -n, -r, -s, -u and -z, and every script (each -e value, else the first operand) a literal word that SED_EDIT holds, while each other operand, a file it edits, is judged as any word is
+function sedInPlace(cmd: Command, parsed: Parsed): Set<Word> | undefined {
+  const { args, local, name } = parsed
+  if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed)) return undefined
+  const scripts: Word[] = []
+  const operands: Word[] = []
+  let inPlace = false
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    const suffix = SED_IN_PLACE.exec(value)
+    if (value === "-e") {
+      if (!args[k + 1]) return undefined
+      scripts.push(args[++k])
+    } else if (value === "--") {
+      operands.push(...args.slice(k + 1))
+      break
+    } else if (suffix) {
+      inPlace = true
+      if (suffix[1]) continue
+      const word = args[++k]
+      if (!word || !literal(word) || !SED_SUFFIX.test(word.value)) return undefined
+    } else if (value.startsWith("-") && value !== "-") {
+      if (!/^-[Enrsuz]+$/.test(value)) return undefined
+    } else operands.push(args[k])
+  }
+  const read = scripts.length ? scripts : operands.slice(0, 1)
+  if (!inPlace || read.length === 0) return undefined
+  if (!read.every((w) => literal(w) && SED_EDIT.test(w.value))) return undefined
+  return new Set(read)
+}
+
 // perl's options that run no other code and write nothing: a, l, n, p and w clustered, the last of them may be e or E, whose script is the next word; -d, -i, -I, -m, -M, -s, -x and the rest are off it
 const PERL_FLAG = /^-[alnpw]*[eE]?$/
 // a regex with no variable, no array and no code block (`(?{`, `(??{`, `(*{`), its $ only an anchor
@@ -728,7 +851,66 @@ function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
   )
 }
 
-// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, git, grep, head, perl, sed, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
+// The line with each $'…' string outside quotes put as one letter, since it expands nothing and singleQuotesOut reads a line holding one as written, and a $ ending a single-quoted span put as a letter too
+function ansiOut(text: string): string {
+  let out = ""
+  let quote = ""
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (quote === "'") {
+      // a single-quoted span's last character a $ is text, put as a letter so singleQuotesOut reads the line
+      if (c === "$" && text[i + 1] === "'") {
+        out += "q"
+        continue
+      }
+      quote = c === "'" ? "" : quote
+    } else if (c === "\\") {
+      out += c + (text[i + 1] ?? "")
+      i++
+      continue
+    } else if (quote === "" && c === "$" && text[i + 1] === "'") {
+      for (i += 2; i < text.length && text[i] !== "'"; i++) if (text[i] === "\\") i++
+      out += "q"
+      continue
+    } else if (c === "'" && quote === "") quote = "'"
+    else if (c === '"') quote = quote === '"' ? "" : '"'
+    out += c
+  }
+  return out
+}
+
+// The parts of a line the shell runs as code where the lexer reads a plain word, found outside a quoted heredoc's body, single quotes and a double-quoted text with no $: a zsh e glob qualifier, an e or P parameter flag's expansion and a zsh =(…), each as written with its single-quoted spans collapsed; a prompt expansion (@P) or a glob substitution (`${~…}`, `$~…`), which runs a value set elsewhere, gives the whole line
+function evaluatedParts(text: string): string[] {
+  const unquoted = singleQuotesOut(quotedBodiesOut(ansiOut(text)))
+  // a double-quoted text right after an e may be a qualifier's code (`f(e"…")`), so it stays
+  const outside = unquoted.replace(/(?<!e)"(?:[^"\\$]|\\.)*"/g, "q")
+  if (/@P\}|\$\{?~/.test(outside)) return [text]
+  const parts: string[] = []
+  for (const [found, pattern] of [
+    [CODE_QUALIFIER, new RegExp(CODE_QUALIFIER.source, "g")],
+    [FLAG, FLAGS],
+    [FILE_RUN, FILE_RUNS],
+  ] as const)
+    if (found.test(outside)) {
+      const written = [...unquoted.matchAll(pattern)].map(([part]) => part)
+      parts.push(...(written.length > 0 ? written : [unquoted]))
+    }
+  return parts
+}
+// steady's QUALIFIER with an e's separator no letter, digit or _ (`:`, `{`, `"`) and its code on one line, as a session writes one, so a program's `d(open(…))` is none
+const CODE_QUALIFIER = new RegExp(
+  QUALIFIER.source
+    .replace("([^\\s[{<])[^]*?\\1", "([^\\s[{<\\w])[^\\n]*?\\1")
+    .replace("|\\+\\w+", ""),
+)
+// an e or P parameter flag's expansion, to its first closing brace
+const FLAG = /\$\{\([^)]*[eP]/
+const FLAGS = /\$\{\([^)]*[eP][^)]*\)[^}]*\}?/g
+// zsh's =(…), which runs its command into a file the word names
+const FILE_RUN = /(?:^|[\s;&|(<>])=\(/
+const FILE_RUNS = /=\([^)]*\)?/g
+
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, date, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, a bash -c of a script of such readers, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
   const { args, first } = parsed
@@ -753,11 +935,29 @@ function narrow(cmd: Command, env: Env): boolean {
   if (base === "git") return reads(parsed, env) && !args.some(({ value }) => marked(value))
   if (SEDS.has(base)) return sedReads(args)
   if (base === "perl") return perlReads(parsed, env)
-  if (base === "cut") return true
-  // a read-only gh call is narrow when its jq filter is the only word that holds a space
+  // date prints the time and runs nothing, so a read line ending in `; date -u +%FT%TZ` keeps its readers' reading
+  if (base === "cut" || base === "date" || base === "echo" || base === "lsof") return true
+  // bash given one script by -c runs that script alone, which the reader walks call by call, so it is narrow when that script holds reads alone; wholeLine counts it only as its line's one command, and sh and zsh keep canary's reading
+  if (base === "bash") {
+    const [flag, script] = args
+    return (
+      args.length === 2 &&
+      flag.value === "-c" &&
+      script.quoted &&
+      !marked(script.value) &&
+      !wholeLine(lex(script.value, env.known).commands, env, true)
+    )
+  }
+  // a read-only gh call is narrow when its jq filter is the only word that holds a space, and a gh post when its title and body are
   if (base === "gh") {
     const filters = ghFilters(parsed)
-    return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value))
+    const texts = filters.size > 0 ? filters : ghTexts(parsed)
+    return texts.size > 0 && args.every((a) => texts.has(a) || !/\s/.test(a.value))
+  }
+  // a cd to one literal folder runs nothing, and the walk follows it, so every later call is judged where it lands
+  if (base === "cd") {
+    const [folder] = args
+    return args.length === 1 && literal(folder) && !/^(?:-|~[-+0-9])/.test(folder.value)
   }
   if (base === "sort") return !args.some(({ value }) => /^-[a-zA-Z]*o|^--./.test(value))
   if (base === "uniq")
@@ -801,15 +1001,34 @@ function quietCommit(cmd: Command, parsed: Parsed, env: Env): boolean {
   )
 }
 
-// Whether a line is read whole, as canary read it, every spaced text of every program but a reader a command line; a line is read call by call only when every command, its substitutions' included, is narrow or a quiet commit and no redirect writes a file
-function wholeLine(commands: Command[], env: Env): boolean {
+// Whether a line is read whole, as canary read it, every spaced text of every program but a reader a command line; a line is read call by call only when every command, its substitutions' included, is narrow or a quiet commit, and no redirect but a quiet commit's own writes a file
+function wholeLine(commands: Command[], env: Env, readsOnly = false): boolean {
+  // date is a reader only on a line that edits nothing, so one beside an in-place sed or a quiet commit keeps canary's reading; readsOnly, a bash -c's script, spares neither edit
+  const edited = !readsOnly && commands.some((cmd) => edits(cmd, parse(cmd), env))
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
-    if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
+    if (words.some((word) => word.procs && wholeLine(word.procs, env, readsOnly))) return true
+    const parsed = parse(cmd)
+    const base = parsed.first && program(parsed.first.value)
+    // a bash -c is narrow only as its line's one command, so a shell beside another call keeps canary's reading
+    if (base === "bash" && commands.length > 1) return true
+    if (edited && base === "date") return true
+    if (!readsOnly && quietRun(cmd, parsed, env)) return false
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
-    return writes || !(narrow(cmd, env) || quietCommit(cmd, parse(cmd), env))
+    return writes || !(narrow(cmd, env) || (!readsOnly && sedInPlace(cmd, parsed)))
   })
 }
+
+// a quiet commit run-slot runs is read as the commit (slotWords), and its own redirect takes what git prints, never its message, judged by where it writes as every redirect is
+function quietRun(cmd: Command, parsed: Parsed, env: Env): boolean {
+  const slot = slotWords(parsed)
+  const commit = slot ? { ...cmd, words: slot } : cmd
+  return quietCommit(commit, slot ? parse(commit) : parsed, env)
+}
+
+// Whether a call edits a file on a line read call by call: a quiet commit or an in-place sed, each judged by what it writes
+const edits = (cmd: Command, parsed: Parsed, env: Env) =>
+  quietRun(cmd, parsed, env) || sedInPlace(cmd, parsed) !== undefined
 
 // Calls whose string argument a shell runs: exec and execSync in a program that names child_process, and execFile, execFileSync, spawn and spawnSync in a program that names `shell` other than as a key whose whole value is a literal `false` (true, a shell's path, a value read at run time or an expression that starts with `false` all run one). A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
 const IMPLICIT_SHELL = new Set(["exec", "execSync"])
@@ -924,17 +1143,18 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
     if (verb !== "set" && verb !== "reset") return
     const key = positional[0]
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
-    if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX)) return
+    const job = key.startsWith(JOB_PREFIX)
+    if (!GUARD_KEYS.has(key) && !job) return
     const value = positional[1]
     if (verb === "set" && value !== undefined && tuning(key, value, scoped)) return
     return PRIVACY_KEYS.has(key) && !scoped
       ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}`
-      : key.startsWith(JOB_PREFIX)
+      : job
         ? `playground settings ${verb} of ${key}, ${BY_APPROVE}`
         : `playground settings ${verb} of ${key}, a key a guard reads`
   }
   if (verb === "accept")
-    return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set"
+    return "playground ext accept, the owner's own call: post it as an accept decision with playground ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set"
   if (verb === "put")
     return unread || positional[1] === "list"
       ? "playground ext put of a list, or with a word it cannot read, which may render into a guard's list"
@@ -990,14 +1210,15 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const near = relative(env)
     return value.includes(needle) || (!!near && value.includes(near))
   }
-  // a regex body that names the root, a folder of its path or the home, which a program could print as a path
-  const guarded = (body: string, env: Env) =>
+  // a text that names the root or a folder of its path, which a glob or a variable can spell
+  const touches = (body: string, env: Env) =>
     holds(body, env) ||
-    body.includes("~") ||
     needle
       .split(sep)
       .filter(Boolean)
       .some((part) => body.toLowerCase().includes(part.toLowerCase()))
+  // a regex body that names the root, a folder of its path or the home, which a program could print as a path
+  const guarded = (body: string, env: Env) => touches(body, env) || body.includes("~")
   // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
   const judged = new Map<string, string | undefined>()
   // literal: a closed-list reader's word on a line read call by call, whose quoted glob character is text the reader never expands
@@ -1037,6 +1258,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   let steadyAt: (cmd: Command) => Steady = () => NONE
   let whole = false
   let rootLine = false
+  let patterns = new Set<Command>()
+  let lineWrites = false
+  // how deep the walk is in a line read out of a quoted text (runsOf), whose commands no one typed
+  let textDepth = 0
   // where each scope's variables were read to for their lines, and judged to for each cwd and remover, so each variable is read once rather than once a command
   type Cursors = WeakMap<Map<string, Text>, Map<string, number>>
   const varsRead: Cursors = new WeakMap()
@@ -1051,7 +1276,36 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       return vars.get(k) ?? []
     })
   }
+  // a refusal that likely names no write: no writing redirect on the typed line, a word read as a folder above the root or a glob there rather than as the root's own path, and a command read out of a quoted text or a reader that writes nothing as called
+  const unwritten = (named: string, cmd: Command, env: Env) =>
+    !lineWrites &&
+    !named.endsWith(" in its text") &&
+    !inRoot(named) &&
+    (textDepth > 0 || READERS.has(program(parse(cmd).name)) || narrow(cmd, env))
   const visit: Visit = async (cmd: Command, parsed, env) => {
+    // a case pattern is matched, never run, so its words are no path and no program; a substitution in it is its own command
+    if (patterns.has(cmd)) return
+    // the reader walks the script a shell or a source runs, so the hook judges only one it cannot read: a -c script it reads none of, or a file this line wrote with such text
+    if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
+      const shellCall = SHELLS.has(parsed.name)
+      const { inline, operand } = shellCall
+        ? shellOperand(parsed.args, parsed.name)
+        : { inline: false, operand: parsed.args[0] }
+      if (inline && operand && unreadWord(operand) && !/\S/.test(visible(operand.value)))
+        return refuse(
+          `a ${parsed.name} -c of ${shown({ ...operand, raw: operand.raw ?? operand.source })}, a script the hook cannot read; run its commands as calls of their own`,
+        )
+      // a script whose text runs as code is refused when that code names the root's folders
+      if (inline && operand && evaluatedParts(operand.value).some((part) => touches(part, env)))
+        return refuse(EVALUATES_ROOT)
+      const path = !inline && operand ? pathOf(operand, env) : undefined
+      const written = path === undefined ? undefined : env.files.get(path)
+      if (written && (written.unknown || marked(written.value)))
+        return refuse(
+          `${parsed.name} ${shown(operand!)}, a script this line wrote with text the hook cannot read; run its commands as calls of their own`,
+        )
+      if (shellCall) return
+    }
     const slot = slotWords(parsed)
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
@@ -1161,19 +1415,18 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
+      textDepth++
+      const verdict = await run(
+        lex(line, env.known),
+        { ...env, vars: new Map() },
+        visit,
+        true,
+      ).finally(() => textDepth--)
       if (verdict) return verdict
     }
-    // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
+    // a quiet commit's message is text git never runs, a gated call it names included, and an in-place sed's script is text sed reads as a program of its own
     const quiet = !whole && quietCommit(cmd, parsed, env)
-    for (const word of quiet ? args : []) {
-      if (!/\s/.test(word.value)) continue
-      const named = lex(word.value.replace(/^--message=/, ""), env.known)
-        .commands.flatMap((c) => cliCalls(parse(c), env))
-        .map((words) => cliWrite(words, tuning))
-        .find(Boolean)
-      if (named) return refuse(named)
-    }
+    const sedScripts = whole ? undefined : sedInPlace(cmd, parsed)
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
@@ -1246,11 +1499,15 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       for (const word of [first, ...args].map(
         (word) => heldWord(own(word), here, steady) ?? own(word),
       )) {
-        // a quiet commit's message and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
-        const text = (quiet && /\s/.test(word.value)) || (filters.has(word) && !word.glob)
+        // a quiet commit's message, an in-place sed's script and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
+        const text =
+          (quiet && /\s/.test(word.value)) ||
+          !!sedScripts?.has(word) ||
+          (filters.has(word) && !word.glob)
         if (text && !texts(word).some((t) => holds(t.value, here))) continue
         const named = names(word, here, remover, literal)
-        if (named) return refuse(`${verb} on ${named}`)
+        if (named)
+          return (unwritten(named, cmd, here) ? refuseUnwritten : refuse)(`${verb} on ${named}`)
       }
       if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`)
@@ -1332,10 +1589,14 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     old: { dir: directory },
     process: environment,
     vars: new Map(),
+    visitShells: true,
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
   rootLine = rooted(lexed.commands)
+  if (evaluatedParts(command).some((part) => touches(part, env))) return refuse(EVALUATES_ROOT)
   whole = rootLine || wholeLine(lexed.commands, env)
+  patterns = casePatterns(lexed.commands)
+  lineWrites = redirectsWrite(lexed.commands)
   // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER)
@@ -1351,7 +1612,9 @@ export async function check(
   budget = 10_000,
 ): Promise<string | undefined> {
   try {
-    return await withDeadline(budget, async () => inspect(raw, environment))
+    return await withDeadline(budget, async () =>
+      eachInput(raw, "no-extensions-write", (one) => inspect(one, environment)),
+    )
   } catch (error) {
     if (error instanceof RangeError) return refuse(TOO_LONG)
   }

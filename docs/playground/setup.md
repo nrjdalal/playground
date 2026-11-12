@@ -6,12 +6,11 @@ It checks every tool and connection they need, shows one table of what is missin
 | Need                                                                                                                     | Used by                                                                               |
 | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
 | `git`, `gh` and its login, and gh as git's credential helper                                                             | every skill: PR and branch checks, PRs, fetches that never stall on a keychain prompt |
-| `python3`                                                                                                                | the ops scripts and code-review-loop's state.py                                       |
+| `python3`                                                                                                                | the ops scripts                                                                       |
 | `npx`                                                                                                                    | the MCP servers that run through npx                                                  |
 | `uv`, `pnpm`                                                                                                             | this repo's Python tests, and a pnpm repo's gates                                     |
 | Claude Code 2.1.224 or later                                                                                             | the forked skills, and messages between sessions                                      |
 | the home skill set, `ws-home@ws`, at user scope                                                                          | everything                                                                            |
-| Linear connected                                                                                                         | a ticket the owner approved (the **tickets** rule)                                    |
 | bypass mode as the default in `settings.json` (`~/.claude`, or `$CLAUDE_CONFIG_DIR`), with its prompt skipped (optional) | the factory's sessions, so messages between them are never held for approval          |
 | each extension's `scripts/setup/check.sh`, and the tools its `mcp <label> <tool>, ...` lines name                        | that extension's skills                                                               |
 

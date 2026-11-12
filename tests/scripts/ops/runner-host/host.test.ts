@@ -772,6 +772,7 @@ esac`,
       shim.replace("#!/bin/bash\n", "").replaceAll("/usr/bin/docker", join(real, "docker")),
     )
     for (const run of ["0123456789ab-aaaaaa", "0123456789ab-bbbbbb"])
+      // not a container start: the docker on PATH is the shim written above, so no container starts
       Bun.spawnSync(["docker", "run", "-d", "--rm", "-p", "127.0.0.1::6379", "redis:alpine"], {
         env: { CI_RUN: run, PATH: `${shimDir}:/usr/bin:/bin` },
       })

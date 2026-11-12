@@ -995,8 +995,9 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
     expect(out.home).toBe(home)
     expect(dashboard()).toEqual(before)
 
-    // every read answered from the fixture, the id-named pair live with the rest
-    expect(out.workers).toBe(21)
+    // every read answered from the fixture, the id-named pair and the Codex worker live with the rest
+    expect(out.workers).toBe(22)
+    expect(out.names).toContain("c4dx7n-worker")
     // the stale record, whose pid another process holds now, is no session
     expect(out.names).not.toContain("gluttony")
     expect(out.frame).toBe(out.workers)
@@ -1023,16 +1024,15 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
     expect(out.merged).toEqual([[97, 2]])
     expect(out.mergedProblems).toEqual([])
     // the ops jobs, whose heartbeats and pids a live stack reads from the config folder and ps
-    // 19 scripts: 11 running, ops-report and ops-sweep failing, and 6 paused with no heartbeat, so the Scripts label counts the 13 it lists
+    // 19 scripts: 11 running, ops-wa waiting on its pairing code, ops-report and ops-sweep failing, and 5 paused with no heartbeat, so the Scripts label counts the 14 it lists
     expect(out.ops).toEqual([
       ["ops-awake", "running"],
       ["ops-changelog", "running"],
       ["ops-checks", "running"],
       ["ops-consultant", "down"],
       ["ops-dashboard", "running"],
+      ["ops-dm-watch", "down"],
       ["ops-fixture", "down"],
-      ["ops-linear-dm", "down"],
-      ["ops-loom-relay", "down"],
       ["ops-machine", "running"],
       ["ops-merge-train", "running"],
       ["ops-merge-watch", "running"],
@@ -1043,6 +1043,7 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
       ["ops-unstick", "running"],
       ["ops-usage", "running"],
       ["ops-usage-post", "down"],
+      ["ops-wa", "waiting"],
       ["ops-zai-usage", "down"],
     ])
     // a stack that has run a while: its heartbeats were set once, when the fixture was written, and ops-slack-watch's 5-minute cycle is long past
@@ -1052,9 +1053,8 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
       ["ops-checks", "running"],
       ["ops-consultant", "down"],
       ["ops-dashboard", "running"],
+      ["ops-dm-watch", "down"],
       ["ops-fixture", "down"],
-      ["ops-linear-dm", "down"],
-      ["ops-loom-relay", "down"],
       ["ops-machine", "running"],
       ["ops-merge-train", "running"],
       ["ops-merge-watch", "running"],
@@ -1065,6 +1065,7 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
       ["ops-unstick", "running"],
       ["ops-usage", "running"],
       ["ops-usage-post", "down"],
+      ["ops-wa", "waiting"],
       ["ops-zai-usage", "down"],
     ])
     // the Dashboard names the roster's file when it has none, which on a fixture stack would be this machine's checkout path

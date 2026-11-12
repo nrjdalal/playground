@@ -3,6 +3,8 @@ import { join } from "node:path"
 
 import { SQL } from "bun"
 
+import { testContainerName } from "../../../container"
+
 // Runs the repair through psql, as it is run on the dashboard, against a throwaway Postgres in Docker published on 127.0.0.1 only, with the repo's migrations applied; skipped where Docker is not running.
 const IMAGE = "postgres:18-alpine"
 const PASSWORD = "repair-test"
@@ -24,6 +26,8 @@ describe.skipIf(!dockerUp())("the jsonb strings repair", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("jsonb-strings"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",

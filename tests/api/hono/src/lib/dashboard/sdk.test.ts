@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import type {
@@ -36,6 +36,7 @@ import {
   withHosted,
   type Live,
 } from "../../../../../../api/hono/src/lib/dashboard/workers"
+import { dataDir } from "../../../../../../api/hono/src/lib/sessions/paths"
 
 const AT = "2026-10-08T12:00:00.000Z"
 const actor = { email: "owner@local.host", id: "u-1" }
@@ -268,26 +269,38 @@ describe("the hosted session's start", () => {
   })
 
   test("it runs on the login alone, and takes none of the API's .env, session or terminal", () => {
-    const env = hostedEnv({
-      ANTHROPIC_API_KEY: "k",
-      ANTHROPIC_AUTH_TOKEN: "t",
-      BETTER_AUTH_SECRET: "s",
-      CLAUDECODE: "1",
-      CLAUDE_CODE_SESSION_ID: "s",
-      CLAUDE_CONFIG_DIR: "/c",
-      CMUX_SURFACE_ID: "x",
-      PLAYGROUND_SDK_PROBE_DIR: "/p",
-      HOME: "/h",
-      NODE_ENV: "local",
-      PATH: "/bin",
-      POSTGRES_URL: "postgresql://dashboard",
-    })
+    const env = hostedEnv(
+      {
+        ANTHROPIC_API_KEY: "k",
+        ANTHROPIC_AUTH_TOKEN: "t",
+        BETTER_AUTH_SECRET: "s",
+        CLAUDECODE: "1",
+        CLAUDE_CODE_SESSION_ID: "s",
+        CLAUDE_CONFIG_DIR: "/c",
+        CMUX_SURFACE_ID: "x",
+        PLAYGROUND_SDK_PROBE_DIR: "/p",
+        HOME: "/h",
+        NODE_ENV: "local",
+        PATH: "/bin",
+        PLAYGROUND_DATA_DIR: "/machine-data",
+        POSTGRES_URL: "postgresql://dashboard",
+      },
+      "/stack-data",
+    )
     expect(env).toEqual({
       CLAUDE_CONFIG_DIR: "/c",
       HOME: "/h",
+      PLAYGROUND_DATA_DIR: "/stack-data",
       PLAYGROUND_ROLE: "probe",
       PATH: "/bin",
     })
+  })
+
+  // a fixture stack's hosted session kept the machine's real HOME and no data folder of its own, so the ops notify script it ran queued its line in the machine's own data folder, which the machine's own relay delivered (#1564)
+  test("on a stack that does not read this machine, the session's data folder is the stack's own, never the machine's", () => {
+    const own = dataDir()
+    expect(own).not.toBe(join(homedir(), ".playground"))
+    expect(hostedEnv({ HOME: homedir(), PATH: "/bin" }).PLAYGROUND_DATA_DIR).toBe(own)
   })
 
   test("a reload under bun --hot lists the running session again rather than starting another", () => {
@@ -834,7 +847,7 @@ describe("the hosted session on the board", () => {
   })
 })
 
-// The hosted session takes a message or an answer only from the owner's own clicks, as deliver() does: the composer's and the card's routes.
+// The hosted session takes a message or an answer only from the owner's own clicks, the acts deliver() types for: the composer's and the card's routes.
 describe("who reaches the hosted session", () => {
   test("only the dashboard router sends to it or answers it", async () => {
     const root = join(import.meta.dir, "../../../../../..")

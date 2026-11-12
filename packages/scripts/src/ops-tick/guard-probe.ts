@@ -7,10 +7,12 @@ import type { Context } from "./tick"
 type Settings = { hooks: Record<string, { hooks: { command: string }[] }[]> }
 
 // The PreToolUse guards the factory's settings register, each by its script's name, once.
-export const preToolUseGuards = async (repo: string): Promise<string[]> => {
-  const settings = (await Bun.file(
-    join(repo, "scripts", "factory-settings.json"),
-  ).json()) as Settings
+export const preToolUseGuards = async (repo: string): Promise<string[]> =>
+  guardsIn(await Bun.file(join(repo, "scripts", "factory-settings.json")).text())
+
+// The same, from the settings file's text, so hooks-bundle can read it from a tree git holds.
+export const guardsIn = (text: string): string[] => {
+  const settings = JSON.parse(text) as Settings
   const names = (settings.hooks.PreToolUse ?? []).flatMap((entry) =>
     entry.hooks.map((hook) => hook.command.match(/scripts\/hooks\/bundled\/([\w-]+)\.js/)?.[1]),
   )

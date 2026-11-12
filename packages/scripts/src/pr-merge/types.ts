@@ -4,6 +4,7 @@ import { mkdir, rm } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
+import { dataDir } from "@packages/env/data-dir"
 import type { Subprocess } from "bun"
 
 import { STALE } from "../hooks-bundle"
@@ -37,8 +38,7 @@ export const TYPES_BUDGET_MS = 10 * 60_000
 
 const NAME = "types"
 
-const runSlot = (): string =>
-  join(process.env.PLAYGROUND_DATA_DIR || join(homedir(), ".playground"), "ops", "run-slot.sh")
+const runSlot = (): string => join(dataDir(), "ops", "run-slot.sh")
 
 const executable = (path: string): boolean => {
   try {

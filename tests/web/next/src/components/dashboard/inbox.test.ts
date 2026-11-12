@@ -1860,12 +1860,34 @@ describe("the Inbox before its first read lands", () => {
       ),
     ),
   )
-  test("draws its open row where it will sit, a blank fixed-width count and the Mark all as read room kept", () => {
+  test("draws its open row where it will sit with the Mark all as read room kept, and no count bubble until the read lands (PG-1686)", () => {
     expect(html).toMatch(/<section aria-busy="true" aria-label="Inbox"/)
     const row = html.split("<h3")[1]!.split("</h3>")[0]!
     expect(row).toContain(">Inbox</span>")
     expect(row).toContain("pr-10")
-    expect(row).toMatch(/data-slot="badge"[^>]*class="[^"]*\bw-5\b/)
+    expect(html).not.toContain('data-slot="badge"')
+  })
+  test("once the read lands, the open row and every shelf show their count, 0 included (PG-1686)", () => {
+    const client = new QueryClient() as { setQueryData: (key: unknown, data: unknown) => void }
+    client.setQueryData(INBOX_QUERY_KEY, { archived: [], items: [], snoozed: [] })
+    const loaded = renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(
+          DashboardContext,
+          { value: { allowed: true, workers: [] } as unknown as DashboardContext },
+          createElement(Inbox, { viewing: true }),
+        ),
+      ),
+    )
+    expect(loaded).not.toContain("aria-busy")
+    const counts = loaded
+      .split("<h3")
+      .slice(1)
+      .map((row) => /data-slot="badge"[^>]*>(\d+)<\/span>/.exec(row.split("</h3>")[0]!)?.[1])
+    // the open row and In progress, Later, Archive and Done each read 0; Preview carries no count
+    expect(counts).toEqual(["0", "0", "0", "0", "0", undefined])
   })
   test("shows the Spinner under the row and no shelf until the read lands", () => {
     expect(html.indexOf('data-slot="spinner"')).toBeGreaterThan(html.indexOf("</h3>"))

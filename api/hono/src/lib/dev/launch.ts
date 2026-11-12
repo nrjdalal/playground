@@ -144,6 +144,7 @@ export const devEnv = (shell: Record<string, string | undefined>, gitSha: string
   }
   Object.assign(env, PORTLESS)
   if (gitSha) env.GIT_SHA = gitSha
+  env.NEXT_TELEMETRY_DISABLED = "1"
   return { env, notes }
 }
 

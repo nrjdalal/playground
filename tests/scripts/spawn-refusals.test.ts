@@ -68,7 +68,10 @@ describe("a session starts the same on any Mac", () => {
   test("every launch passes the factory's bypass itself, never relying on the machine's settings", async () => {
     const worker = await spawn(["worker", "worker-brave-otter", "b.md"], [])
     expect(command(worker)).toContain(" --dangerously-skip-permissions ")
-    const checker = await spawn(["column", "tester", "tester-x", "worker-x", "w1:p2", "b.md"], [])
+    const checker = await spawn(
+      ["column", "tester", "tester-x", "worker-x", "w1:p2", "b.md", "--pr", "1"],
+      [],
+    )
     expect(command(checker)).toContain(" --dangerously-skip-permissions ")
     const resume = await spawn(["resume", "worker-brave-otter", root], [], {}, undefined, {
       name: "worker-brave-otter",
@@ -112,7 +115,7 @@ describe("a session starts the same on any Mac", () => {
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [])
     expect(r.rosterScript).toBe(join(root, "scripts", "roster.ts"))
     expect(r.rosterLog).toEqual([
-      "set worker-brave-otter kind=worker reportsTo=builder surface= title=Plain test work task=b.md",
+      "set worker-brave-otter kind=worker reportsTo=builder surface= title=Plain test work task=b.md memory=off",
     ])
   })
 
@@ -144,9 +147,13 @@ describe("a worker's prompt names brief-rush.md only while that file exists (#14
   })
 
   test("a checker is never told, file or not", async () => {
-    const r = await spawn(["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "b.md"], [], {
-      RUSH: "1",
-    })
+    const r = await spawn(
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "b.md", "--pr", "1"],
+      [],
+      {
+        RUSH: "1",
+      },
+    )
     expect(launchOf(r)).toContain("read it in full and follow it.")
     expect(launchOf(r)).not.toContain("brief-rush.md")
   })
@@ -194,13 +201,16 @@ describe("it refuses what it cannot spawn safely", () => {
     ["a brief with a space", ["worker", "worker-a", "b c.md"]],
     [
       "a checker whose name is not its role's",
-      ["column", "reviewer", "tester-x", "worker-x", "w1:p2", "b.md"],
+      ["column", "reviewer", "tester-x", "worker-x", "w1:p2", "b.md", "--pr", "1"],
     ],
     [
       "a column role it does not know",
       ["column", "worker", "worker-x", OLD.builder, "w1:p2", "b.md"],
     ],
-    ["a surface that is not one", ["column", "tester", "tester-x", "worker-x", "7", "b.md"]],
+    [
+      "a surface that is not one",
+      ["column", "tester", "tester-x", "worker-x", "7", "b.md", "--pr", "1"],
+    ],
     ["a resume into a folder that is not there", ["resume", "worker-x", "/no/such/dir"]],
     ["a resume of a session outside the factory", ["resume", "my-notes", "/tmp"]],
     ["a resume of an id that is not one", ["resume", "worker-x", "/tmp", "x;y"]],

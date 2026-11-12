@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util"
 
-import { mergeReady } from "./ready"
+import { mergeReady, readyReport } from "./ready"
 import { forecast, type Drop } from "./train"
 
 const USAGE = `Usage: bun run pr:train <command> [options]
@@ -63,12 +63,10 @@ try {
     }
     case "ready": {
       const result = await mergeReady(options)
-      out(result, [
-        result.merged
-          ? `Merged #${result.merged.n} on ready at ${result.merged.sha}: ${result.merged.why}`
-          : "Nothing merged on ready.",
-        ...result.refused.map((r) => `- #${r.n} refused: ${r.why}`),
-      ])
+      const report = readyReport(result)
+      out(result, report.lines)
+      for (const line of report.errors) console.error(line)
+      if (report.code !== 0) process.exit(report.code)
       break
     }
     default:

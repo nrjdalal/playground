@@ -1,7 +1,11 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import type { Channel, Message } from "../../../../../packages/message/src/index"
-import { runYard, type YardIo } from "../../../../../packages/scripts/src/playground/yard"
+import { liveBranch } from "../../../../../packages/scripts/src/playground/probe"
+import { runYard, type YardIo, yardIo } from "../../../../../packages/scripts/src/playground/yard"
 
 type YardClient = import("../../../../../api/hono/src/lib/yard/client").YardClient
 const { YardError } = await import("../../../../../api/hono/src/lib/yard/client")
@@ -136,5 +140,57 @@ describe("playground yard", () => {
     })
     expect(await runYard(["login"], slow.io)).toBe(1)
     expect(slow.lines).toEqual(["err: Yard: The operation timed out."])
+  })
+})
+
+describe("yardIo reads the live dashboard checkout's .env", () => {
+  const dirs: string[] = []
+  afterAll(() => {
+    for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
+  })
+
+  // A clone of a made-up repo whose worktree on the live branch holds the fake .env, the clone itself holding none, built the way probe.test.ts builds its fixtures.
+  const cloneWithLive = (env: string): string => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "yard-live-")))
+    dirs.push(root)
+    const git = (...args: string[]) =>
+      Bun.spawnSync(["git", "-c", "user.email=fixture", "-c", "user.name=a", ...args], {
+        cwd: root,
+      })
+    git("init", "-q", "-b", "main", "origin")
+    git("-C", "origin", "commit", "-q", "--allow-empty", "-m", "first")
+    git("clone", "-q", "origin", "repo")
+    const repo = join(root, "repo")
+    const live = join(repo, ".claude", "worktrees", "desk")
+    git("-C", "repo", "worktree", "add", "-b", liveBranch(), live)
+    writeFileSync(join(live, ".env"), env)
+    return repo
+  }
+
+  test("YARD_API_URL and YARD_WEB_URL come from the live checkout's .env when the environment holds none, so the CLI is set up here", async () => {
+    delete process.env.YARD_API_URL
+    delete process.env.YARD_WEB_URL
+    const repo = cloneWithLive(
+      "YARD_API_URL=https://api.yard.example\nYARD_WEB_URL=https://yard.example\n",
+    )
+    const io = await yardIo(repo, async () => "")
+    expect(io.api).toBe("https://api.yard.example")
+    expect(io.web).toBe("https://yard.example")
+  })
+
+  test("with no live checkout, the running checkout's .env stays unread and the CLI says it is not set up", async () => {
+    delete process.env.YARD_API_URL
+    delete process.env.YARD_WEB_URL
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "yard-live-")))
+    dirs.push(root)
+    Bun.spawnSync(["git", "init", "-q", root])
+    writeFileSync(join(root, ".env"), "YARD_API_URL=https://api.yard.example\n")
+    const lines: string[] = []
+    const io = { ...(await yardIo(root, async () => "")), err: (l: string) => lines.push(l) }
+    expect(io.api).toBeUndefined()
+    expect(await runYard(["channels"], io)).toBe(1)
+    expect(lines).toEqual([
+      "Yard is not set up here: set YARD_API_URL in your environment or the live dashboard checkout's .env",
+    ])
   })
 })

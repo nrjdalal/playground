@@ -10,10 +10,9 @@ import {
   stateNow,
 } from "@packages/config/session-state"
 import { dataDirOf } from "@packages/env/data-dir"
-import { readPolicy, ruleSettings } from "@packages/settings"
 
 import { roleOfName } from "../../../../scripts/hooks/role"
-import { leadOf } from "../ops-tick/tick"
+import { escalateMs, leadOf } from "../ops-tick/tick"
 import {
   alertText,
   callKey,
@@ -184,13 +183,6 @@ async function callsTail(configDir: string, record: SessionState): Promise<strin
 
 // a stuck session its manager has not answered in unstick.escalateMinutes goes to the primary dispatcher, who posts to the owner's Inbox only when it cannot resolve it; a session reading working whose transcript has not moved in QUIET_MS (no tool call) goes to its manager.
 const QUIET_MS = 15 * 60_000
-
-// unstick.escalateMinutes in the data folder's policy, read at each pass so a change takes the next one; its default while the policy cannot be read.
-const escalateMs = async (data: string): Promise<number> => {
-  const read = await readPolicy(data)
-  const settings = read.settings ?? { schemaVersion: 1 as const, values: {} }
-  return ruleSettings.get(settings, "unstick.escalateMinutes") * 60_000
-}
 
 // A permission prompt's escalation carries its waiting call and the call's key, so the dispatcher can answer it with playground picker.
 export const stuckEscalation = (

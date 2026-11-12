@@ -12,7 +12,7 @@ Nothing fires it on its own.
 
 | Leg                     | Runs                        | Finds                                                                                                                                                             |
 | ----------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1, a linked org's terms | when an org scope is linked | no-public-leak's derived list, each org's firefighting prefixes, own name, GitHub orgs and repository, a tracker key keyed or bare                                |
+| 1, a linked org's terms | when an org scope is linked | no-public-leak's derived list, each org's own name, GitHub orgs and repository, a tracker key keyed or bare                                                       |
 | 2, org-shaped values    | always                      | a Slack id, a person's home path or a tracker key written into the tree, and a skill, rule, script, job, settings key or spawn flag that serves one org's process |
 
 The runner, `bun run core-audit`, prints the hits and exits 1 on any, or 2 when an org is linked and its list, policy or login cannot be read; the skill adds the read for one org's process, the report, the fix PR and the audit doc.
@@ -35,7 +35,7 @@ Leg 2 reads every file, `tests/` and the fixtures included, for all three kinds.
 
 A job, skill, settings key or spawn flag whose purpose is one org's process (its incident rota, its ticket flow, its watch on one chat tool) is org content, even when every value comes from settings.
 The test: would a second org with a different process run it as it is?
-`ops-firefighting-start` is the worked example: its ticket prefixes, hours and brief all come from `firefighting.start.*`, yet it starts a worker for each ticket on one org's incident rota, so it belongs in that org's extension, while what any org's job uses (spawn.sh's pass past the load gate, `playground focus`, the ops-job framework) stays in core.
+An incident-rota start job is the worked example: its ticket prefixes, hours and brief all come from settings, yet it starts a worker for each ticket on one org's incident rota, so it belongs in that org's extension, while what any org's job uses (spawn.sh's pass past the load gate, `playground focus`, the ops-job framework) stays in core.
 
 ## It's working if
 

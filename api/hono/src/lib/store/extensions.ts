@@ -20,7 +20,8 @@ import {
 
 // Relative, not @/: the web's tests type-check this file under web/next's own @/ paths.
 import { checkoutRoot, readsLive } from "../dashboard/fixture"
-import { OWNER_APPS, type OwnerApps } from "../dashboard/inbox"
+import type { OwnerApps } from "../dashboard/inbox"
+import { OWNER_APPS } from "../dashboard/owner-apps"
 import { dataDir } from "../sessions/paths"
 import { NOT_SET_UP } from "./app-words"
 
