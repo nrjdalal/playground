@@ -70,7 +70,7 @@ The dispatcher's own session: it routes each task by role, a new ask through the
 A session that manages under the dispatcher: the Planner, the Builder, Ops and the Optimizer, by default `planner`, `builder`, `ops` and `optimizer` by name, or any agent the dispatcher's roster gives the manager role. The dashboard lists managers under Orchestrators, below the dispatcher rows in the sidebar's header, with their tasks, A to Z by roster title until the owner drags them into an order of the owner's choosing. The factory's rules call the Builder and Ops leads (Lead).
 
 **Picker**:
-The command (`playground picker`) by which a session's manager answers one permission prompt: it allows or denies only the call the session's stuck alert named, keyed to that call (packages/scripts/src/playground/picker.ts).
+The command (`playground picker`) by which a session's manager answers one permission prompt: it allows or denies only the call the session's stuck alert named, keyed to that call, and records the standing rule `--rule` cites (packages/scripts/src/playground/picker.ts).
 
 **Planner**:
 The Planner's session, a manager: it does every research, deep dive, comparison and plan, through read-only research workers the Builder dispatches, and never builds, so it stays free for the next ask. It keeps the roadmap, `~/.playground/bundles/plan.json`, whose lanes the Builder dispatches from ([playbook](./extensions/core/skills/playbook/SKILL.md)).

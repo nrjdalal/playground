@@ -92,8 +92,8 @@ playground add --dispatcher --backend glm
                       start a second dispatcher on GLM
 playground alerts-wait <name>
                       for a manager's background task: wait for the next stuck alert addressed to <name>, print it and exit, so it wakes without waiting on the relay
-playground picker <session> allow <key> | deny <key> "<reason>"
-                      as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; each answer is a line in ops/picker.log`
+playground picker <session> allow <key> [--rule <name>] | deny <key> [--rule <name>] "<reason>"
+                      as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; --rule names the standing rule that settles the answer; each answer is a line in ops/picker.log`
 
 // The package scripts playground runs as its own verbs.
 export const VERBS = ["ask", "changelog", "dm", "ingest", "queues", "thread", "wa"]
