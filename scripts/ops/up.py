@@ -60,12 +60,18 @@ def log(msg):
         f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {msg}\n")
 
 
-def run(argv, timeout=60):
+def run_streams(argv, timeout=60):
+    """(exit code, stdout, stderr) of the command, its streams apart, as a caller that reads one alone needs."""
     try:
         r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-        return r.returncode, (r.stdout or "") + (r.stderr or "")
+        return r.returncode, r.stdout or "", r.stderr or ""
     except Exception as e:
-        return 1, str(e)
+        return 1, "", str(e)
+
+
+def run(argv, timeout=60):
+    code, out, err = run_streams(argv, timeout)
+    return code, out + err
 
 
 def alive(pid):
@@ -247,14 +253,14 @@ RENDERED = os.path.join(os.path.dirname(os.path.dirname(HERE)), "packages", "scr
 
 
 def resolved(command):
-    """The command with each ext:<scope>/<path> word made the path rendered.ts prints for it, the extension's latest accepted revision, and the refusal when one does not resolve."""
+    """The command with each ext:<scope>/<path> word made the path rendered.ts prints on stdout, the extension's latest accepted revision, and the refusal when one does not resolve."""
     bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
     words = []
     for word in command.split(" "):
         if word.startswith(EXT):
-            code, out = run([bun, "--no-env-file", RENDERED, word[len(EXT):]], 30)
+            code, out, err = run_streams([bun, "--no-env-file", RENDERED, word[len(EXT):]], 30)
             if code != 0:
-                return None, one_line_answer(out) or f"rendered.ts exited {code} on {word}"
+                return None, one_line_answer(out + err) or f"rendered.ts exited {code} on {word}"
             word = out.strip()
         words.append(word)
     return " ".join(words), None
