@@ -95,6 +95,7 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
 - A finding that asks for a behaviour states the behaviour wanted, not only the defect.
 - On a collaborator's org PR whose review ask came to you, the session that posts your review turns at once to the work org's ticket skill, in its extension, for what follows a review you were asked for.
 - A reviewer agrees with an author's reply only once it has reproduced the author's reason with one command, named in its reply.
+- An extension item's fresh full read runs before `playground ext score … 5`, since a 5 accepts the item at once.
 - A 5/5 verdict says the fresh full read found nothing blocking or should-fix and `bun run check-types` ran green, or green CI at the head stood in for it; a red run is a blocking finding.
 - Before a 5/5 posts, `bun run pr:merge <n> --explain`, bare and unpiped, reads ✓ on every gate but ready, ci and review, since the body gate also needs a doc that a reviewer's patch or the last commit changed named in the Evidence; a ✗ is a finding for the worker.
   For an extension repository's PR, `bun run ext:merge <owner>/<repo> <n> --explain` runs in its place and reads ✓ on every gate of its own but ready, ci and review.
