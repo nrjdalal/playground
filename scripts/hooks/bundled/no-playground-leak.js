@@ -7946,9 +7946,28 @@ function knownVariables(command, environment, cwd) {
   return known;
 }
 
+// scripts/hooks/no-stash.ts
+var READS = new Set(["list", "show"]);
+var WRITES = new Set(["create", "store"]);
+var BROWSER_CLOSE = new Set(["close", "exit", "quit"]);
+function gitCommand(args) {
+  const aliases = [];
+  let k = 0;
+  while (k < args.length && args[k].value.startsWith("-")) {
+    const v = args[k].value;
+    if (v === "-c")
+      aliases.push(args[k + 1]?.value ?? "");
+    else if (v.startsWith("-c"))
+      aliases.push(v.slice(2));
+    k += GIT_TAKES.has(v) ? 2 : 1;
+  }
+  return { aliases, rest: args.slice(k + 1), sub: args[k] };
+}
+if (false) {}
+
 // scripts/hooks/no-prepare-write.ts
 var MCP_TOOL = /^mcp__(.+?)__(.+)$/;
-var WRITES = [
+var WRITES2 = [
   [
     /github/i,
     new Set([
@@ -7964,7 +7983,7 @@ var WRITES = [
   [/linear/i, new Set(["save_comment", "save_issue"])],
   [/slack/i, new Set(["chat_post_message"])]
 ];
-var refuse = (what) => `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post, no push and no pull request. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`;
+var refuse = (what) => `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post, no push, no file write, no pull request and no merge. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`;
 var log = (environment, entry) => {
   try {
     const dir = join5(dataDirOf(environment), "ops");
@@ -7975,19 +7994,13 @@ var log = (environment, entry) => {
 };
 var mcpWrite = (tool) => {
   const [, server, name] = MCP_TOOL.exec(tool) ?? [];
-  return !!server && !!name && WRITES.some(([word, tools]) => word.test(server) && tools.has(name));
+  return !!server && !!name && WRITES2.some(([word, tools]) => word.test(server) && tools.has(name));
 };
 var prCreate = (args) => {
   const { head } = ghCommand(args);
   return head[0] === "pr" && head[1] === "create";
 };
-var pushes = (args) => {
-  let k = 0;
-  for (;k < args.length && args[k].value.startsWith("-"); k++)
-    if (GIT_TAKES.has(args[k].value))
-      k++;
-  return args[k]?.value === "push";
-};
+var pushes = (args) => gitCommand(args).sub?.value === "push";
 var REF_MUTATION = /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/;
 var REF_ENDPOINT = /^repos\/[^/]+\/[^/]+\/(?:contents\/.+|git\/refs(?:\/.+)?|merges|pulls|pulls\/\d+\/(?:merge|update-branch))$/;
 async function apiWrite(rest, cmd, env, xargs) {
@@ -8015,7 +8028,7 @@ var visit = async (cmd, { args, name, xargs }, env) => {
     return ghWrite(args, cmd, env, xargs);
   if (name === "git")
     return pushes(args) ? "git push" : undefined;
-  if (PRINTERS.has(name))
+  if (PRINTERS.has(name) || name === "man")
     return;
   const nested = args.findIndex((a) => program(a.value) === "gh" || program(a.value) === "git");
   if (nested === -1)

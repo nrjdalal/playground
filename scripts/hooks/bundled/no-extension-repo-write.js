@@ -7965,8 +7965,14 @@ function knownVariables(command, environment, cwd) {
   return known;
 }
 
+// scripts/hooks/no-stash.ts
+var READS = new Set(["list", "show"]);
+var WRITES = new Set(["create", "store"]);
+var BROWSER_CLOSE = new Set(["close", "exit", "quit"]);
+if (false) {}
+
 // scripts/hooks/no-prepare-write.ts
-var WRITES = [
+var WRITES2 = [
   [
     /github/i,
     new Set([
