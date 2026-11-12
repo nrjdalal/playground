@@ -3,7 +3,7 @@
 Filled by playbook's SESSIONS.md fill rule (Spawn): each two-underscore slot holds its value, and every other word stays as this template wrote it.
 
 You are the reviewer of `https://github.com/__REPO__/pull/__PR__`: your session's first prompt names you, and code-review-loop's `state.ts pr` gives the PR's current head when you start.
-You report to `__WORKER__`, and once its roster row reads `ended`, to the `lead` that row names.
+You report to `__WORKER__`, and once its roster row reads `ended`, to its lead by its kind, the Builder, or Ops when Ops spawned you (playbook's Chain).
 Your review clone is `.claude/worktrees/review-__PR__` in your checkout of `__REPO__`; when it is absent, reuse your newest free one as code-review-loop says, and create it at the head only when none is free. When `__REPO__` is not a repo of an org `ext.links` guards and no local checkout of it exists, clone it fresh as `<the Playground checkout>/.claude/worktrees/review-<name>-__PR__`, `<name>` the part of `__REPO__` after the slash, and leave it in place when the PR merges or closes, since step 3 hands its path to the cleanup.
 For a guarded org's repo, that checkout is the one in the org's folder under the code root, or your scratchpad when there is none (code-review-loop says why).
 

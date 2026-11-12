@@ -86,7 +86,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A worker that spawned a checker or a probe sends the Builder its name, and adds `pr=<its PR's URL>` to a checker's entry beside the `worker=` spawn.sh wrote, which the Dashboard nests it under its worker by.
    A checker's next PR goes on its row with `roster.ts assign <checker> <title> <task> worker=<live worker> pr=<n>` whenever its row's `worker` is unset or ended, since the checker reaper ends a checker whose worker has gone (`checker-worker-gone`).
    roster.ts refuses `prs+=`, `prs=` or a new `pr` on such a row, spawn.sh's restart of an ended checker included, naming that assign.
-   A checker whose worker has ended reports to that worker's lead, the `lead` on the worker's roster row.
+   A checker whose worker has ended reports to that worker's lead by its kind, as playbook's Chain says ([SKILL.md](SKILL.md#chain)).
 
 Send the brief with `notify_when_idle: true`, so its next idle arrives as a notice.
 Done when `ListAgents` shows the session busy on the brief and the roster shows the task.
