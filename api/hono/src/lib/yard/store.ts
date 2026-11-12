@@ -667,7 +667,6 @@ export const setReadsLog = async (
   return (await bots(db, caller)).find((bot) => bot.name === name)!
 }
 
-// A bot's read of the log reaches its maker's Mac: the maker's login, which the Mac checks against its own token's, and the bot's DM, where the read's line goes.
 // A bot's one DM, with the owner who made it, found from its token alone.
 export const botDm = async (
   db: Database,
@@ -681,6 +680,7 @@ export const botDm = async (
   return dm.id
 }
 
+// A bot's read of the log reaches its maker's Mac: the maker's login, which the Mac checks against its own token's, and the bot's DM, where the read's line goes.
 export const logReadOf = async (db: Database, caller: Caller & { bot: { madeBy: string } }) => {
   const [maker] = await db
     .select({ login: user.login })
