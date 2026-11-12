@@ -884,6 +884,8 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1173 GNU mv to the shell's folder attached to its target option in a cluster after a cd to a variable | -ft",
       "#1173 GNU mv to the shell's folder by its long target option after a cd to a variable | --target-directory",
       "#1173 GNU mv to the shell's folder by its shortened long target option after a cd to a variable | --target",
+      // grep's -r, which takes no value: the folder name after it is the search's pattern
+      "#1448 grep -r whose pattern names a folder in its own folder | -r",
       // cd's -P, alone or among its other options, which take no value: the folder after it is the cd's own operand
       "#1663 a commit after a cd whose -P comes before -L | -PL",
       "#1663 a commit after a physical cd into a link, then a climb | -P",

@@ -12823,6 +12823,119 @@ var belowRefusal = (what, path, found) => found === "too many" ? orgRefusal(what
 var GREPS = new Set(["egrep", "fgrep", "ggrep", "grep"]);
 var GREP_RECURSIVE = /^(?:-[A-Za-z]*[rR]|--recursive$|--dereference-recursive$|--directories=recurse$)/;
 var recursive2 = (name, args) => name === "rg" || name === "find" || GREPS.has(name) && args.some((a) => GREP_RECURSIVE.test(a.value));
+var FIND_LEADS = /^-(?:[HLPEXdsx]+|O\d*)$/;
+var SEARCH_VALUES = {
+  grep: {
+    long: new Set([
+      "--after-context",
+      "--before-context",
+      "--context",
+      "--exclude",
+      "--exclude-dir",
+      "--file",
+      "--include",
+      "--label",
+      "--max-count",
+      "--regexp"
+    ]),
+    short: "ABCDdefm"
+  },
+  rg: {
+    long: new Set([
+      "--after-context",
+      "--before-context",
+      "--context",
+      "--context-separator",
+      "--encoding",
+      "--engine",
+      "--file",
+      "--glob",
+      "--iglob",
+      "--ignore-file",
+      "--max-columns",
+      "--max-count",
+      "--max-depth",
+      "--max-filesize",
+      "--path-separator",
+      "--pre",
+      "--pre-glob",
+      "--regexp",
+      "--replace",
+      "--sort",
+      "--sortr",
+      "--threads",
+      "--type",
+      "--type-add",
+      "--type-clear",
+      "--type-not"
+    ]),
+    short: "ABCEMdefgjmrtT"
+  }
+};
+var PATTERN_LONG = new Set(["--file", "--regexp"]);
+function searchRoots(name, args, env) {
+  const folder = (w) => {
+    const path = pathOf(w, env);
+    return path && isFolder2(path) ? [path] : [];
+  };
+  const own = env.cwd ? [env.cwd] : [];
+  if (name === "find") {
+    let i = 0;
+    while (i < args.length && (FIND_LEADS.test(args[i].value) || args[i].value === "-D"))
+      i += args[i].value === "-D" ? 2 : 1;
+    const starts = [];
+    let named = false;
+    for (;i < args.length; i++) {
+      const v = args[i].value;
+      if (v === "-f" && args[i + 1]) {
+        named = true;
+        starts.push(...folder(args[++i]));
+        continue;
+      }
+      if (v.startsWith("-") || ["!", "(", ")", ","].includes(v))
+        break;
+      named = true;
+      starts.push(...folder(args[i]));
+    }
+    return named ? starts : own;
+  }
+  const values = SEARCH_VALUES[name === "rg" ? "rg" : "grep"];
+  const operands = [];
+  let given = false;
+  let unsure = false;
+  for (let i = 0;i < args.length; i++) {
+    const v = args[i].value;
+    if (v === "--") {
+      operands.push(...args.slice(i + 1));
+      break;
+    }
+    if (v.startsWith("--")) {
+      const key = v.split("=")[0];
+      if (PATTERN_LONG.has(key))
+        given = true;
+      if (!v.includes("=") && values.long.has(key))
+        i++;
+      else if (!v.includes("="))
+        unsure = true;
+      continue;
+    }
+    if (v.startsWith("-") && v.length > 1) {
+      for (let k = 1;k < v.length; k++) {
+        if (!values.short.includes(v[k]))
+          continue;
+        if (v[k] === "e" || v[k] === "f")
+          given = true;
+        if (k === v.length - 1)
+          i++;
+        break;
+      }
+      continue;
+    }
+    operands.push(args[i]);
+  }
+  const folders = operands.flatMap(folder);
+  return operands.length <= (given ? 0 : 1) || unsure ? [...folders, ...own] : folders;
+}
 var isFolder2 = (path) => {
   try {
     return statSync4(path).isDirectory();
@@ -13111,13 +13224,8 @@ async function opened(cmd, parsed, env, steady, held) {
   for (const r of cmd.redirects)
     if (namesFile(r))
       await open(r.target, false);
-  if (recursive2(name, args)) {
-    const folders = named.filter(isFolder2);
-    if (folders.length > 0)
-      out.below.push(...folders);
-    else if (env.cwd && !named.some((path) => existsSync8(path)))
-      out.below.push(env.cwd);
-  }
+  if (recursive2(name, args))
+    out.below.push(...searchRoots(name, args, env));
   return out;
 }
 var DB_CLIENTS = new Set([

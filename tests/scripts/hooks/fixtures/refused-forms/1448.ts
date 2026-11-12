@@ -10,8 +10,11 @@ export const groups: Group[] = [
       ["cat of a path held in a variable the hook cannot read", "cat $ORG_DIR/README.md"],
       ["cat of the word xargs fills by -I", "ls .. | xargs -I{} cat ../{}/README.md"],
       ["cat of a path under ~-, the folder the shell last left", "cat ~-/README.md"],
-      // #1449: rg on the folder that holds an org's checkout, a Grep of that folder, and a ** glob reaching below one level
+      // #1449: rg on the folder that holds an org's checkout, a search whose pattern names a file or folder in its own folder (which holds a link into the org's checkout), a Grep of that folder, and a ** glob reaching below one level
       ["rg on the folder that holds an org's checkout", "rg token .."],
+      ["rg whose pattern names a folder in its own folder", "rg web"],
+      ["rg whose pattern names a file in its own folder", "rg package.json"],
+      ["grep -r whose pattern names a folder in its own folder", "grep -r web"],
       [
         "a Grep of the folder that holds an org's checkout",
         { input: { path: "..", pattern: "token" }, tool: "Grep" },

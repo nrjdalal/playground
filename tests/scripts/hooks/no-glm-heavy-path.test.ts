@@ -1339,12 +1339,20 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
     mkdirSync(join(DIR, "read-nest", "acme"), { recursive: true })
     git(DIR, "init", "-q", nest)
     git(nest, "remote", "add", "origin", "https://github.com/acme-blue/nested.git")
+    writeFileSync(join(DIR, "token"), "x\n")
+    mkdirSync(join(DIR, "notes"), { recursive: true })
     for (const raw of [
       input("rg token .."),
+      input("rg token", DIR),
+      input("rg notes", DIR),
+      input("grep -r token", DIR),
+      input("grep -rn notes", DIR),
+      input("rg -g '*.md' notes", DIR),
+      input("rg --hidden token notes", DIR),
+      input("find -name notes", DIR),
       input("grep -r token .."),
       input("grep -Rn token .."),
       input("find .. -name README.md"),
-      input("rg token", DIR),
       input("cat ../read-nest/**/README.md"),
       call("Grep", { path: DIR, pattern: "token" }),
       call("Grep", { pattern: "token" }, DIR),
@@ -1366,6 +1374,8 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
       input("grep -rn token .", LOOSE),
       input("find . -name '*.ts'", LOOSE),
       input("rg token ../read-loose"),
+      input("rg -g '*.md' -e token ../read-loose"),
+      input("grep -rn -m 1 token ../read-loose"),
       input("cat docs/**/*.md"),
       call("Grep", { path: LOOSE, pattern: "token" }),
       call("Glob", { path: LOOSE, pattern: "**/*" }),

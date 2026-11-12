@@ -892,6 +892,113 @@ const recursive = (name: string, args: Word[]) =>
   name === "rg" ||
   name === "find" ||
   (GREPS.has(name) && args.some((a) => GREP_RECURSIVE.test(a.value)))
+// The folders a recursive search walks: find's starting points, else its own folder; for grep and rg, each operand that names a folder, the pattern's included, and its own folder when no operand follows the pattern (none at all when -e, -f, --regexp or --file gives it), read past each option's value; a long option it does not know walks its own folder too, failing closed
+const FIND_LEADS = /^-(?:[HLPEXdsx]+|O\d*)$/
+const SEARCH_VALUES: Record<string, { long: Set<string>; short: string }> = {
+  grep: {
+    long: new Set([
+      "--after-context",
+      "--before-context",
+      "--context",
+      "--exclude",
+      "--exclude-dir",
+      "--file",
+      "--include",
+      "--label",
+      "--max-count",
+      "--regexp",
+    ]),
+    short: "ABCDdefm",
+  },
+  rg: {
+    long: new Set([
+      "--after-context",
+      "--before-context",
+      "--context",
+      "--context-separator",
+      "--encoding",
+      "--engine",
+      "--file",
+      "--glob",
+      "--iglob",
+      "--ignore-file",
+      "--max-columns",
+      "--max-count",
+      "--max-depth",
+      "--max-filesize",
+      "--path-separator",
+      "--pre",
+      "--pre-glob",
+      "--regexp",
+      "--replace",
+      "--sort",
+      "--sortr",
+      "--threads",
+      "--type",
+      "--type-add",
+      "--type-clear",
+      "--type-not",
+    ]),
+    short: "ABCEMdefgjmrtT",
+  },
+}
+const PATTERN_LONG = new Set(["--file", "--regexp"])
+function searchRoots(name: string, args: Word[], env: Env): string[] {
+  const folder = (w: Word) => {
+    const path = pathOf(w, env)
+    return path && isFolder(path) ? [path] : []
+  }
+  const own = env.cwd ? [env.cwd] : []
+  if (name === "find") {
+    let i = 0
+    while (i < args.length && (FIND_LEADS.test(args[i].value) || args[i].value === "-D"))
+      i += args[i].value === "-D" ? 2 : 1
+    const starts: string[] = []
+    let named = false
+    for (; i < args.length; i++) {
+      const v = args[i].value
+      if (v === "-f" && args[i + 1]) {
+        named = true
+        starts.push(...folder(args[++i]))
+        continue
+      }
+      if (v.startsWith("-") || ["!", "(", ")", ","].includes(v)) break
+      named = true
+      starts.push(...folder(args[i]))
+    }
+    return named ? starts : own
+  }
+  const values = SEARCH_VALUES[name === "rg" ? "rg" : "grep"]
+  const operands: Word[] = []
+  let given = false
+  let unsure = false
+  for (let i = 0; i < args.length; i++) {
+    const v = args[i].value
+    if (v === "--") {
+      operands.push(...args.slice(i + 1))
+      break
+    }
+    if (v.startsWith("--")) {
+      const key = v.split("=")[0]
+      if (PATTERN_LONG.has(key)) given = true
+      if (!v.includes("=") && values.long.has(key)) i++
+      else if (!v.includes("=")) unsure = true
+      continue
+    }
+    if (v.startsWith("-") && v.length > 1) {
+      for (let k = 1; k < v.length; k++) {
+        if (!values.short.includes(v[k])) continue
+        if (v[k] === "e" || v[k] === "f") given = true
+        if (k === v.length - 1) i++
+        break
+      }
+      continue
+    }
+    operands.push(args[i])
+  }
+  const folders = operands.flatMap(folder)
+  return operands.length <= (given ? 0 : 1) || unsure ? [...folders, ...own] : folders
+}
 const isFolder = (path: string) => {
   try {
     return statSync(path).isDirectory()
@@ -1183,11 +1290,7 @@ async function opened(
   for (const [at, a] of args.entries()) await open(a, true, code.has(at))
   for (const r of cmd.redirects) if (namesFile(r)) await open(r.target as Word, false)
   // a recursive search reads each folder it names all the way down, or its own folder when it names no path on disk
-  if (recursive(name, args)) {
-    const folders = named.filter(isFolder)
-    if (folders.length > 0) out.below.push(...folders)
-    else if (env.cwd && !named.some((path) => existsSync(path))) out.below.push(env.cwd)
-  }
+  if (recursive(name, args)) out.below.push(...searchRoots(name, args, env))
   return out
 }
 
@@ -1478,7 +1581,6 @@ function orgCall(
   }
 }
 
-// A visitor for one call, tracking what ran before each command: cd, export and assignments are not visited, so they never chain.
 // The line's reading the checkout rule takes past the words: each command's steady variables, and the session's own variables the line never names
 type Held = {
   own: Record<string, string>
@@ -1487,6 +1589,7 @@ type Held = {
 }
 const UNHELD: Held = { own: {}, steadyAt: () => NONE, unset: () => false }
 const PATH_FIX = "Name the path literally, in a call of its own, or report to your lead."
+// A visitor for one call, tracking what ran before each command: cd, export and assignments are not visited, so they never chain.
 const visitor = (load5: number, limit: number, orgs: Orgs, roots: Roots, held = UNHELD): Visit => {
   const busy = load5 > limit
   let earlier: "none" | "staging" | "other" = "none"
