@@ -12335,7 +12335,7 @@ import {
   statSync as statSync4
 } from "fs";
 import { loadavg } from "os";
-import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute5, join as join14, resolve as resolve7 } from "path";
+import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute5, join as join14, relative as relative2, resolve as resolve7 } from "path";
 
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
@@ -13252,6 +13252,20 @@ function globRoot(pattern, base) {
     root: segments.slice(0, at).join("/") || "/"
   };
 }
+var EDIT_TOOLS = {
+  Edit: "file_path",
+  MultiEdit: "file_path",
+  NotebookEdit: "notebook_path",
+  Write: "file_path"
+};
+function fromCheckout(file) {
+  for (let at = dirname6(file);; at = dirname6(at)) {
+    if (existsSync8(join14(at, ".git")))
+      return relative2(at, file);
+    if (dirname6(at) === at)
+      return;
+  }
+}
 var READ_TOOLS = { Glob: "path", Grep: "path", Read: "file_path" };
 var READS_NOTHING = new Set(["date", "echo", "printf", "pwd", "true"]);
 var UNREAD_TEXT = new Set([
@@ -13857,6 +13871,12 @@ async function inspect6(raw, environment, load5, limit) {
   if (typeof tool === "string" && (tool.startsWith("mcp__") || MCP_RESOURCE_TOOLS.has(tool)))
     return orgRefusal(`this ${tool} call`, "an MCP tool reaches an org's or an outside service's data");
   const directory = typeof cwd === "string" ? cwd : undefined;
+  if (typeof tool === "string" && tool in EDIT_TOOLS) {
+    const given = toolInput?.[EDIT_TOOLS[tool]];
+    const file = typeof given !== "string" || given === "" ? undefined : isAbsolute5(given) ? given : directory && resolve7(directory, given);
+    const path = file ? fromCheckout(file) : undefined;
+    return path && heavy(path) ? refuse7(`${tool} call`, [path]) : undefined;
+  }
   if (typeof tool === "string" && tool in READ_TOOLS) {
     const orgs = await guardedOf(environment);
     if (!Array.isArray(orgs))
