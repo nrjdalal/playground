@@ -61,7 +61,7 @@ export async function upload({
 
 // What the words hold, read left to right: a fenced block, a code span or a Slack token already written (`<...>`), each kept as written; a URL, its closing punctuation left out; or a mention as the Inbox reads one: an @ outside a word or an email, then the name.
 const PIECES =
-  /(```[\s\S]*?```|`[^`\n]*`|<[^<>\s][^<>]*>)|(https?:\/\/[^\s<>|`]*[^\s<>|`.,;:!?)'"])|(?<![\p{L}\p{N}_.])@([\p{L}\p{N}_](?:[\p{L}\p{N}_.-]*[\p{L}\p{N}_])?)/giu
+  /(```[\s\S]*?```|`[^`\n]*`|<[^<>\s][^<>]*>)|(https?:\/\/[^\s<>|`]*[^\s<>|`.,;:!?)\]}'"*_~])|(?<![\p{L}\p{N}_.])@([\p{L}\p{N}_](?:[\p{L}\p{N}_.-]*[\p{L}\p{N}_])?)/giu
 
 // Every member of the workspace, a page of users.list at a time.
 async function members(slack: Slack): Promise<Member[]> {

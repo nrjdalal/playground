@@ -306,6 +306,21 @@ describe("dm upload (PG-649)", () => {
       }
     })
 
+    test("a URL inside Slack's bold, italic, strike or brackets leaves the closing mark outside its link (PG-1983)", async () => {
+      for (const [open, close] of [
+        ["*", "*"],
+        ["_", "_"],
+        ["~", "~"],
+        ["[", "]"],
+      ]) {
+        const { shared, steps } = sharing(`see ${open}https://example.com/a${close} now`)
+        await shared
+        expect(steps.at(-1)?.params?.initial_comment).toBe(
+          `see ${open}<https://example.com/a|example.com/a>${close} now`,
+        )
+      }
+    })
+
     test("words with no mention look no member up, and an email or a mention inside a URL stays as written (PG-1983)", async () => {
       const { shared, steps } = sharing("mail a@b.example or see https://example.com/@alex")
       await shared
