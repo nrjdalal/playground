@@ -1597,6 +1597,7 @@ export async function listItems(
         sql`${inboxItem.answer} ->> 'choice' <> 'settled'`,
         sql`${inboxItem.answer} ->> 'ackedAt' is null`,
         sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
+        awakeSql,
       ),
       and(
         eq(inboxItem.kind, "update"),
@@ -1629,6 +1630,8 @@ export async function listItems(
       .where(
         or(
           and(or(eq(inboxItem.status, "open"), eq(inboxItem.kind, "update")), sql`not ${awakeSql}`),
+          // an answered card he archived from Done (PG-1909)
+          sql`(${inboxItem.answer} ->> 'archivedAt' is not null and ${inboxItem.answer} ->> 'dismissedAt' is null)`,
           // a set-aside item he dismissed has gone to Done, which keeps a week as every settled item does
           and(eq(inboxItem.status, "cleared"), sql`${inboxItem.answer} ->> 'dismissedAt' is null`),
         ),
@@ -1810,24 +1813,35 @@ const CHANGED: Refused = {
   ok: false,
 }
 
-// Archive: what still waits on him, or an update in his list, leaves the list and its count, unanswered, and its poster is told nothing, so it keeps waiting; Move back, Later or Dismiss takes it off the Archive shelf.
+// Archive: what still waits on him, or an update in his list, leaves the list and its count, unanswered, and its poster is told nothing, so it keeps waiting; a card on Done he has not dismissed leaves Done the same way, its dismissedAt cleared (PG-1909); Move back, Later or Dismiss takes it off the Archive shelf.
 async function archive(
   db: Database,
   current: InboxItem,
   now: Date,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
-  const dismissed = current.answer !== null && "dismissedAt" in current.answer
-  if ((!waits(current) && current.kind !== "update") || dismissed || archivedAt(current)) {
+  const answer = current.answer
+  const dismissed = answer !== null && "dismissed" in answer && answer.dismissed === true
+  // a card he answered or sent to Done archives too, but a set-aside one, which the Archive shelf already holds (PG-1909)
+  const done =
+    current.status !== "cleared" &&
+    (current.status !== "open" || (answer !== null && "dismissedAt" in answer))
+  if (
+    (!waits(current) && current.kind !== "update" && !done) ||
+    dismissed ||
+    current.delivery?.status === "failed" ||
+    archivedAt(current)
+  ) {
     return {
       code: "CONFLICT",
-      message: "Only an item that waits on you, or an update in your list, is archived",
+      message:
+        "Only an item that waits on you, an update in your list, or a card on Done is archived",
       ok: false,
     }
   }
   const [row] = await db
     .update(inboxItem)
     .set({
-      answer: sql`(coalesce(${inboxItem.answer}, '{}'::jsonb) - 'snoozedUntil') || jsonb_build_object('archivedAt', ${now.toISOString()}::text)`,
+      answer: sql`(coalesce(${inboxItem.answer}, '{}'::jsonb) - 'snoozedUntil' - 'dismissedAt') || jsonb_build_object('archivedAt', ${now.toISOString()}::text)`,
       updatedAt: now,
       version: sql`${inboxItem.version} + 1`,
     })
@@ -2600,10 +2614,10 @@ async function recordAck(
   return linked ?? acked ?? item
 }
 
-// The ack's stamp, the first close's time, and with it why a go has no link, in one write; a closed answer moves to Done at once, as his Dismiss moves it, keeping an earlier Dismiss's time, but for one he set aside, which stays on the Archive shelf until he dismisses it.
+// The ack's stamp, the first close's time, and with it why a go has no link, in one write; a closed answer moves to Done at once, as his Dismiss moves it, keeping an earlier Dismiss's time, but for one he set aside or archived, which stays on the Archive shelf until he dismisses it.
 async function stamp(db: Database, id: string, now: Date, noLink?: string): Promise<void> {
   const at = sql`${now.toISOString()}::text`
-  const dismissal = sql`case when ${inboxItem.answer} ->> 'choice' = 'clear' then '{}'::jsonb else jsonb_build_object('dismissedAt', coalesce(${inboxItem.answer} ->> 'dismissedAt', ${at})) end`
+  const dismissal = sql`case when ${inboxItem.answer} ->> 'choice' = 'clear' or ${inboxItem.answer} ->> 'archivedAt' is not null then '{}'::jsonb else jsonb_build_object('dismissedAt', coalesce(${inboxItem.answer} ->> 'dismissedAt', ${at})) end`
   await db
     .update(inboxItem)
     .set({
