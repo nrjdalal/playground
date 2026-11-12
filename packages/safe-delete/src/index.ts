@@ -215,7 +215,7 @@ const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string 
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders and ended the scratchpad folders of ended sessions (endedPadOf), and nothing else.
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, and the folders in `ended`, ended sessions' scratchpad folders (endedPadOf), and nothing else.
 export function isProtected(
   path: string,
   roots: Roots,
