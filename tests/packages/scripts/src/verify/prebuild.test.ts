@@ -662,6 +662,70 @@ test(
   within(2),
 )
 
+// issue 1964: a test's child process may import a package no reached source names, so test:file builds every workspace package whose dist is missing, whatever its files import
+test(
+  "test:file builds every workspace package whose dist is missing, so a child process's import the test file does not import resolves, and then nothing",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      writeFileSync(
+        join(dir, "tests/child.test.ts"),
+        `import { spawn as launch } from "node:child_process"\nexport const child = () =>\n  launch(process.execPath, ["-e", "import('@packages/three').then(() => process.exit(0), () => process.exit(1))"])\n`,
+      )
+      symlinkSync(join(dir, "packages/three"), join(dir, "node_modules/@packages/three"))
+      const first = run(["tests/child.test.ts"])
+      expect(first.exitCode).toBe(0)
+      expect(log()).toBe(
+        "run build --filter=@api/hono --filter=@packages/one --filter=@packages/three --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
+      )
+      const child = bounded(
+        "the spawned child",
+        [
+          process.execPath,
+          "-e",
+          `import("@packages/three").then(() => process.exit(0), () => process.exit(1))`,
+        ],
+        { cwd: dir },
+      )
+      expect(child.exitCode).toBe(0)
+      expect(run(["tests/child.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toHaveLength(1)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(3),
+)
+
+// a package whose dist is present is not rebuilt: a clone with every dist there starts with no build, for a file that imports a package too
+test(
+  "test:file in a cloned worktree whose every dist is present builds nothing, for a file that imports a package too",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      for (const [path, code] of [
+        ["api/hono/dist", "export {}\n"],
+        ["packages/one/dist", "export const one = 1\n"],
+        ["packages/three/dist", "export {}\n"],
+        ["packages/two/dist", "export {}\n"],
+      ] as const) {
+        mkdirSync(join(dir, path), { recursive: true })
+        writeFileSync(join(dir, path, "index.mjs"), code)
+      }
+      writeFileSync(
+        join(dir, "tests/uses-one.test.ts"),
+        'import { one } from "@packages/one"\nexport const o = one\n',
+      )
+      symlinkSync(join(dir, "packages/one"), join(dir, "node_modules/@packages/one"))
+      expect(run(["tests/uses-one.test.ts"]).exitCode).toBe(0)
+      expect(log()).toBe("")
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(1),
+)
+
 test(
   "ask's and thread's command lines build a package whose dist is older than its src before their entry runs, and then build nothing",
   async () => {
