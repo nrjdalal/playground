@@ -131,15 +131,19 @@ export const REVISION = ".revision"
 export const lastRevision = (data: string, scope: string, ...paths: string[]): string =>
   extGit(scopeDir(data, scope), ["log", "-1", "--format=%h", "--", ...paths]).out.trim()
 
-// The accepted revision of the code a job's entry file runs, else null: an extension item's run in place (<data>/extensions/<scope>/<kinds>/<key>/), its clone's last commit on that item or any other item of the scope its imports reach (sourceOf), which no proposal makes since one sits under proposed/; an org's script folder's under ops, from its REVISION file; none for a job of the checkout's own.
+// The accepted revision of the code a job's entry file runs, else null: an extension item's run in place (<data>/extensions/<scope>/<kinds>/<key>/), its clone's last commit on that item or any other item of the scope its imports reach (sourceOf), which no proposal makes since one sits under proposed/; an org's script folder's under ops, from its REVISION file; none for a job of the checkout's own, or for an entry or file it can no longer read.
 export const revisionOf = (main: string, data: string): string | null => {
   const [scope, kinds, key, ...file] = relative(extensionsDir(data), main).split(sep)
   if (scope && kinds && key && file.length && scope !== ".." && kinds !== "proposed") {
-    const items = sourceOf(scopeDir(data, scope), main)
-      .map((path) => path.split("/").slice(0, 2))
-      .filter(([folder, name]) => name && folder !== "packages" && folder !== "proposed")
-      .map((parts) => parts.join("/"))
-    return lastRevision(data, scope, ...new Set(items)) || null
+    try {
+      const items = sourceOf(scopeDir(data, scope), main)
+        .map((path) => path.split("/").slice(0, 2))
+        .filter(([folder, name]) => name && folder !== "packages" && folder !== "proposed")
+        .map((parts) => parts.join("/"))
+      return lastRevision(data, scope, ...new Set(items)) || null
+    } catch {
+      return null
+    }
   }
   const [folder, ...rest] = relative(join(data, "ops"), main).split(sep)
   if (!folder || folder === ".." || !rest.length) return null
