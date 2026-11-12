@@ -334,6 +334,47 @@ test("runRm refuses a live session's scratchpad folder, every path in it, and it
   expect(told.every((line) => line.includes("is inside the protected"))).toBe(true)
 })
 
+// A folder of one file more than the tripwire's count, spread over subfolders.
+const overCount = (dir: string) => {
+  for (let i = 0; i <= 5000; i++) {
+    const sub = join(dir, "clone", String(i % 50))
+    if (i < 50) mkdirSync(sub, { recursive: true })
+    writeFileSync(join(sub, String(i)), "x")
+  }
+}
+
+test("runRm clears an ended session's whole scratchpad folder over the tripwire's file count, and --restore brings back every file", async () => {
+  const { deps, pad } = pads([{ name: "a4b5c6-worker", status: "ended" }])
+  const folder = join(pad, "a4b5c6-worker")
+  overCount(folder)
+  expect(await runRm([folder], deps)).toBe(0)
+  expect(existsSync(folder)).toBe(false)
+  const moved = listTrash(join(deps.data, "trash")).find((entry) => entry.path === folder)!
+  expect(moved.files).toBe(5001)
+  expect(await runRm(["--restore", moved.id], deps)).toBe(0)
+  expect(
+    readdirSync(folder, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()),
+  ).toHaveLength(5001)
+})
+
+test("runRm keeps the tripwire's file count for the caller's own scratchpad folder, a path inside an ended folder and any other path", async () => {
+  for (const at of [
+    (pad: string) => join(pad, "j6rjgy-worker"),
+    (pad: string) => join(pad, "a4b5c6-worker", "1938"),
+    (pad: string) => join(pad, "..", "..", "big"),
+  ]) {
+    const { deps, pad, told } = pads([
+      { name: "j6rjgy-worker", status: "working" },
+      { name: "a4b5c6-worker", status: "ended" },
+    ])
+    const path = at(pad)
+    overCount(path)
+    expect(await runRm([path], deps)).toBe(1)
+    expect(existsSync(join(path, "clone", "0", "0"))).toBe(true)
+    expect(told.some((line) => line.includes("past the tripwire"))).toBe(true)
+  }
+})
+
 test("--restore refuses a path inside an ended folder while a symlink stands at that folder or at a folder between", async () => {
   const { deps, home, pad } = pads([])
   mkdirSync(join(home, "kept"), { recursive: true })
