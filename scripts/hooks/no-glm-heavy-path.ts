@@ -931,6 +931,83 @@ const UNREAD_TEXT = new Set([
   "select",
   "test",
 ])
+// The words a program takes as code or an assignment and opens no file by: awk's program (with no -f) and each -v assignment, sed's script (each -e value, else its first operand when no -e or -f is given), and an interpreter's inline code (python's -c, node's and bun's -e, --eval, -p or --print, perl's and ruby's -e or -E); the indexes of args
+const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
+const INLINE_CODE: [RegExp, Set<string>][] = [
+  [/^python(?:\d+(?:\.\d+)?)?$/, new Set(["-c"])],
+  [/^(?:bun|node)$/, new Set(["--eval", "--print", "-e", "-p"])],
+  [/^(?:perl|ruby)$/, new Set(["-E", "-e"])],
+]
+function textWords(name: string, args: Word[]): Set<number> {
+  const out = new Set<number>()
+  const inline = INLINE_CODE.find(([program]) => program.test(name))?.[1]
+  if (inline) {
+    for (let i = 0; i < args.length - 1; i++) if (inline.has(args[i].value)) out.add(++i)
+    return out
+  }
+  if (SEDS.has(name)) return sedText(name, args)
+  if (!AWKS.has(name)) return out
+  const program = !args.some((w) => w.value === "-f" || /^-f./.test(w.value))
+  for (let i = 0; i < args.length; i++) {
+    const v = args[i].value
+    if (v === "--") {
+      if (program && i + 1 < args.length) out.add(i + 1)
+      break
+    }
+    if (v === "-v" || v === "-F" || v === "-f") {
+      if (v === "-v" && i + 1 < args.length) out.add(i + 1)
+      i++
+    } else if (v.startsWith("--")) return out
+    else if (v.startsWith("-v")) out.add(i)
+    else if (!v.startsWith("-")) {
+      if (program) out.add(i)
+      break
+    }
+  }
+  return out
+}
+// sed's script words: an -e value (in a cluster, attached or the next word) and --expression's, else, when no -e or -f appears anywhere, the first operand; -l and --line-length take a number, --file and -f a file, and BSD sed's bare -i a suffix, read as one only when it is empty ('')
+const SEDS = new Set(["gsed", "sed"])
+function sedText(name: string, args: Word[]): Set<number> {
+  const out = new Set<number>()
+  const scripted = args.some((w) => /^(?:-[A-Za-z]*[ef]|--expression|--file)/.test(w.value))
+  for (let i = 0; i < args.length; i++) {
+    const v = args[i].value
+    if (v === "--") {
+      if (!scripted && i + 1 < args.length) out.add(i + 1)
+      break
+    }
+    if (v.startsWith("--")) {
+      if (v === "--expression") out.add(++i)
+      else if (v.startsWith("--expression=")) out.add(i)
+      else if (v === "--file" || v === "--line-length") i++
+      continue
+    }
+    if (v.startsWith("-") && v.length > 1) {
+      for (let k = 1; k < v.length; k++) {
+        const letter = v[k]
+        const rest = v.slice(k + 1)
+        if (letter === "e" || letter === "f") {
+          if (rest === "") i++
+          if (letter === "e") out.add(i)
+          break
+        }
+        if (letter === "l") {
+          if (rest === "") i++
+          break
+        }
+        if (letter === "i") {
+          if (rest === "" && name === "sed" && args[i + 1]?.value === "") i++
+          break
+        }
+      }
+      continue
+    }
+    if (!scripted) out.add(i)
+    break
+  }
+  return out
+}
 const PATH_LIKE = /[/~]/
 const GLOB_CHARS = /[*?[]/
 // a redirect that names a file: an input, a read-write or an output, not a duplicated descriptor, a heredoc or a here-string
@@ -1004,17 +1081,52 @@ function globbed(value: string, cwd: string | undefined, deep: string[] = []): s
   }
   return out
 }
-// A substitution of a pure command put as its output in a raw word: pwd as the folder the command runs in, echo as its literal words
-const pureFilled = (raw: string, cwd: string | undefined) =>
-  raw
+// A substitution of a pure command put as its output in a raw word, the innermost first: pwd as the folder the command runs in, echo as its literal words, git rev-parse's checkout and git folders as git gives them, and dirname or basename of a literal path; an output holding a character the shell would split or quote stays unread
+const QUIET_PATH = /^[\w./@+,~-]+$/
+const GIT_FOLDER =
+  /\$\(\s*git(?:\s+-C\s+("[^"$`\\]*"|'[^']*'|[^\s$`()'"\;&|<>]+))?\s+rev-parse((?:\s+--path-format=(?:absolute|relative))?\s+--(?:show-toplevel|git-common-dir|git-dir|absolute-git-dir))\s*\)/g
+const PATH_NAME = /\$\(\s*(dirname|basename)\s+("[^"$`\\]*"|'[^']*'|[^\s$`()'"\;&|<>]+)\s*\)/g
+function pureFilled(raw: string, cwd: string | undefined): string {
+  let out = raw
     .replace(/\$\(\s*pwd(?:\s+-[LP])?\s*\)|`\s*pwd(?:\s+-[LP])?\s*`/g, (m) => cwd ?? m)
     .replace(/\$\(\s*echo\s+([^$`()'"\\|;&<>]*?)\s*\)/g, (_, words: string) => words)
+  for (let round = 0; round < 4; round++) {
+    const before = out
+    out = out
+      .replace(GIT_FOLDER, (m, at: string | undefined, flags: string) => {
+        if (!cwd) return m
+        const dir = resolve(cwd, at ? at.replace(/^["']|["']$/g, "") : ".")
+        const answer = names(dir, ["rev-parse", ...flags.trim().split(/\s+/)])?.[0]
+        return answer && QUIET_PATH.test(answer) ? resolve(dir, answer) : m
+      })
+      .replace(PATH_NAME, (m, program: string, word: string) => {
+        const path = word.replace(/^["']|["']$/g, "")
+        if (!QUIET_PATH.test(path)) return m
+        return program === "dirname" ? dirname(path) : basename(path)
+      })
+    if (out === before) break
+  }
+  return out
+}
+// A ${NAME:-word}, ${NAME-word} or ${NAME:?message} put as what the shell reads: ${NAME} for a name the session holds, its literal word for one the line never sets and the session lacks; any other stays as it is
+const DEFAULTED = /\$\{([A-Za-z_]\w*)(:?)([-?])([^}$`\\]*)\}/g
+const defaulted = (
+  raw: string,
+  known: Record<string, string | undefined>,
+  unset: (key: string) => boolean,
+) =>
+  raw.replace(DEFAULTED, (m, key: string, colon: string, op: string, word: string) => {
+    const value = known[key]
+    if (value !== undefined && (!colon || value !== "")) return `\${${key}}`
+    if (op === "-" && unset(key) && QUIET_PATH.test(word)) return word
+    return m
+  })
 // A word the lexer could not read, read with what the hook holds: its file reads filled in, else lexed again with a pure substitution's output, the line's steady variables and the session's own; undefined while it still holds a value the hook cannot read
 async function readable(
   w: Word,
   env: Env,
   steady: Steady,
-  own: Record<string, string>,
+  held: Held,
 ): Promise<Word[] | undefined> {
   if (w.reads?.length && !w.unknown) {
     const text = await resolveText(w, env)
@@ -1023,8 +1135,8 @@ async function readable(
       : [{ ...w, reads: undefined, value: text.value }]
   }
   if (!w.raw) return undefined
-  const filled = { ...w, raw: pureFilled(w.raw, env.cwd) }
-  const here = { ...env, known: { ...own, ...env.known } }
+  const here = { ...env, known: { ...held.own, ...env.known } }
+  const filled = { ...w, raw: defaulted(pureFilled(w.raw, env.cwd), here.known, held.unset) }
   const word = heldWord(filled, here, steady)
   return word ? [word] : heldReadings(filled, here, steady)
 }
@@ -1035,11 +1147,12 @@ async function opened(
   parsed: Parsed,
   env: Env,
   steady: Steady,
-  own: Record<string, string>,
+  held: Held,
 ): Promise<Opened> {
   const { args, name, xargs } = parsed
   const plain = READS_NOTHING.has(name)
   const text = plain || UNREAD_TEXT.has(name)
+  const code = textWords(name, args)
   const out: Opened = { below: [], places: [] }
   const blind = (why: string) => {
     out.unread ??= why
@@ -1048,7 +1161,7 @@ async function opened(
   else if (!plain && (env.cwdUnread || env.cwdAnywhere))
     blind("the folder a cd on the line left it in")
   const named: string[] = []
-  const open = async (w: Word, argument: boolean) => {
+  const open = async (w: Word, argument: boolean, asText = false) => {
     for (const read of w.reads ?? []) {
       const path = read.unknown || marked(read.value) ? undefined : pathOf(read, env)
       if (path) out.places.push(path)
@@ -1056,8 +1169,8 @@ async function opened(
     }
     if (fromXargs(w, xargs))
       return text ? undefined : blind(`the word xargs fills in place of ${xargs?.replace}`)
-    const words = unreadValue(w) ? await readable(w, env, steady, own) : [w]
-    if (!words) return text ? undefined : blind(w.unknown ?? "a value it cannot expand")
+    const words = unreadValue(w) ? await readable(w, env, steady, held) : [w]
+    if (!words) return text || asText ? undefined : blind(w.unknown ?? "a value it cannot expand")
     for (const word of words) {
       if (plain && argument && !PATH_LIKE.test(word.value)) continue
       const path = pathOf(word, env)
@@ -1067,7 +1180,7 @@ async function opened(
       if (word.glob) out.places.push(...globbed(word.value, env.cwd, out.below))
     }
   }
-  for (const a of args) await open(a, true)
+  for (const [at, a] of args.entries()) await open(a, true, code.has(at))
   for (const r of cmd.redirects) if (namesFile(r)) await open(r.target as Word, false)
   // a recursive search reads each folder it names all the way down, or its own folder when it names no path on disk
   if (recursive(name, args)) {
@@ -1367,8 +1480,12 @@ function orgCall(
 
 // A visitor for one call, tracking what ran before each command: cd, export and assignments are not visited, so they never chain.
 // The line's reading the checkout rule takes past the words: each command's steady variables, and the session's own variables the line never names
-type Held = { own: Record<string, string>; steadyAt: (cmd: Command) => Steady }
-const UNHELD: Held = { own: {}, steadyAt: () => NONE }
+type Held = {
+  own: Record<string, string>
+  steadyAt: (cmd: Command) => Steady
+  unset: (key: string) => boolean
+}
+const UNHELD: Held = { own: {}, steadyAt: () => NONE, unset: () => false }
 const PATH_FIX = "Name the path literally, in a call of its own, or report to your lead."
 const visitor = (load5: number, limit: number, orgs: Orgs, roots: Roots, held = UNHELD): Visit => {
   const busy = load5 > limit
@@ -1383,7 +1500,7 @@ const visitor = (load5: number, limit: number, orgs: Orgs, roots: Roots, held = 
     // a path the hook cannot read refuses after the org rules, whose own fix names the value to spell out
     let blind: string | undefined
     if (Array.isArray(orgs) && orgs.length > 0) {
-      const { below, places, unread } = await opened(cmd, parsed, env, held.steadyAt(cmd), held.own)
+      const { below, places, unread } = await opened(cmd, parsed, env, held.steadyAt(cmd), held)
       for (const place of places) {
         const repo = checkoutOf(place, orgs, roots)
         if (repo) return checkoutRefusal(`this ${name} call`, repo)
@@ -1538,7 +1655,9 @@ async function inspect(
   }
   const home = guarding ? checkoutOf(directory, orgs, roots) : undefined
   try {
-    return await run(lexed, env, visitor(load5, limit, orgs, roots, { own, steadyAt }))
+    const unset = (key: string) =>
+      !named.blind && !named.counts.has(key) && environment[key] === undefined
+    return await run(lexed, env, visitor(load5, limit, orgs, roots, { own, steadyAt, unset }))
   } catch (error) {
     if (home) return checkoutRefusal("this call, which the hook could not read,", home)
     throw error

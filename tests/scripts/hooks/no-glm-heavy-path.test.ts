@@ -1284,7 +1284,13 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
   test("a read through a path the hook cannot read is refused on GLM, naming the glm rule, and passes on Claude", async () => {
     for (const command of [
       "cat $ORG_DIR/README.md",
-      'cat "$(git rev-parse --show-toplevel)/README.md"',
+      `cat "$(git -C ${ORG} rev-parse --show-toplevel)/README.md"`,
+      'cat "${ORG_DIR:?}/README.md"',
+      `cat \${UNSET_DIR:-${ORG}}/README.md`,
+      "awk '{ print }' $ORG_DIR/README.md",
+      "sed -n p $ORG_DIR/README.md",
+      'sed -e p "$ORG_DIR/README.md"',
+      "sed -f $ORG_DIR/x.sed README.md",
       "cat $(cat paths.txt)",
       "ls .. | xargs -I{} cat ../{}/README.md",
       "cat ~-/README.md",
@@ -1311,6 +1317,15 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
       "for i in $(seq 1 3); do echo $i; done",
       '[ -n "$(git status --porcelain)" ] && echo dirty',
       'dirname "$(git rev-parse --git-common-dir)"',
+      'cat "$(git rev-parse --show-toplevel)/README.md"',
+      'git worktree add --no-track "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/x" -b x origin/canary',
+      "ls -dt ${TMPDIR:-/tmp}run-slot-*",
+      "cat ${UNSET_DIR:-docs}/a.md",
+      "until awk -v l=\"$(sysctl -n vm.loadavg | awk '{print $2}')\" 'BEGIN{exit !(l <= 15)}'; do sleep 5; done",
+      'L=$(sysctl -n vm.loadavg); python3 -c "print(1 if $L <= 15 else 0)"',
+      `sed -n "$(grep -n '^x()' README.md | cut -d: -f1),+12p" README.md`,
+      `sed -i '' "s/^K=.*/K=$(openssl rand -hex 32)/" README.md`,
+      'sed -e "s/x/$V/" README.md',
     ])
       expect({ command, glm: await refusal(input(command), ON_GLM, CALM) }).toEqual({
         command,

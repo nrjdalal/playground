@@ -8700,6 +8700,99 @@ var UNREAD_TEXT = new Set([
   "select",
   "test"
 ]);
+var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
+var INLINE_CODE = [
+  [/^python(?:\d+(?:\.\d+)?)?$/, new Set(["-c"])],
+  [/^(?:bun|node)$/, new Set(["--eval", "--print", "-e", "-p"])],
+  [/^(?:perl|ruby)$/, new Set(["-E", "-e"])]
+];
+function textWords(name, args) {
+  const out = new Set;
+  const inline = INLINE_CODE.find(([program]) => program.test(name))?.[1];
+  if (inline) {
+    for (let i = 0;i < args.length - 1; i++)
+      if (inline.has(args[i].value))
+        out.add(++i);
+    return out;
+  }
+  if (SEDS.has(name))
+    return sedText(name, args);
+  if (!AWKS.has(name))
+    return out;
+  const program = !args.some((w) => w.value === "-f" || /^-f./.test(w.value));
+  for (let i = 0;i < args.length; i++) {
+    const v = args[i].value;
+    if (v === "--") {
+      if (program && i + 1 < args.length)
+        out.add(i + 1);
+      break;
+    }
+    if (v === "-v" || v === "-F" || v === "-f") {
+      if (v === "-v" && i + 1 < args.length)
+        out.add(i + 1);
+      i++;
+    } else if (v.startsWith("--"))
+      return out;
+    else if (v.startsWith("-v"))
+      out.add(i);
+    else if (!v.startsWith("-")) {
+      if (program)
+        out.add(i);
+      break;
+    }
+  }
+  return out;
+}
+var SEDS = new Set(["gsed", "sed"]);
+function sedText(name, args) {
+  const out = new Set;
+  const scripted = args.some((w) => /^(?:-[A-Za-z]*[ef]|--expression|--file)/.test(w.value));
+  for (let i = 0;i < args.length; i++) {
+    const v = args[i].value;
+    if (v === "--") {
+      if (!scripted && i + 1 < args.length)
+        out.add(i + 1);
+      break;
+    }
+    if (v.startsWith("--")) {
+      if (v === "--expression")
+        out.add(++i);
+      else if (v.startsWith("--expression="))
+        out.add(i);
+      else if (v === "--file" || v === "--line-length")
+        i++;
+      continue;
+    }
+    if (v.startsWith("-") && v.length > 1) {
+      for (let k = 1;k < v.length; k++) {
+        const letter = v[k];
+        const rest = v.slice(k + 1);
+        if (letter === "e" || letter === "f") {
+          if (rest === "")
+            i++;
+          if (letter === "e")
+            out.add(i);
+          break;
+        }
+        if (letter === "l") {
+          if (rest === "")
+            i++;
+          break;
+        }
+        if (letter === "i") {
+          if (rest === "" && name === "sed" && args[i + 1]?.value === "")
+            i++;
+          break;
+        }
+      }
+      continue;
+    }
+    if (!scripted)
+      out.add(i);
+    break;
+  }
+  return out;
+}
 var PATH_LIKE = /[/~]/;
 var GLOB_CHARS2 = /[*?[]/;
 var namesFile = (r) => r.target !== undefined && !r.body && (r.op === "<" || r.op === "<>" || r.op.startsWith(">") && !r.op.startsWith(">&"));
@@ -8771,23 +8864,56 @@ function globbed(value, cwd, deep = []) {
   }
   return out;
 }
-var pureFilled = (raw, cwd) => raw.replace(/\$\(\s*pwd(?:\s+-[LP])?\s*\)|`\s*pwd(?:\s+-[LP])?\s*`/g, (m) => cwd ?? m).replace(/\$\(\s*echo\s+([^$`()'"\\|;&<>]*?)\s*\)/g, (_, words) => words);
-async function readable(w, env, steady, own) {
+var QUIET_PATH = /^[\w./@+,~-]+$/;
+var GIT_FOLDER = /\$\(\s*git(?:\s+-C\s+("[^"$`\\]*"|'[^']*'|[^\s$`()'"\;&|<>]+))?\s+rev-parse((?:\s+--path-format=(?:absolute|relative))?\s+--(?:show-toplevel|git-common-dir|git-dir|absolute-git-dir))\s*\)/g;
+var PATH_NAME = /\$\(\s*(dirname|basename)\s+("[^"$`\\]*"|'[^']*'|[^\s$`()'"\;&|<>]+)\s*\)/g;
+function pureFilled(raw, cwd) {
+  let out = raw.replace(/\$\(\s*pwd(?:\s+-[LP])?\s*\)|`\s*pwd(?:\s+-[LP])?\s*`/g, (m) => cwd ?? m).replace(/\$\(\s*echo\s+([^$`()'"\\|;&<>]*?)\s*\)/g, (_, words) => words);
+  for (let round = 0;round < 4; round++) {
+    const before = out;
+    out = out.replace(GIT_FOLDER, (m, at, flags) => {
+      if (!cwd)
+        return m;
+      const dir = resolve3(cwd, at ? at.replace(/^["']|["']$/g, "") : ".");
+      const answer = names2(dir, ["rev-parse", ...flags.trim().split(/\s+/)])?.[0];
+      return answer && QUIET_PATH.test(answer) ? resolve3(dir, answer) : m;
+    }).replace(PATH_NAME, (m, program, word) => {
+      const path = word.replace(/^["']|["']$/g, "");
+      if (!QUIET_PATH.test(path))
+        return m;
+      return program === "dirname" ? dirname2(path) : basename2(path);
+    });
+    if (out === before)
+      break;
+  }
+  return out;
+}
+var DEFAULTED = /\$\{([A-Za-z_]\w*)(:?)([-?])([^}$`\\]*)\}/g;
+var defaulted = (raw, known, unset) => raw.replace(DEFAULTED, (m, key, colon, op, word) => {
+  const value = known[key];
+  if (value !== undefined && (!colon || value !== ""))
+    return `\${${key}}`;
+  if (op === "-" && unset(key) && QUIET_PATH.test(word))
+    return word;
+  return m;
+});
+async function readable(w, env, steady, held) {
   if (w.reads?.length && !w.unknown) {
     const text = await resolveText(w, env);
     return text.unknown || marked(text.value) ? undefined : [{ ...w, reads: undefined, value: text.value }];
   }
   if (!w.raw)
     return;
-  const filled = { ...w, raw: pureFilled(w.raw, env.cwd) };
-  const here = { ...env, known: { ...own, ...env.known } };
+  const here = { ...env, known: { ...held.own, ...env.known } };
+  const filled = { ...w, raw: defaulted(pureFilled(w.raw, env.cwd), here.known, held.unset) };
   const word = heldWord(filled, here, steady);
   return word ? [word] : heldReadings(filled, here, steady);
 }
-async function opened(cmd, parsed, env, steady, own) {
+async function opened(cmd, parsed, env, steady, held) {
   const { args, name, xargs } = parsed;
   const plain = READS_NOTHING.has(name);
   const text = plain || UNREAD_TEXT.has(name);
+  const code = textWords(name, args);
   const out = { below: [], places: [] };
   const blind = (why) => {
     out.unread ??= why;
@@ -8797,7 +8923,7 @@ async function opened(cmd, parsed, env, steady, own) {
   else if (!plain && (env.cwdUnread || env.cwdAnywhere))
     blind("the folder a cd on the line left it in");
   const named = [];
-  const open = async (w, argument) => {
+  const open = async (w, argument, asText = false) => {
     for (const read of w.reads ?? []) {
       const path = read.unknown || marked(read.value) ? undefined : pathOf(read, env);
       if (path)
@@ -8807,9 +8933,9 @@ async function opened(cmd, parsed, env, steady, own) {
     }
     if (fromXargs(w, xargs))
       return text ? undefined : blind(`the word xargs fills in place of ${xargs?.replace}`);
-    const words = unreadValue(w) ? await readable(w, env, steady, own) : [w];
+    const words = unreadValue(w) ? await readable(w, env, steady, held) : [w];
     if (!words)
-      return text ? undefined : blind(w.unknown ?? "a value it cannot expand");
+      return text || asText ? undefined : blind(w.unknown ?? "a value it cannot expand");
     for (const word of words) {
       if (plain && argument && !PATH_LIKE.test(word.value))
         continue;
@@ -8823,8 +8949,8 @@ async function opened(cmd, parsed, env, steady, own) {
         out.places.push(...globbed(word.value, env.cwd, out.below));
     }
   };
-  for (const a of args)
-    await open(a, true);
+  for (const [at, a] of args.entries())
+    await open(a, true, code.has(at));
   for (const r of cmd.redirects)
     if (namesFile(r))
       await open(r.target, false);
@@ -9088,7 +9214,7 @@ function orgCall(parsed, env, dir, sub, orgs) {
       return orgRefusal(`this ${name} call`, `it reaches ${hit}, a guarded org's repository`);
   }
 }
-var UNHELD = { own: {}, steadyAt: () => NONE2 };
+var UNHELD = { own: {}, steadyAt: () => NONE2, unset: () => false };
 var PATH_FIX = "Name the path literally, in a call of its own, or report to your lead.";
 var visitor = (load5, limit, orgs, roots, held = UNHELD) => {
   const busy = load5 > limit;
@@ -9102,7 +9228,7 @@ var visitor = (load5, limit, orgs, roots, held = UNHELD) => {
     const { args, name } = parsed;
     let blind;
     if (Array.isArray(orgs) && orgs.length > 0) {
-      const { below, places, unread } = await opened(cmd, parsed, env, held.steadyAt(cmd), held.own);
+      const { below, places, unread } = await opened(cmd, parsed, env, held.steadyAt(cmd), held);
       for (const place of places) {
         const repo = checkoutOf(place, orgs, roots);
         if (repo)
@@ -9225,7 +9351,8 @@ async function inspect(raw, environment, load5, limit) {
   };
   const home = guarding ? checkoutOf(directory, orgs, roots) : undefined;
   try {
-    return await run(lexed, env, visitor(load5, limit, orgs, roots, { own, steadyAt }));
+    const unset = (key) => !named.blind && !named.counts.has(key) && environment[key] === undefined;
+    return await run(lexed, env, visitor(load5, limit, orgs, roots, { own, steadyAt, unset }));
   } catch (error) {
     if (home)
       return checkoutRefusal("this call, which the hook could not read,", home);
