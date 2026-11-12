@@ -882,6 +882,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - A prepare-only session, one whose roster row reads `mode=prepare`, works a ticket the org has registered and not yet posted: its brief keeps it to the local branch until it claims, and this check holds it there.
   An org's start job sets the mode at the prepare-only start (`roster.ts set <session> mode=prepare`) and clears it at the claim: the session's waiter runs `roster.ts set <session> mode=` the moment before it prints its Claim line, so the claim's own assign runs at once, and the job's next beat clears it too, as a backstop.
+  A clear that fails still prints the Claim line, which then tells the worker to retry a refused assign after that beat, since the refusal is not final.
+  The mark and this check each do nothing without the other, so the job's revision and this check go live in either order.
 - While the mode stands, `scripts/hooks/no-prepare-write.ts` refuses a factory session's tracker issue save (`save_issue`, an assign or a state change) and comment (`save_comment`) on a Linear server, a chat post (`chat_post_message`) on a Slack server, and a new pull request:
   `gh pr create` in any form the shared reader (`scripts/hooks/shell.ts`) finds, and a GitHub server's `create_pull_request`.
   Every other call runs: reads, local git, a push and every other gh call.
