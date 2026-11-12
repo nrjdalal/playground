@@ -984,14 +984,14 @@ const SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDR
 // a sed script read whole by a closed grammar: addresses, then =, d, l, n, N, p, P, q, Q or s/// with flags from g, i, I, m, M, p and digits, so it holds no w or W write, no e run and no r read of another file
 const SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`)
 
-// Whether a sed call only reads and prints: every option on SED_FLAG's list, and every script (each -e value, else the first operand) a literal word, unglobbed, that SED_SCRIPT holds
-function sedReads(args: Word[]): boolean {
+// The scripts of a sed call that only reads and prints, or undefined: every option on SED_FLAG's list, and every script (each -e value, else the first operand) a literal word, unglobbed, that SED_SCRIPT holds
+function sedReads(args: Word[]): Word[] | undefined {
   const scripts: Word[] = []
   const operands: Word[] = []
   for (let k = 0; k < args.length; k++) {
     const { value } = args[k]
     if (value === "-e" || value === "--expression") {
-      if (!args[k + 1]) return false
+      if (!args[k + 1]) return undefined
       scripts.push(args[++k])
     } else if (value.startsWith("--expression="))
       scripts.push({ ...args[k], value: value.slice("--expression=".length) })
@@ -999,11 +999,26 @@ function sedReads(args: Word[]): boolean {
       operands.push(...args.slice(k + 1))
       break
     } else if (value.startsWith("-") && value !== "-") {
-      if (!SED_FLAG.test(value)) return false
+      if (!SED_FLAG.test(value)) return undefined
     } else operands.push(args[k])
   }
   const read = scripts.length ? scripts : operands.slice(0, 1)
   return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value))
+    ? read
+    : undefined
+}
+
+// The options of a playground call whose value is free text for a person to read, never a path or a command; gh's posts have their own reading (ghTexts)
+const TEXT_FLAGS = new Set(["--body", "--reason", "--title"])
+
+// The words of a playground call that are a text flag's value: the word after --body, --reason or --title, and the word that attaches one with =
+function textFlagValues({ args, name }: Parsed): Word[] {
+  if (program(name) !== "playground") return []
+  return args.filter(
+    (word, k) =>
+      TEXT_FLAGS.has(args[k - 1]?.value ?? "") ||
+      [...TEXT_FLAGS].some((flag) => word.value.startsWith(`${flag}=`)),
+  )
 }
 
 // sed's in-place option as macOS sed reads it: -i after any of -E, -n, -r, -s, -u and -z, its backup suffix attached (holding no / or *, which GNU writes into another folder) or, when nothing is attached, the next word
@@ -1214,7 +1229,7 @@ function narrow(cmd: Command, env: Env): boolean {
   if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
   // a git reader with a word the hook cannot read keeps canary's reading, since that word may be an option that writes or runs (`--output=…`)
   if (base === "git") return reads(parsed, env) && !args.some(({ value }) => marked(value))
-  if (SEDS.has(base)) return sedReads(args)
+  if (SEDS.has(base)) return !!sedReads(args)
   if (base === "perl") return perlReads(parsed, env)
   // date prints the time and runs nothing, so a read line ending in `; date -u +%FT%TZ` keeps its readers' reading
   if (base === "cut" || base === "date" || base === "echo" || base === "lsof") return true
@@ -1660,7 +1675,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env)
-    // on a line read whole with no root shell and no variable set that makes a program run another (TEXT_RUNS), a read-only gh call's jq filter and agent-browser's eval script stay text, as on a line read call by call, since neither program runs them as a shell line
+    // on a line read whole with no root shell and no variable set that makes a program run another (TEXT_RUNS), a read-only gh call's jq filter, agent-browser's eval script, a read-only sed's script and a playground text flag's value stay text, as on a line read call by call, since no program runs them as a shell line; each is still refused when it names the root, and the sed's files are judged as any word is
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined
     const wholeText = new Set<Word>(
       whole &&
@@ -1669,7 +1684,12 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         ![...parsed.local.keys(), ...env.vars.keys()].some(
           (key) => TEXT_RUNS.test(key) || marked(key),
         )
-        ? [...ghFilters(parsed), ...(browserCode ? [browserCode] : [])]
+        ? [
+            ...ghFilters(parsed),
+            ...(browserCode ? [browserCode] : []),
+            ...(SEDS.has(program(name)) ? (sedReads(parsed.args) ?? []) : []),
+            ...textFlagValues(parsed),
+          ]
         : [],
     )
     const xargsOwn = xargs ? xargsOptions(cmd, first) : []
