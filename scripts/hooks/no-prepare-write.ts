@@ -4,6 +4,7 @@ import { appendFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
+import { gitCommand } from "./no-stash"
 import { registryName } from "./role"
 import {
   type Command,
@@ -11,7 +12,6 @@ import {
   type Parsed,
   ghApi,
   ghCommand,
-  GIT_TAKES,
   knownVariables,
   lex,
   PRINTERS,
@@ -44,7 +44,7 @@ const WRITES: [RegExp, Set<string>][] = [
 ]
 
 const refuse = (what: string): string =>
-  `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post, no push and no pull request. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`
+  `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post, no push, no file write, no pull request and no merge. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`
 
 const log = (environment: Environment, entry: Record<string, unknown>) => {
   try {
@@ -67,17 +67,13 @@ const prCreate = (args: Word[]): boolean => {
   return head[0] === "pr" && head[1] === "create"
 }
 
-// Whether git's subcommand, past its global options (GIT_TAKES), is push.
-const pushes = (args: Word[]): boolean => {
-  let k = 0
-  for (; k < args.length && args[k].value.startsWith("-"); k++)
-    if (GIT_TAKES.has(args[k].value)) k++
-  return args[k]?.value === "push"
-}
+const pushes = (args: Word[]): boolean => gitCommand(args).sub?.value === "push"
 
 // The GraphQL mutations that open or merge a pull request or move a ref, and the REST endpoints a write method does the same at.
 const REF_MUTATION =
   /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/
+// A GraphQL document's strings and comments, which name no mutation it runs.
+const GRAPHQL_TEXT = /"""[\s\S]*?"""|"(?:[^"\\\n]|\\.)*"|#[^\n]*/g
 const REF_ENDPOINT =
   /^repos\/[^/]+\/[^/]+\/(?:contents\/.+|git\/refs(?:\/.+)?|merges|pulls|pulls\/\d+\/(?:merge|update-branch))$/
 
@@ -98,7 +94,7 @@ async function apiWrite(
     .split("?")[0]!
   if (path === "graphql" || path === "api/graphql")
     return [...fields.filter((f) => f.key === "query").map((f) => f.text), ...inputs].some(
-      (d) => unreadable(d) || REF_MUTATION.test(d.value),
+      (d) => unreadable(d) || REF_MUTATION.test(d.value.replace(GRAPHQL_TEXT, "")),
     )
   if (method === "GET" || method === "HEAD") return false
   if (unreadable(endpoint)) return true
@@ -114,7 +110,7 @@ const ghWrite = async (args: Word[], cmd: Command, env: Env, xargs: Parsed["xarg
 const visit: Visit = async (cmd, { args, name, xargs }, env) => {
   if (name === "gh") return ghWrite(args, cmd, env, xargs)
   if (name === "git") return pushes(args) ? "git push" : undefined
-  if (PRINTERS.has(name)) return
+  if (PRINTERS.has(name) || name === "man") return
   const nested = args.findIndex((a) => program(a.value) === "gh" || program(a.value) === "git")
   if (nested === -1) return
   const rest = args.slice(nested + 1)
