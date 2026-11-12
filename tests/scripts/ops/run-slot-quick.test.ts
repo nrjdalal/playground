@@ -269,6 +269,8 @@ test("run-slot.sh kind prints the lane a command takes and runs nothing", async 
       shell,
       await kind([shell, "-c", `git -C ${repo} commit -m x; git -C ${repo} push origin`]),
     ]).toEqual([shell, "commit"])
+  // #1183: a commit behind zsh's dash modifier takes no commit lane, as a commit behind any wrapper takes none
+  expect(await kind(["zsh", "-c", `- git -C ${repo} commit -m x`])).toBe("")
   expect(existsSync(join(m.root, "made"))).toBe(false)
   expect(existsSync(join(m.ops, "run-slot.runs.log"))).toBe(false)
   expect(existsSync(join(m.ops, "run-slot.waiters"))).toBe(false)
