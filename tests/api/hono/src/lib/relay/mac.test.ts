@@ -1122,10 +1122,13 @@ describe("a bot's read of the dispatcher's log, on this Mac (#1888)", () => {
   // a made-up key and a made-up .env value, which no answer to a bot may hold
   const MADE_UP_KEY = ["sk-ant-", "madeUpKeyForTheRelayTestOnly0123"].join("")
   const ENV_VALUE = "madeUpEnvValue42"
+  // the made-up DM scout was made with, which yard.logReaders binds its login to
+  const DM = crypto.randomUUID()
   const botFrame = (over: Record<string, unknown> = {}) =>
     JSON.stringify({
       at: NOW.toISOString(),
       bot: "scout[bot]",
+      dm: DM,
       id: crypto.randomUUID(),
       login: "owner",
       method: "GET",
@@ -1136,7 +1139,7 @@ describe("a bot's read of the dispatcher's log, on this Mac (#1888)", () => {
   const botDeps = (
     dispatch: (request: Request) => Promise<Response>,
     over: Record<string, unknown> = {},
-  ) => ({ ...deps(dispatch), envValues: () => [], readers: () => ["Scout[bot]"], ...over })
+  ) => ({ ...deps(dispatch), envValues: () => [], readers: () => ({ "Scout[bot]": DM }), ...over })
 
   test("a bot on yard.logReaders reads the log route as this Mac's owner, its answer redacted before it leaves", async () => {
     const reached: string[][] = []
@@ -1172,7 +1175,7 @@ describe("a bot's read of the dispatcher's log, on this Mac (#1888)", () => {
   })
 
   test("refuses a bot off yard.logReaders, and every bot while the list is empty", async () => {
-    for (const readers of [["other[bot]"], []]) {
+    for (const readers of [{ "other[bot]": DM }, {}]) {
       const { dispatch, reached } = spy()
       const answer = await answerRelay(botFrame(), botDeps(dispatch, { readers: () => readers }))
       expect([answer?.status, reached]).toEqual([403, []])
@@ -1180,6 +1183,12 @@ describe("a bot's read of the dispatcher's log, on this Mac (#1888)", () => {
     const { dispatch, reached } = spy()
     const { readers: _, ...unwired } = botDeps(dispatch)
     expect([(await answerRelay(botFrame(), unwired))?.status, reached]).toEqual([403, []])
+  })
+
+  test("refuses a bot made again under a listed bot's name, since its DM is a new one", async () => {
+    const { dispatch, reached } = spy()
+    const answer = await answerRelay(botFrame({ dm: crypto.randomUUID() }), botDeps(dispatch))
+    expect([answer?.status, reached]).toEqual([403, []])
   })
 
   test("refuses a bot's frame for another owner's Mac, a stale one and a replay", async () => {
@@ -1196,7 +1205,11 @@ describe("a bot's read of the dispatcher's log, on this Mac (#1888)", () => {
 
   test("gives no answer to a bot frame that names a person, or writes", async () => {
     const { dispatch, reached } = spy()
-    for (const raw of [botFrame({ bot: "scout" }), botFrame({ method: "POST" })])
+    for (const raw of [
+      botFrame({ bot: "scout" }),
+      botFrame({ dm: undefined }),
+      botFrame({ method: "POST" }),
+    ])
       expect(await answerRelay(raw, botDeps(dispatch))).toBeNull()
     expect(reached).toEqual([])
   })

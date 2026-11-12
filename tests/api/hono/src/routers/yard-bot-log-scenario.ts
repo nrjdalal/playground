@@ -1,6 +1,7 @@
 // Run by yard.test.ts as `bun -e` in api/hono, so the hosted build's env loads fresh: the owner makes two made-up bots, one let read the dispatcher's log, and a fake Mac on the relay's socket answers a bot's read with a made-up page; prints one JSON line of what each request answered.
 const { default: shape } = await import(process.env.YARD_HOSTED!)
 const { sessionCookie } = await import("@/lib/sign-in")
+const { answerRelay } = await import("@/lib/relay/mac")
 const server = Bun.serve(shape)
 const api = `http://127.0.0.1:${server.port}/api/v1/yard`
 const web = process.env.HONO_WEB_URL!
@@ -39,7 +40,7 @@ const quietBot = as(quiet.body?.data?.secret ?? "yard_none")
 const dm: string = scout.body?.data?.bot?.dm ?? "none"
 out.offline = await status("/bot/log", scoutBot)
 
-// the owner's Mac, which answers a bot's read with a made-up page of two entries
+// the owner's Mac, which answers each frame as this Mac's own relay does, its yard.logReaders binding scout's login to the DM scout was made with, and its log route a made-up page of two entries
 const frames: Record<string, unknown>[] = []
 const mac = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/yard/relay/socket`, {
   headers: { authorization: `Bearer ${process.env.OWNER_TOKEN}` },
@@ -54,18 +55,19 @@ const page = {
     session: "made-up-session",
   },
 }
-mac.onmessage = (event) => {
-  const frame = JSON.parse(String(event.data))
-  frames.push(frame)
-  mac.send(
-    JSON.stringify({
-      body: Buffer.from(JSON.stringify(page)).toString("base64"),
-      headers: { "content-type": "application/json" },
-      id: frame.id,
-      status: 200,
-      type: "response",
-    }),
-  )
+const seen = new Map<string, number>()
+mac.onmessage = async (event) => {
+  const raw = String(event.data)
+  frames.push(JSON.parse(raw))
+  const answer = await answerRelay(raw, {
+    cookie: async () => "session=made-up",
+    dispatch: async () => Response.json(page),
+    envValues: () => [],
+    login: "lo",
+    readers: () => ({ "scout[bot]": dm }),
+    seen,
+  })
+  if (answer) mac.send(JSON.stringify(answer))
 }
 await new Promise((done) => {
   mac.onopen = done
@@ -76,8 +78,9 @@ await call(`/channels/${dm}/messages`, scoutBot, { kind: "text", text: "hello ow
 await Bun.sleep(1100)
 const read = await call("/bot/log?after=4", scoutBot)
 out.read = [read.status, read.body?.data?.entries?.map((entry: any) => entry.seq)]
-out.frames = frames.map(({ bot, login, method, path, type }) => ({
+out.frames = frames.map(({ bot, dm: frameDm, login, method, path, type }) => ({
   bot,
+  bindsScoutsDm: frameDm === dm,
   login,
   method,
   path,
@@ -111,6 +114,15 @@ out.switchOn = (
 ).body?.data?.bot?.readsLog
 out.revoke = await status("/bots/scout", owner, undefined, "DELETE")
 out.afterRevoke = await status("/bot/log", scoutBot)
+
+// a bot made again under the revoked name, with the Mac's list left as it was: Yard lets it, and the Mac refuses it, since its DM is a new one
+const again = await call("/bots", owner, { log: true, name: "scout" })
+out.remade = [
+  again.status,
+  again.body?.data?.bot?.dm !== dm,
+  await status("/bot/log", as(again.body?.data?.secret ?? "yard_none")),
+  frames.length,
+]
 mac.close()
 console.log(JSON.stringify(out))
 process.exit(0)

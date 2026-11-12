@@ -326,6 +326,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       frameCount: 1,
       frames: [
         {
+          bindsScoutsDm: true,
           bot: "scout[bot]",
           login: "lo",
           method: "GET",
@@ -336,6 +337,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       offline: 503,
       read: [200, [5, 6]],
       refused: { badCursor: 400, browser: 403, owner: 403, quiet: 403 },
+      remade: [201, true, 403, 2],
       revoke: 200,
       switchOff: [200, false],
       switchOn: true,

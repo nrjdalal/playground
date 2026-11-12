@@ -111,6 +111,13 @@ describe("defineSettings", () => {
     expect(set.schemaVersion).toBe(SCHEMA_VERSION)
   })
 
+  test("yard.logReaders binds each bot's login to the DM it was made with (#1888)", () => {
+    const readers = settingFields().find(({ key }) => key === "yard.logReaders")!.field.schema
+    expect(readers.safeParse({ "scout[bot]": crypto.randomUUID() }).success).toBe(true)
+    expect(readers.safeParse(["scout[bot]"]).success).toBe(false)
+    expect(readers.safeParse({ scout: crypto.randomUUID() }).success).toBe(false)
+  })
+
   test("refuses a key or an alias defined twice, and a default its schema refuses", () => {
     const again = { default: 1, description: "", schema: z.number() }
     expect(() => defineSettings({ "fixture.limit": again })).toThrow("defined twice")

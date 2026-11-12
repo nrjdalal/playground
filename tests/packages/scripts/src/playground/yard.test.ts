@@ -100,7 +100,7 @@ const setUp = (
       }) as YardIo["keychain"],
     err: (line) => lines.push(`err: ${line}`),
     logReaders: {
-      add: async (login: string) => void readers.push(`+${login}`),
+      add: async (login: string, dm: string) => void readers.push(`+${login} ${dm}`),
       remove: async (login: string) => void readers.push(`-${login}`),
     },
     keychain: {
@@ -174,10 +174,10 @@ describe("playground yard", () => {
     const { calls, io, lines, readers } = setUp()
     expect(await runYard(["bot", "add", "grok", "--log"], io)).toBe(0)
     expect(calls.at(-1)).toEqual(["addBot", "grok", { log: true }])
-    expect(readers).toEqual(["+grok[bot]"])
+    expect(readers).toEqual(["+grok[bot] dm-bot"])
     expect(lines.join("\n")).toContain("reads the dispatcher's log")
     expect(await runYard(["bot", "revoke", "grok"], io)).toBe(0)
-    expect(readers).toEqual(["+grok[bot]", "-grok[bot]"])
+    expect(readers).toEqual(["+grok[bot] dm-bot", "-grok[bot]"])
     const plain = setUp()
     expect(await runYard(["bot", "add", "grok"], plain.io)).toBe(0)
     expect(plain.readers).toEqual([])
