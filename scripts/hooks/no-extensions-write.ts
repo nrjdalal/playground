@@ -985,7 +985,7 @@ const SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDR
 const SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`)
 
 // The scripts of a sed call that only reads and prints, or undefined: every option on SED_FLAG's list, and every script (each -e value, else the first operand) a literal word, unglobbed, that SED_SCRIPT holds
-function sedReads(args: Word[]): Word[] | undefined {
+function sedReadScripts(args: Word[]): Word[] | undefined {
   const scripts: Word[] = []
   const operands: Word[] = []
   for (let k = 0; k < args.length; k++) {
@@ -1229,7 +1229,7 @@ function narrow(cmd: Command, env: Env): boolean {
   if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
   // a git reader with a word the hook cannot read keeps canary's reading, since that word may be an option that writes or runs (`--output=…`)
   if (base === "git") return reads(parsed, env) && !args.some(({ value }) => marked(value))
-  if (SEDS.has(base)) return !!sedReads(args)
+  if (SEDS.has(base)) return !!sedReadScripts(args)
   if (base === "perl") return perlReads(parsed, env)
   // date prints the time and runs nothing, so a read line ending in `; date -u +%FT%TZ` keeps its readers' reading
   if (base === "cut" || base === "date" || base === "echo" || base === "lsof") return true
@@ -1687,7 +1687,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         ? [
             ...ghFilters(parsed),
             ...(browserCode ? [browserCode] : []),
-            ...(SEDS.has(program(name)) ? (sedReads(parsed.args) ?? []) : []),
+            ...(SEDS.has(program(name)) ? (sedReadScripts(parsed.args) ?? []) : []),
             ...textFlagValues(parsed),
           ]
         : [],
