@@ -113,7 +113,8 @@
   A token never approves, makes tokens or touches invites, which a signed-in browser alone does.
   The owner's token makes, lists and revokes bots (`/api/v1/yard/bots`), the one token route that makes a credential, since `playground yard bot add` runs on the Mac.
   A bot is a user of its own whose login, `<name>[bot]`, no GitHub sign-in can claim and `githubLoginSchema` refuses, its `yard_bot` row naming its maker.
-  Its token reaches only `GET` and `POST /api/v1/yard/channels/<dm>/messages` in its DM with its maker (`yardCaller`'s `bots` and `fenceBot` in `store.ts`), as plain text with no held kind, mention or link, so its post never holds, and the log route while the owner lets it read the log (the relay rule below);
+  Its token reaches only `GET` and `POST /api/v1/yard/bot/messages`, which find its DM with its maker from the token (`botDm` in `store.ts`), and the same DM's `/api/v1/yard/channels/<dm>/messages` (`yardCaller`'s `bots` and `fenceBot` in `store.ts`),
+  as plain text with no held kind, mention or link, so its post never holds, and the log route while the owner lets it read the log (the relay rule below);
   every other call reads 403, and a revoke deletes its user and DM, so its next call reads 401.
   Which of its writes take a trusted Origin is writes.md's hosted rule, walked by `tests/api/hono/src/routers/guards.test.ts`.
   A token's tier-two post (`tier.ts`: bug, fix, log, steps, a mention, a post to a DM with no sent message yet unless a bot's maker posts it in their `createBot` DM, an owner-only channel) is stored pending, read by its sender alone until that sender's browser approves or denies it; an approved one takes the approval's time, so it counts as unread for a member who read the channel meanwhile.
@@ -127,7 +128,9 @@
   so no browser holds it.
   With `YARD_API_URL` unset or no token in the Keychain it answers 404, which hides the sidebar's Yard groups.
   Once a minute it reads what waits on the owner from the hosted Yard's `GET /api/v1/yard/waiting` (`pollWaiting` in `api/hono/src/lib/yard/inbound.ts`, its mark in the data folder's `yard/mentions.json`) and posts each as one Inbox update, oldest first, the sender and their words fenced as someone else's:
-  a mention, a thread's reply included, every message a bot the owner made sends in its DM with the owner, titled as the bot's, and a post of the owner's Yard holds for approval, from the sidebar, `playground yard post` or any device, whose Approve opens Yard's approve page at `YARD_WEB_URL` (asks.md).
+  a mention, a thread's reply included, and a post of the owner's Yard holds for approval, from the sidebar, `playground yard post` or any device, whose Approve opens Yard's approve page at `YARD_WEB_URL` (asks.md).
+  Every message a bot the owner made sends in its DM with the owner makes no card: it goes to the dispatcher as one line, the bot named and its words fenced (`botLine`),
+  queued by `scripts/ops/notify.sh` (`queueLine`, its words kept out of `alerts.log`) for the relay's `SendMessage` (ADR 0010), never through `deliver()`, so the bot's words never read as the owner's; a queue that fails leaves the message to the next poll.
 - ALWAYS: Carry only the GETs on `RELAY_GETS` and the POSTs on `RELAY_WRITES` the paired key signs through the relay, and `BOT_GETS` alone for a bot on `yard.logReaders` (`api/hono/src/lib/relay/protocol.ts`).
   A bot's GET carries no signature and passes two gates: Yard passes only a bot's token whose log grant is on, and the Mac answers only a bot its `yard.logReaders` lists with the DM the bot was made with, refusing it on every `RELAY_GETS` and `RELAY_WRITES` route.
   The relay lets the owner read this Mac's own `/dashboard` from the hosted Yard and send from it, and the rule above keeps every other write on the Mac: its one other frame, a browser's pair request, pairs nothing until the owner's Approve on this Mac.
