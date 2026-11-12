@@ -28,6 +28,14 @@ beforeAll(async () => {
     }),
   )
   env = { CLAUDE_CONFIG_DIR: config, PLAYGROUND_DATA_DIR: join(config, "playground") }
+  await Bun.write(
+    join(config, "query.json"),
+    JSON.stringify({ query: "mutation { createRef(input: {}) { clientMutationId } }" }),
+  )
+  await Bun.write(
+    join(config, "cr.graphql"),
+    "# x\rmutation { createRef(input: {}) { clientMutationId } }",
+  )
 })
 
 afterAll(async () => {
@@ -118,6 +126,22 @@ describe("no-prepare-write refuses a prepare-only session's writes", () => {
     `gh api graphql -f query='mutation { addComment(input: {body: "a \\" b"}) { clientMutationId } createRef(input: {}) { clientMutationId } }'`,
     `gh api graphql -f query='mutation { addComment(input: {body: "unclosed createRef(input: {}) { clientMutationId } }'`,
   ])("refuses a listed mutation beside a string, %s", async (command) => {
+    expect(await check(bash(command), env)).toStartWith("no-prepare-write hook refused gh api")
+  })
+
+  test.each([
+    "gh api graphql --input query.json",
+    "gh api graphql --input - < query.json",
+    `gh api graphql --input - <<'EOF'\n{"query":"mutation { mergePullRequest(input: {}) { clientMutationId } }"}\nEOF`,
+  ])("refuses a listed mutation in a JSON body, %s", async (command) => {
+    expect(await check(bash(command), env)).toStartWith("no-prepare-write hook refused gh api")
+  })
+
+  test.each([
+    "gh api graphql -f query=$'# x\\rmutation { createRef(input: {}) { clientMutationId } }'",
+    "gh api graphql -f query='# x\rmutation { createRef(input: {}) { clientMutationId } }'",
+    "gh api graphql -F query=@cr.graphql",
+  ])("refuses a listed mutation after a comment a carriage return ends, %s", async (command) => {
     expect(await check(bash(command), env)).toStartWith("no-prepare-write hook refused gh api")
   })
 
