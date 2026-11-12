@@ -2988,3 +2988,71 @@ describe("the Ops lead's tuning of a guard setting", () => {
     expect(await ops(command)).toContain("no-extensions-write hook refuses playground settings")
   })
 })
+
+// An ops job row that names an extension script: the write lands outside the root, and only its text names the root.
+describe("a write outside the root whose text names an extension script runs, and one into the root stays refused", () => {
+  const JOBS = join(DATA, "ops", "jobs.json")
+  const SCRIPT = join(SCOPE, "skills", "vault", "scripts", "vault.py")
+
+  test.each([
+    ["a Write of jobs.json", "Write", { content: `{"command":"${SCRIPT}"}`, file_path: JOBS }],
+    [
+      "an Edit of jobs.json",
+      "Edit",
+      { file_path: JOBS, new_string: `"${SCRIPT}"`, old_string: '"x"' },
+    ],
+  ])("%s", async (_, name, input) => {
+    expect(await tool(name, input)).toBeUndefined()
+  })
+
+  test.each([
+    ["jq to a file beside jobs.json", `jq '.jobs[0].command = "${SCRIPT}"' ${JOBS} > ${JOBS}.new`],
+    ["a heredoc to cat into jobs.json", `cat > ${JOBS} <<'EOF'\n{"command":"${SCRIPT}"}\nEOF`],
+    ["a heredoc to tee into jobs.json", `tee ${JOBS} <<'EOF'\n{"command":"${SCRIPT}"}\nEOF`],
+    [
+      "an unquoted heredoc to tee into jobs.json",
+      `tee ${JOBS} <<EOF\n{"command":"${SCRIPT}"}\nEOF`,
+    ],
+    [
+      "a heredoc to tee -a into jobs.json, quiet",
+      `tee -a ${JOBS} > /dev/null <<'EOF'\n{"command":"${SCRIPT}"}\nEOF`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "a Write into the root",
+      "Write",
+      { content: `{"command":"${SCRIPT}"}`, file_path: join(ROOT, "policy.json") },
+    ],
+  ])("%s is refused", async (_, name, input) => {
+    expect(await tool(name, input)).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each([
+    [
+      "a heredoc to tee into the root",
+      `tee ${ROOT}/policy.json <<'EOF'\n{"command":"${SCRIPT}"}\nEOF`,
+    ],
+    ["a heredoc to tee into jobs.json and the root", `tee ${JOBS} ${LIST} <<'EOF'\n[]\nEOF`],
+    ["a heredoc to tee piped into a shell", `tee ${JOBS} <<'EOF' | sh\ntouch ${LIST}\nEOF`],
+    [
+      "a heredoc to tee piped into python",
+      `tee ${JOBS} <<'EOF' | python3\nopen("${LIST}", "w")\nEOF`,
+    ],
+    [
+      "a heredoc to tee into a shell's process substitution",
+      `tee >(sh) <<'EOF'\ntouch ${LIST}\nEOF`,
+    ],
+    ["a heredoc to tee into a shell's stdin", `tee /dev/stdout <<'EOF' | bash\ntouch ${LIST}\nEOF`],
+    [
+      "a heredoc to python naming the root",
+      `python3 - <<'EOF'\nopen("${JOBS}", "w").write("${SCRIPT}")\nEOF`,
+    ],
+    ["sed -i of jobs.json naming the root", `sed -i '' 's#x#${SCRIPT}#' ${JOBS}`],
+  ])("%s is refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
+  })
+})
