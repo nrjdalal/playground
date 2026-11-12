@@ -23,18 +23,20 @@ export const putOf = (): Put => async (url, bytes) => {
   return { ok: res.ok, status: res.status }
 }
 
-// Slack's three external-upload steps: an upload URL for each file, its bytes posted there, then one complete that shares them all into the channel, in the thread when one is named. Any step Slack refuses throws, and a file whose bytes did not land shares nothing.
+// Slack's three external-upload steps: an upload URL for each file, its bytes posted there, then one complete that shares them all into the channel, in the thread when one is named, with the words as their message when given. Any step Slack refuses throws, and a file whose bytes did not land shares nothing.
 export async function upload({
   channel,
   files,
   put,
   slack,
+  text,
   thread,
 }: {
   channel: string
   files: UploadFile[]
   put: Put
   slack: Slack
+  text?: string
   thread?: string
 }): Promise<number> {
   const shared: { id: string; title: string }[] = []
@@ -51,6 +53,7 @@ export async function upload({
   await call(slack, "files.completeUploadExternal", {
     channel_id: channel,
     files: JSON.stringify(shared),
+    ...(text ? { initial_comment: text } : {}),
     ...(thread ? { thread_ts: thread } : {}),
   })
   return files.length
@@ -58,16 +61,19 @@ export async function upload({
 
 export type Check = (raw: string) => Promise<string | undefined>
 
-// The guards dm send runs on a post (no-playground-leak), and no-public-leak, on a file as one post to the channel would carry it: its name, and a text file's words too.
+// The words a file carries into the channel: its name, and a text file's words too.
+export const wordsOf = (file: UploadFile): string =>
+  file.text ? `${file.name}\n${new TextDecoder().decode(file.bytes)}` : file.name
+
+// The guards dm send runs on a post (no-playground-leak), and no-public-leak, on words as one post to the channel would carry them.
 export async function guarded(
   channel: string,
-  file: UploadFile,
+  text: string,
   checks: { playground: (text: string) => Promise<string | undefined>; public: Check } = {
     playground: leakOf(channel),
     public: publicLeak,
   },
 ): Promise<string | undefined> {
-  const text = file.text ? `${file.name}\n${new TextDecoder().decode(file.bytes)}` : file.name
   const raw = JSON.stringify({
     tool_input: { channel, text },
     tool_name: "mcp__slack-shared__chat_post_message",
@@ -75,10 +81,11 @@ export async function guarded(
   return (await checks.playground(text)) ?? (await checks.public(raw))
 }
 
-// What the API's dashboard-upload.ts prints for one answered item: the place and the files read from the item itself.
+// What the API's dashboard-upload.ts prints for one answered item: the place, the files and a draft's words, read from the item itself.
 export type Spec = {
   channel: string
   files: { bytes: string; name: string; text: boolean }[]
+  text?: string
   thread?: string
 }
 
@@ -99,7 +106,7 @@ export const specOf = async (id: string): Promise<Spec> => {
   return JSON.parse(out) as Spec
 }
 
-// Shares one answered Inbox item's files, named by its id alone: the place and the files come from the item, every file is guarded before any is shared, and a refused one shares nothing.
+// Shares one answered Inbox item's files, with a draft's words as their message, named by its id alone: the place, the files and the words come from the item, each is guarded before any file is shared, and a refused one shares nothing.
 export async function share(
   id: string,
   {
@@ -116,10 +123,12 @@ export async function share(
     text: file.text,
   }))
   for (const file of files) {
-    const refusal = await check(spec.channel, file)
+    const refusal = await check(spec.channel, wordsOf(file))
     if (refusal) throw new Error(`${file.name}: ${refusal}`)
   }
-  return upload({ channel: spec.channel, files, put, slack, thread: spec.thread })
+  const refusal = spec.text && (await check(spec.channel, spec.text))
+  if (refusal) throw new Error(`the message: ${refusal}`)
+  return upload({ channel: spec.channel, files, put, slack, text: spec.text, thread: spec.thread })
 }
 
 // its errors as one plain line, which the dashboard shows as the send's reason

@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { machine, SCRIPT } from "./run-slot-fake"
+import { machine, runSlot, SCRIPT } from "./run-slot-fake"
 
 // a check waits on a run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -34,7 +34,7 @@ const holds = (m: Machine, pid: number) => [
 // a run through run-slot that ends with `rc` once the test writes its gate file
 const gated = (m: Machine, who: string, rc: number) => {
   const gate = join(m.root, `gate-${Math.random()}`)
-  const p = Bun.spawn(
+  const p = runSlot(
     [
       "bash",
       SCRIPT,
@@ -44,17 +44,18 @@ const gated = (m: Machine, who: string, rc: number) => {
       "-c",
       `until [ -e "${gate}" ]; do sleep 0.1; done; exit ${rc}`,
     ],
-    { cwd: m.root, env: m.env(), stderr: "ignore" },
+    { cwd: m.root, env: m.env(), stderr: "ignore", ops: m.ops },
   )
   return { open: () => writeFileSync(gate, ""), p }
 }
 // an --after run of `touch <marker>`, its stderr read as it comes
 const after = (m: Machine, who: string, pid: string) => {
   const marker = join(m.root, `after-${Math.random()}`)
-  const p = Bun.spawn(["bash", SCRIPT, who, "--after", pid, "--", "touch", marker], {
+  const p = runSlot(["bash", SCRIPT, who, "--after", pid, "--", "touch", marker], {
     cwd: m.root,
     env: m.env(),
     stderr: "pipe",
+    ops: m.ops,
   })
   let err = ""
   let ended = false

@@ -19,6 +19,12 @@ const upPy = join(import.meta.dir, "..", "..", "..", "scripts", "ops", "up.py")
 const scratch = mkdtempSync(join(tmpdir(), "ops-up-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
+// bun first on PATH, behind a launchctl that refuses every call, so a pass's real render can never reach the real launchctl whatever jobs the registry turns on
+const fakeBin = join(scratch, "fake-bin")
+mkdirSync(fakeBin)
+writeFileSync(join(fakeBin, "launchctl"), "#!/bin/sh\nexit 1\n", { mode: 0o755 })
+const BUN_PATH = `${fakeBin}:${dirname(process.execPath)}:/usr/bin:/bin`
+
 // The data folder up.py reads under a config folder: its jobs.json, roster and up.log.
 const dataOf = (config: string) => join(config, "playground")
 
@@ -80,7 +86,7 @@ test("--sessions names a session of a kind only kinds.ts knows", () => {
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
-      PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      PATH: BUN_PATH,
     },
     stderr: "pipe",
     stdout: "pipe",
@@ -312,6 +318,48 @@ test("a job on a deleted executable is restarted, or reported once when launchd 
   expect(log).not.toContain("ops-w")
 })
 
+// Loads up.py and runs one pass per health answer given, every notify.sh call recorded rather than made.
+const DOWN = `${LOAD}calls = []
+up.render_jobs = lambda: None
+up.ptable.table = lambda: {}
+up.once.running = lambda name, marker: None
+up.run = lambda argv, timeout=60: (calls.append(argv) if argv[0].endswith("notify.sh") else None, (0, ""))[1]
+for answer in json.loads(sys.argv[2]):
+    up.healthy = lambda job, answer=answer: tuple(answer)
+    up.up(True)
+print(json.dumps(calls))
+`
+
+// a launchd job turned on but never installed once logged "keeps it alive" every pass and told nobody, so a run of down passes is told to ops once, and again only after a healthy pass.
+test("a launchd job down 3 passes in a row is told to ops once, and again only after it comes back and goes down", () => {
+  const config = mkdtempSync(join(scratch, "down-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  writeFileSync(
+    join(ops, "jobs.json"),
+    JSON.stringify({ jobs: [{ heartbeat: "ops-l", launchd: "com.x.ops-l", name: "ops-l" }] }),
+  )
+  const down = [false, "no heartbeat"]
+  const answers = [down, down, down, down, [true, "ok"], down, down, down]
+  const child = Bun.spawnSync(["python3", "-I", "-c", DOWN, upPy, JSON.stringify(answers)], {
+    env: {
+      CLAUDE_CONFIG_DIR: config,
+      PLAYGROUND_DATA_DIR: join(config, "playground"),
+      HOME: scratch,
+      PATH: "/usr/bin:/bin",
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  const told = [
+    join(dirname(upPy), "notify.sh"),
+    "up",
+    "ops-l has been unhealthy (no heartbeat) for 3 passes in a row; launchd job com.x.ops-l is not bringing it back, so check it is installed and loaded (playground doctor)",
+  ]
+  expect(JSON.parse(child.stdout.toString())).toEqual([told, told])
+})
+
 // Loads up.py and starts one herdr job, recording every herdr call rather than making it.
 const STARTED = `${LOAD}calls = []
 up.herdr = lambda: ("/x/herdr", "")
@@ -339,6 +387,115 @@ test("the start line holds exec before the job", () => {
   const herdrLine = JSON.parse(child.stdout.toString()).find((c: unknown[]) => c[1] === "run")[3]
   expect(herdrLine).toContain("ops-h")
   expect(herdrLine).toContain("&& exec python3 -I ")
+})
+
+// Loads up.py and starts one herdr job whose command is argv[2], its rendered.ts argv[3] when given, recording every herdr call, then prints the calls, the marker and up.log.
+const STARTED_EXT = `${LOAD}calls = []
+up.herdr = lambda: ("/x/herdr", "")
+up.ops_panes = lambda binary: ([(4101, "ops-a")], "workspace:1")
+up.hr = lambda binary, *args: (calls.append(args), (0, {"pane": {"pane_id": 5501}}, ""))[1]
+if len(sys.argv) > 3:
+    up.RENDERED = sys.argv[3]
+job = {"name": "ops-x", "runtime": "herdr", "cwd": "~/h", "command": sys.argv[2]}
+started = up.start(job)
+log = open(os.path.join(up.OPS, "up.log")).read() if os.path.exists(os.path.join(up.OPS, "up.log")) else ""
+print(json.dumps({"started": started, "calls": [list(c) for c in calls], "marker": up.marker(job), "log": log}))
+`.replace("import importlib.util, json, sys", "import importlib.util, json, os, sys")
+
+// A data folder whose extensions root holds one scope's skill script, as an accepted revision renders it.
+const withExtension = (body: string) => {
+  const config = mkdtempSync(join(scratch, "ext-"))
+  const data = dataOf(config)
+  mkdirSync(join(data, "ops"), { recursive: true })
+  const script = join(data, "extensions", "acme", "skills", "vault", "scripts", "vault.py")
+  mkdirSync(dirname(script), { recursive: true })
+  writeFileSync(script, body)
+  return { config, data, script }
+}
+
+const startExt = (config: string, command: string, rendered?: string) => {
+  const child = Bun.spawnSync(
+    ["python3", "-I", "-c", STARTED_EXT, upPy, command, ...(rendered ? [rendered] : [])],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: dataOf(config),
+        HOME: scratch,
+        PATH: BUN_PATH,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  )
+  expect(child.stderr.toString()).toBe("")
+  return JSON.parse(child.stdout.toString()) as {
+    calls: string[][]
+    log: string
+    marker: string
+    started: boolean
+  }
+}
+
+// a jobs row names an extension script by ext:<scope>/<path>, which rendered.ts resolves at each start, so a new accepted revision reaches the job with no repoint
+test("a start runs an ext: word as the path rendered.ts gives it, at each start", () => {
+  const { config, script } = withExtension("print(1)\n")
+  const first = startExt(config, "python3 -I ext:acme/skills/vault/scripts/vault.py run")
+  expect(first.started).toBe(true)
+  const line = first.calls.find((call) => call[1] === "run")![3]!
+  expect(line).toContain(`exec python3 -I `)
+  expect(line).toContain(`ops-x python3 -I ${script} run`)
+  expect(line).not.toContain("ext:")
+  expect(first.marker).toBe("/vault/scripts/")
+  writeFileSync(script, "print(2)\n")
+  const second = startExt(config, "python3 -I ext:acme/skills/vault/scripts/vault.py run")
+  expect(second.calls.find((call) => call[1] === "run")![3]).toContain(script)
+})
+
+test("a start whose ext: word the store lacks opens no pane and logs rendered.ts's refusal", () => {
+  const { config } = withExtension("print(1)\n")
+  const out = startExt(config, "python3 -I ext:acme/skills/vault/scripts/gone.py")
+  expect(out.started).toBe(false)
+  expect(out.calls).toEqual([])
+  expect(out.log).toContain("ops-x")
+  expect(out.log).toContain("acme/skills/vault/scripts/gone.py")
+})
+
+test("a start with a plain path runs it as written", () => {
+  const { config } = withExtension("print(1)\n")
+  const out = startExt(config, "bash /x/h.sh")
+  expect(out.started).toBe(true)
+  expect(out.calls.find((call) => call[1] === "run")![3]).toContain("ops-x bash /x/h.sh")
+})
+
+// issue 1960: rendered.ts may warn on stderr, so the path an ext: word resolves to comes from its stdout alone
+test("a start whose ext: word resolves while rendered.ts warns on stderr runs the path stdout gave", () => {
+  const { config, script } = withExtension("print(1)\n")
+  const rendered = join(scratch, "warn-rendered.ts")
+  writeFileSync(
+    rendered,
+    `console.log(${JSON.stringify(script)})\nconsole.error("warn: lookup is deprecated")\n`,
+  )
+  const out = startExt(config, "python3 -I ext:acme/skills/vault/scripts/vault.py run", rendered)
+  expect(out.started).toBe(true)
+  const line = out.calls.find((call) => call[1] === "run")![3]!
+  expect(line).toContain(`ops-x python3 -I ${script} run`)
+  expect(line).not.toContain("warn:")
+})
+
+// the refusal's why keeps the reader's whole answer, its stdout and stderr both, as today
+test("a start whose ext: word refuses keeps the refusal's why from stdout and stderr both", () => {
+  const { config } = withExtension("print(1)\n")
+  const rendered = join(scratch, "refused-rendered.ts")
+  writeFileSync(
+    rendered,
+    `console.log("acme/skills/vault/scripts/gone.py")\nconsole.error("refused: no accepted revision")\nprocess.exit(1)\n`,
+  )
+  const out = startExt(config, "python3 -I ext:acme/skills/vault/scripts/gone.py run", rendered)
+  expect(out.started).toBe(false)
+  expect(out.calls).toEqual([])
+  expect(out.log).toContain("ops-x")
+  expect(out.log).toContain("acme/skills/vault/scripts/gone.py")
+  expect(out.log).toContain("refused: no accepted revision")
 })
 
 // a failed or empty lsof read changes nothing.
@@ -400,7 +557,7 @@ test("a pass renders jobs.json from the store, keeps it when the store has no po
         CLAUDE_CONFIG_DIR: config,
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: scratch,
-        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+        PATH: BUN_PATH,
       },
       stderr: "pipe",
     })
@@ -442,7 +599,7 @@ test("a dead render with no ops folder shows the render's own error in up.log, n
         CLAUDE_CONFIG_DIR: config,
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: scratch,
-        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+        PATH: BUN_PATH,
       },
       stderr: "pipe",
     },
@@ -451,6 +608,33 @@ test("a dead render with no ops folder shows the render's own error in up.log, n
   expect(readFileSync(join(dataOf(config), "ops", "up.log"), "utf8")).toContain(
     "the render died here",
   )
+})
+
+// a launchd job turned on reaches launchd only through the render's install into HOME's LaunchAgents, so each pass hands it that folder.
+test("a pass hands the render HOME's LaunchAgents folder to install into", () => {
+  const config = join(scratch, "config-install")
+  mkdirSync(dataOf(config), { recursive: true })
+  const render = join(scratch, "argv-render.ts")
+  const argv = join(scratch, "argv-render.json")
+  writeFileSync(
+    render,
+    `require("node:fs").writeFileSync(${JSON.stringify(argv)}, JSON.stringify(process.argv.slice(2)))\n`,
+  )
+  const pass = Bun.spawnSync(
+    ["python3", "-I", "-c", `${LOAD}up.JOBS_RENDER = sys.argv[2]\nup.render_jobs()`, upPy, render],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: dataOf(config),
+        HOME: scratch,
+        PATH: BUN_PATH,
+      },
+      stderr: "pipe",
+    },
+  )
+  expect(pass.stderr.toString()).toBe("")
+  const args = JSON.parse(readFileSync(argv, "utf8")) as string[]
+  expect(args[args.indexOf("--install") + 1]).toBe(join(scratch, "Library", "LaunchAgents"))
 })
 
 test("a pass writes jobs.json into the data folder dataDir() resolves, playground over an old dispatcher beside it", () => {
@@ -462,7 +646,7 @@ test("a pass writes jobs.json into the data folder dataDir() resolves, playgroun
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
-      PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      PATH: BUN_PATH,
     },
     stderr: "pipe",
   })
@@ -487,7 +671,7 @@ test("a pass moves a turned-off job's plist from ops/launch-agents to the data f
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: data,
       HOME: scratch,
-      PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      PATH: BUN_PATH,
     },
     stderr: "pipe",
   })

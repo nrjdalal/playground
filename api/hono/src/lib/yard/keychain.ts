@@ -12,4 +12,10 @@ export type { Run }
 export const keychain = (run?: Run, account = userInfo().username): KeychainItem =>
   keychainItem("yard", { account, run })
 
+// A bot's token, which `playground yard bot add` writes and never prints, in an item of its own a reveal card names for the owner's Copy.
+export const botService = (name: string) => `playground-yard-bot-${name}`
+
+export const botKeychain = (name: string, run?: Run, account = userInfo().username): KeychainItem =>
+  keychainItem(botService(name), { account, run })
+
 export type Keychain = KeychainItem

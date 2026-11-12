@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 
 import {
@@ -23,8 +23,13 @@ describe("every session compacts in one 400k window (#1805)", () => {
   const builtOf = (r: { home: string }, file: string) =>
     JSON.parse(readFileSync(settingsOf(r, file), "utf8"))
   // a session the memory trial starts on (ADR 0022) reads a file of its own, the shared file's settings plus its memory folder
-  const fileOf = (name: string, kind?: string) =>
-    kind ? `factory-settings-400k-memory-${name}.json` : "factory-settings-400k.json"
+  const fileOf = (name: string, kind?: string, manager?: boolean) =>
+    kind
+      ? `factory-settings-400k-memory-${name}.json`
+      : `factory-settings-${manager ? "manager-" : ""}400k.json`
+  // a dispatcher or a lead denies the Agent and Workflow tools (spawn-manager-deny.test.ts)
+  const managerOf = (args: string[]) =>
+    args[0] === "manager" || (args[0] === "column" && ["dispatcher", "lead"].includes(args[1]))
   const memoryOf = (r: { home: string }, kind?: string) =>
     kind ? { autoMemoryDirectory: lw(r.home, "memory", kind), autoMemoryEnabled: true } : {}
   const roster = JSON.stringify({
@@ -65,7 +70,7 @@ describe("every session compacts in one 400k window (#1805)", () => {
   ])("%s starts with the 400k window", async (_, args, name, kind) => {
     const r = await spawn(args, [], { ROSTER_JSON: roster })
     expect(r.code).toBe(0)
-    const file = fileOf(name, kind)
+    const file = fileOf(name, kind, managerOf(args))
     expect(launchAfterRm(r).split(" --settings ")).toHaveLength(2)
     expect(launchAfterRm(r)).toContain(
       ` --settings ${settingsOf(r, file)} --dangerously-skip-permissions`,
@@ -75,6 +80,7 @@ describe("every session compacts in one 400k window (#1805)", () => {
       autoCompactWindow: 400000,
       enabledPlugins: { "ws-home@ws": false },
       ...memoryOf(r, kind),
+      ...(managerOf(args) ? { permissions: { deny: ["Agent", "Workflow"] } } : {}),
     })
   })
 
@@ -124,7 +130,8 @@ describe("every session compacts in one 400k window (#1805)", () => {
     const pin = pinned ? { name: pinned, backend: "glm" } : undefined
     const r = await spawn(args, [], {}, undefined, pin)
     expect(r.code).toBe(0)
-    const file = "factory-settings-glm-400k.json"
+    const manager = args[0] === "manager" || pinned === "builder"
+    const file = `factory-settings-glm-${manager ? "manager-" : ""}400k.json`
     expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, file)} `)
     expect(builtOf(r, file).autoCompactWindow).toBe(400000)
     expect(builtOf(r, file).env.CLAUDE_CODE_ENABLE_TELEMETRY).toBe("0")
@@ -132,14 +139,7 @@ describe("every session compacts in one 400k window (#1805)", () => {
 
   test("the built file keeps every hook command of the real factory settings byte for byte", async () => {
     const real = readFileSync(join(root, "scripts", "factory-settings.json"), "utf8")
-    const r = await spawn(
-      ["worker", "worker-brave-otter", "b.md"],
-      [],
-      {},
-      undefined,
-      undefined,
-      (home) => writeFileSync(join(home, ".playground", "factory-settings.json"), real),
-    )
+    const r = await spawn(["worker", "worker-brave-otter", "b.md"], [])
     expect(r.code).toBe(0)
     const source = JSON.parse(real)
     const built = builtOf(r, "factory-settings-400k.json")
@@ -180,10 +180,10 @@ describe("the backend pin carries a start onto its resume", () => {
   test("a start records glm or claude beside the session's name", async () => {
     const glm = await spawn(["worker", "worker-brave-otter", "b.md", "--backend", "glm"], [])
     expect(glm.code).toBe(0)
-    expect(pinOf(glm, "worker-brave-otter")).toBe("glm")
+    expect(pinOf(glm, "worker-brave-otter")).toBe("claude-code glm")
     const plain = await spawn(["worker", "worker-calm-heron", "b.md"], [])
     expect(plain.code).toBe(0)
-    expect(pinOf(plain, "worker-calm-heron")).toBe("claude")
+    expect(pinOf(plain, "worker-calm-heron")).toBe("claude-code claude")
   })
 
   test("a resume of a session started on glm relaunches the whole GLM launch from its pin", async () => {
@@ -200,6 +200,16 @@ describe("the backend pin carries a start onto its resume", () => {
     const glmSettings = join(r.home, ".playground", "factory-settings-glm-400k.json")
     expect(command(r)).toContain(` --settings ${glmSettings} --dangerously-skip-permissions`)
     expect(r.security).toEqual(["find-generic-password -s playground-glm -a zai"])
+  })
+
+  test("a hand-edited pin reads by its words, whatever the spacing between them", async () => {
+    const r = await spawn(["resume", "worker-brave-otter", root], [], {}, undefined, {
+      name: "worker-brave-otter",
+      backend: "claude-code  glm\t",
+    })
+    expect(r.err).not.toContain("refuses")
+    expect(r.code).toBe(0)
+    expect(command(r)).toContain(" --model 'glm-5.3-flash[1m]' ")
   })
 
   test("a resume whose pin says claude stays on Claude", async () => {
@@ -222,13 +232,13 @@ describe("the backend pin carries a start onto its resume", () => {
   test("a resume that carries an explicit --backend with no pin heals the record", async () => {
     const r = await spawn(["resume", "worker-brave-otter", root, "--backend", "glm"], [])
     expect(r.code).toBe(0)
-    expect(pinOf(r, "worker-brave-otter")).toBe("glm")
+    expect(pinOf(r, "worker-brave-otter")).toBe("claude-code glm")
   })
 
   test("a pinless resume with --backend claude relaunches on Claude and heals the record", async () => {
     const r = await spawn(["resume", "worker-brave-otter", root, "--backend", "claude"], [])
     expect(r.code).toBe(0)
-    expect(pinOf(r, "worker-brave-otter")).toBe("claude")
+    expect(pinOf(r, "worker-brave-otter")).toBe("claude-code claude")
     expect(command(r)).toStartWith("(env PLAYGROUND_ROLE=worker claude --resume worker-brave-otter")
     expect(command(r)).not.toContain("ANTHROPIC_BASE_URL")
     expect(r.security).toBeUndefined()
@@ -240,7 +250,7 @@ describe("the backend pin carries a start onto its resume", () => {
       [],
     )
     expect(r.code).toBe(0)
-    expect(pinOf(r, "reviewer-nopin")).toBe("claude")
+    expect(pinOf(r, "reviewer-nopin")).toBe("claude-code claude")
   })
 
   test("a checker takes no --backend glm", async () => {
@@ -277,14 +287,16 @@ describe("the backend pin carries a start onto its resume", () => {
     expect(r.err).toContain("the pin decides")
   })
 
-  test("a pin that reads neither glm nor claude refuses, like a missing one", async () => {
+  test("a pin that reads none of the pin shapes refuses, like a missing one", async () => {
     const r = await spawn(["resume", "worker-brave-otter", root], [], {}, undefined, {
       name: "worker-brave-otter",
       backend: "openai",
     })
     expect(r.code).not.toBe(0)
     expect(placing(r)).toEqual([])
-    expect(r.err).toContain("reads neither glm nor claude")
+    expect(r.err).toContain(
+      "reads none of claude-code claude, claude-code glm, codex openai, glm or claude",
+    )
   })
 
   test("a start writes its pin only once herdr has the session", async () => {

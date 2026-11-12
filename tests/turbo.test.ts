@@ -5,7 +5,12 @@ const ROOT = join(import.meta.dir, "..")
 const SCRIPTS = join(ROOT, "packages/scripts/src")
 
 type Task = { cache?: boolean; dependsOn?: string[]; inputs?: string[]; outputs?: string[] }
-type Turbo = { globalDependencies?: string[]; tasks: Record<string, Task> }
+type Turbo = {
+  globalDependencies?: string[]
+  globalEnv?: string[]
+  globalPassThroughEnv?: string[]
+  tasks: Record<string, Task>
+}
 
 const readTurbo = async () =>
   Bun.JSONC.parse(await Bun.file(join(ROOT, "turbo.json")).text()) as Turbo
@@ -103,6 +108,30 @@ describe("turbo.json", () => {
   test("no packages/scripts/src glob is a global dependency, so an edit to a script no build runs keeps every build's cache", async () => {
     const { globalDependencies = [] } = await readTurbo()
     expect(globalDependencies.filter((entry) => entry.includes("packages/scripts"))).toEqual([])
+  })
+
+  // turbo runs the tasks in strict env mode, so a PLAYGROUND_* value the stack's starter exports reaches the API only through one of the two global lists; the API's process is what the Dashboard's Start button spawns every session from
+  test("every PLAYGROUND_* name spawn.sh reads from its environment is on turbo's global pass-through lists", async () => {
+    const turbo = await readTurbo()
+    const script = await Bun.file(join(ROOT, "scripts/spawn.sh")).text()
+    // a shell parameter read (${PLAYGROUND_X:-default} or $PLAYGROUND_X) or a gate's os.environ read, in its get, getenv and bracket forms; names spawn.sh only sets for a child, or names in prose, are not reads
+    const reads = [
+      ...new Set(
+        [
+          ...script.matchAll(/\$\{?(PLAYGROUND_[A-Z0-9_]+)/g),
+          ...script.matchAll(/os\.(?:environ\.get|getenv)\(.(PLAYGROUND_[A-Z0-9_]+)./g),
+          ...script.matchAll(/os\.environ\[.(PLAYGROUND_[A-Z0-9_]+)./g),
+        ].map((match) => match[1]!),
+      ),
+    ].sort()
+    expect(reads.length).toBeGreaterThan(0)
+    const passed = new Set([...(turbo.globalEnv ?? []), ...(turbo.globalPassThroughEnv ?? [])])
+    expect(reads.filter((name) => !passed.has(name))).toEqual([])
+  })
+
+  test("globalPassThroughEnv stays in A to Z order", async () => {
+    const { globalPassThroughEnv = [] } = await readTurbo()
+    expect(globalPassThroughEnv).toEqual([...globalPassThroughEnv].sort())
   })
 
   // turbo folds @packages/scripts#build's hash into each dependent's through ^build, so that task's inputs decide which script edits rebuild web and auth

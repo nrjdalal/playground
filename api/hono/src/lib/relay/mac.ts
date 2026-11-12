@@ -3,6 +3,7 @@ import { RELAY_ANSWER_KINDS, signedBytes } from "@packages/message"
 import { type AuditLog, remoteAudit } from "@/lib/relay/audit"
 import { type KeyStore, type PairedKey, remoteKeys } from "@/lib/relay/key"
 import {
+  BOT_GETS,
   cardsOf,
   pathOn,
   RELAY_HEADERS,
@@ -12,6 +13,8 @@ import {
   RELAY_REPLACED_CLOSE,
   RELAY_SILENT_MS,
   relayAllowed,
+  type RelayBotRead,
+  relayBotSchema,
   relayPairSchema,
   RELAY_WRITES,
   type RelayRequest,
@@ -20,10 +23,11 @@ import {
   type RelayWrite,
   relayWriteSchema,
 } from "@/lib/relay/protocol"
+import { checkoutEnvValues, redact } from "@/lib/relay/redact"
 import { markRelayed } from "@/lib/relay/relayed"
 import { remoteWriteIds, type WriteIdStore } from "@/lib/relay/write-ids"
 
-// This Mac's side of the relay: it dials out to the hosted hub and answers the owner's reads, and the writes the paired key signed, from its own dashboard, in process, so no port opens here.
+// This Mac's side of the relay: it dials out to the hosted hub and answers the owner's reads, the writes the paired key signed, and a bot's read of the dispatcher's log, from its own dashboard, in process, so no port opens here.
 
 // The ids this Mac has answered, each kept until it is too old to come again.
 export type SeenIds = Map<string, number>
@@ -119,6 +123,26 @@ export async function requireSignedWrite(
   return { write }
 }
 
+// Pure but for seen, which it shares with requireRelay: the bot's read a frame holds, or the answer that refuses it, before any route runs. It refuses as refuseStale does, then a bot off readers (the yard.logReaders setting) or one whose DM is not the one its login is listed with, as a bot made again under a revoked bot's name, then a path off BOT_GETS, so a bot reaches no RELAY_GETS or RELAY_WRITES route.
+export function requireBotRead(
+  raw: string,
+  {
+    readers,
+    ...deps
+  }: { login: string; now: Date; readers: () => Readonly<Record<string, string>>; seen: SeenIds },
+): { read: RelayBotRead } | { refused: RelayResponse } | null {
+  const frame = relayBotSchema.safeParse(parse(raw))
+  if (!frame.success) return null
+  const read = frame.data
+  const stale = refuseStale(read, deps)
+  if (stale) return { refused: stale }
+  if (!Object.entries(readers()).some(([bot, dm]) => sameLogin(bot, read.bot) && dm === read.dm))
+    return { refused: json(read.id, 403, "FORBIDDEN", "This Mac lets no such bot read its log") }
+  if (!pathOn(BOT_GETS, read.path))
+    return { refused: json(read.id, 403, "FORBIDDEN", "A bot reads the dispatcher's log alone") }
+  return { read }
+}
+
 // The answer a route gave, as a frame: its status, the headers on RELAY_HEADERS, and its bytes.
 const framed = async (id: string, response: Response): Promise<RelayResponse> => ({
   body: Buffer.from(await response.arrayBuffer()).toString("base64"),
@@ -137,11 +161,15 @@ type AnswerDeps = {
   audit?: Pick<AuditLog, "append">
   cookie: () => Promise<string>
   dispatch: (request: Request) => Promise<Response>
+  // the live checkout's .env values, hidden in a bot's read; the API's own checkout's by default
+  envValues?: () => readonly string[]
   keys?: Pick<KeyStore, "offer" | "paired">
   // the kind of the Inbox card a key names (an id, or the `#iN` a message names), or null with none; a relayed write reaching a card is refused without it
   kindOf?: (key: string) => Promise<string | null>
   login: string
   now?: Date
+  // yard.logReaders, each bot's login to its DM, the only ones whose read this Mac answers; none by default
+  readers?: () => Readonly<Record<string, string>>
   seen: SeenIds
   // the ids of the writes this Mac took, kept on disk across a restart
   writeIds?: Pick<WriteIdStore, "claim">
@@ -172,17 +200,19 @@ async function runWrite(
   }
 }
 
-// Answers one frame. A pair request, once refuseStale passes it, waits in keys for the owner's Approve on this Mac and is answered with its fingerprint. A write passes requireSignedWrite against the paired key and RELAY_WRITES, then its id is kept on disk until it expires, so a replay after a restart is refused, then runWrite, and each one that ran or met the kind check leaves an audit line, its kind refusal included, so a hub that sends frames it cannot sign never pushes a write that ran out of the Remote section's list. A read passes requireRelay first. Both run in this Mac's own API as its local owner's session, so the routes' own owner check and limits still run here.
+// Answers one frame. A bot's read passes requireBotRead, runs as a read does, and has every secret hidden in its answer (redact). A pair request, once refuseStale passes it, waits in keys for the owner's Approve on this Mac and is answered with its fingerprint. A write passes requireSignedWrite against the paired key and RELAY_WRITES, then its id is kept on disk until it expires, so a replay after a restart is refused, then runWrite, and each one that ran or met the kind check leaves an audit line, its kind refusal included, so a hub that sends frames it cannot sign never pushes a write that ran out of the Remote section's list. A read passes requireRelay first. Both run in this Mac's own API as its local owner's session, so the routes' own owner check and limits still run here.
 export async function answerRelay(
   raw: string,
   {
     audit = remoteAudit,
     cookie,
     dispatch,
+    envValues = checkoutEnvValues,
     keys = remoteKeys,
     kindOf,
     login,
     now = new Date(),
+    readers = () => ({}),
     seen,
     writeIds = remoteWriteIds,
   }: AnswerDeps,
@@ -231,6 +261,22 @@ export async function answerRelay(
       .catch((error: unknown) => console.error("[relay] the audit line was not written", error))
     return answer
   }
+  const bot = requireBotRead(raw, { login, now, readers, seen })
+  if (bot) {
+    if ("refused" in bot) return bot.refused
+    const { read } = bot
+    try {
+      const response = await dispatch(
+        new Request(`http://127.0.0.1${read.path}`, { headers: { cookie: await cookie() } }),
+      )
+      const answer = await framed(read.id, response)
+      const said = Buffer.from(answer.body, "base64").toString()
+      return { ...answer, body: Buffer.from(redact(said, envValues())).toString("base64") }
+    } catch (error) {
+      console.error("[relay] a bot's read failed", error)
+      return json(read.id, 500, "INTERNAL_SERVER_ERROR", "This Mac could not read it")
+    }
+  }
   const checked = requireRelay(raw, { login, now, seen })
   if (checked === null || "refused" in checked) return checked?.refused ?? null
   const { request } = checked
@@ -278,6 +324,8 @@ type RelayDeps = {
   kindOf?: (key: string) => Promise<string | null>
   // the login the token's /me answers
   login: (token: string) => Promise<string>
+  // yard.logReaders, each bot's login to its DM
+  readers?: () => Readonly<Record<string, string>>
   recycleMs?: number
   silentMs?: number
   // the Keychain token, or null with none

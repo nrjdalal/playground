@@ -257,6 +257,165 @@ describe("set", () => {
     expect(alone.code).toBe(1)
   })
 
+  // the checker reaper ended a reviewer whose lead had added PRs with prs+= alone while its row still named a worker that had ended (#1839).
+  describe("a checker whose worker is missing or ended takes no new PR but through assign (#1839)", () => {
+    const pull = (n: number) => `https://github.com/acme/app/pull/${n}`
+    const gone: Agent = {
+      kind: "worker",
+      name: "x7mh4d-worker",
+      role: "worker",
+      status: "ended",
+      task: "Fix #1",
+    }
+    const live: Agent = { ...gone, name: "b4n8tz-worker", status: "working", task: "Fix #3" }
+    const checker: Agent = {
+      kind: "reviewer",
+      name: "k3v9q2-reviewer",
+      pr: pull(1),
+      prs: [pull(1)],
+      role: "worker",
+      status: "working",
+      task: "Review #1",
+      title: "Reviewer of x7mh4d-worker",
+      worker: "x7mh4d-worker",
+    }
+    const { pr: _pr, prs: _prs, worker: _worker, ...bare } = checker
+    const FIX = "roster.ts assign k3v9q2-reviewer <title> <task> worker=<live worker> pr=<n>"
+
+    for (const [why, agents, args] of [
+      [
+        "prs+= while its worker has ended",
+        [gone, live, checker],
+        ["set", "k3v9q2-reviewer", "prs+=2"],
+      ],
+      [
+        "prs= while its worker has ended",
+        [gone, live, checker],
+        ["set", "k3v9q2-reviewer", "prs=1,2"],
+      ],
+      [
+        "report's prs+= while its worker has ended",
+        [gone, live, checker],
+        ["report", "k3v9q2-reviewer", "on #2", "prs+=2"],
+      ],
+      [
+        "assign naming an ended worker",
+        [gone, live, checker],
+        ["assign", "k3v9q2-reviewer", "Reviewer", "Review #2", "worker=x7mh4d-worker", "pr=2"],
+      ],
+      [
+        "a restart of an ended checker whose worker has ended",
+        [gone, { ...checker, status: "ended" }],
+        ["set", "k3v9q2-reviewer", "kind=reviewer", "status=starting", "prs=3", "pr=3"],
+      ],
+      [
+        "a restart of an ended checker on the PR it holds, whose worker has ended",
+        [gone, { ...checker, status: "ended" }],
+        ["set", "k3v9q2-reviewer", "kind=reviewer", "status=starting", "prs=1", "pr=1"],
+      ],
+      [
+        "a restart of an ended checker with no worker, as a lead's column writes one",
+        [{ ...bare, status: "ended" }],
+        ["set", "k3v9q2-reviewer", "kind=reviewer", "status=starting", "prs=3", "pr=3"],
+      ],
+      ["prs+= with no worker", [bare], ["set", "k3v9q2-reviewer", "prs+=2"]],
+      ["a first pr with no worker", [bare], ["set", "k3v9q2-reviewer", "pr=2"]],
+    ] as [string, Agent[], string[]][])
+      test(`refuses ${why}, naming assign with a live worker, and writes nothing`, async () => {
+        const r = await run(configWith(agents), args)
+        expect(r.code).toBe(1)
+        expect(r.err).toContain(FIX)
+        expect(r.roster?.agents).toEqual(agents)
+      })
+
+    test("takes prs-= and a status while its worker has ended", async () => {
+      const config = configWith([gone, live, checker])
+      expect((await run(config, ["set", "k3v9q2-reviewer", "prs-=1"])).code).toBe(0)
+      expect((await run(config, ["set", "k3v9q2-reviewer", "status=waiting"])).code).toBe(0)
+    })
+
+    test("a checker a lead started with no worker, refused prs+=, takes the PR through the assign the refusal names", async () => {
+      const config = configWith([live, bare])
+      const refused = await run(config, ["set", "k3v9q2-reviewer", "prs+=2"])
+      expect(refused.code).toBe(1)
+      expect(refused.err).toContain(FIX)
+      const assigned = await run(config, [
+        "assign",
+        "k3v9q2-reviewer",
+        "Reviewer of b4n8tz-worker",
+        "Review #2",
+        "worker=b4n8tz-worker",
+        "pr=2",
+      ])
+      expect(assigned.code).toBe(0)
+      expect(agentOf(assigned.roster, "k3v9q2-reviewer")).toMatchObject({
+        pr: pull(2),
+        prs: [pull(2)],
+        worker: "b4n8tz-worker",
+      })
+    })
+
+    test("assign with a live worker moves it to the new PR", async () => {
+      const r = await run(configWith([gone, live, checker]), [
+        "assign",
+        "k3v9q2-reviewer",
+        "Reviewer of b4n8tz-worker",
+        "Review #3",
+        "worker=b4n8tz-worker",
+        "pr=3",
+      ])
+      expect(r.code).toBe(0)
+      expect(agentOf(r.roster, "k3v9q2-reviewer")).toMatchObject({
+        pr: pull(3),
+        prs: [pull(1), pull(3)],
+        worker: "b4n8tz-worker",
+      })
+    })
+
+    test("prs+= with a live worker passes, as spawn.sh's first write of a new checker gives it", async () => {
+      const r = await run(configWith([live]), [
+        "set",
+        "k3v9q2-reviewer",
+        "kind=reviewer",
+        "task=Review #3",
+        "prs+=3",
+        "pr=3",
+        "worker=b4n8tz-worker",
+      ])
+      expect(r.code).toBe(0)
+      expect(agentOf(r.roster, "k3v9q2-reviewer")).toMatchObject({ pr: pull(3), prs: [pull(3)] })
+    })
+
+    test("spawn.sh's restart of an ended checker passes, by resume and by a column under a live worker", async () => {
+      const ended: Agent = { ...checker, status: "ended", worker: "b4n8tz-worker" }
+      const resume = await run(configWith([live, ended]), [
+        "set",
+        "k3v9q2-reviewer",
+        "kind=reviewer",
+        "status=starting",
+        "prs=2",
+        "pr=2",
+      ])
+      expect(resume.code).toBe(0)
+      const column = await run(configWith([gone, live, ended]), [
+        "set",
+        "k3v9q2-reviewer",
+        "kind=reviewer",
+        "status=starting",
+        "prs=3",
+        "pr=3",
+        "worker=b4n8tz-worker",
+      ])
+      expect(column.code).toBe(0)
+      expect(agentOf(column.roster, "k3v9q2-reviewer")).toMatchObject({
+        pr: pull(3),
+        prs: [pull(3)],
+        status: "starting",
+        worker: "b4n8tz-worker",
+      })
+    })
+  })
+
   test("a title loses a trailing (#N) and is cut to 40 characters; an empty value removes its key", async () => {
     const r = await run(configWith([]), [
       "set",
@@ -276,7 +435,14 @@ describe("set", () => {
       const r = await run(configWith([]), ["set", "worker-envy", "task=t", `pr=${pr}`])
       expect(r.code).toBe(0)
       expect(agentOf(r.roster, "worker-envy")?.pr).toBe(url)
-      const a = await run(configWith([]), ["assign", "reviewer-envy", "Review", "t", `pr=${pr}`])
+      const a = await run(configWith([]), [
+        "assign",
+        "reviewer-envy",
+        "Review",
+        "t",
+        "worker=worker-envy",
+        `pr=${pr}`,
+      ])
       expect(a.code).toBe(0)
       expect(agentOf(a.roster, "reviewer-envy")?.pr).toBe(url)
     }
@@ -360,6 +526,251 @@ describe("set", () => {
     const read = JSON.parse(readFileSync(join(dataDir(env), "roster.json"), "utf8")) as RosterFile
     expect(agentOf(read, "p4dd1r-worker")?.task).toBe("t")
     expect(existsSync(join(config, "playground", "roster.json"))).toBe(false)
+  })
+})
+
+// a mistyped key once left two rows reading working for over an hour, counted live by the Dashboard and the sweep (#1290).
+describe("unknown keys (#1290)", () => {
+  test("a mistyped status is refused by set, report and assign, naming status as the nearest field, and writes nothing", async () => {
+    const config = configWith([WITH_PR])
+    for (const args of [
+      ["set", "worker-greed", "stauts=working"],
+      ["report", "worker-greed", "r1", "stauts=working"],
+      ["assign", "worker-greed", "Chore", "Do it", "stauts=working"],
+    ]) {
+      const r = await run(config, args)
+      expect(r.code).toBe(2)
+      expect(r.err).toContain('did you mean "status"?')
+      expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
+    }
+  })
+
+  test("a key far from every field is refused with no guess, naming the keys it takes", async () => {
+    const config = configWith([WITH_PR])
+    const r = await run(config, ["set", "worker-greed", "wibble=1", "task=t"])
+    expect(r.code).toBe(2)
+    expect(r.err).toContain('not "wibble"')
+    expect(r.err).toContain("reportsTo")
+    expect(r.err).not.toContain("did you mean")
+    expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
+  })
+
+  test("every key a caller sets still sets", async () => {
+    // a fresh row without a pr, since task= on a row holding one goes through assign
+    const config = configWith([])
+    const seeded = await run(config, ["set", "worker-greed", "task=Seed"])
+    expect(seeded.code).toBe(0)
+    expect(agentOf(seeded.roster, "worker-greed")?.task).toBe("Seed")
+    const values: Record<string, string> = {
+      asks: "#i1 #i2",
+      backlogNext: "3",
+      backlogTaken: "1 2",
+      branch: "pg-1290-roster-unknown-key",
+      eta: inMinutes(90),
+      kind: "worker",
+      lastReport: "r1",
+      lastReportAt: "2026-10-01T00:00:00Z",
+      lead: "builder",
+      memory: "off",
+      mode: "prepare",
+      owner: "PG-1290",
+      pr: "2",
+      prs: "2",
+      "prs+": "3",
+      reportsTo: "builder",
+      repo: "acme/app",
+      role: "worker",
+      schedule: "always",
+      size: "medium",
+      slot: "2",
+      status: "working",
+      surface: "surface:3",
+      ticket: "ENG-1290",
+      title: "Fix the export",
+      worker: "x7mh4d-worker",
+      workspace: "workspace:3",
+    }
+    for (const [key, value] of Object.entries(values)) {
+      const stored = key === "prs+" ? "prs" : key
+      const r = await run(config, ["set", "worker-greed", `${key}=${value}`])
+      expect([key, r.code]).toEqual([key, 0])
+      expect(agentOf(r.roster, "worker-greed")?.[stored]).toBeDefined()
+    }
+    const parked = await run(config, ["set", "worker-greed", "status=parked", "hold=#12"])
+    expect(parked.code).toBe(0)
+    expect(agentOf(parked.roster, "worker-greed")?.hold).toBe("#12")
+    const cleared = await run(config, ["set", "worker-greed", "prs-=3", "mode="])
+    expect(cleared.code).toBe(0)
+  })
+})
+
+// a reviewer scoring an extension item kept the ended worker it last served, since pr= took a GitHub PR alone, and the checker reaper ended it mid-review (#1851).
+describe("an extension item as a checker's pr (#1851)", () => {
+  const pull = (n: number) => `https://github.com/acme/app/pull/${n}`
+  const REF = "acme/script/start-up"
+  const gone: Agent = {
+    kind: "worker",
+    name: "x7mh4d-worker",
+    role: "worker",
+    status: "ended",
+    task: "Fix #1",
+  }
+  const live: Agent = { ...gone, name: "b4n8tz-worker", status: "working", task: "Fix #3" }
+  const checker: Agent = {
+    kind: "reviewer",
+    name: "k3v9q2-reviewer",
+    pr: pull(1),
+    prs: [pull(1)],
+    role: "worker",
+    status: "working",
+    task: "Review #1",
+    title: "Reviewer of x7mh4d-worker",
+    worker: "x7mh4d-worker",
+  }
+  const assign = (pr: string, worker = "b4n8tz-worker") => [
+    "assign",
+    "k3v9q2-reviewer",
+    "Review: the start-up script",
+    "Score the item",
+    `worker=${worker}`,
+    `pr=${pr}`,
+  ]
+
+  test("assign with a live worker and an item ref sets the worker and keeps the ref in prs, leaving pr unset", async () => {
+    const r = await run(configWith([gone, live, checker]), assign(REF))
+    expect(r.code).toBe(0)
+    const row = agentOf(r.roster, "k3v9q2-reviewer")
+    expect(row).toMatchObject({ prs: [pull(1), REF], status: "working", worker: "b4n8tz-worker" })
+    expect(row).not.toHaveProperty("pr")
+  })
+
+  for (const bad of ["-acme/script/start-up", "acme/widget/start-up", "acme/script/Start-Up"])
+    test(`refuses the ref ${bad}, naming the form, and writes nothing`, async () => {
+      const agents = [gone, live, checker]
+      const r = await run(configWith(agents), assign(bad))
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("<scope>/<kind>/<key>")
+      expect(r.roster?.agents).toEqual(agents)
+    })
+
+  test("refuses an item ref with an ended worker, naming assign with a live worker", async () => {
+    const agents = [gone, live, checker]
+    const r = await run(configWith(agents), assign(REF, "x7mh4d-worker"))
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(
+      "roster.ts assign k3v9q2-reviewer <title> <task> worker=<live worker> pr=<n>",
+    )
+    expect(r.roster?.agents).toEqual(agents)
+  })
+
+  test("prs+= and prs-= take an item ref on a checker with a live worker", async () => {
+    const config = configWith([live, { ...checker, worker: "b4n8tz-worker" }])
+    const added = await run(config, ["set", "k3v9q2-reviewer", `prs+=${REF}`])
+    expect(added.code).toBe(0)
+    expect(agentOf(added.roster, "k3v9q2-reviewer")?.prs).toEqual([pull(1), REF])
+    const removed = await run(config, ["set", "k3v9q2-reviewer", `prs-=${REF}`])
+    expect(agentOf(removed.roster, "k3v9q2-reviewer")?.prs).toEqual([pull(1)])
+  })
+
+  test("a worker's pr takes no item ref", async () => {
+    const r = await run(configWith([live]), ["set", "b4n8tz-worker", `pr=${REF}`])
+    expect(r.code).toBe(2)
+    expect(agentOf(r.roster, "b4n8tz-worker")).toEqual(live)
+  })
+})
+
+// a checker scoring an extension revision has no pull request, so assign names the item it scores now by item=, beside pr= for a pull request (#1932)
+describe("item= on a checker (#1932)", () => {
+  const pull = (n: number) => `https://github.com/acme/app/pull/${n}`
+  const REF = "acme/script/start-up"
+  const live: Agent = {
+    kind: "worker",
+    name: "b4n8tz-worker",
+    role: "worker",
+    status: "working",
+    task: "Fix #3",
+  }
+  const checker: Agent = {
+    kind: "reviewer",
+    name: "k3v9q2-reviewer",
+    pr: pull(1),
+    prs: [pull(1)],
+    role: "worker",
+    status: "working",
+    task: "Review #1",
+    title: "Reviewer of x7mh4d-worker",
+    worker: "x7mh4d-worker",
+  }
+  const assign = (...pairs: string[]) => [
+    "assign",
+    "k3v9q2-reviewer",
+    "Review: the start-up script",
+    "Score the item",
+    "worker=b4n8tz-worker",
+    ...pairs,
+  ]
+
+  test("assign with item= sets the checker's worker, title and item, keeps the item in prs and clears its pr", async () => {
+    const r = await run(configWith([live, checker]), assign(`item=${REF}`))
+    expect(r.code).toBe(0)
+    const row = agentOf(r.roster, "k3v9q2-reviewer")
+    expect(row).toMatchObject({
+      item: REF,
+      prs: [pull(1), REF],
+      status: "working",
+      task: "Score the item",
+      title: "Review: the start-up script",
+      worker: "b4n8tz-worker",
+    })
+    expect(row).not.toHaveProperty("pr")
+  })
+
+  test("assign with pr= sets the pr as today, and clears an item the row held", async () => {
+    const r = await run(configWith([live, { ...checker, item: REF }]), assign(`pr=${pull(3)}`))
+    expect(r.code).toBe(0)
+    const row = agentOf(r.roster, "k3v9q2-reviewer")
+    expect(row).toMatchObject({ pr: pull(3), prs: [pull(1), pull(3)], worker: "b4n8tz-worker" })
+    expect(row).not.toHaveProperty("item")
+  })
+
+  test("assign with both pr= and item= is refused, and writes nothing", async () => {
+    const agents = [live, checker]
+    const r = await run(configWith(agents), assign(`pr=${pull(3)}`, `item=${REF}`))
+    expect(r.code).toBe(2)
+    expect(r.err).toContain("pr= or item=, not both")
+    expect(r.roster?.agents).toEqual(agents)
+  })
+
+  for (const bad of ["start-up", "acme/script", "acme/widget/start-up", pull(3)])
+    test(`a malformed item=${bad} is refused with the shape it takes, and writes nothing`, async () => {
+      const agents = [live, checker]
+      const r = await run(configWith(agents), assign(`item=${bad}`))
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("<scope>/<kind>/<key>")
+      expect(r.roster?.agents).toEqual(agents)
+    })
+
+  test("item= is refused on a worker, and through set on a checker, which moves through assign", async () => {
+    const agents = [live, { ...checker, worker: "b4n8tz-worker" }]
+    const worker = await run(configWith(agents), ["set", "b4n8tz-worker", `item=${REF}`])
+    expect(worker.code).toBe(2)
+    expect(worker.roster?.agents).toEqual(agents)
+    const set = await run(configWith(agents), ["set", "k3v9q2-reviewer", `item=${REF}`])
+    expect(set.code).toBe(1)
+    expect(set.err).toContain("roster.ts assign k3v9q2-reviewer")
+    expect(set.roster?.agents).toEqual(agents)
+  })
+
+  test("assign without worker= is refused on a row holding an item, as on one holding a pr, and writes nothing", async () => {
+    const onItem: Agent = { ...checker, item: REF, prs: [REF], worker: "b4n8tz-worker" }
+    delete onItem.pr
+    const agents = [live, onItem]
+    for (const pair of [`item=acme/script/other`, `pr=${pull(9)}`]) {
+      const r = await run(configWith(agents), ["assign", "k3v9q2-reviewer", "Review: s", "t", pair])
+      expect(r.code).toBe(1)
+      expect(r.err).toContain("roster.ts assign k3v9q2-reviewer")
+      expect(r.roster?.agents).toEqual(agents)
+    }
   })
 })
 

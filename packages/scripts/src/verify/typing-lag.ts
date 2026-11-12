@@ -51,7 +51,7 @@ export const TYPING_LAG_SCRIPT = `(() => {
   window.WebSocket = class extends Native {
     constructor(...args) {
       super(...args)
-      if (!String(args[0]).includes("/dashboard/ws")) return
+      if (!String(args[0]).includes("/api/v1/ws")) return
       sockets.push(this)
       // Registered before the page's own listeners, so each real workers frame reaches the page widened too: a board that flipped between its own sessions and the widened ones would read as sessions coming and going on every frame, which a live board does not do.
       this.addEventListener("message", (event) => {

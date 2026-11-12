@@ -236,6 +236,24 @@ export const builtPaths = (sources: string[]): string[] => [
   ...new Set(sources.flatMap((source) => source.match(BUILT_PATH) ?? [])),
 ]
 
+// A source that spawns a child process may start Bun on code the import scan cannot follow (a `bun -e` text, a path read at run time, a helper's binary in a variable), so test:file builds every shared package's dist for it, whatever the program.
+const SPAWNS = /\b(?:spawn|spawnSync|execFile|execFileSync|execSync|fork)\s*\(|(?:^|[^\w$])\$`/m
+
+// What test:file, or with `types` check-types:tests, builds for the given sources: their built imports and paths, and for a source that spawns a child process each built shared package's dist.
+export const testSpecifiers = (
+  sources: string[],
+  built: Set<string | undefined>,
+  types: boolean,
+): string[] => [
+  ...workspaceImports(sources, types),
+  ...builtPaths(sources),
+  ...(!types && sources.some((source) => SPAWNS.test(source))
+    ? [...built]
+        .filter((name): name is string => Boolean(name?.startsWith("@packages/")))
+        .map((name) => `packages/${name.slice("@packages/".length)}/dist`)
+    : []),
+]
+
 // Where a built import's file lives, by its workspace's exports and the conditions the reader takes (Bun's runtime, or tsc's types), so a test file outside any workspace resolves as the code it imports does; it throws when the file is not there yet.
 export const builtFile = (specifier: string, root: string, conditions: string[]): string => {
   if (
@@ -373,13 +391,29 @@ export const prebuildTests = async (paths: string[], types = false): Promise<num
       .map(({ pkg }) => pkg.name),
   )
   const missing = unbuilt(
-    [...workspaceImports(sources, types), ...builtPaths(sources)].filter(
+    testSpecifiers(sources, built, types).filter(
       (specifier) => specifier.startsWith("generated/") || built.has(packageOf(specifier)),
     ),
     ROOT,
     types ? {} : importedNames(sources),
     (specifier) => builtFile(specifier, ROOT, conditions),
   )
+  // a test's child process may load code no source names (a path read at run time, an aliased spawn), so test:file also builds every shared package whose dist is missing, whatever its files import; a dist that is present stays as it is
+  if (!types) {
+    const named = new Set(missing.map(packageOf))
+    missing.push(
+      ...workspaces(ROOT)
+        .filter(
+          ({ dir, path, pkg }) =>
+            pkg.scripts?.build &&
+            /^(?:api|packages)\//.test(dir) &&
+            !existsSync(join(path, "dist")) &&
+            !named.has(packageOf(dir)),
+        )
+        .map(({ dir }) => `${dir}/dist`)
+        .sort(),
+    )
+  }
   return prebuild(types ? "check-types:tests" : "test:file", missing)
 }
 

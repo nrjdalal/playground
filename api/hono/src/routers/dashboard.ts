@@ -68,6 +68,7 @@ import {
   storePasteReport,
 } from "@/lib/dashboard/paste-report"
 import { restartPrs, restartSession } from "@/lib/dashboard/restart"
+import { restoreCheckout, RestoreError } from "@/lib/dashboard/restore"
 import { readRoster } from "@/lib/dashboard/roster"
 import {
   answerHosted,
@@ -563,10 +564,51 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "The ops jobs that run as scripts with no Claude session, A to Z: one for each `ops/ops-*.json` heartbeat in the data folder (`report.json` and `alerts.log` beside them are not jobs), so a new job shows with no code change: what each does (null for a job the API does not describe), its status (`running`; `waiting` with the reason after `waiting: ` in its last result, when it has nothing to read yet; `failing` with its last result; `down` when its file is malformed, its loop has exited, its process is gone or it has not beaten for three cycles, with the reason), its last beat, and `paused`: true for a job `ops/jobs.json` marks disabled, which the sidebar leaves out and the System page lists as Paused. A job jobs.json expects to run with no heartbeat file is `down`. Beside those, `callsModel` and `model`, the marks jobs.json gives each job: the sidebar shows a model label, or AI, on a job marked callsModel. Read-only.",
+        "The ops jobs that run as scripts with no Claude session, A to Z: one for each `ops/ops-*.json` heartbeat in the data folder and each job `ops/jobs.json` lists, with or without the `ops-` prefix (`report.json`, `alerts.log` and any other file no row names are not jobs), so a new job shows with no code change: what each does (core's line for a registry job, else its own `jobs.json` description, else the generic `NO_DESCRIPTION` line), its status (`running`; `waiting` with the reason after `waiting: ` in its last result, when it has nothing to read yet; `failing` with its last result; `down` when its file is malformed, its loop has exited, its process is gone or it has not beaten for three cycles, with the reason), its last beat, and `paused`: true for a job `ops/jobs.json` marks disabled, which the sidebar leaves out and the System page lists as Paused. A job jobs.json expects to run with no heartbeat file is `down`. Beside those, `callsModel` and `model`, the marks jobs.json gives each job: the sidebar shows a model label, or AI, on a job marked callsModel. Read-only.",
       responses: { 200: { description: "OK" }, ...authErrorResponses },
     }),
     async (c) => c.json({ data: await readOps() }),
+  )
+  .post(
+    "/ops/restore",
+    describeRoute({
+      tags: ["Dashboard"],
+      description:
+        "Settings > Jobs' Restore now, on the owner's click: runs ops-restore's own steps once (`packages/scripts/src/ops-restore/cli.ts --now`) from this API's checkout, for a main checkout whose guards are gone while the job is stopped or off. The checkout comes from the server alone: the main checkout this API's checkout sits in on a stack that reads this machine, the fixture's scratch `checkout` folder on a fixture or test stack. A checkout whose guards are all there is left as it is (`intact`), as is one an install, `link-skills.sh` or `playground update` holds; otherwise it puts the files back, installs and runs `link-skills.sh` (`restored`), or names the step it stopped at (`stopped`), and tells ops and the dispatcher. Refused (409) on a stack with no checkout to restore and while a restore runs. The request waits for the whole run, past the server's 10 s idle limit.",
+      responses: {
+        200: {
+          description: "What the restore did, in words",
+          content: {
+            "application/json": {
+              schema: resolver(
+                z.object({
+                  data: z.object({
+                    status: z.enum(["intact", "restored", "stopped"]),
+                    text: z.string(),
+                  }),
+                }),
+              ),
+            },
+          },
+        },
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        409: errorResponse("CONFLICT", "No checkout to restore, or a restore already runs"),
+      },
+    }),
+    async (c) => {
+      // a restore (a run-slot wait, an install, link-skills.sh) outlasts Bun.serve's 10 s idle limit, so this one request waits for its words
+      ;(c.env as { timeout?: (request: Request, seconds: number) => void } | undefined)?.timeout?.(
+        c.req.raw,
+        0,
+      )
+      try {
+        return c.json({ data: await restoreCheckout() })
+      } catch (error) {
+        if (error instanceof RestoreError) throw new ApiError(409, "CONFLICT", error.message)
+        throw error
+      }
+    },
   )
   .get(
     "/stacks",

@@ -10,7 +10,7 @@ import {
 } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, WAITING, machine, stop } from "./run-slot-fake"
+import { SCRIPT, WAITING, machine, stop, within } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -43,6 +43,18 @@ const slots = (m: ReturnType<typeof machine>) =>
 describe("slots 2 to 4 with single-slot mode off", () => {
   test("wait while load5 is at or over run-slot.load5-cap's cap", async () => {
     expect(await loaded(18, 15).waits("worker-m", MEDIUM)).toBe(true)
+  })
+
+  // #1378: cheap_sig read run-slot.load5-cap's first line while load_line reads its last, so a cap the operator set below its reason line moved nothing a waiter watched for
+  test("a cap whose last line moves under a reason line lets a held waiter take slot 2", async () => {
+    const m = loaded(16)
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "raised for the shards\n14\n")
+    const run = m.start("worker-m", { ...MEDIUM, RUN_SLOT_LOAD_WAIT: "600" })
+    expect(await run.saw(WAITING)).toBe(true)
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "raised for the shards\n20\n")
+    // the check binds the run's own line, not wall time; within is the give-up if the line never comes (issue 1725: an 8 s wall-time race lost once in a 145-file batch, the look that reads the moved cap stretching under a batch's load)
+    await within(() => run.stderr().includes("holds run-slot-2"), "the held waiter took slot 2", m)
+    expect(await run.ran()).toBe(true)
   })
 
   // review round 1: the hold shut run-slot-2 alone, so a second heavy run took run-slot-3 or run-slot-4 at the cap while the lanes were open

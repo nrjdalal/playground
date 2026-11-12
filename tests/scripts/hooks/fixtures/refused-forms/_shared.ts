@@ -52,12 +52,17 @@ export type Paths = {
   BARE: string
   CLI_DIR: string
   DATA: string
+  // worktrees another repository lists: one outside the main checkout, one placed under its .claude/worktrees
+  FOREIGN_TREE: string
+  FOREIGN_TREE_IN_MAIN: string
   HOME: string
   LINK: string
   LIST: string
   MAIN: string
   ROOT: string
   SCOPE: string
+  // a link inside the main checkout's worktree that names a folder of the main checkout
+  TREE_LINK: string
   WORDS: string
   WORK: string
 }

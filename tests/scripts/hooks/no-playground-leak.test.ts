@@ -3,7 +3,13 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { check, skillNames } from "../../../scripts/hooks/no-playground-leak"
+import {
+  check,
+  inspectAs,
+  type Policy,
+  skillNames,
+} from "../../../scripts/hooks/no-playground-leak"
+import { withDeadline } from "../../../scripts/hooks/shell"
 import { OLD } from "../../session-names"
 import { storeWith } from "./render-set"
 
@@ -353,6 +359,16 @@ describe(`a Acme write holding a ${OLD.dispatcher} term is refused`, () => {
   test("git push carries the messages of the commits the remote does not hold", async () => {
     expect(await bash("git push", dirs.leaky)).toContain('"worker-envy"')
     expect(await bash("git push -u origin main", dirs.leaky)).toContain('"worker-envy"')
+  })
+
+  test("a push's refusal names the commit whose message held the term, and the branch it names", async () => {
+    const sha = Bun.spawnSync(["git", "-C", dirs.leaky, "rev-parse", "--short", "HEAD"])
+      .stdout.toString()
+      .trim()
+    const message = await bash("git push", dirs.leaky)
+    expect(message).toContain(`, in the message of commit ${sha}`)
+    expect(message).toContain("git commit --amend")
+    expect(await bash("git push", dirs.named)).toContain(", in the branch name it pushes")
   })
 
   test("git commit and git push carry the branch name", async () => {
@@ -977,6 +993,53 @@ describe("a Acme write it cannot read is refused", () => {
   })
 })
 
+describe("a pull request opened from a pushed branch is judged on its own text (#1941)", () => {
+  const file = (name: string) => join(dirs.lw, name)
+  const pulls = (title: string, body: string) =>
+    `gh api repos/acme-blue/app/pulls -X POST -F title=@${file(title)} -F body=@${file(body)} -f head=fix/export -f base=main`
+  const create = (title: string, body: string) =>
+    `gh pr create ${LW} --head fix/export --title "${title}" --body-file ${file(body)}`
+
+  test("gh api's pulls POST is refused for a factory term in its title or body file, and passes clean", async () => {
+    expect(await bash(pulls("leaky.md", "clean.md"), scratch)).toContain('"worker-envy"')
+    expect(await bash(pulls("clean.md", "leaky.md"), scratch)).toContain('"worker-envy"')
+    expect(await bash(pulls("clean.md", "clean.md"), scratch)).toBeUndefined()
+  })
+
+  test("gh pr create with --head, outside a checkout, is judged on its title and body file", async () => {
+    expect(await bash(create("Fix export", "clean.md"), scratch)).toBeUndefined()
+    expect(await bash(create("Fix export", "leaky.md"), scratch)).toContain('"worker-envy"')
+    expect(await bash(create("Fix by worker-envy", "clean.md"), scratch)).toContain('"worker-envy"')
+  })
+
+  test.each(["-H fix/export", "--head=fix/export", "-Hfix/export", "-dH fix/export"])(
+    "gh pr create %s, outside a checkout, is judged on its text alone",
+    async (head) => {
+      const command = `gh pr create ${LW} ${head} --title "Fix export" --body-file ${file("clean.md")}`
+      expect(await bash(command, scratch)).toBeUndefined()
+    },
+  )
+
+  test("gh pr create --head from a checkout whose unpushed commit holds a term reads no commits, since it pushes none", async () => {
+    expect(await bash(create("Fix export", "clean.md"), dirs.leaky)).toBeUndefined()
+    expect(
+      await bash(
+        `gh pr create ${LW} --title "Fix export" --body-file ${file("clean.md")}`,
+        dirs.leaky,
+      ),
+    ).toContain('"worker-envy"')
+  })
+
+  test("gh pr create with no --head, outside a checkout, stays refused for the commits it may push", async () => {
+    const reason = await bash(
+      `gh pr create ${LW} --title "Fix export" --body-file ${file("clean.md")}`,
+      scratch,
+    )
+    expect(reason).toContain("cannot read its text")
+    expect(reason).toContain("the commits it may push")
+  })
+})
+
 describe("a write it cannot place", () => {
   test("is refused when its text holds a term", async () => {
     expect(await bash(`gh pr comment "$N" -R acme/archive --body ${OLD.dispatcher}`)).toContain(
@@ -1162,10 +1225,9 @@ describe("as Claude Code runs it", () => {
     return found
   }
 
-  test("the factory settings' matcher takes Bash and the Linear, Slack and GitHub tools", async () => {
+  test("the factory settings' matcher takes the Linear, Slack and GitHub tools, Bash reaching it through guards", async () => {
     const matcher = new RegExp((await entry()).matcher)
     for (const tool of [
-      "Bash",
       "mcp__linear-shared__save_issue",
       "mcp__claude_ai_Linear__save_comment",
       "mcp__slack-shared__chat_post_message",
@@ -1175,7 +1237,7 @@ describe("as Claude Code runs it", () => {
     ]) {
       expect(matcher.test(tool)).toBe(true)
     }
-    for (const tool of ["Read", "Write", "Edit", "mcp__notes__save_note"]) {
+    for (const tool of ["Bash", "Read", "Write", "Edit", "mcp__notes__save_note"]) {
       expect(matcher.test(tool)).toBe(false)
     }
   })
@@ -1552,4 +1614,51 @@ describe("an org whose extension gates its Slack sends", () => {
       ).toBeUndefined()
     },
   )
+})
+
+describe("each inspectAs call keeps its own policy (PG-1702)", () => {
+  const guards = (repo: string): Policy => ({
+    anyWrite: true,
+    find: () => undefined,
+    git: true,
+    guard: "A",
+    guarded: (r) => `${r.owner}/${r.repo}`.toLowerCase() === repo,
+    hosts: false,
+    place: "p",
+    what: "w",
+    why: "y",
+  })
+  const none: Policy = {
+    ...guards(""),
+    anyWrite: undefined,
+    guard: "B",
+    guarded: () => false,
+    hosts: true,
+  }
+  const input = (command: string) =>
+    JSON.stringify({
+      cwd: tmpdir(),
+      hook_event_name: "PreToolUse",
+      tool_input: { command },
+      tool_name: "Bash",
+    })
+  const env = { HOME: tmpdir(), PATH: process.env.PATH }
+  const judge = (policy: Policy, command: string) =>
+    withDeadline(10_000, () => inspectAs(policy, input(command), env))
+  // reading files first gives the walk awaits, so the other check runs inside it
+  const merge = "cat /etc/hosts /etc/shells > /dev/null; gh pr merge 1 -R acme/ext"
+  const read = "gh pr list -R other/x"
+
+  test("two overlapping checks under different policies in one Promise.all both keep their verdicts", async () => {
+    const alone = [await judge(guards("acme/ext"), merge), await judge(none, merge)]
+    expect(alone[0]).toContain("A hook refused")
+    expect(alone[1]).toBeUndefined()
+    const partners = [await judge(none, read), await judge(guards("acme/ext"), read)]
+    const first = await Promise.all([judge(guards("acme/ext"), merge), judge(none, read)])
+    const second = await Promise.all([judge(none, merge), judge(guards("acme/ext"), read)])
+    expect([first, second]).toEqual([
+      [alone[0], partners[0]],
+      [alone[1], partners[1]],
+    ])
+  })
 })

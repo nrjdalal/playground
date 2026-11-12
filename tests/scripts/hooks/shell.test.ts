@@ -7,6 +7,7 @@ import {
   type Env,
   GIT_TAKES,
   lex,
+  pastDeadline,
   places,
   run,
   stdinShell,
@@ -37,6 +38,27 @@ describe("git's value-taking options live in one list", () => {
       .filter((file) => file.endsWith(".ts") && file !== "shell.ts")
       .filter((file) => readFileSync(join(HOOKS, file), "utf8").includes('"--namespace"'))
     expect(copies).toEqual([])
+  })
+})
+
+describe("each withDeadline call keeps its own deadline (PG-1690)", () => {
+  // a check reads its verdict once its wait is over: past its own deadline, or in time
+  const check = (budget: number, wait: Promise<unknown>) =>
+    withDeadline(budget, async () => {
+      await wait
+      try {
+        pastDeadline()
+        return "in time"
+      } catch {
+        return "past"
+      }
+    })
+
+  test("two overlapping checks in one Promise.all both keep their verdicts, and leave no deadline behind", async () => {
+    const short = check(1, Bun.sleep(20))
+    const long = check(60_000, short)
+    expect(await Promise.all([short, long])).toEqual(["past", "in time"])
+    expect(() => pastDeadline()).not.toThrow()
   })
 })
 
@@ -74,12 +96,15 @@ const madePaths = (prefix: string): Paths => {
     BARE: join(root, "bare"),
     CLI_DIR: join(root, "cli"),
     DATA: join(root, "data"),
+    FOREIGN_TREE: join(root, "foreign-tree"),
+    FOREIGN_TREE_IN_MAIN: join(root, "main", ".claude", "worktrees", "foreign"),
     HOME: join(root, "home"),
     LINK: join(root, "home", "store"),
     LIST: join(extensions, "hooks", "list.json"),
     MAIN: join(root, "main"),
     ROOT: extensions,
     SCOPE: join(extensions, "login"),
+    TREE_LINK: join(root, "main", ".claude", "worktrees", "a", "into-main"),
     WORDS: join(root, "home", "words"),
     WORK: join(root, "home", "work"),
   }

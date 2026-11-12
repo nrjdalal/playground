@@ -39,6 +39,8 @@ const sandboxOf = (home: string, data = join(home, ".playground")) => ({
 })
 
 const settingsOf = (r: { home: string }, file: string) => join(r.home, ".playground", file)
+// The extensions root, the data folder's extensions folder (extensionsDir in packages/settings/src/rendered.ts).
+const extensionsOf = (home: string, data = join(home, ".playground")) => join(data, "extensions")
 const builtOf = (r: { home: string }, file: string) =>
   JSON.parse(readFileSync(settingsOf(r, file), "utf8"))
 
@@ -71,7 +73,7 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
     })
     expect(r.code, r.err).toBe(0)
     const { denyWrite } = builtOf(r, "factory-settings-sandbox-400k.json").sandbox.filesystem
-    expect(denyWrite).toEqual(
+    expect(denyWrite.filter((path: string) => path !== extensionsOf(r.home))).toEqual(
       readdirSync(main)
         .sort()
         .map((name) => join(main, name)),
@@ -97,7 +99,11 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
           .filter((path) => path !== own)
       : []
     expect(others.filter((path) => !covered(path))).toEqual([])
-    expect(denyWrite.filter((path: string) => !path.startsWith(`${main}/`))).toEqual([])
+    expect(
+      denyWrite.filter(
+        (path: string) => !path.startsWith(`${main}/`) && path !== extensionsOf(r.home),
+      ),
+    ).toEqual([])
   })
 
   test("a probe resumed in scripts/hooks writes that folder alone, in every checkout", async () => {
@@ -115,6 +121,21 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
     expect(covered(join(main, ".git"))).toBe(true)
     expect(covered(join(main, "README.md"))).toBe(true)
   })
+
+  test.each([
+    ["the data folder in the home", {}, ".playground"],
+    ["a scratch data folder", { SCRATCH_DATA: "1" }, "scratch-data"],
+  ])(
+    "a probe on %s can write nothing under the extensions root, while the rest of the data folder stays writable",
+    async (_, env, folder) => {
+      const r = await spawn(["probe", "probe-x", "ops", "p.md"], [], env)
+      expect(r.code, r.err).toBe(0)
+      const file = join(r.home, folder, "factory-settings-sandbox-400k.json")
+      const { allowWrite, denyWrite } = JSON.parse(readFileSync(file, "utf8")).sandbox.filesystem
+      expect(denyWrite).toContain(extensionsOf(r.home, join(r.home, folder)))
+      expect(allowWrite).toContain(join(r.home, folder))
+    },
+  )
 
   test("a resumed probe keeps the sandbox", async () => {
     const name = "probe-x"
@@ -139,7 +160,7 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
     expect(built.env.CLAUDE_CODE_ENABLE_TELEMETRY).toBe("0")
   })
 
-  // the dispatcher reads a file of its own, since the memory trial starts it on (ADR 0022)
+  // the dispatcher reads a file of its own, since the memory trial starts it on (ADR 0022), and the optimizer the managers' shared file (spawn-manager-deny.test.ts)
   test.each([
     ["a worker", ["worker", "worker-brave-otter", "b.md"], "factory-settings-400k.json"],
     ["a runner", ["runner", "runner-calm-heron", "b.md"], "factory-settings-400k.json"],
@@ -158,7 +179,7 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
       ["column", "dispatcher", "dispatcher", "ops", "w1:p2", "h.md"],
       "factory-settings-400k-memory-dispatcher.json",
     ],
-    ["an optimizer", ["manager", "optimizer", "b.md"], "factory-settings-400k.json"],
+    ["an optimizer", ["manager", "optimizer", "b.md"], "factory-settings-manager-400k.json"],
   ])("%s keeps today's settings, with no sandbox", async (_, args, file) => {
     const r = await spawn(args, [])
     expect(r.code, r.err).toBe(0)

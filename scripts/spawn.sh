@@ -29,7 +29,8 @@ set -euo pipefail
 #   3. slots, for a fresh worker start alone (a reviewer, tester or resume skips it, so work
 #      already admitted finishes): `ops/run-slot.sh room`, refusing while runs wait in its queue and no
 #      lane is free with the load units for a run (but for a --priority start while a priority file
-#      stands, PRIORITY_FILE, logged as readings.priority), or when room gives no reading
+#      stands, PRIORITY_FILE, logged as readings.priority), or when room gives no reading; a --reads-only
+#      worker start passes it, logged as readings.reads_only, since it takes no lane
 #   4. usage, the launching backend's own window: Claude reads usage.json
 #      (5-hour under 90%, the week within 14.3 points a day of pace, floored at one day's share, readings
 #      no older than 15 minutes; one never written, as on a fresh install before ops-usage first runs, passes,
@@ -38,10 +39,11 @@ set -euo pipefail
 #      starts on the passing login next in the account split, else the one with the lowest week, naming it, and refuses
 #      only when every login is over, its pick kept off the resume record's exec line so a restore picks afresh; a login whose usage.accounts
 #      row is parked (parkedUntil a later time) counts as over, and an --account naming it is refused; --account skips the usage
-#      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; GLM reads zai-usage.json
+#      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; an --account naming
+#      this machine's own login starts there, the split skipped, judged and refused as that login is in a bare start; GLM reads zai-usage.json
 #      (the 5-hour window under 95% of its credits, with no week check, and no empty balance (its `balance`), valid only
 #      while the zai usage job's last beat is ok and within 3 cycles)
-#   The first dispatcher starts past every gate, so the owner always has one: the gates still read, a failure
+#   The first dispatcher starts past every gate, by a manager start or a resume, so the owner always has one: the gates still read, a failure
 #   logs a skipped row naming its gate and reading (which the load gate counts as a start) and prints it, and the
 #   pass picks its login as for any start; every other manager start, an orchestrator's included, takes them all
 # It also refuses a name a live session holds, since Claude Code would start the
@@ -56,20 +58,23 @@ set -euo pipefail
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time
-#   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again once its resume finds the session gone so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
+#   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row just before the pane closes, putting its status back when herdr refuses the close
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
-#   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, or priority-start.json, a job's own starts), and focus's refusal while any but priority-start.json does; it is refused while none does.
+#   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
+#   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate; the load, memory and usage gates still hold it
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
-#   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, never this machine's own login, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; with --backend glm it takes a GLM row's label instead
+#   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
-#     The backend is recorded at the start in ~/.playground/backends/<name> and carried on its resume: a resume takes no --backend while a pin stands, and refuses with no pin and none given, or with a pin that reads as neither glm nor claude.
+#   --harness codex    with the first dispatcher's manager start or its resume alone, on a scratch data folder (PLAYGROUND_DATA_DIR naming one) until phase 3 lifts that, and no --backend, --account, --model or --effort: the session runs in Codex (the codex on PATH), its CODEX_HOME the data folder's codex/, whose config.toml, hooks.json (the factory's guards and the beat) and app-server-daemon/settings.json each launch writes; its hooks always run trusted (--dangerously-bypass-hook-trust), and it fails closed: a session whose SessionStart hook writes no beat within 60 seconds has its pane closed and the start refused, with no new pin, record or roster row (a resume keeps its earlier ones), and a pane herdr will not close is named for you to close; a Codex start also stops when PowerShell is installed (a pwsh or powershell on PATH, or /usr/local/bin/pwsh), which the beat names. The beat names its thread, which takes the session's name through codex app-server's thread/name/set.
+#   --harness claude-code  the default: the session runs in Claude Code.
+#     The harness and backend are recorded at the start in ~/.playground/backends/<name> (claude-code glm, codex openai), and carried on its resume, which also reads a pin of the backend alone: a resume takes no --backend or --harness while a pin stands, and refuses with no pin and none given, or with a pin that reads as none of those.
 #   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
 #   --effort <level>   with any mode but restore or close, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
-#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PRs the checker serves, each by its URL or its number alone, with an issue's URL beside a pull request for a PR not yet opened; a reviewer's or tester's start is refused unless it names a pull request, and its roster row records it before the pane opens; on an ended roster row it replaces the row's prs, and its pr with the first pull request named; on a live row, or none, it joins them and gives a row with no pr the first pull request named
+#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PRs the checker serves, each by its URL or its number alone, with an issue's URL beside a pull request for a PR not yet opened, or an extension item it scores as <scope>/<kind>/<key>; a reviewer's or tester's start is refused unless it names a pull request or an extension item, and its roster row records it before the pane opens; on an ended roster row it replaces the row's prs, and its pr with the first pull request named; on a live row, or none, it joins them and gives a row with no pr the first pull request named
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
 #   --memory <dir>     with any mode but restore or close, anywhere among its words: the launch runs with Claude Code's auto-memory on, writing to <dir>, an absolute folder: its built settings file, one of its own (factory-settings-...-memory-<name>.json), sets autoMemoryEnabled and autoMemoryDirectory, while every other launch's file stays as it is, for the auto-memory trial; --memory off launches with memory off on the shared file, whatever arm the role or the row would take
@@ -102,17 +107,17 @@ fi
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
 # The roster's manager kinds (kinds.ts' ROSTER_ROLE_OF_KIND), so a kind role_of_kind does not list runs as a lead: an orchestrator. A read that fails leaves the named kinds alone, so an orchestrator is refused rather than guessed.
 MANAGER_KINDS=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { ROSTER_ROLE_OF_KIND as r } from '$REPO/packages/config/src/kinds.ts'; console.log(Object.keys(r).filter((k) => r[k] === 'manager').join(' '))" 2>/dev/null) || MANAGER_KINDS=
-# The priority file standing in the data folder, one that passes focus first, exit 1 when none does, its content unread: every priority*.json but priority-start.json (priority.json, or an org's own priority-<name>.json, each writer keeping its own) passes the load and slots gates and focus, and a job's own start file, priority-start.json, passes the load and slots gates but never focus.
+# The priority file standing in the data folder, exit 1 when none does, its content unread: every priority*.json (priority.json, an org's own priority-<name>.json, a session's from playground priority, or a job's own start file, priority-start.json, each writer keeping its own) passes the load and slots gates and focus.
 priority_file() {
   local f
   for f in "$DATA"/priority*.json; do
-    [ "${f##*/}" != priority-start.json ] && [ -e "$f" ] && { echo "$f"; return 0; }
+    [ -e "$f" ] && { echo "$f"; return 0; }
   done
-  [ -e "$DATA/priority-start.json" ] && { echo "$DATA/priority-start.json"; return 0; }
   return 1
 }
 [[ $DATA == "$HOME"/* ]] && SHOWN="~${DATA#"$HOME"}" || SHOWN=$DATA
-SETTINGS="$DATA/factory-settings.json"
+# The factory's settings by their real path in this checkout, never through the data folder's link, which any session can repoint at settings of its own.
+SETTINGS="$REPO/scripts/factory-settings.json"
 HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
 PINS="$DATA/backends"
 RESUME_DIR="$DATA/resume"
@@ -211,6 +216,13 @@ session_kind() { local n k; while read -r n k; do [ "$n" != "$1" ] || { echo "$k
 session_name() { local n k; while read -r n k; do [ "$k" != "$1" ] || { echo "$n"; return; }; done <<<"$SESSION_KINDS"; }
 # The second dispatcher's own name is a dispatcher's name, from sessions.names or sessions.aliases, with -2.
 second_dispatcher() { [ "${1%-2}" != "$1" ] && [ "$(session_kind "${1%-2}")" = dispatcher ]; }
+# The first dispatcher, a dispatcher (its caller reads KIND) that holds slot 1 or is sessions.names' own and not the second, starts past every gate, by manager and by resume alike, so a restore brings the owner's dispatcher back at once.
+first_dispatcher() { [ "$1" = "$(dispatcher_of 1)" ] || { [ "$(session_kind "$1")" = dispatcher ] && ! second_dispatcher "$1"; }; }
+# A resume's refusal that a later restore clears with no change: a gate holding it over a reading that falls, or focus standing for another session. A gate that cannot read its input or reads a bad setting is a fault, which waiting never ends.
+restore_waits() {
+  local wait_re='the [a-z]+ gate holds it:|focus stands for' fault_re='cannot read|PLAYGROUND_LOAD_MULT is|holds no'
+  [[ $1 =~ $wait_re ]] && ! [[ $1 =~ $fault_re ]]
+}
 
 # The live sessions: a registry file whose pid is alive with the start time the file records, as the Dashboard reads them, but for a `claude -p` run (entrypoint sdk-cli), which holds no name. It prints a line, tab-separated pid, session id, folder and process start ("-" for a field the file lacks), for each live session named $1, the lowest pid first.
 live_holders() {
@@ -267,7 +279,7 @@ for pid, data in sorted(entries.items()):
         print(pid, field(data.get("sessionId")), field(data.get("cwd")), starts[pid], sep="\t")
 PY
 }
-# The capacity gate: four gates in order (load, memory, slots for a fresh worker start, usage), the first failure naming its gate and its reading (a first dispatcher's failures each kept as a skip, the gates after it still read), every pass and refusal, and a first dispatcher's skipped start, one JSON line in ~/.playground/ops/capacity.jsonl (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing a past line for each skip and then ok, or the refusal for refuse() to print.
+# The capacity gate: four gates in order (load, memory, slots for a fresh worker start, usage), the first failure naming its gate and its reading (a first dispatcher's failures each kept as a skip, the gates after it still read), every pass and refusal, and a first dispatcher's skipped start, one JSON line in ~/.playground/ops/capacity.jsonl naming its session (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing a past line for each skip and then ok, or the refusal for refuse() to print.
 # The login a launch runs on with no --account, from Claude Code's config, which the launch reads from ~ when it drops inscope's folder.
 own_config() { if [ -n "$UNSET" ]; then echo "$HOME/.claude.json"; else echo "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"; fi; }
 gate_capacity() {
@@ -278,7 +290,7 @@ gate_capacity() {
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" "$OWN_LOGIN" "${READS_ONLY:+reads-only}" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -288,7 +300,7 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed = sys.argv[1:15]
+data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed, session, own_pick, reads_only = sys.argv[1:18]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -305,7 +317,7 @@ def refuse(gate, detail):
     if first:
         skips.append((gate, detail))
         raise Skip
-    row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "detail": detail, "gate": gate, "readings": readings, "verdict": "refused"}
+    row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "detail": detail, "gate": gate, "readings": readings, "session": session, "verdict": "refused"}
     try:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "a") as f:
@@ -499,7 +511,10 @@ else:
 
 # 3 slots (the header's gate 3)
 try:
-    if room:
+    # a reads-only worker runs nothing through run-slot, so its room never holds it
+    if room and reads_only:
+        readings["reads_only"] = True
+    elif room:
         try:
             lanes, held, free, waiters = (int(n) for n in room.split())
         except ValueError:
@@ -714,6 +729,12 @@ try:
             if detail is None:
                 known.add(email.lower())
         logins = [(email, name, acct, seen, detail or (f"it is parked until {parked[email.lower()]} (usage.accounts parkedUntil)" if email.lower() in parked else None)) for email, name, acct, seen, detail in logins]
+        # --account naming the own login: that login alone, judged as a bare start judges it, refused on its reading's failure and never split
+        if own_pick:
+            logins = logins[:1]
+            if logins[0][4]:
+                readings.update(logins[0][3])
+                refuse("usage", f"--account {own_pick}, this machine's own login: {logins[0][4]}")
         passing = [login for login in logins if login[4] is None]
         if not passing:
             readings.update(logins[0][3])
@@ -721,12 +742,12 @@ try:
                 refuse("usage", logins[0][4])
             readings["logins"] = {f"{email} ({name})": detail for email, name, _, _, detail in logins}
             refuse("usage", "every login is over it: " + "; ".join(f"{email} ({name}): {detail}" for email, name, _, _, detail in logins))
-        # login-flip.py's split, under 30 minutes old (two of the ops tick's 15-minute beats), picks among the passing logins it shares by smooth weighted round robin over split-picks.json (SESSIONS.md, Spawn), else the lowest week
+        # login-flip.py's split, under 30 minutes old (two of the ops tick's 15-minute beats), picks among the passing logins it shares by smooth weighted round robin over split-picks.json (playbook's SPAWN.md, --account), else the lowest week
         flip_dir = os.path.join(data_dir, "ops", "usage")
         try:
             with open(os.path.join(flip_dir, "login-flip.json")) as f:
                 split = json.load(f)["split"]
-            shares = {a.lower(): v for a, v in split["shares"].items()} if now.timestamp() - split["at"] < 1800 else {}
+            shares = {a.lower(): v for a, v in split["shares"].items()} if now.timestamp() - split["at"] < 1800 and not own_pick else {}
         except Exception:
             shares = {}
         shared = {login[0]: shares[login[0].lower()] for login in passing if isinstance(shares.get(login[0].lower()), (int, float)) and shares[login[0].lower()] > 0}
@@ -760,7 +781,7 @@ try:
 except Skip:
     pass
 
-row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "gate": None, "readings": readings, "verdict": "check" if check else "pass"}
+row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "gate": None, "readings": readings, "session": session, "verdict": "check" if check else "pass"}
 if skips:
     row.update(detail="; ".join(d for _, d in skips), gate=", ".join(g for g, _ in skips), verdict="check" if check else "skipped")
 try:
@@ -776,6 +797,9 @@ for gate, detail in skips:
 why = f"next in the account split ({fmt(readings['share'] * 100)}% of new sessions)" if "share" in readings else "the login with the most room this week"
 if any(gate == "usage" for gate, _ in skips):
     print("ok")
+elif own_pick:
+    week = f"its week is at {fmt(readings['week'])}%" if "week" in readings else f"its usage {readings.get('usage', 'unread')}"
+    print(f"ok - --account {own_pick} is this machine's own login, so it starts there, the split skipped: {week} ({chosen[1]})")
 elif readings.get("account"):
     print(f"ok {readings['account']} no --account, so it starts on {readings['account']}, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif "logins" in readings:
@@ -802,10 +826,11 @@ PY
   esac
 }
 
-# --account, --backend, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check and --priority may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --harness, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check, --priority and --reads-only may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
+HARNESS=
 GLM_ACCOUNT=
 GLM_GIVEN=
 # usage.accounts sits mid-list, since an empty list prints an empty line, which a last line would lose. The models a session runs on (models.*) and the capacity gate's lines (gates.*) are settings, each in the docs' list of keys, so changing one is a settings write, never an edit here.
@@ -826,6 +851,8 @@ CLAUDE_MODEL=
 EFFORT=
 RESUME_BRIEF=
 PR_ARG=
+# An extension item a checker scores, <scope>/<kind>/<key>, checked as roster.ts and playground ext check one: the kinds are packages/settings' KINDS.
+ITEM_FORM='[A-Za-z0-9][A-Za-z0-9-]*/(doc|learning|list|rule|script|skill|template)/[a-z0-9][a-z0-9._-]*'
 REPORTS_TO=
 TITLE_ARG=
 IN_DIR=
@@ -833,6 +860,7 @@ MEMORY_DIR=
 MEMORY_OFF=
 CHECK=
 PRIORITY=
+READS_ONLY=
 NAME_PROJECT=
 SIZE=
 RUNTIME=
@@ -848,6 +876,10 @@ while [ $# -gt 0 ]; do
     case "$2" in --*) usage "--backend needs a value; \"$2\" starts with --" ;; esac
     BACKEND=$2
     shift 2
+  elif [ "$1" = --harness ]; then
+    [ $# -ge 2 ] && [ -z "$HARNESS" ] || usage "--harness takes claude-code or codex, once"
+    case "$2" in claude-code | codex) HARNESS=$2 ;; *) usage "--harness takes claude-code or codex, not \"$2\"" ;; esac
+    shift 2
   elif [ "$1" = --model ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$CLAUDE_MODEL" ] || usage "--model takes one of $MODELS, once"
     case "$2" in --*) usage "--model needs a value; \"$2\" starts with --" ;; esac
@@ -860,10 +892,10 @@ while [ $# -gt 0 ]; do
     shift 2
   elif [ "$1" = --pr ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PR_ARG" ] || usage "--pr takes the PR a checker serves, once"
-    pr_form='^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(pull|issues)/[1-9][0-9]*)$'
+    pr_form="^(#?[1-9][0-9]*|https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(pull|issues)/[1-9][0-9]*|$ITEM_FORM)\$"
     IFS=, read -ra prs_named <<<"$2"
     for one in "${prs_named[@]}"; do
-      [[ $one =~ $pr_form ]] || usage "--pr takes a PR's URL or its number alone, comma-separated, or an issue's URL beside one for a PR not yet opened, not \"$2\""
+      [[ $one =~ $pr_form ]] || usage "--pr takes a PR's URL or its number alone, comma-separated, an issue's URL beside one for a PR not yet opened, or an extension item as <scope>/<kind>/<key>, not \"$2\""
     done
     PR_ARG=$2
     shift 2
@@ -904,6 +936,9 @@ while [ $# -gt 0 ]; do
     shift
   elif [ "$1" = --priority ]; then
     PRIORITY=1
+    shift
+  elif [ "$1" = --reads-only ]; then
+    READS_ONLY=1
     shift
   elif [ "$1" = --brief ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RESUME_BRIEF" ] || usage
@@ -955,6 +990,7 @@ MODE=${1:-}
 [ $# -gt 0 ] && shift
 [ -z "$REPORTS_TO" ] || [ "$MODE" = worker ] || usage "--reports-to is for a worker, not ${MODE:-no mode}"
 [ -z "$IN_DIR" ] || [ "$MODE" = worker ] || usage "--in is for a worker, not ${MODE:-no mode}"
+[ -z "$READS_ONLY" ] || [ "$MODE" = worker ] || usage "--reads-only is for a worker, not ${MODE:-no mode}"
 [ -z "$PR_ARG" ] || [[ $MODE =~ ^(column|resume)$ ]] || usage "--pr is for a reviewer's or tester's column or resume, not ${MODE:-no mode}"
 [ -z "$TITLE_ARG" ] || [[ $MODE =~ ^(worker|column|resume)$ ]] || usage "--title is for a worker or a reviewer's or tester's column, not ${MODE:-no mode}"
 # herdr 0.9.5 keeps a resume command only from a source that holds the pane through report-agent, and then shows that source's state in place of its own (measured: a 14s turn read idle throughout), so restore reruns the sessions spawn.sh itself listed, with ops-herdr's resume_agents_on_restore off. Each goes through resume, so the gate and the live-name check judge it, and a live one is left as it is.
@@ -1041,6 +1077,14 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
 PY
   }
   lines=$(restore_list) || refuse "it cannot read the roster or the resume files"
+  # The first dispatcher's record runs first, so the owner's dispatcher is back before any other resume takes the gate's room.
+  first=$(dispatcher_of 1)
+  lead= rest=
+  while IFS= read -r line; do
+    case "$line" in "run"$'\t'"$first"$'\t'*) lead+="$line"$'\n' ;; *) rest+="$line"$'\n' ;; esac
+  done <<<"$lines"
+  lines="$lead$rest"
+  # A resume that waits (restore_waits) comes back on a later restore, so it is progress, printed as waiting, and leaves the exit 0; any other miss fails the restore.
   failed=0
   while IFS=$'\t' read -r -a args; do
     case "${args[0]:-}" in
@@ -1048,21 +1092,30 @@ PY
       run)
         args=("${args[@]:1}")
         [ "${#args[@]}" -ge 3 ] || continue
-        if said=$(bash "$0" resume "${args[@]}" 2>&1 </dev/null); then
+        # A close can end a row after restore_list read the roster, so each resume reads the row again once it finds the session gone (SPAWN_RESTORING, below) and exits 4 on a down row.
+        if said=$(SPAWN_RESTORING=1 bash "$0" resume "${args[@]}" 2>&1 </dev/null); then
           echo "restored ${args[0]}"
-        elif [ $? -eq 3 ]; then
-          echo "skipped ${args[0]}: live"
         else
-          failed=1
+          rc=$?
           said=$(tail -1 <<<"$said")
-          echo "not restored ${args[0]}: ${said#"spawn.sh refuses ${args[0]}: "}"
+          said=${said#"spawn.sh refuses ${args[0]}: "}
+          if [ "$rc" -eq 3 ]; then
+            echo "skipped ${args[0]}: live"
+          elif [ "$rc" -eq 4 ]; then
+            echo "skipped ${args[0]}: $said"
+          elif restore_waits "$said"; then
+            echo "waiting ${args[0]}: $said"
+          else
+            failed=1
+            echo "not restored ${args[0]}: $said"
+          fi
         fi
         ;;
     esac
   done <<<"$lines"
   exit "$failed"
 fi
-# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row once the pane closes, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
+# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row just before the pane closes (putting its status back when herdr refuses the close), so a restore that finds the session gone reads ended, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
 if [ "$MODE" = close ]; then
   NAME=${1:-close}
   [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
@@ -1088,16 +1141,26 @@ except (ValueError, KeyError, TypeError):
   # herdr sets HERDR_PANE_ID and HERDR_SESSION in every pane, and a pane id is unique on its own server alone.
   [ "$panes" != "${HERDR_PANE_ID:-}" ] || [ "${HERDR_SESSION:-$server}" != "$server" ] ||
     refuse "pane $panes is your own; a session ends itself with /exit"
+  # The row reads ended before the pane closes, so a restore's resume that finds the session gone reads ended too and leaves it down; a close herdr refuses puts the row's status back.
+  # roster.ts drops a parked row's hold once it reads ended, and a park takes one in the same call, so the put-back names it.
+  was=$(roster_field "$NAME" status)
+  back=("status=$was")
+  [ "$was" != parked ] || back+=("hold=$(roster_field "$NAME" hold)")
+  ended=1
+  rostered=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" status=ended 2>&1 >/dev/null) || ended=
   if ! said=$(hr pane close "$panes" 2>&1 >/dev/null | tr -s '\n' ' '); then
     said=${said% }
+    if [ -n "$ended" ] && [ -n "$was" ] && ! rostered=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" "${back[@]}" 2>&1 >/dev/null); then
+      [ -n "$rostered" ] && echo "roster.ts says: $rostered" >&2
+      echo "spawn.sh: $NAME's row reads ended, but its pane stays open; put it back with $BUN $ROSTER set $NAME ${back[*]}" >&2
+    fi
     refuse "herdr would not close pane $panes (${said:-no answer from herdr})"
   fi
   echo "closed $NAME (pane $panes on $server)"
-  # The close keeps its time and the row's status before it ends it, for the load gate's pass of a resume within 15 minutes (JUST_CLOSED, below).
-  was=$(roster_field "$NAME" status)
+  # The close keeps its time and the row's status before it ended it, for the load gate's pass of a resume within 15 minutes (JUST_CLOSED, below).
   { mkdir -p "$DATA/closes" && echo "$(date -u +%s) $(date -u +%FT%TZ) ${was:-none}" > "$DATA/closes/$NAME"; } 2>/dev/null || true
-  if ! said=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" status=ended 2>&1 >/dev/null); then
-    [ -n "$said" ] && echo "roster.ts says: $said" >&2
+  if [ -z "$ended" ]; then
+    [ -n "$rostered" ] && echo "roster.ts says: $rostered" >&2
     echo "spawn.sh: $NAME closed, but its roster write failed; record it with $BUN $ROSTER set $NAME status=ended, adding task=<what it does> for a name the roster lacks" >&2
   fi
   exit 0
@@ -1186,7 +1249,7 @@ case "$MODE" in
         word "$TO" || refuse "$NAME is an orchestrator of the $KIND kind, and its roster row names no session it reports to: roster.ts set $NAME reportsTo=<session>"
         ;;
     esac
-    [ "$KIND" = dispatcher ] && { [ "$NAME" = "$TO" ] || { [ "$(session_kind "$NAME")" = dispatcher ] && ! second_dispatcher "$NAME"; }; } && FIRST=1 TO=
+    [ "$KIND" = dispatcher ] && first_dispatcher "$NAME" && FIRST=1 TO=
     DIR="${PLAYGROUND_REPO:-$MAIN}/.claude/worktrees/leads"
     # A fresh checkout has no leads worktree until its first manager start cuts one as branch leads from origin's copy of the branch the checkout was cloned on, tracking it: canary only for a checkout cloned on canary on purpose, else main, so a public install's managers run what it shipped. A branch of its own, since the checkout holds its branch already, and a manager's bare git calls land in its own tree, never the main checkout.
     CUT=
@@ -1210,11 +1273,12 @@ case "$MODE" in
     KIND=$(kind_of "$NAME")
     ROLE=$(role_of_kind "$KIND")
     [ -n "$ROLE" ] || refuse "$NAME is not a factory session's name, and the roster gives it no kind"
-    # A checker whose roster row names an ended worker is ended again on the checker reaper's next pass (checker-worker-gone, scripts/ops/optimizer/idle_sessions.ts), so its row moves to the worker it now serves before it comes back.
+    [ "$KIND" = dispatcher ] && first_dispatcher "$NAME" && FIRST=1
+    # A checker whose roster row names an ended worker is ended again on the checker reaper's next pass unless a live worker serves one of its open PRs (checker-worker-gone; the rule: scripts/ops/README.md's optimizer/ entry), so its row moves to the worker it now serves before it comes back.
     if [[ $ROLE =~ ^(reviewer|tester)$ ]]; then
       serves=$(roster_field "$NAME" worker)
       [ -z "$serves" ] || [ "$(roster_field "$serves" status)" != ended ] ||
-        refuse "its roster row names $serves as its worker, which has ended, so the checker reaper would end it again: point it at the worker it serves first, with bun scripts/roster.ts assign $NAME \"<title>\" review worker=<live worker> pr=<url>, or, when it serves none, end its row with bun scripts/roster.ts set $NAME status=ended"
+        refuse "its roster row names $serves as its worker, which has ended, so the checker reaper ends it again unless a live worker serves one of its open PRs: point it at the worker it serves first, with bun scripts/roster.ts assign $NAME \"<title>\" review worker=<live worker> pr=<url>, or, when it serves none, end its row with bun scripts/roster.ts set $NAME status=ended"
     fi
     # macOS guards the Desktop folder, so a new pane there fails until Full Disk Access is granted again after each update: a folder there resumes in the same tree under the code root, and in place where the code root is on the Desktop itself.
     desktop="$HOME/Desktop/" # the folder the factory left
@@ -1283,9 +1347,9 @@ elif [ "$MODE" = column ] && [[ $ROLE =~ ^(reviewer|tester)$ ]] && [ -z "$TITLE_
   if [ "$ROLE" = reviewer ]; then TITLE_ARG="Review: $of"; else TITLE_ARG="Test: $of"; fi
 fi
 [ -z "$PR_ARG" ] || [[ $ROLE =~ ^(reviewer|tester)$ ]] || usage "--pr is for a reviewer's or tester's start, not a $ROLE's"
-# A checker's row names the pull request it serves, which no-outside-pr-code reads at its first tool call (a row naming none holds it in read mode) and auto-end reads to end it (an ended row's are the PRs it last served), so every reviewer or tester start names one.
-[[ ! $ROLE =~ ^(reviewer|tester)$ ]] || [[ ,$PR_ARG, =~ ,(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*), ]] ||
-  refuse "a $ROLE starts with --pr <pull url>, the pull request it serves now, by its URL or its number, which its roster row records before its pane opens; an issue's URL alone leaves the row with no pr, so open the PR as a draft first"
+# A checker's row names the pull request or extension item it serves, which no-outside-pr-code reads at its first tool call (a row naming no pull request holds it in read mode) and auto-end reads to end it (an ended row's are the PRs it last served), so every reviewer or tester start names one.
+[[ ! $ROLE =~ ^(reviewer|tester)$ ]] || [[ ,$PR_ARG, =~ ,(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*|$ITEM_FORM), ]] ||
+  refuse "a $ROLE starts with --pr <pull url>, the pull request it serves now, by its URL or its number, or the extension item it scores as <scope>/<kind>/<key>, which its roster row records before its pane opens; an issue's URL alone leaves the row with no pr, so open the PR as a draft first"
 if [ "$MODE" != resume ] || [ -n "$BRIEF" ]; then
   # The brief's path under ~/.playground names the same file as its bare name.
   BRIEF=${BRIEF#"$DATA/"}
@@ -1303,14 +1367,19 @@ fi
 PIN_GIVEN=
 if [ "$MODE" = resume ]; then
   if [ -e "$PINS/$NAME" ]; then
-    [ -z "$BACKEND" ] || refuse "the pin decides how $NAME runs; --backend would change it mid-life. Close it and start it again instead."
+    [ -z "$BACKEND$HARNESS" ] || refuse "the pin decides how $NAME runs; --backend or --harness would change it mid-life. Close it and start it again instead."
     pin=$(cat "$PINS/$NAME") || refuse "it cannot read the backend pin for $NAME"
+    # Its words, one space apart, as readPin() reads them, so a hand edit's spacing changes nothing.
+    read -ra pin_words <<<"$pin" || true
+    pin=${pin_words[*]+"${pin_words[*]}"}
+    # A pin names its harness, then its backend (HARNESSES in packages/settings/src/harnesses.ts); one written before the harness split names its backend alone.
     case "$pin" in
-      glm) BACKEND=glm ;;
-      claude) ;;
-      *) refuse "the backend pin for $NAME reads neither glm nor claude: it cannot know how $NAME ran. Fix or remove $SHOWN/backends/$NAME, then resume." ;;
+      glm | "claude-code glm") BACKEND=glm ;;
+      claude | "claude-code claude") ;;
+      "codex openai") HARNESS=codex ;;
+      *) refuse "the backend pin for $NAME reads none of claude-code claude, claude-code glm, codex openai, glm or claude: it cannot know how $NAME ran. Fix or remove $SHOWN/backends/$NAME, then resume." ;;
     esac
-  elif [ -n "$BACKEND" ]; then
+  elif [ -n "$BACKEND$HARNESS" ]; then
     PIN_GIVEN=1
   else
     if [ "$ROLE" = reviewer ] || [ "$ROLE" = tester ]; then
@@ -1318,6 +1387,16 @@ if [ "$MODE" = resume ]; then
     fi
     refuse "no backend pin for $NAME: it cannot know how $NAME ran. Resume it with --backend glm or --backend claude, whichever it ran on, which records the pin."
   fi
+fi
+# Codex runs the first dispatcher alone, on the one login its CODEX_HOME holds, with the model and effort its own config names.
+if [ "$HARNESS" = codex ]; then
+  { [ -n "$FIRST" ] && [[ $MODE =~ ^(manager|resume)$ ]]; } || refuse "Codex runs the first dispatcher alone, in a workspace of its own (spawn.sh manager $(dispatcher_of 1) <brief> --harness codex), not $NAME"
+  [ -z "$BACKEND$ACCOUNT$CLAUDE_MODEL$EFFORT" ] || refuse "Codex runs on the login and model its CODEX_HOME holds, so it takes no --backend, --account, --model or --effort"
+  # A Codex session runs only on a scratch data folder until phase 3 of the harness layer lifts this, once a live probe has passed.
+  # The live data folder is the one dataDir() gives with no PLAYGROUND_DATA_DIR set.
+  live=$(cd / && env $UNSET -u PLAYGROUND_DATA_DIR "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || refuse "bun could not resolve the live data folder"
+  [ "$(cd -P "$DATA" 2>/dev/null && pwd -P)" != "$(cd -P "$live" 2>/dev/null && pwd -P)" ] ||
+    refuse "Codex starts only on a scratch data folder (PLAYGROUND_DATA_DIR naming one) until phase 3 of the harness layer (the plan-harness-layer doc) lifts that, once a live probe has passed, and $SHOWN is the live one"
 fi
 # Every start and resume runs in herdr, the one runtime: a resume reads no pin, and the write below rewrites it whatever word it held.
 RUNTIMES="$DATA/runtimes"
@@ -1328,24 +1407,33 @@ esac
 # the Keychain service each account's long-lived token is kept under: usage.keychainService, else its default when the reader cannot answer
 KEYCHAIN=$(setting_text usage.keychainService)
 KEYCHAIN=${KEYCHAIN:-playground-claude-oauth}
-# An --account, or the login the usage gate picks for a bare spawn, is a second login whose Keychain item exists.
-check_account() {
-  # The email goes into the pane's command, so it is a plain local@domain: no quote, space or $.
-  [[ $ACCOUNT =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || refuse "--account takes a plain email, not $ACCOUNT"
-  OWN_CONFIG=$(own_config)
-  python3 -I - "$OWN_CONFIG" "$ACCOUNT" <<'PY' || refuse "--account $ACCOUNT is this machine's own Claude login, whose usage the session would share unchecked: name a second account"
+# Whether --account names the login the launch runs on with no --account, read from its config.
+own_login() {
+  python3 -I - "$(own_config)" "$ACCOUNT" <<'PY'
 import json, sys
 try:
     with open(sys.argv[1]) as f:
         email = (json.load(f).get("oauthAccount") or {}).get("emailAddress")
 except Exception:
-    sys.exit(0)
-sys.exit(1 if isinstance(email, str) and email.lower() == sys.argv[2].lower() else 0)
+    sys.exit(1)
+sys.exit(0 if isinstance(email, str) and email.lower() == sys.argv[2].lower() else 1)
 PY
+}
+# An --account, or the login the usage gate picks for a bare spawn, is a second login whose Keychain item exists.
+check_account() {
+  # The email goes into the pane's command, so it is a plain local@domain: no quote, space or $.
+  [[ $ACCOUNT =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || refuse "--account takes a plain email, not $ACCOUNT"
+  ! own_login || refuse "--account $ACCOUNT is this machine's own Claude login, whose usage the session would share unchecked: name a second account"
   # Only that the item exists: no -w, so the token is never read here.
   security find-generic-password -s "$KEYCHAIN" -a "$ACCOUNT" >/dev/null 2>&1 ||
     refuse "the Keychain holds no $KEYCHAIN item for $ACCOUNT"
 }
+# --account naming this machine's own login starts on it with no token, as a bare start does, its usage judged by that login's reading and the split skipped.
+OWN_LOGIN=
+if [ -n "$ACCOUNT" ] && [ "$BACKEND" != glm ] && own_login; then
+  OWN_LOGIN=$ACCOUNT
+  ACCOUNT=
+fi
 # --account names a GLM row's label on a GLM start, checked in its block below.
 [ -z "$ACCOUNT" ] || [ "$BACKEND" = glm ] || check_account
 if [ -n "$BACKEND" ]; then
@@ -1408,6 +1496,14 @@ taken=$(tail -n 1 <<<"$holders" | cut -f 1)
 # It exits 3, so restore tells a live session, which it leaves as it is, from a resume that failed.
 [ -z "$taken" ] || [ -n "$CHECK" ] ||
   REFUSE_CODE=3 refuse "a live session already holds the name $NAME (pid $taken), so the new one would start under a generated name. A respawned session takes the name only once the old session is gone: close it first (its handoff written, SESSIONS.md End), then run this again."
+# restore's resume leaves a down row down, since a close ends the row before its pane closes: it reads the row once the session is gone and again just before the launch, exiting 4 on a down row, which restore prints as skipped, and its roster write keeps ended (write_row) for a close that lands after that.
+restoring_row_down() {
+  [ "$MODE" = resume ] && [ -n "${SPAWN_RESTORING:-}" ] || return 1
+  row_status=$(roster_field "$NAME" status)
+  case "$row_status" in done | ended | parked | paused) return 0 ;; esac
+  return 1
+}
+! restoring_row_down || REFUSE_CODE=4 refuse "its roster row reads $row_status"
 # The item's size and its load units: --size, else small for a checker, a short read run-slot.sh knows no name for, else the roster and plan.json through run-slot.sh's own reader
 [ -n "$SIZE" ] || case "$ROLE" in reviewer | tester) SIZE=small ;; esac
 case "$SIZE" in
@@ -1417,7 +1513,7 @@ esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
 PRIORITY_FILE=
 if [ -n "$PRIORITY" ]; then
-  PRIORITY_FILE=$(priority_file) || refuse "--priority starts only while a priority file stands in $DATA (priority.json, priority-start.json or another priority-<name>.json), and none does"
+  PRIORITY_FILE=$(priority_file) || refuse "--priority starts only while a priority file stands in $DATA (priority.json, priority-start.json or another priority-<name>.json), and none does: playground priority on <session> --reason \"<why>\" opens one, on the owner's or the dispatcher's word"
 fi
 # A resume within 15 minutes of spawn.sh closing its row while it read live (not ended, parked, paused or done) passes the load gate, as a Claude Code update's close and resume do, since that session already counts in the load it comes back into; a new start, an older close and a close of a row that read otherwise meet it.
 JUST_CLOSED=
@@ -1427,7 +1523,7 @@ if [ "$MODE" = resume ] && [ -f "$DATA/closes/$NAME" ] && read -r closed_at clos
     *) if [[ $closed_at =~ ^[0-9]+$ ]] && age=$(($(date -u +%s) - closed_at)) && [ "$age" -ge 0 ] && [ "$age" -le 900 ]; then JUST_CLOSED="its $closed_was row closed at $closed_iso"; fi ;;
   esac
 fi
-# While focus stands (playground focus), one session has the Mac, so a start waits for its end, but for that session's own reviewer and tester and a --priority start on any priority file but a job's start file (below).
+# While focus stands (playground focus), one session has the Mac, so a start waits for its end, but for that session's own reviewer and tester and a --priority start on any priority file (below).
 if FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
 import datetime, json, sys
 try:
@@ -1440,8 +1536,8 @@ if until <= datetime.datetime.now(datetime.timezone.utc):
 print(f"{f.get('session')} until {f['until']}")
 PY
 ); then
-  # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --priority start goes on while any priority file but a job's start file stands; a job's start file leaves focus to hold it, since an urgent ticket's focus comes first
-  { [ -n "$PRIORITY_FILE" ] && case "${PRIORITY_FILE##*/}" in priority-start.json) false ;; *) true ;; esac; } || case "$ROLE" in reviewer | tester) [ "${TO:-${serves:-}}" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
+  # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --priority start goes on while any priority file stands, a job's own start file included, since no gate but the machine's own delays a job's ticket start
+  [ -n "$PRIORITY_FILE" ] || case "$ROLE" in reviewer | tester) [ "${TO:-${serves:-}}" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
     refuse "focus stands for $FOCUS, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)"
 fi
 # With no id, Claude's resume picker looks the name up only in the transcripts of the folder it starts in (its project folder, named from the folder's real path), so in a folder the session never ran in it finds nothing and the launch waits out its timeout; that check reads every transcript there, so the gate reads first as --check does, logging no start, and the gate proper runs after it.
@@ -1451,6 +1547,8 @@ if [ -n "$NAME_PROJECT" ]; then
     refuse "no session named $NAME ran in $DIR, so Claude's resume picker would find nothing there: pass its session id, or resume it in the folder it ran in"
 fi
 gate_capacity
+# Codex runs on the login its CODEX_HOME holds, so a Claude login the usage gate picked stays off its launch.
+if [ "$HARNESS" = codex ]; then ACCOUNT= PICKED=; fi
 if [ "$RUNTIME" = herdr ]; then
   # herdr names an agent by [a-z][a-z0-9_-]{0,31}, so a longer name could never name the session's agent there.
   [ "${#NAME}" -le 32 ] || refuse "herdr names an agent with at most 32 characters, and $NAME has ${#NAME}"
@@ -1513,17 +1611,23 @@ TAG=
 # A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own. Workers and testers join once the worker git flow runs inside it, as run-slot and spawn.sh do.
 SANDBOX=
 [ "$ROLE" = probe ] && SANDBOX=sandbox-
-BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k.json"
+# A manager hands every build, read or research to a worker session (playbook's **workers**), so its file of its own denies the Agent and Workflow tools, which a bare deny takes out of its tools; every other session keeps both, a reviewer's code-review sub-agents among them.
+MANAGER=
+case "$ROLE" in dispatcher | lead) MANAGER=manager- ;; esac
+BUILT="$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k.json"
 # A --memory launch builds a file of its own, so the shared one every other session reads keeps the factory's memory off.
 [ -n "$MEMORY_DIR" ] && BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k-memory-$NAME.json"
 # The folder the session runs in, as the launch below moves to it.
 OWN=${DIR:-$REPO}
 [ "$MODE" = column ] && OWN=$REPO
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" "$MANAGER" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
-src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory = sys.argv[1:12]
+src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager = sys.argv[1:13]
 settings = json.load(open(src))
 settings["autoCompactWindow"] = int(window)
+if manager:
+    permissions = settings.get("permissions", {})
+    settings["permissions"] = {**permissions, "deny": sorted({*permissions.get("deny", []), "Agent", "Workflow"})}
 # The home skill set link-skills.sh turns on at user scope stays off here, since the session loads its own set (below) and two plugins that ship one name refuse it at call time.
 settings["enabledPlugins"] = {**settings.get("enabledPlugins", {}), "ws-home@ws": False}
 if backend == "glm":
@@ -1534,7 +1638,8 @@ if sandbox:
     def denied(folder):
         paths = [os.path.join(folder, name) for name in sorted(os.listdir(folder))]
         return [d for p in paths if p != own for d in (denied(p) if own.startswith(p + os.sep) else [p])]
-    deny = denied(main)
+    # The extensions root, the data folder's extensions folder, which every guard reads its lists from, is denied too, so a sandboxed session writes the rest of the data folder alone.
+    deny = denied(main) + [os.path.join(data, "extensions")]
     home = os.path.expanduser("~")
     settings["sandbox"] = {
         # Bypass mode would run the unsandboxed retry with no prompt, and a sandbox that cannot start would run every command unsandboxed.
@@ -1574,12 +1679,16 @@ SID=${SESSION:-}
 if [ "$RUNTIME" = herdr ] && [ "$MODE" != resume ]; then
   SID=$(uuidgen | tr 'A-F' 'a-f') || refuse "it cannot make a session id (uuidgen)"
 fi
+FRESH=
 if [ "$MODE" = resume ]; then
   COMMAND="$LAUNCH --resume $SESSION -n $NAME $FLAGS"
   PROMPT=
   # A herdr session that never took a message has no transcript, so --resume finds no conversation, while --session-id refuses an id that has one (both measured on claude in herdr): it starts afresh under its own id and name, with the prompt its start recorded.
-  if [ "$RUNTIME" = herdr ] && [[ $SESSION =~ ^[0-9a-f-]{36}$ ]] &&
-    [ -z "$(find "$PROJECTS" -mindepth 2 -maxdepth 2 -name "$SESSION.jsonl" -print -quit 2>/dev/null)" ]; then
+  # A Codex thread that never wrote its rollout has nothing to resume either, so it starts afresh the same way, under the thread its new beat names.
+  saved=$(find "$PROJECTS" -mindepth 2 -maxdepth 2 -name "$SESSION.jsonl" -print -quit 2>/dev/null) || saved=
+  if [ "$HARNESS" = codex ]; then saved=$(find "$DATA/codex/sessions" -name "rollout-*-$SESSION.jsonl" -print -quit 2>/dev/null) || saved=; fi
+  if [ "$RUNTIME" = herdr ] && [[ $SESSION =~ ^[0-9a-f-]{36}$ ]] && [ -z "$saved" ]; then
+    FRESH=1
     COMMAND="$LAUNCH --session-id $SESSION -n $NAME $FLAGS"
     PROMPT=$(cat "$RESUME_DIR/$NAME.prompt" 2>/dev/null) || PROMPT=
     # The prompt goes into the launch inside double quotes, so a quote, $, backquote or backslash would end or run them.
@@ -1614,6 +1723,40 @@ else
   PROMPT="You are $NAME, $WHO. $READ$BINDS$REPORT"
   COMMAND="$LAUNCH --session-id $SID -n $NAME $FLAGS \"$PROMPT\""
 fi
+# Codex's launch: its CODEX_HOME's files are written fresh each launch, and its hooks always run trusted, since a hook with no recorded trust is silently dropped (measured); the session id comes from the SessionStart beat its hook writes, read after the pane runs.
+BEAT=
+if [ "$HARNESS" = codex ]; then
+  CODEX=$(command -v codex) || refuse "codex is not on PATH, so $NAME cannot start in Codex"
+  CODEX_HOME="$DATA/codex"
+  BEAT="$DATA/launch/$NAME.beat"
+  mkdir -p "$CODEX_HOME/app-server-daemon" || refuse "it cannot prepare $CODEX_HOME"
+  # The factory's guards as Codex loads them (packages/scripts/src/codex-hooks.ts), with the beat added below.
+  GUARDS=$(cd / && env $UNSET "$BUN" --no-env-file "$REPO/packages/scripts/src/codex-hooks.ts" "$REPO/scripts/factory-settings.json") || refuse "it cannot render $CODEX_HOME's hooks.json from the factory's settings"
+  python3 -I - "$CODEX_HOME" "$(cd -P "$OWN" && pwd -P)" "$GUARDS" <<'PY' || refuse "it cannot write $CODEX_HOME's config.toml and hooks.json"
+import json, os, sys
+home, folder, guards = sys.argv[1:4]
+def write(name, text):
+    tmp = os.path.join(home, f"{name}.{os.getpid()}.tmp")
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.replace(tmp, os.path.join(home, name))
+# The login stays in CODEX_HOME's auth.json, no update check or self-update runs mid-session, and the session's folder is trusted, so no prompt waits on the owner.
+write("config.toml", f'cli_auth_credentials_store = "file"\ncheck_for_update_on_startup = false\n\n[projects.{json.dumps(folder)}]\ntrust_level = "trusted"\n')
+write(os.path.join("app-server-daemon", "settings.json"), json.dumps({"autoUpdateEnabled": False}) + "\n")
+# The beat lands whole: written beside its path, then moved onto it, so the wait never reads half of it. A Codex start stops when PowerShell is installed, so the beat names a pwsh or powershell on PATH, or at /usr/local/bin/pwsh, where Codex also looks (shell_detect.rs, codex-cli 0.167.1), in place of the thread.
+beat = {"hooks": [{"command": 'f="$SPAWN_CODEX_BEAT"; p=$(command -v pwsh || command -v powershell || { [ -x /usr/local/bin/pwsh ] && echo /usr/local/bin/pwsh; }); if [ -n "$p" ]; then printf \'{"powershell":"%s"}\\n\' "$p" > "$f.tmp"; else cat > "$f.tmp"; fi && mv "$f.tmp" "$f"', "timeout": 10, "type": "command"}], "matcher": ""}
+hooks = json.loads(guards)
+hooks.setdefault("SessionStart", []).append(beat)
+write("hooks.json", json.dumps({"hooks": hooks}, indent=2) + "\n")
+PY
+  LAUNCH="env ${UNSET}${CARRY}PLAYGROUND_ROLE=$ROLE CODEX_HOME=$(printf %q "$CODEX_HOME") SPAWN_CODEX_BEAT=$(printf %q "$BEAT") $(printf %q "$CODEX")"
+  if [ "$MODE" = resume ] && [ -z "$FRESH" ]; then
+    COMMAND="$LAUNCH resume --dangerously-bypass-hook-trust $SESSION"
+  else
+    COMMAND="$LAUNCH --dangerously-bypass-hook-trust"
+  fi
+  [ -z "$PROMPT" ] || COMMAND="$COMMAND \"$PROMPT\""
+fi
 # The pane's shell runs this text, so the whole launch goes in a subshell: a failed Keychain read's exit ends only that, the message stays on the pane, and tk dies with it.
 COMMAND="($COMMAND)"
 
@@ -1621,6 +1764,7 @@ COMMAND="($COMMAND)"
 LAUNCH_DIR="$DATA/launch"
 mkdir -p "$LAUNCH_DIR" && chmod 700 "$LAUNCH_DIR" || refuse "it cannot prepare $LAUNCH_DIR"
 LAUNCH_FILE="$LAUNCH_DIR/$NAME.sh"
+[ -z "$BEAT" ] || rm -f -- "$BEAT"
 # The factory's hooks read PLAYGROUND_REPO before the session's own folder, so the launch file's second line exports this script's main checkout: a session in a worktree, or outside any Playground checkout, runs the main checkout's guards.
 HEAD_LINES=
 if [ "$RUNTIME" = herdr ]; then
@@ -1639,13 +1783,69 @@ fi
 # Claude's folder trust and MCP picker approve a folder in the owner's name, so spawn.sh answers them only under the two roots the owner trusts (#i502, #i503); anywhere else the prompt stays for the owner.
 # herdr matches one screen row at a time, and a narrow column wraps each row, so the trust and ready patterns are each a part short enough for a narrow row to keep.
 TRUST_RE='Yes, I trust'
-# The picker's own title (Claude Code 2.1.302), since a REPL's status line can name an MCP server too.
-MCP_RE='New MCP server found in this project'
+# The pickers' own titles (Claude Code 2.1.319), since a REPL's status line can name an MCP server too: one server's, then several servers', which leads with their count.
+MCP_RE='New MCP server found in this project|[0-9]+ new MCP servers found'
 # Claude Code's mode mark leads its status line and survives the cut: 27 columns read "⏵⏵ bypass permissions" and 12 read "⏵⏵" (measured, 24 Oct).
 READY_RE='⏵⏵'
+# The servers an MCP picker's screen shows, one a line: the one server's name from its title, or each `[✔] <name>` row under several servers' title.
+mcp_names() {
+  hr pane read "$PANE" --source recent-unwrapped --lines 80 | python3 -I -c '
+import re, sys
+rows = sys.stdin.read().splitlines()
+titles = [i for i, r in enumerate(rows) if re.search(r"New MCP server found in this project|[0-9]+ new MCP servers found", r)]
+if not titles:
+    sys.exit(1)
+one = re.search(r"New MCP server found in this project: (.+?)\s*$", rows[titles[-1]])
+if one:
+    print(one.group(1))
+    sys.exit(0)
+for r in rows[titles[-1] + 1:]:
+    row = re.search(r"\[[^\]]?\]\s*(\S.*?)\s*$", r)
+    if row:
+        print(row.group(1))
+'
+}
+# The row the MCP picker's pointer marks, the last row after its title that leads with ❯.
+mcp_focused() {
+  hr pane read "$PANE" --source recent-unwrapped --lines 80 | python3 -I -c '
+import re, sys
+rows = sys.stdin.read().splitlines()
+titles = [i for i, r in enumerate(rows) if re.search(r"New MCP server found in this project|[0-9]+ new MCP servers found", r)]
+focused = [r for r in rows[titles[-1] + 1:] if r.lstrip().startswith("❯")] if titles else []
+print(focused[-1].lstrip()[1:].strip() if focused else "")
+'
+}
+# Why the picker is the owner's, printed, unless the names on stdin are $1 servers, each one of the factory's own MCP file, ~/.mcp.json, the only servers spawn.sh enables in the owner's name.
+# Claude Code merges the .mcp.json of $CWD and of each folder above it but /, the nearest taking a name over, so another on that walk that defines a server leaves the picker to the owner; a plugin's server reads "<name> (from plugin <plugin>)", which no key matches.
+mcp_factory_only() {
+  python3 -I -c '
+import json, os, sys
+def stop(why):
+    print(why)
+    sys.exit(1)
+factory = os.path.realpath(sys.argv[1])
+try:
+    servers = set(json.load(open(factory))["mcpServers"])
+except Exception:
+    stop(f"has no server list it can read in {sys.argv[1]}")
+d = os.path.realpath(sys.argv[3])
+while d != os.path.dirname(d):
+    f = os.path.join(d, ".mcp.json")
+    if os.path.lexists(f) and os.path.realpath(f) != factory:
+        try:
+            other = json.load(open(f)).get("mcpServers") or {}
+        except Exception:
+            other = None
+        if other != {}:
+            stop(f"also reads {f}")
+    d = os.path.dirname(d)
+names = set(sys.stdin.read().splitlines()) - {""}
+if len(names) != int(sys.argv[2]) or not names <= servers:
+    stop(f"lists a server from outside {sys.argv[1]}")' "$HOME/.mcp.json" "$1" "$CWD"
+}
 # The screens come in order (trust, then the MCP picker, then the REPL), so each wait looks only for what can still come and a screen already answered never matches twice. One key a request, since herdr drops part of several keys sent together.
 herdr_answer() {
-  local want="$TRUST_RE|$MCP_RE|$READY_RE" line
+  local want="$TRUST_RE|$MCP_RE|$READY_RE" line k n names why target focused
   while :; do
     line=$(hr pane wait-output "$PANE" --regex "$want" --source visible --timeout 120000 |
       python3 -I -c 'import json, sys; print(json.load(sys.stdin)["result"]["matched_line"])' 2>/dev/null) ||
@@ -1657,10 +1857,36 @@ herdr_answer() {
         { echo "spawn.sh: $NAME waits at Claude's folder trust prompt for $CWD, outside $(code_root) and each org's folder, so it is the owner's to answer" >&2; return 1; }
       hr pane send-keys "$PANE" down >/dev/null && hr pane send-keys "$PANE" enter >/dev/null || return 1
       want="$MCP_RE|$READY_RE"
-    elif [[ $want != "$READY_RE" ]] && grep -q "$MCP_RE" <<<"$line"; then
+    elif [[ $want != "$READY_RE" ]] && grep -qE "$MCP_RE" <<<"$line"; then
       trusted_root "$CWD" ||
         { echo "spawn.sh: $NAME waits at Claude's MCP server picker for $CWD, outside $(code_root) and each org's folder, so it is the owner's to answer" >&2; return 1; }
-      hr pane send-keys "$PANE" esc >/dev/null || return 1
+      # Esc on either picker writes its servers to disabledMcpjsonServers, so the answer enables them, and only the factory's own: Claude Code drops keys in a picker's first 250 ms, so it waits first.
+      sleep 0.5
+      n=1
+      [[ $line =~ ([0-9]+)\ new\ MCP\ servers ]] && n=${BASH_REMATCH[1]}
+      names=$(mcp_names)
+      # Several servers show five rows at a time, scrolled with the focus, so each move down reads the rows it brings in; a picker left before "Enable selected" writes nothing.
+      for ((k = 1; k < n; k++)); do
+        hr pane send-keys "$PANE" down >/dev/null || return 1
+        sleep 0.2
+        names+=$'\n'$(mcp_names)
+      done
+      why=$(mcp_factory_only "$n" <<<"$names") ||
+        { echo "spawn.sh: $NAME waits at Claude's MCP server picker for $CWD, which $why, so it is the owner's to answer" >&2; return 1; }
+      # Then "Enable selected", one row below the last server with all selected at the start, or one server's "Use this MCP server", two rows above the focused "Continue without".
+      # herdr can drop a key, and Enter on "Use this and all future MCP servers" would trust every later .mcp.json of the folder unseen, so Enter goes only to the row the pointer marks as the one wanted.
+      if [ "$n" -gt 1 ]; then
+        hr pane send-keys "$PANE" down >/dev/null || return 1
+        target="Enable selected"
+      else
+        hr pane send-keys "$PANE" up >/dev/null && hr pane send-keys "$PANE" up >/dev/null || return 1
+        target="Use this MCP server"
+      fi
+      sleep 0.2
+      focused=$(mcp_focused)
+      [ "$focused" = "$target" ] ||
+        { echo "spawn.sh: $NAME waits at Claude's MCP server picker for $CWD with \"${focused:-no row}\" marked where \"$target\" was wanted, so it is the owner's to answer" >&2; return 1; }
+      hr pane send-keys "$PANE" enter >/dev/null || return 1
       want=$READY_RE
     else
       return 0
@@ -1671,8 +1897,8 @@ herdr_answer() {
 # The roster row: a checker's is written before its pane opens, since no-outside-pr-code reads the PR it names at the session's first tool call, and every other row once its session has started.
 write_row() {
   set -- set "$NAME" "kind=$KIND"
-  # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status.
-  [ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "status=starting"
+  # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status, and so does restore's resume, whose row a close can end mid-launch.
+  [ "$(roster_field "$NAME" status)" = ended ] && [ -z "${SPAWN_RESTORING:-}" ] && set -- "$@" "status=starting"
   # A checker's --pr replaces an ended row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named; on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
   if [ -n "$PR_ARG" ]; then
     first_pull=
@@ -1778,6 +2004,11 @@ except (ValueError, KeyError, TypeError):
     pass' <<<"$out" || true)
   fi
   PANE=${placed% *} ws=${placed#* }
+  if restoring_row_down; then
+    rm -f -- "$LAUNCH_FILE" "$said_file"
+    [ -z "$placed" ] || [ "$out" = reused ] || hr pane close "$PANE" >/dev/null 2>&1 || true
+    REFUSE_CODE=4 refuse "its roster row reads $row_status"
+  fi
   # herdr clears an agent's name after every turn (measured), while a pane's label stays and comes back after a restart, so the label carries the name.
   if [ -z "$placed" ] || ! hr pane rename "$PANE" "$NAME" >/dev/null 2>>"$said_file" || ! hr pane run "$PANE" "exec bash '$LAUNCH_FILE'" >/dev/null 2>>"$said_file"; then
     herdr_said=$(tr -s '\n' ' ' 2>/dev/null <"$said_file" || true)
@@ -1790,11 +2021,59 @@ except (ValueError, KeyError, TypeError):
   fi
   rm -f -- "$said_file"
   echo "herdr pane $PANE workspace $ws"
+  # Codex fails closed: the beat its SessionStart hook writes proves its hooks loaded, and names its thread, so a session with none is stopped within 60 seconds of its start.
+  if [ "$HARNESS" = codex ]; then
+    for ((tick = 0; tick < 120; tick++)); do
+      [ -s "$BEAT" ] && break
+      sleep 0.5
+    done
+    # the beat names the thread, or the PowerShell the start stops on
+    SID=$(python3 -I -c 'import json, sys; b = json.load(open(sys.argv[1])); print("powershell " + b["powershell"] if "powershell" in b else b["session_id"])' "$BEAT" 2>/dev/null) || SID=
+    rm -f -- "$BEAT"
+    if ! [[ $SID =~ ^[0-9a-f-]{36}$ ]]; then
+      rm -f -- "$LAUNCH_FILE"
+      why="Codex's SessionStart hook wrote no beat within 60 seconds, so its guards may not have loaded"
+      [[ $SID != "powershell "* ]] || why="a Codex start stops when PowerShell is installed, and ${SID#powershell } is"
+      hr pane close "$PANE" >/dev/null 2>&1 ||
+        refuse "$why, and herdr would not close $NAME's pane $PANE, so the session may still run: close that pane yourself"
+      # A resume's pin and record stand from its last start, so a later resume tries again.
+      left="no pin, record or roster row was written"
+      [ "$MODE" != resume ] || left="no new pin, record or roster row was written, so its earlier pin and resume record stand"
+      refuse "$why: $NAME's pane $PANE is closed, and $left"
+    fi
+    # The thread takes the session's name through the app-server's thread/name/set, so Codex's own lists and resume by name find it.
+    python3 -I - "$CODEX" "$CODEX_HOME" "$SID" "$NAME" <<'PY' || echo "spawn.sh: $NAME started in Codex, but its thread $SID kept no name" >&2
+import json, os, signal, subprocess, sys
+codex, home, thread, name = sys.argv[1:5]
+server = subprocess.Popen([codex, "app-server"], env={**os.environ, "CODEX_HOME": home}, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+# An app-server that answers nothing in 20 seconds is ended with the naming, so none outlives the start.
+def give_up(*_):
+    server.kill()
+    sys.exit(1)
+signal.signal(signal.SIGALRM, give_up)
+signal.alarm(20)
+def call(id, method, params):
+    server.stdin.write(json.dumps({"id": id, "method": method, "params": params}, separators=(",", ":"), sort_keys=True) + "\n")
+    server.stdin.flush()
+    for line in server.stdout:
+        answer = json.loads(line)
+        if answer.get("id") == id:
+            return "error" not in answer
+    return False
+named = call(1, "initialize", {"clientInfo": {"name": "spawn.sh", "version": "1"}})
+server.stdin.write(json.dumps({"method": "initialized"}) + "\n")
+named = named and call(2, "thread/name/set", {"name": name, "threadId": thread})
+server.stdin.close()
+server.wait()
+sys.exit(0 if named else 1)
+PY
+  fi
   # The session's resume record, which spawn.sh restore reads after a server's restart, written once herdr runs the session. It is the one resume that brings it back, with the --account its start was given, the model it started with and an effort other than high, and never a token.
   record="exec $(printf %q "$MAIN/scripts/spawn.sh") resume $(printf '%q ' "$NAME" "$CWD" "$SID")"
   # A login the usage gate picked stays off the exec line, so a restore picks afresh, and on the account line, which ops-unstick and no-headless-login read.
   [ -n "$ACCOUNT" ] && [ -z "$PICKED" ] && record+="--account $ACCOUNT "
   [ -n "$GLM_GIVEN" ] && record+="--account $GLM_GIVEN "
+  [ -n "$OWN_LOGIN" ] && record+="--account $OWN_LOGIN "
   [ -n "$CLAUDE_MODEL" ] && record+="--model $CLAUDE_MODEL "
   [ -n "$EFFORT" ] && [ "$EFFORT" != high ] && record+="--effort $EFFORT "
   account_line=
@@ -1804,13 +2083,15 @@ except (ValueError, KeyError, TypeError):
   # A start's prompt, which a resume sends again when the session never took it (no transcript yet); it names the brief's file, never its text.
   [ "$MODE" = resume ] || (umask 077 && printf '%s\n' "$PROMPT" > "$RESUME_DIR/$NAME.prompt") ||
     echo "spawn.sh: $NAME started, but its prompt record write failed, so a restore before its first turn starts it without its brief" >&2
-  herdr_answer || true
+  [ "$HARNESS" = codex ] || herdr_answer || true
 fi
 
 # The pin lands only once herdr has the session; a healed resume records the backend it was given.
 if [ "$MODE" != resume ] || [ -n "$PIN_GIVEN" ]; then
-  if ! { mkdir -p "$PINS" && printf '%s\n' "${BACKEND:-claude}" > "$PINS/$NAME"; }; then
-    echo "spawn.sh: $NAME started, but its backend pin write failed; its next resume refuses until the pin reads glm or claude" >&2
+  pin="claude-code ${BACKEND:-claude}"
+  [ "$HARNESS" = codex ] && pin="codex openai"
+  if ! { mkdir -p "$PINS" && printf '%s\n' "$pin" > "$PINS/$NAME"; }; then
+    echo "spawn.sh: $NAME started, but its backend pin write failed; its next resume refuses until the pin reads $pin" >&2
   fi
 fi
 if ! { mkdir -p "$RUNTIMES" && printf '%s\n' "$RUNTIME" > "$RUNTIMES/$NAME"; }; then

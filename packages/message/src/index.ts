@@ -112,6 +112,15 @@ export const githubLoginSchema = z
   .trim()
   .regex(/^[a-z\d](?:[a-z\d-]{0,38})$/i, "a GitHub login")
 
+// A bot's name, which also names its Keychain item (playground-yard-bot-<name>), so it keeps to that item's lowercase letters, digits and dashes.
+export const botNameSchema = z
+  .string()
+  .regex(/^[a-z\d][a-z\d-]{0,29}$/, "lowercase letters, digits and dashes, 1 to 30")
+
+// A bot's login, <name>[bot]: no GitHub login holds a bracket, so no GitHub sign-in can claim it, and githubLoginSchema refuses it, so no invite or new DM can name it.
+export const botLogin = (name: string) => `${name}[bot]`
+export const isBotLogin = (login: string) => login.endsWith("[bot]")
+
 // An invite code as a newcomer types it, the one shape the redeem route takes.
 export const inviteCodeSchema = z.string().trim().min(1, "the invite code").max(64)
 

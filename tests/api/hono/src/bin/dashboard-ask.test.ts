@@ -301,7 +301,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect(posted.code).toBe(0)
     expect(posted.stdout).toMatch(/^\S+\n$/)
     expect(posted.stderr).toContain("ask: this ask is one block of prose")
-    expect(posted.stderr).toContain("bun run ask example code|decision|ui")
+    expect(posted.stderr).toContain("playground ask example code|decision|ui")
     const wide = await cli(
       ["new"],
       JSON.stringify({
@@ -762,6 +762,28 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     )
     expect((await cli(["edit", id])).code).toBe(1)
     rmSync(dir, { force: true, recursive: true })
+  })
+
+  test("edit says it reopened an update the owner marked Done, and says nothing of it on a card still listed (PG-1926)", async () => {
+    const update = (text: string) => ({
+      from: "worker-envy",
+      kind: "update",
+      preview: { outcome: "finding", text },
+      title: "Round 2",
+    })
+    const { id, tag } = await post(update("40%"))
+    const listed = await cli(["edit", id], JSON.stringify(update("60%")))
+    expect(listed.code).toBe(0)
+    expect(listed.stderr).not.toContain("reopened")
+    await dismiss(id)
+    const reopened = await cli(["edit", id], JSON.stringify(update("80%")))
+    expect(reopened.code).toBe(0)
+    expect(reopened.stderr).toContain(`edited ${tag}`)
+    expect(reopened.stderr).toContain("reopened it")
+    expect(JSON.parse((await cli(["get", id])).stdout)).toMatchObject({
+      answer: null,
+      readAt: null,
+    })
   })
 
   test("new and edit fill {now} with the time they post at, and refuse a measured or now time ahead of the clock, passing an ETA", async () => {

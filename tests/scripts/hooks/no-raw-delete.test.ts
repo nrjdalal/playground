@@ -147,3 +147,44 @@ describe("a delete the hook refuses, naming playground rm", () => {
     expect(await check("not json")).toBeUndefined()
   })
 })
+
+describe("agent-browser eval's script is JavaScript, never a shell command line (PG-1695)", () => {
+  const INBOX = `agent-browser eval 'document.querySelector("section[aria-busy][aria-label=Inbox]")?.outerHTML.slice(0,1500) ?? "no busy inbox"'`
+
+  test("the cause: a spaced word read as a shell line holds a glob program word and a ?? that may expand to -r", async () => {
+    expect(await check(input("a?.b ?? 1"))).toContain(
+      "a program the hook cannot read (a?.b) given -r",
+    )
+    expect(await check(input("some-tool 'a?.b ?? 1'"))).toContain(
+      "a program the hook cannot read (a?.b) given -r",
+    )
+  })
+
+  test.each([
+    "agent-browser eval 'a?.b ?? 1'",
+    `agent-browser eval 'f("x")?.outerHTML ?? "none"'`,
+    INBOX,
+    "agent-browser open http://x.localhost && agent-browser eval 'a?.b ?? 1'",
+    // #1887: a --session name before eval, alone or by =, and the same call's other commands
+    "agent-browser --session t eval 'a?.b ?? 1'",
+    "agent-browser --session=t eval 'a?.b ?? 1'",
+    "agent-browser --session t open http://x.localhost && agent-browser --session t eval 'a?.b ?? 1'",
+    "agent-browser --session t eval 'document.title'",
+  ])("%s runs", async (command) => {
+    expect(await check(input(command))).toBeUndefined()
+  })
+
+  test.each([
+    "$RM -r x",
+    "r? -rf x",
+    "agent-browser eval 'a?.b ?? 1' && r? -rf x",
+    `agent-browser eval "$(rm -rf ${NEVER_MADE})"`,
+    `agent-browser rm -rf ${NEVER_MADE}`,
+    // #1887: another option before eval, a session name and no eval, and a substitution in the session's script
+    "agent-browser --json eval 'a?.b ?? 1'",
+    `agent-browser --session t rm -rf ${NEVER_MADE}`,
+    `agent-browser --session t eval "$(rm -rf ${NEVER_MADE})"`,
+  ])("%s is still refused", async (command) => {
+    expect(await check(input(command))).toContain("no-raw-delete hook ")
+  })
+})

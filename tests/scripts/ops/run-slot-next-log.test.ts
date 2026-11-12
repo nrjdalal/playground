@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { waits } from "../../../packages/scripts/src/playground/focus"
-import { SCRIPT, machine, stop } from "./run-slot-fake"
+import { SCRIPT, machine, runSlot, stop } from "./run-slot-fake"
 
 // a check waits on its run's exit, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -56,10 +56,12 @@ describe("the oldest waiter's run-slot.next write leaves one line in run-slot.ru
       ].join("\n"),
     )
     const marker = join(m.root, "after-ran")
-    const p = Bun.spawn(
-      ["bash", SCRIPT, "worker-a", "--after", String(pid), "--", "touch", marker],
-      { cwd: m.root, env: m.env(), stderr: "ignore" },
-    )
+    const p = runSlot(["bash", SCRIPT, "worker-a", "--after", String(pid), "--", "touch", marker], {
+      cwd: m.root,
+      env: m.env(),
+      stderr: "ignore",
+      ops: m.ops,
+    })
     await p.exited
     expect(existsSync(marker)).toBe(true)
   })

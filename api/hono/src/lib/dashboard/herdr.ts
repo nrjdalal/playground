@@ -1,7 +1,7 @@
 import "@packages/env/aliases"
-import { readdirSync } from "node:fs"
+import { readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { envValue } from "@packages/config/org"
 import {
@@ -11,6 +11,7 @@ import {
   type SessionState,
 } from "@packages/config/session-state"
 import { dataDirOf } from "@packages/env/data-dir"
+import { readPin } from "@packages/settings"
 import { z } from "zod"
 
 import {
@@ -53,6 +54,68 @@ export const herdrServers = (
     .filter((name) => SERVER_NAME.test(name))
     .map((name) => ({ name, socket: join(dir, `${name}.sock`) }))
 }
+
+// A restore has 5 minutes from its owe to write its first run's lines, so a server whose start or restore never runs gives Start back; a restored dispatcher has 2 minutes for its pane to read live.
+const RESTORE_RUN_MS = 5 * 60_000
+const RESTORED_MS = 2 * 60_000
+
+const RESTORE_LINE = /^(restored|skipped|waiting|not restored) (\S+?)(?::|$)/
+
+// Pure: whether a server's owed restore can still bring the dispatcher back, from the owe's time and its newest run's lines (spawn.sh restore's, which tries the dispatcher first): before a run that names any session, for up to RESTORE_RUN_MS; while that run's line for the dispatcher reads waiting; or restored, for RESTORED_MS. A line that skipped or failed it, or none, is a restore that will not, whatever else still waits.
+export const bringsBack = ({
+  dispatcher,
+  log,
+  logAt,
+  now,
+  owedAt,
+}: {
+  dispatcher: string
+  log: string
+  logAt: number | null
+  now: number
+  owedAt: number
+}): boolean => {
+  const lines =
+    logAt === null || logAt < owedAt
+      ? []
+      : log.split("\n").flatMap((line) => {
+          const read = RESTORE_LINE.exec(line)
+          return read ? [{ kind: read[1], name: read[2] }] : []
+        })
+  if (lines.length === 0) return now - owedAt < RESTORE_RUN_MS
+  const kind = lines.find((line) => line.name === dispatcher)?.kind
+  return kind === "waiting" || (kind === "restored" && now - (logAt ?? 0) < RESTORED_MS)
+}
+
+const mtimeOf = (path: string): number | null => {
+  try {
+    return statSync(path).mtimeMs
+  } catch {
+    return null
+  }
+}
+
+// Whether a restore can still bring the dispatcher back: ops-herdr keeps <server>.restore beside a server's socket (owedFile) from the server's start until no session its restore owes waits on a gate or focus, and writes each run's lines to <server>.restore.log beside it (bringsBack reads both); a fixture stack reads its herdr.json's restoring instead.
+export const restoring = ({
+  dispatcher,
+  fixtureDir,
+  now = Date.now(),
+  servers = herdrServers(),
+}: {
+  dispatcher: string
+  fixtureDir?: string
+  now?: number
+  servers?: HerdrServer[]
+}): boolean =>
+  servers.some(({ name, socket }) => {
+    if (socket === FIXTURE_SOCKET) return Boolean(readFixtureHerdr(fixtureDir).restoring)
+    const owedAt = mtimeOf(join(dirname(socket), `${name}.restore`))
+    if (owedAt === null) return false
+    const path = join(dirname(socket), `${name}.restore.log`)
+    const logAt = mtimeOf(path)
+    const log = logAt === null ? "" : readFileSync(path, "utf8")
+    return bringsBack({ dispatcher, log, logAt, now, owedAt })
+  })
 
 // Every other server socket in the folder, by ops-herdr's socketServers rule (a <name>.sock, never a client's <name>-client.sock nor herdr's default), so a session on a server an older Playground started under another name, factory or probes before the rename, still shows while that server runs, as the CLI's Start already counts it.
 const leftOver = (dir: string): string[] => {
@@ -240,6 +303,7 @@ const STATUSES = ["idle", "working", "blocked", "done", "unknown"] as const
 export const paneSchema = z.object({
   agent_session: z.object({ kind: z.string(), value: z.string() }).nullish(),
   agent_status: z.enum(STATUSES).catch("unknown"),
+  label: z.string().nullish(),
   pane_id: z.string().regex(new RegExp(`^${PANE_ID}$`)),
   scroll: z.object({ offset_from_bottom: z.number() }).nullish(),
   terminal_id: z.string(),
@@ -371,20 +435,44 @@ const FILED: Record<SessionState["state"], string> = {
   working: "running",
 }
 
+// Pure: the program an argv runs is codex, run directly or as npm's launcher under node.
+const runsCodex = (argv: string[]) => {
+  const program = /(^|\/)node$/.test(argv[0] ?? "") ? argv[1] : argv[0]
+  return /(^|\/)codex$/.test(program ?? "")
+}
+
+// The session a pane holds, its agent and the process that runs it, or null. A Codex session writes no Claude registry file, so its pane holds it when the pane's label has a Codex launch record (codexLaunches) and a codex process runs in its foreground.
+function paneSession(
+  pane: Pane,
+  registry: Registry,
+  codex: CodexLaunches,
+): { agent: "claude" | "codex"; proc: Pane["processes"][number]; sessionId: string } | null {
+  const thread = pane.label ? codex.get(pane.label) : undefined
+  const codexProc = thread ? pane.processes.find((p) => runsCodex(p.argv ?? [])) : undefined
+  if (thread && codexProc) return { agent: "codex", proc: codexProc, sessionId: thread }
+  const registered = pane.processes.find((p) => registry?.get(p.pid))
+  const registeredId = registered && registry?.get(registered.pid)?.sessionId
+  if (registered)
+    return registeredId ? { agent: "claude", proc: registered, sessionId: registeredId } : null
+  const unread = pane.processes.find((p) => registry === null || registry.get(p.pid) === null)
+  return unread && pane.agent_session?.kind === "id" && pane.agent_session.value
+    ? { agent: "claude", proc: unread, sessionId: pane.agent_session.value }
+    : null
+}
+
 // Pure but for the change times (state.changed: when each session's herdr state last changed, as this process saw it, by its terminal and session, which a move does not change; herdr keeps no such time, and answeredSince() compares a picker's answer with it): every server's panes as the session records liveRecords() and composeWorkers() read. A pane holds a session when a process in its foreground has a registry file naming one, so a pane whose Claude has exited, or one never registered, is no session (St3); a file mid-rewrite leaves herdr's own agent_session, when it has one.
-export function herdrRecords(reads: ServerRead[], registry: Registry, now: string): Json[] {
+export function herdrRecords(
+  reads: ServerRead[],
+  registry: Registry,
+  now: string,
+  codex: CodexLaunches = new Map(),
+): Json[] {
   const changes = new Map<string, Change>()
   const records = reads.flatMap((read) =>
     read.panes.flatMap((pane) => {
-      const registered = pane.processes.find((p) => registry?.get(p.pid))
-      const unread = pane.processes.find((p) => registry === null || registry.get(p.pid) === null)
-      const proc = registered ?? unread
-      const sessionId = registered
-        ? (registry?.get(registered.pid)?.sessionId ?? "")
-        : unread && pane.agent_session?.kind === "id"
-          ? pane.agent_session.value
-          : ""
-      if (!proc || !sessionId) return []
+      const held = paneSession(pane, registry, codex)
+      if (!held) return []
+      const { agent, proc, sessionId } = held
       const key = `${read.server}:${pane.terminal_id}:${sessionId}`
       const known = state.changed.get(key)
       // a read more than SEEN_SLACK_MS after the last can hide a change and back (a picker answered, then a permission raised), so its state began at some time unknown, as on a fresh process
@@ -397,7 +485,7 @@ export function herdrRecords(reads: ServerRead[], registry: Registry, now: strin
       const cwd = proc.cwd ?? ""
       return [
         {
-          agent: "claude",
+          agent,
           agent_lifecycle: LIFECYCLE[pane.agent_status],
           cwd,
           herdr_seen_at: seen ? at : null,
@@ -409,7 +497,8 @@ export function herdrRecords(reads: ServerRead[], registry: Registry, now: strin
           started_at: null,
           stored_pid_exists: true,
           surface_id: herdrSurface(read.server, pane.pane_id),
-          transcript_path: cwd ? transcriptPath(claudeDir(), cwd, sessionId) : "",
+          transcript_path:
+            agent === "claude" && cwd ? transcriptPath(claudeDir(), cwd, sessionId) : "",
           updated_at: at,
           workspace_id: herdrSurface(read.server, pane.workspace_id),
         },
@@ -422,6 +511,31 @@ export function herdrRecords(reads: ServerRead[], registry: Registry, now: strin
     if (!whole.has(change.server) && !changes.has(key)) changes.set(key, change)
   state.changed = changes
   return records
+}
+
+// The sessions spawn.sh started in Codex, by name: each one whose backend pin names the codex harness, with the thread its resume record's exec line names (spawn.sh resume <name> <folder> <thread>).
+export type CodexLaunches = Map<string, string>
+
+export function codexLaunches(data = dataDir()): CodexLaunches {
+  const out: CodexLaunches = new Map()
+  let names: string[] = []
+  try {
+    names = readdirSync(join(data, "backends"))
+  } catch {
+    return out
+  }
+  for (const name of names) {
+    try {
+      if (readPin(readFileSync(join(data, "backends", name), "utf8"))?.harness !== "codex") continue
+      const exec = readFileSync(join(data, "resume", `${name}.sh`), "utf8")
+        .split("\n")
+        .find((line) => line.startsWith("exec "))
+      // spawn.sh writes the line with %q, so a folder may hold an escaped space: the name follows resume, and the thread ends the line
+      const words = exec?.match(/ resume (\S+) .* ([0-9a-f-]{36})$/)
+      if (words?.[1] === name && words[2]) out.set(name, words[2])
+    } catch {}
+  }
+  return out
 }
 
 // Pure: every server's workspaces in the board's workspace list, each id its ref too.

@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -8,6 +17,7 @@ import {
   missingGuards,
   originPath,
   restoreBeat,
+  type Restore,
   SECOND_LOOK_MS,
   upkeepHeld,
 } from "../../../../../packages/scripts/src/ops-restore/cli"
@@ -334,5 +344,158 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
     await git(m.main, "checkout", "--", ".")
     await beat(m.ctx(later(900_000)))
     expect(existsSync(join(m.ops, "restore", "state.json"))).toBe(false)
+  })
+})
+
+describe("ops-restore puts back a tracked file modified in the main checkout (#1840)", () => {
+  const rootsOf = (m: { main: string; root: string }) => () => ({
+    home: join(m.root, "home"),
+    main: m.main,
+    trash: join(m.root, "data", "trash"),
+  })
+  const logOf = async (ops: string) =>
+    (
+      await Bun.file(join(ops, "log", "ops-restore.log"))
+        .text()
+        .catch(() => "")
+    )
+      .split("\n")
+      .filter(Boolean)
+  const readme = (main: string) => readFileSync(join(main, "README.md"), "utf8")
+
+  test("a file modified on two looks in a row comes back as HEAD's copy, its stray copy in the trash, with one log line", async () => {
+    const m = await machine()
+    writeFileSync(join(m.main, "README.md"), "stray\n")
+    const beat = restoreBeat({ guards: GUARDS, main: m.main, roots: rootsOf(m), upkeep: noUpkeep })
+    await beat(m.ctx(T0))
+    expect(readme(m.main)).toBe("stray\n")
+    await beat(m.ctx(later(300_000)))
+    expect(readme(m.main)).toBe("origin\n")
+    expect(await git(m.main, "status", "--porcelain")).toBe("")
+    const lines = await logOf(m.ops)
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain("restored README.md from HEAD")
+    const trashed = /in the trash at (.+) \(playground rm --restore /.exec(lines[0]!)![1]!
+    expect(trashed.startsWith(realpathSync(join(m.root, "data", "trash")))).toBe(true)
+    expect(readFileSync(trashed, "utf8")).toBe("stray\n")
+  })
+
+  test("a staged modification is put back from HEAD too", async () => {
+    const m = await machine()
+    writeFileSync(join(m.main, "README.md"), "stray\n")
+    await git(m.main, "add", "README.md")
+    const beat = restoreBeat({ guards: GUARDS, main: m.main, roots: rootsOf(m), upkeep: noUpkeep })
+    await beat(m.ctx(T0))
+    await beat(m.ctx(later(300_000)))
+    expect(readme(m.main)).toBe("origin\n")
+    expect(await git(m.main, "status", "--porcelain")).toBe("")
+    expect(await logOf(m.ops)).toHaveLength(1)
+  })
+
+  test("a file modified on one look only is left as it is", async () => {
+    const m = await machine()
+    writeFileSync(join(m.main, "README.md"), "stray\n")
+    const beat = restoreBeat({ guards: GUARDS, main: m.main, roots: rootsOf(m), upkeep: noUpkeep })
+    await beat(m.ctx(T0))
+    await beat(m.ctx(later(SECOND_LOOK_MS - 10_000)))
+    expect(readme(m.main)).toBe("stray\n")
+    expect(await logOf(m.ops)).toEqual([])
+  })
+
+  test("an untracked file and a staged add stay as they are", async () => {
+    const m = await machine()
+    writeFileSync(join(m.main, "new.txt"), "new\n")
+    writeFileSync(join(m.main, "added.txt"), "added\n")
+    await git(m.main, "add", "added.txt")
+    const beat = restoreBeat({ guards: GUARDS, main: m.main, roots: rootsOf(m), upkeep: noUpkeep })
+    await beat(m.ctx(T0))
+    await beat(m.ctx(later(300_000)))
+    expect(await git(m.main, "status", "--porcelain")).toBe("A  added.txt\n?? new.txt\n")
+    expect(await logOf(m.ops)).toEqual([])
+    expect(existsSync(join(m.root, "data", "trash"))).toBe(false)
+  })
+
+  test("while upkeep holds the main checkout, a modified file waits", async () => {
+    const m = await machine()
+    writeFileSync(join(m.main, "README.md"), "stray\n")
+    const beat = restoreBeat({
+      guards: GUARDS,
+      main: m.main,
+      roots: rootsOf(m),
+      upkeep: async () => true,
+    })
+    await beat(m.ctx(T0))
+    await beat(m.ctx(later(300_000)))
+    expect(readme(m.main)).toBe("stray\n")
+    expect(await logOf(m.ops)).toEqual([])
+  })
+})
+
+// Imported at each call, so this file's other tests still run on a tree that lacks it.
+const restoreNow = async (ctx: Context, restore: Restore) =>
+  (await import("../../../../../packages/scripts/src/ops-restore/cli")).restoreNow(ctx, restore)
+
+describe("the Dashboard's Restore now runs the same steps at once (#1919)", () => {
+  test("with a guard gone, one look is enough: it restores, installs, links and tells ops and the dispatcher", async () => {
+    const m = await machine()
+    m.wipe()
+    const pressed = await restoreNow(m.ctx(T0), { guards: GUARDS, main: m.main, upkeep: noUpkeep })
+    expect(pressed.code).toBe(0)
+    expect(missingGuards(m.main, GUARDS)).toEqual([])
+    expect(m.runs.some((r) => r.includes("run-slot.sh ops-restore -- bun install --cwd"))).toBe(
+      true,
+    )
+    expect(m.runs.some((r) => r.endsWith("scripts/link-skills.sh"))).toBe(true)
+    expect(pressed.text).toContain("2 guards were gone from")
+    expect(pressed.text).toContain("Restore now on the Dashboard restored the checkout")
+    expect(m.sent.map((s) => s.to)).toEqual(["ops", "dispatcher"])
+    expect(m.sent[0]!.text).toBe(`ops-restore: ${pressed.text}`)
+  })
+
+  test("a checkout whose guards are all there is left as it is", async () => {
+    const m = await machine()
+    writeFileSync(join(m.main, "README.md"), "stray\n")
+    const pressed = await restoreNow(m.ctx(T0), { guards: GUARDS, main: m.main, upkeep: noUpkeep })
+    expect(pressed).toEqual({
+      code: 3,
+      text: `Every guard is in place in ${m.main}, so nothing was restored.`,
+    })
+    expect(m.runs).toEqual([])
+    expect(m.sent).toEqual([])
+    expect(readFileSync(join(m.main, "README.md"), "utf8")).toBe("stray\n")
+  })
+
+  test("while a run slot's holder runs upkeep on the main checkout, nothing runs", async () => {
+    const m = await machine({
+      "ps -o command= -p 4242": { code: 0, out: "bun install --cwd /x\n" },
+    })
+    m.wipe()
+    writeFileSync(join(m.ops, "run-slot.holder"), "ops 4242 2026-11-07T06:00:00Z 1 medium\n")
+    const pressed = await restoreNow(m.ctx(T0), { guards: GUARDS, main: m.main })
+    expect(pressed.code).toBe(1)
+    expect(pressed.text).toContain("so nothing was restored")
+    expect(m.runs).toEqual(["ps -o command= -p 4242"])
+    expect(missingGuards(m.main, GUARDS)).toEqual(GUARDS)
+  })
+
+  test("a step that fails is named in the words the page shows, and runs after a beat's failed restore too", async () => {
+    const m = await machine({ "bun install": { code: 1, out: "error: no network\n" } })
+    m.wipe()
+    await seed(m.ops, { failed: "bun install", last: T0.toISOString(), since: T0.toISOString() })
+    const pressed = await restoreNow(m.ctx(T0), { guards: GUARDS, main: m.main, upkeep: noUpkeep })
+    expect(pressed.code).toBe(1)
+    expect(pressed.text).toContain("stopped at bun install: error: no network")
+    expect(pressed.text).toContain("The guards are back: Ops finishes the rest")
+  })
+
+  test("a folder that holds no checkout is refused", async () => {
+    const m = await machine()
+    const pressed = await restoreNow(m.ctx(T0), {
+      guards: GUARDS,
+      main: join(m.root, "nowhere"),
+      upkeep: noUpkeep,
+    })
+    expect(pressed.code).toBe(1)
+    expect(m.runs).toEqual([])
   })
 })

@@ -36,7 +36,7 @@ describe("toolChecks", () => {
       () => true,
     )
     expect(checks.filter((c) => c.status !== "ok")).toEqual([])
-    expect(checks.map((c) => c.name)).toEqual([...REQUIRED, "uv", "gh login"])
+    expect(checks.map((c) => c.name)).toEqual([...REQUIRED, "uv", "whisper-cli", "gh login"])
     expect(missing(checks)).toBe(false)
   })
 
@@ -51,12 +51,14 @@ describe("toolChecks", () => {
     expect(missing(checks)).toBe(true)
   })
 
-  test("uv and the gh login are optional", () => {
+  test("uv, whisper-cli and the gh login are optional", () => {
     const checks = toolChecks(
-      (cmd) => cmd !== "uv",
+      (cmd) => cmd !== "uv" && cmd !== "whisper-cli",
       () => false,
     )
     expect(checks.find((c) => c.name === "uv")!.status).toBe("optional")
+    expect(checks.find((c) => c.name === "whisper-cli")!.status).toBe("optional")
+    expect(missing(checks)).toBe(false)
     expect(checks.find((c) => c.name === "gh login")).toEqual({
       detail: "sync is off; fix: gh auth login, then playground ext init",
       name: "gh login",
@@ -281,6 +283,7 @@ describe("doctor.ts --tools", () => {
     expect(checks.filter((c) => c.status !== "ok").map((c) => c.name)).toEqual([
       "claude",
       "uv",
+      "whisper-cli",
       "gh login",
     ])
   })

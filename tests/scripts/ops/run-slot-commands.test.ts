@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { SCRIPT, stop, dirs, machine } from "./run-slot-fake"
+import { SCRIPT, stop, dirs, machine, runSlot } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang: 60s, twice the slowest case under SLOW_CHILD=1.5 but local CI's, which sets its own
 setDefaultTimeout(60_000)
@@ -27,10 +27,11 @@ describe("the command reads run-slot's own stdin", () => {
     chmodSync(join(m.bin, "git"), 0o755)
     const gitInput = join(m.root, "git-input")
     const script = heredoc === null ? '"$@" <&-' : `"$@" <<'EOF'\n${heredoc}EOF\n`
-    const p = Bun.spawn(["bash", "-c", script, "bash", "bash", SCRIPT, "worker-x", "--", ...argv], {
+    const p = runSlot(["bash", "-c", script, "bash", "bash", SCRIPT, "worker-x", "--", ...argv], {
       cwd: m.root,
       env: m.env({ GIT_INPUT: gitInput }),
       stdout: "pipe",
+      ops: m.ops,
     })
     const out = await new Response(p.stdout).text()
     return { code: await p.exited, gitInput: () => readFileSync(gitInput, "utf8"), out }
@@ -66,10 +67,11 @@ describe("one argument holding a list of paths", () => {
     const m = machine()
     writeFileSync(join(m.root, "a.test.ts"), "")
     writeFileSync(join(m.root, "b.test.ts"), "")
-    const p = Bun.spawn(["bash", SCRIPT, "worker-x", "--", "touch", "a.test.ts b.test.ts"], {
+    const p = runSlot(["bash", SCRIPT, "worker-x", "--", "touch", "a.test.ts b.test.ts"], {
       cwd: m.root,
       env: m.env(),
       stderr: "pipe",
+      ops: m.ops,
     })
     const [code, err] = await Promise.all([p.exited, new Response(p.stderr).text()])
     expect(code).toBe(0)
@@ -82,10 +84,11 @@ describe("one argument holding a list of paths", () => {
     const m = machine()
     writeFileSync(join(m.root, "a.test.ts"), "")
     writeFileSync(join(m.root, "b.test.ts"), "")
-    const p = Bun.spawn(["bash", SCRIPT, "worker-x", "--", "touch", "a.test.ts\nb.test.ts"], {
+    const p = runSlot(["bash", SCRIPT, "worker-x", "--", "touch", "a.test.ts\nb.test.ts"], {
       cwd: m.root,
       env: m.env(),
       stderr: "pipe",
+      ops: m.ops,
     })
     const [code, err] = await Promise.all([p.exited, new Response(p.stderr).text()])
     expect(code).toBe(0)
@@ -96,9 +99,9 @@ describe("one argument holding a list of paths", () => {
   test("a message whose first word alone names a path does not warn", async () => {
     const m = machine()
     writeFileSync(join(m.root, "a.test.ts"), "")
-    const p = Bun.spawn(
+    const p = runSlot(
       ["bash", SCRIPT, "worker-x", "--", "printf", "%s\\n", "a.test.ts is a message"],
-      { cwd: m.root, env: m.env(), stderr: "pipe" },
+      { cwd: m.root, env: m.env(), stderr: "pipe", ops: m.ops },
     )
     const [code, err] = await Promise.all([p.exited, new Response(p.stderr).text()])
     expect(code).toBe(0)
@@ -109,10 +112,11 @@ describe("one argument holding a list of paths", () => {
 // dispatcher, 18 Oct: keen-ledger's dev stack held a slot from 21:13Z to 21:58Z
 const refused = async (argv: string[]) => {
   const m = machine()
-  const p = Bun.spawn(["bash", SCRIPT, "worker-x", "--", ...argv], {
+  const p = runSlot(["bash", SCRIPT, "worker-x", "--", ...argv], {
     cwd: tmpdir(),
     env: m.env(),
     stderr: "pipe",
+    ops: m.ops,
   })
   return { code: await p.exited, err: await new Response(p.stderr).text(), tickets: m.tickets() }
 }
@@ -151,7 +155,11 @@ describe("a slot folder with no holder line", () => {
     const m = machine()
     bare(m, "run-slot", 3 * 3600)
     bare(m, "run-slot-2", 60)
-    const p = Bun.spawn(["bash", SCRIPT, "clear-stale"], { env: m.env(), stdout: "pipe" })
+    const p = runSlot(["bash", SCRIPT, "clear-stale"], {
+      env: m.env(),
+      stdout: "pipe",
+      ops: m.ops,
+    })
     expect(await p.exited).toBe(0)
     expect(await new Response(p.stdout).text()).toContain("run-slot: cleared")
     expect(existsSync(join(m.ops, "run-slot"))).toBe(false)
@@ -161,7 +169,11 @@ describe("a slot folder with no holder line", () => {
   test("clear-stale clears an aged run-slot-quick", async () => {
     const m = machine()
     bare(m, "run-slot-quick", 3 * 3600)
-    const p = Bun.spawn(["bash", SCRIPT, "clear-stale"], { env: m.env(), stdout: "pipe" })
+    const p = runSlot(["bash", SCRIPT, "clear-stale"], {
+      env: m.env(),
+      stdout: "pipe",
+      ops: m.ops,
+    })
     expect(await p.exited).toBe(0)
     expect(existsSync(join(m.ops, "run-slot-quick"))).toBe(false)
   })
@@ -176,7 +188,7 @@ test("a slot with no holder pid and no readable mtime reads as young, with no er
     `#!/bin/bash\ncase "\${@: -1}" in */run-slot|*/run-slot.holder) exit 0 ;; esac\nexec /usr/bin/stat "$@"\n`,
   )
   chmodSync(join(m.bin, "stat"), 0o755)
-  const p = Bun.spawn(["bash", SCRIPT, "clear-stale"], { env: m.env(), stderr: "pipe" })
+  const p = runSlot(["bash", SCRIPT, "clear-stale"], { env: m.env(), stderr: "pipe", ops: m.ops })
   const [code, err] = await Promise.all([p.exited, new Response(p.stderr).text()])
   expect(err).toBe("")
   expect(code).toBe(0)
@@ -199,7 +211,12 @@ describe("an ops file whose mtime reads back empty reads as gone, with no error 
 
   test("a set file with no expiry line leaves its slot open", async () => {
     const m = blind("run-slot.3-off", "")
-    const p = Bun.spawn(["bash", SCRIPT, "slots"], { env: m.env(), stderr: "pipe", stdout: "pipe" })
+    const p = runSlot(["bash", SCRIPT, "slots"], {
+      env: m.env(),
+      stderr: "pipe",
+      stdout: "pipe",
+      ops: m.ops,
+    })
     const [code, out, err] = await Promise.all([
       p.exited,
       new Response(p.stdout).text(),
@@ -212,10 +229,11 @@ describe("an ops file whose mtime reads back empty reads as gone, with no error 
 
   test("run-slot.priority names no holder, so a run takes its slot", async () => {
     const m = blind("run-slot.priority", "worker-p\n")
-    const p = Bun.spawn(["bash", SCRIPT, "worker-m", "--", "true"], {
+    const p = runSlot(["bash", SCRIPT, "worker-m", "--", "true"], {
       cwd: m.root,
       env: m.env({ RUN_SLOT_SIZE: "medium" }),
       stderr: "pipe",
+      ops: m.ops,
     })
     const [code, err] = await Promise.all([p.exited, new Response(p.stderr).text()])
     expect(err).not.toContain("syntax error")
@@ -365,10 +383,11 @@ describe("the runner host", () => {
     chmodSync(join(m.bin, "bun"), 0o755)
     const read = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : "")
     const run = async (argv: string[], extra: Record<string, string> = {}) => {
-      const p = Bun.spawn(["bash", SCRIPT, "worker-x", "--", ...argv], {
+      const p = runSlot(["bash", SCRIPT, "worker-x", "--", ...argv], {
         cwd: m.root,
         env: m.env(extra),
         stderr: "pipe",
+        ops: m.ops,
       })
       const [code, err] = await Promise.all([p.exited, new Response(p.stderr).text()])
       return {

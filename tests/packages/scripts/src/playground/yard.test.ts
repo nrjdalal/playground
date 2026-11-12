@@ -38,9 +38,21 @@ const MESSAGE: Message = {
   text: "anyone up?",
 }
 
+// A made-up bot and its made-up token, which no line the command prints may hold.
+const BOT_SECRET = "yard_madeUpBotTokenForTheTestOnly42"
+const BOT = {
+  createdAt: "2026-11-12T00:00:00.000Z",
+  dm: "dm-bot",
+  login: "grok[bot]",
+  name: "grok",
+  readsLog: false,
+}
+
 // A fake hosted Yard, Keychain and terminal, so nothing reaches any of them for real.
 const setUp = (
   over: Partial<YardIo> & {
+    botGone?: boolean
+    keychainRefuses?: boolean
     token?: string | null
     status?: Message["status"]
     me?: () => Promise<unknown>
@@ -49,7 +61,8 @@ const setUp = (
   const lines: string[] = []
   const calls: unknown[][] = []
   const stored: string[] = []
-  const io: YardIo = {
+  const readers: string[] = []
+  const io = {
     api: "https://api.yard.example",
     client: (base, token) => {
       calls.push(["client", base, token])
@@ -65,9 +78,31 @@ const setUp = (
           { ...MESSAGE, id: "m9", status: over.status ?? "sent" }
         ),
         read: async (id: string) => (calls.push(["read", id]), { lastReadAt: MESSAGE.at }),
+        addBot: async (name: string, options?: { log?: boolean }) => (
+          calls.push(["addBot", name, ...(options?.log ? [options] : [])]),
+          { bot: { ...BOT, name, login: `${name}[bot]` }, secret: BOT_SECRET }
+        ),
+        revokeBot: async (name: string) => {
+          calls.push(["revokeBot", name])
+          if (over.botGone) throw new YardError(404, "Bot not found")
+          return { ...BOT, name, login: `${name}[bot]` }
+        },
       } as unknown as YardClient
     },
+    botKeychain: (name: string) =>
+      ({
+        read: async () => null,
+        remove: async () => void stored.push(`removed playground-yard-bot-${name}`),
+        write: async (token: string) => {
+          if (over.keychainRefuses) throw new Error("the Keychain refused it: locked")
+          stored.push(`playground-yard-bot-${name}=${token}`)
+        },
+      }) as YardIo["keychain"],
     err: (line) => lines.push(`err: ${line}`),
+    logReaders: {
+      add: async (login: string, dm: string) => void readers.push(`+${login} ${dm}`),
+      remove: async (login: string) => void readers.push(`-${login}`),
+    },
     keychain: {
       read: async () => ("token" in over ? over.token : "yard_mac"),
       remove: async () => void stored.push("removed"),
@@ -77,8 +112,8 @@ const setUp = (
     readSecret: async () => "yard_pasted\n",
     web: "https://yard.example",
     ...over,
-  }
-  return { calls, io, lines, stored }
+  } as YardIo
+  return { calls, io, lines, readers, stored }
 }
 
 describe("playground yard", () => {
@@ -122,6 +157,57 @@ describe("playground yard", () => {
     expect(held.lines).toEqual(["Held for your approval: https://yard.example/yard/approve/m9"])
     expect(await runYard(["post", "ops", "x", "--kind", "shout"], held.io)).toBe(2)
     expect(await runYard(["post", "ops", "--kind", "steps"], held.io)).toBe(2)
+  })
+
+  test("bot add writes the bot's token to its own Keychain item and prints only the item's name", async () => {
+    const { calls, io, lines, stored } = setUp()
+    expect(await runYard(["bot", "add", "grok"], io)).toBe(0)
+    expect(calls.at(-1)).toEqual(["addBot", "grok"])
+    expect(stored).toEqual([`playground-yard-bot-grok=${BOT_SECRET}`])
+    expect(lines.join("\n")).toContain("playground-yard-bot-grok")
+    expect(lines.join("\n")).toContain("dm-bot")
+    expect(lines.join("\n")).not.toContain(BOT_SECRET)
+    expect(lines.join("\n")).not.toContain("yard_madeUp")
+  })
+
+  test("bot add --log lets the bot read the dispatcher's log on Yard and puts it on this Mac's yard.logReaders, and a revoke takes it off (#1888)", async () => {
+    const { calls, io, lines, readers } = setUp()
+    expect(await runYard(["bot", "add", "grok", "--log"], io)).toBe(0)
+    expect(calls.at(-1)).toEqual(["addBot", "grok", { log: true }])
+    expect(readers).toEqual(["+grok[bot] dm-bot"])
+    expect(lines.join("\n")).toContain("reads the dispatcher's log")
+    expect(await runYard(["bot", "revoke", "grok"], io)).toBe(0)
+    expect(readers).toEqual(["+grok[bot] dm-bot", "-grok[bot]"])
+    const plain = setUp()
+    expect(await runYard(["bot", "add", "grok"], plain.io)).toBe(0)
+    expect(plain.readers).toEqual([])
+    expect(await runYard(["bot", "add", "grok", "--logs"], plain.io)).toBe(2)
+  })
+
+  test("bot add revokes the bot it made when the Keychain will not keep its token, and prints no token", async () => {
+    const { calls, io, lines, stored } = setUp({ keychainRefuses: true })
+    expect(await runYard(["bot", "add", "grok"], io)).toBe(1)
+    expect(calls.at(-1)).toEqual(["revokeBot", "grok"])
+    expect(stored).toEqual([])
+    expect(lines.join("\n")).not.toContain(BOT_SECRET)
+  })
+
+  test("bot revoke revokes the bot on Yard and deletes its Keychain item, also when Yard has no such bot", async () => {
+    const made = setUp()
+    expect(await runYard(["bot", "revoke", "grok"], made.io)).toBe(0)
+    expect(made.calls.at(-1)).toEqual(["revokeBot", "grok"])
+    expect(made.stored).toEqual(["removed playground-yard-bot-grok"])
+    const gone = setUp({ botGone: true })
+    expect(await runYard(["bot", "revoke", "grok"], gone.io)).toBe(0)
+    expect(gone.stored).toEqual(["removed playground-yard-bot-grok"])
+  })
+
+  test("bot refuses a name its Keychain item cannot take, and a verb it does not know", async () => {
+    const { calls, io } = setUp()
+    expect(await runYard(["bot", "add", "Grok!"], io)).toBe(2)
+    expect(await runYard(["bot", "add", "../yard"], io)).toBe(2)
+    expect(await runYard(["bot", "list"], io)).toBe(2)
+    expect(calls.filter(([verb]) => verb === "addBot")).toEqual([])
   })
 
   test("says what is missing: no Yard set up, no token, no such channel", async () => {

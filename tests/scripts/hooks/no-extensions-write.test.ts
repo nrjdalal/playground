@@ -592,6 +592,39 @@ describe("a quoted argument is read as a command line only where a program runs 
     expect(await bash(command)).toBeUndefined()
   })
 
+  // #1799: a quiet commit's message names the home by ~/ as text, under run-slot and with its own log redirect too; the real home, since the shell reads ~ as the process's home
+  const atHome = (command: string) =>
+    check(JSON.stringify({ cwd: tmpdir(), tool_input: { command }, tool_name: "Bash" }), {
+      HOME: homedir(),
+    })
+  const log = join(tmpdir(), "commit.log")
+  test.each([
+    [
+      "under run-slot, with its log redirect",
+      `~/.playground/ops/run-slot.sh w -- git commit -q -m "fix(x): reads each checkout in ~/<org>" > ${log} 2>&1`,
+    ],
+    [
+      "under run-slot",
+      `~/.playground/ops/run-slot.sh w -- git commit -q -m "fix(x): files in ~/ stay"`,
+    ],
+    ["with its log redirect", `git commit -q -m "fix(x): files in ~/ stay" > ${log} 2>&1`],
+  ])("a quiet commit whose message names ~/ runs %s", async (_, command) => {
+    expect(await atHome(command)).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "a substitution in its message writes into the root",
+      `~/.playground/ops/run-slot.sh w -- git commit -q -m "fix(x): $(touch ~/.playground/extensions/f)" > ${log} 2>&1`,
+    ],
+    [
+      "its redirect writes into the root",
+      `git commit -q -m "fix(x): y" > ~/.playground/extensions/f`,
+    ],
+  ])("a quiet commit stays refused when %s", async (_, command) => {
+    expect(await atHome(command)).toContain("no-extensions-write hook refuses")
+  })
+
   test("a gated call after a quiet commit stays refused", async () => {
     expect(await bash("git commit -m 'fix: x' && playground migrate")).toContain(
       "playground migrate",
@@ -767,8 +800,26 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["gh api with a Go template", `gh api x --template '{{range .}}{{.a}} {{end}}'`],
     ["gh api with a Go template by -t", `gh api x -t '{{range .}}{{.a}} {{end}}'`],
     ["gh pr view with a Go template", `gh pr view 1 --json a --template '{{.a}} x'`],
+    [
+      "gh issue create with a title naming the data folder",
+      `gh issue create --title "a note about ~/.playground" --body x`,
+    ],
+    ["gh pr comment with a body naming the data folder", `gh pr comment 1 -b "see ~/.playground"`],
+    [
+      "a cd to a folder, then a sed range from a bracket regex",
+      "cd /tmp && sed -n '/[Ff]ollow/,$p' f",
+    ],
+    [
+      "a cd to the checkout, then gh's jq body through a sed range and head",
+      `cd ${CHECKOUT} && gh api repos/o/r/issues/comments/1 --jq .body | sed -n '/[Ff]ollow/,$p' | head -40`,
+    ],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
+  })
+
+  test("a gh post that opens an editor keeps canary's reading of its title", async () => {
+    const command = `gh issue create --editor --title "a note about ~/.playground"`
+    for (const cwd of homes) expect(await at(command, cwd)).toContain("no-extensions-write hook ")
   })
 
   test.each([
@@ -925,6 +976,14 @@ describe("a quoted argument is read as a command line only where a program runs 
     [
       "pkexec running a program of its own",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | pkexec cat",
+    ],
+    [
+      "zsh's dash modifier ahead of a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | - ls",
+    ],
+    [
+      "cat reading the text from stdin by its lone dash",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | cat -",
     ],
     [
       "env's lone dash ahead of a harmless program",
@@ -1641,8 +1700,8 @@ describe("a quoted argument is read as a command line only where a program runs 
       `git commit -m "fix(x): y"; sh -c 'true'`,
     ],
     [
-      "a redirect that writes a file, dropping its redirect guard runs it",
-      `git commit -m "fix(x): y" > f`,
+      "a redirect that writes a file from another call on the line, dropping its redirect guard runs it",
+      `git commit -m "fix(x): y"; echo x > f`,
     ],
     [
       "a message holding the root's path as text, dropping its text guard runs it",
@@ -1705,6 +1764,90 @@ describe("a quoted argument is read as a command line only where a program runs 
         expect(await at(`${program} commit -m "fix(x): y"`, cwd)).toContain(
           "no-extensions-write hook refuses",
         )
+    },
+  )
+})
+
+// #1887: a perl edit's script, a browser eval's script, a commit message and a jq filter are text no shell runs, so each runs from the home on a line read whole, beside the same programs' ordinary calls, which ran before too
+describe("text no program runs as a shell line stays text on a line read whole", () => {
+  test.each([
+    [
+      "an in-place perl edit holding a parenthesised conditional",
+      `perl -pi -e 's/\\(a \\? b\\)/(a ? c : "")/' ${WORK}/f`,
+    ],
+    ["an in-place perl edit by -i and -pe", `perl -i -pe 's/(a)/b/' ${WORK}/f`],
+    ["a browser eval holding ?? beside a sleep", "sleep 1; agent-browser eval 'a?.b ?? 1'"],
+    [
+      "a browser eval by session beside a sleep",
+      "sleep 1; agent-browser --session t eval 'a ?? 1'",
+    ],
+    ["a jq alternative in a loop", `for p in 1 2; do gh api x --jq '"\\(.a)/\\(.b // "-")"'; done`],
+    [
+      "a jq alternative beside an assignment",
+      `h=$(gh api x --jq .sha); gh api x --jq '(.b // "-")'`,
+    ],
+    ["a perl reader", `perl -ne 'print if /a/' ${WORK}/f`],
+    ["an in-place sed", `sed -i '' 's/a/b/' ${WORK}/f`],
+    ["a plain browser eval", "agent-browser eval 'document.title'"],
+    ["a gh read", "gh api x --jq .sha"],
+    ["a plain commit", 'git commit -q -m "a b"'],
+    [
+      "a read-only sed's address range beside another call (PG-1931)",
+      `bun x.ts; sed -n '/^if (import.meta.main)/,/^}/p' ${WORK}/f`,
+    ],
+    [
+      "a playground call whose reason holds a regex (PG-1931)",
+      `playground ext score login x 5 --reason "matches /^(\\d+)(?: (\\S+) \\S+)?/ now"`,
+    ],
+    [
+      "a reason attached by =, holding a regex (PG-1931)",
+      `playground ext score login x 5 --reason="/^(\\d+)(?: (\\S+))?/ x"`,
+    ],
+  ])("%s runs", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    ["an in-place perl edit of a file in the root", `perl -pi -e 's/a/b/' ${LIST}`],
+    ["a browser eval whose output a shell runs", `sleep 1; agent-browser eval 'a ?? 1' | sh`],
+    [
+      "an in-place sed of a file in the root beside another call",
+      `bun x.ts; sed -i '' 's/a/b/' ${LIST}`,
+    ],
+    [
+      "a sed w command writing into the root beside another call",
+      `bun x.ts; sed -n 'w ${LIST}' ${WORK}/f`,
+    ],
+    ["a read-only sed's file in the root beside another call", `bun x.ts; sed -n '/(a)/p' ${LIST}`],
+    [
+      "a read-only sed's glob in the root beside another call",
+      `bun x.ts; sed -n '/(a)/p' ${ROOT}/*/x.md`,
+    ],
+    ["a reason that names the root", `playground ext score login x 5 --reason "see ${LIST}"`],
+  ])("%s is still refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook ")
+  })
+
+  // a commit's message holds a bare cd, which the shell reads as a cd to the process's home, so these run from a worktree under it
+  const tree = join(homedir(), "x", ".claude", "worktrees", "y")
+  const fromTree = (command: string) =>
+    check(JSON.stringify({ cwd: tree, tool_input: { command }, tool_name: "Bash" }), {
+      HOME: homedir(),
+    })
+  const message = '-m "x" -m "y\ncd && make || true, then . ./env"'
+  test("a commit by -C to the folder the shell is in, its message holding a cd line, runs", async () => {
+    expect(await fromTree(`git -C ${tree} commit -q ${message}`)).toBeUndefined()
+    expect(await fromTree(`git -C ~/x/.claude/worktrees/y commit -q ${message}`)).toBeUndefined()
+  })
+  test.each([
+    ["another folder", `git -C /tmp commit -q ${message}`],
+    ["a relative folder", `git -C y commit -q ${message}`],
+    ["the folder by a variable", `git -C "$PWD" commit -q ${message}`],
+    ["the folder with -c beside it", `git -c x.y=z -C ${tree} commit -q ${message}`],
+  ])(
+    "a commit by -C to %s, its message holding a cd line, is still refused",
+    async (_, command) => {
+      expect(await fromTree(command)).toContain("no-extensions-write hook ")
     },
   )
 })
@@ -1800,6 +1943,94 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["git status after a cd to a variable", `cd "$X" && git status`],
     ["a redirect to an absolute path after a cd to a variable", `cd "$X"; echo x > /tmp/y`],
     ["rm of an absolute path after a cd to a variable", `cd "$X"; rm -rf /tmp/scratch-dir`],
+    [
+      "rm under xargs fed an absolute path after a cd to a variable",
+      `cd "$X"; echo /tmp/scratch-dir | xargs rm -rf`,
+    ],
+    [
+      "touch under xargs fed an absolute path after a cd to a variable",
+      `cd "$X"; echo /tmp/y | xargs touch`,
+    ],
+    [
+      "a reader under xargs fed a relative name after a cd to a variable",
+      `cd "$X"; echo notes.txt | xargs wc -l`,
+    ],
+    ["a reader under xargs fed by ls after a cd to a variable", `cd "$X"; ls | xargs cat`],
+    ["a find listing with no path after a cd to a variable", `cd "$X"; find -name x`],
+    ["BSD find -x on an absolute path after a cd to a variable", `cd "$X"; find -x /tmp/a -delete`],
+    [
+      "BSD find -xd clustered on an absolute path after a cd to a variable",
+      `cd "$X"; find -xd /tmp/a -delete`,
+    ],
+    ["BSD find -E on an absolute path after a cd to a variable", `cd "$X"; find -E /tmp/a -delete`],
+    [
+      "BSD find -f naming an absolute path after a cd to a variable",
+      `cd "$X"; find -f /tmp/x -delete`,
+    ],
+    [
+      "BSD find -x then -f naming an absolute path after a cd to a variable",
+      `cd "$X"; find -x -f /tmp/x -delete`,
+    ],
+    [
+      "a reader under xargs -a reading an absolute list after a cd to a variable",
+      `cd "$X" && xargs -a /tmp/list wc -l`,
+    ],
+    ["a writer under xargs -a with no cd, as canary reads it", "xargs -a /tmp/list touch"],
+    [
+      "a test run under xargs -a with no cd, as canary reads it",
+      "xargs -a /tmp/touched.txt bun run --cwd /tmp/tree test:file > /tmp/t.log 2>&1",
+    ],
+    ["a writer under xargs -E with absolute words and no cd", "echo /tmp/x | xargs -E -a touch"],
+    // xargs' options that leave where its words land alone, each with absolute words after a cd to a variable
+    ...[
+      "-0",
+      "-E END",
+      "-e",
+      "--eof=END",
+      "-P 2 -n1",
+      "--process-slot-var S",
+      "-p -t -r -x -n1",
+    ].map((options): [string, string] => [
+      `rm under xargs ${options} fed an absolute path after a cd to a variable`,
+      `cd "$X" && echo /tmp/x | xargs ${options} rm -r`,
+    ]),
+    [
+      "a reader under every option xargs reads after a cd to a variable",
+      `cd "$X" && echo .x | xargs -0 -E END -P 2 -n1 -t wc -l`,
+    ],
+    [
+      "find -fprint to an absolute file after a cd to a variable",
+      `cd "$X"; find /tmp/a -fprint /tmp/out`,
+    ],
+    [
+      "find -newer a relative file, a read, after a cd to a variable",
+      `cd "$X"; find /tmp/a -newer .x -print`,
+    ],
+    [
+      "rm under xargs fed a quoted absolute path after a cd to a variable",
+      `cd "$X" && echo "'/tmp/x'" | xargs rm -rf`,
+    ],
+    [
+      "rm under xargs -0 fed a name whose quotes it keeps, so it names no root",
+      `echo ".play'ground'/extensions" | xargs -0 rm -r`,
+    ],
+    [
+      "rm under xargs fed a relative name by printf -- with no cd",
+      "printf -- 'sub' | xargs rm -rf",
+    ],
+    ["printf -v of a dash-led value after --", "printf -v v -- '-delete'"],
+    [
+      "a printer under xargs with no xargs after it after a cd to a variable",
+      `cd "$X"; echo notes | xargs echo`,
+    ],
+    [
+      "rm under xargs fed a relative name with no cd, so the hook knows the folder it lands in",
+      "echo build | xargs rm -rf",
+    ],
+    [
+      "a writer under xargs fed a program's output with no -a or cd, as on canary",
+      "git ls-files | xargs sed -i s/a/b/",
+    ],
     ["cp of a relative file to an absolute path after a cd to a variable", `cd "$X"; cp a /tmp/b`],
     [
       "a redirect to a file the line holds after a cd to a variable",
@@ -1967,6 +2198,40 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     [
       "GNU find by its g name in capitals printing names after a cd to a variable",
       `cd "$X"; GFIND /tmp/x -name x`,
+    ],
+    // #1340: a program on neither list whose writes the hook places outside the root
+    ["an in-place sed of an absolute file", `cd "$X"; sed -i '' s/a/b/ /tmp/p.json`],
+    ["an in-place perl of an absolute file", `cd "$X"; perl -pi -e s/a/b/ /tmp/p.json`],
+    ["a sed that edits nothing in place", `cd "$X"; sed s/a/b/ notes.txt`],
+    ["chmod of an absolute file", `cd "$X"; chmod 644 /tmp/p`],
+    ["chmod by a symbolic mode of an absolute file", `cd "$X"; chmod u+x /tmp/p`],
+    ["truncate of an absolute file", `cd "$X"; truncate -s 0 /tmp/p`],
+    ["shred of an absolute file", `cd "$X"; shred -u /tmp/p`],
+    ["tar extracting into an absolute folder", `cd "$X"; tar -xf /tmp/a.tar -C /tmp/out`],
+    ["tar listing an archive", `cd "$X"; tar -tf /tmp/a.tar`],
+    ["curl's -o to an absolute file", `cd "$X"; curl -o /tmp/p https://example.com`],
+    ["curl printing to its output", `cd "$X"; curl -s https://example.com`],
+    ["sort's -o to an absolute file", `cd "$X"; sort -o /tmp/p /tmp/a`],
+    ["sort printing to its output", `cd "$X"; sort notes.txt`],
+    ["git rm in an absolute -C", `cd "$X"; git -C /tmp/repo rm -q p`],
+    ["a bare mktemp", `cd "$X"; mktemp`],
+    ["mktemp of a template in the temp folder", `cd "$X"; mktemp -t x.XXXX`],
+    ["mktemp of a template in an absolute folder", `cd "$X"; mktemp -p /tmp/scratch x.XXXX`],
+    ["chmod under xargs of an absolute file", `cd "$X"; xargs chmod 644 /tmp/p`],
+    ["GNU chmod of an absolute file", `cd "$X"; gchmod 644 /tmp/p`],
+    ["sort's shortened --output to an absolute file", `cd "$X"; sort --outp /tmp/p /tmp/a`],
+    ["tar's -f before its -C", `cd "$X"; tar -x -f /tmp/a.tar -C /tmp/out`],
+    ["old-style tar with its -C", `cd "$X"; tar xfC /tmp/a.tar /tmp/out`],
+    ["macOS tar's --cd to an absolute folder", `cd "$X"; tar -xf /tmp/a.tar --cd /tmp/out`],
+    ["sort's one-letter --output to an absolute file", `cd "$X"; sort --o /tmp/p /tmp/a`],
+    ["macOS chmod's dash-led mode of an absolute file", `cd "$X"; chmod -w /tmp/p`],
+    ["curl sending a cookie", `cd "$X"; curl --cookie a=b https://example.com`],
+    ["curl with an attached -X value", `cd "$X"; curl -XPOST https://example.com`],
+    ["macOS mktemp -t beside an absolute template", `cd "$X"; mktemp -t x /tmp/scratch/y.XXXX`],
+    ["curl's --trace to an absolute file", `cd "$X"; curl --trace /tmp/t https://example.com`],
+    [
+      "git rm of a pathspec file in an absolute -C",
+      `cd "$X"; git -C /tmp/repo rm --pathspec-from-file=/tmp/list`,
     ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
@@ -2169,7 +2434,7 @@ describe("a factory session's ext accept is refused, since accepting a proposal 
     ],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toContain(
-      "refuses playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role",
+      "refuses playground ext accept, the owner's own call: post it as an accept decision with playground ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role",
     )
   })
 })
@@ -2363,7 +2628,7 @@ describe("a job's setting is the owner's alone (PG-1196)", () => {
   ])("a session's own %s is refused, naming the guard decision", async (command) => {
     const refusal = await bash(command)
     expect(refusal).toContain("no-extensions-write hook refuses")
-    expect(refusal).toContain("post a guard decision with bun run ask new")
+    expect(refusal).toContain("post a guard decision with playground ask new")
   })
 })
 
@@ -2452,6 +2717,51 @@ describe("a held path past any other heredoc or a quote the scan cannot place is
   })
 })
 
+// #1616: the subscript scan read quoted text, so a selector or a jq filter in single quotes left no variable held on its line
+describe("a single-quoted subscript no command reads as a name leaves the line's variables held", () => {
+  test.each([
+    [
+      "cp to a held path beside an assignment's single-quoted value",
+      `D=/tmp/d; ST='x[y]'; cp x "$D/y"`,
+    ],
+    [
+      "tee to a held path beside an assignment's single-quoted value",
+      `D=/tmp/d; ST='x[\\"'; echo x | tee "$D/a.log"`,
+    ],
+    ["cp to a held path beside a jq filter", `D=/tmp/d; jq '.a[b]' f; cp x "$D/y"`],
+    [
+      "cp to a held path beside a selector an echo prints",
+      `D=/tmp/d; echo 'q("a[href]")'; cp x "$D/y"`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+})
+
+describe("a single-quoted subscript a command reads as a name still holds no variable", () => {
+  test.each([
+    ["read", `D=/tmp/d; read 'a[i]' < /tmp/f; cp x "$D/y"`],
+    ["printf -v", `D=/tmp/d; printf -v 'a[i]' x; cp x "$D/y"`],
+    ["unset", `D=/tmp/d; unset 'a[i]'; cp x "$D/y"`],
+    ["[[ -v", `D=/tmp/d; [[ -v 'a[i]' ]]; cp x "$D/y"`],
+    ["declare", `D=/tmp/d; declare 'a[i]=1'; cp x "$D/y"`],
+    ["declare -n", `D=/tmp/d; declare -n r='a[i]'; cp x "$D/y"`],
+    ["getopts", `D=/tmp/d; getopts ab 'a[i]'; cp x "$D/y"`],
+    ["mapfile", `D=/tmp/d; mapfile 'a[i]' < /tmp/f; cp x "$D/y"`],
+    ["wait -p", `D=/tmp/d; wait -p 'a[i]'; cp x "$D/y"`],
+    ["test -v", `D=/tmp/d; test -v 'a[i]'; cp x "$D/y"`],
+    ["unset behind command", `D=/tmp/d; command unset 'a[i]'; cp x "$D/y"`],
+    ["let", `D=/tmp/d; let 'a[i]'; cp x "$D/y"`],
+    ["arithmetic", `D=/tmp/d; (( 'a[i]' )); cp x "$D/y"`],
+    ["eval", `D=/tmp/d; eval 'a[i]=1'; cp x "$D/y"`],
+    ["read of a held value", `D=/tmp/d; X='a[i]'; read "$X" < /tmp/f; cp x "$D/y"`],
+    ["unset of a held value", `D=/tmp/d; X='a[i]'; unset "$X"; cp x "$D/y"`],
+    ["printf -v of a held value", `D=/tmp/d; X='a[i]'; printf -v "$X" x; cp x "$D/y"`],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeDefined()
+  })
+})
+
 // An eval of literal text is followed as the line its words make, so it runs where those commands would; refused-forms/1198.ts holds the forms it refuses
 describe("an eval of literal text runs", () => {
   test.each([
@@ -2465,5 +2775,284 @@ describe("an eval of literal text runs", () => {
     ["an eval of an escaped glob operator", "eval echo \\^x"],
   ])("%s runs from the checkout and the home", async (_, command) => {
     for (const cwd of [CHECKOUT, HOME]) expect(await bash(command, cwd)).toBeUndefined()
+  })
+})
+
+// The Ops lead sets a guard setting that only tunes a number: glm.readOnlyLoad5 to a positive limit, and a job's row changed in its schedule's interval alone, read against the row the login's scope stores, since a set replaces that row and the render reads every field it leaves out from the registry; every other change, and every other session, stays with the owner
+describe("the Ops lead's tuning of a guard setting", () => {
+  const home = mkdtempSync(join(tmpdir(), "no-extensions-write-tuning-"))
+  const data = join(home, ".playground")
+  const config = join(home, "config")
+  // a call runs from a worktree, since from the home, which holds the data folder, a glob character in a word reads as a path into the extensions
+  const work = join(home, "work")
+  mkdirSync(work)
+  mkdirSync(join(data, "extensions", "hooks"), { recursive: true })
+  mkdirSync(join(config, "sessions"), { recursive: true })
+  // each job as policy.json renders it, its stored row over the registry's entry
+  const job = (fields: object) => ({
+    callsModel: false,
+    command: "bun run x",
+    cwd: "{checkout}",
+    description: "a job",
+    enabled: false,
+    runtime: "launchd",
+    ...fields,
+  })
+  writeFileSync(
+    join(data, "extensions", "policy.json"),
+    JSON.stringify({
+      values: {
+        "jobs.opsAlways": job({ enabled: true, schedule: { always: true } }),
+        "jobs.opsAwake": job({ enabled: true, schedule: { every: 300 } }),
+        "jobs.opsOrg": job({ enabled: true, schedule: { every: 60 } }),
+      },
+    }),
+  )
+  // the rows each scope stores: the login's, one under jobs.opsDashboard's old name, and an org's that holds a row for a job; no scope stores jobs.opsUsage, so policy.json lacks it and the registry's entry is its row
+  writeFileSync(join(data, "extensions", "login"), "me\n")
+  for (const [scope, values] of [
+    [
+      "me",
+      {
+        "jobs.opsAlways": { enabled: true },
+        "jobs.opsAwake": { enabled: true },
+        "jobs.opsDesk": { enabled: true },
+      },
+    ],
+    ["acme", { "jobs.opsOrg": { enabled: true } }],
+  ] as const) {
+    mkdirSync(join(data, "extensions", scope, ".git"), { recursive: true })
+    writeFileSync(join(data, "extensions", scope, "settings.json"), JSON.stringify(values))
+  }
+  writeFileSync(
+    join(data, "roster.json"),
+    JSON.stringify({
+      agents: [
+        { kind: "ops", name: "ops", status: "working" },
+        { kind: "builder", name: "builder", status: "working" },
+        { kind: "worker", name: "abc-worker", status: "working" },
+      ],
+    }),
+  )
+  for (const [session, name] of [
+    ["s-ops", "ops"],
+    ["s-builder", "builder"],
+    ["s-worker", "abc-worker"],
+  ])
+    writeFileSync(
+      join(config, "sessions", `${session}.json`),
+      JSON.stringify({ name, sessionId: session }),
+    )
+  afterAll(() => rmSync(home, { force: true, recursive: true }))
+
+  const as = (session: string, role: string, command: string) =>
+    check(
+      JSON.stringify({
+        cwd: work,
+        hook_event_name: "PreToolUse",
+        session_id: session,
+        tool_input: { command },
+        tool_name: "Bash",
+      }),
+      { CLAUDE_CONFIG_DIR: config, HOME: home, PLAYGROUND_ROLE: role },
+    )
+  const ops = (command: string) => as("s-ops", "lead", command)
+
+  const TUNES = [
+    ["glm.readOnlyLoad5 to a new limit", "playground settings set glm.readOnlyLoad5 20 --reason r"],
+    [
+      "a job's interval, its stored row otherwise as it stands",
+      `playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "the interval of a registry job no scope stores a row for",
+      `playground settings set jobs.opsUsage '{"schedule":{"every":600}}' --reason r`,
+    ],
+  ]
+
+  test.each(TUNES)("the Ops lead sets %s", async (_, command) => {
+    expect(await ops(command)).toBeUndefined()
+  })
+
+  test.each(TUNES)("the Builder lead and a worker are refused %s", async (_, command) => {
+    for (const [session, role] of [
+      ["s-builder", "lead"],
+      ["s-worker", "worker"],
+      ["s-unnamed", "lead"],
+    ])
+      expect(await as(session, role, command)).toContain(
+        "no-extensions-write hook refuses playground settings",
+      )
+  })
+
+  test.each([
+    ["glm.readOnlyLoad5 to 0", "playground settings set glm.readOnlyLoad5 0 --reason r"],
+    ["glm.readOnlyLoad5 to a word", "playground settings set glm.readOnlyLoad5 high --reason r"],
+    [
+      "glm.readOnlyLoad5 to a value it cannot read",
+      'playground settings set glm.readOnlyLoad5 "$N" --reason r',
+    ],
+    [
+      "glm.readOnlyLoad5 at a scope",
+      "playground settings set glm.readOnlyLoad5 20 --scope acme --reason r",
+    ],
+    ["a reset of glm.readOnlyLoad5", "playground settings reset glm.readOnlyLoad5 --reason r"],
+    [
+      "a job turned off with its interval",
+      `playground settings set jobs.opsAwake '{"enabled":false,"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job's row that drops a field",
+      `playground settings set jobs.opsAwake '{"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job's row that adds a command",
+      `playground settings set jobs.opsAwake '{"command":"x","enabled":true,"schedule":{"every":300}}' --reason r`,
+    ],
+    [
+      "a number in a job's config",
+      `playground settings set jobs.opsAwake '{"config":{"timeout":5},"enabled":true,"schedule":{"every":300}}' --reason r`,
+    ],
+    [
+      "a job's interval that is no positive integer",
+      `playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":1.5}}' --reason r`,
+    ],
+    [
+      "a job's whole rendered row with a new interval, which would pin the registry's fields",
+      `playground settings set jobs.opsAwake '{"callsModel":false,"command":"bun run x","cwd":"{checkout}","description":"a job","enabled":true,"runtime":"launchd","schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job whose rendered schedule is no interval, moved to one",
+      `playground settings set jobs.opsAlways '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job its login stores under an old name",
+      `playground settings set jobs.opsDashboard '{"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job an org's scope stores a row for",
+      `playground settings set jobs.opsOrg '{"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job policy.json holds no row for",
+      `playground settings set jobs.opsNone '{"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job's row at a scope",
+      `playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --scope acme --reason r`,
+    ],
+    ["a reset of a job", "playground settings reset jobs.opsAwake --reason r"],
+    ["import-jobs", "playground settings import-jobs /tmp/jobs.json --reason r"],
+    [
+      "live.branch, a key naming what a guard allows",
+      "playground settings set live.branch x --reason r",
+    ],
+    ["owner.names", "playground settings set owner.names '[]' --reason r"],
+    [
+      "a tuning set chained with a refused one",
+      "playground settings set glm.readOnlyLoad5 20 --reason r && playground settings set live.branch x --reason r",
+    ],
+    [
+      "a job's interval with PLAYGROUND_LOGIN set before it, which moves the set to another scope",
+      `PLAYGROUND_LOGIN=acme playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job's interval after an export of PLAYGROUND_LOGIN",
+      `export PLAYGROUND_LOGIN=acme; playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job's interval under env with PLAYGROUND_LOGIN",
+      `env PLAYGROUND_LOGIN=acme playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job's interval with another data folder",
+      `PLAYGROUND_DATA_DIR=/tmp/other playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job's interval with another home",
+      `HOME=/tmp/other playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job's interval after a sourced file, which may export the login",
+      `. ./login.sh; playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job's interval in a subshell",
+      `(playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r)`,
+    ],
+    [
+      "glm.readOnlyLoad5 with PLAYGROUND_LOGIN set before it",
+      `PLAYGROUND_LOGIN=acme playground settings set glm.readOnlyLoad5 20 --reason r`,
+    ],
+  ])("the Ops lead is refused %s", async (_, command) => {
+    expect(await ops(command)).toContain("no-extensions-write hook refuses playground settings")
+  })
+})
+
+// An ops job row that names an extension script: the write lands outside the root, and only its text names the root.
+describe("a write outside the root whose text names an extension script runs, and one into the root stays refused", () => {
+  const JOBS = join(DATA, "ops", "jobs.json")
+  const SCRIPT = join(SCOPE, "skills", "vault", "scripts", "vault.py")
+
+  test.each([
+    ["a Write of jobs.json", "Write", { content: `{"command":"${SCRIPT}"}`, file_path: JOBS }],
+    [
+      "an Edit of jobs.json",
+      "Edit",
+      { file_path: JOBS, new_string: `"${SCRIPT}"`, old_string: '"x"' },
+    ],
+  ])("%s", async (_, name, input) => {
+    expect(await tool(name, input)).toBeUndefined()
+  })
+
+  test.each([
+    ["jq to a file beside jobs.json", `jq '.jobs[0].command = "${SCRIPT}"' ${JOBS} > ${JOBS}.new`],
+    ["a heredoc to cat into jobs.json", `cat > ${JOBS} <<'EOF'\n{"command":"${SCRIPT}"}\nEOF`],
+    ["a heredoc to tee into jobs.json", `tee ${JOBS} <<'EOF'\n{"command":"${SCRIPT}"}\nEOF`],
+    [
+      "an unquoted heredoc to tee into jobs.json",
+      `tee ${JOBS} <<EOF\n{"command":"${SCRIPT}"}\nEOF`,
+    ],
+    [
+      "a heredoc to tee -a into jobs.json, quiet",
+      `tee -a ${JOBS} > /dev/null <<'EOF'\n{"command":"${SCRIPT}"}\nEOF`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "a Write into the root",
+      "Write",
+      { content: `{"command":"${SCRIPT}"}`, file_path: join(ROOT, "policy.json") },
+    ],
+  ])("%s is refused", async (_, name, input) => {
+    expect(await tool(name, input)).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each([
+    [
+      "a heredoc to tee into the root",
+      `tee ${ROOT}/policy.json <<'EOF'\n{"command":"${SCRIPT}"}\nEOF`,
+    ],
+    ["a heredoc to tee into jobs.json and the root", `tee ${JOBS} ${LIST} <<'EOF'\n[]\nEOF`],
+    ["a heredoc to tee piped into a shell", `tee ${JOBS} <<'EOF' | sh\ntouch ${LIST}\nEOF`],
+    [
+      "a heredoc to tee piped into python",
+      `tee ${JOBS} <<'EOF' | python3\nopen("${LIST}", "w")\nEOF`,
+    ],
+    [
+      "a heredoc to tee into a shell's process substitution",
+      `tee >(sh) <<'EOF'\ntouch ${LIST}\nEOF`,
+    ],
+    ["a heredoc to tee into a shell's stdin", `tee /dev/stdout <<'EOF' | bash\ntouch ${LIST}\nEOF`],
+    [
+      "a heredoc to python naming the root",
+      `python3 - <<'EOF'\nopen("${JOBS}", "w").write("${SCRIPT}")\nEOF`,
+    ],
+    ["sed -i of jobs.json naming the root", `sed -i '' 's#x#${SCRIPT}#' ${JOBS}`],
+  ])("%s is refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
   })
 })

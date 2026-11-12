@@ -121,6 +121,21 @@ describe("a brief given by its path under ~/.playground starts as its file name 
     expect(seen(r)).toEqual(seen(bare))
   })
 
+  // issue 1970: a filled brief lives in its writing session's scratchpad, which playground rm clears
+  test.each([
+    ["its name", "scratchpad/worker-x/brief-reviewer-x-1.md"],
+    ["an absolute path", "{home}/.playground/scratchpad/worker-x/brief-reviewer-x-1.md"],
+    ["a quoted ~ path", "~/.playground/scratchpad/worker-x/brief-reviewer-x-1.md"],
+  ])(
+    "a brief in a session's scratchpad, given by %s, starts with its prompt naming that path",
+    async (_, path) => {
+      const brief = "scratchpad/worker-x/brief-reviewer-x-1.md"
+      const r = await spawn(["worker", "worker-brave-otter", path], [], { BRIEF_FILE: brief })
+      expect(r.code, r.err).toBe(0)
+      expect(launchOf(r)).toContain(`Your brief is in ~/.playground/${brief}: read it`)
+    },
+  )
+
   test("a resume's --brief takes the absolute path too", async () => {
     const brief = "handoffs/restart-brief.md"
     const r = await spawn(
@@ -171,7 +186,7 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
         "wait-output",
         "w5:p1",
         "--regex",
-        "Yes, I trust|New MCP server found in this project|⏵⏵",
+        "Yes, I trust|New MCP server found in this project|[0-9]+ new MCP servers found|⏵⏵",
         "--source",
         "visible",
         "--timeout",
@@ -183,7 +198,9 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
       `playground ${dir}/playground.sock ${dir}/config.toml`,
     )
     expect(readFileSync(lw(r.home, "runtimes", "worker-brave-otter"), "utf8")).toBe("herdr\n")
-    expect(readFileSync(lw(r.home, "backends", "worker-brave-otter"), "utf8")).toBe("claude\n")
+    expect(readFileSync(lw(r.home, "backends", "worker-brave-otter"), "utf8")).toBe(
+      "claude-code claude\n",
+    )
     expect(execLine(r, "worker-brave-otter")).toBe(
       `exec spawn.sh resume worker-brave-otter ${root} ${sid}`,
     )
@@ -482,13 +499,18 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
       { FAKE_SCREENS: "trust,mcp,ready" },
       undefined,
       undefined,
-      herdrPin(),
+      (home) => {
+        herdrPin()(home)
+        writeFileSync(join(home, ".mcp.json"), JSON.stringify({ mcpServers: { fs: {} } }))
+      },
     )
     expect(r.code).toBe(0)
     expect(placing(r).filter((c) => c[1] === "send-keys")).toEqual([
       ["pane", "send-keys", "w5:p1", "down"],
       ["pane", "send-keys", "w5:p1", "enter"],
-      ["pane", "send-keys", "w5:p1", "esc"],
+      ["pane", "send-keys", "w5:p1", "up"],
+      ["pane", "send-keys", "w5:p1", "up"],
+      ["pane", "send-keys", "w5:p1", "enter"],
     ])
   })
 

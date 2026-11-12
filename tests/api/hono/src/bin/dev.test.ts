@@ -28,7 +28,7 @@ type DryTask = {
   taskId: string
 }
 type DryRun = {
-  globalCacheInputs: { environmentVariables: { configured: string[] } }
+  globalCacheInputs: { environmentVariables: { configured: string[]; passthrough?: string[] } }
   tasks: DryTask[]
 }
 
@@ -91,6 +91,18 @@ describe("bun run dev", () => {
     expect(turbo.globalEnv).not.toContain("GIT_SHA")
     expect(Object.values(turbo.tasks).flatMap((task) => task.env ?? [])).not.toContain("GIT_SHA")
   })
+
+  // #1292, pinned through the real launcher's dry run, which reads what turbo passes the dev tasks
+  test("sets NEXT_TELEMETRY_DISABLED=1 for next dev, and turbo passes it through", async () => {
+    const { dry } = await dryRun(["--filter=@web/next"])
+    expect(dry.globalCacheInputs.environmentVariables.passthrough).toContain(
+      hashed("NEXT_TELEMETRY_DISABLED", "1"),
+    )
+    const turbo = Bun.JSONC.parse(await Bun.file(join(ROOT, "turbo.json")).text()) as {
+      globalPassThroughEnv?: string[]
+    }
+    expect(turbo.globalPassThroughEnv).toContain("NEXT_TELEMETRY_DISABLED")
+  }, 30_000)
 
   test("hands turbo its arguments and the shell's environment, less NODE_ENV and plus HEAD's sha", async () => {
     const head = Bun.spawnSync(["git", "rev-parse", "--short", "HEAD"], { cwd: ROOT })

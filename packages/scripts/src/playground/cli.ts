@@ -46,7 +46,7 @@ import {
   probe,
   supervisorRunning,
 } from "./probe"
-import { runSpawn, startDispatcher } from "./spawn"
+import { dispatcherOptions, runSpawn, startDispatcher } from "./spawn"
 import { runStore, terminalIo } from "./store"
 import { startJobs } from "./terminal"
 import { askPurge, uninstall } from "./uninstall"
@@ -71,9 +71,13 @@ const briefExists = (brief: string): boolean => existsSync(join(HOME_DATA, brief
 type ManagerVerb = NamedKind | "optimizer"
 
 // playground dispatcher, planner, builder, ops or optimizer, and the bare start's dispatcher step: 0 started, 3 already running, 1 refused with spawn.sh's reason.
-const manager = async (kind: ManagerVerb): Promise<{ code: number; message: string }> => {
+const manager = async (
+  kind: ManagerVerb,
+  options: { brief?: string; harness?: "codex" } = {},
+): Promise<{ code: number; message: string }> => {
   const name = kind === "optimizer" ? kind : getSessionNames().names[kind]
   const result = await startDispatcher({
+    ...options,
     data: HOME_DATA,
     live: liveSessions((live) => live === name).map((d) => d.name),
     name,
@@ -120,7 +124,7 @@ const stepFailed = async (argv: string[], first: "stderr" | "stdout"): Promise<s
     : last(first === "stdout" ? stdout : stderr) || last(second) || `${argv.at(-1)} exited ${code}`
 }
 
-// The files install's linking step puts in the state folder that a dispatcher's start reads: spawn.sh builds every session's settings from factory-settings.json, and the sessions it starts run heavy work through run-slot.sh and brief their workers from the templates.
+// The files install's linking step puts in the state folder that a dispatcher's start needs: the hosted session reads factory-settings.json, and the sessions it starts run heavy work through run-slot.sh and brief their workers from the templates.
 const LINKED = ["factory-settings.json", "handoffs/new-worker.md", "ops/run-slot.sh"]
 
 // playground dispatcher's setup, which install and the bare start give a machine and Start <dispatcher> on a fresh install has not: install's linking step when a file it links is missing, the pinned herdr installed as install.sh installs it, which downloads nothing when the copy is already pinned, then one pass of ops-herdr's start, which writes the pin and config and brings the servers up, since spawn.sh starts none; null once each is in place, else the line that says why not.
@@ -138,9 +142,11 @@ const setUp = async (): Promise<string | null> => {
 // The managers a playground verb starts: the dispatcher, which starts the Planner, the Builder and Ops the first time it routes work to each, so none sits idle on the user's usage, and the optimizer when the dispatcher itself starts, since ops-tick's beats bring its retros.
 const MANAGERS: ManagerVerb[] = ["builder", "dispatcher", "ops", "optimizer", "planner"]
 
-const managerAlone = async (kind: ManagerVerb): Promise<number> => {
+const managerAlone = async (kind: ManagerVerb, words: string[]): Promise<number> => {
+  const options = kind === "dispatcher" ? dispatcherOptions(words) : {}
+  if (typeof options === "string") return fail(options, 2)
   const unready = await setUp()
-  if (unready === null) return (await manager(kind)).code
+  if (unready === null) return (await manager(kind, options)).code
   console.error(`playground: ${unready}`)
   return 1
 }
@@ -365,7 +371,7 @@ const picker = async (args: string[]): Promise<number> => {
   return code
 }
 
-// playground alerts-wait: blocks until the next stuck alert for a manager (alerts-wait.ts), then prints it.
+// playground alerts-wait: blocks until the next outbox line for a manager, a stuck session's alert, the relay watch's late-stop line or any job's line addressed to it (alerts-wait.ts), then prints it.
 const alertsWaitFor = async (name: string): Promise<number> => {
   const { alertsWait } = await import("./alerts-wait")
   console.log(await alertsWait(name, join(dataDir(), "ops", "outbox")))
@@ -387,6 +393,12 @@ const focusDeps = async () => {
       return { code: run.exitCode, err: run.stderr.toString() }
     },
   }
+}
+
+// playground priority's reads and writes: the data folder, the clock and the caller's name, loaded only for this command.
+const priorityDeps = async () => {
+  const { sessionName } = await import("../trash")
+  return { by: sessionName, data: dataDir(), now: () => new Date() }
 }
 
 // playground rm: the trash (rm.ts), loaded only for this command.
@@ -430,7 +442,7 @@ const code =
           : command === "add"
             ? await add(rest)
             : MANAGERS.includes(command as ManagerVerb)
-              ? await managerAlone(command as ManagerVerb)
+              ? await managerAlone(command as ManagerVerb, rest)
               : command === "page"
                 ? page(rest)
                 : command === "view"
@@ -468,28 +480,32 @@ const code =
                                         ? await (
                                             await import("./focus")
                                           ).runFocus(rest, await focusDeps())
-                                        : command === "rm"
-                                          ? await rm(rest)
-                                          : command === "yard"
-                                            ? await (
-                                                await import("./yard")
-                                              ).runYard(
-                                                rest,
-                                                await (
+                                        : command === "priority"
+                                          ? await (
+                                              await import("./priority")
+                                            ).runPriority(rest, await priorityDeps())
+                                          : command === "rm"
+                                            ? await rm(rest)
+                                            : command === "yard"
+                                              ? await (
                                                   await import("./yard")
-                                                ).yardIo(REPO, accountsIo(dataDir()).readSecret),
-                                              )
-                                            : command === "herdr" && rest[0] === "stop"
-                                              ? (await opsHerdr(["stop-all"]).exited) === 0
-                                                ? 0
-                                                : 1
-                                              : command === "herdr" && rest[0] === "pin"
-                                                ? await (
-                                                    await import("./herdr-pin")
-                                                  ).runHerdrPin(rest.slice(1))
-                                                : VERBS.includes(command)
-                                                  ? await verb(command, rest)
-                                                  : fail(
-                                                      `no command ${command}; playground --help lists them`,
-                                                    )
+                                                ).runYard(
+                                                  rest,
+                                                  await (
+                                                    await import("./yard")
+                                                  ).yardIo(REPO, accountsIo(dataDir()).readSecret),
+                                                )
+                                              : command === "herdr" && rest[0] === "stop"
+                                                ? (await opsHerdr(["stop-all"]).exited) === 0
+                                                  ? 0
+                                                  : 1
+                                                : command === "herdr" && rest[0] === "pin"
+                                                  ? await (
+                                                      await import("./herdr-pin")
+                                                    ).runHerdrPin(rest.slice(1))
+                                                  : VERBS.includes(command)
+                                                    ? await verb(command, rest)
+                                                    : fail(
+                                                        `no command ${command}; playground --help lists them`,
+                                                      )
 process.exit(code)

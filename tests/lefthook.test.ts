@@ -382,6 +382,7 @@ test("the pre-commit marker check refuses a staged conflict marker before lint-s
 
 // pre-push's jobs that read the pushed refs on stdin run as scripts, since lefthook 2.2.2 skips every pre-push command and job while the checked-out branch has nothing new against its upstream, and runs a script on every push
 const PUSH_SCRIPTS = {
+  "commit-trailer.sh": "bun --no-env-file packages/scripts/src/commit-trailer.ts --push",
   "conflict-markers.sh": "bun --no-env-file packages/scripts/src/conflict-markers.ts --push",
   "keeps-canary.sh": "bun --no-env-file packages/scripts/src/pr-merge/prepush.ts",
 }
@@ -497,6 +498,93 @@ test("the pre-push marker check refuses a pushed conflict marker a hooks-off com
   }
 }, 60_000)
 
+// this repo's pre-push trailer job, its script run from this checkout, in a scratch repo whose commits go in with --no-verify, the route that once let a Co-Authored-By trailer past commit-msg: a pushed commit no remote holds yet is refused when its message holds the trailer, naming the amend that drops it, and that amend, run with commit-msg's step, clears the push
+test("the pre-push trailer check refuses a pushed commit a --no-verify commit let a Co-authored-by trailer into", async () => {
+  const trailer = await pushScript("commit-trailer.sh")
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-push-trailer-"))
+  const hooks = join(dir, ".hooks")
+  const run = (argv: string[], stdin?: string) => {
+    const result = Bun.spawnSync(argv, {
+      cwd: dir,
+      env: SCRATCH_ENV,
+      stdin: stdin === undefined ? "ignore" : Buffer.from(stdin),
+    })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const git = (...args: string[]) =>
+    run([
+      "git",
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "-c",
+      `core.hooksPath=${hooks}`,
+      ...args,
+    ])
+  const commit = async (path: string, message: string) => {
+    await Bun.write(join(dir, path), message)
+    await Bun.write(join(dir, ".msg"), message)
+    expect(git("add", path)).toMatchObject({ code: 0 })
+    expect(git("commit", "-q", "--no-verify", "-F", ".msg")).toMatchObject({ code: 0 })
+    return git("rev-parse", "HEAD").out.trim()
+  }
+  const ZERO = "0".repeat(40)
+  const push = (local: string) =>
+    run(["bash", "-c", trailer], `refs/heads/b ${local} refs/heads/b ${ZERO}\n`)
+  try {
+    expect(git("init", "-q")).toMatchObject({ code: 0 })
+    // commit-msg's step alone, run by its path in this checkout, as lefthook would run it
+    mkdirSync(hooks)
+    await Bun.write(
+      join(hooks, "commit-msg"),
+      `#!/usr/bin/env bash\nexec bun --no-env-file ${ROOT}/packages/scripts/src/commit-trailer.ts "$1"\n`,
+    )
+    chmodSync(join(hooks, "commit-msg"), 0o755)
+    const base = await commit("a.txt", "chore: base\n\nCo-Authored-By: A <a@b.c>\n")
+    expect(git("update-ref", "refs/remotes/origin/canary", base)).toMatchObject({ code: 0 })
+    // a commit every remote already holds is not read, the trailer on canary's base included
+    expect(push(base)).toEqual({ code: 0, out: "" })
+    const mention = await commit(
+      "b.txt",
+      "fix: a change\n\nThe hook drops a Co-authored-by trailer.\n",
+    )
+    expect(push(mention)).toMatchObject({ code: 0 })
+    const tip = await commit(
+      "c.txt",
+      "build: rebuild\n\nCo-Authored-By: Claude <noreply@example.com>\n",
+    )
+    const last = push(tip)
+    expect(last.code).not.toBe(0)
+    expect(last.out).toContain(`${tip.slice(0, 9)} build: rebuild`)
+    expect(last.out).toContain("git commit --amend --no-edit")
+    const top = await commit("d.txt", "fix: after\n")
+    const older = push(top)
+    expect(older.code).not.toBe(0)
+    expect(older.out).toContain(`${tip.slice(0, 9)} build: rebuild`)
+    expect(older.out).toContain(
+      `git rebase --rebase-merges --exec 'git commit --amend --no-edit' ${tip.slice(0, 9)}^`,
+    )
+    expect(push(ZERO)).toEqual({ code: 0, out: "" })
+    // the amend the refusal names, with commit-msg's step on, drops the trailer and clears the push
+    expect(
+      git(
+        "rebase",
+        "-q",
+        "--rebase-merges",
+        "--exec",
+        "git commit -q --amend --no-edit",
+        `${tip}^`,
+      ),
+    ).toMatchObject({ code: 0 })
+    const fixed = git("rev-parse", "HEAD").out.trim()
+    expect(git("log", "-1", "--format=%B", "HEAD^").out).not.toContain("Co-Authored-By")
+    expect(push(fixed)).toMatchObject({ code: 0 })
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
 // the real lefthook on this repo's pre-push stdin scripts, their paths pointed at this checkout, in a scratch clone whose commits go in with hooks off: with main level with origin/main, a push of another branch is still read, and keeps-canary refuses a normal push as before
 test("pre-push reads a pushed branch while the checked-out one has nothing new", async () => {
   const prePush = await prePushConfig()
@@ -604,6 +692,74 @@ test("pre-push reads a pushed branch while the checked-out one has nothing new",
     rmSync(dir, { force: true, recursive: true })
   }
 }, 60_000)
+
+// two tests scan the tracked tree's text, so a commit anywhere can break them, and with no hook to run them a break went red in CI minutes after its push
+const TREE_TEXT_TESTS = ["tests/cmux.test.ts", "tests/shell-read-redirect.test.ts"]
+
+test("one pre-commit job runs both whole-tree text tests, beside trace-count", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, { priority?: number; run: string }> }
+  }
+  const { commands } = config["pre-commit"]
+  const running = Object.entries(commands).filter(([, job]) =>
+    TREE_TEXT_TESTS.some((file) => job.run.includes(file)),
+  )
+  expect(running.map(([name]) => name)).toEqual(["text-tests"])
+  const job = running[0]![1]
+  expect(job.run).toStartWith("bun run test:file ")
+  for (const file of TREE_TEXT_TESTS) expect(job.run.split(/\s+/)).toContain(file)
+  expect(job.priority).toBe(commands["trace-count"]!.priority)
+})
+
+// lefthook 2.2.2 picks a job's files from its files: command only through a {files} in its run; without one it filters the staged files, so files: can only skip the job (measured)
+const filesWithoutTemplate = (node: unknown, path: string): string[] => {
+  if (Array.isArray(node))
+    return node.flatMap((item, i) => filesWithoutTemplate(item, `${path}[${i}]`))
+  if (typeof node !== "object" || node === null) return []
+  const job = node as Record<string, unknown>
+  const own =
+    "files" in job && typeof job.run === "string" && !job.run.includes("{files}") ? [path] : []
+  return [
+    ...own,
+    ...Object.entries(job).flatMap(([key, value]) => filesWithoutTemplate(value, `${path}.${key}`)),
+  ]
+}
+
+// YAML reads a space and # in a plain scalar as a comment, so an unquoted run drops the rest of its line, a {files} there included
+const unquotedHashRuns = (text: string, name: string): string[] =>
+  text.split("\n").flatMap((line, i) => {
+    const value = line.match(/^\s*(?:-\s+)?run:\s+(.*)$/)?.[1]
+    return value !== undefined && !/^["'>|]/.test(value) && /\s#/.test(value)
+      ? [`${name}:${i + 1}`]
+      : []
+  })
+
+const COMMENTED_FILES =
+  "pre-commit:\n  commands:\n    probe:\n      files: git ls-files\n      run: echo # {files}\n"
+
+test("every job with files: names {files} in its run", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text())
+  expect(filesWithoutTemplate(config, "lefthook.yml")).toEqual([])
+  expect(filesWithoutTemplate(Bun.YAML.parse(COMMENTED_FILES), "sample")).toEqual([
+    "sample.pre-commit.commands.probe",
+  ])
+  expect(
+    filesWithoutTemplate(
+      Bun.YAML.parse(COMMENTED_FILES.replace("echo # {files}", '"echo # {files}"')),
+      "sample",
+    ),
+  ).toEqual([])
+})
+
+test("every run holding a space and # is quoted", async () => {
+  expect(
+    unquotedHashRuns(await Bun.file(join(ROOT, "lefthook.yml")).text(), "lefthook.yml"),
+  ).toEqual([])
+  expect(unquotedHashRuns(COMMENTED_FILES, "sample")).toEqual(["sample:5"])
+  expect(
+    unquotedHashRuns(COMMENTED_FILES.replace("echo # {files}", '"echo # {files}"'), "sample"),
+  ).toEqual([])
+})
 
 // every worktree of a checkout shares one stash list, so the pre-commit's lint-staged keeps no backup there (PG-715)
 test("the pre-commit's lint-staged runs with --no-stash", async () => {
@@ -933,8 +1089,8 @@ test("the pre-commit trace count refuses a commit that raises a count or holds a
   }
 }, 120_000)
 
-// lefthook on this repo's own commit-msg steps, commitlint and its config included, in a scratch repo: a ticket scope in either case passes, a Co-authored-by trailer in any case is refused by name, and a body that only mentions it passes
-test("commit-msg takes a ticket scope in either case and refuses a Co-authored-by trailer in any case", async () => {
+// lefthook on this repo's own commit-msg steps, commitlint and its config included, in a scratch repo: a ticket scope in either case passes, a Co-authored-by trailer in any case is dropped from the message with one line saying so, and a body that only mentions it passes as written
+test("commit-msg takes a ticket scope in either case and drops a Co-authored-by trailer in any case", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
     "commit-msg": unknown
   }
@@ -959,7 +1115,7 @@ test("commit-msg takes a ticket scope in either case and refuses a Co-authored-b
       new Response(proc.stderr).text(),
       proc.exited,
     ])
-    return { code, out: out + err }
+    return { code, message: await Bun.file(msg).text(), out: out + err }
   }
   try {
     expect(run(["git", "init", "-q"])).toMatchObject({ code: 0 })
@@ -977,18 +1133,28 @@ test("commit-msg takes a ticket scope in either case and refuses a Co-authored-b
     expect((await hookWith("Fix: A change\n")).code).not.toBe(0)
     // the rest at once: each starts commitlint, whose start grows with the machine's load, and seven in a row took 60s on a loaded runner
     const trailers = ["Co-authored-by", "Co-Authored-By", "co-authored-by"]
-    const [upper, lower, mention, ...refused] = await Promise.all(
+    const mention = "fix: a change\n\nThe hook drops a Co-authored-by trailer.\n"
+    // a trailer past commitlint's 100-character footer line, which commitlint would refuse were it read before the drop
+    const long = `Co-Authored-By: ${"A".repeat(90)} <a@b.c>`
+    const [upper, lower, kept, ...dropped] = await Promise.all(
       [
         "feat(PG-1): x\n",
         "feat(pg-1): x\n",
-        "fix: a change\n\nThe hook refuses a Co-authored-by trailer.\n",
-        ...trailers.map((trailer) => `fix: a change\n\nWhy it changed.\n\n${trailer}: A <a@b.c>\n`),
+        mention,
+        ...[...trailers.map((trailer) => `${trailer}: A <a@b.c>`), long].map(
+          (trailer) => `fix: a change\n\nWhy it changed.\n\n${trailer}\n`,
+        ),
       ].map(hookWith),
     )
-    expect([upper, lower, mention]).toMatchObject([{ code: 0 }, { code: 0 }, { code: 0 }])
-    for (const result of refused) {
-      expect(result.code).not.toBe(0)
-      expect(result.out).toContain("Co-authored-by")
+    expect([upper, lower, kept]).toMatchObject([{ code: 0 }, { code: 0 }, { code: 0 }])
+    expect(kept!.message).toBe(mention)
+    expect(kept!.out).not.toContain("dropped")
+    for (const result of dropped) {
+      expect(result.code).toBe(0)
+      expect(result.message).toBe("fix: a change\n\nWhy it changed.\n\n")
+      expect(result.out.match(/commit-trailer: dropped the Co-authored-by trailer/g)).toHaveLength(
+        1,
+      )
     }
   } finally {
     rmSync(dir, { force: true, recursive: true })

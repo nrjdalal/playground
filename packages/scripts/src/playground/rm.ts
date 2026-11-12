@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
 import {
@@ -14,6 +14,7 @@ import {
   restore,
   type Roots,
   type WorktreeGit,
+  worktreeRepo,
 } from "@packages/safe-delete"
 
 import { targetWords } from "../../../../api/hono/src/lib/dashboard/delete-targets"
@@ -86,11 +87,13 @@ export type PrState = "CLOSED" | "MERGED" | "OPEN"
 export type Pr = { head: string; number: number; state: PrState }
 // A worktree's PR once it reads MERGED or CLOSED, as the hold check's freed: its head beside its number and state, or undefined while it reads OPEN or GitHub cannot read it. The hold check frees a row naming the worktree by its branch or by this PR's number only when the PR's head is the worktree's HEAD; commits past it keep the hold, named with them.
 export const freedOf = (
-  pr: Pr | null,
+  pr: Pr | "none" | null,
 ): { head: string; number: number; state: "CLOSED" | "MERGED" } | undefined =>
-  pr && pr.state !== "OPEN" ? { head: pr.head, number: pr.number, state: pr.state } : undefined
+  pr && pr !== "none" && pr.state !== "OPEN"
+    ? { head: pr.head, number: pr.number, state: pr.state }
+    : undefined
 
-// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR state by its --pr or else its branch (null when none reads), the session the caller is (callerOf), and the session's name.
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR state by its --pr or else its branch ("none" when gh answers with no PR, null when no PR of its own reads), the session the caller is (callerOf), and the session's name.
 export type RmDeps = {
   caller: () => Promise<string | undefined>
   clones: () => Clone[]
@@ -101,7 +104,7 @@ export type RmDeps = {
   merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
   places: () => string[]
-  prState: (path: string, pr?: string) => Promise<Pr | null>
+  prState: (path: string, pr?: string) => Promise<Pr | "none" | null>
   procs: () => Proc[] | null
   session: () => Promise<string>
 }
@@ -211,12 +214,13 @@ const merged = (sha: string, at: string): boolean | null => {
   return run.exitCode === 0 && (out === "true" || out === "false") ? out === "true" : null
 }
 
-// Pure: a worktree's PR state, counted only when exactly one PR answers, since a branch name used twice can find another's, that PR is this worktree's own (its branch is the worktree's, or its head is HEAD, so a stacked child does not pass under its parent's PR), and its head is HEAD or an ancestor of it; else null.
+// Pure: a worktree's PR state, counted only when exactly one PR answers, since a branch name used twice can find another's, that PR is this worktree's own (its branch is the worktree's, or its head is HEAD, so a stacked child does not pass under its parent's PR), and its head is HEAD or an ancestor of it; "none" when gh's list is empty; else null.
 export const prStateOf = (
   prs: { headRefName: string; headRefOid: string; number: number; state: PrState }[] | null,
   at: { branch: string | null; head: string },
   holds: (sha: string) => boolean,
-): Pr | null => {
+): Pr | "none" | null => {
+  if (prs?.length === 0) return "none"
   const only = prs?.length === 1 ? prs[0]! : null
   if (!only || (only.headRefName !== at.branch && only.headRefOid !== at.head)) return null
   return only.headRefOid === at.head || holds(only.headRefOid)
@@ -225,7 +229,7 @@ export const prStateOf = (
 }
 
 // A worktree's PR state from gh in it, the --pr URL's else its branch's, by prStateOf, or null when gh or git cannot answer.
-const prState = async (path: string, pr?: string): Promise<Pr | null> => {
+const prState = async (path: string, pr?: string): Promise<Pr | "none" | null> => {
   const gh = (args: string[]) => {
     try {
       const run = Bun.spawnSync(["gh", ...args], { cwd: path, stderr: "ignore", stdout: "pipe" })
@@ -305,7 +309,8 @@ export const discardRefusal = async (
 ): Promise<string | null> => {
   const route = `post an Inbox delete decision with bun run ask new naming ${resolve(path)} and why (bun run ask example delete prints one to start from), then run playground rm --worktree ${path} --discard --decision <id> once it is approved`
   if (id === undefined) {
-    const state = (await deps.prState(path, pr))?.state
+    const read = await deps.prState(path, pr)
+    const state = read === "none" ? undefined : read?.state
     if (state === "MERGED" || state === "CLOSED") return null
     return `${caller} passes --discard only with --decision <id>: ${route}`
   }
@@ -342,6 +347,9 @@ export const worktreeGit = (path: string): WorktreeGit | undefined => {
   const branch = gitIn(path, "symbolic-ref", "--quiet", "--short", "HEAD")
   return { branch: branch.ok ? branch.out : null, gitdir: gitdir.out, sha: sha.out }
 }
+
+// A worktree's own repo, the main checkout or another, whose .git/worktrees/<name> its record folder is.
+const repoOf = (git: WorktreeGit): string => dirname(dirname(dirname(git.gitdir)))
 
 // Why a worktree's restore would leave it on another commit or unreadable, or null; a record folder still there is kept as it is.
 const relinkRefusal = (main: string, git: WorktreeGit): string | null => {
@@ -385,7 +393,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   }
   const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
   // the worktree's own PR, asked of GitHub once a run, as the discard gate and the roster's hold both read it for args.path and args.pr
-  let ownRead: Promise<Pr | null> | undefined
+  let ownRead: Promise<Pr | "none" | null> | undefined
   const read: RmDeps = { ...deps, prState: (path, pr) => (ownRead ??= deps.prState(path, pr)) }
   // a folder outside the worktrees folder skips the gate, since quarantine refuses its --worktree naming plain playground rm
   if ("discard" in args && args.discard && inWorktrees(args.path, roots)) {
@@ -405,22 +413,23 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
       )
     return 0
   }
-  const keptGit =
+  const kept =
     "restore" in args
-      ? listTrash(roots.trash).find((entry) => entry.id === args.restore)?.git
+      ? listTrash(roots.trash).find((entry) => entry.id === args.restore)
       : undefined
-  const relinkRefused = keptGit && relinkRefusal(roots.main, keptGit)
+  const keptGit = kept?.git
+  const relinkRefused = keptGit && relinkRefusal(repoOf(keptGit), keptGit)
   if (relinkRefused) {
     console.error(`playground: ${relinkRefused}`)
     return 1
   }
   const session = "restore" in args ? "" : await deps.session()
   const git = "worktree" in args && args.worktree ? worktreeGit(args.path) : undefined
-  // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold
-  const freed =
-    "worktree" in args && args.worktree
-      ? freedOf(await read.prState(args.path, args.pr))
-      : undefined
+  const repo = "worktree" in args && args.worktree ? worktreeRepo(args.path, roots) : null
+  // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold; on gh's clean answer of no PR alone, another repo's worktree may go once archiveUnlanded archives its commits no remote holds
+  const own =
+    "worktree" in args && args.worktree ? await read.prState(args.path, args.pr) : undefined
+  const freed = own === undefined ? undefined : freedOf(own)
   const done =
     "restore" in args
       ? restore(args.restore, roots)
@@ -428,10 +437,12 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
           args.path,
           {
             ...(git ? { git } : {}),
+            ended: { live: STATUSES.live, roster: join(deps.data, "roster.json") },
             reason: args.reason,
             session,
             worktree: args.worktree
               ? {
+                  ...(own === "none" ? { archive: join(deps.data, "scratchpad", "archive") } : {}),
                   clones: deps.clones,
                   discard: args.discard,
                   ...(freed ? { freed } : {}),
@@ -453,18 +464,19 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     return 1
   }
   if ("path" in done) {
-    const relinked = keptGit ? relink(done.path, roots.main, keptGit) : null
+    const relinked = keptGit ? relink(done.path, repoOf(keptGit), keptGit) : null
     if (relinked) {
       console.error(`playground: restored ${done.path}, but git cannot read it yet: ${relinked}`)
       return 1
     }
-    console.log(`Restored ${done.path}`)
+    console.log(
+      `Restored ${done.path}${kept?.stripped ? ", and a bun install in it rebuilds what the strip removed" : ""}`,
+    )
     return 0
   }
-  if ("worktree" in args && args.worktree)
-    Bun.spawnSync(["git", "-C", roots.main, "worktree", "prune"])
+  if (repo) Bun.spawnSync(["git", "-C", repo, "worktree", "prune"])
   console.log(
-    `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back`,
+    `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back${done.stripped ? ", and a bun install in it rebuilds what the strip removed" : ""}${done.stripFailed ? ` (the strip stopped partway: ${done.stripFailed}; the hourly strip takes the rest)` : ""}`,
   )
   return 0
 }

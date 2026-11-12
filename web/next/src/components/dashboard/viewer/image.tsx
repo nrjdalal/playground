@@ -272,12 +272,12 @@ function PairThumb({ after, before }: Pair) {
   )
 }
 
-// A folded pair keeps its before's id, so the url handed in is the before's; the after's is fetched here, null until it arrives, and "before" once its file is gone, so the pair shows its before alone.
+// A folded pair keeps its before's id, so the url handed in is the before's; the after's is fetched here, null until it arrives, and "before" once its file is gone or did not load, so the pair shows its before alone.
 function usePair(item: ViewerItem, url: string): Pair | "before" | null {
   const pair = item.pair
   const after = useAttachment(pair ? pair.after.id : item.id, Boolean(pair))
   if (!pair) return null
-  if (after.missing) return "before"
+  if (after.missing || after.failed) return "before"
   if (!after.url) return null
   return { after: { alt: pair.after.name, url: after.url }, before: { alt: pair.before.name, url } }
 }

@@ -10,7 +10,7 @@ import {
 } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, WAITING, stop, machine } from "./run-slot-fake"
+import { SCRIPT, WAITING, runSlot, stop, machine } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang: 60s, twice the slowest case under SLOW_CHILD=1.5 but local CI's, which sets its own
 setDefaultTimeout(60_000)
@@ -245,16 +245,19 @@ describe("a node_modules clone waits for its spacing", () => {
 test("run-slot.sh kind prints the lane a command takes and runs nothing", async () => {
   const m = machine()
   const kind = async (words: string[]) => {
-    const p = Bun.spawn(["bash", SCRIPT, "kind", "--", ...words], {
+    const p = runSlot(["bash", SCRIPT, "kind", "--", ...words], {
       cwd: m.root,
       env: m.env(),
       stdout: "pipe",
+      ops: m.ops,
     })
     expect(await p.exited).toBe(0)
     return (await new Response(p.stdout).text()).trim()
   }
   expect(await kind(["cp", "-R", "node_modules", join(m.root, "made")])).toBe("clone")
   expect(await kind(["touch", join(m.root, "made")])).toBe("")
+  // issue 1722: env's no-argument flags and the VAR=x words before it wrap the command, so the lane and size read the command itself
+  expect(await kind(["env", "-i", "X=Y", "bun", "install"])).toBe("quick")
   // review round 1: a run run-slot refuses reads as refuse, a dev stack's among them
   expect(await kind(["bun", "run", "dev"])).toBe("refuse")
   // a chain's git steps take the commit lane only in a repo, so these name a throwaway one: kind runs nothing, but the lane decision reads the named repo's index and lefthook.yml, and naming this checkout let a staged packages/ file answer for it (issue 1487)
@@ -266,6 +269,8 @@ test("run-slot.sh kind prints the lane a command takes and runs nothing", async 
       shell,
       await kind([shell, "-c", `git -C ${repo} commit -m x; git -C ${repo} push origin`]),
     ]).toEqual([shell, "commit"])
+  // #1183: a pin that a commit behind zsh's dash modifier stays out of the commit lane; run-slot-wrappers.test.ts holds the mirror itself
+  expect(await kind(["zsh", "-c", `- git -C ${repo} commit -m x`])).toBe("")
   expect(existsSync(join(m.root, "made"))).toBe(false)
   expect(existsSync(join(m.ops, "run-slot.runs.log"))).toBe(false)
   expect(existsSync(join(m.ops, "run-slot.waiters"))).toBe(false)
@@ -310,10 +315,11 @@ describe("a quick run takes its own slot past a full queue", () => {
           )
           .join(""),
     )
-    const p = Bun.spawn(["bash", SCRIPT, who, "--", ...argv, marker], {
+    const p = runSlot(["bash", SCRIPT, who, "--", ...argv, marker], {
       cwd: m.root,
       env: m.env({ RUN_SLOT_SIZE: "medium", ...as.env }),
       stderr: "pipe",
+      ops: m.ops,
     })
     let err = ""
     let ended = false

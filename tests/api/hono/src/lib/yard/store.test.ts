@@ -208,6 +208,28 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       ).toEqual([])
     })
 
+    test("waiting lists every message a bot sends in its DM to the bot's maker, with no mention, and not to a member outside the DM", async () => {
+      const since = new Date(Date.now() - 1000).toISOString()
+      const { bot } = await store.createBot(db, web("ada", true), "waiter")
+      const [row] = await sql`select id from "user" where login = ${bot.login}`
+      const asBot: Caller = {
+        bot: { madeBy: "ada" },
+        device: store.BOT_DEVICE,
+        id: row!.id,
+        login: bot.login,
+        owner: false,
+        via: "token",
+      }
+      const said = await send(asBot, bot.dm, { kind: "question", text: "is the build green?" })
+      await send(web("ada", true), bot.dm, { kind: "answer", text: "yes, all green" })
+      const inDm = async (caller: Caller) =>
+        (await store.waiting(db, caller, { since }))
+          .filter((item) => item.message.channel === bot.dm)
+          .map((item) => [item.held, item.message.id, item.message.from.login])
+      expect(await inDm(web("ada", true))).toEqual([[false, said.id, "waiter[bot]"]])
+      expect(await inDm(web("bo"))).toEqual([])
+    })
+
     test("a mention held, then approved after a later mark, still waits, from when it was sent", async () => {
       const { id } = await both("approved-later")
       const asked = await send(token("ada", true), id, { kind: "question", text: "@bo approve me" })
@@ -343,6 +365,22 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       const next = await send(token("ada", true), id, { kind: "text", text: "hello" })
       await store.decide(db, web("ada", true), next.id, "sent")
       expect([await status("now plain"), await status("@di see")]).toEqual(["sent", "pending"])
+    })
+
+    test("the maker's token sends its first plain post into the DM bot add made at once, while a mention and each held kind there still wait", async () => {
+      const { bot } = await store.createBot(db, web("ada", true), "greeter")
+      const status = async (kind: Parameters<typeof send>[2]["kind"], text: string) =>
+        (await send(token("ada", true), bot.dm, { kind, text })).status
+      expect(await status("text", `@${bot.login} see`)).toBe("pending")
+      for (const kind of ["bug", "fix", "log", "steps"] as const)
+        expect(await status(kind, "run the suite")).toBe("pending")
+      expect(await status("text", "hi")).toBe("sent")
+    })
+
+    test("another member's first post into a DM with that bot still waits", async () => {
+      const { bot } = await store.createBot(db, web("ada", true), "porter")
+      const { id } = await store.openDm(db, web("bo"), bot.login)
+      expect((await send(token("bo"), id, { kind: "text", text: "hi" })).status).toBe("pending")
     })
 
     test("an owner-only channel takes the owner alone, and holds the owner's token post", async () => {

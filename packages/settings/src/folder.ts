@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -42,6 +43,7 @@ export const extGit = (
   dir: string,
   args: string[],
   env: Record<string, string> = {},
+  opts: { raw?: boolean } = {},
 ): { code: number; err: string; out: string } => {
   const clean = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
@@ -63,13 +65,24 @@ export const extGit = (
   return {
     code: run.exitCode,
     err: run.stderr.toString().trim(),
-    out: run.stdout.toString().trim(),
+    out: opts.raw ? run.stdout.toString() : run.stdout.toString().trim(),
   }
 }
 
 // extGit's output, or an error naming what failed.
 export const mustGit = (dir: string, args: string[], env: Record<string, string> = {}): string => {
   const run = extGit(dir, args, env)
+  if (run.code !== 0) throw new Error(`git ${args[0]} in ${dir}: ${run.err}`)
+  return run.out
+}
+
+// mustGit's output as git wrote it, a file's bytes whole with its final newline, where the trimmed shape would drop it.
+export const mustGitRaw = (
+  dir: string,
+  args: string[],
+  env: Record<string, string> = {},
+): string => {
+  const run = extGit(dir, args, env, { raw: true })
   if (run.code !== 0) throw new Error(`git ${args[0]} in ${dir}: ${run.err}`)
   return run.out
 }
@@ -232,16 +245,22 @@ export const commitExt = (
   })
 }
 
-// A scope's files made exactly these, as one commit: each written in place by rename, then every other file removed but those keep names.
+// A scope's files made exactly these, as one commit: each written in place by rename, then every other file removed but those keep names; a file written over keeps the mode of the file it replaces, and executable says which source files run, so an import never strips a stored script's bit.
 export const writeTree = (
   data: string,
   scope: string,
   files: Map<string, string | Uint8Array>,
   commit: Commit,
   keep: (path: string) => boolean = () => false,
+  executable?: (path: string) => boolean,
 ): string | undefined =>
   commitExt(data, scope, commit, (dir) => {
-    for (const [path, text] of files) writeAtomically(join(dir, path), text)
+    for (const [path, text] of files) {
+      const at = join(dir, path)
+      const ran = existsSync(at) && (statSync(at).mode & 0o111) !== 0
+      writeAtomically(at, text)
+      if (executable?.(path) || ran) chmodSync(at, 0o755)
+    }
     for (const path of filesIn(dir)) if (!files.has(path) && !keep(path)) rmSync(join(dir, path))
     pruneEmpty(dir, dir)
   })
@@ -330,7 +349,7 @@ export type Entry = {
 const FIELD = "\x1f"
 const RECORD = "\x1e"
 
-// The commits of a scope that carry this trailer line exactly (Setting: ui.theme), newest first: what why reads.
+// The commits of a scope that carry this trailer line exactly (Setting: ui.theme), newest first, an empty one included (a score below 5 changes no file, and a pathspec would hide it): what why reads.
 export const extLog = (data: string, scope: string, trailer: [string, string]): Entry[] => {
   const dir = scopeDir(data, scope)
   if (!existsSync(dir)) return []
@@ -341,8 +360,6 @@ export const extLog = (data: string, scope: string, trailer: [string, string]): 
     "--grep",
     line,
     `--format=%H${FIELD}%aI${FIELD}%an${FIELD}%B${RECORD}`,
-    "--",
-    ".",
   ])
   if (code !== 0) return []
   return out

@@ -3,6 +3,7 @@ import { db } from "@packages/db"
 import { getBuildVersion } from "@packages/env"
 import { env } from "@packages/env/api-hono"
 import { answerKind } from "@packages/message"
+import { readPolicyOrDefaults, yardSettings } from "@packages/settings"
 import { describeRoute, openAPIRouteHandler, resolver } from "hono-openapi"
 import { HTTPException } from "hono/http-exception"
 import { z } from "zod"
@@ -13,10 +14,12 @@ import { keepSweeping } from "@/lib/dashboard/attachments"
 import { readsLive } from "@/lib/dashboard/fixture"
 import { getItem } from "@/lib/dashboard/inbox"
 import { startSdkProbe } from "@/lib/dashboard/sdk"
+import { seedFixtureThreadsAtStart } from "@/lib/dashboard/threads"
 import { globalErrorResponses } from "@/lib/error"
 import { DB_TIMEOUT_MS, healthData } from "@/lib/health"
 import { startRelay } from "@/lib/relay/mac"
 import { createServer, upgradeWebSocket } from "@/lib/server"
+import { dataDir } from "@/lib/sessions/paths"
 import { sessionCookie } from "@/lib/sign-in"
 import { yardClient } from "@/lib/yard/client"
 import { startYardPoll } from "@/lib/yard/inbound"
@@ -294,6 +297,13 @@ startSdkProbe()
 // Yard's mentions of the owner into the Inbox, once a minute, when YARD_API_URL names a hosted Yard.
 startYardPoll(db, yardClient)
 
+// A fresh fixture stack's threads page from its first load: an empty thread table takes the fixture's threads at start, one line saying so; a full table and any other source write nothing.
+seedFixtureThreadsAtStart(db).catch((error: unknown) =>
+  console.error(
+    `fixture: seeding the made-up threads failed: ${error instanceof Error ? error.message : error}`,
+  ),
+)
+
 // The relay to the hosted Yard, on a stack that reads this Mac alone, never a fixture's: with YARD_API_URL set and the Keychain token, the owner's browser on Yard reads this dashboard through one socket this API dials out, and sends the writes its paired key signs, each run here as the one local owner.
 if (env.YARD_API_URL && readsLive()) {
   const api = env.YARD_API_URL
@@ -324,6 +334,11 @@ if (env.YARD_API_URL && readsLive()) {
       return answerKind(item)
     },
     login: async (token) => (await yardClient(api, token).me()).login,
+    // read at each bot's read, so a bot add --log or a revoke counts from the next one, and a policy.json that does not parse lets no bot read
+    readers: () => {
+      const read = readPolicyOrDefaults(dataDir())
+      return read.refusal === undefined ? yardSettings.get(read.settings, "yard.logReaders") : {}
+    },
     token: () => keychain().read(),
   })
 }

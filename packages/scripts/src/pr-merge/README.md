@@ -13,6 +13,8 @@ pr:merge refuses a PR the repo's owner did not open unless `--outside-author <lo
   A body with no such line meets no `parent` gate.
 - `up to date`: the head holds everything on `canary`, or merges with it clean; a conflict waits for a merge of `canary`, whose new head then needs its own checks and 5/5.
 - `ci`: the newest run of every GitHub check on the head, by workflow and name, has finished and passed, since a rerun or a close and reopen leaves the older runs listed; `Audit, Lint, and Build` and `test` (`REQUIRED_CHECKS` in `gates.ts`) are among them, and on factory.repo (the checkout's origin when unset) a GitGuardian check too, since a head GitGuardian never started on ran no secret scan.
+  A required check missing while every job of its workflow's run passed is GitHub's: it ended that run without creating the job and concluded it `failure`, as run 42670675952 did with all 20 jobs green, so `ci` names the run and its step, `gh run rerun <run id>`.
+  That rerun tests the same merge, which suits this shape alone, since the run's code was green; a red check's step stays a fix or a merge of `canary`.
 - `body`: the PR body is the PR template, its TL;DR holds no `Outcome:` label line, and its Evidence section names each changed `*.md` path (a `SKILL.md` included) by its full repo-relative path, as AGENTS.md's Shipping step 1 asks, and holds a line that opens with `A/B:` (a bullet, bold or plain, outside a code fence), the PR's measured comparison: A and B against the bar, or `A/B: No runtime metric` and the check that stands in (`bodyRefusal()` in `body.ts`, which names why it refuses and each doc left out; `abLine()` reads the line).
   Its prose, outside code fences and inline code (a code span kept to its line), holds no unfilled placeholder: no `<...>` of the template, read from `extensions/core/skills/pr/SKILL.md` at the head (`templatePlaceholders()`), and no bare all-caps token with an underscore (`SUITE_LINE`) that `git grep -w` finds in no file at the head (`unfoundTokens()` in `merge.ts`), so a real identifier such as `CLOCK_EXEMPT` passes, and the refusal names each token.
   The grep leaves out the gate's own folders (`GATE_OWN`), whose code, docs and tests name sample tokens that would else read as found, and a template the head cannot show, or one holding no placeholder, stops the run with why, so the check fails closed.
@@ -46,15 +48,28 @@ After that reset, `bun run hooks:merge-canary` makes that merge and rebuild, two
 
 A hold is a line in the `held` object of `~/.playground/ops/report/held-prs.json`, `"<owner>/<name>#<n>": "<reason>"`, which Ops writes the moment a lead sends `hold <owner>/<name>#<n>: <reason>` and removes on the lead's word; pr:merge and merge-on-ready refuse a listed PR, naming the reason: each reads the file at the gates and again inside the merge lock, after the types gate and just before the merge call, so a hold written while the type check runs still stops the merge.
 One `"*": "<reason>"` line holds every PR at once, as a ship's merge hold does, while a PR's own line keeps its own reason.
-The ship flow writes it with `bun run ship:freeze <version>` when its freeze starts (`startFreeze` in `held.ts`), with the time in the file's `since` object, and removes it with `bun run ship:freeze --end` once the tag lands or the ship stops (`endFreeze`).
+A ship writes it with `bun run ship:freeze <version>` (`startFreeze` in `held.ts`), with the time in the file's `since` object, and removes it with `bun run ship:freeze --end` (`endFreeze`), at the points the release skill names, from its step 1 to its step 4's tag ([SKILL.md](../../../../skills/zerostarter/release/SKILL.md#1-pin-the-content)).
 `bun run ship:freeze status` prints the `"*"` line, its `since` (or focus's `until`) and whether it has lapsed, or that none is set, and writes nothing (`freezeStatus`); any other word that is not a version (`vX.Y.Z`) prints the usage and writes nothing, since a stray word written as the version would hold every PR.
-A freeze's own `"*"` line (its reason ends `ships: canary is frozen until its tag lands`) lapses 4 hours after that time (`FREEZE_LAPSE_MS`), so a ship that stopped without its `--end` holds no PR for long, and a ship still running then writes it again.
+A freeze's own `"*"` line (its reason ends `ships: canary is frozen until its tag lands`) lapses 4 hours after that time (`FREEZE_LAPSE_MS`), so a ship that stopped without its `--end` holds no PR for long.
 A `"*"` line Ops wrote by hand never lapses, even beside a time an earlier freeze left, and `ship:freeze <version>` and `--end` both leave it for Ops to remove; a PR's own line never lapses either.
 `playground focus on` writes focus's own `"*"` line (its reason ends `has focus: every merge waits until focus ends`, `startFocus`), with the focus end in the file's `until` object, at which it lapses; `playground focus off` removes it (`endFocus`).
 Focus keeps a ship's freeze or a hand line it finds, and a ship's freeze writes over focus's line, since the ship's tag waits on it.
 A lead that overrules a reviewer's FAIL posts one comment on the PR whose first line is `Lead ruling: ReviewBot round <r> at <sha7> overruled: <evidence>; the fault moves to #<issue>`, with that issue filed first; pr:merge reads no ruling, so the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
 A red check that `canary` caused needs a fresh run once `canary`'s fix lands: merge `canary` into the PR, since `gh run rerun` reuses the run's original merge commit, which holds the red `canary`.
 An outside author's PR goes to the Builder, who gives its go only after a read-only review of its diff.
+
+## ship:merge
+
+`bun run ship:merge <n>` is the ship skill's step 3, the one merge into `main` (`ship-merge.ts`): it merges ship PR `<n>` with a merge commit, `--match-head-commit` at the head it read, and refuses, naming each reason (`shipRefusals`), unless:
+
+- `pr`: the PR is open, into `main`;
+- `gate`: the body holds the new-user gate's PASS line for the head on a line of its own, and no FAIL line for it; the gate prints that line last (`resultLine` in `new-user-gate/cli.ts`, its words from `gateLine` in `ship-lines.ts`), PASS only for a run that reached its last step with none reading FAIL, an INCONCLUSIVE step included, since that reads this Mac, not the build;
+- `rehearsal`: the body holds the invitee rehearsal's line for the head (`rehearsalLine`), PASS or `not needed`;
+- `ci`: `Audit, Lint, and Build` and `test` (`REQUIRED_CHECKS`) are each green at the head by their newest run (`ciGate`), so a suite still running or red refuses;
+- `freeze`: the `"*"` line holds and is the ship's own freeze for the next version, the latest tag's patch plus one (`freezeLine` in `held.ts`, `nextVersion`), so a lapsed freeze, another version's, focus's or one Ops wrote by hand refuses.
+
+It takes no merge lock and runs no pr:merge gate, since a ship PR merges `canary` into `main` while the freeze holds every PR into `canary`.
+`bun run ship:approve-held <n>` approves ship PR `<n>`'s held CI runs at its head (`packages/scripts/src/ship/approve-held.ts`, behind the `ship` prebuild target), the `pull_request` runs the bot's draft leaves at conclusion `action_required`, and prints each run it approved or `none held`, so `ci` can read them.
 
 ## The merge lock
 

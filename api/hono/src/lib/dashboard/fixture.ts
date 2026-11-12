@@ -15,7 +15,7 @@ import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path"
 
 import { threadIdSchema } from "@packages/config/threads"
 import type { Roots } from "@packages/safe-delete"
-import { deriveRoot } from "@packages/settings"
+import { deriveRoot, HARNESS_IDS } from "@packages/settings"
 import { z } from "zod"
 
 // Relative, not @/: paths.ts imports this file, and the web's tests type-check it under web/next's own @/ paths.
@@ -220,13 +220,26 @@ const doctorCheck = z.object({
   status: z.enum(["MISSING", "ok", "optional", "waiting"]),
 })
 
+// A harness's made-up facts: the version installed (null when none), whether it is signed in, and its plan.
+const harnessFacts = z.object({
+  plan: z.string().nullable(),
+  signedIn: z.boolean(),
+  version: z.string().nullable(),
+})
+
 export const fixtureSchema = z.object({
   // The made-up Claude account of Claude Code's config, which the user menu shows when usage.json names no login (lib/dashboard/account.ts).
   account: z.object({ email: z.email(), name: z.string().nullable() }).optional(),
   // Every ISO time in the file, and every epoch-seconds `resets_at`, moves by the time between this and the moment the fixture is written, so ages, ETAs and usage stay as current as they read here.
   anchor: z.iso.datetime({ offset: true }),
-  // Onboarding's tool rows on the made-up machine, the database's left to the API: every one ok, and the missing set a stack answers while PLAYGROUND_ONBOARD_MISSING is set.
-  doctor: z.object({ checks: z.array(doctorCheck), missing: z.array(doctorCheck) }).optional(),
+  // Onboarding's tool rows on the made-up machine, the database's left to the API: every one ok, and the missing set a stack answers while PLAYGROUND_ONBOARD_MISSING is set; and each harness's facts its card is built from (lib/onboard/harness.ts).
+  doctor: z
+    .object({
+      checks: z.array(doctorCheck),
+      harnesses: z.record(z.enum(HARNESS_IDS), harnessFacts).optional(),
+      missing: z.array(doctorCheck),
+    })
+    .optional(),
   // Each file under the config folder by its path: a .jsonl as an array of lines, a { "$base64": … } as bytes, anything else as JSON. `$CONFIG` in any string is that folder.
   files: z.record(relativePath, z.unknown()),
   git: z.record(
@@ -247,6 +260,8 @@ export const fixtureSchema = z.object({
       }),
     ),
     prompts: z.record(z.string(), z.string()),
+    // set while a made-up restore can still bring the dispatcher back, as restoring() in herdr.ts reads a live one, so the home says the factory is coming back; absent otherwise
+    restoring: z.iso.datetime({ offset: true }).optional(),
     screens: z.record(z.string(), z.string()),
     workspaces: z.array(json),
   }),
@@ -266,7 +281,7 @@ export const fixtureSchema = z.object({
     probes: z.record(z.string(), z.string()),
     totalBytes: z.number(),
   }),
-  // The owner's made-up threads, which bun run ingest writes into a fixture stack's database once it has read the transcripts their messages are in.
+  // The owner's made-up threads, which the API's start writes into a fixture stack's database while its thread table is empty, and bun run ingest once it has read the transcripts their messages are in.
   threads: z.array(fixtureThread).optional(),
   // How far the made-up dashboard's build is behind the branch it follows, as the update check reports it (lib/dashboard/update.ts), so a fixture stack shows the update icon and Update now without running git.
   update: z

@@ -4,6 +4,7 @@ import { reachesConsole } from "@packages/auth/access"
 import { db } from "@packages/db"
 import { env } from "@packages/env/api-hono"
 import {
+  botNameSchema,
   channelSchema,
   githubLoginSchema,
   inviteCodeSchema,
@@ -21,11 +22,13 @@ import {
   ApiError,
   authErrorResponses,
   conflictErrorResponses,
+  errorResponse,
   forbiddenErrorResponses,
   notFoundErrorResponses,
   validationErrorResponses,
 } from "@/lib/error"
 import { hub } from "@/lib/relay/hub"
+import { BOT_GETS } from "@/lib/relay/protocol"
 import { upgradeWebSocket } from "@/lib/server"
 import { type YardVariables, yardCaller } from "@/lib/yard/caller"
 import { join, publish } from "@/lib/yard/socket"
@@ -68,6 +71,14 @@ const tokenSchema = z.object({
   revokedAt: z.iso.datetime().nullable(),
 })
 
+const botSchema = z.object({
+  createdAt: z.iso.datetime(),
+  dm: z.string(),
+  login: z.string(),
+  name: z.string(),
+  readsLog: z.boolean(),
+})
+
 const inviteSchema = z.object({
   code: z.string().optional(),
   createdAt: z.iso.datetime(),
@@ -84,6 +95,23 @@ const webOrigin = env.HONO_WEB_URL ? new URL(env.HONO_WEB_URL).origin : null
 const member = yardCaller()
 const web = yardCaller({ web: true })
 const owner = yardCaller({ rung: "owner", web: true })
+// the two message routes, and the log route, the only ones a bot's token reaches, the message routes only in its DM with its maker
+const memberOrBot = yardCaller({ bots: true })
+// the owner's session or the owner's own token, since `playground yard bot add` makes a bot from the Mac: the one token route that makes a credential, safe as the bot it makes reaches only its DM with the owner
+const botMaker = yardCaller({ rung: "owner" })
+
+// The line a read of the log leaves in the bot's DM: when, and the seqs the page held.
+const readLine = (body: string, at: Date): string => {
+  let seqs: number[] = []
+  try {
+    seqs =
+      (JSON.parse(body) as { data?: { entries?: { seq?: unknown }[] } }).data?.entries
+        ?.map((entry) => entry.seq)
+        .filter((seq): seq is number => typeof seq === "number") ?? []
+  } catch {}
+  const covered = seqs.length ? `entries ${seqs[0]} to ${seqs.at(-1)}` : "no new entries"
+  return `Read the dispatcher's log at ${at.toISOString()}: ${covered}`
+}
 
 // Sends a message's frame to whoever may read it: its channel once sent, its sender alone while it waits or after a deny.
 // A stored post answers as stored whatever the fan-out does, so a client's retry never posts it twice; a failed fan-out is logged.
@@ -121,11 +149,11 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       return c.json({ data: { login, owner } })
     },
   )
-  // what the local Playground cards in its Inbox: mentions, a thread's replies included, which a channel's page of top-level messages leaves out, and your own held posts
+  // what the local Playground cards in its Inbox: mentions, a thread's replies included, which a channel's page of top-level messages leaves out, your bots' messages and your own held posts
   .get(
     "/waiting",
     doc(
-      "What waits on you past a mark, oldest first by when it showed, then by id: every sent message that names you in the channels and DMs you are in, a thread's replies included, and your own posts held for your approval; take the last item's shownAt as the next since and its message's id as the next after",
+      "What waits on you past a mark, oldest first by when it showed, then by id: every sent message that names you in the channels and DMs you are in, a thread's replies included, every message a bot you made sends in its DM with you, and your own posts held for your approval; take the last item's shownAt as the next since and its message's id as the next after",
       z.object({
         items: z.array(
           z.object({ held: z.boolean(), message: messageSchema, shownAt: z.iso.datetime() }),
@@ -200,18 +228,21 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   .get(
     "/channels/:id/messages",
     doc(
-      "A page of a channel's messages, or of one thread's replies, oldest first: every sent one and your own pending and denied ones",
+      "A page of a channel's messages, or of one thread's replies, oldest first: every sent one and your own pending and denied ones; the newest page by default, the one before a time with before, or the one after a message's id with after; a bot's token reads its DM with its maker alone",
       z.object({ messages: z.array(messageSchema), hasMore: z.boolean() }),
       [validationErrorResponses, notFoundErrorResponses],
     ),
-    member,
+    memberOrBot,
     valid(
       "query",
-      z.object({
-        before: z.iso.datetime().optional(),
-        limit: z.coerce.number().int().min(1).max(100).optional(),
-        parent: z.string().min(1).optional(),
-      }),
+      z
+        .object({
+          after: z.string().min(1).optional(),
+          before: z.iso.datetime().optional(),
+          limit: z.coerce.number().int().min(1).max(100).optional(),
+          parent: z.string().min(1).optional(),
+        })
+        .refine((query) => !(query.after && query.before), "after or before, not both"),
     ),
     async (c) =>
       c.json({
@@ -221,12 +252,12 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   .post(
     "/channels/:id/messages",
     doc(
-      "Posts a message; a token's tier-two post waits as pending until your signed-in browser approves it",
+      "Posts a message; a token's tier-two post waits as pending until your signed-in browser approves it; a bot's token posts in its DM with its maker alone, never a held kind, a mention or a link, and its post never waits",
       z.object({ message: messageSchema }),
       [validationErrorResponses, notFoundErrorResponses],
       201,
     ),
-    member,
+    memberOrBot,
     valid(
       "json",
       z.object({
@@ -326,6 +357,96 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
     web,
     async (c) =>
       c.json({ data: { token: await store.revokeToken(db, c.get("caller"), c.req.param("id")) } }),
+  )
+  .get(
+    "/bots",
+    doc("The bots you made", z.object({ bots: z.array(botSchema) })),
+    botMaker,
+    async (c) => c.json({ data: { bots: await store.bots(db, c.get("caller")) } }),
+  )
+  .post(
+    "/bots",
+    doc(
+      "Makes a bot: its own login, <name>[bot], its DM with you and its token, whose secret is shown this once",
+      z.object({ bot: botSchema, secret: z.string() }),
+      [validationErrorResponses, conflictErrorResponses],
+      201,
+    ),
+    botMaker,
+    valid("json", z.object({ log: z.boolean().optional(), name: botNameSchema })),
+    async (c) => {
+      const { log, name } = c.req.valid("json")
+      return c.json({ data: await store.createBot(db, c.get("caller"), name, { log }) }, 201)
+    },
+  )
+  .patch(
+    "/bots/:name",
+    doc(
+      "Turns a bot's leave to read the dispatcher's log on or off, from its next read: the Account page's log switch, from your signed-in browser alone",
+      z.object({ bot: botSchema }),
+      [validationErrorResponses, notFoundErrorResponses],
+    ),
+    owner,
+    valid("json", z.object({ readsLog: z.boolean() })),
+    async (c) =>
+      c.json({
+        data: {
+          bot: await store.setReadsLog(
+            db,
+            c.get("caller"),
+            c.req.param("name"),
+            c.req.valid("json").readsLog,
+          ),
+        },
+      }),
+  )
+  .get(
+    "/bot/log",
+    describeRoute({
+      tags: ["Yard"],
+      description:
+        "A page of the dispatcher's log after a seq, for a bot's token the owner lets read it, read from the owner's Mac through the relay and redacted there; each read leaves a line in the bot's DM, and every other caller reads 403",
+      responses: {
+        200: { description: "OK" },
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...validationErrorResponses,
+        503: errorResponse("MAC_OFFLINE", "The owner's Mac is offline"),
+      },
+    }),
+    memberOrBot,
+    valid("query", z.object({ after: z.coerce.number().int().min(0).optional() })),
+    async (c) => {
+      const caller = c.get("caller")
+      if (!caller.bot?.readsLog)
+        throw new ApiError(403, "FORBIDDEN", "Only a bot the owner lets read the log reads it")
+      const { after } = c.req.valid("query")
+      const { dm, login } = await store.logReadOf(db, { ...caller, bot: caller.bot })
+      const path = `${BOT_GETS[0]}${after === undefined ? "" : `?after=${after}`}`
+      const answer = await hub.botRead(caller.bot.madeBy, login, { bot: caller.login, dm }, path)
+      if (answer.type !== "response")
+        throw new ApiError(503, "MAC_OFFLINE", "The owner's Mac is offline")
+      const body = Buffer.from(answer.body, "base64")
+      if (answer.status === 200) {
+        const message = await store.logLine(db, caller, dm, readLine(body.toString(), new Date()))
+        await fanOut(caller, message)
+      }
+      return new Response(body, {
+        headers: { ...answer.headers, "cache-control": "no-store" },
+        status: answer.status,
+      })
+    },
+  )
+  .delete(
+    "/bots/:name",
+    doc(
+      "Revokes a bot you made: its token reads 401 from its next call, and its DM goes",
+      z.object({ bot: botSchema }),
+      [notFoundErrorResponses],
+    ),
+    botMaker,
+    async (c) =>
+      c.json({ data: { bot: await store.revokeBot(db, c.get("caller"), c.req.param("name")) } }),
   )
   .get(
     "/invites",

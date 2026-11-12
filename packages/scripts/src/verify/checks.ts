@@ -688,6 +688,12 @@ export const SIDEBAR_READY = [
   `innerWidth < 768 || (!!document.querySelector('[data-sidebar="content"] [data-sidebar="menu"][data-agents="ready"]') && !document.querySelector('[data-sidebar="menu"][data-agents="loading"]'))`,
 ]
 
+// A page's data is in once no region outside the sidebar reads aria-busy, the app's loading mark (the aside's Inbox until its first data render, a settings panel, the status table); SIDEBAR_READY covers the sidebar, whose stored menu stays busy while it shows stored rows.
+export const DATA_READY = [
+  "--fn",
+  `![...document.querySelectorAll('[aria-busy="true"]')].some((el) => !el.closest('[data-sidebar]'))`,
+]
+
 // The routes a run has fetched once, and how it fetches: a cold next dev compiles a route on its first request, and under load 48 that compile wedged the browser's first open (page_wedged on /robots.txt) until the pages were fetched by hand.
 export type Warm = { done: Set<string>; fetch: (url: string) => Promise<unknown> }
 
@@ -703,7 +709,7 @@ export const warmUp = async (warm: Warm, web: string, route: string): Promise<vo
   await warm.fetch(`${web}${route}`).catch(() => undefined)
 }
 
-// A route READY does not name (a session's own page) is shot once the page settles, as before.
+// Each shot loads its page fresh through a blank page, since an open that changes only the hash keeps the page an earlier shot loaded; a route READY does not name (a session's own page) waits on its data alone; a wait that runs out still takes the shot, and the result names each wait that ran out.
 export const screenshot = async (
   browser: Browser,
   { web }: Target,
@@ -718,19 +724,31 @@ export const screenshot = async (
   await warmUp(warm, web, route)
   await browser.viewport(viewport)
   await browser.run("set", "media", theme)
+  await browser.run("open", "about:blank")
   await browser.visit(`${web}${route}`)
   const ready = READY[new URL(route, "http://dashboard").pathname]
-  if (ready) {
+  const data: [string, string[]] = ["the page's data", DATA_READY]
+  const waits: [string, string[]][] = ready
+    ? [["the page's ready marker", ready], ["the sidebar", SIDEBAR_READY], data]
+    : [data]
+  const ranOut: string[] = []
+  const wait = async ([name, args]: [string, string[]]) => {
     try {
-      await browser.run("wait", ...ready)
-      await browser.run("wait", ...SIDEBAR_READY)
+      await browser.run("wait", ...args)
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      return fail(`screenshot ${route}`, `the page never drew its ready marker: ${reason}`)
+      ranOut.push(`${name} (${error instanceof Error ? error.message : String(error)})`)
     }
   }
+  for (const step of waits) await wait(step)
   await browser.run("screenshot", "--full", path)
-  return pass(`screenshot ${route}`, path)
+  // A full shot sizes the page to 1x1 and back, which can draw a region anew; a page busy again after it is shot once more when its data is back in, and an eval that fails there reads as busy, so the wait above takes it.
+  if (!(await browser.eval<boolean>(DATA_READY[1]!).catch(() => false))) {
+    await wait(["the page's data after the shot", DATA_READY])
+    await browser.run("screenshot", "--full", path)
+  }
+  return ranOut.length
+    ? fail(`screenshot ${route}`, `${path} was shot, but its wait ran out on ${ranOut.join("; ")}`)
+    : pass(`screenshot ${route}`, path)
 }
 
 export const map = async (): Promise<Result> => {

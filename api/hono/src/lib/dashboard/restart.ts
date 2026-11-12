@@ -1,6 +1,8 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { spawnEnv } from "@packages/env/api-hono"
+
 import { checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
 import { unstickPath } from "@/lib/dashboard/unstick"
 
@@ -11,7 +13,12 @@ export type Run = (argv: string[]) => Promise<{ code: number; stderr: string; st
 export type Restarted = { status: "restarted" } | { detail: string; status: "refused" }
 
 const run: Run = async (argv) => {
-  const child = Bun.spawn(argv, { stderr: "pipe", stdin: "ignore", stdout: "pipe" })
+  const child = Bun.spawn(argv, {
+    env: spawnEnv(),
+    stderr: "pipe",
+    stdin: "ignore",
+    stdout: "pipe",
+  })
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
@@ -22,7 +29,7 @@ const run: Run = async (argv) => {
 
 const said = (text: string) => text.trim().split("\n").at(-1) ?? ""
 
-// Pure: the PRs a restart's resume names with --pr (its pr first, as spawn.sh sets an ended row's pr to the first named), since spawn.sh refuses every checker start that names no pull request: a checker's pr, then the rest of its prs, else null, as for a row naming only issues, which the route refuses before the close; none for a session that is no checker or has no row.
+// Pure: the PRs a restart's resume names with --pr (its pr first, as spawn.sh sets an ended row's pr to the first named), since spawn.sh refuses every checker start that names no pull request: a checker's pr, then the rest of its prs, else null, as for a row naming only issues or extension items, which the route refuses before the close, failing closed; none for a session that is no checker or has no row.
 const PULL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*$/
 
 export const restartPrs = (

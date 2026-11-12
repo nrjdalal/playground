@@ -5,7 +5,8 @@ const ROOT = join(import.meta.dir, "../../../../..")
 const SKILL = join(ROOT, "extensions/core/skills/pr")
 const UPSTREAM = join(import.meta.dir, "upstream")
 
-const TLDR = "## TL;DR\n\n- <a few short ASD-STE100 bullet points: what changes, and why>\n\n"
+const TLDR =
+  "## TL;DR\n\n- <a few short bullet points by the plain-words skill: what changes, and why>\n\n"
 const LINKS = "\n\n## Links\n\n<tickets, issues it closes, docs, related PRs>"
 
 // The skill is upstream's whole, with only a TL;DR and a Links block added, so every edit beyond them is drift. The pinned copy is upstream's at the commit upstream/SOURCE names, so the test needs no network.
