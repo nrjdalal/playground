@@ -32,6 +32,15 @@ beforeAll(async () => {
     join(config, "query.json"),
     JSON.stringify({ query: "mutation { createRef(input: {}) { clientMutationId } }" }),
   )
+  // A block string holding an escaped \""", then a listed mutation between it and the next block string; the second's block holds two backslashes before its three quotes.
+  await Bun.write(
+    join(config, "escaped.graphql"),
+    String.raw`mutation { a: addComment(input: {body: """x \""" """}) { clientMutationId } c: createRef(input: {}) { clientMutationId } d: addComment(input: {body: """ """}) { clientMutationId } }`,
+  )
+  await Bun.write(
+    join(config, "backslashes.graphql"),
+    String.raw`mutation { a: addComment(input: {body: """a\\""" filler """}) { clientMutationId } c: createRef(input: {}) { clientMutationId } d: addComment(input: {body: """ """}) { clientMutationId } }`,
+  )
   await Bun.write(
     join(config, "cr.graphql"),
     "# x\rmutation { createRef(input: {}) { clientMutationId } }",
@@ -145,6 +154,16 @@ describe("no-prepare-write refuses a prepare-only session's writes", () => {
     expect(await check(bash(command), env)).toStartWith("no-prepare-write hook refused gh api")
   })
 
+  test.each([
+    "gh api graphql -F query=@escaped.graphql",
+    "gh api graphql -F query=@backslashes.graphql",
+  ])(
+    "refuses a listed mutation after a block string holding an escaped quote, %s",
+    async (command) => {
+      expect(await check(bash(command), env)).toStartWith("no-prepare-write hook refused gh api")
+    },
+  )
+
   test("its refusal names a file write and a merge", async () => {
     expect(await check(tool("mcp__github-shared__merge_pull_request"), env)).toContain(
       "no push, no file write, no pull request and no merge",
@@ -181,9 +200,6 @@ describe("no-prepare-write refuses a prepare-only session's writes", () => {
     "gh api repos/made-up/app/git/commits -X POST -f message=m -f tree=abc123",
     "gh api repos/made-up/app/git/trees -X POST -f base_tree=abc123",
     "gh api graphql -f query='mutation { addComment(input: {}) { clientMutationId } }'",
-    `gh api graphql -f query='mutation { addComment(input: {body: "see createRef"}) { clientMutationId } }'`,
-    `gh api graphql -f query='mutation { addComment(input: {body: """mergePullRequest"""}) { clientMutationId } }'`,
-    "gh api graphql -f query='# createRef comes later\nmutation { addComment(input: {}) { clientMutationId } }'",
     "man git push",
   ])("lets it run %s", async (command) => {
     expect(await check(bash(command), env)).toBeUndefined()
