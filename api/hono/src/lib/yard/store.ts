@@ -364,17 +364,23 @@ const POST_RULES: Record<
       throw new ApiError(403, "FORBIDDEN", `Only the owner posts in #${channel.name}`)
     return { firstInDm: false }
   },
-  // A token's post waits while the DM has no sent message, so a held or denied opener lets nothing through after it.
-  dm: async (db, _caller, channel) => ({
-    firstInDm:
-      (
-        await db
-          .select({ id: yardMessage.id })
-          .from(yardMessage)
-          .where(and(eq(yardMessage.channelId, channel.id), eq(yardMessage.status, "sent"), live()))
-          .limit(1)
-      ).length === 0,
-  }),
+  // A token's post waits while the DM has no sent message, so a held or denied opener lets nothing through after it; the DM bot add made between a bot and its maker is one the maker chose to open, so the maker's first post there sends.
+  dm: async (db, caller, channel) => {
+    const [sent, made] = await Promise.all([
+      db
+        .select({ id: yardMessage.id })
+        .from(yardMessage)
+        .where(and(eq(yardMessage.channelId, channel.id), eq(yardMessage.status, "sent"), live()))
+        .limit(1),
+      db
+        .select({ id: yardBot.userId })
+        .from(yardMember)
+        .innerJoin(yardBot, eq(yardBot.userId, yardMember.userId))
+        .where(and(eq(yardMember.channelId, channel.id), eq(yardBot.madeBy, caller.id)))
+        .limit(1),
+    ])
+    return { firstInDm: sent.length === 0 && made.length === 0 }
+  },
 }
 
 export const post = async (
