@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -11,6 +12,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs"
+import { loadavg } from "node:os"
 import { basename, dirname, join, relative } from "node:path"
 
 import { makeScratch, removeScratch } from "@packages/safe-delete"
@@ -167,7 +169,22 @@ const flagRoot = (root: string, locked: boolean): number => {
   return performance.now() - start
 }
 
-// A write under the one lock: a locked root is lifted for it and locked again after it, each lift and relock's time logged, so the ops tick's log measures it on the live root.
+// One line per lift in the data folder's ops/log/ext-lock.log, beside the ops tick's relocks: its time, the lift and relock's duration, load5 and the caller (the entry script, and the session's role when it has one), so the log measures the lock on the live root.
+const logLift = (data: string, root: string, took: number) => {
+  const at = new Date().toISOString().replace(/\.\d{3}Z$/, "Z")
+  const entry = process.argv[1] ?? process.argv0
+  const role = process.env.PLAYGROUND_ROLE
+  const by = `${basename(dirname(entry))}/${basename(entry)}${role ? ` (${role})` : ""}`
+  const line = `${at} lifted ${root} in ${Math.round(took)} ms load5 ${loadavg()[1].toFixed(2)} by ${by}\n`
+  try {
+    mkdirSync(join(data, "ops", "log"), { recursive: true })
+    appendFileSync(join(data, "ops", "log", "ext-lock.log"), line)
+  } catch (error) {
+    console.error(`extensions' lock: could not log its lift: ${error}`)
+  }
+}
+
+// A write under the one lock: a locked root is lifted for it and locked again after it, each lift logged (logLift).
 export const withLock = <T>(data: string, run: () => T, wait = 30_000): T =>
   holdLock(
     data,
@@ -182,8 +199,10 @@ export const withLock = <T>(data: string, run: () => T, wait = 30_000): T =>
         return run()
       } finally {
         took += flagRoot(root, true)
-        if (lifted)
+        if (lifted) {
           console.error(`extensions' lock: lifted and relocked ${root} in ${Math.round(took)} ms`)
+          logLift(data, root, took)
+        }
       }
     },
     wait,
