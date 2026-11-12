@@ -2112,6 +2112,41 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(calls).toHaveLength(1)
     })
 
+    test("a Send whose files shared took its words with them, so the poster's line closes the item and holds no words to post again (PG-1921)", async () => {
+      const posted = await filedDraft()
+      const typed: Delivery[] = []
+      const { upload } = recorder()
+      await store.answerItem(
+        db,
+        posted.id,
+        { action: "send", text: "the fix is live today" },
+        { actor, deliver: async (delivery) => (typed.push(delivery), delivered()), upload },
+      )
+      const payload = payloadOf(typed[0]?.text ?? "")
+      expect(payload).toMatchObject({ go: true, next: "close", verb: "send" })
+      expect(payload).not.toHaveProperty("text")
+    })
+
+    test("a Send that shared no files, as a fixture stack's counts 0, still hands the poster its words", async () => {
+      const posted = await filedDraft()
+      const typed: Delivery[] = []
+      await store.answerItem(
+        db,
+        posted.id,
+        { action: "send", text: "the fix is live today" },
+        {
+          actor,
+          deliver: async (delivery) => (typed.push(delivery), delivered()),
+          upload: async () => 0,
+        },
+      )
+      expect(payloadOf(typed[0]?.text ?? "")).toMatchObject({
+        next: "carry-out",
+        text: "the fix is live today",
+        verb: "send",
+      })
+    })
+
     test("Approve of a slack decision with files uploads them too", async () => {
       const posted = await post(decision({ ...SLACK, attachments: FILES }))
       const { calls, upload } = recorder()
@@ -2159,6 +2194,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         })
         await store.answerItem(db, posted.id, { action: "send" }, { actor })
         const spec = await uploadSpec(db, posted.id, read)
+        expect(spec).toHaveProperty("text", "hi")
         expect(spec).toEqual({
           channel: "C0MADEUP01",
           files: [
@@ -2171,6 +2207,18 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           ],
           thread: "1700000000.000100",
         })
+      })
+
+      test("carries the owner's changed words in place of the draft's (PG-1921)", async () => {
+        const shot = await kept(PNG, "before.png", "image")
+        const posted = await post({
+          from: "ops",
+          kind: "draft",
+          preview: { attachments: [shot], link: THREAD, text: "hi", to: "@Merritt" },
+          title: "Tell Merritt",
+        })
+        await store.answerItem(db, posted.id, { action: "send", text: "hi there" }, { actor })
+        expect(await uploadSpec(db, posted.id, read)).toHaveProperty("text", "hi there")
       })
 
       test("refuses an id naming no item, a channel, a thread or a path, so no caller picks the place or the file", async () => {

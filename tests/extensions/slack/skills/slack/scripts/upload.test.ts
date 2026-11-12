@@ -67,6 +67,21 @@ describe("dm upload (PG-649)", () => {
     ])
   })
 
+  test("a draft's words ride with its files as the complete's initial_comment, so they post once (PG-1921)", async () => {
+    const { put, slack, steps } = stub()
+    const sent = {
+      channel: "C0MADEUP01",
+      files: FILES,
+      put,
+      slack,
+      text: "the fix is live",
+      thread: "1700000000.000100",
+    }
+    await upload(sent)
+    const completes = steps.filter((step) => step.at === "files.completeUploadExternal")
+    expect(completes.map((step) => step.params?.initial_comment)).toEqual(["the fix is live"])
+  })
+
   test("a channel with no thread shares the files at its top level", async () => {
     const { put, slack, steps } = stub()
     await upload({ channel: "D0MADEUP11", files: FILES.slice(0, 1), put, slack })
@@ -158,6 +173,13 @@ describe("dm upload (PG-649)", () => {
         channel_id: "C0MADEUP01",
         thread_ts: "1700000000.000100",
       })
+    })
+
+    test("the spec's words reach Slack as the complete's initial_comment (PG-1921)", async () => {
+      const { put, slack, steps } = stub()
+      const words = { ...SPEC, text: "the fix is live" } as Spec
+      await share("item-1", { check: async () => undefined, put, read: async () => words, slack })
+      expect(steps.at(-1)?.params?.initial_comment).toBe("the fix is live")
     })
 
     test("a file a guard refuses fails the share, naming it, before any file reaches Slack", async () => {
