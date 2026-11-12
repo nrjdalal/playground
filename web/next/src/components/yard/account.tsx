@@ -178,10 +178,12 @@ function Bots() {
         <ul className="divide-y rounded-md border text-sm">
           {bots?.map((bot) => (
             <li key={bot.name} className="flex items-center gap-3 px-3 py-2">
-              <span className="font-medium">{bot.login}</span>
-              <span className="text-muted-foreground text-xs">
-                Made {new Date(bot.createdAt).toLocaleString()}
-              </span>
+              <div className="flex min-w-0 flex-col sm:flex-row sm:items-center sm:gap-3">
+                <span className="font-medium">{bot.login}</span>
+                <span className="text-muted-foreground text-xs text-balance">
+                  Made {new Date(bot.createdAt).toLocaleString()}
+                </span>
+              </div>
               <label className="ml-auto flex shrink-0 items-center gap-2 text-xs whitespace-nowrap">
                 <Switch
                   checked={bot.readsLog}
