@@ -21,7 +21,7 @@ import { EMPTY_LIST, isPublicList, reposOf } from "../trace-count/kinds"
 import { bridge, type Inbox, type Sock, sender } from "./bridge"
 import { type Card, termsOf } from "./cards"
 import { keepAlive, ownFolder, releaseLock, SOCKET, takeLock, writeOwn } from "./habits"
-import { life, type LinkSock, PAIRING, unguarded } from "./life"
+import { life, type LinkSock, pairingCard, unguarded } from "./life"
 import { mediaDir, modelPath, transcriber } from "./media"
 import { socketPath, serve } from "./server"
 
@@ -58,16 +58,38 @@ const by = async () =>
     )?.agents,
     "ops",
   )
-const post = async (title: string, text: string, outcome?: "alert") => {
-  const posted = await ask(
-    ["new"],
-    JSON.stringify({ from: await by(), kind: "update", preview: { outcome, text }, title }),
-  )
-  return posted.out
+// An update's outcome, one of the Inbox's OUTCOMES (api/hono/src/lib/dashboard/inbox.ts), spelled here since the scripts package cannot type-pull that file; the life test pins the words against the real schema.
+type Outcome = "alert" | "decision" | "finding" | "merged" | "shipped"
+type UpdateCard = {
+  from: string
+  kind: "update"
+  preview: { outcome: Outcome; text: string }
+  title: string
+}
+// One ask new for a card, answered by the card's id, or why the Inbox refused it: a non-zero exit, or an exit that prints no id.
+const postCard = async (card: UpdateCard): Promise<string | undefined> => {
+  const posted = await ask(["new"], JSON.stringify(card))
+  const id = posted.out
     .split("\n")
     .find((l) => /^[0-9a-f-]{36}$/.test(l.trim()))
     ?.trim()
+  if (posted.code === 0 && id !== undefined) return id
+  const why = posted.code === 0 ? "ask printed no id" : lastLine(posted.out)
+  if (card.preview.outcome === "alert") {
+    console.error(`ops-wa: the Inbox refused an alert: ${why}`)
+    return undefined
+  }
+  const alert = await postCard({
+    from: card.from,
+    kind: "update",
+    preview: { outcome: "alert", text: `The Inbox refused the card "${card.title}": ${why}` },
+    title: "ops-wa: the Inbox refused a card",
+  })
+  if (alert === undefined) console.error(`ops-wa: the refusal's alert was refused too: ${why}`)
+  return undefined
 }
+const post = async (title: string, text: string, outcome: Outcome): Promise<string | undefined> =>
+  postCard({ from: await by(), kind: "update", preview: { outcome, text }, title })
 
 // The Inbox as ops-wa reaches it: the open items through ask open --json, no-public-leak's list as that guard reads it, failing closed, and an answer as a file in its own folder that ask whatsapp reads (ADR 0024).
 const lastLine = (text: string) =>
@@ -192,6 +214,7 @@ const main = async () => {
         post(
           "Open WhatsApp on the spare phone",
           "A linked device drops after 14 days with its phone away: open WhatsApp on the spare phone once, with its SIM in, to keep the link.",
+          "finding",
         ),
       ),
     3_600_000,
@@ -211,7 +234,7 @@ const main = async () => {
     card: (code) => {
       result = "waiting: the pairing code waits to be typed on the spare phone"
       void pulse()
-      return post(`Link WhatsApp: code ${code.slice(0, 4)}-${code.slice(4)}`, PAIRING)
+      return by().then((from) => postCard(pairingCard(code, from)))
     },
     connect: async () => {
       const sock = makeWASocket({

@@ -16,7 +16,12 @@ import {
   SOCKET,
   takeLock,
 } from "../../../../../packages/scripts/src/ops-wa/habits"
-import { life, PAIRING, unguarded } from "../../../../../packages/scripts/src/ops-wa/life"
+import {
+  life,
+  PAIRING,
+  pairingCard,
+  unguarded,
+} from "../../../../../packages/scripts/src/ops-wa/life"
 import { fakeSocket, OWNER, SPARE } from "./fake-socket"
 
 const dirs: string[] = []
@@ -294,13 +299,19 @@ describe("ops-wa's ban-safety habits", () => {
 
 describe("the pairing card as the Inbox takes it", () => {
   test("the pairing card's JSON passes the Inbox's input schema", () => {
-    const code = "12345678"
-    const payload = {
-      from: "ops",
-      kind: "update",
-      preview: { outcome: undefined as string | undefined, text: PAIRING },
-      title: `Link WhatsApp: code ${code.slice(0, 4)}-${code.slice(4)}`,
-    }
-    expect(inboxInputSchema.safeParse(JSON.parse(JSON.stringify(payload))).success).toBe(true)
+    expect(
+      inboxInputSchema.safeParse(JSON.parse(JSON.stringify(pairingCard("12345678", "ops"))))
+        .success,
+    ).toBe(true)
+  })
+  test("the reminder card's outcome passes the schema too", () => {
+    expect(
+      inboxInputSchema.safeParse({
+        from: "ops",
+        kind: "update",
+        preview: { outcome: "finding", text: "Open WhatsApp on the spare phone." },
+        title: "Open WhatsApp on the spare phone",
+      }).success,
+    ).toBe(true)
   })
 })
