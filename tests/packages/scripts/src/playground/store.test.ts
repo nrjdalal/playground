@@ -116,42 +116,51 @@ describe("playground ext", () => {
     expect(why.map((entry) => entry.reason)).toEqual(["clear", "shorter replies"])
   })
 
-  test("why keeps a score below 5 with its reason between the revision it scored and the next one, and a 5 that accepts", async () => {
+  test("why keeps a score below 5 with its reason between the revision it scored and the next one, and a 5 that accepts, and lists no other item's commit", async () => {
     const at = folder("why-rounds")
-    const put = async (text: string, reason: string) => {
-      writeFileSync(join(scratch, "rounds.md"), text)
+    const put = async (key: string, text: string, reason: string) => {
+      writeFileSync(join(scratch, `${key}.md`), text)
       const out = await ext(
         at,
-        ["put", "tester", "rule", "rounds", join(scratch, "rounds.md"), "--reason", reason],
+        ["put", "tester", "rule", key, join(scratch, `${key}.md`), "--reason", reason],
         "",
         "worker",
         "a-worker",
       )
       return (JSON.parse(out.out) as { rev: string }).rev
     }
-    const score = (rev: string, n: string, reason: string) =>
+    const score = (key: string, rev: string, n: string, reason: string) =>
       ext(
         at,
-        ["score", "tester", "rule", "rounds", rev, n, "--reason", reason],
+        ["score", "tester", "rule", key, rev, n, "--reason", reason],
         "",
         "reviewer",
         "b-reviewer",
       )
-    const first = await put("Name the rounds.\n", "first draft")
-    expect((await score(first, "4", "round 1: name each case")).out).toContain("is proposed")
-    const second = await put("Name each round and its case.\n", "second draft")
-    expect((await score(second, "5", "round 2: clear")).out).toContain("is accepted")
-    const why = JSON.parse((await ext(at, ["why", "tester", "rule", "rounds"])).out) as {
-      reason: string
-      trailers: [string, string][]
-    }[]
-    expect(
-      why.map((entry) => [entry.reason, Object.fromEntries(entry.trailers).Score ?? "-"]),
-    ).toEqual([
+    const why = async (key: string) =>
+      (
+        JSON.parse((await ext(at, ["why", "tester", "rule", key])).out) as {
+          reason: string
+          trailers: [string, string][]
+        }[]
+      ).map((entry) => [entry.reason, Object.fromEntries(entry.trailers).Score ?? "-"])
+    const first = await put("rounds", "Name the rounds.\n", "first draft")
+    expect((await score("rounds", first, "4", "round 1: name each case")).out).toContain(
+      "is proposed",
+    )
+    const other = await put("other", "Another rule.\n", "other draft")
+    expect((await score("other", other, "3", "other round 1")).out).toContain("is proposed")
+    const second = await put("rounds", "Name each round and its case.\n", "second draft")
+    expect((await score("rounds", second, "5", "round 2: clear")).out).toContain("is accepted")
+    expect(await why("rounds")).toEqual([
       ["round 2: clear", "5"],
       ["second draft", "-"],
       ["round 1: name each case", "4"],
       ["first draft", "-"],
+    ])
+    expect(await why("other")).toEqual([
+      ["other round 1", "3"],
+      ["other draft", "-"],
     ])
   })
 
