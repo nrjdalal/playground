@@ -157,16 +157,20 @@ test("in the factory's main checkout prebuild stops before any build and says wh
 })
 
 // yard.test.ts's `bun -e` scenarios import the hosted app through a path read at run time, so a fresh clone's test:file built nothing and 8 rows failed on "Cannot find module '@packages/db'"
-test("testSpecifiers adds every built shared package for a test:file source that spawns a child Bun, whose script the import scan cannot follow", () => {
+test("testSpecifiers adds every built shared package's dist for a test:file source that spawns a child process, whose program the import scan cannot follow, through a helper or a variable too", () => {
   const built = new Set(["@api/hono", "@packages/db", "@packages/env"])
+  const all = ["packages/db/dist", "packages/env/dist"]
   expect(
     testSpecifiers(['Bun.spawnSync(["bun", "-e", script], { cwd: API })'], built, false),
-  ).toEqual(["packages/db/dist", "packages/env/dist"])
-  expect(testSpecifiers(["spawnSync([process.execPath, file])"], built, false)).toEqual([
-    "packages/db/dist",
-    "packages/env/dist",
-  ])
-  expect(testSpecifiers(['Bun.spawnSync(["git", "status"])'], built, false)).toEqual([])
+  ).toEqual(all)
+  expect(
+    testSpecifiers(['const BUN = slowChild("bun")\nBun.spawn([BUN, CLI, ...args])'], built, false),
+  ).toEqual(all)
+  expect(testSpecifiers(['const r = spawnSync(sh, ["-c", cmd])'], built, false)).toEqual(all)
+  expect(testSpecifiers(["const out = await $`bun run ask`.text()"], built, false)).toEqual(all)
+  expect(
+    testSpecifiers(['import { db } from "@packages/db"\nconst m = /x/.exec(s)'], built, false),
+  ).toEqual(["@packages/db"])
   expect(testSpecifiers(['Bun.spawnSync(["bun", "-e", script])'], built, true)).toEqual([])
 })
 
