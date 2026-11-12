@@ -1799,9 +1799,19 @@ export async function answerItem(
 const waits = (item: InboxItem): boolean =>
   item.kind !== "update" && item.status === "open" && choiceOf(item) !== "replied"
 
-// Pure: whether its poster still carries an answer out, which the web shows In progress: a go not yet closed, or a secret its sink has not taken (PG-1909).
-const carrying = (answer: { ackedAt?: string; choice: string; results?: unknown }): boolean =>
-  (isGo(answer.choice) && !answer.ackedAt) || (answer.choice === "provided" && !answer.results)
+// Pure: whether its poster still carries an answer out, the web's itemState `sending`, which it shows In progress: a secret its sink has not taken, or a go with no close (ackedAt, link or noLink), no step the Dashboard ran itself and no delivery from before acks were stamped (PG-1909).
+const carrying = (item: InboxItem): boolean => {
+  const answer = item.answer
+  if (item.kind === "update" || !answer || !("choice" in answer)) return false
+  if (answer.choice === "provided") return !("results" in answer && answer.results)
+  if (!isGo(answer.choice)) return false
+  const { accepted, ackedAt, link, listed, noLink, opened, owned, set } = answer as InboxAnswer
+  if (accepted ?? listed ?? owned ?? set) return false
+  if (opened && opened.exitCode !== 0) return false
+  const unstamped =
+    item.delivery?.status === "delivered" && Date.parse(answer.at) < ACKS_STAMPED_FROM.getTime()
+  return !(ackedAt || link || noLink || unstamped)
+}
 
 // the change a write is made against, so a double click or a second tab cannot write it twice
 const unchanged = (current: InboxItem) =>
@@ -1830,7 +1840,7 @@ async function archive(
     current.status !== "cleared" &&
     answer !== null &&
     ("dismissedAt" in answer ||
-      (current.status !== "open" && "choice" in answer && !carrying(answer)))
+      (current.status !== "open" && "choice" in answer && !carrying(current)))
   if (
     (!waits(current) && current.kind !== "update" && !done) ||
     dismissed ||
