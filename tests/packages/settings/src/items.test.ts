@@ -78,6 +78,22 @@ test("show --rev of a revision that wrote another item prints this item as that 
   })
 })
 
+// PG-1907: a proposal that has since landed reads accepted under --rev, the same state bare show reads, while a live proposal still reads proposed
+test("show --rev reads a proposal that has since landed as accepted, a live proposal still as proposed", () => {
+  const gate = { ...ref, key: "gate", kind: "rule" as const }
+  const text = (body: string) => ({ attachments: [], body, files: null, value: null })
+  setSetting(scratch, { key: "clock.ownerZone", scope: ME, value: "Europe/Lisbon" }, OWNER)
+  const proposal = revOf(putItem(scratch, gate, text("Gate one.\n"), WORKER, false))
+  expect(showItem(scratch, gate, proposal)?.state).toBe("proposed")
+  const accepted = revOf(judgeItem(scratch, gate, proposal, { kind: "score", score: 5 }, REVIEWER))
+  expect(showItem(scratch, gate, accepted)?.state).toBe("accepted")
+  expect(showItem(scratch, gate, proposal)?.state).toBe("accepted")
+  expect(showItem(scratch, gate)?.state).toBe("accepted")
+  const newer = revOf(putItem(scratch, gate, text("Gate two.\n"), WORKER, false))
+  expect(showItem(scratch, gate, newer)?.state).toBe("proposed")
+  expect(showItem(scratch, gate, proposal)?.state).toBe("accepted")
+})
+
 // PG-1377: put chmods each executable name, so a name the item does not hold, such as ../x, is refused before it reaches chmodSync
 test("put refuses an executable name the item does not hold", () => {
   const refusal = {
