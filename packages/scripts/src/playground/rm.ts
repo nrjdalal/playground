@@ -422,11 +422,10 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   const session = "restore" in args ? "" : await deps.session()
   const git = "worktree" in args && args.worktree ? worktreeGit(args.path) : undefined
   const repo = "worktree" in args && args.worktree ? worktreeRepo(args.path, roots) : null
-  // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold
-  const freed =
-    "worktree" in args && args.worktree
-      ? freedOf(await read.prState(args.path, args.pr))
-      : undefined
+  // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold; with none read, another repo's worktree may go once archiveUnlanded archives its commits no remote holds
+  const own =
+    "worktree" in args && args.worktree ? await read.prState(args.path, args.pr) : undefined
+  const freed = own === undefined ? undefined : freedOf(own)
   const done =
     "restore" in args
       ? restore(args.restore, roots)
@@ -439,6 +438,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
             session,
             worktree: args.worktree
               ? {
+                  ...(own === null ? { archive: join(deps.data, "scratchpad", "archive") } : {}),
                   clones: deps.clones,
                   discard: args.discard,
                   ...(freed ? { freed } : {}),

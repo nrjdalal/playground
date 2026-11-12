@@ -31,8 +31,9 @@ export type Proc = { command: string; cwd: string; pid: number; sockets: string[
 // A running node_modules clone, from run-slot's clone holder record: the session that runs it, its pid, the checkout it copies from and the one it copies into.
 export type Clone = { destination: string; pid: number; source: string; who: string }
 
-// What tells a worktree is held: the running clones, a reader quarantine calls again right before its move, the roster's live statuses, the folders beyond the other worktrees read for links into it (linkPlaces), every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that; the worktree's own PR once it reads MERGED or CLOSED (freed, at its head), which no roster row naming its branch or its number holds while the worktree sits at that PR's head, and where a pass past such a row is told (note).
+// What tells a worktree is held: the folder another repo's worktree with no PR has its commits no remote holds archived in before it goes (archiveUnlanded), the running clones, a reader quarantine calls again right before its move, the roster's live statuses, the folders beyond the other worktrees read for links into it (linkPlaces), every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that; the worktree's own PR once it reads MERGED or CLOSED (freed, at its head), which no roster row naming its branch or its number holds while the worktree sits at that PR's head, and where a pass past such a row is told (note).
 export type Holders = {
+  archive?: string
   clones: () => Clone[]
   discard: boolean
   freed?: { head: string; number: number; state: "CLOSED" | "MERGED" }
@@ -630,10 +631,11 @@ const linkHolder = (at: string, roots: Roots, places: string[]): string | null =
   return `${at} is linked into by ${links.sort().slice(0, 3).join(", ")}${more}: repoint or remove each link first`
 }
 
-// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session, running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary.
+// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session, running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree given an archive folder, archiveUnlanded has archived each of its commits no remote holds.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
-  if (worktreeRepo(at, roots) === null)
+  const repo = worktreeRepo(at, roots)
+  if (repo === null)
     return `${at} is not a worktree in ${worktreesOf(roots)} or a git worktree in another repo's .claude/worktrees`
   let agents: ({
     branch?: unknown
@@ -722,9 +724,63 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const more = changed.length > 3 ? `, and ${changed.length - 3} more` : ""
     return `${at} holds ${changed.length} uncommitted change${changed.length === 1 ? "" : "s"} (${paths.join(", ")}${more}): ${discard}`
   }
-  if (!landed(git, holders, at))
-    return `${at}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): ${discard}`
-  return null
+  if (landed(git, holders, at)) return null
+  const archived =
+    holders.archive !== undefined && repo !== real(roots.main)
+      ? archiveUnlanded(at, holders.archive)
+      : undefined
+  if (archived && !("refused" in archived)) {
+    holders.note?.(
+      `archived ${counted(archived.count, "commit", "commits")} no remote holds at ${archived.path}`,
+    )
+    return null
+  }
+  return `${at}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since)${archived ? `, and ${archived.refused}` : ""}: ${discard}`
+}
+
+const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
+
+// The commits a worktree's HEAD holds that no remote does, archived by git format-patch into <archive>/<repo>/<worktree>-<HEAD sha7>, written only when that folder is not there yet, then read back: its path and count once it holds one patch for each of those commits, by each patch's From line, else why the worktree stays.
+export function archiveUnlanded(
+  at: string,
+  archive: string,
+): { count: number; path: string } | { refused: string } {
+  const git = (...args: string[]) => {
+    const run = Bun.spawnSync(["git", "-C", at, ...args], { stderr: "pipe", stdout: "pipe" })
+    return { err: run.stderr.toString().trim(), ok: run.exitCode === 0, out: run.stdout.toString() }
+  }
+  const head = git("rev-parse", "HEAD")
+  const listed = git("rev-list", "HEAD", "--not", "--remotes")
+  if (!head.ok || !listed.ok) return { refused: "its commits could not be read" }
+  const shas = listed.out.split("\n").filter(Boolean)
+  if (!shas.length) return { refused: "it holds no commit past its remotes to archive" }
+  const repo = dirname(dirname(dirname(at)))
+  const path = join(archive, basename(repo), `${basename(at)}-${head.out.trim().slice(0, 7)}`)
+  if (!existsSync(path)) {
+    let wrote: string | null = null
+    try {
+      mkdirSync(path, { recursive: true })
+      const patched = git("format-patch", "-q", "-o", path, "HEAD", "--not", "--remotes")
+      if (!patched.ok) wrote = patched.err
+    } catch (error) {
+      wrote = (error as Error).message
+    }
+    if (wrote !== null) return { refused: `its archive at ${path} failed to write: ${wrote}` }
+  }
+  let patches: (string | undefined)[]
+  try {
+    patches = readdirSync(path)
+      .filter((name) => name.endsWith(".patch"))
+      .map((name) => /^From ([0-9a-f]+) /.exec(readFileSync(join(path, name), "utf8"))?.[1])
+  } catch (error) {
+    return { refused: `its archive at ${path} could not be read: ${(error as Error).message}` }
+  }
+  const held = shas.filter((sha) => patches.includes(sha)).length
+  if (patches.length !== shas.length || held !== shas.length)
+    return {
+      refused: `its archive at ${path} holds ${counted(patches.length, "patch", "patches")}, ${held} of its ${counted(shas.length, "commit", "commits")} no remote holds`,
+    }
+  return { count: shas.length, path }
 }
 
 // Whether HEAD's work is on origin/canary: each file HEAD changed since their merge-base, named raw (-z) and matched literally so no name is quoted or globbed, reads the same there, or, since canary squash-merges and may change those files again, a merged PR holds HEAD's commit.
