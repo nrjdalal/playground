@@ -79,6 +79,7 @@ const ioOf = (data: string, over: Partial<OrgsIo> = {}) => {
     claude: () => undefined,
     data,
     err: (line) => err.push(line),
+    home: join(data, "home"),
     login: () => "someone",
     origin: (dir) => origins[dir] ?? "",
     out: (line) => out.push(line),
@@ -164,7 +165,7 @@ test("an extension linked to * reaches every repo, and takes a name over core's"
 const homeFolder = join(scratch, "home")
 for (const folder of ["acme-inc/web", "other"])
   mkdirSync(join(homeFolder, folder), { recursive: true })
-const atHome = { home: homeFolder } as Partial<OrgsIo>
+const atHome = { home: homeFolder }
 
 test("a session in an org's own folder, or a folder inside it with no origin, loads that org's current skills", async () => {
   const data = extensionsWith("org-folder", policy)
