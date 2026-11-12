@@ -978,6 +978,14 @@ describe("a quoted argument is read as a command line only where a program runs 
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | pkexec cat",
     ],
     [
+      "zsh's dash modifier ahead of a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | - ls",
+    ],
+    [
+      "cat reading the text from stdin by its lone dash",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | cat -",
+    ],
+    [
       "env's lone dash ahead of a harmless program",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - ls",
     ],
