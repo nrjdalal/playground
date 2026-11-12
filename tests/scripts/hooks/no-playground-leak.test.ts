@@ -993,6 +993,35 @@ describe("a Acme write it cannot read is refused", () => {
   })
 })
 
+describe("a pull request opened from a pushed branch is judged on its own text (#1941)", () => {
+  const file = (name: string) => join(dirs.lw, name)
+  const pulls = (title: string, body: string) =>
+    `gh api repos/acme-blue/app/pulls -X POST -F title=@${file(title)} -F body=@${file(body)} -f head=fix/export -f base=main`
+  const create = (title: string, body: string) =>
+    `gh pr create ${LW} --head fix/export --title "${title}" --body-file ${file(body)}`
+
+  test("gh api's pulls POST is refused for a factory term in its title or body file, and passes clean", async () => {
+    expect(await bash(pulls("leaky.md", "clean.md"), scratch)).toContain('"worker-envy"')
+    expect(await bash(pulls("clean.md", "leaky.md"), scratch)).toContain('"worker-envy"')
+    expect(await bash(pulls("clean.md", "clean.md"), scratch)).toBeUndefined()
+  })
+
+  test("gh pr create with --head, outside a checkout, is judged on its title and body file", async () => {
+    expect(await bash(create("Fix export", "clean.md"), scratch)).toBeUndefined()
+    expect(await bash(create("Fix export", "leaky.md"), scratch)).toContain('"worker-envy"')
+    expect(await bash(create("Fix by worker-envy", "clean.md"), scratch)).toContain('"worker-envy"')
+  })
+
+  test("gh pr create with no --head, outside a checkout, stays refused for the commits it may push", async () => {
+    const reason = await bash(
+      `gh pr create ${LW} --title "Fix export" --body-file ${file("clean.md")}`,
+      scratch,
+    )
+    expect(reason).toContain("cannot read its text")
+    expect(reason).toContain("the commits it may push")
+  })
+})
+
 describe("a write it cannot place", () => {
   test("is refused when its text holds a term", async () => {
     expect(await bash(`gh pr comment "$N" -R acme/archive --body ${OLD.dispatcher}`)).toContain(
