@@ -1,7 +1,15 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import {
   dashboardRun,
@@ -13,7 +21,10 @@ import {
 import type { Context } from "../../../../../packages/scripts/src/ops-tick/tick"
 
 const dirs: string[] = []
+// every job copy a test starts, stopped by its own handle once the file ends, so a red run leaves none running
+const started: Bun.Subprocess[] = []
 afterAll(() => {
+  for (const proc of started) proc.kill("SIGTERM")
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
 })
 
@@ -64,6 +75,140 @@ describe("hold", () => {
     expect(Date.now() - started).toBeLessThan(5_000)
     expect(heartbeat(ops, "ops-held").lastResult).toBe("loop exited: TERM")
   })
+})
+
+// A scheduled job's entry file at path, beating into ops: one beat each minute that, once started, waits for ops/pass-release, a restart that prints its call, on a 100 ms tick.
+const JOB = join(import.meta.dir, "../../../../../packages/scripts/src/ops-job/job.ts")
+const entry = (path: string, ops: string) => {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(
+    path,
+    `import { existsSync, writeFileSync } from "node:fs"
+import { scheduled } from ${JSON.stringify(JOB)}
+const ops = ${JSON.stringify(ops)}
+const pass = async () => {
+  writeFileSync(ops + "/pass-started", "")
+  while (!existsSync(ops + "/pass-release")) await Bun.sleep(20)
+}
+scheduled("ops-watch", [{ cron: "* * * * *", name: "pass", run: pass, to: "ops" }], ops, {
+  restart: (job: string) => console.log("restart " + job),
+  tickMs: 100,
+})
+`,
+  )
+}
+
+const git = (dir: string, ...args: string[]) =>
+  new TextDecoder()
+    .decode(
+      Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t", "-C", dir, ...args]).stdout,
+    )
+    .trim()
+
+// A scope's clone holding path with text, committed as an accept would; its new short revision.
+const commit = (scope: string, path: string, text: string) => {
+  mkdirSync(dirname(join(scope, path)), { recursive: true })
+  writeFileSync(join(scope, path), text)
+  git(scope, "add", "-A")
+  git(scope, "commit", "-q", "-m", `write ${path}`)
+  return git(scope, "rev-parse", "--short", "HEAD")
+}
+
+const spawn = (main: string) => {
+  const proc = Bun.spawn([process.execPath, main], { stderr: "pipe", stdout: "pipe" })
+  started.push(proc)
+  return proc
+}
+
+const waitFor = async (check: () => boolean, ms = 5_000) => {
+  for (let at = Date.now(); !check() && Date.now() - at < ms;) await Bun.sleep(20)
+  return check()
+}
+
+// One job run from a skill's folder in an extension's clone, as a skill-run job runs in place.
+const skillJob = () => {
+  const data = scratch()
+  const ops = join(data, "ops")
+  mkdirSync(ops)
+  const scope = join(data, "extensions", "acme")
+  mkdirSync(scope, { recursive: true })
+  git(scope, "init", "-q")
+  const main = join(scope, "skills", "watch", "scripts", "main.ts")
+  entry(main, ops)
+  git(scope, "add", "-A")
+  git(scope, "commit", "-q", "-m", "seed")
+  return { data, first: git(scope, "rev-parse", "--short", "HEAD"), main, ops, scope }
+}
+
+describe("scheduled, on an accepted revision of the code it runs (#1880)", () => {
+  test("a skill-run job stops at its next idle tick on an accept, asks up.py to start it again at once, and the new copy names the revision", async () => {
+    const { first, main, ops, scope } = skillJob()
+    writeFileSync(join(ops, "pass-release"), "")
+    const proc = spawn(main)
+    expect(await waitFor(() => existsSync(join(ops, "ops-watch.json")))).toBe(true)
+    const second = commit(scope, "skills/watch/scripts/lib.ts", "export const two = 2\n")
+    const accepted = Date.now()
+    expect(await proc.exited).toBe(0)
+    expect(Date.now() - accepted).toBeLessThan(5_000)
+    const out = await new Response(proc.stdout).text()
+    expect(out).toContain(`ops-watch runs revision ${first}`)
+    expect(out).toContain("restart ops-watch")
+    expect(heartbeat(ops, "ops-watch").lastResult).toBe(
+      `loop exited: revision ${second} accepted, restarting`,
+    )
+    const again = spawn(main)
+    expect(await waitFor(() => heartbeat(ops, "ops-watch").pid === again.pid)).toBe(true)
+    again.kill("SIGTERM")
+    expect(await new Response(again.stdout).text()).toContain(`ops-watch runs revision ${second}`)
+  }, 20_000)
+
+  test("an accept that lands mid-pass waits for the pass to end", async () => {
+    const { main, ops, scope } = skillJob()
+    const proc = spawn(main)
+    expect(await waitFor(() => existsSync(join(ops, "pass-started")))).toBe(true)
+    commit(scope, "skills/watch/scripts/lib.ts", "export const two = 2\n")
+    await Bun.sleep(1_000)
+    expect(proc.exitCode).toBeNull()
+    writeFileSync(join(ops, "pass-release"), "")
+    expect(await proc.exited).toBe(0)
+  }, 20_000)
+
+  test("the controls keep running: a change outside its own skill, a proposal under proposed/, and a core job with no revision", async () => {
+    const { main, ops, scope } = skillJob()
+    writeFileSync(join(ops, "pass-release"), "")
+    const proc = spawn(main)
+    expect(await waitFor(() => existsSync(join(ops, "ops-watch.json")))).toBe(true)
+    commit(scope, "skills/other/scripts/main.ts", "export const other = 1\n")
+    commit(scope, "proposed/skills/watch/scripts/lib.ts", "export const two = 2\n")
+    const coreOps = join(scratch(), "ops")
+    mkdirSync(coreOps)
+    writeFileSync(join(coreOps, "pass-release"), "")
+    const core = join(scratch(), "core", "main.ts")
+    entry(core, coreOps)
+    const plain = spawn(core)
+    await Bun.sleep(1_000)
+    expect([proc.exitCode, plain.exitCode]).toEqual([null, null])
+    proc.kill("SIGTERM")
+    plain.kill("SIGTERM")
+    expect(await new Response(plain.stdout).text()).not.toContain("runs revision")
+  }, 20_000)
+
+  test("a job run from an org's script folder under ops restarts when the render writes its folder's new revision", async () => {
+    const data = scratch()
+    const ops = join(data, "ops")
+    const main = join(ops, "watch", "main.ts")
+    entry(main, ops)
+    writeFileSync(join(ops, "watch", ".revision"), "aaa1111\n")
+    writeFileSync(join(ops, "pass-release"), "")
+    const proc = spawn(main)
+    expect(await waitFor(() => existsSync(join(ops, "ops-watch.json")))).toBe(true)
+    writeFileSync(join(ops, "watch", ".revision"), "bbb2222\n")
+    expect(await proc.exited).toBe(0)
+    expect(await new Response(proc.stdout).text()).toContain("ops-watch runs revision aaa1111")
+    expect(heartbeat(ops, "ops-watch").lastResult).toBe(
+      "loop exited: revision bbb2222 accepted, restarting",
+    )
+  }, 20_000)
 })
 
 describe("gateOf", () => {
