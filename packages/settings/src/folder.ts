@@ -99,7 +99,7 @@ const releasable = (lock: string, aside: string, token: string): boolean => {
 }
 
 // One write at a time across every process, the API's and the CLI's: the lock is a scratch folder made beside the root and renamed into place, so its taking is atomic and it always holds makeScratch's marker and its holder's token; a stale one is moved aside, then removed, and a release leaves a lock that holds another's token.
-export const withLock = <T>(data: string, run: () => T, wait = 30_000): T => {
+const holdLock = <T>(data: string, run: () => T, wait: number): T => {
   const lock = lockPath(data)
   const parent = dirname(lock)
   const drop = (dir: string) => {
@@ -151,10 +151,55 @@ export const withLock = <T>(data: string, run: () => T, wait = 30_000): T => {
   }
 }
 
-// Stubs for the red commit; the next commit builds them.
-export const rootLocked = (_root: string): boolean => false
-export const setRootLock = (_data: string, _locked: boolean): void => {}
-export const relockRoot = (_data: string): boolean => false
+// The root's file lock: macOS's user immutable flag on the root and everything under it, so a plain write from any process meets EPERM; a machine with no chflags (Linux) has no lock, and a root with no flag takes its writes as before.
+const chflags = () => Bun.which("chflags", { PATH: process.env.PATH ?? "" })
+export const rootLocked = (root: string): boolean =>
+  Boolean(chflags()) &&
+  existsSync(root) &&
+  Bun.spawnSync(["stat", "-f", "%Sf", root]).stdout.toString().trim().split(",").includes("uchg")
+const flagRoot = (root: string, locked: boolean): number => {
+  const start = performance.now()
+  const run = Bun.spawnSync([chflags()!, "-R", locked ? "uchg" : "nouchg", root], {
+    stderr: "pipe",
+  })
+  if (run.exitCode !== 0)
+    throw new Error(`chflags could not ${locked ? "lock" : "unlock"} ${root}: ${run.stderr}`)
+  return performance.now() - start
+}
+
+// A write under the one lock: a locked root is lifted for it and locked again after it, each lift and relock's time logged, so the ops tick's log measures it on the live root.
+export const withLock = <T>(data: string, run: () => T, wait = 30_000): T =>
+  holdLock(
+    data,
+    () => {
+      const root = extensionsDir(data)
+      if (!rootLocked(root)) return run()
+      let took = 0
+      try {
+        took += flagRoot(root, false)
+        return run()
+      } finally {
+        took += flagRoot(root, true)
+        console.error(`extensions' lock: lifted and relocked ${root} in ${Math.round(took)} ms`)
+      }
+    },
+    wait,
+  )
+
+// playground ext lock and unlock: the root's file lock set or cleared, under the one lock so no write is mid-way.
+export const setRootLock = (data: string, locked: boolean): void => {
+  if (!chflags())
+    throw new Error("this machine has no chflags, so the extensions root takes no lock")
+  holdLock(data, () => void flagRoot(extensionsDir(data), locked), 30_000)
+}
+
+// The ops tick's relock: true when it locked a root that stood unlocked, false where it is locked already, missing, or the machine has no chflags.
+export const relockRoot = (data: string): boolean => {
+  const root = extensionsDir(data)
+  if (!chflags() || !existsSync(root) || rootLocked(root)) return false
+  setRootLock(data, true)
+  return true
+}
 
 // A file written whole under a temp name, then renamed into place, so a hook reading it meets the old file or the new one.
 export const writeAtomically = (path: string, data: string | Uint8Array) => {

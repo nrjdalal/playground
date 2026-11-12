@@ -26,6 +26,7 @@ import { ALERT_JOB, waiterLive } from "../stuck-alert"
 import { swapBundles, unswapBundles } from "../swap-bundles"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
+import { extLock } from "./ext-lock"
 import { guardProbe } from "./guard-probe"
 import { nightlyClean } from "./nightly-clean"
 
@@ -1040,6 +1041,7 @@ export const BEATS: Beat[] = [
     to: "ops, then the dispatcher at unstick's escalation, and the Inbox once Ops is down",
   },
   { cron: "*/10 * * * *", name: "guard-probe", run: guardProbe, to: "dispatcher" },
+  { cron: "*/5 * * * *", name: "ext-lock", run: extLock(), to: "ops/log/ext-lock.log" },
   { cron: "* * * * *", name: "focus-card", run: focusCardBeat, to: "the Inbox, by bun run ask" },
   { cron: "*/5 * * * *", name: "priority-lapse", run: priorityLapse, to: "ops" },
   { cron: "*/5 * * * *", name: "run-slot-hold", run: runSlotHold, to: "ops" },

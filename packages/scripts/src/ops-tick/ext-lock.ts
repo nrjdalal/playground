@@ -1,8 +1,17 @@
-import { relockRoot } from "@packages/settings"
+import { appendFile, mkdir } from "node:fs/promises"
+import { dirname, join } from "node:path"
+
+import { extensionsDir, relockRoot } from "@packages/settings"
 
 import type { Context } from "./tick"
 
-// Stub for the red commit; the next commit builds it.
+// The extensions root's file lock kept on: a root that stands unlocked (a new one, one a move of the data folder made, or one playground ext unlock left) is locked again, one line in ops/log/ext-lock.log.
 export const extLock =
-  (_relock: (data: string) => boolean = relockRoot) =>
-  async (_ctx: Context) => {}
+  (relock: (data: string) => boolean = relockRoot) =>
+  async (ctx: Context) => {
+    const data = dirname(ctx.ops)
+    if (!relock(data)) return
+    await mkdir(join(ctx.ops, "log"), { recursive: true })
+    const at = ctx.now.toISOString().replace(/\.\d{3}Z$/, "Z")
+    await appendFile(join(ctx.ops, "log", "ext-lock.log"), `${at} locked ${extensionsDir(data)}\n`)
+  }
