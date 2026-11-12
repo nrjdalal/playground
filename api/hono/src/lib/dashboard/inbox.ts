@@ -1484,7 +1484,7 @@ const ownRefused = (
   return message ? { code: "VALIDATION_ERROR", message, ok: false } : undefined
 }
 
-// Pure: an item its poster can no longer edit: done or dismissed by the owner, settled, resolved, or closed by its poster's ack.
+// Pure: an item its poster can no longer edit: done or dismissed by the owner, settled, resolved, or closed by its poster's ack; editItem still takes an update the owner sent to Done (ownerDone).
 const closed = (item: InboxItem): boolean => {
   const answer = item.answer
   if (answer === null) return false

@@ -273,7 +273,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   An item reads `listed` while the Inbox lists it and it is not `open`, by the Inbox's own rule (`listed` in `web/next/src/lib/inbox.ts`, restated as `listedItem` in the hook, a test running both over the same items):
   a progress card (an `update`) is stored `done` from its post on, yet stays listed until the owner sends it to Done, dismisses it or its poster resolves it, so a reply naming it asks for no copy (on 7 Nov a gate that took `open` alone had the dispatcher post one card 5 times).
   A card the owner put off with Later counts too, though the list hides it until its time: it comes back on its own, and a copy would notify the owner of what they put off.
-  Once the owner sends the card to Done it reads `done` and counts no more, since `ask edit` refuses it and more progress goes on a new card (to-inbox's PROGRESS.md).
+  Once the owner sends the card to Done it reads `done` and counts no more, until its poster's `ask edit` that changes its words brings it back to the list (to-inbox's PROGRESS.md).
   An ask of the owner still waits on an open item, one the owner archived included (it reads `archived while open`), so a decision asked in chat beside a progress card is refused, and one beside an archived open decision passes.
   Any other item the owner archived reads `archived`, an item the owner dismissed `dismissed`, and a decision or draft its poster settled `settled`, each from the item's answer, so none counts, nor does a decision the owner denied.
   The reads run at once, each killed after 10s (one took 5.9s under load), and the first to read a status that counts passes the stop at once and ends every read still running.

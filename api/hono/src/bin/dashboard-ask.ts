@@ -65,8 +65,8 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
        bun run ask edit <id|#iN> < item.json
                                                 replaces your own item's title, preview and attachments
                                                 in place, checked as new checks it, so one card carries a
-                                                progress to its end: an update until it is Done or dismissed,
-                                                an ask, answered or not, until it closes; one put away with Later stays put away
+                                                progress to its end: an update until it is dismissed (an edit
+                                                after Done brings it back unread), an ask, answered or not, until it closes; one put away with Later stays put away
        bun run ask example <code|decision|delete|questions|slack|ui>
                                                 prints an item to start from: an ask's picture and its note, bullets,
                                                 then what Approve does (.agents/dashboard/asks.md, The ask's shape),
