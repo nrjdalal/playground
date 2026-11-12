@@ -6,7 +6,7 @@ import { dirname, join, resolve, sep } from "node:path"
 import { dataDir } from "../../packages/env/src/data-dir"
 import { extensionsDir } from "../../packages/settings/src/rendered"
 import { eachInput } from "./codex"
-import { bunCall, FILE_TOOLS, gitCall, real } from "./no-main-checkout"
+import { bunCall, FILE_TOOLS, gitCall, inPlace, real } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
   codeFed,
@@ -317,6 +317,100 @@ const after = (word: Word, cut: number): Word => ({
   raw: word.raw?.startsWith(word.value.slice(0, cut)) ? word.raw.slice(cut) : undefined,
   value: word.value.slice(cut),
 })
+
+// The shell's own folder, which a program that writes there by no operand (tar extracting, curl -O) names after an unread cd, so the hook can place it no more than the cd
+const SHELL_FOLDER: Word = { quoted: false, value: "." }
+// A program's words past its options, each option's value skipped: a short letter in `takes` takes the rest of its cluster or the next word, as does a long option in `long` with no = of its own
+function operandsPast(args: Word[], takes: string, long: string[]): Word[] {
+  const out: Word[] = []
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k].value
+    if (v === "--") return [...out, ...args.slice(k + 1)]
+    if (v.startsWith("--")) {
+      if (long.includes(v)) k++
+    } else if (/^-./.test(v)) {
+      const at = v
+        .slice(1)
+        .split("")
+        .findIndex((c) => takes.includes(c))
+      if (at !== -1 && at === v.length - 2) k++
+    } else out.push(args[k])
+  }
+  return out
+}
+// The values an option of `short` or `long` names, attached, after an = or as the next word, read past a cluster's letters until one in `takes` takes the rest
+function optionValues(args: Word[], short: string, takes: string, long: string[]): Word[] {
+  const out: Word[] = []
+  for (let k = 0; k < args.length && args[k].value !== "--"; k++) {
+    const v = args[k].value
+    const eq = v.indexOf("=")
+    if (v.startsWith("--")) {
+      if (long.includes(eq === -1 ? v : v.slice(0, eq)))
+        if (eq !== -1) out.push(after(args[k], eq + 1))
+        else if (args[k + 1]) out.push(args[++k])
+    } else if (/^-./.test(v))
+      for (let j = 1; j < v.length; j++) {
+        if (!takes.includes(v[j])) continue
+        if (short.includes(v[j]))
+          if (j + 1 < v.length) out.push(after(args[k], j + 1))
+          else if (args[k + 1]) out.push(args[++k])
+        break
+      }
+  }
+  return out
+}
+// chmod's mode word, octal or symbolic, which names no file
+const MODE = /^(?:[0-7]+|[ugoa]*[-+=][-+=rwxXstugo,]*)$/
+// curl's short options that take a value, of which -o, -c and -D write the file they name
+const CURL_TAKES = "AbcCdDeEFHKmoPQrtTuUwxXyYz"
+const CURL_WRITES = ["--cookie-jar", "--dump-header", "--output", "--output-dir"]
+
+// The words a program on neither REMOVERS nor WRITERS writes after a cd the hook cannot read: an in-place sed's or perl's files, every file chmod, truncate or shred names, tar's -C folder or the shell's when it extracts, curl's and sort's output files, git rm's pathspecs from git's own folder, and a mktemp template outside the temp folder
+function unreadCdWrites(tool: string, args: Word[], env: Env): Word[] {
+  if (tool === "sed" || tool === "perl") return inPlace(tool, args)
+  if (tool === "chmod") {
+    const files = operandsPast(args, "", [])
+    return MODE.test(files[0]?.value ?? "") ? files.slice(1) : files
+  }
+  if (tool === "truncate") return operandsPast(args, "rs", ["--reference", "--size"])
+  if (tool === "shred")
+    return operandsPast(args, "ns", ["--iterations", "--random-source", "--size"])
+  if (tool === "tar") {
+    const first = args[0]?.value ?? ""
+    const extracts = args.some(
+      (a, k) =>
+        a.value === "--extract" ||
+        a.value === "--get" ||
+        (/^-[^-]/.test(a.value) && a.value.includes("x")) ||
+        (k === 0 && /^[A-Za-z]+$/.test(first) && first.includes("x")),
+    )
+    if (!extracts) return []
+    const into = optionValues(args, "C", "bCfFgHIKLNTVX", ["--directory"])
+    return into.length > 0 ? into : [SHELL_FOLDER]
+  }
+  if (tool === "curl") {
+    const files = optionValues(args, "cDo", CURL_TAKES, CURL_WRITES)
+    const named = args.some((a) => /^-[^-]*O|^--remote-name/.test(a.value))
+    return named && !args.some((a) => a.value.startsWith("--output-dir"))
+      ? [...files, SHELL_FOLDER]
+      : files
+  }
+  if (tool === "sort") return optionValues(args, "o", "koStT", ["--output"])
+  if (tool === "git") {
+    const { cwd, rest, sub } = gitCall(args, { ...env, cwd: undefined })
+    if (sub !== "rm") return []
+    const specs = operandsPast(args.slice(args.length - rest.length), "", [])
+    return cwd === undefined
+      ? specs
+      : specs.map((w) => (w.value.startsWith("/") ? w : { ...w, value: join(cwd, w.value) }))
+  }
+  if (tool === "mktemp") {
+    if (args.some((a) => /^-[^-]*t/.test(a.value) || a.value === "--tmpdir")) return []
+    const into = optionValues(args, "p", "p", ["--tmpdir"])
+    return into.length > 0 ? into : operandsPast(args, "p", ["--suffix"])
+  }
+  return []
+}
 
 // The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install, ln and mv (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch; and every word the shell may split (`Word.splits`), since one of its words may land as a target
 function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): Word[] {
@@ -1457,7 +1551,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       : WRITERS.has(tool)
         ? writeTargets(tool, args, gnu, posix)
         : []
-    const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined
+    const unlisted =
+      env.cwdUnread && !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env) : []
+    const loose = env.cwdUnread
+      ? [...operands, ...unlisted].find((word) => !placed(word, env, steady))
+      : undefined
     if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))
   }
   const named = namings(command)
