@@ -109,7 +109,7 @@ A reviewer's round sorts its findings into blocking, should-fix and nits; the wo
 
 Done when every finding of the round is fixed in the push, kept in the sort comment with its PR, or dropped there with its reason.
 
-An extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n>`, its worker pushing a branch other than `main` by remote and refspec (`git push origin HEAD:<branch>`) and its reviewer spawned for the PR's URL; done when the PR reads merged.
+An extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n>`, its worker committing on a branch other than `main` in its clone, as a `git commit` call of its own, then pushing that branch by remote and refspec (`git push origin HEAD:<branch>`) and its reviewer spawned for the PR's URL; done when the PR reads merged.
 
 An extension item's revision goes up with `playground ext put`, and its reviewer scores it with `playground ext score`.
 A put on an item whose earlier revision is still proposed moves the proposal's head, so a score on the earlier one is refused (`the proposal is at <sha>, not <rev>; read it again`): put a stacked revision once the one under it is judged.
