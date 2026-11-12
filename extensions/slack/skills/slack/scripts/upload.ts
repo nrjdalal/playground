@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { REPO } from "../../../../../packages/scripts/src/ops-job/job"
 import { check as publicLeak } from "../../../../../scripts/hooks/no-public-leak"
 import { leakOf } from "./send"
-import { call, type Slack, slackOf, tokenOf } from "./slack"
+import { call, type Member, type Slack, slackOf, tokenOf } from "./slack"
 
 // The byte post to the URL Slack hands back, which takes no token.
 export type Put = (
@@ -59,6 +59,49 @@ export async function upload({
   return files.length
 }
 
+// What the words hold, read left to right: a fenced block, a code span or a Slack token already written (`<...>`), each kept as written; a URL, its closing punctuation left out; or a mention as the Inbox reads one: an @ outside a word or an email, then the name.
+const PIECES =
+  /(```[\s\S]*?```|`[^`\n]*`|<[^<>\s][^<>]*>)|(https?:\/\/[^\s<>|`]*[^\s<>|`.,;:!?)\]}'"*_~])|(?<![\p{L}\p{N}_.])@([\p{L}\p{N}_](?:[\p{L}\p{N}_.-]*[\p{L}\p{N}_])?)/giu
+
+// Every member of the workspace, a page of users.list at a time.
+async function members(slack: Slack): Promise<Member[]> {
+  const all: Member[] = []
+  let cursor = ""
+  do {
+    const reply = await call(slack, "users.list", { limit: "200", ...(cursor && { cursor }) })
+    all.push(...(reply.members ?? []))
+    cursor = reply.response_metadata?.next_cursor ?? ""
+  } while (cursor)
+  return all
+}
+
+// The words as the files' message carries them, as the poster would post them: each @name as the token of the one member whose username, display name or real name it is, and each URL as a link labelled without its scheme, as a link chip shows it; a name that matches no member or more than one throws, naming it.
+async function slackWords(slack: Slack, words: string): Promise<string> {
+  const names = [...words.matchAll(PIECES)].flatMap((piece) => (piece[3] ? [piece[3]] : []))
+  const ids = new Map<string, string>()
+  const all = names.length ? (await members(slack)).filter((member) => !member.deleted) : []
+  for (const name of names) {
+    const key = name.toLowerCase()
+    const found = all.filter((member) =>
+      [member.name, member.profile?.display_name, member.profile?.real_name].some(
+        (known) => known?.toLowerCase() === key,
+      ),
+    )
+    if (found.length !== 1)
+      throw new Error(
+        `@${name} matches ${found.length ? `${found.length} Slack users` : "no Slack user: only a person can be tagged"}`,
+      )
+    ids.set(key, found[0]!.id)
+  }
+  return words.replace(PIECES, (kept: string, written?: string, url?: string, name?: string) =>
+    written
+      ? kept
+      : url
+        ? `<${url}|${url.replace(/^https?:\/\//i, "")}>`
+        : `<@${ids.get(name!.toLowerCase())}>`,
+  )
+}
+
 export type Check = (raw: string) => Promise<string | undefined>
 
 // The words a file carries into the channel: its name, and a text file's words too.
@@ -106,7 +149,7 @@ export const specOf = async (id: string): Promise<Spec> => {
   return JSON.parse(out) as Spec
 }
 
-// Shares one answered Inbox item's files, with a draft's words as their message, named by its id alone: the place, the files and the words come from the item, each is guarded before any file is shared, and a refused one shares nothing.
+// Shares one answered Inbox item's files, with a draft's words as their message (slackWords), named by its id alone: the place, the files and the words come from the item, each is guarded and each mention resolved before any file is shared, and a refused one shares nothing.
 export async function share(
   id: string,
   {
@@ -128,7 +171,8 @@ export async function share(
   }
   const refusal = spec.text && (await check(spec.channel, spec.text))
   if (refusal) throw new Error(`the message: ${refusal}`)
-  return upload({ channel: spec.channel, files, put, slack, text: spec.text, thread: spec.thread })
+  const text = spec.text && (await slackWords(slack, spec.text))
+  return upload({ channel: spec.channel, files, put, slack, text, thread: spec.thread })
 }
 
 // its errors as one plain line, which the dashboard shows as the send's reason

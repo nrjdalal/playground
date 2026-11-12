@@ -151,7 +151,8 @@ Your answer goes to the session that posted the item, and that session carries i
 In that session's chat your answer shows as a small chip, the item's id and what you picked, such as `#i343 · Add all 4 lines`, with your note after it; click the chip to open the card in the Inbox.
 The Dashboard itself sends no message but one: a Slack message that holds files.
 On Send of a Slack draft it posts the files in the same thread with the draft's words as their message, so the session only closes the card.
-Words that tag someone (@name) or hold a link, and a Slack message you Approve, go another way: the files go to that thread first, then the session posts the words.
+A name you tag (@name) shows as that person's Slack mention and a link stays a link; a tag that matches no one in Slack, or more than one person, stops the send and says which.
+A Slack message you Approve goes another way: the files go to that thread first, then the session posts the words.
 Either way the card counts them, such as 2 files shared; until then, it reads 2 files · uploads on Send, or on Approve, under them.
 
 Until the session confirms it, the card's light spins blue; its line adds a word only when the answer waits or fails, such as Queued for Ops or Send failed.
