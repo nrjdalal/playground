@@ -9178,13 +9178,12 @@ var FLAG_PLACES = {
   "--comment": "its comment",
   "--notes": "its notes",
   "--notes-file": "its notes file",
-  "--title": "its title",
-  "-b": "its body",
-  "-c": "its comment",
-  "-F": "its body file",
-  "-n": "its notes",
-  "-t": "its title"
+  "--title": "its title"
 };
+function longName(name, flags) {
+  const next = flags[flags.indexOf(name) + 1];
+  return name.startsWith("--") || !next?.startsWith("--") ? name : next;
+}
 var BODY_FILE = ["-F", "--body-file"];
 var CLOSING = spec(["-c", "--comment"], [], ["-r", "--reason", "--duplicate-of"]);
 var EDIT = [
@@ -9500,7 +9499,8 @@ async function gh(args, cmd, env, local, xargs) {
   const texts = [];
   for (const { name, value } of flags) {
     const posts = found.texts.includes(name) || found.files.includes(name);
-    const place = FLAG_PLACES[name] ?? `its ${name} value`;
+    const long = longName(name, found.texts.includes(name) ? found.texts : found.files);
+    const place = FLAG_PLACES[long] ?? `its ${long} value`;
     if (!value) {
       if (posts)
         texts.push(unknown2(`${name} with no value`));
@@ -9855,13 +9855,19 @@ function commitTexts(dir, range, what, after = "") {
   const log = gitText(dir, ["log", "--format=%h%x00%B%x1e", "-n", "500", ...range], what);
   if (log.unknown)
     return [log];
-  return log.value.split("\x1E").flatMap((entry) => {
-    const at = entry.indexOf("\x00");
-    if (at === -1)
-      return [];
-    const name = `the message of commit ${entry.slice(0, at).trim()}${after}`;
-    return [withPlace({ value: entry.slice(at + 1) }, name, COMMIT_FIX)];
-  });
+  const texts = [];
+  for (const entry of log.value.split("\x1E")) {
+    const sha = /^\n?([\da-f]{4,64})\0/.exec(entry);
+    const last = texts.at(-1);
+    if (sha) {
+      const name = `the message of commit ${sha[1]}${after}`;
+      texts.push(withPlace({ value: entry.slice(sha[0].length) }, name, COMMIT_FIX));
+    } else if (last)
+      last.value += `\x1E${entry}`;
+    else
+      texts.push({ value: entry });
+  }
+  return texts;
 }
 function gitText(dir, args, what) {
   if (!dir)

@@ -248,7 +248,7 @@ const spec = (texts: string[], files: string[], others: string[] = []): Spec => 
   texts,
 })
 const BODY = ["-b", "--body"]
-// The place each gh text flag fills, which a refusal names.
+// The place each gh text flag fills, by its long name, which a refusal names.
 const FLAG_PLACES: Record<string, string> = {
   "--body": "its body",
   "--body-file": "its body file",
@@ -256,11 +256,11 @@ const FLAG_PLACES: Record<string, string> = {
   "--notes": "its notes",
   "--notes-file": "its notes file",
   "--title": "its title",
-  "-b": "its body",
-  "-c": "its comment",
-  "-F": "its body file",
-  "-n": "its notes",
-  "-t": "its title",
+}
+// A flag's long name in its write's spec, where each short flag sits just before its long one, so -F reads as --notes-file for a ship and --body-file for a pull request.
+function longName(name: string, flags: string[]): string {
+  const next = flags[flags.indexOf(name) + 1]
+  return name.startsWith("--") || !next?.startsWith("--") ? name : next
 }
 const BODY_FILE = ["-F", "--body-file"]
 const CLOSING = spec(["-c", "--comment"], [], ["-r", "--reason", "--duplicate-of"])
@@ -641,7 +641,8 @@ async function gh(
   const texts: Placed[] = []
   for (const { name, value } of flags) {
     const posts = found.texts.includes(name) || found.files.includes(name)
-    const place = FLAG_PLACES[name] ?? `its ${name} value`
+    const long = longName(name, found.texts.includes(name) ? found.texts : found.files)
+    const place = FLAG_PLACES[long] ?? `its ${long} value`
     if (!value) {
       if (posts) texts.push(unknown(`${name} with no value`))
     } else if (found.texts.includes(name)) texts.push(withPlace(value, place))
@@ -1088,16 +1089,21 @@ function clearedPost(
 
 const COMMIT_FIX =
   "Reword that commit's message (git commit --amend for the newest one), then run it again."
-// The message of each commit a git log range reads, one text per commit named by its short sha, or the one unknown when the read fails.
+// The message of each commit a git log range reads, one text per commit named by its short sha, or the one unknown when the read fails; a piece that opens with no sha is a message's own 0x1e and its text, kept on the commit before it.
 function commitTexts(dir: string | undefined, range: string[], what: string, after = ""): Placed[] {
   const log = gitText(dir, ["log", "--format=%h%x00%B%x1e", "-n", "500", ...range], what)
   if (log.unknown) return [log]
-  return log.value.split("\x1e").flatMap((entry) => {
-    const at = entry.indexOf("\0")
-    if (at === -1) return []
-    const name = `the message of commit ${entry.slice(0, at).trim()}${after}`
-    return [withPlace({ value: entry.slice(at + 1) }, name, COMMIT_FIX)]
-  })
+  const texts: Placed[] = []
+  for (const entry of log.value.split("\x1e")) {
+    const sha = /^\n?([\da-f]{4,64})\0/.exec(entry)
+    const last = texts.at(-1)
+    if (sha) {
+      const name = `the message of commit ${sha[1]}${after}`
+      texts.push(withPlace({ value: entry.slice(sha[0].length) }, name, COMMIT_FIX))
+    } else if (last) last.value += `\x1e${entry}`
+    else texts.push({ value: entry })
+  }
+  return texts
 }
 
 // The text of a git read in a checkout, or an unknown naming what it stood for when the read fails.
