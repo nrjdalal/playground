@@ -41,6 +41,7 @@ On an update, Done types you `done` and Dismiss `dismiss`: post a new card for m
    | ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
    | A number or a short comparison                       | a markdown table of three columns or fewer                                                |
    | A UI not yet built, or a demo                        | an ASCII sketch of the page; one `html` attachment built by [HTML.md](references/HTML.md) |
+   | A PDF                                                | the PDF itself as one `pdf` attachment, by [HTML.md's A PDF](references/HTML.md#a-pdf)    |
    | A code change past a few lines                       | its patch as a file, `git diff > x.diff`, which the viewer draws as a patch view          |
    | A job of several steps (a plan, a lane, a PR series) | the **work status** block, built by [PROGRESS.md](references/PROGRESS.md)                 |
 
