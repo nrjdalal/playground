@@ -1855,7 +1855,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         if (named)
           return (unwritten(named, cmd, here) ? refuseUnwritten : refuse)(`${verb} on ${named}`)
       }
-      if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
+      // tee copies its heredoc to the targets the loop above judged, so the body is data, unless the line feeds code
+      if (
+        !(name === "tee" && !rootLine) &&
+        cmd.redirects.some((r) => r.body && holds(r.body.value, here))
+      )
         return refuse(`${verb} with a script that names ${root}`)
       const unreadFeed =
         fed && remover

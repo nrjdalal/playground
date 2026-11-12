@@ -242,11 +242,30 @@ def stop_dashboard():
 
 
 GRID = "Ops"  # every terminal job runs as a pane of this one herdr workspace
+EXT = "ext:"  # a command word ext:<scope>/<path> names an extension file, which rendered.ts resolves at each start
+RENDERED = os.path.join(os.path.dirname(os.path.dirname(HERE)), "packages", "scripts", "src", "playground", "rendered.ts")
+
+
+def resolved(command):
+    """The command with each ext:<scope>/<path> word made the path rendered.ts prints for it, the extension's latest accepted revision, and the refusal when one does not resolve."""
+    bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
+    words = []
+    for word in command.split(" "):
+        if word.startswith(EXT):
+            code, out = run([bun, "--no-env-file", RENDERED, word[len(EXT):]], 30)
+            if code != 0:
+                return None, one_line_answer(out) or f"rendered.ts exited {code} on {word}"
+            word = out.strip()
+        words.append(word)
+    return " ".join(words), None
 
 
 def marker(job):
     """The job's folder (ops/<name>/), which its loop's command line holds even after a wrapper execs."""
     argv = [os.path.expanduser(a) for a in job["command"].split()]
+    ext = next((a[len(EXT):] for a in argv if a.startswith(EXT)), None)
+    if ext:
+        return once.marker_of(ext)
     script = next((a for a in argv if "/" in a and os.path.isfile(a) and not a.endswith(("/python3", "/bash", "/env"))), argv[0])
     return once.marker_of(script)
 
@@ -258,7 +277,11 @@ def in_grid(job, binary):
 
 def start(job):
     """Start the job as a pane of herdr's Ops workspace, closing its old pane there first (best effort); True once it started."""
-    command = job["command"].replace("~/", os.path.expanduser("~") + "/")
+    command, refused = resolved(job["command"])
+    if refused:
+        log(f"started {job['name']}: not started, since {refused}")
+        return False
+    command = command.replace("~/", os.path.expanduser("~") + "/")
     binary = herdr()[0]
     for pane, label in ops_panes(binary)[0] if binary else []:
         if label == job["name"]:
