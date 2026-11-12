@@ -1917,6 +1917,94 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["git status after a cd to a variable", `cd "$X" && git status`],
     ["a redirect to an absolute path after a cd to a variable", `cd "$X"; echo x > /tmp/y`],
     ["rm of an absolute path after a cd to a variable", `cd "$X"; rm -rf /tmp/scratch-dir`],
+    [
+      "rm under xargs fed an absolute path after a cd to a variable",
+      `cd "$X"; echo /tmp/scratch-dir | xargs rm -rf`,
+    ],
+    [
+      "touch under xargs fed an absolute path after a cd to a variable",
+      `cd "$X"; echo /tmp/y | xargs touch`,
+    ],
+    [
+      "a reader under xargs fed a relative name after a cd to a variable",
+      `cd "$X"; echo notes.txt | xargs wc -l`,
+    ],
+    ["a reader under xargs fed by ls after a cd to a variable", `cd "$X"; ls | xargs cat`],
+    ["a find listing with no path after a cd to a variable", `cd "$X"; find -name x`],
+    ["BSD find -x on an absolute path after a cd to a variable", `cd "$X"; find -x /tmp/a -delete`],
+    [
+      "BSD find -xd clustered on an absolute path after a cd to a variable",
+      `cd "$X"; find -xd /tmp/a -delete`,
+    ],
+    ["BSD find -E on an absolute path after a cd to a variable", `cd "$X"; find -E /tmp/a -delete`],
+    [
+      "BSD find -f naming an absolute path after a cd to a variable",
+      `cd "$X"; find -f /tmp/x -delete`,
+    ],
+    [
+      "BSD find -x then -f naming an absolute path after a cd to a variable",
+      `cd "$X"; find -x -f /tmp/x -delete`,
+    ],
+    [
+      "a reader under xargs -a reading an absolute list after a cd to a variable",
+      `cd "$X" && xargs -a /tmp/list wc -l`,
+    ],
+    ["a writer under xargs -a with no cd, as canary reads it", "xargs -a /tmp/list touch"],
+    [
+      "a test run under xargs -a with no cd, as canary reads it",
+      "xargs -a /tmp/touched.txt bun run --cwd /tmp/tree test:file > /tmp/t.log 2>&1",
+    ],
+    ["a writer under xargs -E with absolute words and no cd", "echo /tmp/x | xargs -E -a touch"],
+    // xargs' options that leave where its words land alone, each with absolute words after a cd to a variable
+    ...[
+      "-0",
+      "-E END",
+      "-e",
+      "--eof=END",
+      "-P 2 -n1",
+      "--process-slot-var S",
+      "-p -t -r -x -n1",
+    ].map((options): [string, string] => [
+      `rm under xargs ${options} fed an absolute path after a cd to a variable`,
+      `cd "$X" && echo /tmp/x | xargs ${options} rm -r`,
+    ]),
+    [
+      "a reader under every option xargs reads after a cd to a variable",
+      `cd "$X" && echo .x | xargs -0 -E END -P 2 -n1 -t wc -l`,
+    ],
+    [
+      "find -fprint to an absolute file after a cd to a variable",
+      `cd "$X"; find /tmp/a -fprint /tmp/out`,
+    ],
+    [
+      "find -newer a relative file, a read, after a cd to a variable",
+      `cd "$X"; find /tmp/a -newer .x -print`,
+    ],
+    [
+      "rm under xargs fed a quoted absolute path after a cd to a variable",
+      `cd "$X" && echo "'/tmp/x'" | xargs rm -rf`,
+    ],
+    [
+      "rm under xargs -0 fed a name whose quotes it keeps, so it names no root",
+      `echo ".play'ground'/extensions" | xargs -0 rm -r`,
+    ],
+    [
+      "rm under xargs fed a relative name by printf -- with no cd",
+      "printf -- 'sub' | xargs rm -rf",
+    ],
+    ["printf -v of a dash-led value after --", "printf -v v -- '-delete'"],
+    [
+      "a printer under xargs with no xargs after it after a cd to a variable",
+      `cd "$X"; echo notes | xargs echo`,
+    ],
+    [
+      "rm under xargs fed a relative name with no cd, so the hook knows the folder it lands in",
+      "echo build | xargs rm -rf",
+    ],
+    [
+      "a writer under xargs fed a program's output with no -a or cd, as on canary",
+      "git ls-files | xargs sed -i s/a/b/",
+    ],
     ["cp of a relative file to an absolute path after a cd to a variable", `cd "$X"; cp a /tmp/b`],
     [
       "a redirect to a file the line holds after a cd to a variable",

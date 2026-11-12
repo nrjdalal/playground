@@ -9213,6 +9213,48 @@ var READERS = new Set([
   "wc"
 ]);
 var FIND_ACTS = /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/;
+var XARGS_ARG_FILE = /^-[0oprtx]*a|^--a(?:r(?:g(?:-(?:f(?:i(?:le?)?)?)?)?)?)?(?:=|$)/;
+var XARGS_NUL = /^-[0oprtx]*0|^--nu(?:ll?)?$/;
+var XARGS_DELIMITER = /^-[0oprtx]*d|^--d(?:e(?:l(?:i(?:m(?:i(?:t(?:er?)?)?)?)?)?)?)?(?:=|$)/;
+function xargsOptions(cmd, first) {
+  const start = cmd.words.findIndex((word) => /(?:^|\/)g?xargs$/i.test(word.value));
+  if (start === -1)
+    return [];
+  const end = first ? cmd.words.indexOf(first) : -1;
+  return cmd.words.slice(start + 1, end > start ? end : undefined).map((word) => word.value);
+}
+function xargsWords(text) {
+  const words = [];
+  let word;
+  let quote;
+  for (let i = 0;i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote)
+        quote = undefined;
+      else if (c === `
+`)
+        return;
+      else
+        word += c;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      word ??= "";
+    } else if (c === "\\")
+      word = (word ?? "") + (text[++i] ?? "");
+    else if (/\s/.test(c)) {
+      if (word !== undefined)
+        words.push(word);
+      word = undefined;
+    } else
+      word = (word ?? "") + c;
+  }
+  if (quote)
+    return;
+  if (word !== undefined)
+    words.push(word);
+  return words;
+}
 var FIND_WRITES = /^-(?:fls|fprint|fprint0|fprintf)$/;
 var GIT_READS = new Set([
   "blame",
@@ -10247,14 +10289,14 @@ function shellRunnerArgs(text) {
   }
   return out;
 }
-function runsOf(parsed, vars, whole, rootLine, text) {
+function runsOf(parsed, vars, whole, rootLine, plain) {
   const { args, first, local } = parsed;
   const values = [...local.values(), ...vars].flatMap((text) => {
     tick();
     return text.unknown ? [] : [text.value];
   });
   for (const word of whole ? first ? [first, ...args] : args : [])
-    for (const piece of text.has(word) ? [] : texts(word)) {
+    for (const piece of plain.has(word) ? [] : texts(word)) {
       values.push(piece.value.replace(/^!/, ""));
       if (rootLine)
         values.push(...piece.value.split("\\n"));
@@ -10467,8 +10509,16 @@ async function inspect(raw, environment, unknown = false) {
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env);
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined;
     const wholeText = new Set(whole && !rootLine && ownProgram(cmd, parsed) && ![...parsed.local.keys(), ...env.vars.keys()].some((key) => TEXT_RUNS.test(key) || marked(key)) ? [...ghFilters(parsed), ...browserCode ? [browserCode] : []] : []);
+    const xargsOwn = xargs ? xargsOptions(cmd, first) : [];
+    const delimiter = xargsOwn.some((word) => XARGS_DELIMITER.test(word));
+    const argFile = xargsOwn.some((word) => XARGS_ARG_FILE.test(word));
+    const argWord = argFile ? { quoted: false, value: UNKNOWN } : undefined;
     const fed = xargs ? await stdinOf(cmd, env) : undefined;
-    const stdinWords = !fed ? [] : fed.unknown ? [{ quoted: false, value: UNKNOWN }] : fed.value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
+    const fedSplit = !fed || fed.unknown ? undefined : delimiter || xargsOwn.some((word) => XARGS_NUL.test(word)) ? fed.value.split(/\s+/).filter(Boolean) : xargsWords(fed.value);
+    const stdinWords = [
+      ...!fed ? [] : fedSplit ? fedSplit.map((value) => ({ quoted: false, value })) : [{ quoted: false, value: UNKNOWN }],
+      ...argWord ? [argWord] : []
+    ];
     const calls = reader ? [] : cliCalls(parsed, env);
     const write = calls.map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords], tuning)).find(Boolean) ?? (calls.some((words) => scoreAsOther(words, cmd, parsed, env)) ? SCORE_AS_OTHER : undefined);
     if (write)
@@ -10557,35 +10607,62 @@ async function inspect(raw, environment, unknown = false) {
       }
       if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`);
-      if (fed && remover && (fed.unknown || marked(fed.value)))
-        return refuse(`${verb} under xargs fed by ${fed.unknown ?? "a value it cannot read"}, a value the hook does not hold; write the paths literally in the call`);
+      const unreadFeed = fed && remover ? argFile ? "the file its -a names" : fed.unknown || marked(fed.value) || !fedSplit ? fed.unknown ?? (fedSplit ? "a value it cannot read" : "stdin holding a quote it does not close") : undefined : undefined;
+      if (unreadFeed)
+        return refuse(`${verb} under xargs fed by ${unreadFeed}, a value the hook does not hold; write the paths literally in the call`);
       if (fed) {
-        const named = !fed.unknown && fed.value.split(/\s+/).filter(Boolean).map((value) => names({ quoted: false, value }, here, remover)).find(Boolean);
+        const named = !fed.unknown && [...fed.value.split(/\s+/), ...fedSplit ?? []].filter(Boolean).map((value) => names({ quoted: false, value }, here, remover)).find(Boolean);
         if (named)
           return refuse(`${verb} under xargs on ${named}`);
       }
     }
-    const end = args.findIndex((word) => word.value === "--");
+    if (!env.cwdUnread)
+      return;
+    const unsplit = fed && !fed.unknown && (marked(fed.value) || delimiter || !fedSplit);
+    const fedWords = unsplit ? [{ quoted: false, value: UNKNOWN }, ...argWord ? [argWord] : []] : stdinWords;
+    const replace = xargs?.replace;
+    const fromStdin = new Set(fedWords);
+    const fromArgFile = new Set(argWord ? [argWord] : []);
+    const inPlace = (word) => args.map((arg) => {
+      if (!replace || !arg.value.includes(replace))
+        return arg;
+      const put = { ...arg, value: arg.value.replaceAll(replace, word.value) };
+      fromStdin.add(put);
+      if (fromArgFile.has(word))
+        fromArgFile.add(put);
+      return put;
+    });
+    const shapes = [
+      args,
+      ...!xargs ? [] : replace ? fedWords.map(inPlace) : [[...args, ...fedWords], ...fedWords.map((word) => [...args, word])]
+    ];
     const option = (word) => /^-./.test(word.value);
-    const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(args[0]?.value === "--") : args.findIndex((word) => !option(word));
-    const values = tool === "mv" ? writeTargets(tool, args, gnu, posix) : tool === "rsync" ? args.flatMap((word, k) => {
-      const long = /^--([^=]+)=?/.exec(word.value);
-      const path = long && !RSYNC_FLAGS.has(long[1]) && RSYNC_PATHS.some((name) => name.startsWith(long[1]));
-      const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length;
-      if (!cut)
-        return [];
-      if (cut < word.value.length)
-        return [after(word, cut)];
-      return args[k + 1] ? [args[k + 1]] : [];
-    }) : tool === "find" ? args.flatMap((word, k) => FIND_WRITES.test(word.value) && args[k + 1] ? [args[k + 1]] : []) : [];
-    const operands = remover ? [
-      ...args.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)),
-      ...values
-    ] : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : [];
-    const unlisted = env.cwdUnread && !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env, !gnu || posix) : [];
-    const loose = env.cwdUnread ? [...operands, ...unlisted].find((word) => !placed(word, env, steady)) : undefined;
-    if (loose)
-      return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`));
+    const operandsOf = (typed) => {
+      const lead = typed.findIndex((word, i) => !/^-(?:[EHLPXdsx]+|O\d*|D)$/.test(word.value) && typed[i - 1]?.value !== "-D");
+      const given = tool === "find" && (lead === -1 || /^[-(!]/.test(typed[lead].value) && typed[lead].value !== "-f") ? [{ quoted: false, value: "." }, ...typed] : typed;
+      const end = given.findIndex((word) => word.value === "--");
+      const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(given[0]?.value === "--") : given.findIndex((word) => !option(word));
+      const values = tool === "mv" ? writeTargets(tool, given, gnu, posix) : tool === "rsync" ? given.flatMap((word, k) => {
+        const long = /^--([^=]+)=?/.exec(word.value);
+        const path = long && !RSYNC_FLAGS.has(long[1]) && RSYNC_PATHS.some((name) => name.startsWith(long[1]));
+        const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length;
+        if (!cut)
+          return [];
+        if (cut < word.value.length)
+          return [after(word, cut)];
+        return given[k + 1] ? [given[k + 1]] : [];
+      }) : tool === "find" ? given.flatMap((word, k) => FIND_WRITES.test(word.value) && given[k + 1] ? [given[k + 1]] : []) : [];
+      return remover ? [
+        ...given.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)),
+        ...values
+      ] : WRITERS.has(tool) ? writeTargets(tool, given, gnu, posix) : [];
+    };
+    const unlisted = !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env, !gnu || posix) : [];
+    const loose = [...shapes.flatMap(operandsOf), ...unlisted].find((word) => !placed(word, env, steady));
+    if (!loose)
+      return;
+    const unread = fromArgFile.has(loose) ? "the file its -a names" : fed && fromStdin.has(loose) && (fed.unknown || unsplit) ? fed.unknown ?? (delimiter ? "stdin split on its -d delimiter" : fedSplit ? "stdin holding a part it cannot read" : "stdin holding a quote it does not close") : undefined;
+    return refuse(afterUnreadCd(unread ? `${verb} under xargs on the words it reads from ${unread}` : `${verb} on ${shown(loose)}`));
   };
   const named = namings(command);
   const known = knownVariables(command, environment, directory);

@@ -118,6 +118,43 @@ const READERS = new Set([
 ])
 // find's actions that write, remove or run
 const FIND_ACTS = /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/
+// xargs' -a (GNU's --arg-file), -0 (--null) and -d (--delimiter), after any of its flags in one cluster or by any prefix of the long name
+const XARGS_ARG_FILE = /^-[0oprtx]*a|^--a(?:r(?:g(?:-(?:f(?:i(?:le?)?)?)?)?)?)?(?:=|$)/
+const XARGS_NUL = /^-[0oprtx]*0|^--nu(?:ll?)?$/
+const XARGS_DELIMITER = /^-[0oprtx]*d|^--d(?:e(?:l(?:i(?:m(?:i(?:t(?:er?)?)?)?)?)?)?)?(?:=|$)/
+
+// xargs' own words, from its name to the parsed program word itself, so an option value spelled like the program (`-E rm`) ends none; with no program found, every word after the name, so a misplaced program reads as more options, never fewer
+function xargsOptions(cmd: Command, first: Word | undefined): string[] {
+  const start = cmd.words.findIndex((word) => /(?:^|\/)g?xargs$/i.test(word.value))
+  if (start === -1) return []
+  const end = first ? cmd.words.indexOf(first) : -1
+  return cmd.words.slice(start + 1, end > start ? end : undefined).map((word) => word.value)
+}
+
+// The words xargs reads from stdin with no -0 or -d: blanks and newlines separate them, a pair of ' or " groups its text and is dropped, and a backslash keeps the next character; a quote left open is undefined, read as words the hook cannot read
+function xargsWords(text: string): string[] | undefined {
+  const words: string[] = []
+  let word: string | undefined
+  let quote: string | undefined
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (quote) {
+      if (c === quote) quote = undefined
+      else if (c === "\n") return undefined
+      else word += c
+    } else if (c === "'" || c === '"') {
+      quote = c
+      word ??= ""
+    } else if (c === "\\") word = (word ?? "") + (text[++i] ?? "")
+    else if (/\s/.test(c)) {
+      if (word !== undefined) words.push(word)
+      word = undefined
+    } else word = (word ?? "") + c
+  }
+  if (quote) return undefined
+  if (word !== undefined) words.push(word)
+  return words
+}
 // find's actions that write the file named by the next word, a dash-led one too
 const FIND_WRITES = /^-(?:fls|fprint|fprint0|fprintf)$/
 const GIT_READS = new Set([
@@ -1222,13 +1259,14 @@ function rooted(commands: Command[]): boolean {
   )
 }
 
-// A git commit the hook reads as text: git as its own program (ownProgram), its sub commit, no shell variable set, no git option ahead of commit that changes what git runs or where (-c, -C, --config-env, --exec-path, --git-dir, --work-tree) but a -C naming the folder the shell is surely in, which moves git nowhere, and every spaced word a quoted message it holds (after -m, a flag cluster ending in m, --message, or --message=), since commit runs no word it is given.
+// a -C word naming, as one literal absolute path, the folder every place the shell may be in resolves to
 const ownFolder = (word: Word | undefined, env: Env) =>
   !!word &&
   literal(word) &&
   word.value.startsWith("/") &&
   env.cwdSure !== undefined &&
   places(env).every(({ cwd }) => cwd === resolve(word.value))
+// A git commit the hook reads as text: git as its own program (ownProgram), its sub commit, no shell variable set, no git option ahead of commit that changes what git runs or where (-c, -C, --config-env, --exec-path, --git-dir, --work-tree) but a -C naming the folder the shell is surely in, which moves git nowhere, and every spaced word a quoted message it holds (after -m, a flag cluster ending in m, --message, or --message=), since commit runs no word it is given.
 function quietCommit(cmd: Command, parsed: Parsed, env: Env): boolean {
   const { args, local, name } = parsed
   if (name !== "git" || local.size > 0 || !ownProgram(cmd, parsed)) return false
@@ -1345,13 +1383,13 @@ function shellRunnerArgs(text: string): string[] {
   return out
 }
 
-// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own, and the command string a shell-running call in it is given; `vars` is the scope's variables set since their lines were last read.
+// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own, and the command string a shell-running call in it is given; `vars` is the scope's variables set since their lines were last read, and `plain` the words a line read whole keeps as text (wholeText).
 function runsOf(
   parsed: Parsed,
   vars: Text[],
   whole: boolean,
   rootLine: boolean,
-  text: Set<Word>,
+  plain: Set<Word>,
 ): string[] {
   const { args, first, local } = parsed
   const values = [...local.values(), ...vars].flatMap((text) => {
@@ -1359,7 +1397,7 @@ function runsOf(
     return text.unknown ? [] : [text.value]
   })
   for (const word of whole ? (first ? [first, ...args] : args) : [])
-    for (const piece of text.has(word) ? [] : texts(word)) {
+    for (const piece of plain.has(word) ? [] : texts(word)) {
       values.push(piece.value.replace(/^!/, ""))
       // printf and echo -e print a \n as a line break, which a root shell runs as one
       if (rootLine) values.push(...piece.value.split("\\n"))
@@ -1634,15 +1672,27 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         ? [...ghFilters(parsed), ...(browserCode ? [browserCode] : [])]
         : [],
     )
+    const xargsOwn = xargs ? xargsOptions(cmd, first) : []
+    const delimiter = xargsOwn.some((word) => XARGS_DELIMITER.test(word))
+    // GNU xargs' -a reads its words from a file in place of stdin; a word read as -a may be another option's value, so stdin is still judged as xargs' words, and the file adds a word the hook cannot read (argWord)
+    const argFile = xargsOwn.some((word) => XARGS_ARG_FILE.test(word))
+    const argWord: Word | undefined = argFile ? { quoted: false, value: UNKNOWN } : undefined
     const fed = xargs ? await stdinOf(cmd, env) : undefined
-    const stdinWords: Word[] = !fed
-      ? []
-      : fed.unknown
-        ? [{ quoted: false, value: UNKNOWN }]
-        : fed.value
-            .split(/\s+/)
-            .filter(Boolean)
-            .map((value) => ({ quoted: false, value }))
+    // xargs' own words: under -0 or -d its quotes and backslashes stay, else xargsWords reads them
+    const fedSplit =
+      !fed || fed.unknown
+        ? undefined
+        : delimiter || xargsOwn.some((word) => XARGS_NUL.test(word))
+          ? fed.value.split(/\s+/).filter(Boolean)
+          : xargsWords(fed.value)
+    const stdinWords: Word[] = [
+      ...(!fed
+        ? []
+        : fedSplit
+          ? fedSplit.map((value) => ({ quoted: false, value }))
+          : [{ quoted: false, value: UNKNOWN }]),
+      ...(argWord ? [argWord] : []),
+    ]
     const calls = reader ? [] : cliCalls(parsed, env)
     const write =
       calls
@@ -1787,15 +1837,24 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
       if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`)
-      if (fed && remover && (fed.unknown || marked(fed.value)))
+      const unreadFeed =
+        fed && remover
+          ? argFile
+            ? "the file its -a names"
+            : fed.unknown || marked(fed.value) || !fedSplit
+              ? (fed.unknown ??
+                (fedSplit ? "a value it cannot read" : "stdin holding a quote it does not close"))
+              : undefined
+          : undefined
+      if (unreadFeed)
         return refuse(
-          `${verb} under xargs fed by ${fed.unknown ?? "a value it cannot read"}, a value the hook does not hold; write the paths literally in the call`,
+          `${verb} under xargs fed by ${unreadFeed}, a value the hook does not hold; write the paths literally in the call`,
         )
       if (fed) {
+        // each word as written and as xargs reads it, so a quote or backslash xargs drops hides no root path
         const named =
           !fed.unknown &&
-          fed.value
-            .split(/\s+/)
+          [...fed.value.split(/\s+/), ...(fedSplit ?? [])]
             .filter(Boolean)
             .map((value) => names({ quoted: false, value }, here, remover))
             .find(Boolean)
@@ -1803,56 +1862,110 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
     // after a cd the hook cannot read, a remover's operand or a writer's target the hook can place only by the shell's own folder may be in the root
-    const end = args.findIndex((word) => word.value === "--")
+    if (!env.cwdUnread) return
+    // stdin xargs splits where the hook cannot see (a NUL, a part it cannot read, GNU's -d delimiter, a quote left open) is read as one value it cannot read
+    const unsplit = fed && !fed.unknown && (marked(fed.value) || delimiter || !fedSplit)
+    const fedWords: Word[] = unsplit
+      ? [{ quoted: false, value: UNKNOWN }, ...(argWord ? [argWord] : [])]
+      : stdinWords
+    const replace = xargs?.replace
+    const fromStdin = new Set<Word>(fedWords)
+    const fromArgFile = new Set<Word>(argWord ? [argWord] : [])
+    // xargs puts each stdin word in place of its -I or -J string
+    const inPlace = (word: Word) =>
+      args.map((arg) => {
+        if (!replace || !arg.value.includes(replace)) return arg
+        const put = { ...arg, value: arg.value.replaceAll(replace, word.value) }
+        fromStdin.add(put)
+        if (fromArgFile.has(word)) fromArgFile.add(put)
+        return put
+      })
+    // the call as typed, then each call xargs may build: its stdin words appended to one call or split over several (-n, -L, -s, its own size cap), so each word may end a call of its own, or put in place of its -I or -J string
+    const shapes = [
+      args,
+      ...(!xargs
+        ? []
+        : replace
+          ? fedWords.map(inPlace)
+          : [[...args, ...fedWords], ...fedWords.map((word) => [...args, word])]),
+    ]
     // a dash with more after it is an option, while a lone dash is an operand
     const option = (word: Word) => /^-./.test(word.value)
-    // macOS unlink reads no option but a leading --
-    const stop =
-      !GETOPT_REMOVERS.has(tool) || (gnu && !posix)
-        ? -1
-        : tool === "unlink" && !gnu
-          ? Number(args[0]?.value === "--")
-          : args.findIndex((word) => !option(word))
-    // mv's -t folder, rsync's path values and the file find's write actions name are written to, though their word opens with a dash
-    const values =
-      tool === "mv"
-        ? writeTargets(tool, args, gnu, posix)
-        : tool === "rsync"
-          ? args.flatMap((word, k) => {
-              const long = /^--([^=]+)=?/.exec(word.value)
-              const path =
-                long &&
-                !RSYNC_FLAGS.has(long[1]) &&
-                RSYNC_PATHS.some((name) => name.startsWith(long[1]))
-              const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length
-              if (!cut) return []
-              // with no value attached, the option takes the next word, a dash-led one too
-              if (cut < word.value.length) return [after(word, cut)]
-              return args[k + 1] ? [args[k + 1]] : []
-            })
-          : tool === "find"
-            ? args.flatMap((word, k) =>
-                FIND_WRITES.test(word.value) && args[k + 1] ? [args[k + 1]] : [],
-              )
-            : []
-    const operands = remover
-      ? [
-          ...args.filter(
-            (word, k) => (end !== -1 && k > end) || (stop !== -1 && k >= stop) || !option(word),
-          ),
-          ...values,
-        ]
-      : WRITERS.has(tool)
-        ? writeTargets(tool, args, gnu, posix)
-        : []
+    const operandsOf = (typed: Word[]) => {
+      // find with no path before its expression searches the shell's own folder; GNU's -D takes the next word, while GNU's -H, -L, -P and -O<n> and BSD's -E, -X, -d, -s and -x, alone or clustered, take none, and BSD's -f names a path
+      const lead = typed.findIndex(
+        (word, i) => !/^-(?:[EHLPXdsx]+|O\d*|D)$/.test(word.value) && typed[i - 1]?.value !== "-D",
+      )
+      const given =
+        tool === "find" &&
+        (lead === -1 || (/^[-(!]/.test(typed[lead].value) && typed[lead].value !== "-f"))
+          ? [{ quoted: false, value: "." }, ...typed]
+          : typed
+      const end = given.findIndex((word) => word.value === "--")
+      // macOS unlink reads no option but a leading --
+      const stop =
+        !GETOPT_REMOVERS.has(tool) || (gnu && !posix)
+          ? -1
+          : tool === "unlink" && !gnu
+            ? Number(given[0]?.value === "--")
+            : given.findIndex((word) => !option(word))
+      // mv's -t folder, rsync's path values and the file find's write actions name are written to, though their word opens with a dash
+      const values =
+        tool === "mv"
+          ? writeTargets(tool, given, gnu, posix)
+          : tool === "rsync"
+            ? given.flatMap((word, k) => {
+                const long = /^--([^=]+)=?/.exec(word.value)
+                const path =
+                  long &&
+                  !RSYNC_FLAGS.has(long[1]) &&
+                  RSYNC_PATHS.some((name) => name.startsWith(long[1]))
+                const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length
+                if (!cut) return []
+                // with no value attached, the option takes the next word, a dash-led one too
+                if (cut < word.value.length) return [after(word, cut)]
+                return given[k + 1] ? [given[k + 1]] : []
+              })
+            : tool === "find"
+              ? given.flatMap((word, k) =>
+                  FIND_WRITES.test(word.value) && given[k + 1] ? [given[k + 1]] : [],
+                )
+              : []
+      return remover
+        ? [
+            ...given.filter(
+              (word, k) => (end !== -1 && k > end) || (stop !== -1 && k >= stop) || !option(word),
+            ),
+            ...values,
+          ]
+        : WRITERS.has(tool)
+          ? writeTargets(tool, given, gnu, posix)
+          : []
+    }
+    // a program on neither list is judged on its typed words alone (unreadCdWrites)
     const unlisted =
-      env.cwdUnread && !remover && !WRITERS.has(tool)
-        ? unreadCdWrites(tool, args, env, !gnu || posix)
-        : []
-    const loose = env.cwdUnread
-      ? [...operands, ...unlisted].find((word) => !placed(word, env, steady))
-      : undefined
-    if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))
+      !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env, !gnu || posix) : []
+    const loose = [...shapes.flatMap(operandsOf), ...unlisted].find(
+      (word) => !placed(word, env, steady),
+    )
+    if (!loose) return
+    const unread = fromArgFile.has(loose)
+      ? "the file its -a names"
+      : fed && fromStdin.has(loose) && (fed.unknown || unsplit)
+        ? (fed.unknown ??
+          (delimiter
+            ? "stdin split on its -d delimiter"
+            : fedSplit
+              ? "stdin holding a part it cannot read"
+              : "stdin holding a quote it does not close"))
+        : undefined
+    return refuse(
+      afterUnreadCd(
+        unread
+          ? `${verb} under xargs on the words it reads from ${unread}`
+          : `${verb} on ${shown(loose)}`,
+      ),
+    )
   }
   const named = namings(command)
   const known = knownVariables(command, environment, directory)
