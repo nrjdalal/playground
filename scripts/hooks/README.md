@@ -486,9 +486,20 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   and `settings import-jobs` but its `--dry-run`, which writes a `jobs.<name>` for each job its file lists,
   whose refusal names the Inbox guard decision whose Approve writes it.
   A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
+  Two of them only tune a number, so the Ops lead sets them as it sets spawn.sh's `gates.*`, on a line that holds the `playground` call alone.
+  The Ops lead is `opsLead` in `role.ts`: the lead role, whose name in Claude Code's registry has the roster's `ops` kind.
+  It sets `glm.readOnlyLoad5` to a positive number.
+  It sets a `jobs.<name>` whose new row equals the row the login's scope stores (`{}` when it stores none), field for field, but a `schedule` of `{"every": <positive integer>}`.
+  That needs the job's rendered row (`policy.json`'s, else the registry's entry) to run on an interval already.
+  A set replaces the stored row, and the render reads each field it leaves out from the registry's entry, since a job's setting merges over it.
+  So the hook compares the stored row, never the rendered one, whose copy would pin the registry's fields.
+  A row that drops a field, turns a job on or off, moves its command, program or folder, or changes a `config` number stays the owner's.
+  So do a reset, `import-jobs`, a `--scope`, a job another scope stores a row for or any scope stores under an old name, and a job neither `policy.json` nor the registry holds.
+  So do an `always` schedule, and a login, `settings.json` or `policy.json` that does not read.
+  A line holding more than the call (an assignment, `export`, `env`, wrapper, group, substitution or second command) tunes nothing, since `PLAYGROUND_LOGIN` or the data folder set there would move the write to another scope than the one the hook reads.
   A command, verb, kind or key word it cannot read, or any such word among the words of `ext put` or `settings set` or `reset`, counts as the write.
   `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score` and `reject`, a score of 5 included, which accepts the proposal itself (`judgeItem` in `packages/settings/src/items.ts`) with no `accept` card after it, `settings set` of any other key, `settings import-jobs --dry-run` and writes elsewhere in the data folder (handoffs, the roster) run.
-  Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which runs without hooks and which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note in a session's own call frees it.
+  Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which runs without hooks and which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note in a session's own call frees it, the Ops lead's two tuning sets above alone running.
   A `settings set` or `reset` of `owner.names` or `factory.archiveRepo` with no `--scope` names Privacy on the Dashboard's Settings page instead, which saves both at your login's scope: the dispatcher asks the owner to save it there.
   An accept's refusal names its own route: the session posts an `accept` decision with `playground ask new` (`.agents/dashboard/asks.md`), and the owner's Approve has the Dashboard run the accept with no role.
   The CLI refuses an accept with a role set too, for a caller no hook reads (a script run by its path, an ops job), naming the same decision.
@@ -687,7 +698,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 ## no-public-leak
 
 - ALWAYS: Write each public repository's pull requests, issues, reviews and comments in plain words, naming no person, company or private record, since everything written there is public once the repository is and stays cached after.
-  `scripts/hooks/no-public-leak.ts`, run on Bash by [guards](#guards) and registered in both settings files on the GitHub MCP tools, refuses a write to a public repository (`factory.publicRepo`, one or a list, or while unset `TODAY_PUBLIC` in trace-count's `kinds.ts`, the factory's and Yard's)
+  `scripts/hooks/no-public-leak.ts`, run on Bash by [guards](#guards) and registered in both settings files on the GitHub MCP tools, refuses a write to a public repository (`factory.publicRepo`, one or a list, or while unset the main checkout's origin, as trace-count's `kinds.ts` reads it)
   whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or any email address or link into the archive repository (`factory.archiveRepo`).
   An extensions root whose policy.json it cannot read for those two refuses the write, as a list it cannot trust does.
   Its reason names the kind and the plain-words fix, never the text.
