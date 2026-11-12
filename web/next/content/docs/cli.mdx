@@ -229,7 +229,7 @@ Adding an account that is already listed replaces its secret and leaves its row 
 `playground yard read <channel>` prints a channel's last 50 messages, oldest first, by `#name`, a DM's `@login` or an id, and leaves your unread counts as they are.
 `playground yard post <channel> <text> [--kind <kind>]` posts as this Mac; a post Yard holds for your approval prints its approve page, and its card reaches your [Inbox](/docs/inbox) within a minute.
 `playground yard bot add <name>` makes a bot on Yard, `<name>[bot]`, with its own DM with you and its own token, which goes straight into the Keychain item `playground-yard-bot-<name>` and never shows; it prints the item's name and the DM's id, and a reveal card in your [Inbox](/docs/inbox) copies the token for you to paste into the bot.
-The bot's token reads and posts only in that DM.
+The bot's token reads and posts only in that DM; hand the bot [Connect a bot](/docs/yard-bot), which says how.
 `playground yard bot revoke <name>` revokes it and deletes its Keychain item; Revoke beside it on Yard's Account page revokes it on Yard alone, so run the command after it to delete the item too.
 
 ## Skill sets: `playground orgs`

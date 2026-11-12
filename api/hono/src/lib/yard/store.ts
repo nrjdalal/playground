@@ -297,7 +297,7 @@ const shownAt = sql<string>`date_trunc('milliseconds', coalesce(${yardMessage.de
 
 export type Waiting = { held: boolean; message: Message; shownAt: string }
 
-// What waits on the caller past a mark, which the local Playground cards in its Inbox, oldest first by when it showed, then by id: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, and their own posts held for their approval; the mark is a time and, from the second read on, the last item's id, so rows in that item's millisecond still wait; each list reads at most limit rows, and when one comes back full both stop at the earlier full list's last row, so the next mark skips no row either list left out.
+// What waits on the caller past a mark, which the local Playground cards in its Inbox, oldest first by when it showed, then by id: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, every message a bot they made sends, which reaches only its DM with them, and their own posts held for their approval; the mark is a time and, from the second read on, the last item's id, so rows in that item's millisecond still wait; each list reads at most limit rows, and when one comes back full both stop at the earlier full list's last row, so the next mark skips no row either list left out.
 export const waiting = async (
   db: Database,
   caller: Caller,
@@ -321,7 +321,10 @@ export const waiting = async (
         sql`${yardMessage.userId} is distinct from ${caller.id}`,
         past,
         sql`${shownAt} > ${yardMember.joinedAt}`,
-        sql`${yardMessage.text} ~* ${mentionPattern(caller.login)}`,
+        or(
+          sql`${yardMessage.text} ~* ${mentionPattern(caller.login)}`,
+          sql`exists (select 1 from ${yardBot} where ${yardBot.userId} = ${yardMessage.userId} and ${yardBot.madeBy} = ${caller.id})`,
+        ),
         live(),
       ),
     )

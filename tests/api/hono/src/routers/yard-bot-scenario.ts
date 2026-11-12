@@ -71,6 +71,8 @@ out.refused = {
   otherPost: await status(`/channels/${general}/messages`, bot, { kind: "text", text: "hi all" }),
   otherRead: await status(`/channels/${general}/messages`, bot),
   read: await status(`/channels/${dm}/read`, bot, {}),
+  relayStatus: await status("/relay/status", bot),
+  relayWrite: await status("/relay/write", bot, {}),
   tokens: await status("/tokens", bot),
   waiting: await status("/waiting?since=2026-01-01T00:00:00.000Z", bot),
 }
