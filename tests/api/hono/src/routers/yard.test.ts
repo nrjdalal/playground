@@ -14,6 +14,7 @@ const SCENARIO = join(import.meta.dir, "yard-scenario.ts")
 const RELAY = join(import.meta.dir, "yard-relay-scenario.ts")
 const GITHUB = join(import.meta.dir, "yard-github.ts")
 const BOT = join(import.meta.dir, "yard-bot-scenario.ts")
+const BOT_LOG = join(import.meta.dir, "yard-bot-log-scenario.ts")
 const WEB = "http://127.0.0.1:3000"
 const PASSWORD = crypto.randomUUID()
 
@@ -297,6 +298,50 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
     })
     // the bot's token is stored only as its hash, and no log line of the hosted side holds it
     expect(await sql`select count(*)::int as n from yard_bot`).toEqual([{ n: 0 }])
+    expect(run.out).not.toMatch(/yard_[A-Za-z0-9_-]{32}/)
+  })
+
+  test("a bot the owner lets read the log reads a page through the owner's Mac, a line in its DM says so and cards nothing, and every other caller is refused (#1888)", async () => {
+    await sql`insert into "user" (id, name, email, login, role) values ('lo', 'lo', ${["lo", "example.com"].join("@")}, 'lo', 'owner')`
+    await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update("yard_lo").digest("hex")}, ${"mac"}, 'lo')`
+    const run = child(await Bun.file(BOT_LOG).text(), {
+      OWNER_ID: "lo",
+      OWNER_TOKEN: "yard_lo",
+      POSTGRES_URL: url,
+    })
+    expect(run.err).not.toContain("error:")
+    const out = JSON.parse(last(run.out))
+    expect(out).toEqual({
+      add: [201, true, false],
+      afterOff: 403,
+      afterRevoke: 401,
+      dm: [
+        ["scout[bot]", "text", "hello owner"],
+        [
+          "scout[bot]",
+          "log",
+          expect.stringMatching(/^Read the dispatcher's log at \S+Z: entries 5 to 6$/),
+        ],
+      ],
+      frameCount: 1,
+      frames: [
+        {
+          bot: "scout[bot]",
+          login: "lo",
+          method: "GET",
+          path: "/api/v1/dashboard/dispatcher/log?after=4",
+          type: "bot",
+        },
+      ],
+      offline: 503,
+      read: [200, [5, 6]],
+      refused: { badCursor: 400, browser: 403, owner: 403, quiet: 403 },
+      revoke: 200,
+      switchOff: [200, false],
+      switchOn: true,
+      switchToken: 403,
+      waiting: [["scout[bot]", "text"]],
+    })
     expect(run.out).not.toMatch(/yard_[A-Za-z0-9_-]{32}/)
   })
 
