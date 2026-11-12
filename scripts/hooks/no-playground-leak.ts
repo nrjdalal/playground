@@ -764,11 +764,12 @@ function unplaced(what: string, source: (Repo | undefined)[], env: Env): string 
   )
 }
 
-// What `gh pr create` publishes beyond its flags: with no --head, the branch it opens from and the commits it may push (with --head it opens from that branch, already pushed, and pushes nothing), and with --fill the messages it reads.
+// What `gh pr create` publishes beyond its flags: with no --head, the branch it opens from and the commits it may push (with --head it opens from that branch, already pushed, and pushes nothing; gh keeps the last --head, and only a non-empty literal counts, so one empty, only whitespace, unreadable, or holding $, a backtick, a glob character or a quote reads as none), and with --fill the messages it reads.
 function prCreate(rest: Word[], flags: Flag[], env: Env): Placed[] {
   const values = rest.map((w) => w.value)
   const texts: Placed[] = []
-  if (!flags.some((f) => f.name === "-H" || f.name === "--head"))
+  const head = flags.findLast((f) => f.name === "-H" || f.name === "--head")?.value
+  if (!head || unreadable(head) || !head.value.trim() || /[$`*?[\]'"]/.test(head.value))
     texts.push(
       ...commitTexts(
         env.cwd,
