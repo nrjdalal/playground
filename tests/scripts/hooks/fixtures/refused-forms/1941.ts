@@ -43,6 +43,14 @@ export const groups: Group[] = [
         'gh pr create -R acme-blue/app --head " " --title x --body ok',
       ],
       [
+        "a pull request whose --head holds a backtick",
+        "gh pr create -R acme-blue/app --head 'fix`x' --title x --body ok",
+      ],
+      [
+        "a pull request whose --head holds a leftover quote",
+        `gh pr create -R acme-blue/app --head "fix'x" --title x --body ok`,
+      ],
+      [
         "a pull request whose --head holds a glob character",
         "gh pr create -R acme-blue/app --head 'fix*' --title x --body ok",
       ],
