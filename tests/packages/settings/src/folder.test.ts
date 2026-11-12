@@ -25,6 +25,7 @@ import {
   GUARD_LISTS,
   lockPath,
   mustGit,
+  relockRoot,
   rootLocked,
   scopeDir,
   scopesIn,
@@ -372,4 +373,110 @@ test("an unlocked root sees no flag call", () => {
     process.env.PATH = path
   }
   expect(existsSync(calls)).toBe(false)
+})
+
+const OTHER = "made-up-org"
+// A locked root holding two scopes: the accepted item's, and another scope's settings.
+const twoScopes = (name: string) => {
+  const data = join(scratch, name)
+  revOf(putItem(data, ref, files("v1"), OWNER, true))
+  writeFiles(data, OTHER, new Map([["settings.json", "{}\n"]]), { author: "o", reason: "r" })
+  setRootLock(data, true)
+  return data
+}
+// chflags on PATH as the body given, which can call the real one at $REAL; the run's result, with PATH put back after.
+const withChflags = <T>(name: string, body: string, run: () => T): T => {
+  const bin = join(scratch, `bin-${name}`)
+  mkdirSync(bin, { recursive: true })
+  writeFileSync(join(bin, "chflags"), `#!/bin/sh\nREAL='${CHFLAGS}'\n${body}\n`)
+  chmodSync(join(bin, "chflags"), 0o755)
+  const path = process.env.PATH
+  process.env.PATH = `${bin}:${path}`
+  try {
+    return run()
+  } finally {
+    process.env.PATH = path
+  }
+}
+// The real chflags, then a line of its words and the other scope's settings file's flags as it left them.
+const logged = (calls: string, probe: string) =>
+  `"$REAL" "$@"; c=$?\necho "$*|$(stat -f %Sf '${probe}')" >> '${calls}'\nexit $c`
+const callsIn = (calls: string) =>
+  readFileSync(calls, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => line.split("|"))
+const allLocked = (data: string) =>
+  [extensionsDir(data), scopeDir(data, ME), scopeDir(data, OTHER)].map(rootLocked)
+
+test.skipIf(!CHFLAGS)(
+  "a write to one scope lifts that scope alone, so every other scope stays locked while it runs",
+  () => {
+    const data = twoScopes("one-scope")
+    const calls = join(scratch, "one-scope.calls")
+    const probe = join(scopeDir(data, OTHER), "settings.json")
+    withChflags("one-scope", logged(calls, probe), () =>
+      revOf(putItem(data, ref, files("v2"), WORKER, false)),
+    )
+    expect(callsIn(calls)).toEqual([
+      [`-R nouchg ${scopeDir(data, ME)}`, "uchg"],
+      [`-R uchg ${scopeDir(data, ME)}`, "uchg"],
+    ])
+    expect(allLocked(data)).toEqual([true, true, true])
+  },
+)
+
+test.skipIf(!CHFLAGS)("a write that touches the root lifts the whole root", () => {
+  const data = twoScopes("root-write")
+  const calls = join(scratch, "root-write.calls")
+  const probe = join(scopeDir(data, OTHER), "settings.json")
+  withChflags("root-write", logged(calls, probe), () =>
+    writeFiles(
+      data,
+      ME,
+      new Map([["settings.json", '{"a":1}\n']]),
+      { author: "o", reason: "r" },
+      new Map([["policy.json", "{}"]]),
+    ),
+  )
+  expect(callsIn(calls)).toEqual([
+    [`-R nouchg ${extensionsDir(data)}`, "-"],
+    [`-R uchg ${extensionsDir(data)}`, "uchg"],
+  ])
+  expect(allLocked(data)).toEqual([true, true, true])
+})
+
+// git maintenance can remove a file of a scope's .git while the walk runs, which chflags reports as No such file or directory and exits 1.
+test.skipIf(!CHFLAGS)(
+  "a file gone by the time the walk reaches it is skipped on the lift and the relock",
+  () => {
+    const data = twoScopes("gone")
+    const gone = join(scopeDir(data, ME), ".git", "objects", "maintenance.lock")
+    const calls = join(scratch, "gone.calls")
+    withChflags("gone", `echo "$*" >> '${calls}'\nexec "$REAL" "$@" '${gone}'`, () =>
+      revOf(putItem(data, ref, files("v2"), WORKER, false)),
+    )
+    expect(readFileSync(calls, "utf8").trim().split("\n")).toHaveLength(2)
+    expect(allLocked(data)).toEqual([true, true, true])
+  },
+)
+
+test.skipIf(!CHFLAGS)("a flag call that fails for any other reason still refuses the write", () => {
+  const data = twoScopes("refused")
+  const outcome = withChflags(
+    "refused",
+    `echo "chflags: $3: Operation not permitted" >&2\nexit 1`,
+    () => putItem(data, ref, files("v2"), WORKER, false),
+  )
+  expect(outcome.ok).toBe(false)
+  expect(outcome.ok ? "" : outcome.message).toContain("Operation not permitted")
+})
+
+// A write killed mid-way leaves its one scope unlocked under a locked root, which the ops tick's relock then locks.
+test.skipIf(!CHFLAGS)("the relock locks a scope left unlocked under a locked root", () => {
+  const data = twoScopes("half")
+  Bun.spawnSync([CHFLAGS!, "-R", "nouchg", scopeDir(data, OTHER)])
+  expect(rootLocked(scopeDir(data, OTHER))).toBe(false)
+  expect(relockRoot(data)).toBe(true)
+  expect(allLocked(data)).toEqual([true, true, true])
 })
