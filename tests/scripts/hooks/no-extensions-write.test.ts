@@ -158,6 +158,10 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["git -C a scope checkout", `git -C ${SCOPE} checkout HEAD~1 -- lists`],
     ["git diff --output into the root", `git diff --output=${LIST}`],
     ["through run-slot", `~/.playground/ops/run-slot.sh w -- rm ${LIST}`],
+    [
+      "a write inside run-slot's words, in the scope its own cd names",
+      `~/.playground/ops/run-slot.sh w -- bash -c 'cd ${SCOPE} && touch f'`,
+    ],
     ["through bash -c", `bash -c "rm ${LIST}"`],
     ["through env", `env FOO=1 rm ${LIST}`],
   ])("%s", async (_, command) => {
@@ -482,6 +486,16 @@ describe("a direct write into the extensions root is refused, naming the owner's
 
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
+  })
+
+  test("a write after a run-slot call whose words cd away lands in the shell's own folder", async () => {
+    const slot = "~/.playground/ops/run-slot.sh w --"
+    expect(await bash(`${slot} cd /tmp; touch f`, SCOPE)).toContain(
+      "no-extensions-write hook refuses",
+    )
+    expect(await bash(`${slot} pushd /tmp; touch f`, SCOPE)).toContain(
+      "no-extensions-write hook refuses",
+    )
   })
 
   // zsh's ~- is the folder it last left, so an OLDPWD assignment keeps it in the root, and a popd that lands back leaves it unread
