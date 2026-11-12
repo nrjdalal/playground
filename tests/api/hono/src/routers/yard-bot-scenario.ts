@@ -48,11 +48,33 @@ out.botRead = (await call(`/channels/${dm}/messages`, bot)).body?.data?.messages
   (m: any) => m.text,
 )
 
+// the bot routes find the same DM from the token alone, with no DM id (#1995)
+const viaRoute = await call("/bot/messages", bot, { kind: "text", text: "via the bot route" })
+out.botRoutePost = [
+  viaRoute.status,
+  viaRoute.body?.data?.message?.status,
+  viaRoute.body?.data?.message?.channel === dm,
+]
+const routeSince = await call(
+  `/bot/messages?after=${first.body?.data?.message?.id ?? "none"}&limit=5`,
+  bot,
+)
+out.botRouteReadAfter = [
+  routeSince.status,
+  routeSince.body?.data?.messages?.map((m: any) => m.text),
+]
+out.botRouteRead = (await call("/bot/messages", bot)).body?.data?.messages?.map((m: any) => m.text)
+
 // everything else a bot's token tries reads 403
 const general = (await call("/channels", owner)).body?.data?.channels?.find(
   (c: any) => c.name === "general",
 )?.id
 out.refused = {
+  botRouteHeldKind: await status("/bot/messages", bot, { kind: "steps", text: "run it" }),
+  botRouteMention: await status("/bot/messages", bot, {
+    kind: "text",
+    text: `@${process.env.MEMBER_LOGIN} look`,
+  }),
   bots: await status("/bots", bot),
   channels: await status("/channels", bot),
   dms: await status("/dms", bot, { login: process.env.MEMBER_LOGIN }),
@@ -81,12 +103,19 @@ out.dmToBot = await status("/dms", member, { login: "grok[bot]" })
 // a bot's login with no yard_bot row, its maker gone, is no one
 out.ghost = await status(`/channels/${dm}/messages`, as(process.env.GHOST_TOKEN!))
 
+// a person's token has no bot DM to find
+out.personOnBotRoute = [
+  await status("/bot/messages", member),
+  await status("/bot/messages", owner, { kind: "text", text: "hi" }),
+]
+
 // a person's token works as before
 out.controls = [await status("/channels", member), await status("/me", owner)]
 
 out.memberRevoke = await status("/bots/grok", member, undefined, "DELETE")
 out.revoke = await status("/bots/grok", owner, undefined, "DELETE")
 out.afterRevoke = await status(`/channels/${dm}/messages`, bot)
+out.afterRevokeRoute = await status("/bot/messages", bot)
 out.listAfter = (await call("/bots", owner)).body?.data?.bots
 out.revokeAgain = await status("/bots/grok", owner, undefined, "DELETE")
 console.log(JSON.stringify(out))
