@@ -2,7 +2,14 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-glm-heavy-path.ts
-import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, readlinkSync, realpathSync as realpathSync2 } from "fs";
+import {
+  existsSync as existsSync2,
+  readdirSync,
+  readFileSync as readFileSync2,
+  readlinkSync,
+  realpathSync as realpathSync2,
+  statSync as statSync2
+} from "fs";
 import { loadavg } from "os";
 import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join5, resolve as resolve3 } from "path";
 
@@ -8605,6 +8612,64 @@ function checkoutOf(path, orgs, roots) {
   return found;
 }
 var checkoutRefusal = (what, repo) => orgRefusal(what, `it reads the checkout of ${label(repo.owner, repo.repo)}, a guarded org's repository`);
+var BELOW_DEPTH = 4;
+var BELOW_FOLDERS = 5000;
+var UNWALKED = new Set([".git", "node_modules"]);
+function checkoutBelow(path, orgs, roots) {
+  let level = [realOf(resolve3(path))];
+  let walked = 0;
+  for (let depth = 0;depth < BELOW_DEPTH && level.length > 0; depth++) {
+    const next = [];
+    for (const at of level)
+      for (const entry of folderEntries(at)) {
+        if (UNWALKED.has(entry.name))
+          continue;
+        const child = join5(at, entry.name);
+        if (++walked > BELOW_FOLDERS)
+          return "too many";
+        if (entry.isSymbolicLink() || existsSync2(join5(child, ".git"))) {
+          const repo = checkoutOf(child, orgs, roots);
+          if (repo)
+            return repo;
+        }
+        if (entry.isDirectory())
+          next.push(child);
+      }
+    level = next;
+  }
+}
+function folderEntries(at) {
+  try {
+    return readdirSync(at, { withFileTypes: true }).filter((entry) => entry.isDirectory() || entry.isSymbolicLink());
+  } catch {
+    return [];
+  }
+}
+var belowRefusal = (what, path, found) => found === "too many" ? orgRefusal(what, `it reads every folder below ${path}, more than the hook walks to find an org's checkout there`, "Name a folder nearer what you read, in a call of its own, or report to your lead.") : checkoutRefusal(what, found);
+var GREPS = new Set(["egrep", "fgrep", "ggrep", "grep"]);
+var GREP_RECURSIVE = /^(?:-[A-Za-z]*[rR]|--recursive$|--dereference-recursive$|--directories=recurse$)/;
+var recursive2 = (name, args) => name === "rg" || name === "find" || GREPS.has(name) && args.some((a) => GREP_RECURSIVE.test(a.value));
+var isFolder2 = (path) => {
+  try {
+    return statSync2(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
+function globRoot(pattern, base) {
+  const full = isAbsolute3(pattern) ? pattern : base && join5(base, pattern);
+  if (!full)
+    return;
+  const segments = full.split("/");
+  const at = segments.findIndex((segment) => GLOB_CHARS2.test(segment) || segment.includes("{"));
+  if (at < 0)
+    return { deep: false, root: full };
+  const rest = segments.slice(at);
+  return {
+    deep: rest.length > 1 || rest[0].includes("**"),
+    root: segments.slice(0, at).join("/") || "/"
+  };
+}
 var READ_TOOLS = { Glob: "path", Grep: "path", Read: "file_path" };
 var READS_NOTHING = new Set(["date", "echo", "printf", "pwd", "true"]);
 var PATH_LIKE = /[/~]/;
@@ -8640,7 +8705,7 @@ function globRegex(segment) {
   }
   return new RegExp(`${re}$`);
 }
-function globbed(value, cwd) {
+function globbed(value, cwd, deep = []) {
   const out = [];
   for (const pattern of braces(value)) {
     const root = isAbsolute3(pattern) ? "/" : cwd;
@@ -8652,6 +8717,8 @@ function globbed(value, cwd) {
         candidates = candidates.map((at) => join5(at, segment));
         continue;
       }
+      if (segment.includes("**"))
+        deep.push(...candidates);
       const re = globRegex(segment.replaceAll("**", "*"));
       const hidden = segment.startsWith(".");
       const next = [];
@@ -8689,7 +8756,7 @@ async function readable(w, env, steady, own) {
 async function opened(cmd, parsed, env, steady, own) {
   const { args, name, xargs } = parsed;
   const plain = READS_NOTHING.has(name);
-  const out = { places: [] };
+  const out = { below: [], places: [] };
   const blind = (why) => {
     out.unread ??= why;
   };
@@ -8697,6 +8764,7 @@ async function opened(cmd, parsed, env, steady, own) {
     out.places.push(env.cwd);
   else if (!plain && (env.cwdUnread || env.cwdAnywhere))
     blind("the folder a cd on the line left it in");
+  const named = [];
   const open = async (w, argument) => {
     for (const read of w.reads ?? []) {
       const path = read.unknown || marked(read.value) ? undefined : pathOf(read, env);
@@ -8716,14 +8784,23 @@ async function opened(cmd, parsed, env, steady, own) {
     if (!path)
       return;
     out.places.push(path);
+    if (argument)
+      named.push(path);
     if (word.glob)
-      out.places.push(...globbed(word.value, env.cwd));
+      out.places.push(...globbed(word.value, env.cwd, out.below));
   };
   for (const a of args)
     await open(a, true);
   for (const r of cmd.redirects)
     if (namesFile(r))
       await open(r.target, false);
+  if (recursive2(name, args)) {
+    const folders = named.filter(isFolder2);
+    if (folders.length > 0)
+      out.below.push(...folders);
+    else if (env.cwd && !named.some((path) => existsSync2(path)))
+      out.below.push(env.cwd);
+  }
   return out;
 }
 var DB_CLIENTS = new Set([
@@ -8904,11 +8981,16 @@ var visitor = (load5, limit, orgs, roots, held = UNHELD) => {
     const { args, name } = parsed;
     let blind;
     if (Array.isArray(orgs) && orgs.length > 0) {
-      const { places, unread } = await opened(cmd, parsed, env, held.steadyAt(cmd), held.own);
+      const { below, places, unread } = await opened(cmd, parsed, env, held.steadyAt(cmd), held.own);
       for (const place of places) {
         const repo = checkoutOf(place, orgs, roots);
         if (repo)
           return checkoutRefusal(`this ${name} call`, repo);
+      }
+      for (const folder of below) {
+        const found = checkoutBelow(folder, orgs, roots);
+        if (found)
+          return belowRefusal(`this ${name} call`, folder, found);
       }
       if (unread)
         blind = orgRefusal(`this ${name} call`, `it opens ${unread}, a path the hook cannot read, which may be in an org's checkout`, PATH_FIX);
@@ -8974,8 +9056,27 @@ async function inspect(raw, environment, load5, limit) {
       return;
     const given = toolInput?.[READ_TOOLS[tool]];
     const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join5(environment.HOME, given.slice(2)) : isAbsolute3(given) ? given : directory && resolve3(directory, given);
-    const repo = orgs.length > 0 ? checkoutOf(path, orgs, new Map) : undefined;
-    return repo ? checkoutRefusal(`this ${tool} call`, repo) : undefined;
+    if (orgs.length === 0)
+      return;
+    const roots = new Map;
+    const what = `this ${tool} call`;
+    const repo = checkoutOf(path, orgs, roots);
+    if (repo)
+      return checkoutRefusal(what, repo);
+    const pattern = toolInput?.pattern;
+    const glob = tool === "Glob" && typeof pattern === "string" ? globRoot(pattern, path) : undefined;
+    const root = tool === "Grep" ? path : glob?.root;
+    if (!root)
+      return;
+    if (root !== path) {
+      const at = checkoutOf(root, orgs, roots);
+      if (at)
+        return checkoutRefusal(what, at);
+    }
+    if (tool === "Grep" ? !isFolder2(root) : !glob?.deep)
+      return;
+    const found = checkoutBelow(root, orgs, roots);
+    return found ? belowRefusal(what, root, found) : undefined;
   }
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;

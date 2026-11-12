@@ -1,6 +1,13 @@
 // PreToolUse hook, acting for a factory session (role.ts) that runs on GLM alone: refuses a git commit whose staged files, or a git push whose commits the remote does not hold, touch a path that is Opus work (GLM was handed UI work three times, against "truly tiny" mechanical work only), and while load5 is over glm.readOnlyLoad5 (15 by default) any install, node_modules clone, commit or push (a GLM worker pushed twice at load5 20 to 30), and, by the glm rule, a headless Claude run, every org tool, a read of a guarded org's checkout and a database client aimed off this machine. It fails closed on a commit or push whose file list it cannot read, on an org tool whose repository or policy it cannot read, on a database client whose host it cannot read, and on a call it cannot parse inside a guarded checkout, and passes every other call.
 
-import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs"
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+} from "node:fs"
 import { loadavg } from "node:os"
 import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 
@@ -834,6 +841,79 @@ const checkoutRefusal = (what: string, repo: Repo) =>
     what,
     `it reads the checkout of ${label(repo.owner, repo.repo)}, a guarded org's repository`,
   )
+// How far below a folder a recursive read is walked for a guarded checkout, and the most folders the walk reads before it fails closed
+const BELOW_DEPTH = 4
+const BELOW_FOLDERS = 5000
+const UNWALKED = new Set([".git", "node_modules"])
+// The guarded org's checkout a recursive read of a folder reaches: the nearest one at most BELOW_DEPTH folders below it, a link there read by its real path and never walked into, .git and node_modules passed over; "too many" past BELOW_FOLDERS folders
+function checkoutBelow(path: string, orgs: string[], roots: Roots): Repo | "too many" | undefined {
+  let level = [realOf(resolve(path))]
+  let walked = 0
+  for (let depth = 0; depth < BELOW_DEPTH && level.length > 0; depth++) {
+    const next: string[] = []
+    for (const at of level)
+      for (const entry of folderEntries(at)) {
+        if (UNWALKED.has(entry.name)) continue
+        const child = join(at, entry.name)
+        if (++walked > BELOW_FOLDERS) return "too many"
+        if (entry.isSymbolicLink() || existsSync(join(child, ".git"))) {
+          const repo = checkoutOf(child, orgs, roots)
+          if (repo) return repo
+        }
+        if (entry.isDirectory()) next.push(child)
+      }
+    level = next
+  }
+}
+// A folder's entries that are folders or links, none when it cannot be read
+function folderEntries(at: string) {
+  try {
+    return readdirSync(at, { withFileTypes: true }).filter(
+      (entry) => entry.isDirectory() || entry.isSymbolicLink(),
+    )
+  } catch {
+    return []
+  }
+}
+const belowRefusal = (what: string, path: string, found: Repo | "too many") =>
+  found === "too many"
+    ? orgRefusal(
+        what,
+        `it reads every folder below ${path}, more than the hook walks to find an org's checkout there`,
+        "Name a folder nearer what you read, in a call of its own, or report to your lead.",
+      )
+    : checkoutRefusal(what, found)
+// The shell's recursive searches, which read every folder below the ones they name: rg and find always, grep and its kin by -r, -R or their long forms
+const GREPS = new Set(["egrep", "fgrep", "ggrep", "grep"])
+const GREP_RECURSIVE =
+  /^(?:-[A-Za-z]*[rR]|--recursive$|--dereference-recursive$|--directories=recurse$)/
+const recursive = (name: string, args: Word[]) =>
+  name === "rg" ||
+  name === "find" ||
+  (GREPS.has(name) && args.some((a) => GREP_RECURSIVE.test(a.value)))
+const isFolder = (path: string) => {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+// A Glob pattern's literal start, the folder its segments name before the first glob, read from the pattern's own root when it is absolute, else from the call's folder; deep when what follows reaches below that folder's own entries
+function globRoot(
+  pattern: string,
+  base: string | undefined,
+): { deep: boolean; root: string } | undefined {
+  const full = isAbsolute(pattern) ? pattern : base && join(base, pattern)
+  if (!full) return
+  const segments = full.split("/")
+  const at = segments.findIndex((segment) => GLOB_CHARS.test(segment) || segment.includes("{"))
+  if (at < 0) return { deep: false, root: full }
+  const rest = segments.slice(at)
+  return {
+    deep: rest.length > 1 || rest[0].includes("**"),
+    root: segments.slice(0, at).join("/") || "/",
+  }
+}
 // The read tools, each with the input that names what it reads; a Grep or a Glob with no path reads the session's folder
 const READ_TOOLS: Record<string, string> = { Glob: "path", Grep: "path", Read: "file_path" }
 // the shell's commands that read no file, which run inside an org's checkout and open only an argument with a slash or a tilde, since their plain words are text
@@ -877,8 +957,8 @@ function globRegex(segment: string): RegExp {
   }
   return new RegExp(`${re}$`)
 }
-// A glob's matches on disk, segment by segment from the call's folder: a literal segment is kept whether or not it exists, a glob segment takes each entry it matches (a hidden one only when the segment opens with the dot), a ** reads as a * here (the folders below it are the recursive read the residual-risk line names), at most 200 paths
-function globbed(value: string, cwd: string | undefined): string[] {
+// A glob's matches on disk, segment by segment from the call's folder: a literal segment is kept whether or not it exists, a glob segment takes each entry it matches (a hidden one only when the segment opens with the dot), a ** reads as a * here, each folder it starts from put in `deep`, which the caller walks all the way down, at most 200 paths
+function globbed(value: string, cwd: string | undefined, deep: string[] = []): string[] {
   const out: string[] = []
   for (const pattern of braces(value)) {
     const root = isAbsolute(pattern) ? "/" : cwd
@@ -889,6 +969,7 @@ function globbed(value: string, cwd: string | undefined): string[] {
         candidates = candidates.map((at) => join(at, segment))
         continue
       }
+      if (segment.includes("**")) deep.push(...candidates)
       const re = globRegex(segment.replaceAll("**", "*"))
       const hidden = segment.startsWith(".")
       const next: string[] = []
@@ -930,8 +1011,8 @@ async function readable(w: Word, env: Env, steady: Steady, own: Record<string, s
     steady,
   )
 }
-// The paths a command opens (its folder, each argument, each file a redirect names, each file a substitution in a word reads ($(< f), $(cat f)) and each match of a glob or a brace), and the first path it opens that the hook cannot read: a value it cannot expand, xargs's -I word, a file a substitution reads by such a value, or the folder a cd it cannot follow left it in; a command that reads nothing gives no folder and only a path-like argument, its other words text
-type Opened = { places: string[]; unread?: string }
+// The paths a command opens (its folder, each argument, each file a redirect names, each file a substitution in a word reads ($(< f), $(cat f)) and each match of a glob or a brace), the folders it reads all the way down (a recursive search's, else its own folder, and each folder a ** starts from), and the first path it opens that the hook cannot read: a value it cannot expand, xargs's -I word, a file a substitution reads by such a value, or the folder a cd it cannot follow left it in; a command that reads nothing gives no folder and only a path-like argument, its other words text
+type Opened = { below: string[]; places: string[]; unread?: string }
 async function opened(
   cmd: Command,
   parsed: Parsed,
@@ -941,13 +1022,14 @@ async function opened(
 ): Promise<Opened> {
   const { args, name, xargs } = parsed
   const plain = READS_NOTHING.has(name)
-  const out: Opened = { places: [] }
+  const out: Opened = { below: [], places: [] }
   const blind = (why: string) => {
     out.unread ??= why
   }
   if (!plain && env.cwd) out.places.push(env.cwd)
   else if (!plain && (env.cwdUnread || env.cwdAnywhere))
     blind("the folder a cd on the line left it in")
+  const named: string[] = []
   const open = async (w: Word, argument: boolean) => {
     for (const read of w.reads ?? []) {
       const path = read.unknown || marked(read.value) ? undefined : pathOf(read, env)
@@ -961,10 +1043,17 @@ async function opened(
     const path = pathOf(word, env)
     if (!path) return
     out.places.push(path)
-    if (word.glob) out.places.push(...globbed(word.value, env.cwd))
+    if (argument) named.push(path)
+    if (word.glob) out.places.push(...globbed(word.value, env.cwd, out.below))
   }
   for (const a of args) await open(a, true)
   for (const r of cmd.redirects) if (namesFile(r)) await open(r.target as Word, false)
+  // a recursive search reads each folder it names all the way down, or its own folder when it names no path on disk
+  if (recursive(name, args)) {
+    const folders = named.filter(isFolder)
+    if (folders.length > 0) out.below.push(...folders)
+    else if (env.cwd && !named.some((path) => existsSync(path))) out.below.push(env.cwd)
+  }
   return out
 }
 
@@ -1198,10 +1287,14 @@ const visitor = (load5: number, limit: number, orgs: Orgs, roots: Roots, held = 
     // a path the hook cannot read refuses after the org rules, whose own fix names the value to spell out
     let blind: string | undefined
     if (Array.isArray(orgs) && orgs.length > 0) {
-      const { places, unread } = await opened(cmd, parsed, env, held.steadyAt(cmd), held.own)
+      const { below, places, unread } = await opened(cmd, parsed, env, held.steadyAt(cmd), held.own)
       for (const place of places) {
         const repo = checkoutOf(place, orgs, roots)
         if (repo) return checkoutRefusal(`this ${name} call`, repo)
+      }
+      for (const folder of below) {
+        const found = checkoutBelow(folder, orgs, roots)
+        if (found) return belowRefusal(`this ${name} call`, folder, found)
       }
       if (unread)
         blind = orgRefusal(
@@ -1291,8 +1384,24 @@ async function inspect(
           : isAbsolute(given)
             ? given
             : directory && resolve(directory, given)
-    const repo = orgs.length > 0 ? checkoutOf(path, orgs, new Map()) : undefined
-    return repo ? checkoutRefusal(`this ${tool} call`, repo) : undefined
+    if (orgs.length === 0) return
+    const roots: Roots = new Map()
+    const what = `this ${tool} call`
+    const repo = checkoutOf(path, orgs, roots)
+    if (repo) return checkoutRefusal(what, repo)
+    // a Grep reads its folder all the way down, and a Glob the folder its pattern's literal start names whenever a glob reaches past one level there
+    const pattern = toolInput?.pattern
+    const glob =
+      tool === "Glob" && typeof pattern === "string" ? globRoot(pattern, path) : undefined
+    const root = tool === "Grep" ? path : glob?.root
+    if (!root) return
+    if (root !== path) {
+      const at = checkoutOf(root, orgs, roots)
+      if (at) return checkoutRefusal(what, at)
+    }
+    if (tool === "Grep" ? !isFolder(root) : !glob?.deep) return
+    const found = checkoutBelow(root, orgs, roots)
+    return found ? belowRefusal(what, root, found) : undefined
   }
   if (tool !== "Bash" || typeof toolInput?.command !== "string") return
   const command = toolInput.command

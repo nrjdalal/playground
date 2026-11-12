@@ -11783,7 +11783,14 @@ async function check6(raw, shell = process.env.SHELL ?? "zsh") {
 if (false) {}
 
 // scripts/hooks/no-glm-heavy-path.ts
-import { existsSync as existsSync8, readdirSync as readdirSync4, readFileSync as readFileSync5, readlinkSync, realpathSync as realpathSync4 } from "fs";
+import {
+  existsSync as existsSync8,
+  readdirSync as readdirSync4,
+  readFileSync as readFileSync5,
+  readlinkSync,
+  realpathSync as realpathSync4,
+  statSync as statSync4
+} from "fs";
 import { loadavg } from "os";
 import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute5, join as join13, resolve as resolve7 } from "path";
 
@@ -12530,6 +12537,64 @@ function checkoutOf(path, orgs, roots) {
   return found;
 }
 var checkoutRefusal = (what, repo) => orgRefusal(what, `it reads the checkout of ${label(repo.owner, repo.repo)}, a guarded org's repository`);
+var BELOW_DEPTH = 4;
+var BELOW_FOLDERS = 5000;
+var UNWALKED = new Set([".git", "node_modules"]);
+function checkoutBelow(path, orgs, roots) {
+  let level = [realOf2(resolve7(path))];
+  let walked = 0;
+  for (let depth = 0;depth < BELOW_DEPTH && level.length > 0; depth++) {
+    const next = [];
+    for (const at of level)
+      for (const entry of folderEntries(at)) {
+        if (UNWALKED.has(entry.name))
+          continue;
+        const child = join13(at, entry.name);
+        if (++walked > BELOW_FOLDERS)
+          return "too many";
+        if (entry.isSymbolicLink() || existsSync8(join13(child, ".git"))) {
+          const repo = checkoutOf(child, orgs, roots);
+          if (repo)
+            return repo;
+        }
+        if (entry.isDirectory())
+          next.push(child);
+      }
+    level = next;
+  }
+}
+function folderEntries(at) {
+  try {
+    return readdirSync4(at, { withFileTypes: true }).filter((entry) => entry.isDirectory() || entry.isSymbolicLink());
+  } catch {
+    return [];
+  }
+}
+var belowRefusal = (what, path, found) => found === "too many" ? orgRefusal(what, `it reads every folder below ${path}, more than the hook walks to find an org's checkout there`, "Name a folder nearer what you read, in a call of its own, or report to your lead.") : checkoutRefusal(what, found);
+var GREPS = new Set(["egrep", "fgrep", "ggrep", "grep"]);
+var GREP_RECURSIVE = /^(?:-[A-Za-z]*[rR]|--recursive$|--dereference-recursive$|--directories=recurse$)/;
+var recursive2 = (name, args) => name === "rg" || name === "find" || GREPS.has(name) && args.some((a) => GREP_RECURSIVE.test(a.value));
+var isFolder2 = (path) => {
+  try {
+    return statSync4(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
+function globRoot(pattern, base) {
+  const full = isAbsolute5(pattern) ? pattern : base && join13(base, pattern);
+  if (!full)
+    return;
+  const segments = full.split("/");
+  const at = segments.findIndex((segment) => GLOB_CHARS2.test(segment) || segment.includes("{"));
+  if (at < 0)
+    return { deep: false, root: full };
+  const rest = segments.slice(at);
+  return {
+    deep: rest.length > 1 || rest[0].includes("**"),
+    root: segments.slice(0, at).join("/") || "/"
+  };
+}
 var READ_TOOLS = { Glob: "path", Grep: "path", Read: "file_path" };
 var READS_NOTHING = new Set(["date", "echo", "printf", "pwd", "true"]);
 var PATH_LIKE = /[/~]/;
@@ -12565,7 +12630,7 @@ function globRegex(segment) {
   }
   return new RegExp(`${re}$`);
 }
-function globbed(value, cwd) {
+function globbed(value, cwd, deep = []) {
   const out = [];
   for (const pattern of braces(value)) {
     const root = isAbsolute5(pattern) ? "/" : cwd;
@@ -12577,6 +12642,8 @@ function globbed(value, cwd) {
         candidates = candidates.map((at) => join13(at, segment));
         continue;
       }
+      if (segment.includes("**"))
+        deep.push(...candidates);
       const re = globRegex(segment.replaceAll("**", "*"));
       const hidden = segment.startsWith(".");
       const next = [];
@@ -12614,7 +12681,7 @@ async function readable(w, env, steady, own) {
 async function opened(cmd, parsed, env, steady, own) {
   const { args, name, xargs } = parsed;
   const plain = READS_NOTHING.has(name);
-  const out = { places: [] };
+  const out = { below: [], places: [] };
   const blind = (why) => {
     out.unread ??= why;
   };
@@ -12622,6 +12689,7 @@ async function opened(cmd, parsed, env, steady, own) {
     out.places.push(env.cwd);
   else if (!plain && (env.cwdUnread || env.cwdAnywhere))
     blind("the folder a cd on the line left it in");
+  const named = [];
   const open = async (w, argument) => {
     for (const read of w.reads ?? []) {
       const path = read.unknown || marked(read.value) ? undefined : pathOf(read, env);
@@ -12641,14 +12709,23 @@ async function opened(cmd, parsed, env, steady, own) {
     if (!path)
       return;
     out.places.push(path);
+    if (argument)
+      named.push(path);
     if (word.glob)
-      out.places.push(...globbed(word.value, env.cwd));
+      out.places.push(...globbed(word.value, env.cwd, out.below));
   };
   for (const a of args)
     await open(a, true);
   for (const r of cmd.redirects)
     if (namesFile(r))
       await open(r.target, false);
+  if (recursive2(name, args)) {
+    const folders = named.filter(isFolder2);
+    if (folders.length > 0)
+      out.below.push(...folders);
+    else if (env.cwd && !named.some((path) => existsSync8(path)))
+      out.below.push(env.cwd);
+  }
   return out;
 }
 var DB_CLIENTS = new Set([
@@ -12829,11 +12906,16 @@ var visitor = (load5, limit, orgs, roots, held = UNHELD) => {
     const { args, name } = parsed;
     let blind;
     if (Array.isArray(orgs) && orgs.length > 0) {
-      const { places, unread } = await opened(cmd, parsed, env, held.steadyAt(cmd), held.own);
+      const { below, places, unread } = await opened(cmd, parsed, env, held.steadyAt(cmd), held.own);
       for (const place of places) {
         const repo = checkoutOf(place, orgs, roots);
         if (repo)
           return checkoutRefusal(`this ${name} call`, repo);
+      }
+      for (const folder of below) {
+        const found = checkoutBelow(folder, orgs, roots);
+        if (found)
+          return belowRefusal(`this ${name} call`, folder, found);
       }
       if (unread)
         blind = orgRefusal(`this ${name} call`, `it opens ${unread}, a path the hook cannot read, which may be in an org's checkout`, PATH_FIX);
@@ -12899,8 +12981,27 @@ async function inspect5(raw, environment, load5, limit) {
       return;
     const given = toolInput?.[READ_TOOLS[tool]];
     const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join13(environment.HOME, given.slice(2)) : isAbsolute5(given) ? given : directory && resolve7(directory, given);
-    const repo = orgs.length > 0 ? checkoutOf(path, orgs, new Map) : undefined;
-    return repo ? checkoutRefusal(`this ${tool} call`, repo) : undefined;
+    if (orgs.length === 0)
+      return;
+    const roots = new Map;
+    const what = `this ${tool} call`;
+    const repo = checkoutOf(path, orgs, roots);
+    if (repo)
+      return checkoutRefusal(what, repo);
+    const pattern = toolInput?.pattern;
+    const glob = tool === "Glob" && typeof pattern === "string" ? globRoot(pattern, path) : undefined;
+    const root = tool === "Grep" ? path : glob?.root;
+    if (!root)
+      return;
+    if (root !== path) {
+      const at = checkoutOf(root, orgs, roots);
+      if (at)
+        return checkoutRefusal(what, at);
+    }
+    if (tool === "Grep" ? !isFolder2(root) : !glob?.deep)
+      return;
+    const found = checkoutBelow(root, orgs, roots);
+    return found ? belowRefusal(what, root, found) : undefined;
   }
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
@@ -14772,8 +14873,8 @@ var RUNS = {
 var QUEUES = new Set(["at", "batch"]);
 var unversioned = (name) => name.replace(/(?<=.)@[^@/]*$/, "");
 var ATTACHED = /^(?:--exec(?:-batch)?=|-[01FHILVaghilpqsu]*[xX]=?)(.*)$/s;
-var recursive2 = (v) => v.startsWith("--") ? v.length >= 3 && "--recursive".startsWith(v) : /^-[A-Za-z]*[rR]/.test(v);
-var spellsRecursive = (v) => v.split(/[\s,{}]+/).some((part) => part.startsWith("-") && recursive2(part));
+var recursive3 = (v) => v.startsWith("--") ? v.length >= 3 && "--recursive".startsWith(v) : /^-[A-Za-z]*[rR]/.test(v);
+var spellsRecursive = (v) => v.split(/[\s,{}]+/).some((part) => part.startsWith("-") && recursive3(part));
 var hidden = (word) => unreadable(word) || !!word.glob && /[*?]|\[[^\]]*\]/.test(word.value);
 var prefixOf = (v, option, shortest) => v.length >= shortest && option.startsWith(v);
 function real3(path) {
@@ -14807,7 +14908,7 @@ function judgeRm(args, xargs, env, roots, { nested }) {
       continue;
     }
     const option = options && a.value.startsWith("-") && a.value !== "-";
-    if (option && recursive2(a.value))
+    if (option && recursive3(a.value))
       return refuse11(`a recursive rm (${a.value})`);
     const spread = marked(a.value) && (!nested || !a.quoted);
     if (spread || options && spellsRecursive(a.value) || option && hidden(a))
@@ -15340,7 +15441,7 @@ var readOf = (word, at) => {
   const again = lex(word.raw, known).commands[0]?.words[0];
   return again && !marked(again.value) ? again : undefined;
 };
-var recursive3 = (name, args) => RECURSIVE.has(name) || args.some((a) => RECURSIVE_WITH[name]?.test(a.value));
+var recursive4 = (name, args) => RECURSIVE.has(name) || args.some((a) => RECURSIVE_WITH[name]?.test(a.value));
 async function judgeBash(command, cwd, environment) {
   const targets = targetsOf(environment);
   if (namesTarget(command, targets))
@@ -15373,7 +15474,7 @@ async function judgeBash(command, cwd, environment) {
           const stands = worst(path, targets, !!word.glob);
           if (stands === "inside")
             return refuse13(`${visible(word.value)}, which reaches whatsapp/ in the data folder`);
-          if (stands === "above" && recursive3(program(name), args))
+          if (stands === "above" && recursive4(program(name), args))
             return refuse13(`${name} through ${visible(word.value)}, which reads whatsapp/ in the data folder on its way down`);
         }
       }
@@ -15868,7 +15969,7 @@ function turboTask(words) {
   const tasks = (beside ? lineWords(values) : values).filter((v) => v !== "" && !v.startsWith("-"));
   return (tasks[0] === "run" ? tasks.slice(1) : tasks).find((t) => TURBO_TASKS.has(t));
 }
-var recursive4 = (args) => args.some((a) => /^-[a-zA-Z]*[Rra]/.test(a.value) || ["--archive", "--recursive"].includes(a.value));
+var recursive5 = (args) => args.some((a) => /^-[a-zA-Z]*[Rra]/.test(a.value) || ["--archive", "--recursive"].includes(a.value));
 function heavy2(name, args, env) {
   const compose = portlessCompose(name, args);
   if (DOCKERS.has(name) || compose) {
@@ -15878,7 +15979,7 @@ function heavy2(name, args, env) {
   if (name === "cp") {
     const paths = args.filter((a) => !a.value.startsWith("-"));
     const from = paths.slice(0, -1);
-    if (recursive4(args) && from.some((a) => program(a.value.replace(/\/+$/, "")) === "node_modules"))
+    if (recursive5(args) && from.some((a) => program(a.value.replace(/\/+$/, "")) === "node_modules"))
       return {
         dir: paths.at(-1) && pathOf(paths.at(-1), env),
         what: "a node_modules clone"

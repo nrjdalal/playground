@@ -1336,12 +1336,13 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
     }
   })
 
+  // the session's repo holds org-link.md, a link into the org's checkout, which a recursive read reaches, so these read a folder with none
   test("a recursive read of a folder holding no guarded checkout runs on GLM", async () => {
     mkdirSync(join(LOOSE, "deep", "er"), { recursive: true })
     for (const raw of [
-      input("rg token ."),
-      input("grep -rn token ."),
-      input("find . -name '*.ts'"),
+      input("rg token .", LOOSE),
+      input("grep -rn token .", LOOSE),
+      input("find . -name '*.ts'", LOOSE),
       input("rg token ../read-loose"),
       input("cat docs/**/*.md"),
       call("Grep", { path: LOOSE, pattern: "token" }),
