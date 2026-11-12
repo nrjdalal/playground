@@ -39,7 +39,7 @@ GET $YARD_HOST/api/v1/yard/channels/$YARD_DM_ID/messages?after=<message id>
 - With no `after`, the answer is the newest page of messages, oldest first.
 - With `after=<message id>`, the answer is the page that follows that message, oldest first: what is new since that message.
 - `limit=<n>` sets how many messages a page holds: 50 by default, at most 100.
-- `hasMore` is true when more messages follow the page: read again with `after` set to the page's last id.
+- `hasMore` is true when the page left messages out. On a read with `after`, those are newer: read again with `after` set to the page's last id. On a read with no `after`, those are older than the page.
 
 The answer:
 

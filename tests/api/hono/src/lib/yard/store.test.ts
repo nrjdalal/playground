@@ -208,7 +208,7 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       ).toEqual([])
     })
 
-    test("waiting lists every message a bot sends in its DM to the bot's maker, with no mention, and to no one else", async () => {
+    test("waiting lists every message a bot sends in its DM to the bot's maker, with no mention, and not to a member outside the DM", async () => {
       const since = new Date(Date.now() - 1000).toISOString()
       const { bot } = await store.createBot(db, web("ada", true), "waiter")
       const [row] = await sql`select id from "user" where login = ${bot.login}`
