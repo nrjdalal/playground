@@ -353,14 +353,21 @@ function operandsPast(args: Word[], takes: string, long: string[]): Word[] {
   }
   return out
 }
-// The values an option of `short` or `long` names, attached, after an = or as the next word, read past a cluster's letters until one in `takes` takes the rest of the cluster, or the next word when it ends it
-function optionValues(args: Word[], short: string, takes: string, long: string[]): Word[] {
+// The values an option of `short` or `long` names, attached, after an = or as the next word, read past a cluster's letters until one in `takes` takes the rest of the cluster, or the next word when it ends it; a long one by any prefix, or by its exact name alone under `exact`, as curl reads it
+function optionValues(
+  args: Word[],
+  short: string,
+  takes: string,
+  long: string[],
+  exact = false,
+): Word[] {
   const out: Word[] = []
   for (let k = 0; k < args.length && args[k].value !== "--"; k++) {
     const v = args[k].value
     const eq = v.indexOf("=")
     if (v.startsWith("--")) {
-      if (longOf(eq === -1 ? v : v.slice(0, eq), long))
+      const name = eq === -1 ? v : v.slice(0, eq)
+      if (exact ? long.includes(name) : longOf(name, long))
         if (eq !== -1) out.push(after(args[k], eq + 1))
         else if (args[k + 1]) out.push(args[++k])
     } else if (/^-./.test(v))
@@ -455,7 +462,7 @@ function tarWrites(args: Word[]): Word[] {
 }
 // chmod's mode word, octal or symbolic, which names no file
 const MODE = /^(?:[0-7]+|[ugoa]*[-+=][-+=rwxXstugo,]*)$/
-// curl's short options that take a value, of which -o, -c and -D write the file they name
+// curl's short options that take a value, of which -o, -c and -D write the file they name, and its long ones that write, each taken by its exact name alone, as curl takes it (--cookie is no --cookie-jar)
 const CURL_TAKES = "AbcCdDeEFHKmoPQrtTuUwxXyYz"
 const CURL_WRITES = [
   "--alt-svc",
@@ -485,7 +492,7 @@ function unreadCdWrites(tool: string, args: Word[], env: Env, getopt: boolean): 
     return operandsPast(args, "ns", ["--iterations", "--random-source", "--size"])
   if (tool === "tar") return tarWrites(args)
   if (tool === "curl") {
-    const files = optionValues(args, "cDo", CURL_TAKES, CURL_WRITES)
+    const files = optionValues(args, "cDo", CURL_TAKES, CURL_WRITES, true)
     const named = args.some((a) => /^-[^-]*O|^--remote-name/.test(a.value))
     return named && !args.some((a) => a.value.startsWith("--output-dir"))
       ? [...files, SHELL_FOLDER]
