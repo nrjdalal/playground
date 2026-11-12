@@ -9170,7 +9170,10 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     return;
   if (state().policy.anyWrite) {
     const target = decide(dir ? checkout : [undefined]);
-    return target.where === "guarded" ? judge("git commit", target, [], env) : undefined;
+    if (target.where !== "guarded")
+      return;
+    const onBranch = state().policy.branchPush && dir && !carried && !state().movedBefore && branchHead(dir);
+    return onBranch ? undefined : judge("git commit", target, [], env);
   }
   const { flags } = parseFlags(rest, COMMIT_TAKES);
   const texts = [branch(dir)];
@@ -9306,6 +9309,23 @@ function branchOnly(flags, positionals, dir) {
     const name = (destination ?? source).replace(/^(?:refs\/)?heads\//, "");
     return name !== "" && !/^(?:refs\/|@$|head$|tag$)/i.test(name) && !defaults.has(name.toLowerCase());
   });
+}
+function branchHead(dir) {
+  const head = gitText(dir, ["symbolic-ref", "--short", "-q", "HEAD"], "the checkout's branch");
+  const name = head.value.trim().toLowerCase();
+  if (head.unknown || name === "")
+    return false;
+  const remotes = gitText(dir, ["remote"], "the checkout's remotes");
+  if (remotes.unknown)
+    return false;
+  const defaults = new Set(["main", "master"]);
+  for (const remote of remotes.value.split(`
+`).filter(Boolean)) {
+    const ref = gitText(dir, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`], "the remote's default branch");
+    if (!ref.unknown)
+      defaults.add(ref.value.trim().slice(remote.length + 1).toLowerCase());
+  }
+  return !defaults.has(name);
 }
 async function push(rest, env, checkout, takes = PUSH_TAKES, plain = false) {
   const { flags, positionals } = parseFlags(rest, takes);
