@@ -19,9 +19,10 @@ const readCursor = async (
   const raw = await Bun.file(path)
     .text()
     .catch(() => undefined)
+  if (raw === undefined) return { at: {}, whole: false }
   let parsed: unknown
   try {
-    parsed = JSON.parse(raw?.trim() || "0")
+    parsed = JSON.parse(raw.trim() || "0")
   } catch {}
   if (typeof parsed === "number") return { at: { [ALERTS]: parsed }, whole: false }
   // a cursor that does not read as offsets (cut off, or not JSON) is none, so the wait still runs
