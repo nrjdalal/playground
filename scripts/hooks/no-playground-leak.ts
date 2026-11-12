@@ -672,7 +672,7 @@ async function gh(
     if (refused) return refused
   }
   const target = decide(named.length > 0 ? named : fallback)
-  if (key === "pr create" && target.where !== "other") texts.push(...prCreate(rest, env))
+  if (key === "pr create" && target.where !== "other") texts.push(...prCreate(rest, flags, env))
   return judge(
     `gh ${key}`,
     target,
@@ -765,10 +765,10 @@ function unplaced(what: string, source: (Repo | undefined)[], env: Env): string 
 }
 
 // What `gh pr create` publishes beyond its flags: with no --head, the branch it opens from and the commits it may push (with --head it opens from that branch, already pushed, and pushes nothing), and with --fill the messages it reads.
-function prCreate(rest: Word[], env: Env): Placed[] {
+function prCreate(rest: Word[], flags: Flag[], env: Env): Placed[] {
   const values = rest.map((w) => w.value)
   const texts: Placed[] = []
-  if (!values.some((v) => /^(?:-H|--head)(?:=|$)/.test(v)))
+  if (!flags.some((f) => f.name === "-H" || f.name === "--head"))
     texts.push(
       ...commitTexts(
         env.cwd,

@@ -1012,6 +1012,14 @@ describe("a pull request opened from a pushed branch is judged on its own text (
     expect(await bash(create("Fix by worker-envy", "clean.md"), scratch)).toContain('"worker-envy"')
   })
 
+  test.each(["-H fix/export", "--head=fix/export", "-Hfix/export", "-dH fix/export"])(
+    "gh pr create %s, outside a checkout, is judged on its text alone",
+    async (head) => {
+      const command = `gh pr create ${LW} ${head} --title "Fix export" --body-file ${file("clean.md")}`
+      expect(await bash(command, scratch)).toBeUndefined()
+    },
+  )
+
   test("gh pr create with no --head, outside a checkout, stays refused for the commits it may push", async () => {
     const reason = await bash(
       `gh pr create ${LW} --title "Fix export" --body-file ${file("clean.md")}`,
