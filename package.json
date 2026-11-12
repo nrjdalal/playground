@@ -25,6 +25,7 @@
     "devtools": "turbo devtools",
     "dm": "bun --no-env-file packages/scripts/src/dm/cli.ts",
     "docs:wrap": "bun packages/scripts/src/docs-wrap/cli.ts",
+    "ext:merge": "bun packages/scripts/src/verify/prebuild.ts ext-merge && bun --no-env-file packages/scripts/src/ext-merge/cli.ts",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "gate:new-user": "bun packages/scripts/src/new-user-gate/cli.ts",

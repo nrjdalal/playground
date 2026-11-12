@@ -244,6 +244,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A merge of `canary` makes a new head, which needs its own checks and 5/5.
   Merges go one at a time, under the factory's merge lock, which pr:merge takes itself.
   A wrong refusal goes to the Builder, the only one who merges by hand, on an override.
+- Every extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n>`, so none lands on its default branch unless the account every session pushes as opened it, a reviewer session other than its author scored it 5/5 at its head, and its checks passed.
 - A lead that overrules a reviewer's FAIL says so on the PR, in one `Lead ruling:` line with the evidence and the issue the fault moved to, so the next reviewer reads the FAIL as settled; the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
 - No session but the dashboard's runner restarts the live dashboard.
 - No session, and no fork or sub-agent one runs, stops a process it did not start: the **signal** rule.

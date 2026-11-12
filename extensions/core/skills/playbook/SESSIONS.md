@@ -99,6 +99,8 @@ A reviewer's round sorts its findings into blocking, should-fix and nits; the wo
 - Post one sort comment per PR, naming each nit kept, with the PR it waits for, or dropped, with why.
   Done when every finding of the round is fixed in the push, kept in the sort comment with its PR, or dropped there with its reason.
 
+An extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n>`, its worker pushing a branch other than `main` by remote and refspec (`git push origin HEAD:<branch>`) and its reviewer spawned for the PR's URL; done when the PR reads merged.
+
 ## Write a handoff
 
 A handoff, for a respawn, a parked chore or a priority close, counts as written only once `TZ=UTC ls -l <path>` prints its file, and the report that names it quotes that line.
