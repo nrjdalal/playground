@@ -5812,10 +5812,100 @@ var slackSettings = defineSettings({
   }
 });
 
+// scripts/hooks/role.ts
+import { homedir as homedir2 } from "os";
+import { join as join4 } from "path";
+var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
+var names;
+function loadNames(environment = process.env) {
+  names ??= (async () => {
+    try {
+      const setting = join4(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
+        env: { ...process.env, ...environment },
+        stderr: "ignore",
+        stdout: "pipe"
+      });
+      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
+`);
+      if (await read.exited === 0)
+        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
+    } catch {}
+  })();
+  return names;
+}
+async function registryName(sessionId, environment = process.env) {
+  const dir = join4(environment.CLAUDE_CONFIG_DIR || join4(homedir2(), ".claude"), "sessions");
+  for await (const file of new Bun.Glob("*.json").scan(dir)) {
+    try {
+      const entry = await Bun.file(join4(dir, file)).json();
+      if (entry.sessionId === sessionId && typeof entry.name === "string")
+        return entry.name;
+    } catch {}
+  }
+}
+async function codexName(sessionId, environment = process.env) {
+  if (!environment.CODEX_HOME)
+    return;
+  let name;
+  try {
+    const index = await Bun.file(join4(environment.CODEX_HOME, "session_index.jsonl")).text();
+    for (const line of index.split(`
+`)) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.id === sessionId && typeof entry.thread_name === "string")
+          name = entry.thread_name;
+      } catch {}
+    }
+  } catch {}
+  return name;
+}
+async function rosterKind(name, environment = process.env) {
+  const path = join4(dataDirOf(environment), "roster.json");
+  try {
+    const roster = await Bun.file(path).json();
+    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
+    return isRosterKind(kind) ? kind : undefined;
+  } catch {
+    return;
+  }
+}
+async function rosterRole(name, environment = process.env) {
+  const kind = await rosterKind(name, environment);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+async function sessionRole(environment, sessionId) {
+  if (environment.PLAYGROUND_ROLE)
+    return environment.PLAYGROUND_ROLE;
+  if (typeof sessionId !== "string")
+    return "";
+  try {
+    const name = await registryName(sessionId, environment) ?? await codexName(sessionId, environment) ?? "";
+    const role = name && await rosterRole(name, environment);
+    if (role)
+      return role;
+    await loadNames(environment);
+    return roleOfName(name);
+  } catch {
+    return "";
+  }
+}
+async function fromFactory(raw, environment = process.env) {
+  return await sessionRole(environment, sessionOf(raw)) !== "";
+}
+function sessionOf(raw) {
+  try {
+    return JSON.parse(raw).session_id;
+  } catch {
+    return;
+  }
+}
+
 // scripts/hooks/shell.ts
 import { AsyncLocalStorage } from "async_hooks";
 import { realpathSync, statSync as statSync2 } from "fs";
-import { homedir as homedir2 } from "os";
+import { homedir as homedir3 } from "os";
 import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
@@ -6344,7 +6434,7 @@ var merge2 = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join4 = (parts, separator = "") => {
+var join5 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -6799,7 +6889,7 @@ function word(lx) {
       if (marked(text.value))
         out.splits = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
-      out.value += homedir2();
+      out.value += homedir3();
       lx.i++;
     } else {
       if (c === UNKNOWN || c === READ)
@@ -7336,7 +7426,7 @@ var tildeSign = (name, dir, env) => (name === "cd" || name === "pushd") && env.o
 async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
-    return homedir2();
+    return homedir3();
   const lexical = dir.value === "-" ? undefined : pathOf(dir, env);
   const typed = await folder(lexical && physicalCd(args) ? kernelPath(dir, env.cwd, lexical) : lexical);
   const sign = typed ? undefined : tildeSign(name, dir, env);
@@ -7352,7 +7442,7 @@ function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
   const [dir] = dirs;
   if (!dir) {
-    return name === "cd" ? { paths: [homedir2()], unread: false } : { back: true, paths: [homedir2()], unread: true };
+    return name === "cd" ? { paths: [homedir3()], unread: false } : { back: true, paths: [homedir3()], unread: true };
   }
   if (dir.value === "-")
     return { back: true, paths: [], unread: true };
@@ -7549,7 +7639,7 @@ async function scriptOf(operand, cmd, env) {
   return scripts;
 }
 async function outputs(cmds, env) {
-  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join5(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -7560,7 +7650,7 @@ async function record2(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown2(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join4([await existing(path, env), out]) : out));
+    env.files.set(path, held2(r.op === ">>" ? join5([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -7569,7 +7659,7 @@ async function record2(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join4([await existing(path, env), input]) : input));
+      env.files.set(path, held2(append ? join5([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -7598,7 +7688,7 @@ async function outputOf(cmd, env) {
         return unknown2(LARGE);
       parts.push(part);
     }
-    return join4(parts);
+    return join5(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -7874,6 +7964,13 @@ function knownVariables(command, environment, cwd) {
   return known;
 }
 
+// scripts/hooks/no-prepare-write.ts
+var WRITES = [
+  [/github/i, new Set(["create_pull_request"])],
+  [/linear/i, new Set(["save_comment", "save_issue"])],
+  [/slack/i, new Set(["chat_post_message"])]
+];
+
 // scripts/hooks/read-only.ts
 var READ_FILE = { count: true, operands: true, values: ["-c", "-n"] };
 var GH_VIEW = {
@@ -8034,96 +8131,6 @@ function readOnly(raw) {
     return lex(input.command).commands.every(commandReads);
   } catch {
     return false;
-  }
-}
-
-// scripts/hooks/role.ts
-import { homedir as homedir3 } from "os";
-import { join as join5 } from "path";
-var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
-var names;
-function loadNames(environment = process.env) {
-  names ??= (async () => {
-    try {
-      const setting = join5(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
-      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
-        env: { ...process.env, ...environment },
-        stderr: "ignore",
-        stdout: "pipe"
-      });
-      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
-`);
-      if (await read.exited === 0)
-        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
-    } catch {}
-  })();
-  return names;
-}
-async function registryName(sessionId, environment = process.env) {
-  const dir = join5(environment.CLAUDE_CONFIG_DIR || join5(homedir3(), ".claude"), "sessions");
-  for await (const file of new Bun.Glob("*.json").scan(dir)) {
-    try {
-      const entry = await Bun.file(join5(dir, file)).json();
-      if (entry.sessionId === sessionId && typeof entry.name === "string")
-        return entry.name;
-    } catch {}
-  }
-}
-async function codexName(sessionId, environment = process.env) {
-  if (!environment.CODEX_HOME)
-    return;
-  let name;
-  try {
-    const index = await Bun.file(join5(environment.CODEX_HOME, "session_index.jsonl")).text();
-    for (const line of index.split(`
-`)) {
-      try {
-        const entry = JSON.parse(line);
-        if (entry.id === sessionId && typeof entry.thread_name === "string")
-          name = entry.thread_name;
-      } catch {}
-    }
-  } catch {}
-  return name;
-}
-async function rosterKind(name, environment = process.env) {
-  const path = join5(dataDirOf(environment), "roster.json");
-  try {
-    const roster = await Bun.file(path).json();
-    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
-    return isRosterKind(kind) ? kind : undefined;
-  } catch {
-    return;
-  }
-}
-async function rosterRole(name, environment = process.env) {
-  const kind = await rosterKind(name, environment);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
-}
-async function sessionRole(environment, sessionId) {
-  if (environment.PLAYGROUND_ROLE)
-    return environment.PLAYGROUND_ROLE;
-  if (typeof sessionId !== "string")
-    return "";
-  try {
-    const name = await registryName(sessionId, environment) ?? await codexName(sessionId, environment) ?? "";
-    const role = name && await rosterRole(name, environment);
-    if (role)
-      return role;
-    await loadNames(environment);
-    return roleOfName(name);
-  } catch {
-    return "";
-  }
-}
-async function fromFactory(raw, environment = process.env) {
-  return await sessionRole(environment, sessionOf(raw)) !== "";
-}
-function sessionOf(raw) {
-  try {
-    return JSON.parse(raw).session_id;
-  } catch {
-    return;
   }
 }
 

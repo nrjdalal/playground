@@ -46,7 +46,7 @@ applyEnvAliases();
 // scripts/hooks/no-playground-leak.ts
 import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
 import { existsSync as existsSync3, readdirSync, readFileSync as readFileSync2, statSync as statSync2 } from "fs";
-import { basename as basename2, join as join5 } from "path";
+import { basename as basename2, join as join6 } from "path";
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
@@ -5727,10 +5727,169 @@ async function loadList(guard, path, valid, empty, environment = process.env) {
 var isStrings = (value) => Array.isArray(value) && value.every((item) => typeof item === "string");
 var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
+// scripts/hooks/no-prepare-write.ts
+import { appendFileSync, mkdirSync } from "fs";
+import { join as join5 } from "path";
+
+// scripts/hooks/role.ts
+import { homedir as homedir2 } from "os";
+import { join as join3 } from "path";
+
+// packages/config/src/kinds.ts
+var ROSTER_KINDS = [
+  "assistant",
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "orchestrator",
+  "planner",
+  "probe",
+  "researcher",
+  "reviewer",
+  "runner",
+  "tester",
+  "worker"
+];
+var isRosterKind = (value) => ROSTER_KINDS.includes(value);
+var FACTORY_ROLE_OF_KIND = {
+  assistant: "lead",
+  builder: "lead",
+  dispatcher: "dispatcher",
+  ops: "lead",
+  optimizer: "lead",
+  orchestrator: "lead",
+  planner: "lead",
+  probe: "probe",
+  researcher: "worker",
+  reviewer: "reviewer",
+  runner: "runner",
+  tester: "tester",
+  worker: "worker"
+};
+var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
+var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
+var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
+var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
+var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
+var DEFAULT_SESSION_NAMES = {
+  aliases: {},
+  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
+};
+var NAMES = Symbol.for("playground.sessionNames");
+var held = globalThis;
+var setSessionNames = (next) => {
+  held[NAMES] = next;
+};
+var getSessionNames = () => held[NAMES] ?? DEFAULT_SESSION_NAMES;
+var namedKinds = () => {
+  const { aliases, names } = getSessionNames();
+  return new Map([
+    ...Object.entries(names).map(([kind, name]) => [name, kind]),
+    [`${names.dispatcher}-2`, "dispatcher"],
+    ...Object.entries(aliases),
+    ["optimizer", "optimizer"]
+  ]);
+};
+var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
+function roleOfName(name) {
+  const kind = placedKindOfName(name);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+var SEATLESS = new Set(["ended", "parked"]);
+
+// scripts/hooks/role.ts
+var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
+var names;
+function loadNames(environment = process.env) {
+  names ??= (async () => {
+    try {
+      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
+        env: { ...process.env, ...environment },
+        stderr: "ignore",
+        stdout: "pipe"
+      });
+      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
+`);
+      if (await read.exited === 0)
+        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
+    } catch {}
+  })();
+  return names;
+}
+async function registryName(sessionId, environment = process.env) {
+  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir2(), ".claude"), "sessions");
+  for await (const file of new Bun.Glob("*.json").scan(dir)) {
+    try {
+      const entry = await Bun.file(join3(dir, file)).json();
+      if (entry.sessionId === sessionId && typeof entry.name === "string")
+        return entry.name;
+    } catch {}
+  }
+}
+async function codexName(sessionId, environment = process.env) {
+  if (!environment.CODEX_HOME)
+    return;
+  let name;
+  try {
+    const index = await Bun.file(join3(environment.CODEX_HOME, "session_index.jsonl")).text();
+    for (const line of index.split(`
+`)) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.id === sessionId && typeof entry.thread_name === "string")
+          name = entry.thread_name;
+      } catch {}
+    }
+  } catch {}
+  return name;
+}
+async function rosterKind(name, environment = process.env) {
+  const path = join3(dataDirOf(environment), "roster.json");
+  try {
+    const roster = await Bun.file(path).json();
+    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
+    return isRosterKind(kind) ? kind : undefined;
+  } catch {
+    return;
+  }
+}
+async function rosterRole(name, environment = process.env) {
+  const kind = await rosterKind(name, environment);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+async function sessionRole(environment, sessionId) {
+  if (environment.PLAYGROUND_ROLE)
+    return environment.PLAYGROUND_ROLE;
+  if (typeof sessionId !== "string")
+    return "";
+  try {
+    const name = await registryName(sessionId, environment) ?? await codexName(sessionId, environment) ?? "";
+    const role = name && await rosterRole(name, environment);
+    if (role)
+      return role;
+    await loadNames(environment);
+    return roleOfName(name);
+  } catch {
+    return "";
+  }
+}
+async function fromFactory(raw, environment = process.env) {
+  return await sessionRole(environment, sessionOf(raw)) !== "";
+}
+function sessionOf(raw) {
+  try {
+    return JSON.parse(raw).session_id;
+  } catch {
+    return;
+  }
+}
+
 // scripts/hooks/shell.ts
 import { AsyncLocalStorage } from "async_hooks";
 import { realpathSync, statSync } from "fs";
-import { homedir as homedir2 } from "os";
+import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
@@ -5760,7 +5919,7 @@ function filled(script, mark, value) {
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
-var held = (text) => text.value.length > MAX_BYTES ? unknown2(LARGE) : text;
+var held2 = (text) => text.value.length > MAX_BYTES ? unknown2(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
 var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
@@ -6256,7 +6415,7 @@ var merge2 = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join3 = (parts, separator = "") => {
+var join4 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -6711,7 +6870,7 @@ function word(lx) {
       if (marked(text.value))
         out.splits = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
-      out.value += homedir2();
+      out.value += homedir3();
       lx.i++;
     } else {
       if (c === UNKNOWN || c === READ)
@@ -7248,7 +7407,7 @@ var tildeSign = (name, dir, env) => (name === "cd" || name === "pushd") && env.o
 async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
-    return homedir2();
+    return homedir3();
   const lexical = dir.value === "-" ? undefined : pathOf(dir, env);
   const typed = await folder(lexical && physicalCd(args) ? kernelPath(dir, env.cwd, lexical) : lexical);
   const sign = typed ? undefined : tildeSign(name, dir, env);
@@ -7264,7 +7423,7 @@ function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
   const [dir] = dirs;
   if (!dir) {
-    return name === "cd" ? { paths: [homedir2()], unread: false } : { back: true, paths: [homedir2()], unread: true };
+    return name === "cd" ? { paths: [homedir3()], unread: false } : { back: true, paths: [homedir3()], unread: true };
   }
   if (dir.value === "-")
     return { back: true, paths: [], unread: true };
@@ -7461,7 +7620,7 @@ async function scriptOf(operand, cmd, env) {
   return scripts;
 }
 async function outputs(cmds, env) {
-  return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -7472,7 +7631,7 @@ async function record2(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown2(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held(r.op === ">>" ? join3([await existing(path, env), out]) : out));
+    env.files.set(path, held2(r.op === ">>" ? join4([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -7481,7 +7640,7 @@ async function record2(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held(append ? join3([await existing(path, env), input]) : input));
+      env.files.set(path, held2(append ? join4([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -7510,7 +7669,7 @@ async function outputOf(cmd, env) {
         return unknown2(LARGE);
       parts.push(part);
     }
-    return join3(parts);
+    return join4(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -7552,13 +7711,13 @@ async function stdinOf(cmd, env) {
   tick();
   const input = cmd.redirects.findLast((r) => !r.bodyFed && ownFeed(r));
   if (!input)
-    return held(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown2("stdin the hook cannot see"));
-  return held(await redirectText(input, env, false));
+    return held2(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown2("stdin the hook cannot see"));
+  return held2(await redirectText(input, env, false));
 }
 async function scriptStdin(cmd, env) {
   const own = await stdinOf(cmd, env);
   tick();
-  const fed = held(await stdinText(cmd, env));
+  const fed = held2(await stdinText(cmd, env));
   return fed.value === own.value && fed.unknown === own.unknown ? [own] : [own, fed];
 }
 var ownFeed = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
@@ -7786,6 +7945,85 @@ function knownVariables(command, environment, cwd) {
   return known;
 }
 
+// scripts/hooks/no-prepare-write.ts
+var MCP_TOOL = /^mcp__(.+?)__(.+)$/;
+var WRITES = [
+  [/github/i, new Set(["create_pull_request"])],
+  [/linear/i, new Set(["save_comment", "save_issue"])],
+  [/slack/i, new Set(["chat_post_message"])]
+];
+var refuse = (what) => `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post and no pull request. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`;
+var log = (environment, entry) => {
+  try {
+    const dir = join5(dataDirOf(environment), "ops");
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join5(dir, "no-prepare-write.log"), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}
+`);
+  } catch {}
+};
+var mcpWrite = (tool) => {
+  const [, server, name] = MCP_TOOL.exec(tool) ?? [];
+  return !!server && !!name && WRITES.some(([word, tools]) => word.test(server) && tools.has(name));
+};
+var prCreate = (args) => {
+  const { head } = ghCommand(args);
+  return head[0] === "pr" && head[1] === "create";
+};
+var visit = async (_cmd, { args, name }) => {
+  if (name === "gh")
+    return prCreate(args) ? "gh pr create" : undefined;
+  if (PRINTERS.has(name))
+    return;
+  const nested = args.findIndex((a) => program(a.value) === "gh");
+  return nested !== -1 && prCreate(args.slice(nested + 1)) ? "gh pr create" : undefined;
+};
+async function writeOf(tool, input, cwd, environment) {
+  if (mcpWrite(tool))
+    return `the tool ${tool}`;
+  const command = input?.command;
+  if (tool !== "Bash" || typeof command !== "string" || !/gh/.test(command))
+    return;
+  const directory = typeof cwd === "string" ? cwd : undefined;
+  const env = {
+    cwd: directory,
+    files: new Map,
+    known: knownVariables(command, environment, directory),
+    process: environment,
+    vars: new Map
+  };
+  return run(lex(command, env.known), env, visit);
+}
+async function marked2(sessionId, environment) {
+  if (typeof sessionId !== "string")
+    return false;
+  const name = await registryName(sessionId, environment);
+  if (!name)
+    return false;
+  const roster = await Bun.file(join5(dataDirOf(environment), "roster.json")).json();
+  return roster.agents?.find((agent) => agent?.name === name)?.mode === "prepare";
+}
+async function check(raw, environment = process.env) {
+  let input;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  const { cwd, session_id: session, tool_input: toolInput, tool_name: tool } = input;
+  if (typeof tool !== "string")
+    return;
+  let write;
+  try {
+    write = await writeOf(tool, toolInput, cwd, environment);
+    if (!write)
+      return;
+    return await marked2(session, environment) ? refuse(write) : undefined;
+  } catch (error) {
+    log(environment, { error: String(error), session, tool, write });
+    return;
+  }
+}
+
 // scripts/hooks/read-only.ts
 var READ_FILE = { count: true, operands: true, values: ["-c", "-n"] };
 var GH_VIEW = {
@@ -7949,161 +8187,6 @@ function readOnly(raw) {
   }
 }
 
-// scripts/hooks/role.ts
-import { homedir as homedir3 } from "os";
-import { join as join4 } from "path";
-
-// packages/config/src/kinds.ts
-var ROSTER_KINDS = [
-  "assistant",
-  "builder",
-  "dispatcher",
-  "ops",
-  "optimizer",
-  "orchestrator",
-  "planner",
-  "probe",
-  "researcher",
-  "reviewer",
-  "runner",
-  "tester",
-  "worker"
-];
-var isRosterKind = (value) => ROSTER_KINDS.includes(value);
-var FACTORY_ROLE_OF_KIND = {
-  assistant: "lead",
-  builder: "lead",
-  dispatcher: "dispatcher",
-  ops: "lead",
-  optimizer: "lead",
-  orchestrator: "lead",
-  planner: "lead",
-  probe: "probe",
-  researcher: "worker",
-  reviewer: "reviewer",
-  runner: "runner",
-  tester: "tester",
-  worker: "worker"
-};
-var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
-var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
-var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
-var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
-var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
-var DEFAULT_SESSION_NAMES = {
-  aliases: {},
-  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
-};
-var NAMES = Symbol.for("playground.sessionNames");
-var held2 = globalThis;
-var setSessionNames = (next) => {
-  held2[NAMES] = next;
-};
-var getSessionNames = () => held2[NAMES] ?? DEFAULT_SESSION_NAMES;
-var namedKinds = () => {
-  const { aliases, names } = getSessionNames();
-  return new Map([
-    ...Object.entries(names).map(([kind, name]) => [name, kind]),
-    [`${names.dispatcher}-2`, "dispatcher"],
-    ...Object.entries(aliases),
-    ["optimizer", "optimizer"]
-  ]);
-};
-var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
-function roleOfName(name) {
-  const kind = placedKindOfName(name);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
-}
-var SEATLESS = new Set(["ended", "parked"]);
-
-// scripts/hooks/role.ts
-var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
-var names;
-function loadNames(environment = process.env) {
-  names ??= (async () => {
-    try {
-      const setting = join4(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
-      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
-        env: { ...process.env, ...environment },
-        stderr: "ignore",
-        stdout: "pipe"
-      });
-      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
-`);
-      if (await read.exited === 0)
-        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
-    } catch {}
-  })();
-  return names;
-}
-async function registryName(sessionId, environment = process.env) {
-  const dir = join4(environment.CLAUDE_CONFIG_DIR || join4(homedir3(), ".claude"), "sessions");
-  for await (const file of new Bun.Glob("*.json").scan(dir)) {
-    try {
-      const entry = await Bun.file(join4(dir, file)).json();
-      if (entry.sessionId === sessionId && typeof entry.name === "string")
-        return entry.name;
-    } catch {}
-  }
-}
-async function codexName(sessionId, environment = process.env) {
-  if (!environment.CODEX_HOME)
-    return;
-  let name;
-  try {
-    const index = await Bun.file(join4(environment.CODEX_HOME, "session_index.jsonl")).text();
-    for (const line of index.split(`
-`)) {
-      try {
-        const entry = JSON.parse(line);
-        if (entry.id === sessionId && typeof entry.thread_name === "string")
-          name = entry.thread_name;
-      } catch {}
-    }
-  } catch {}
-  return name;
-}
-async function rosterKind(name, environment = process.env) {
-  const path = join4(dataDirOf(environment), "roster.json");
-  try {
-    const roster = await Bun.file(path).json();
-    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
-    return isRosterKind(kind) ? kind : undefined;
-  } catch {
-    return;
-  }
-}
-async function rosterRole(name, environment = process.env) {
-  const kind = await rosterKind(name, environment);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
-}
-async function sessionRole(environment, sessionId) {
-  if (environment.PLAYGROUND_ROLE)
-    return environment.PLAYGROUND_ROLE;
-  if (typeof sessionId !== "string")
-    return "";
-  try {
-    const name = await registryName(sessionId, environment) ?? await codexName(sessionId, environment) ?? "";
-    const role = name && await rosterRole(name, environment);
-    if (role)
-      return role;
-    await loadNames(environment);
-    return roleOfName(name);
-  } catch {
-    return "";
-  }
-}
-async function fromFactory(raw, environment = process.env) {
-  return await sessionRole(environment, sessionOf(raw)) !== "";
-}
-function sessionOf(raw) {
-  try {
-    return JSON.parse(raw).session_id;
-  } catch {
-    return;
-  }
-}
-
 // scripts/hooks/no-playground-leak.ts
 var EMPTY_TERMS = {
   aliases: [],
@@ -8178,9 +8261,9 @@ function chipsSigned(blocks, signature) {
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var HANDLE = /^[a-z\d][\w.-]{1,63}$/i;
 var MAX_ROSTER_BYTES = 1048576;
-var CHECKOUT = join5(__CHECKOUT + "/scripts/hooks", "..", "..");
+var CHECKOUT = join6(__CHECKOUT + "/scripts/hooks", "..", "..");
 function rosterNames(environment) {
-  const path = join5(dataDirOf(environment), "roster.json");
+  const path = join6(dataDirOf(environment), "roster.json");
   try {
     if (statSync2(path).size > MAX_ROSTER_BYTES)
       return [];
@@ -8197,9 +8280,9 @@ function rosterNames(environment) {
 }
 var notEveryday = (name) => HANDLE.test(name) && !terms.everyday.some((w) => w.toLowerCase() === name.toLowerCase());
 function skillNames(checkout = CHECKOUT) {
-  const ours = join5(checkout, "skills", "playground");
+  const ours = join6(checkout, "skills", "playground");
   try {
-    return readdirSync(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync3(join5(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
+    return readdirSync(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync3(join6(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
   } catch {
     return [];
   }
@@ -8369,7 +8452,7 @@ var CONFIG_WRITE = /^--(?:add|edit|remove-section|rename-section|replace-all|uns
 var CONFIG_READ = /^--(?:get|get-all|get-color|get-colorbool|get-regexp|get-urlmatch|list)$|^-l$/;
 var CONFIG_TAKES = new Set(["--blob", "--default", "-f", "--file", "--type"]);
 var builtins;
-var MCP_TOOL = /^mcp__(.+?)__(.+)$/;
+var MCP_TOOL2 = /^mcp__(.+?)__(.+)$/;
 var READ_TOOL = /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$/;
 var INNER = new Set(["curl", "gh", "git"]);
 var MAYBE = /curl|gh|git/i;
@@ -8398,11 +8481,11 @@ var IDLE = {
 };
 var state = () => calls.getStore() ?? IDLE;
 var lower = (text) => text[0].toLowerCase() + text.slice(1);
-function refuse(what, target, detail, fix) {
+function refuse2(what, target, detail, fix) {
   return `${state().policy.guard} hook refused ${what} to ${target.label}: ${detail}. ${state().policy.why} ${fix}`;
 }
 function refuseAny(what, target, fix = NOT_RUN) {
-  return target.where === "guarded" ? refuse(what, target, `it writes to ${state().policy.place}`, fix) : refuse(what, target, `the hook cannot tell whether it writes to ${state().policy.place}`, PLACE_FIX);
+  return target.where === "guarded" ? refuse2(what, target, `it writes to ${state().policy.place}`, fix) : refuse2(what, target, `the hook cannot tell whether it writes to ${state().policy.place}`, PLACE_FIX);
 }
 async function judge(what, target, texts, env, extras = []) {
   if (target.where === "other")
@@ -8415,13 +8498,13 @@ async function judge(what, target, texts, env, extras = []) {
   if (target.where === "unknown") {
     if (!hit)
       return;
-    return refuse(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${hit.detail}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(hit.fix)} ${NOT_RUN}`);
+    return refuse2(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${hit.detail}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(hit.fix)} ${NOT_RUN}`);
   }
   if (hit)
-    return refuse(what, target, `its text holds ${hit.detail}`, hit.fix);
+    return refuse2(what, target, `its text holds ${hit.detail}`, hit.fix);
   const hidden = resolved.find((t) => t.unknown);
   if (hidden) {
-    return refuse(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`, READABLE);
+    return refuse2(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`, READABLE);
   }
 }
 function decide(candidates) {
@@ -8516,7 +8599,7 @@ async function gh(args, cmd, env, local, xargs) {
   const key = head.join(" ");
   if (state().policy.anyWrite) {
     if (key === "alias import" || key === "alias set") {
-      return refuse(`gh ${key}`, decide([]), "an alias can run any gh write under a name the hook does not read", `Run the gh command itself, in a call of its own. ${NOT_RUN}`);
+      return refuse2(`gh ${key}`, decide([]), "an alias can run any gh write under a name the hook does not read", `Run the gh command itself, in a call of its own. ${NOT_RUN}`);
     }
     if (head[0] === "issue" || head[0] === "label" || CONVERSATION.has(key))
       return;
@@ -8569,7 +8652,7 @@ async function gh(args, cmd, env, local, xargs) {
   }
   const target = decide(named.length > 0 ? named : fallback);
   if (key === "pr create" && target.where !== "other")
-    texts.push(...prCreate(rest, env));
+    texts.push(...prCreate2(rest, env));
   return judge(`gh ${key}`, target, texts.map((t) => viaXargs(t, xargs)), env, positionals);
 }
 function destination(what, owner, name, fix) {
@@ -8619,10 +8702,10 @@ function unplaced(what, source, env) {
   if (!lost && source.every(Boolean))
     return;
   if (state().policy.anyWrite && state().changed)
-    return refuse(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
-  return refuse(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
+    return refuse2(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
+  return refuse2(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
 }
-function prCreate(rest, env) {
+function prCreate2(rest, env) {
   const values = rest.map((w) => w.value);
   const texts = [
     gitText(env.cwd, ["log", "--format=%B", "-n", "500", "HEAD", "--not", "--remotes"], "the commits it may push")
@@ -8944,11 +9027,11 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     const words = value === undefined || value.trim().startsWith("!") ? undefined : splitCmdline(value);
     const head = words?.[0]?.value;
     if (!words || !head || aliases.has(head.toLowerCase()) || depth > 8)
-      return refuse("git", decide([]), `its alias ${sub}, set with -c or --config-env, runs a command, holds a value the hook cannot read, or names another alias`, `Write the git command out in full in place of the alias, then run it again. ${NOT_RUN}`);
+      return refuse2("git", decide([]), `its alias ${sub}, set with -c or --config-env, runs a command, holds a value the hook cannot read, or names another alias`, `Write the git command out in full in place of the alias, then run it again. ${NOT_RUN}`);
     return git([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1);
   }
   if (state().policy.anyWrite) {
-    const cannot = (detail) => refuse("git", decide([]), detail, PLACE_FIX);
+    const cannot = (detail) => refuse2("git", decide([]), detail, PLACE_FIX);
     if (aliasSet)
       return cannot("it sets a git alias with -c or --config-env, which can run a push under a name the hook does not read");
     if (sub && marked(sub))
@@ -8971,8 +9054,8 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     const subtree = sub === "subtree" && rest[0]?.value === "push";
     if (sub === "push" || sub === "send-pack" || subtree) {
       if (carried)
-        return refuse("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
-      return subtree ? push(rest.slice(1), here, [], SUBTREE_TAKES) : push(rest, here, [], PUSH_TAKES, sub === "push");
+        return refuse2("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
+      return push(subtree ? rest.slice(1) : rest, here, [], subtree ? SUBTREE_TAKES : PUSH_TAKES);
     }
   }
   if (sub !== "commit" && sub !== "push")
@@ -9077,58 +9160,11 @@ function pushTarget(remote, dir) {
   }
   return decide(urls(remote.value) ?? [literal(remote.value)]);
 }
-var BRANCH_PUSH_FLAGS = new Set([
-  "--dry-run",
-  "--force",
-  "--force-if-includes",
-  "--force-with-lease",
-  "--no-verify",
-  "--quiet",
-  "--set-upstream",
-  "--verbose",
-  "-f",
-  "-n",
-  "-q",
-  "-u",
-  "-v"
-]);
-function branchOnly(flags, positionals, dir) {
-  const [remote, ...specs] = positionals;
-  if (!remote || specs.length === 0 || flags.some((f) => !BRANCH_PUSH_FLAGS.has(f.name)))
-    return false;
-  const defaults = new Set(["main", "master"]);
-  if (!/[:/]/.test(remote.value)) {
-    const config = gitText(dir, ["config", "--list"], "the checkout's git config");
-    if (config.unknown || config.value.split(`
-`).some((line) => line.startsWith(`remote.${remote.value}.push=`)))
-      return false;
-    const head = gitText(dir, ["symbolic-ref", "--short", `refs/remotes/${remote.value}/HEAD`], "the remote's default branch");
-    if (!head.unknown)
-      defaults.add(head.value.trim().slice(remote.value.length + 1).toLowerCase());
-  }
-  return specs.every((spec) => {
-    if (unreadable(spec) || /[*?[\\\s]/.test(spec.value))
-      return false;
-    const [source, destination, more] = spec.value.replace(/^\+/, "").split(":");
-    if (more !== undefined || !source || destination === "")
-      return false;
-    if (destination === undefined) {
-      const tags = gitText(dir, ["for-each-ref", "--format=%(refname)", `refs/tags/${source}`], "the tags of that name");
-      if (tags.unknown || tags.value.trim() !== "")
-        return false;
-    }
-    const name = (destination ?? source).replace(/^(?:refs\/)?heads\//, "");
-    return name !== "" && !/^(?:refs\/|@$|head$|tag$)/i.test(name) && !defaults.has(name.toLowerCase());
-  });
-}
-async function push(rest, env, checkout, takes = PUSH_TAKES, plain = false) {
+async function push(rest, env, checkout, takes = PUSH_TAKES) {
   const { flags, positionals } = parseFlags(rest, takes);
   if (state().policy.anyWrite) {
     const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value;
-    const target = pushTarget(remote, env.cwd);
-    if (plain && state().policy.branchPush && target.where === "guarded" && env.cwd && branchOnly(flags, positionals, env.cwd))
-      return;
-    return judge("git push", target, [], env);
+    return judge("git push", pushTarget(remote, env.cwd), [], env);
   }
   const names = new Set(flags.map((f) => f.name));
   const [remote, ...refspecs] = positionals;
@@ -9231,7 +9267,7 @@ function strings(node) {
   return [];
 }
 function mcp(tool, input) {
-  const [, server = "", name = ""] = MCP_TOOL.exec(tool) ?? [];
+  const [, server = "", name = ""] = MCP_TOOL2.exec(tool) ?? [];
   const gated = gatedPost(tool, server, name, input);
   if (gated)
     return gated;
@@ -9241,7 +9277,7 @@ function mcp(tool, input) {
   const what = tool.replace(/^mcp__/, "");
   let target = { label: surface, where: "guarded" };
   if (!input)
-    return refuse(what, target, "its input is not an object the hook can read", MCP_READABLE);
+    return refuse2(what, target, "its input is not an object the hook can read", MCP_READABLE);
   if (surface === "Slack" && (CHAT_TOOL.test(name) || name === CONNECTOR_TOOL)) {
     const connector = name === CONNECTOR_TOOL;
     const verdict = clearedPost(what, input, connector ? CONNECTOR_KEYS : POST_KEYS, connector);
@@ -9258,7 +9294,7 @@ function mcp(tool, input) {
     if (owner === undefined)
       return;
     if (typeof owner !== "string") {
-      return refuse(what, { label: "GitHub", where: "unknown" }, "its owner is not text the hook can read", MCP_READABLE);
+      return refuse2(what, { label: "GitHub", where: "unknown" }, "its owner is not text the hook can read", MCP_READABLE);
     }
     const repo = { owner, repo: typeof input.repo === "string" ? input.repo : "*" };
     if (!state().policy.guarded(repo))
@@ -9269,24 +9305,24 @@ function mcp(tool, input) {
   }
   const hit = strings(input).map(state().policy.find).find(Boolean);
   if (hit)
-    return refuse(what, target, `its text holds ${hit.detail}`, hit.fix);
+    return refuse2(what, target, `its text holds ${hit.detail}`, hit.fix);
 }
 function candidate(command) {
   const maybe = state().policy.anyWrite ? MAYBE_ANY : MAYBE;
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""));
 }
-async function factoryTerms(environment = process.env, checkout = CHECKOUT, lists = join5(coreDir(), "lists")) {
-  const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join5(lists, "playground-terms.json"));
+async function factoryTerms(environment = process.env, checkout = CHECKOUT, lists = join6(coreDir(), "lists")) {
+  const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join6(lists, "playground-terms.json"));
   if (loaded.refusal !== undefined)
     return { refusal: loaded.refusal };
   terms = loaded.list;
   return { pattern: pattern(environment, checkout) };
 }
-async function check(raw, environment = process.env, checkout = CHECKOUT, lists = join5(coreDir(), "lists")) {
+async function check2(raw, environment = process.env, checkout = CHECKOUT, lists = join6(coreDir(), "lists")) {
   const loadedTerms = await factoryTerms(environment, checkout, lists);
   if (loadedTerms.refusal !== undefined)
     return refusedList(raw, loadedTerms.refusal);
-  const loadedCleared = await guardList("no-playground-leak", "slack-cleared", isCleared, {}, environment, join5(lists, "slack-cleared.json"));
+  const loadedCleared = await guardList("no-playground-leak", "slack-cleared", isCleared, {}, environment, join6(lists, "slack-cleared.json"));
   if (loadedCleared.refusal !== undefined)
     return refusedList(raw, loadedCleared.refusal);
   const read = await readPolicy(dataDir(environment));
@@ -9367,7 +9403,7 @@ async function inspect(raw, environment) {
 }
 if (import.meta.main) {
   const raw = await Bun.stdin.text();
-  const reason = await fromFactory(raw) ? await check(raw) : undefined;
+  const reason = await fromFactory(raw) ? await check(raw) ?? await check2(raw) : undefined;
   if (reason) {
     console.error(reason);
     process.exit(2);
@@ -9375,7 +9411,7 @@ if (import.meta.main) {
 }
 export {
   REPHRASE,
-  check,
+  check2 as check,
   factoryTerms,
   inspectAs,
   refusedList,

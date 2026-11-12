@@ -2756,7 +2756,7 @@ if (false) {}
 
 // scripts/hooks/no-extension-repo-write.ts
 import { existsSync as existsSync6 } from "fs";
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 
 // packages/settings/src/folder.ts
 import {
@@ -2837,7 +2837,7 @@ function remotes(cwd) {
 // scripts/hooks/no-playground-leak.ts
 import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
 import { existsSync as existsSync5, readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync3 } from "fs";
-import { basename as basename3, join as join8 } from "path";
+import { basename as basename3, join as join9 } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
@@ -8729,6 +8729,87 @@ var slackSettings = defineSettings({
   }
 });
 
+// scripts/hooks/no-prepare-write.ts
+import { appendFileSync, mkdirSync as mkdirSync2 } from "fs";
+import { join as join8 } from "path";
+var MCP_TOOL = /^mcp__(.+?)__(.+)$/;
+var WRITES = [
+  [/github/i, new Set(["create_pull_request"])],
+  [/linear/i, new Set(["save_comment", "save_issue"])],
+  [/slack/i, new Set(["chat_post_message"])]
+];
+var refuse2 = (what) => `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post and no pull request. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`;
+var log = (environment, entry) => {
+  try {
+    const dir = join8(dataDirOf(environment), "ops");
+    mkdirSync2(dir, { recursive: true });
+    appendFileSync(join8(dir, "no-prepare-write.log"), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}
+`);
+  } catch {}
+};
+var mcpWrite = (tool) => {
+  const [, server, name] = MCP_TOOL.exec(tool) ?? [];
+  return !!server && !!name && WRITES.some(([word, tools]) => word.test(server) && tools.has(name));
+};
+var prCreate = (args) => {
+  const { head } = ghCommand(args);
+  return head[0] === "pr" && head[1] === "create";
+};
+var visit2 = async (_cmd, { args, name }) => {
+  if (name === "gh")
+    return prCreate(args) ? "gh pr create" : undefined;
+  if (PRINTERS.has(name))
+    return;
+  const nested = args.findIndex((a) => program(a.value) === "gh");
+  return nested !== -1 && prCreate(args.slice(nested + 1)) ? "gh pr create" : undefined;
+};
+async function writeOf(tool, input, cwd, environment) {
+  if (mcpWrite(tool))
+    return `the tool ${tool}`;
+  const command = input?.command;
+  if (tool !== "Bash" || typeof command !== "string" || !/gh/.test(command))
+    return;
+  const directory = typeof cwd === "string" ? cwd : undefined;
+  const env = {
+    cwd: directory,
+    files: new Map,
+    known: knownVariables(command, environment, directory),
+    process: environment,
+    vars: new Map
+  };
+  return run(lex(command, env.known), env, visit2);
+}
+async function marked2(sessionId, environment) {
+  if (typeof sessionId !== "string")
+    return false;
+  const name = await registryName(sessionId, environment);
+  if (!name)
+    return false;
+  const roster = await Bun.file(join8(dataDirOf(environment), "roster.json")).json();
+  return roster.agents?.find((agent) => agent?.name === name)?.mode === "prepare";
+}
+async function check3(raw, environment = process.env) {
+  let input;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  const { cwd, session_id: session, tool_input: toolInput, tool_name: tool } = input;
+  if (typeof tool !== "string")
+    return;
+  let write;
+  try {
+    write = await writeOf(tool, toolInput, cwd, environment);
+    if (!write)
+      return;
+    return await marked2(session, environment) ? refuse2(write) : undefined;
+  } catch (error) {
+    log(environment, { error: String(error), session, tool, write });
+    return;
+  }
+}
+
 // scripts/hooks/read-only.ts
 var READ_FILE = { count: true, operands: true, values: ["-c", "-n"] };
 var GH_VIEW = {
@@ -8966,9 +9047,9 @@ function chipsSigned(blocks, signature) {
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var HANDLE = /^[a-z\d][\w.-]{1,63}$/i;
 var MAX_ROSTER_BYTES = 1048576;
-var CHECKOUT = join8(__CHECKOUT + "/scripts/hooks", "..", "..");
+var CHECKOUT = join9(__CHECKOUT + "/scripts/hooks", "..", "..");
 function rosterNames(environment) {
-  const path = join8(dataDirOf(environment), "roster.json");
+  const path = join9(dataDirOf(environment), "roster.json");
   try {
     if (statSync3(path).size > MAX_ROSTER_BYTES)
       return [];
@@ -8985,9 +9066,9 @@ function rosterNames(environment) {
 }
 var notEveryday = (name) => HANDLE.test(name) && !terms.everyday.some((w) => w.toLowerCase() === name.toLowerCase());
 function skillNames(checkout = CHECKOUT) {
-  const ours = join8(checkout, "skills", "playground");
+  const ours = join9(checkout, "skills", "playground");
   try {
-    return readdirSync2(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync5(join8(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
+    return readdirSync2(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync5(join9(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
   } catch {
     return [];
   }
@@ -9157,7 +9238,7 @@ var CONFIG_WRITE = /^--(?:add|edit|remove-section|rename-section|replace-all|uns
 var CONFIG_READ = /^--(?:get|get-all|get-color|get-colorbool|get-regexp|get-urlmatch|list)$|^-l$/;
 var CONFIG_TAKES = new Set(["--blob", "--default", "-f", "--file", "--type"]);
 var builtins;
-var MCP_TOOL = /^mcp__(.+?)__(.+)$/;
+var MCP_TOOL2 = /^mcp__(.+?)__(.+)$/;
 var READ_TOOL = /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$/;
 var INNER = new Set(["curl", "gh", "git"]);
 var MAYBE = /curl|gh|git/i;
@@ -9186,11 +9267,11 @@ var IDLE = {
 };
 var state = () => calls.getStore() ?? IDLE;
 var lower = (text) => text[0].toLowerCase() + text.slice(1);
-function refuse2(what, target, detail, fix) {
+function refuse3(what, target, detail, fix) {
   return `${state().policy.guard} hook refused ${what} to ${target.label}: ${detail}. ${state().policy.why} ${fix}`;
 }
 function refuseAny(what, target, fix = NOT_RUN) {
-  return target.where === "guarded" ? refuse2(what, target, `it writes to ${state().policy.place}`, fix) : refuse2(what, target, `the hook cannot tell whether it writes to ${state().policy.place}`, PLACE_FIX);
+  return target.where === "guarded" ? refuse3(what, target, `it writes to ${state().policy.place}`, fix) : refuse3(what, target, `the hook cannot tell whether it writes to ${state().policy.place}`, PLACE_FIX);
 }
 async function judge2(what, target, texts, env, extras = []) {
   if (target.where === "other")
@@ -9203,13 +9284,13 @@ async function judge2(what, target, texts, env, extras = []) {
   if (target.where === "unknown") {
     if (!hit)
       return;
-    return refuse2(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${hit.detail}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(hit.fix)} ${NOT_RUN}`);
+    return refuse3(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${hit.detail}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(hit.fix)} ${NOT_RUN}`);
   }
   if (hit)
-    return refuse2(what, target, `its text holds ${hit.detail}`, hit.fix);
+    return refuse3(what, target, `its text holds ${hit.detail}`, hit.fix);
   const hidden = resolved.find((t) => t.unknown);
   if (hidden) {
-    return refuse2(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`, READABLE);
+    return refuse3(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`, READABLE);
   }
 }
 function decide(candidates) {
@@ -9304,7 +9385,7 @@ async function gh(args, cmd, env, local, xargs) {
   const key = head.join(" ");
   if (state().policy.anyWrite) {
     if (key === "alias import" || key === "alias set") {
-      return refuse2(`gh ${key}`, decide([]), "an alias can run any gh write under a name the hook does not read", `Run the gh command itself, in a call of its own. ${NOT_RUN}`);
+      return refuse3(`gh ${key}`, decide([]), "an alias can run any gh write under a name the hook does not read", `Run the gh command itself, in a call of its own. ${NOT_RUN}`);
     }
     if (head[0] === "issue" || head[0] === "label" || CONVERSATION.has(key))
       return;
@@ -9357,7 +9438,7 @@ async function gh(args, cmd, env, local, xargs) {
   }
   const target = decide(named.length > 0 ? named : fallback);
   if (key === "pr create" && target.where !== "other")
-    texts.push(...prCreate(rest, env));
+    texts.push(...prCreate2(rest, env));
   return judge2(`gh ${key}`, target, texts.map((t) => viaXargs(t, xargs)), env, positionals);
 }
 function destination(what, owner, name, fix) {
@@ -9407,10 +9488,10 @@ function unplaced(what, source, env) {
   if (!lost && source.every(Boolean))
     return;
   if (state().policy.anyWrite && state().changed)
-    return refuse2(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
-  return refuse2(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
+    return refuse3(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
+  return refuse3(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
 }
-function prCreate(rest, env) {
+function prCreate2(rest, env) {
   const values = rest.map((w) => w.value);
   const texts = [
     gitText(env.cwd, ["log", "--format=%B", "-n", "500", "HEAD", "--not", "--remotes"], "the commits it may push")
@@ -9732,11 +9813,11 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     const words = value === undefined || value.trim().startsWith("!") ? undefined : splitCmdline(value);
     const head = words?.[0]?.value;
     if (!words || !head || aliases.has(head.toLowerCase()) || depth > 8)
-      return refuse2("git", decide([]), `its alias ${sub}, set with -c or --config-env, runs a command, holds a value the hook cannot read, or names another alias`, `Write the git command out in full in place of the alias, then run it again. ${NOT_RUN}`);
+      return refuse3("git", decide([]), `its alias ${sub}, set with -c or --config-env, runs a command, holds a value the hook cannot read, or names another alias`, `Write the git command out in full in place of the alias, then run it again. ${NOT_RUN}`);
     return git([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1);
   }
   if (state().policy.anyWrite) {
-    const cannot = (detail) => refuse2("git", decide([]), detail, PLACE_FIX);
+    const cannot = (detail) => refuse3("git", decide([]), detail, PLACE_FIX);
     if (aliasSet)
       return cannot("it sets a git alias with -c or --config-env, which can run a push under a name the hook does not read");
     if (sub && marked(sub))
@@ -9759,8 +9840,8 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     const subtree = sub === "subtree" && rest[0]?.value === "push";
     if (sub === "push" || sub === "send-pack" || subtree) {
       if (carried)
-        return refuse2("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
-      return subtree ? push(rest.slice(1), here, [], SUBTREE_TAKES) : push(rest, here, [], PUSH_TAKES, sub === "push");
+        return refuse3("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
+      return push(subtree ? rest.slice(1) : rest, here, [], subtree ? SUBTREE_TAKES : PUSH_TAKES);
     }
   }
   if (sub !== "commit" && sub !== "push")
@@ -9865,58 +9946,11 @@ function pushTarget(remote, dir) {
   }
   return decide(urls(remote.value) ?? [literal(remote.value)]);
 }
-var BRANCH_PUSH_FLAGS = new Set([
-  "--dry-run",
-  "--force",
-  "--force-if-includes",
-  "--force-with-lease",
-  "--no-verify",
-  "--quiet",
-  "--set-upstream",
-  "--verbose",
-  "-f",
-  "-n",
-  "-q",
-  "-u",
-  "-v"
-]);
-function branchOnly(flags, positionals, dir) {
-  const [remote, ...specs] = positionals;
-  if (!remote || specs.length === 0 || flags.some((f) => !BRANCH_PUSH_FLAGS.has(f.name)))
-    return false;
-  const defaults = new Set(["main", "master"]);
-  if (!/[:/]/.test(remote.value)) {
-    const config = gitText(dir, ["config", "--list"], "the checkout's git config");
-    if (config.unknown || config.value.split(`
-`).some((line) => line.startsWith(`remote.${remote.value}.push=`)))
-      return false;
-    const head = gitText(dir, ["symbolic-ref", "--short", `refs/remotes/${remote.value}/HEAD`], "the remote's default branch");
-    if (!head.unknown)
-      defaults.add(head.value.trim().slice(remote.value.length + 1).toLowerCase());
-  }
-  return specs.every((spec) => {
-    if (unreadable(spec) || /[*?[\\\s]/.test(spec.value))
-      return false;
-    const [source, destination, more] = spec.value.replace(/^\+/, "").split(":");
-    if (more !== undefined || !source || destination === "")
-      return false;
-    if (destination === undefined) {
-      const tags = gitText(dir, ["for-each-ref", "--format=%(refname)", `refs/tags/${source}`], "the tags of that name");
-      if (tags.unknown || tags.value.trim() !== "")
-        return false;
-    }
-    const name = (destination ?? source).replace(/^(?:refs\/)?heads\//, "");
-    return name !== "" && !/^(?:refs\/|@$|head$|tag$)/i.test(name) && !defaults.has(name.toLowerCase());
-  });
-}
-async function push(rest, env, checkout, takes = PUSH_TAKES, plain = false) {
+async function push(rest, env, checkout, takes = PUSH_TAKES) {
   const { flags, positionals } = parseFlags(rest, takes);
   if (state().policy.anyWrite) {
     const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value;
-    const target = pushTarget(remote, env.cwd);
-    if (plain && state().policy.branchPush && target.where === "guarded" && env.cwd && branchOnly(flags, positionals, env.cwd))
-      return;
-    return judge2("git push", target, [], env);
+    return judge2("git push", pushTarget(remote, env.cwd), [], env);
   }
   const names = new Set(flags.map((f) => f.name));
   const [remote, ...refspecs] = positionals;
@@ -10019,7 +10053,7 @@ function strings(node) {
   return [];
 }
 function mcp(tool, input) {
-  const [, server = "", name = ""] = MCP_TOOL.exec(tool) ?? [];
+  const [, server = "", name = ""] = MCP_TOOL2.exec(tool) ?? [];
   const gated = gatedPost(tool, server, name, input);
   if (gated)
     return gated;
@@ -10029,7 +10063,7 @@ function mcp(tool, input) {
   const what = tool.replace(/^mcp__/, "");
   let target = { label: surface, where: "guarded" };
   if (!input)
-    return refuse2(what, target, "its input is not an object the hook can read", MCP_READABLE);
+    return refuse3(what, target, "its input is not an object the hook can read", MCP_READABLE);
   if (surface === "Slack" && (CHAT_TOOL.test(name) || name === CONNECTOR_TOOL)) {
     const connector = name === CONNECTOR_TOOL;
     const verdict = clearedPost(what, input, connector ? CONNECTOR_KEYS : POST_KEYS, connector);
@@ -10046,7 +10080,7 @@ function mcp(tool, input) {
     if (owner === undefined)
       return;
     if (typeof owner !== "string") {
-      return refuse2(what, { label: "GitHub", where: "unknown" }, "its owner is not text the hook can read", MCP_READABLE);
+      return refuse3(what, { label: "GitHub", where: "unknown" }, "its owner is not text the hook can read", MCP_READABLE);
     }
     const repo = { owner, repo: typeof input.repo === "string" ? input.repo : "*" };
     if (!state().policy.guarded(repo))
@@ -10057,24 +10091,24 @@ function mcp(tool, input) {
   }
   const hit = strings(input).map(state().policy.find).find(Boolean);
   if (hit)
-    return refuse2(what, target, `its text holds ${hit.detail}`, hit.fix);
+    return refuse3(what, target, `its text holds ${hit.detail}`, hit.fix);
 }
 function candidate(command) {
   const maybe = state().policy.anyWrite ? MAYBE_ANY : MAYBE;
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""));
 }
-async function factoryTerms(environment = process.env, checkout = CHECKOUT, lists = join8(coreDir(), "lists")) {
-  const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join8(lists, "playground-terms.json"));
+async function factoryTerms(environment = process.env, checkout = CHECKOUT, lists = join9(coreDir(), "lists")) {
+  const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join9(lists, "playground-terms.json"));
   if (loaded.refusal !== undefined)
     return { refusal: loaded.refusal };
   terms = loaded.list;
   return { pattern: pattern(environment, checkout) };
 }
-async function check3(raw, environment = process.env, checkout = CHECKOUT, lists = join8(coreDir(), "lists")) {
+async function check4(raw, environment = process.env, checkout = CHECKOUT, lists = join9(coreDir(), "lists")) {
   const loadedTerms = await factoryTerms(environment, checkout, lists);
   if (loadedTerms.refusal !== undefined)
     return refusedList(raw, loadedTerms.refusal);
-  const loadedCleared = await guardList("no-playground-leak", "slack-cleared", isCleared, {}, environment, join8(lists, "slack-cleared.json"));
+  const loadedCleared = await guardList("no-playground-leak", "slack-cleared", isCleared, {}, environment, join9(lists, "slack-cleared.json"));
   if (loadedCleared.refusal !== undefined)
     return refusedList(raw, loadedCleared.refusal);
   const read = await readPolicy(dataDir(environment));
@@ -10171,7 +10205,7 @@ function guardedRepos(data, values, environment) {
   const repos = new Set(named.values());
   const scopes = scopesIn(data);
   for (const scope of scopes) {
-    const config = join9(extensionsDir(data), scope, ".git", "config");
+    const config = join10(extensionsDir(data), scope, ".git", "config");
     const url = Bun.spawnSync(["git", "config", "--file", config, "--get", "remote.origin.url"], {
       stderr: "ignore"
     });
@@ -10201,7 +10235,6 @@ function finder(repos) {
 }
 var policy = (repos) => ({
   anyWrite: true,
-  branchPush: true,
   find: finder(repos),
   git: true,
   guard: GUARD2,
@@ -10217,9 +10250,9 @@ var policy = (repos) => ({
   hosts: false,
   place: "an extension repository",
   what: "a write to an extension repository",
-  why: `The sync renders each extension repository's main into every session's store. A session pushes a branch other than the default by its remote and refspec (git push origin HEAD:<branch>), opens a pull request, and lands it with bun run ext:merge <owner>/<repo> <n> at the review's 5/5. For anything else: ${OWNER_ROUTE}`
+  why: `The sync renders each extension repository's main into every session's store. ${OWNER_ROUTE}`
 });
-async function check4(raw, environment = process.env, budget = 8000) {
+async function check5(raw, environment = process.env, budget = 8000) {
   const data = dataDir(environment);
   if (!existsSync6(extensionsDir(data)))
     return;
@@ -10239,7 +10272,7 @@ async function check4(raw, environment = process.env, budget = 8000) {
 if (false) {}
 
 // scripts/hooks/no-extensions-write.ts
-import { dirname as dirname5, join as join11, resolve as resolve6, sep as sep2 } from "path";
+import { dirname as dirname5, join as join12, resolve as resolve6, sep as sep2 } from "path";
 
 // packages/settings/src/jobs.ts
 var jobSchema = strictObject({
@@ -10402,7 +10435,7 @@ var patchPaths = (text) => text.split(`
   const header = HEADERS.find((h) => trimmed.startsWith(h));
   return header && trimmed.length > header.length ? [trimmed.slice(header.length)] : [];
 });
-var writeOf = (input, path, patch) => {
+var writeOf2 = (input, path, patch) => {
   const cwd = typeof input.cwd === "string" ? input.cwd : "/";
   return JSON.stringify({
     ...input,
@@ -10428,7 +10461,7 @@ function guardInputs(raw) {
   const paths = patchPaths(text);
   if (paths.length === 0)
     return null;
-  return [...shell ? [raw] : [], ...paths.map((path) => writeOf(input, path, text))];
+  return [...shell ? [raw] : [], ...paths.map((path) => writeOf2(input, path, text))];
 }
 async function eachInput(raw, guard, judge) {
   const inputs = guardInputs(raw);
@@ -10443,7 +10476,7 @@ async function eachInput(raw, guard, judge) {
 
 // scripts/hooks/no-main-checkout.ts
 import { existsSync as existsSync7, readdirSync as readdirSync3, readFileSync as readFileSync4, realpathSync as realpathSync3 } from "fs";
-import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute4, join as join10, normalize, resolve as resolve5, sep } from "path";
+import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute4, join as join11, normalize, resolve as resolve5, sep } from "path";
 
 // packages/settings/src/live.ts
 var liveSettings = defineSettings({
@@ -11059,7 +11092,7 @@ function heldVars(env, steady) {
 // scripts/hooks/no-main-checkout.ts
 function mainCheckout2(dir) {
   try {
-    const gitdir = /^gitdir: (.+)$/m.exec(readFileSync4(join10(dir, ".git"), "utf8"))?.[1];
+    const gitdir = /^gitdir: (.+)$/m.exec(readFileSync4(join11(dir, ".git"), "utf8"))?.[1];
     const main = gitdir && /^(.+)\/\.git\/worktrees\/[^/]+$/.exec(resolve5(dir, gitdir.trim()))?.[1];
     if (main)
       return main;
@@ -11072,7 +11105,7 @@ function liveCheckout(main, environment) {
     values: {}
   };
   const head = `ref: refs/heads/${liveSettings.get(settings, "live.branch")}`;
-  const worktrees = join10(main, ".git", "worktrees");
+  const worktrees = join11(main, ".git", "worktrees");
   let names;
   try {
     names = readdirSync3(worktrees);
@@ -11081,17 +11114,17 @@ function liveCheckout(main, environment) {
   }
   for (const name of names) {
     try {
-      if (readFileSync4(join10(worktrees, name, "HEAD"), "utf8").trim() !== head)
+      if (readFileSync4(join11(worktrees, name, "HEAD"), "utf8").trim() !== head)
         continue;
-      return dirname4(resolve5(join10(worktrees, name), readFileSync4(join10(worktrees, name, "gitdir"), "utf8").trim()));
+      return dirname4(resolve5(join11(worktrees, name), readFileSync4(join11(worktrees, name, "gitdir"), "utf8").trim()));
     } catch {}
   }
 }
 function inWorktree(path, worktrees) {
   if (!path.startsWith(worktrees))
     return false;
-  const tree = join10(worktrees, path.slice(worktrees.length).split(sep)[0]);
-  return existsSync7(join10(tree, ".git")) || !isFolder(tree);
+  const tree = join11(worktrees, path.slice(worktrees.length).split(sep)[0]);
+  return existsSync7(join11(tree, ".git")) || !isFolder(tree);
 }
 function real(path) {
   const found = resolved(path);
@@ -11107,7 +11140,7 @@ function real(path) {
     else
       low = mid;
   }
-  return join10(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
+  return join11(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
 }
 var resolved = (path) => {
   try {
@@ -11121,7 +11154,7 @@ function nearest(path) {
   for (let dir = path;; dir = dirname4(dir)) {
     const found = resolved(dir);
     if (found !== undefined)
-      return join10(found, ...rest.reverse());
+      return join11(found, ...rest.reverse());
     if (dir === dirname4(dir))
       return path;
     rest.push(basename4(dir));
@@ -11134,7 +11167,7 @@ var FILE_TOOLS = {
   Write: "file_path"
 };
 var INSTEAD = `the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under the main checkout's .claude/worktrees/, made by absolute path so it nests in no other worktree (git worktree add --no-track "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.`;
-var refuse3 = (what, fix = INSTEAD) => `no-main-checkout hook refuses ${what}: ${fix}`;
+var refuse4 = (what, fix = INSTEAD) => `no-main-checkout hook refuses ${what}: ${fix}`;
 var UNKNOWN_FIX = "the hook cannot tell which folder it runs in, since a cd before it may not run, may run many times, or names a path it cannot read, so it reads every folder the shell may be in. Name the folder instead: git -C <your worktree>, bun --cwd <your worktree>, or cd by a literal path.";
 var ANYWHERE_FIX = "the line names more folders than the hook carries, so it cannot rule out the main checkout. Name the folder on the command instead: git -C <your worktree>, bun --cwd <your worktree>, or run it as a line of its own after a cd to a literal path.";
 var fixFor2 = (sure, own = INSTEAD) => sure ? own : UNKNOWN_FIX;
@@ -11563,7 +11596,7 @@ async function unreadScript(shell, here, sure, inMain) {
   const script = await stdinOf(shell, here);
   if (!script.unknown || !inMain(here.cwd))
     return;
-  return refuse3(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor2(sure));
+  return refuse4(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor2(sure));
 }
 var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 async function fedScript(cmd, here, sure, inMain, visit) {
@@ -11578,7 +11611,7 @@ async function fedScript(cmd, here, sure, inMain, visit) {
   if (unread) {
     if (!inMain(here.cwd))
       return;
-    return refuse3(`a shell whose script (${unread}) the hook cannot read`, fixFor2(sure));
+    return refuse4(`a shell whose script (${unread}) the hook cannot read`, fixFor2(sure));
   }
   if (kind === "root" && !cmd.bareOf)
     return run(lex(script.value, here.known), { ...here, vars: new Map }, visit, true);
@@ -11588,7 +11621,7 @@ async function inspect3(raw, environment, main) {
   const input = toolInput ?? {};
   const directory = typeof cwd === "string" ? cwd : undefined;
   const checkout = real(main);
-  const worktrees = join10(checkout, ".claude", "worktrees") + sep;
+  const worktrees = join11(checkout, ".claude", "worktrees") + sep;
   const inMain = (raw) => {
     const path = raw === undefined ? undefined : real(resolve5(directory ?? "", raw));
     return path !== undefined && (path === checkout || path.startsWith(checkout + sep)) && !inWorktree(path, worktrees);
@@ -11605,11 +11638,11 @@ async function inspect3(raw, environment, main) {
       return;
     if (await (writer ??= liveWriter(raw, environment)))
       return;
-    return refuse3(`${move.what} in the live Dashboard's checkout`, fix);
+    return refuse4(`${move.what} in the live Dashboard's checkout`, fix);
   };
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
   if (typeof file === "string")
-    return inMain(file) ? refuse3(`a write to ${file}`) : undefined;
+    return inMain(file) ? refuse4(`a write to ${file}`) : undefined;
   if (tool !== "Bash")
     return;
   const { command } = input;
@@ -11628,7 +11661,7 @@ async function inspect3(raw, environment, main) {
   const visit = async (cmd, parsed, env) => {
     const pathless = browserOnly.has(cmd) ? browserPathless(parsed.args, env) : undefined;
     if (pathless)
-      return refuse3(`agent-browser ${pathless} with a relative path or none`, BROWSER_FIX);
+      return refuse4(`agent-browser ${pathless} with a relative path or none`, BROWSER_FIX);
     if (parsed.name === "" && !cmd.feedsShell || EXPORTS2.has(parsed.name)) {
       for (const here of places(env, directory)) {
         const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure;
@@ -11646,13 +11679,13 @@ async function inspect3(raw, environment, main) {
       const blind = { ...env, cwd: undefined };
       const ran = runs(name, args, local, blind);
       if (ran && ranIn(ran.cwd, ran.also).some((dir) => dir === undefined || inMain(dir)))
-        return refuse3(ran.what, ANYWHERE_FIX);
+        return refuse4(ran.what, ANYWHERE_FIX);
       const blindWrite = writeTargets(cmd, name, args).find((t) => {
         const path = pathOf(t, blind);
         return path === undefined || inMain(path);
       });
       if (blindWrite)
-        return refuse3(`a write to ${blindWrite.value}`, ANYWHERE_FIX);
+        return refuse4(`a write to ${blindWrite.value}`, ANYWHERE_FIX);
       const blindLive = name === "git" ? await liveRefusal(args, local, blind, (cwd) => cwd === undefined || inLive(cwd), ANYWHERE_FIX) : undefined;
       if (blindLive)
         return blindLive;
@@ -11661,7 +11694,7 @@ async function inspect3(raw, environment, main) {
       const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure;
       const pipedTo = fed.get(cmd);
       if (pipedTo?.kind === "code" && inMain(here.cwd))
-        return refuse3(`a pipe into an interpreter whose script, the piped input, the hook cannot read`, fixFor2(sure));
+        return refuse4(`a pipe into an interpreter whose script, the piped input, the hook cannot read`, fixFor2(sure));
       if (pipedTo) {
         const verdict = await unreadScript(pipedTo.consumer, here, sure, inMain);
         if (verdict)
@@ -11672,13 +11705,13 @@ async function inspect3(raw, environment, main) {
         return script;
       const ran = runs(name, args, local, here);
       if (ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)))
-        return refuse3(ran.what, fixFor2(sure, ran.fix));
+        return refuse4(ran.what, fixFor2(sure, ran.fix));
       const moved = name === "git" ? await liveRefusal(args, local, here, inLive, fixFor2(sure, LIVE_FIX)) : undefined;
       if (moved)
         return moved;
       const wrote = writeTargets(cmd, name, args).find((t) => inMain(pathOf(t, here)));
       if (wrote)
-        return refuse3(`a write to ${pathOf(wrote, here)}`, fixFor2(sure));
+        return refuse4(`a write to ${pathOf(wrote, here)}`, fixFor2(sure));
     }
   };
   const steadyAt = steadyNames(namings(command), lexed.commands);
@@ -11694,7 +11727,7 @@ async function inspect3(raw, environment, main) {
   };
   return run(lexed, env, visit, true);
 }
-async function check5(raw, environment = process.env, main = mainCheckout2(resolve5(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
+async function check6(raw, environment = process.env, main = mainCheckout2(resolve5(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
     return await eachInput(raw, "no-main-checkout", (one) => inspect3(one, environment, main));
   } catch {
@@ -11709,7 +11742,7 @@ var ROUTE = `${WHY_ROOT} A guard's list or setting changes only by the owner typ
 var PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"]);
 var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves";
 var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
-var refuse4 = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
+var refuse5 = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS2 = new Set([
   "[",
@@ -11744,7 +11777,7 @@ var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"]);
 var RSYNC_FLAGS = new Set(["backup", "partial"]);
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
-var CLI = join11("packages", "scripts", "src", "playground", "cli.ts");
+var CLI = join12("packages", "scripts", "src", "playground", "cli.ts");
 var varsRun = new WeakMap;
 var GH_READS = new Set([
   "api",
@@ -11816,7 +11849,7 @@ async function guarded(raw, environment = process.env, wait = 12000, url = new U
         worker.postMessage({ environment, raw });
       }),
       new Promise((done) => {
-        timer = setTimeout(() => done(refuse4(TOO_LONG)), wait);
+        timer = setTimeout(() => done(refuse5(TOO_LONG)), wait);
       })
     ]);
   } finally {
@@ -11972,7 +12005,7 @@ async function inspect4(raw, shell) {
     return;
   return judge3(command, dialect(shell));
 }
-async function check6(raw, shell = process.env.SHELL ?? "zsh") {
+async function check7(raw, shell = process.env.SHELL ?? "zsh") {
   try {
     return await inspect4(raw, shell);
   } catch {
@@ -11984,7 +12017,7 @@ if (false) {}
 // scripts/hooks/no-glm-heavy-path.ts
 import { existsSync as existsSync8, readdirSync as readdirSync4, readFileSync as readFileSync5, readlinkSync, realpathSync as realpathSync4 } from "fs";
 import { loadavg } from "os";
-import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute5, join as join13, resolve as resolve7 } from "path";
+import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute5, join as join14, resolve as resolve7 } from "path";
 
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
@@ -12065,7 +12098,7 @@ var ruleSettings = defineSettings({
 });
 
 // scripts/hooks/no-headless-login.ts
-import { join as join12 } from "path";
+import { join as join13 } from "path";
 var TOKEN = "CLAUDE_CODE_OAUTH_TOKEN";
 var ROLE = "PLAYGROUND_ROLE";
 var KEYCHAIN_SERVICE = "playground-claude-oauth";
@@ -12081,7 +12114,7 @@ async function accountOf(id, environment) {
     const name = await registryName(id, environment);
     if (!name)
       return;
-    const record = await Bun.file(join12(dataDir(environment), "resume", `${name}.sh`)).text();
+    const record = await Bun.file(join13(dataDir(environment), "resume", `${name}.sh`)).text();
     return /^# account: (\S+)/m.exec(record)?.[1] ?? /--account (\S+)/.exec(record)?.[1];
   } catch {
     return;
@@ -12092,7 +12125,7 @@ var sets = (key, { local }, env) => {
   const value = local.get(key) ?? env.vars.get(key);
   return value !== undefined && value.value !== "";
 };
-async function check7(raw, environment = process.env) {
+async function check8(raw, environment = process.env) {
   try {
     const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
     if (tool !== "Bash" || typeof toolInput?.command !== "string")
@@ -12208,13 +12241,13 @@ async function onGlm(raw, environment = process.env) {
     const name = await registryName(id, environment);
     if (!name || name.includes("/"))
       return false;
-    const pin = join13(dataDir(environment), "backends", name);
+    const pin = join14(dataDir(environment), "backends", name);
     return readPin(await Bun.file(pin).text())?.backend === "glm";
   } catch {
     return false;
   }
 }
-var refuse5 = (what, files) => `no-glm-heavy-path hook refuses this ${what}: it touches ${files.join(", ")}, which is Opus work, and this session runs on GLM. Stop, report to your lead with this file list, and the lead moves the change to a Claude worker.`;
+var refuse6 = (what, files) => `no-glm-heavy-path hook refuses this ${what}: it touches ${files.join(", ")}, which is Opus work, and this session runs on GLM. Stop, report to your lead with this file list, and the lead moves the change to a Claude worker.`;
 var unread2 = (what, why) => `no-glm-heavy-path hook refuses this ${what}: it cannot read ${why}, and this session runs on GLM, whose commits and pushes must stay off Opus paths. Run it again from your own worktree with a literal path, or report to your lead.`;
 var loaded = (what, load5, limit) => `no-glm-heavy-path hook refuses this ${what}: load5 is ${load5.toFixed(1)}, and a GLM session goes read-only while load5 is over ${limit} (no install, node_modules clone, commit or push). Wait until load5 is ${limit} or under (the middle figure of sysctl -n vm.loadavg), then run it again, or report to your lead.`;
 function installOrClone(name, args) {
@@ -12359,7 +12392,7 @@ async function commit(rest, dir, chained, forced) {
   const staged = new Set(lists[0]);
   if (chained && !all && paths.length === 0 && heavyFiles.every((f) => !staged.has(f)))
     return `no-glm-heavy-path hook refuses this git commit: ${heavyFiles.join(", ")} is on disk and not staged, and the hook cannot tell before the call runs whether the git add before it stages it, while this session runs on GLM and that is Opus work. Run git commit as its own call.`;
-  return refuse5("git commit", heavyFiles);
+  return refuse6("git commit", heavyFiles);
 }
 function rebased(dir, named, source, dest, not) {
   const branch = dest === "HEAD" ? names2(dir, ["symbolic-ref", "-q", "--short", "HEAD"])?.[0] : dest.replace(/^refs\/heads\//, "");
@@ -12458,7 +12491,7 @@ function push2(rest, dir, branchReads) {
   if (bases)
     beyondMerge(files, bases[0], bases[1], (tree) => [pathsOf(dir, ["diff", "--name-only", "--no-renames", tree, sources[0]])], dir);
   const heavyFiles = [...files].filter(heavy).sort();
-  return heavyFiles.length > 0 ? refuse5("git push", heavyFiles) : undefined;
+  return heavyFiles.length > 0 ? refuse6("git push", heavyFiles) : undefined;
 }
 function forcedPaths(rest, dir) {
   const { flags, positionals } = parseFlags(rest, ADD_TAKES);
@@ -12535,7 +12568,7 @@ function packageScripts(dir) {
   const found = new Map;
   for (let at = dir;; at = dirname6(at)) {
     try {
-      const { scripts } = JSON.parse(readFileSync5(join13(at, "package.json"), "utf8"));
+      const { scripts } = JSON.parse(readFileSync5(join14(at, "package.json"), "utf8"));
       for (const [name, command] of Object.entries(scripts ?? {}))
         if (!found.has(name) && typeof command === "string")
           found.set(name, { at, command });
@@ -12704,7 +12737,7 @@ var realOf2 = (path, depth = 0) => {
     return realOf2(resolve7(dirname6(path), readlinkSync(path)), depth + 1);
   } catch {}
   const parent = dirname6(path);
-  return parent === path ? path : join13(realOf2(parent, depth + 1), basename5(path));
+  return parent === path ? path : join14(realOf2(parent, depth + 1), basename5(path));
 };
 function checkoutOf(path, orgs, roots) {
   if (!path)
@@ -12717,7 +12750,7 @@ function checkoutOf(path, orgs, roots) {
       break;
     }
     walked.push(at);
-    if (existsSync8(join13(at, ".git"))) {
+    if (existsSync8(join14(at, ".git"))) {
       found = remotes(at).find((r) => isGuarded(orgs, r.owner));
       break;
     }
@@ -12773,7 +12806,7 @@ function globbed(value, cwd) {
     let candidates = [root];
     for (const segment of pattern.split("/").filter((part) => part !== "")) {
       if (!GLOB_CHARS2.test(segment)) {
-        candidates = candidates.map((at) => join13(at, segment));
+        candidates = candidates.map((at) => join14(at, segment));
         continue;
       }
       const re = globRegex(segment.replaceAll("**", "*"));
@@ -12788,7 +12821,7 @@ function globbed(value, cwd) {
         }
         for (const entry of entries)
           if ((hidden || !entry.startsWith(".")) && re.test(entry))
-            next.push(join13(at, entry));
+            next.push(join14(at, entry));
         if (next.length >= 200)
           break;
       }
@@ -13061,7 +13094,7 @@ async function inspect5(raw, environment, load5, limit) {
     if (!Array.isArray(orgs))
       return;
     const given = toolInput?.[READ_TOOLS[tool]];
-    const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join13(environment.HOME, given.slice(2)) : isAbsolute5(given) ? given : directory && resolve7(directory, given);
+    const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join14(environment.HOME, given.slice(2)) : isAbsolute5(given) ? given : directory && resolve7(directory, given);
     const repo = orgs.length > 0 ? checkoutOf(path, orgs, new Map) : undefined;
     return repo ? checkoutRefusal(`this ${tool} call`, repo) : undefined;
   }
@@ -13092,7 +13125,7 @@ async function inspect5(raw, environment, load5, limit) {
   }
 }
 var mayRefuse = (text, load5, limit) => GIT_CALL.test(text) || ORG_CALL.test(text) || load5 > limit && BUSY_RUN.test(text);
-async function check8(raw, environment = process.env, load5 = currentLoad5()) {
+async function check9(raw, environment = process.env, load5 = currentLoad5()) {
   const limit = await loadLimit(environment);
   try {
     return await inspect5(raw, environment, load5, limit);
@@ -13103,7 +13136,7 @@ async function check8(raw, environment = process.env, load5 = currentLoad5()) {
   }
 }
 async function refusal(raw, environment = process.env, load5 = currentLoad5()) {
-  return await onGlm(raw, environment) ? check8(raw, environment, load5) : undefined;
+  return await onGlm(raw, environment) ? check9(raw, environment, load5) : undefined;
 }
 if (false) {}
 
@@ -13112,7 +13145,7 @@ var BY_NAME = new Set(["killall", "pkill"]);
 var SEARCHES = new Set(["fuser", "lsof", "pgrep", "pidof", "ps"]);
 var READS_ONLY2 = new Set(["--help", "--version", "-V", "-h"]);
 var WAY_OUT = "Stop a background task with TaskStop, a dev stack with bun run dev:stop in its worktree, and a process you spawned with kill <pid> on the pid you hold ($! or its pid file).";
-var refuse6 = (what, beside = "") => `no-kill-by-name hook refuses ${what}: a name, pattern or port matches the live dashboard and every worker's stack, not only your own process. ${WAY_OUT}${beside}`;
+var refuse7 = (what, beside = "") => `no-kill-by-name hook refuses ${what}: a name, pattern or port matches the live dashboard and every worker's stack, not only your own process. ${WAY_OUT}${beside}`;
 var readsOnly = (cmd, first, args) => {
   const before = cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0);
   return before.some((w, i) => program(w.value) === "command" && /^-[vV]$/.test(before[i + 1]?.value ?? "")) || args.length > 0 && args.every((a) => READS_ONLY2.has(a.value));
@@ -13135,18 +13168,18 @@ async function inspect6(raw) {
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || []);
   const visit = async (cmd, { args, first, name, xargs }) => {
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args))
-      return refuse6(name);
+      return refuse7(name);
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
-      return refuse6("fuser -k");
+      return refuse7("fuser -k");
     if (name !== "kill" || !search)
       return;
     const fed = xargs || args.some((a) => a.value.includes(UNKNOWN) || handed.some((h) => a.value.includes(h)));
     if (fed)
-      return refuse6(`a kill in a call that searches with ${search}`, ` Run a kill of a pid you hold in a Bash call of its own, apart from the search.`);
+      return refuse7(`a kill in a call that searches with ${search}`, ` Run a kill of a pid you hold in a Bash call of its own, apart from the search.`);
   };
   return run(lexed, fresh(), visit);
 }
-async function check9(raw) {
+async function check10(raw) {
   try {
     return await inspect6(raw);
   } catch {
@@ -13157,12 +13190,12 @@ if (false) {}
 
 // scripts/hooks/no-linear-ticket.ts
 import { realpath } from "fs/promises";
-import { basename as basename6, dirname as dirname7, isAbsolute as isAbsolute6, join as join14, resolve as resolve8, sep as sep3 } from "path";
+import { basename as basename6, dirname as dirname7, isAbsolute as isAbsolute6, join as join15, resolve as resolve8, sep as sep3 } from "path";
 var CREATE = /\bissue(?:batch)?create\b/i;
 var LINEAR = /linear\.app/i;
 var GITHUB = /^https?:\/\/(?:[\w-]+\.)*github\.com(?:[/:?#]|$)/i;
 var URL_SCHEME = /^[a-z][a-z\d+.-]*:\/\//i;
-var MCP_TOOL2 = /^mcp__(.+?)__(.+)$/;
+var MCP_TOOL3 = /^mcp__(.+?)__(.+)$/;
 var CREATE_TOOL = /^(?:\w+_)?create_?issues?$|^issues?_?create$/i;
 var FILE_TOOLS2 = new Map([
   ["Edit", "file_path"],
@@ -13182,12 +13215,12 @@ var MAYBE2 = /issue(?:batch)?create|linear|ticket-approvals|curl|\bgh\b|bun|deno
 var MAX_APPROVAL_BYTES = 65536;
 var interpreter = (name) => /^python[\d.]*$/.test(name) ? "python" : name;
 var isDispatcher = (environment) => environment.PLAYGROUND_ROLE === "dispatcher";
-var approvalsDir = (environment) => join14(dataDirOf(environment), "ticket-approvals");
+var approvalsDir = (environment) => join15(dataDirOf(environment), "ticket-approvals");
 var slug = (team) => team.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 var day = (now) => now.toISOString().slice(0, 10);
 var RULE = "A new Linear ticket needs the owner's yes first, and the factory's own work never goes in Linear.";
 var ASK_UP = "Ask up the chain with the team and the exact title; once the owner says yes, the dispatcher records it, and the same save_issue call then runs.";
-function refuse7(what, detail, next) {
+function refuse8(what, detail, next) {
   return `no-linear-ticket hook refused ${what}: ${detail}. ${RULE} ${next}`;
 }
 async function real2(path) {
@@ -13202,7 +13235,7 @@ async function inApprovals(path, environment) {
   const dir = approvalsDir(environment);
   const dirs = [dir, await real2(dir)];
   const target = resolve8(path);
-  const targets = [target, join14(await real2(dirname7(target)), basename6(target))];
+  const targets = [target, join15(await real2(dirname7(target)), basename6(target))];
   return targets.some((t) => dirs.some((d) => within(t, d)));
 }
 function refuseApprovals(what, environment) {
@@ -13317,7 +13350,7 @@ async function script2(language, args, cmd, env, stdin) {
 }
 function judge4(what, texts, toLinear, environment, targets = 0) {
   if (texts.some((t) => CREATE.test(visible(t.value)))) {
-    return refuse7(what, "it sends Linear's issueCreate, which files a new ticket", isDispatcher(environment) ? "Once he says yes, record it and file the ticket with the Linear MCP's save_issue, which the hook matches to the approval; a GraphQL create matches none." : ASK_UP);
+    return refuse8(what, "it sends Linear's issueCreate, which files a new ticket", isDispatcher(environment) ? "Once he says yes, record it and file the ticket with the Linear MCP's save_issue, which the hook matches to the approval; a GraphQL create matches none." : ASK_UP);
   }
   if (!toLinear)
     return;
@@ -13326,14 +13359,14 @@ function judge4(what, texts, toLinear, environment, targets = 0) {
     return;
   const hidden = texts[at];
   if (at < targets) {
-    return refuse7(what, `the hook cannot read where it goes (it comes from ${hidden.unknown}), so it may be Linear's API and file a ticket`, `Name the endpoint or URL by its literal value in the command itself (gh api https://api.linear.app/graphql, or curl https://api.linear.app/graphql). ${NOT_RUN}`);
+    return refuse8(what, `the hook cannot read where it goes (it comes from ${hidden.unknown}), so it may be Linear's API and file a ticket`, `Name the endpoint or URL by its literal value in the command itself (gh api https://api.linear.app/graphql, or curl https://api.linear.app/graphql). ${NOT_RUN}`);
   }
-  return refuse7(what, `it goes to Linear's API, and the hook cannot read what it sends before it runs (it comes from ${hidden.unknown}), so it may file a ticket`, `To read Linear, put the query in the command itself, or write the query to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (curl -d @/abs/query.json, or gh api --input /abs/query.json). ${NOT_RUN}`);
+  return refuse8(what, `it goes to Linear's API, and the hook cannot read what it sends before it runs (it comes from ${hidden.unknown}), so it may file a ticket`, `To read Linear, put the query in the command itself, or write the query to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (curl -d @/abs/query.json, or gh api --input /abs/query.json). ${NOT_RUN}`);
 }
 var hasId = (input) => typeof input.id === "string" && input.id.trim() !== "";
 var textOf = (value) => typeof value === "string" ? value.trim() : "";
 function creates(tool, input) {
-  const [, server = "", name = ""] = MCP_TOOL2.exec(tool) ?? [];
+  const [, server = "", name = ""] = MCP_TOOL3.exec(tool) ?? [];
   if (name === "save_issue")
     return !input || !hasId(input);
   return CREATE_TOOL.test(name) && /linear/i.test(server);
@@ -13345,15 +13378,15 @@ async function mcp2(tool, input, environment, now) {
   const team = textOf(input?.team ?? input?.teamId ?? input?.teamKey);
   const title = textOf(input?.title);
   if (slug(team) === "" || title === "") {
-    return refuse7(what, "it files a new Linear ticket, and the hook cannot read its team and title to match an approval", "Name the team and the title as the owner approved them.");
+    return refuse8(what, "it files a new Linear ticket, and the hook cannot read its team and title to match an approval", "Name the team and the title as the owner approved them.");
   }
-  const path = join14(approvalsDir(environment), `${slug(team)}-${day(now)}.json`);
+  const path = join15(approvalsDir(environment), `${slug(team)}-${day(now)}.json`);
   const approval = await readApproval(path);
   if (approval.titles?.includes(title))
     return;
   const problem = approval.problem ?? `today's approval does not name ${JSON.stringify(title)}`;
   const shape = `{"ask": "<the Inbox decision he approved>", "titles": [${JSON.stringify(title)}]}`;
-  return refuse7(what, `it files a new Linear ticket in ${JSON.stringify(team)}, and ${problem}`, isDispatcher(environment) ? `Once he says yes, write ${path} as ${shape}, and the same call then runs. An approval holds for the UTC day in its name.` : ASK_UP);
+  return refuse8(what, `it files a new Linear ticket in ${JSON.stringify(team)}, and ${problem}`, isDispatcher(environment) ? `Once he says yes, write ${path} as ${shape}, and the same call then runs. An approval holds for the UTC day in its name.` : ASK_UP);
 }
 async function readApproval(path) {
   const file = Bun.file(path);
@@ -13394,7 +13427,7 @@ function candidate2(command) {
 function createCall(subject) {
   return CREATE.test(subject) || /save_issue|create_?issue|issues?_?create/i.test(subject);
 }
-async function check10(raw, environment = process.env, now = new Date) {
+async function check11(raw, environment = process.env, now = new Date) {
   const role = await sessionRole(environment, sessionOf(raw));
   if (!role)
     return;
@@ -13452,7 +13485,7 @@ async function inspect7(raw, environment, now) {
 if (false) {}
 
 // scripts/hooks/no-mac-web-build.ts
-import { join as join15 } from "path";
+import { join as join16 } from "path";
 
 // scripts/hooks/docker-build.ts
 var DOCKERS = new Set(["docker", "docker-compose"]);
@@ -13627,7 +13660,7 @@ var API_HERE = "The api image still builds here (docker compose build api).";
 var BOX_ROUTE = `Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. ${API_HERE}`;
 var NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on, and the live dashboard's Postgres stays up: set one up (scripts/ops/runner-host/host.sh setup <ip>, then write its address to that ip file), or build the web image on a machine with no live dashboard running. ${API_HERE}`;
 async function hasRunnerHost(environment) {
-  const ip = environment.RUNNER_HOST || (await Bun.file(join15(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
+  const ip = environment.RUNNER_HOST || (await Bun.file(join16(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
   return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip);
 }
 function composeBuild2({ rest, sub }) {
@@ -13666,7 +13699,7 @@ async function dashboardRuns(what, environment) {
   const cannot = async (why) => `no-mac-web-build hook refuses ${what}: ${why}, so it cannot tell whether the live dashboard's Postgres runs in this Mac's Docker VM, where a web image build's memory takes the VM's out-of-memory killer to the dashboard's database. ${await route()}`;
   let name;
   try {
-    name = (await Bun.file(join15(dataDirOf(environment), "ops", "dashboard", "dashboard-db")).text()).trim();
+    name = (await Bun.file(join16(dataDirOf(environment), "ops", "dashboard", "dashboard-db")).text()).trim();
   } catch (error) {
     if (error.code === "ENOENT")
       return cannot("there is no dashboard-db in the dashboard supervisor's state folder");
@@ -13698,7 +13731,7 @@ async function dashboardRuns(what, environment) {
     return `no-mac-web-build hook refuses ${what}: the live dashboard's Postgres (${name}) runs in this Mac's Docker VM, and a web image build peaks past the VM's memory, so its out-of-memory killer takes the dashboard's database. ${await route()}`;
   return cannot(`docker inspect ${name} answered ${(err || out).trim().slice(0, 200) || `exit ${code}`}`);
 }
-var visit2 = async (_cmd, { args, first, name }, env) => {
+var visit3 = async (_cmd, { args, first, name }, env) => {
   const judge = async (words, compose) => {
     const what = webBuild(words, compose);
     return what ? dashboardRuns(what, env.process) : undefined;
@@ -13743,9 +13776,9 @@ async function inspect8(raw, environment) {
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit2);
+  return run(lex(command, env.known), env, visit3);
 }
-async function check11(raw, environment = process.env) {
+async function check12(raw, environment = process.env) {
   try {
     return await inspect8(raw, environment);
   } catch (error) {
@@ -13795,16 +13828,16 @@ var SPECS = new Map([
 ]);
 var LABELS = /^repos\/[^/]+\/[^/]+\/labels(\/[^/]+)?$/;
 var MCP_LABEL = /^mcp__.+__label_write$/;
-var refuse8 = (what, detail) => `no-off-palette-label hook refused ${what}: ${detail}. Every label is a Tailwind 500: ${PALETTE}. Give one of them as the color, written literally, and leave existing labels as they are.`;
+var refuse9 = (what, detail) => `no-off-palette-label hook refused ${what}: ${detail}. Every label is a Tailwind 500: ${PALETTE}. Give one of them as the color, written literally, and leave existing labels as they are.`;
 function judge5(what, color, create) {
   if (!color || color.value === "" && !unreadable(color))
-    return create ? refuse8(what, "it sets no color, so GitHub picks one") : undefined;
+    return create ? refuse9(what, "it sets no color, so GitHub picks one") : undefined;
   if (unreadable(color))
-    return refuse8(what, `the hook cannot read its color (it comes from ${color.unknown ?? "a variable"})`);
+    return refuse9(what, `the hook cannot read its color (it comes from ${color.unknown ?? "a variable"})`);
   if (!HEXES.has(color.value.replace(/^#/, "").toLowerCase()))
-    return refuse8(what, `its color ${color.value} is not a Tailwind 500`);
+    return refuse9(what, `its color ${color.value} is not a Tailwind 500`);
 }
-var visit3 = async (cmd, { args, first, name }, env) => {
+var visit4 = async (cmd, { args, first, name }, env) => {
   if (name === "gh" || first?.unknown && ["api", "label"].includes(args[0]?.value ?? ""))
     return gh3(args, cmd, env);
   const nested = args.findIndex((a) => program(a.value) === "gh");
@@ -13879,9 +13912,9 @@ async function inspect9(raw) {
     process: process.env,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit3);
+  return run(lex(command, env.known), env, visit4);
 }
-async function check12(raw) {
+async function check13(raw) {
   try {
     return await inspect9(raw);
   } catch {
@@ -13893,9 +13926,9 @@ if (false) {}
 // scripts/hooks/no-stash.ts
 var FULL_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 var READS = new Set(["list", "show"]);
-var WRITES = new Set(["create", "store"]);
+var WRITES2 = new Set(["create", "store"]);
 var INSTEAD2 = `Every worktree shares one stash list, so a stash taken by position or without a name can be another session's work. Commit a WIP commit on your own branch instead (git commit -m 'chore: wip <what>'), or take before-shots from a separate worktree on origin/canary, made by absolute path under the main checkout so it nests in no other worktree (git worktree add --detach "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" origin/canary). git stash list, git stash show, git stash push -m <message> and git stash apply <full sha> stay allowed.`;
-var refuse9 = (what, why) => `no-stash hook refuses ${what}: ${why}. ${INSTEAD2}`;
+var refuse10 = (what, why) => `no-stash hook refuses ${what}: ${why}. ${INSTEAD2}`;
 var BROWSER_CLOSE = new Set(["close", "exit", "quit"]);
 var BROWSER_INSTEAD = "Close only the browser you opened; pass --session <name>: agent-browser --session <name> close.";
 function judgeBrowser(args, session, named) {
@@ -13927,32 +13960,32 @@ function message(args) {
 }
 function judgeStash(args, xargs) {
   if (xargs)
-    return refuse9("git stash under xargs", "the hook cannot read the arguments xargs adds");
+    return refuse10("git stash under xargs", "the hook cannot read the arguments xargs adds");
   const action = args[0];
   if (!action)
-    return refuse9("a bare git stash", "it saves your changes with no name to find them by");
+    return refuse10("a bare git stash", "it saves your changes with no name to find them by");
   if (marked(action.value))
-    return refuse9("this git stash", `the hook cannot read its action (${visible(action.value)})`);
+    return refuse10("this git stash", `the hook cannot read its action (${visible(action.value)})`);
   const name = action.value;
   if (args.some((a) => a.value === "-h" || a.value === "--help"))
     return;
-  if (READS.has(name) || WRITES.has(name))
+  if (READS.has(name) || WRITES2.has(name))
     return;
   if (name === "push" || name === "save" || name.startsWith("-")) {
     const implied = name.startsWith("-");
     if (message(implied ? args : args.slice(1)))
       return;
-    return refuse9(`${implied ? "git stash" : `git stash ${name}`} without -m <message>`, "an unnamed stash is found again only by its position, which another session's stash moves");
+    return refuse10(`${implied ? "git stash" : `git stash ${name}`} without -m <message>`, "an unnamed stash is found again only by its position, which another session's stash moves");
   }
   if (name === "apply") {
     const target = args.slice(1).find((a) => !a.value.startsWith("-"));
     if (target && !marked(target.value) && FULL_SHA.test(target.value))
       return;
-    return refuse9("git stash apply without a full commit SHA", "stash@{n} and the default name whatever entry is newest, which can be another session's");
+    return refuse10("git stash apply without a full commit SHA", "stash@{n} and the default name whatever entry is newest, which can be another session's");
   }
   if (name === "pop" || name === "drop" || name === "clear" || name === "branch")
-    return refuse9(`git stash ${name}`, "it removes an entry by position from the list every worktree shares");
-  return refuse9(`git stash ${name}`, "it is not a stash action the hook knows to be safe");
+    return refuse10(`git stash ${name}`, "it removes an entry by position from the list every worktree shares");
+  return refuse10(`git stash ${name}`, "it is not a stash action the hook knows to be safe");
 }
 function gitCommand(args) {
   const aliases = [];
@@ -13968,7 +14001,7 @@ function gitCommand(args) {
   return { aliases, rest: args.slice(k + 1), sub: args[k] };
 }
 var stashes = (args) => gitCommand(args).sub?.value === "stash";
-var visit4 = async (_cmd, { args, first, local, name, xargs }, env) => {
+var visit5 = async (_cmd, { args, first, local, name, xargs }, env) => {
   const session = sessionIn(local, env);
   if (name === "agent-browser")
     return judgeBrowser(args, session, true);
@@ -13998,12 +14031,12 @@ function judgeGit(args, xargs) {
   if (!sub)
     return;
   if (marked(sub.value))
-    return refuse9("this git call", `the hook cannot read which git command it runs (${visible(sub.value)})`);
+    return refuse10("this git call", `the hook cannot read which git command it runs (${visible(sub.value)})`);
   if (sub.value === "stash")
     return judgeStash(rest, xargs !== undefined);
   const alias = aliases.find((a) => a.startsWith(`alias.${sub.value}=`));
   if (alias && /\bstash\b/.test(alias))
-    return refuse9(`git ${sub.value}`, "it is an alias for git stash");
+    return refuse10(`git ${sub.value}`, "it is an alias for git stash");
 }
 var BARE2 = (command) => command.replace(/[\\'"]/g, "");
 var teardown = (command) => /agent-browser/i.test(BARE2(command)) && /\b(?:close|exit|quit)\b/.test(BARE2(command));
@@ -14040,9 +14073,9 @@ async function inspect10(raw, environment) {
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit4);
+  return run(lex(command, env.known), env, visit5);
 }
-async function check13(raw, environment = process.env) {
+async function check14(raw, environment = process.env) {
   try {
     return await inspect10(raw, environment);
   } catch (error) {
@@ -14114,7 +14147,7 @@ function judgeGit2(args) {
   }
 }
 var merges = (args) => SUBS.has(gitCommand(args).sub?.value ?? "");
-var visit5 = async (_cmd, { args, first, name }) => {
+var visit6 = async (_cmd, { args, first, name }) => {
   if (name === "git")
     return judgeGit2(args);
   if (first && (first.unknown || marked(first.value)) && merges(args))
@@ -14151,9 +14184,9 @@ async function inspect11(raw, environment) {
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit5);
+  return run(lex(command, env.known), env, visit6);
 }
-async function check14(raw, environment = process.env) {
+async function check15(raw, environment = process.env) {
   try {
     return await inspect11(raw, environment);
   } catch (error) {
@@ -14180,20 +14213,20 @@ var FIX = {
   rm: "Name each path literally: a file in your worktree or scratchpad with rm, anything else with playground rm <literal path> (in a script, removeScratch for a folder makeScratch made), and run it again.",
   rmdir: 'Guard each one as ${VAR:?} ("${S:?}/${m:?}"), or name a literal path, and run it again.'
 };
-var refuse10 = (name, path) => `no-prompt-stop hook refuses ${name} ${shown(path)}: Claude Code stops on a removal whose target has two or more parts that start with a variable and waits for a person, who is not there. ${FIX[name]}`;
+var refuse11 = (name, path) => `no-prompt-stop hook refuses ${name} ${shown(path)}: Claude Code stops on a removal whose target has two or more parts that start with a variable and waits for a person, who is not there. ${FIX[name]}`;
 var AT_ROOT = /^\/[^/\u0000]+\/?$/;
 var AT_ROOT_FIX = {
   rm: "Write and remove in the session's scratchpad, a folder there with playground rm <literal path>, and run it again.",
   rmdir: "Write and remove in $TMPDIR or the session's scratchpad, and run it again."
 };
 var refuseAtRoot = (name, path) => `no-prompt-stop hook refuses ${name} ${path}: Claude Code stops on a removal of a name directly in / and waits for a person, who is not there. ${AT_ROOT_FIX[name]}`;
-var visit6 = async (_cmd, { args, name }) => {
+var visit7 = async (_cmd, { args, name }) => {
   if (name !== "rm" && name !== "rmdir")
     return;
   const operands = args.filter((a) => !a.value.startsWith("-"));
   const path = operands.find((a) => variables(a.value) >= VARIABLES_TO_STOP);
   if (path)
-    return refuse10(name, path.value);
+    return refuse11(name, path.value);
   const atRoot = operands.find((a) => AT_ROOT.test(a.value));
   if (atRoot)
     return refuseAtRoot(name, atRoot.value);
@@ -14217,9 +14250,9 @@ async function inspect12(raw) {
     process: {},
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit6);
+  return run(lex(command, env.known), env, visit7);
 }
-async function check15(raw) {
+async function check16(raw) {
   try {
     return await inspect12(raw);
   } catch {
@@ -14692,7 +14725,7 @@ var shipWrite = (raw) => {
     return false;
   }
 };
-async function check16(raw, environment = process.env) {
+async function check17(raw, environment = process.env) {
   const loaded = await guardList("no-public-leak", "no-public-leak", isPublicList, EMPTY_LIST, environment);
   if (loaded.refusal)
     return refusedList(raw, `${loaded.refusal} The list is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`);
@@ -14708,7 +14741,7 @@ import { realpathSync as realpathSync5 } from "fs";
 import { basename as basename7, dirname as dirname8, resolve as resolve10, sep as sep4 } from "path";
 var INSTEAD4 = "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
 var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it, it holds no uncommitted change and its work has landed on canary.";
-var refuse11 = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD4) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
+var refuse12 = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD4) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
 var shown2 = (word) => word.variable ? `$${word.variable}` : visible(word.value);
 var DATA = new Set([
   ...PRINTERS,
@@ -14803,7 +14836,7 @@ var inside = (path, { scratch, worktree }) => {
 var OWN = { appends: false, nested: false };
 function judgeRm(args, xargs, env, roots, { nested }) {
   if (xargs)
-    return refuse11("rm under xargs", "the hook cannot read the paths xargs hands it");
+    return refuse12("rm under xargs", "the hook cannot read the paths xargs hands it");
   let options = true;
   const targets = [];
   for (const a of args) {
@@ -14813,10 +14846,10 @@ function judgeRm(args, xargs, env, roots, { nested }) {
     }
     const option = options && a.value.startsWith("-") && a.value !== "-";
     if (option && recursive2(a.value))
-      return refuse11(`a recursive rm (${a.value})`);
+      return refuse12(`a recursive rm (${a.value})`);
     const spread = marked(a.value) && (!nested || !a.quoted);
     if (spread || options && spellsRecursive(a.value) || option && hidden(a))
-      return refuse11(`an rm with a word the hook cannot read (${shown2(a)})`, "it may be -r or any path");
+      return refuse12(`an rm with a word the hook cannot read (${shown2(a)})`, "it may be -r or any path");
     if (!option)
       targets.push(a);
   }
@@ -14827,7 +14860,7 @@ function judgeRm(args, xargs, env, roots, { nested }) {
     return !path || !inside(path, roots);
   });
   if (outside)
-    return refuse11(`an rm of ${visible(outside.value)}`, "it is outside your own worktree and scratchpad, where a plain rm runs");
+    return refuse12(`an rm of ${visible(outside.value)}`, "it is outside your own worktree and scratchpad, where a plain rm runs");
 }
 function judgeGit3(args) {
   const { rest, sub } = gitCommand(args);
@@ -14838,10 +14871,10 @@ function judgeGit3(args) {
     if (cluster("n") || words.some((v) => prefixOf(v, "--dry-run", 3)))
       return;
     if (cluster("d") || cluster("x") || cluster("X"))
-      return refuse11("git clean with -d or -x", "it deletes untracked folders or ignored files for good");
+      return refuse12("git clean with -d or -x", "it deletes untracked folders or ignored files for good");
   }
   if (sub?.value === "worktree" && words[0] === "remove" && force)
-    return refuse11("git worktree remove --force", "it deletes a worktree's uncommitted work for good", WORKTREE);
+    return refuse12("git worktree remove --force", "it deletes a worktree's uncommitted work for good", WORKTREE);
 }
 async function inspect13(raw, environment) {
   const payload = JSON.parse(raw);
@@ -14880,7 +14913,7 @@ async function inspect13(raw, environment) {
       for (const [k, a] of args.entries()) {
         if (hidden(a)) {
           if (!isData(name) && args.slice(k).some((w) => spellsRecursive(w.value)))
-            return refuse11(`a program the hook cannot read (${shown2(a)}) given -r`, "it may be rm");
+            return refuse12(`a program the hook cannot read (${shown2(a)}) given -r`, "it may be rm");
           continue;
         }
         const named = unversioned(program(a.value));
@@ -14908,7 +14941,7 @@ async function inspect13(raw, environment) {
     const end = args.findIndex((a) => !a.value.startsWith("-") && !hidden(a));
     const lead = end < 0 ? args : args.slice(0, end);
     if (first && hidden(first) && (spellsRecursive(first.value) || args.some((a) => spellsRecursive(a.value)) || lead.some((a) => hidden(a) && !a.quoted)))
-      return refuse11(`a program the hook cannot read (${shown2(first)}) given -r`, "it may be rm");
+      return refuse12(`a program the hook cannot read (${shown2(first)}) given -r`, "it may be rm");
     const held = first && !first.quoted && first.value === UNKNOWN && first.variable ? at.vars.get(first.variable) : undefined;
     if (held && !held.unknown && /\s/.test(held.value.trim())) {
       const split = held.value.trim().split(/\s+/).map((value) => ({ quoted: false, value }));
@@ -14924,23 +14957,23 @@ async function inspect13(raw, environment) {
     if (name === "git")
       return judgeGit3(args);
     if (DELETER_PROGRAMS.has(name))
-      return refuse11(name);
+      return refuse12(name);
     if (name === "rsync" && args.some(({ value }) => value === "--del" || value.startsWith("--delete")))
-      return refuse11("rsync --delete", "it deletes every file its source lacks, for good");
+      return refuse12("rsync --delete", "it deletes every file its source lacks, for good");
     if (name === "rsync" && args.some(({ value }) => /^--remove-s(?:ent|ource)-files$/.test(value)))
-      return refuse11("rsync --remove-source-files", "it deletes every source file it sends");
+      return refuse12("rsync --remove-source-files", "it deletes every source file it sends");
     if (SHRED.has(name) && args.some(({ value }) => /^-[a-z]*u/.test(value) || prefixOf(value.split("=")[0], "--remove", 4)))
-      return refuse11(`${name} -u`, "it overwrites each file and then deletes it, past any recovery");
+      return refuse12(`${name} -u`, "it overwrites each file and then deletes it, past any recovery");
     if (TAR.has(name) && args.some(({ value }) => prefixOf(value, "--remove-files", 5)))
-      return refuse11(`${name} --remove-files`, "it deletes every file it adds to the archive");
+      return refuse12(`${name} --remove-files`, "it deletes every file it adds to the archive");
     if (name === "chflags")
-      return refuse11("chflags", "it lifts the flags that keep a file from deletion");
+      return refuse12("chflags", "it lifts the flags that keep a file from deletion");
     if (name === "chmod" && args.some((a) => /^-[A-Za-z]*[aN]/.test(a.value)))
-      return refuse11("chmod -a or -N", "it strips the access entries that keep a file from deletion");
+      return refuse12("chmod -a or -N", "it strips the access entries that keep a file from deletion");
     const runs = Object.hasOwn(RUNS, name) ? RUNS[name] : undefined;
     if (runs) {
       if (args.some((a) => a.value === "-delete"))
-        return refuse11(`${name} -delete`);
+        return refuse12(`${name} -delete`);
       for (const [k, a] of args.entries()) {
         const attached = name === "fd" ? ATTACHED.exec(a.value) : null;
         if (!runs.has(a.value) && !attached)
@@ -14952,7 +14985,7 @@ async function inspect13(raw, environment) {
           ...args.slice(k + 1, end === -1 ? undefined : end)
         ];
         if (RM.has(parse({ ...cmd, words }).name))
-          return refuse11(value === undefined ? `${name} ${a.value} rm` : `${name} ${a.value}`, `it deletes every path ${name} reaches`);
+          return refuse12(value === undefined ? `${name} ${a.value} rm` : `${name} ${a.value}`, `it deletes every path ${name} reaches`);
         const found = await examine({ ...cmd, words }, at, visitAs({ appends: true, nested: true }), false);
         if (found)
           return found;
@@ -14964,7 +14997,7 @@ async function inspect13(raw, environment) {
       if (fed) {
         const script = await (file === -1 ? stdinOf(cmd, at) : readPath(args[file + 1] ?? { value: "" }, at)).catch((error) => ({ unknown: `a read that failed: ${error}`, value: "" }));
         if (script.unknown)
-          return refuse11(`${name} given a job it cannot read (${script.unknown})`, "it may queue a recursive delete");
+          return refuse12(`${name} given a job it cannot read (${script.unknown})`, "it may queue a recursive delete");
         return line(script.value, at);
       }
     }
@@ -14990,20 +15023,20 @@ function commandOf2(raw) {
     return;
   }
 }
-async function check17(raw, environment = process.env) {
+async function check18(raw, environment = process.env) {
   try {
     return await withDeadline(1e4, async () => inspect13(raw, environment));
   } catch (error) {
     if (!DELETES.test(bare(commandOf2(raw) ?? raw)))
       return;
-    return refuse11(`a call it could not read (${error})`, "it reads as a delete").concat(" Split it into plain commands and run them again.");
+    return refuse12(`a call it could not read (${error})`, "it reads as a delete").concat(" Split it into plain commands and run them again.");
   }
 }
 if (false) {}
 
 // scripts/hooks/no-raw-spawn.ts
-import { join as join16, resolve as resolve11, sep as sep5 } from "path";
-var SPAWN = join16(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
+import { join as join17, resolve as resolve11, sep as sep5 } from "path";
+var SPAWN = join17(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
 var HEADS = new Set([
   "agent",
   "agent-hibernation",
@@ -15088,7 +15121,7 @@ function unixTarget(name, args) {
   }
 }
 var EXPORTS4 = new Set(["declare", "export", "local", "readonly", "typeset"]);
-var refuse12 = (what) => `no-raw-spawn hook refuses ${what}: a factory session starts another only through ${SPAWN}, which refuses unless the machine has room, its gate naming the reading that failed. Run it instead (worker, runner, column, manager, resume or restore; with no arguments it prints how).`;
+var refuse13 = (what) => `no-raw-spawn hook refuses ${what}: a factory session starts another only through ${SPAWN}, which refuses unless the machine has room, its gate naming the reading that failed. Run it instead (worker, runner, column, manager, resume or restore; with no arguments it prints how).`;
 var refuseHerdr = (what) => `no-raw-spawn hook refuses ${what}: herdr's socket has no access control, so a factory session runs only herdr's reads (current, edges, get, layout, list, neighbor, process-info, read and status, agent explain, agent wait, api snapshot, pane wait-output and the like) on herdr's own socket. Talk to another session with SendMessage; start, resume or restore one only through ${SPAWN} (with no arguments it prints how).`;
 var beforeDashes = (args) => {
   const dashes = args.findIndex((a) => a.value === "--");
@@ -15110,7 +15143,7 @@ function judgeCmux(args) {
   if (args.length === 1 && CMUX_READS.has(args[0].value))
     return;
   const [head] = positionals3(beforeDashes(args));
-  return refuse12(`a cmux ${head ?? "call"}, since every session runs in herdr and no factory session calls cmux (only \`cmux --help\`, \`-h\`, \`--version\` and \`version\` run)`);
+  return refuse13(`a cmux ${head ?? "call"}, since every session runs in herdr and no factory session calls cmux (only \`cmux --help\`, \`-h\`, \`--version\` and \`version\` run)`);
 }
 function herdrArgs(args) {
   const found = [];
@@ -15200,7 +15233,7 @@ function judgeHerdr(args, local, env, program) {
     return refuseHerdr(`\`${verb}\` whose program is ${program.unknown ?? "a word it cannot read"}, which it cannot tell from herdr; type the program by its literal name, such as \`agent-browser\` or \`herdr\`, so the hook can read it`);
   return refuseHerdr(`a herdr ${verb}, which is not one of its reads`);
 }
-var visit7 = async (cmd, { args, first, local, name }, env) => {
+var visit8 = async (cmd, { args, first, local, name }, env) => {
   const texts = [...args, ...cmd.redirects.flatMap((r) => [r.target ?? [], r.body ?? []].flat())];
   const socket = (t) => {
     if (HERDR_SOCKET.test(t.value) || t.variable === "HERDR_SOCKET_PATH")
@@ -15242,7 +15275,7 @@ var visit7 = async (cmd, { args, first, local, name }, env) => {
     return head && HEADS.has(head) ? judgeCmux(args) : undefined;
   }
   if (name === "claude" && reopens(args))
-    return refuse12("a claude --resume or --continue");
+    return refuse13("a claude --resume or --continue");
 };
 var BARE4 = (command) => command.replace(/[\\'"]/g, "");
 var OPENS3 = new RegExp(`\\b(?:cmux|hc|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH|${[...HEADS, ...HERDR_HEADS, ...HC_HEADS].join("|")})\\b`, "i");
@@ -15277,16 +15310,16 @@ async function inspect14(raw, environment) {
     vars: new Map,
     visitShells: true
   };
-  return run(lex(command, env.known), env, visit7, true);
+  return run(lex(command, env.known), env, visit8, true);
 }
-async function check18(raw, environment = process.env) {
+async function check19(raw, environment = process.env) {
   try {
     return await inspect14(raw, environment);
   } catch (error) {
     const command = commandOf3(raw);
     if (!command || !spawnCall(command))
       return;
-    return `no-raw-spawn hook could not read this call (${error}), which reads as a session spawn, so it refuses it. ${refuse12("it")}`;
+    return `no-raw-spawn hook could not read this call (${error}), which reads as a session spawn, so it refuses it. ${refuse13("it")}`;
   }
 }
 if (false) {}
@@ -15295,7 +15328,7 @@ if (false) {}
 import { realpathSync as realpathSync6 } from "fs";
 import { homedir as homedir4 } from "os";
 import { resolve as resolve12 } from "path";
-var refuse13 = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
+var refuse14 = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
 var RECURSIVE = new Set(["ack", "ag", "ditto", "find", "rg", "rsync", "tar"]);
 var RECURSIVE_WITH = {
   cp: /^-[A-Za-z]*[rRa]|^--(?:recursive|archive)$/,
@@ -15349,7 +15382,7 @@ var recursive3 = (name, args) => RECURSIVE.has(name) || args.some((a) => RECURSI
 async function judgeBash(command, cwd, environment) {
   const targets = targetsOf(environment);
   if (namesTarget(command, targets))
-    return refuse13("a command naming whatsapp/ in the data folder");
+    return refuse14("a command naming whatsapp/ in the data folder");
   const env = {
     cwd,
     files: new Map,
@@ -15365,7 +15398,7 @@ async function judgeBash(command, cwd, environment) {
     ];
     for (const place of places(at)) {
       if (place.cwd && worst(place.cwd, targets) === "inside")
-        return refuse13(`a command run inside whatsapp/ in the data folder`);
+        return refuse14(`a command run inside whatsapp/ in the data folder`);
       for (const typed of words) {
         const word = readOf(typed, at);
         if (!word?.value)
@@ -15377,9 +15410,9 @@ async function judgeBash(command, cwd, environment) {
             continue;
           const stands = worst(path, targets, !!word.glob);
           if (stands === "inside")
-            return refuse13(`${visible(word.value)}, which reaches whatsapp/ in the data folder`);
+            return refuse14(`${visible(word.value)}, which reaches whatsapp/ in the data folder`);
           if (stands === "above" && recursive3(program(name), args))
-            return refuse13(`${name} through ${visible(word.value)}, which reads whatsapp/ in the data folder on its way down`);
+            return refuse14(`${name} through ${visible(word.value)}, which reads whatsapp/ in the data folder on its way down`);
         }
       }
     }
@@ -15400,7 +15433,7 @@ async function inspect15(raw, environment) {
   if (typeof tool === "string" && FILE_TOOLS3.has(tool)) {
     const path = input?.file_path ?? input?.notebook_path;
     if (typeof path === "string" && worst(path, targets) === "inside")
-      return refuse13(`a ${tool} of ${path}`);
+      return refuse14(`a ${tool} of ${path}`);
     return;
   }
   if (tool === "Grep" || tool === "Glob") {
@@ -15409,13 +15442,13 @@ async function inspect15(raw, environment) {
       return;
     const at = worst(path, targets);
     if (at === "inside" || tool === "Grep" && at === "above")
-      return refuse13(`a ${tool} through ${path}, which reads whatsapp/ in the data folder`);
+      return refuse14(`a ${tool} through ${path}, which reads whatsapp/ in the data folder`);
     const pattern = input?.pattern;
     if (tool === "Glob" && typeof pattern === "string" && worst(resolve12(path, pattern), targets, true) === "inside")
-      return refuse13(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
+      return refuse14(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
   }
 }
-async function check19(raw, environment = process.env) {
+async function check20(raw, environment = process.env) {
   try {
     return await eachInput(raw, "no-raw-wa", (one) => inspect15(one, environment));
   } catch {
@@ -15425,7 +15458,7 @@ async function check19(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-release-comment.ts
-import { join as join17 } from "path";
+import { join as join18 } from "path";
 var guardedOwners = new Set;
 var WORD2 = /release/i;
 var UNRESOLVED = "a repository the hook cannot resolve";
@@ -15593,7 +15626,7 @@ function decide2(candidates) {
   const repo = candidates[hit];
   return { guarded: true, label: repo ? `${repo.owner}/${repo.repo}` : UNRESOLVED };
 }
-function refuse14(what, target, detail, fix) {
+function refuse15(what, target, detail, fix) {
   return `no-release-comment hook refused ${what} on ${target.label}: ${detail}. On a guarded owner's repos an owner comment containing "release" in any case publishes to npm, and gh and the GitHub MCP post as that owner. ${fix}`;
 }
 var READABLE2 = "Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md).";
@@ -15604,16 +15637,16 @@ async function judge6(what, target, bodies, env, fix = READABLE2) {
     return;
   const texts = await Promise.all(bodies.map((b) => resolveText(b, env)));
   if (texts.some((t) => WORD2.test(visible(t.value))))
-    return refuse14(what, target, 'its text contains "release"', REWORD);
+    return refuse15(what, target, 'its text contains "release"', REWORD);
   const hidden = texts.find((t) => t.unknown);
   if (hidden) {
-    return refuse14(what, target, `the hook cannot read its text before the command runs (it comes from ${hidden.unknown})`, fix);
+    return refuse15(what, target, `the hook cannot read its text before the command runs (it comes from ${hidden.unknown})`, fix);
   }
 }
 function mcp4(tool, input) {
   const what = tool.replace(/^mcp__/, "");
   if (!input)
-    return refuse14(what, { guarded: true, label: UNRESOLVED }, "its input is not an object", REWORD);
+    return refuse15(what, { guarded: true, label: UNRESOLVED }, "its input is not an object", REWORD);
   const { body, owner, repo } = input;
   if (body === undefined || body === null)
     return;
@@ -15622,17 +15655,17 @@ function mcp4(tool, input) {
   if (!target.guarded)
     return;
   if (typeof body !== "string")
-    return refuse14(what, target, "its body is not text the hook can read", REWORD);
+    return refuse15(what, target, "its body is not text the hook can read", REWORD);
   if (WORD2.test(body))
-    return refuse14(what, target, 'its text contains "release"', REWORD);
+    return refuse15(what, target, 'its text contains "release"', REWORD);
 }
 var commentCall = (raw) => GH2.test(raw) && COMMENT_CALL.test(raw);
 function candidate7(command) {
   const bare = command.replace(/[\\'"]/g, "");
   return command.includes("$'") || GH2.test(bare) && MAYBE_COMMENT.test(bare);
 }
-async function check20(raw, environment = process.env, lists = join17(coreDir(), "lists")) {
-  const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join17(lists, "release-owners.json"));
+async function check21(raw, environment = process.env, lists = join18(coreDir(), "lists")) {
+  const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join18(lists, "release-owners.json"));
   if (owners.refusal)
     return commentCall(subjectOf3(raw)) ? owners.refusal : undefined;
   guardedOwners = new Set((owners.list ?? []).map((owner) => owner.toLowerCase()));
@@ -15688,8 +15721,8 @@ if (false) {}
 // scripts/hooks/no-unslotted-run.ts
 import { existsSync as existsSync9, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync2 } from "fs";
 import { tmpdir } from "os";
-import { join as join18, resolve as resolve13, sep as sep6 } from "path";
-var refuse15 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
+import { join as join19, resolve as resolve13, sep as sep6 } from "path";
+var refuse16 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var COMMIT_TAKES3 = new Set([
   "--author",
@@ -15766,11 +15799,11 @@ async function commitLint(cmd, args, env, wrote) {
     stderr: "ignore"
   });
   const root = top.success ? top.stdout.toString().trim() : "";
-  const lint = join18(root, "node_modules", ".bin", "commitlint");
+  const lint = join19(root, "node_modules", ".bin", "commitlint");
   if (!root || !existsSync9(lint))
     return;
-  const folder = mkdtempSync(join18(tmpdir(), "commit-msg-"));
-  const file = join18(folder, "COMMIT_EDITMSG");
+  const folder = mkdtempSync(join19(tmpdir(), "commit-msg-"));
+  const file = join19(folder, "COMMIT_EDITMSG");
   let out = "";
   let err = "";
   let code;
@@ -15979,8 +16012,8 @@ function inspect17(raw, environment, main) {
   if (typeof command !== "string")
     return;
   const worktrees = [
-    join18(main, ".claude", "worktrees"),
-    real(join18(main, ".claude", "worktrees"))
+    join19(main, ".claude", "worktrees"),
+    real(join19(main, ".claude", "worktrees"))
   ].map((w) => w + sep6);
   const inWorktree = (dir) => dir !== undefined && [resolve13(dir), real(resolve13(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
   const directory = typeof cwd === "string" ? cwd : undefined;
@@ -16035,7 +16068,7 @@ function inspect17(raw, environment, main) {
         return;
       const moved = here.cwd !== undefined && (directory === undefined || resolve13(here.cwd) !== resolve13(directory));
       const cd = moved ? `cd ${quotedDir(here.cwd)} && ` : "";
-      return found.anywhere ? refuseDocker(found.what, cd, line, found.fix) : refuse15(found.what, cd, line);
+      return found.anywhere ? refuseDocker(found.what, cd, line, found.fix) : refuse16(found.what, cd, line);
     }
   };
   const env = {
@@ -16050,7 +16083,7 @@ function inspect17(raw, environment, main) {
   line = lexed.commands;
   return run(lexed, env, visit);
 }
-async function check21(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
+async function check22(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
     return await inspect17(raw, environment, main);
   } catch {
@@ -16066,30 +16099,31 @@ var GUARDS = [
   {
     factory: true,
     name: "no-extension-repo-write",
-    run: (raw, env) => check4(raw, env)
+    run: (raw, env) => check5(raw, env)
   },
   { factory: true, name: "no-extensions-write", run: (raw, env) => guarded(raw, env) },
-  { factory: true, name: "no-false-green", run: (raw, env) => check6(raw, env.SHELL ?? "zsh") },
+  { factory: true, name: "no-false-green", run: (raw, env) => check7(raw, env.SHELL ?? "zsh") },
   { factory: true, name: "no-glm-heavy-path", run: (raw, env) => refusal(raw, env) },
-  { factory: false, name: "no-headless-login", run: (raw, env) => check7(raw, env) },
-  { factory: true, name: "no-kill-by-name", run: (raw) => check9(raw) },
-  { factory: false, name: "no-linear-ticket", run: (raw, env) => check10(raw, env) },
-  { factory: true, name: "no-mac-web-build", run: (raw, env) => check11(raw, env) },
-  { factory: true, name: "no-main-checkout", run: (raw, env) => check5(raw, env) },
-  { factory: false, name: "no-off-palette-label", run: (raw) => check12(raw) },
-  { factory: true, name: "no-ours-merge", run: (raw, env) => check14(raw, env) },
-  { factory: true, name: "no-playground-leak", run: (raw, env) => check3(raw, env) },
-  { factory: true, name: "no-prompt-stop", run: (raw) => check15(raw) },
-  { factory: true, name: "no-public-leak", run: (raw, env) => check16(raw, env) },
-  { factory: false, name: "no-raw-delete", run: (raw, env) => check17(raw, env) },
-  { factory: true, name: "no-raw-spawn", run: (raw, env) => check18(raw, env) },
-  { factory: true, name: "no-raw-wa", run: (raw, env) => check19(raw, env) },
-  { factory: false, name: "no-release-comment", run: (raw, env) => check20(raw, env) },
-  { factory: true, name: "no-stash", run: (raw, env) => check13(raw, env) },
-  { factory: true, name: "no-unslotted-run", run: (raw, env) => check21(raw, env) }
+  { factory: false, name: "no-headless-login", run: (raw, env) => check8(raw, env) },
+  { factory: true, name: "no-kill-by-name", run: (raw) => check10(raw) },
+  { factory: false, name: "no-linear-ticket", run: (raw, env) => check11(raw, env) },
+  { factory: true, name: "no-mac-web-build", run: (raw, env) => check12(raw, env) },
+  { factory: true, name: "no-main-checkout", run: (raw, env) => check6(raw, env) },
+  { factory: false, name: "no-off-palette-label", run: (raw) => check13(raw) },
+  { factory: true, name: "no-ours-merge", run: (raw, env) => check15(raw, env) },
+  { factory: true, name: "no-playground-leak", run: (raw, env) => check4(raw, env) },
+  { factory: true, name: "no-prepare-write", run: (raw, env) => check3(raw, env) },
+  { factory: true, name: "no-prompt-stop", run: (raw) => check16(raw) },
+  { factory: true, name: "no-public-leak", run: (raw, env) => check17(raw, env) },
+  { factory: false, name: "no-raw-delete", run: (raw, env) => check18(raw, env) },
+  { factory: true, name: "no-raw-spawn", run: (raw, env) => check19(raw, env) },
+  { factory: true, name: "no-raw-wa", run: (raw, env) => check20(raw, env) },
+  { factory: false, name: "no-release-comment", run: (raw, env) => check21(raw, env) },
+  { factory: true, name: "no-stash", run: (raw, env) => check14(raw, env) },
+  { factory: true, name: "no-unslotted-run", run: (raw, env) => check22(raw, env) }
 ];
 var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`;
-async function check22(raw, environment = process.env, guards = GUARDS) {
+async function check23(raw, environment = process.env, guards = GUARDS) {
   let factory;
   const reasons = await Promise.all(guards.map(async ({ factory: gated, name, run }) => {
     try {
@@ -16105,7 +16139,7 @@ async function check22(raw, environment = process.env, guards = GUARDS) {
 `) || undefined;
 }
 async function hook() {
-  const reason = await check22(await Bun.stdin.text());
+  const reason = await check23(await Bun.stdin.text());
   if (!reason)
     return 0;
   console.error(reason);
@@ -16115,6 +16149,6 @@ if (import.meta.main)
   process.exit(await hook());
 export {
   GUARDS,
-  check22 as check,
+  check23 as check,
   hook
 };
