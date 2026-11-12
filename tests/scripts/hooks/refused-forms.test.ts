@@ -767,7 +767,8 @@ const realOf = (path: string, physical = false) => {
 // Each row and path flag that keeps its single spelling, with why: the row moves folders (cd, pushd, popd), or the flag names no folder; the pinned list below shows a row that stops being spelt
 const UNSPELT = new Set<string>()
 
-const movesFolders = (call: string) => /\b(?:cd|pushd|popd)\b/.test(call)
+// cd, pushd or popd as a word of its own, so a folder name that holds one (PG-1-unread-cd-writers, x.cd) moves nothing
+const movesFolders = (call: string) => /(?<![\w.-])(?:cd|pushd|popd)(?=[\s;&|)]|$)/.test(call)
 
 // Each other spelling of one path flag's folder in a case's call: its other joins, the folder relative from the case's own folder, a ./ hop, an <x>/../<x> hop and a link made in a scratch folder, each kept only where it names the folder the row's does, by its real path.
 function spellingsOf(call: Call, cwd: string, id: string): { spelling: string; text: string }[] {
