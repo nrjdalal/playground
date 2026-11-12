@@ -958,6 +958,26 @@ describe("a GLM session's org tools", () => {
       expect(await refusal(input(command, scripts), ON_GLM, CALM)).toBeUndefined()
   })
 
+  test("a program path through the session's PLAYGROUND_REPO gets its literal path's verdict on GLM, and stays refused without it", async () => {
+    const repo = join(DIR, "pg")
+    const env = { ...ON_GLM, PLAYGROUND_REPO: repo }
+    const forms = ["$PLAYGROUND_REPO", "${PLAYGROUND_REPO}", "${PLAYGROUND_REPO:?}"]
+    for (const [program, rest, refused] of [
+      ["scripts/spawn.sh", "column reviewer reviewer-x worker-x p1 brief-reviewer.md", undefined],
+      ["packages/scripts/src/dm/cli.ts", "send x.md", "DM sender"],
+    ]) {
+      const verdict = (at: string, on: Record<string, string> = env) =>
+        refusal(input(`"${at}/${program}" ${rest}`), on, CALM)
+      const literal = await verdict(repo)
+      if (refused) expect(literal).toContain(refused)
+      else expect(literal).toBeUndefined()
+      for (const form of forms) {
+        expect(await verdict(form)).toBe(literal)
+        expect(await verdict(form, ON_GLM)).toContain("names its program")
+      }
+    }
+  })
+
   test("a policy it cannot read refuses gh, git and a fetcher on GLM, naming the fix, and passes on Claude", async () => {
     const broken = join(DIR, "broken-data")
     writeRoot(extensionsDir(broken), new Map([["policy.json", "{not json"]]))
