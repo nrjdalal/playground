@@ -784,7 +784,7 @@ test("a worktree's PR state counts only when exactly one PR answers, as a branch
   expect(prStateOf([pr("other", "MERGED")], at, holds)).toBeNull()
   expect(prStateOf([pr("head", "MERGED"), pr("older", "OPEN")], at, holds)).toBeNull()
   // #1962: gh's clean answer of no PR reads as none, apart from a read gh could not make
-  expect(prStateOf([], at, holds) as unknown).toBe("none")
+  expect(prStateOf([], at, holds)).toBe("none")
   expect(prStateOf(null, at, holds)).toBeNull()
   // a stacked child: its parent's PR is another branch's, whose head is only an ancestor of HEAD
   expect(prStateOf([pr("older", "MERGED", "PG-0-parent")], at, holds)).toBeNull()
