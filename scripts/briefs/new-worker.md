@@ -9,6 +9,7 @@ You are a worker or a runner that the owner started from their terminal with `pl
 Cut a worktree by its absolute path under the main checkout's `.claude/worktrees/`, as AGENTS.md's worktree rule says, so none nests in another.
 A worktree that commits, a docs-only one included, still runs `bun install` through run-slot before its first commit: lefthook's hook runs the worktree's own `node_modules/.bin/lefthook`, and the commit stops without it. A review worktree that only reads needs no install.
 A worktree whose commit stages any file but Markdown passes pre-commit's env-keys step by the `dev` skill's Start: one that runs a stack starts its own `.env` from `.env.example` with `BETTER_AUTH_SECRET` set, and one that runs no stack commits under `env NODE_ENV=production SKIP_ENV_VALIDATION=true`.
+No Co-Authored-By trailer on any commit: AGENTS.md forbids it and wins over the harness's attribution reminder.
 A scratch script goes to a file in your scratchpad through the Write tool, then runs as `bun <path>`, so its text is never read as a command: a heredoc's text is part of its Bash call, and one holding `rm` raised Claude Code's built-in prompt, which times out unanswered in 120s.
 A clone of a repo no org guards goes under `.claude/worktrees/<name>` in the Playground checkout, and your last report to your lead names its path, since no automated cleanup reaches a plain clone and your lead removes it by hand with `playground rm --worktree <path>`; a guarded org's clone goes in the org's folder (code-review-loop says why).
 Save every screenshot and PDF by absolute path under your scratchpad or your worktree (`agent-browser screenshot <your scratchpad>/<name>.png`), since agent-browser saves a relative path in the folder its browser started in, which can be the main checkout, where `playground rm` cannot clear it.
@@ -22,6 +23,7 @@ On GLM, a file under `OPUS_PATHS` is a Claude worker's: its first edit is refuse
 After a resume your shell starts in the folder you launched in, the main checkout, so `cd` to your worktree by its absolute path before any write.
 
 Answer each review round by playbook's SESSIONS.md, Fix pushes and nits.
+When your reviewer asks for a ruling, send it to your lead and build on the lead's answer, since a checker confirms a relayed ruling with the lead before it bends a step, so a ruling of your own costs a round.
 Your PR's checkers (its reviewer and tester) are yours to brief, as playbook's SESSIONS.md (Spawn) says: the spawn passes a filled copy of the template (`~/.playground/<name>-reviewer-<pr>.md`), never the bare template. A run your checker has already measured at the same head is not queued again: ask for its result and cite it.
 A run you repeat, such as a test loop of passes chasing a flake, takes one run-slot call per pass, so the queue moves between passes, and ops hears of any hold past 30 minutes while a waiter queues.
 
