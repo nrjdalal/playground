@@ -51,6 +51,7 @@ export const isAgentBrowser = (command: string): boolean =>
   /^agent-browser(?:-[\w-]+)?$/.test(basename(command.split(" ")[0]!))
 
 export type Quarantined = {
+  bundle?: string
   files: number
   id: string
   size: number
@@ -64,6 +65,7 @@ export type WorktreeGit = { branch: string | null; gitdir: string; sha: string }
 
 export type TrashEntry = {
   at: string
+  bundle?: string
   carveOut?: string
   ended?: string
   files: number
@@ -736,6 +738,16 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     return null
   }
   return `${at}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since)${archived ? `, and ${archived.refused}` : ""}: ${discard}`
+}
+
+// Red-first stub: writes no bundle yet.
+export function bundleToTrash(
+  _repo: string,
+  _refs: { ref: string; sha: string }[],
+  _exclude: string[],
+  _at: { name: string; now: Date; session: string; trash: string },
+): { held: string[]; path: string } | { refused: string } {
+  return { refused: "not built yet" }
 }
 
 const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`

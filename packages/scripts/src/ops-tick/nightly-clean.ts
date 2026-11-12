@@ -27,8 +27,18 @@ const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
 
 export type Pr = { headRefOid: string; state: "CLOSED" | "MERGED" | "OPEN"; url: string }
 // repo is the repository's https URL, which the branch step's archive tags are pushed through.
-export type Prs = { byBranch: Map<string, Pr>; byNumber: Map<number, Pr>; repo?: string }
-export type Ref = { name: string; sha: string }
+export type IssueState = "CLOSED" | "OPEN"
+export type Prs = {
+  byBranch: Map<string, Pr>
+  byIssue?: Map<number, IssueState>
+  byNumber: Map<number, Pr>
+  repo?: string
+}
+export type Ref = { name: string; sha: string; subject?: string }
+
+// Red-first stubs: no branch is judged yet.
+export const isCopy = (_name: string): boolean => false
+export const issueOf = (_ref: Ref): number | undefined => undefined
 export type Worktree = { branch: string | null; path: string }
 
 // What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers in the repo a folder's origin names (the checkout's when none is given; null when GitHub cannot be read), the folders other repos are read in, the names of the live sessions, the roots safe-delete's quarantine reads, the turbo cache's folder, the clock the cap's pacing reads, and the sleep it waits on.
@@ -37,7 +47,13 @@ export type NightDeps = {
   free: (dir: string) => number
   live: () => Promise<string[]>
   now: () => number
-  prs: (ctx: Context, branches: string[], numbers: number[], dir?: string) => Promise<Prs | null>
+  prs: (
+    ctx: Context,
+    branches: string[],
+    numbers: number[],
+    dir?: string,
+    issues?: number[],
+  ) => Promise<Prs | null>
   roots: (data: string, checkout: string) => Promise<string[]>
   sleep: (ms: number) => Promise<void>
   trashRoots: () => Roots
@@ -142,16 +158,18 @@ export const otherRepos = async (roots: string[], checkout: string): Promise<str
 // Pure: what the branch step does. A local branch merged into origin/canary, or one whose merged or closed PR still holds its head, goes with -D (the main checkout's HEAD is main, so -d would refuse one merged into canary alone), and a remote one whose merged or closed PR holds its head is deleted on origin, since GitHub restores it from the PR's page; an unmerged local branch with no PR, or one ahead of its PR's head, goes to the archive list, whose head is tagged on origin before any delete, so the tag holds the old head. A kept branch (canary, main, the live dashboard's), one a worktree has checked out, and one with an open PR stay.
 export const staleBranches = (input: {
   checkedOut: Set<string>
+  issues?: Map<number, IssueState>
   keep: Set<string>
   local: Ref[]
   merged: Set<string>
   prs: Map<string, Pr>
   remote: Ref[]
-}): { archive: string[]; local: string[]; remote: string[] } => {
+}): { archive: string[]; bundle: string[]; local: string[]; remote: string[] } => {
   const done = (pr: Pr | undefined, sha: string) =>
     pr !== undefined && pr.state !== "OPEN" && pr.headRefOid === sha
   const out = {
     archive: [] as string[],
+    bundle: [] as string[],
     local: [] as string[],
     remote: [] as string[],
   }
@@ -689,7 +707,13 @@ export const nightlyClean =
   }
 
 // Pure: one gh api graphql answer read into prs, its b<i> aliases by branch and n<i> by number, a null alias (a number that is no PR) skipped; false when it holds no repository. Its stdout's JSON alone, read up to the "gh: ..." lines of stderr, which ctx.run joins straight after it, since gh ends the body with no newline and an answer with errors exits 1 with its data and errors there.
-export const readPrs = (out: string, branches: string[], numbers: number[], prs: Prs): boolean => {
+export const readPrs = (
+  out: string,
+  branches: string[],
+  numbers: number[],
+  prs: Prs,
+  _issues: number[] = [],
+): boolean => {
   let found: Record<string, unknown> | undefined
   try {
     found = (

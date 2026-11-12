@@ -95,10 +95,8 @@ export const freedOf = (
 
 // What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR state by its --pr or else its branch ("none" when gh answers with no PR, null when no PR of its own reads), the session the caller is (callerOf), and the session's name.
 export type RmDeps = {
-  caller: () => Promise<string | undefined>
   clones: () => Clone[]
   data: string
-  decision: (id: string) => Promise<Decision | null>
   home: string
   main: string
   merged: (sha: string, at: string) => boolean | null
@@ -280,10 +278,8 @@ const decisionOf =
 
 // This machine's: the caller above this process, run-slot's running clone, HOME, the data folder, the Inbox through the Dashboard's checkout, the main checkout, gh for a merged PR, notify.sh to the dispatcher, linkPlaces' temp and scratchpad folders, lsof and ps, and the Claude Code registry's name for this session, else "shell".
 export const rmDeps = (repo: string): RmDeps => ({
-  caller: () => callerOf(process.env, process.ppid),
   clones: clones(dataDir()),
   data: dataDir(),
-  decision: decisionOf(repo),
   home: homedir(),
   main: mainCheckout(repo),
   merged,
@@ -304,7 +300,7 @@ export const discardRefusal = async (
   path: string,
   id: string | undefined,
   caller: string,
-  deps: Pick<RmDeps, "decision" | "prState">,
+  deps: Pick<RmDeps, "prState"> & { decision: (id: string) => Promise<Decision | null> },
   pr?: string,
 ): Promise<string | null> => {
   const route = `post an Inbox delete decision with bun run ask new naming ${resolve(path)} and why (bun run ask example delete prints one to start from), then run playground rm --worktree ${path} --discard --decision <id> once it is approved`
@@ -397,9 +393,16 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   const read: RmDeps = { ...deps, prState: (path, pr) => (ownRead ??= deps.prState(path, pr)) }
   // a folder outside the worktrees folder skips the gate, since quarantine refuses its --worktree naming plain playground rm
   if ("discard" in args && args.discard && inWorktrees(args.path, roots)) {
-    const caller = await deps.caller()
+    // red-first stub: every caller reads as a terminal's until the gate goes
+    const caller = (await Promise.resolve(undefined)) as string | undefined
     const refusal = caller
-      ? await discardRefusal(args.path, args.decision, caller, read, args.pr)
+      ? await discardRefusal(
+          args.path,
+          args.decision,
+          caller,
+          { ...read, decision: decisionOf(deps.main) },
+          args.pr,
+        )
       : null
     if (refusal) {
       console.error(`playground: ${refusal}`)
