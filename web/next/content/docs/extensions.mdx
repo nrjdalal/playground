@@ -123,7 +123,7 @@ playground ext check-modes   # once: lists the scripts stored before put kept th
 
 ## Which scope wins
 
-A session reads its scopes in one order: `ext.order`'s, with your login's first when the list leaves it out, each extension kept only when `ext.links` links it to the org that owns the repo it runs in, or whose own folder `~/<org>` holds a folder with no GitHub origin it runs in, or to every repo (`*`), then `core`. By default, with no `ext.order` set, that is your login's, then the linked extensions, then `core`.
+A session reads its scopes in one order: `ext.order`'s, with your login's first when the list leaves it out, each extension kept only when `ext.links` links it to the org that owns the repo it runs in (for a folder with no GitHub origin, the org whose own folder `~/<org>` holds it) or to every repo (`*`), then `core`. By default, with no `ext.order` set, that is your login's, then the linked extensions, then `core`.
 For skills alone, each bundled extension `ext.bundled` turns on is read between the extensions and `core`: one an installed extension already names stays that extension's, and one that is off loads no skill.
 
 - A skill, a rule or another item resolves by its name: the first scope in that order that holds the name wins, so your copy shadows the org's and the org's shadows core's.
