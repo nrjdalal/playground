@@ -1,4 +1,4 @@
-import { statfsSync } from "node:fs"
+import { existsSync, statfsSync } from "node:fs"
 import { appendFile, lstat, mkdir, readdir, realpath, unlink } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
@@ -15,9 +15,10 @@ import {
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { machineRoots } from "../trash"
 import { writeAtomic } from "../write-atomic"
+import { endOrphans, orphansOf, procsOf, PS } from "./orphans"
 import type { Context } from "./tick"
 
-// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders of sessions that are gone (trashed, each restorable), branches (each head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, and an Inbox update when 1 GB or more was freed. It asks no decision: each container or volume no rule removes is kept and named as kept.
+// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders of sessions that are gone (trashed, each restorable), branches (each head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, and an Inbox update when 1 GB or more was freed. It asks no decision: each container or volume no rule removes is kept and named as kept.
 
 const GB = 1024 ** 3
 // The freed-space finding's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
@@ -384,6 +385,17 @@ export const nightlyClean =
         }
       }
       return out.length ? out.join("; ") : "none stale"
+    })
+    // After the worktrees step, so a script left running in a worktree it trashed is read the same night: TERM, then KILL past the grace, each by its own pid (the signal rule's orphan case).
+    await step("orphans", async () => {
+      const listed = await ctx.run(PS)
+      if (listed.code !== 0) return "ps unreadable, none read"
+      const found = orphansOf(procsOf(listed.out), join(main, ".claude", "worktrees"), existsSync)
+      const said = await endOrphans(found, ctx.run, deps.sleep)
+      removed.push(...said.ended)
+      kept.push(...said.kept)
+      const all = [...said.ended, ...said.kept]
+      return all.length ? all.join("; ") : "none"
     })
     // Every other repo the factory works in: a worktree goes by git worktree remove, with no force flag, so git refuses a dirty tree, only when its PR merged or closed (or it has none, and every commit is on a remote or archiveUnlanded has archived each one no remote holds under the data folder's scratchpad/archive), it holds no work but build output, and no live process or roster row has it; each kept one is named with why, and its branch stays, so git worktree add <path> <branch> brings it back.
     await step("other repos", async () => {

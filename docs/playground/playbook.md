@@ -69,7 +69,7 @@ A lane's item aims at about 1,000 changed lines or fewer, and a bigger diff spli
 Anything else bundles into one PR or sequences one PR after the other.
 A worker is spawned for one chore and ends when the chore is done, so the room it held fills again as work finishes: a fix for live breakage or security first, then a queued org ticket, else the next item of the planner's first lane with no worker, where his own asks sit ahead of the chores the factory proposed.
 Before a lead spawns a worker it reads the machine's room, the Dashboard's System panel through `bun run verify system`, so the factory grows as far as the Mac allows, counting every membership rather than holding for usage.
-Every factory session starts through one script, `scripts/spawn.sh`, which refuses when the machine has no room for it (its gate reads the load against the cores, memory pressure, for a new worker a free run slot with the load room for a run, or an empty run queue, and the model's usage windows, and names the reading that failed),
+Every factory session starts through one script, `scripts/spawn.sh`, which refuses when the machine has no room for it (its gate reads the load against the cores, memory pressure, for a new worker (a `--reads-only` one aside) a free run slot with the load room for a run, or an empty run queue, and the model's usage windows, and names the reading that failed),
 or a live session already holds the name it would start;
 it counts no sessions, so Ops watches the live board, since cmux once stopped answering at 49 live sessions and load 97; a hook turns back a session started any other way; a worker runs its dev stack only while it tests.
 A heavy run, such as a suite, takes one of a few run slots and gives it back when it ends, so nothing long-lived holds one.
@@ -84,6 +84,7 @@ Each night at 3:00 am, ops-tick's nightly clean removes what no merge's cleanup 
 It keeps a worktree that another worktree or a scratch folder still links into, and names the first three links.
 A merged or closed PR's worktree goes to the trash whatever it holds, and one whose merge or close `playground rm` cannot confirm goes there too under the owner's standing approval, each move restorable with `playground rm --restore`.
 It spaces its deletes under `playground rm`'s limit of 3 a minute, so none is refused, and leaves what does not fit in a 10-minute wait for the next night.
+It then ends each script the factory left running after its worktree was removed, one whose parent process is gone, by its own process id, so no one ends it by hand in Activity Monitor; each one is named in the same log and outbox line.
 The same night it sweeps every other repo the factory works in: each checkout directly in the code root, or in `~/<org>` for an org `ext.links` guards.
 A worktree there goes by `git worktree remove`, its branch kept, only when its PR merged or closed (or it has none, and every commit is pushed or saved as a patch in the data folder's `scratchpad/archive/`, which stays on this Mac), it holds nothing but build output, and no live process or roster row has it; each one kept is named with why.
 It also moves to the trash each folder in the data folder's `scratch/` whose session is gone, with no live session and no roster row naming it that has not ended, each restorable with `playground rm --restore`.
@@ -171,7 +172,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - A manager starts no hidden helper: its settings deny it the Agent and Workflow tools, so every build, read or research it hands off shows as a worker in the sidebar.
 - A heavy run in a worktree (an install, a `node_modules` copy, a build, a type check or the whole test suite) waits for a free run slot, so the machine runs a few at a time: the `no-unslotted-run` hook refuses one typed without `run-slot.sh`, naming the form to use.
   A docker image build waits too, from any folder, one at a time in a builder capped at half the Docker VM's memory, so a build that grows too big fails alone and the live dashboard's database keeps running.
-- No factory session starts unless the machine has room: `scripts/spawn.sh` refuses while the load is at or over the core count, while memory pressure is critical or free memory is under 8%, for a new worker while no run slot can take a run and other runs wait for one, or while the model's usage window is near its cap, naming what it read,
+- No factory session starts unless the machine has room: `scripts/spawn.sh` refuses while the load is at or over the core count, while memory pressure is critical or free memory is under 8%, for a new worker (a `--reads-only` one aside) while no run slot can take a run and other runs wait for one, or while the model's usage window is near its cap, naming what it read,
   and when a live session already holds the name, so a respawned session starts only once the old one has closed,
   and the `no-raw-spawn` hook refuses a session not started through it.
   A session started with `--account <email>` runs on that account, and its token shows in no command, message or log.
