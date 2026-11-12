@@ -2041,6 +2041,7 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["GNU chmod of an absolute file", `cd "$X"; gchmod 644 /tmp/p`],
     ["sort's shortened --output to an absolute file", `cd "$X"; sort --outp /tmp/p /tmp/a`],
     ["tar's -f before its -C", `cd "$X"; tar -x -f /tmp/a.tar -C /tmp/out`],
+    ["old-style tar with its -C", `cd "$X"; tar xfC /tmp/a.tar /tmp/out`],
     ["macOS mktemp -t beside an absolute template", `cd "$X"; mktemp -t x /tmp/scratch/y.XXXX`],
     ["curl's --trace to an absolute file", `cd "$X"; curl --trace /tmp/t https://example.com`],
     [

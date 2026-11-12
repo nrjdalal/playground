@@ -839,6 +839,9 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
 
   test("the rows whose path flag keeps its single spelling are the ones pinned here", () => {
     expect([...UNSPELT].sort()).toEqual([
+      // the row's cd moves the shell, and the -C is a value tar's own option takes, so no spelling of it names a folder tar uses
+      "#1340 tar whose --exclude value is a -C after a cd to a variable | tar -C, it moves folders",
+      "#1340 tar whose -f value looks like -C after a cd to a variable | tar -C, it moves folders",
       // a `..` after a link, which the kernel reads from the link's target
       "#1663 a commit by one -C that climbs out of a link | git -C, it climbs out of a link",
       // the row's cd moves the shell, so its --cwd is read from a folder no spelling knows
