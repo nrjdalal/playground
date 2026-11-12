@@ -5,7 +5,8 @@ import { join } from "node:path"
 process.env.BETTER_AUTH_SECRET ||= "inbox-router-test-secret-not-for-use-anywhere"
 const { inboxRouter } = await import("../../../../../api/hono/src/routers/inbox")
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
-const { refuseAgent } = await import("../../../../../api/hono/src/middlewares/dashboard")
+const { refuseAgent, refuseAgentOffFixture } =
+  await import("../../../../../api/hono/src/middlewares/dashboard")
 const { site } = await import("../../../../../packages/config/src/site")
 
 // Validated, the setting is a list; with validation skipped, as in CI, it is the raw comma-separated string.
@@ -204,5 +205,14 @@ describe("a reveal card's Show (PG-1023)", () => {
     expect((await reveal({ origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)
     expect((await reveal({ origin: trusted() })).status).toBe(403)
     expect((await reveal({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
+  })
+})
+
+describe("an Inbox answer refuses the agent sign-in off a fixture stack", () => {
+  test("POST /:id/answer carries refuseAgentOffFixture", () => {
+    const handlers = inboxRouter.routes
+      .filter((route) => route.method === "POST" && route.path === "/:id/answer")
+      .map((route) => route.handler)
+    expect(handlers).toContain(refuseAgentOffFixture)
   })
 })
