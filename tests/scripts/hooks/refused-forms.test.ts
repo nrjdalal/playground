@@ -862,6 +862,9 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1747 bunx running a commit in a --cwd read from the one before | bunx --cwd, no folder",
       "#1747 bunx running bun's build in a --cwd in a worktree read from the one before | bunx --cwd, no folder",
       "#1747 bunx running bun's build in a --cwd read from the one before | bunx --cwd, no folder",
+      // the row's -C is git's own, and its message, which git never runs, holds the cd, so no spelling of it moves a folder git uses
+      "#1887 a commit by -C whose message holds a folder change, a build and an or-true | git -C, it moves folders",
+      "#1887 a commit by -c whose message holds a folder change into the root | git -C, it moves folders",
       "#466 git --work-tree with a subcommand for its value | git --work-tree, no folder",
       "#466 git -C with a subcommand for its value | git -C, no folder",
     ])
