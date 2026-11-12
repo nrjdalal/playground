@@ -25,6 +25,7 @@ const BASH_GUARDS = [
   "no-off-palette-label",
   "no-ours-merge",
   "no-playground-leak",
+  "no-prepare-write",
   "no-prompt-stop",
   "no-public-leak",
   "no-raw-delete",
