@@ -125,6 +125,26 @@ describe("orphansOf", () => {
     ])
   })
 
+  // only a script file counts: an app opened on a gone worktree's folder, or a reader of a log there, may have parent pid 1 too, and is no factory script
+  test("never selects a program that names only a gone worktree's folder or a file that is no script", () => {
+    expect(
+      select([
+        row(740, 1, `/Applications/Editor.app/Contents/MacOS/Electron ${gone}/`),
+        row(741, 1, `/Applications/Editor.app/Contents/MacOS/Electron ${gone}`),
+        row(742, 1, `tail -f ${gone}/.turbo/dev.log`),
+        row(743, 1, `less ${gone}/README.md`),
+      ]),
+    ).toEqual([])
+    expect(
+      select([
+        row(744, 1, `bash ${gone}/scripts/ops/run-slot.sh w -- sleep 5`),
+        row(745, 1, `bun ${gone}/packages/scripts/src/x.ts`),
+        row(746, 1, `node ${gone}/scripts/x.mjs`),
+        row(747, 1, `python3 ${gone}/scripts/x.py`),
+      ]),
+    ).toEqual([744, 745, 746, 747])
+  })
+
   test("never selects a process that names no worktree of this checkout", () => {
     expect(
       select([
