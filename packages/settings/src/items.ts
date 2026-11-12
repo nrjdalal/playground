@@ -20,6 +20,7 @@ import {
   extLog,
   filesIn,
   mustGit,
+  mustGitRaw,
   scopesIn,
   withLock,
   writeAtomically,
@@ -331,7 +332,7 @@ export const showItem = (data: string, ref: Ref, rev?: string) => {
     if (listed.code !== 0) return null
     const names = listed.out.split("\n").filter(Boolean)
     if (!names.length) continue
-    const show = (name: string) => mustGit(dir, ["show", `${tree}:${name}`])
+    const show = (name: string) => mustGitRaw(dir, ["show", `${tree}:${name}`])
     const content: Content = { attachments: [], body: null, files: null, value: null }
     if (names.length > 1 || names[0] !== at)
       content.files = Object.fromEntries(names.map((name) => [relative(at, name), show(name)]))

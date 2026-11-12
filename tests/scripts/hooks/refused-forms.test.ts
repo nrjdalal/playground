@@ -128,6 +128,12 @@ git(GLM_ORG_REPO, "remote", "add", "origin", "https://github.com/acme-blue/demo.
 // A file of the org's checkout, and a link to it from the session's own checkout, for the read rows a glob or a link reaches it through.
 writeFileSync(join(GLM_ORG_REPO, "README.md"), "demo\n")
 symlinkSync(join("..", "glm-org-repo", "README.md"), join(GLM_REPO, "org-link.md"))
+// An org checkout two folders below glm-nest, which a ** glob reaches and a one-level glob does not, and a psql script in the session's own checkout that connects off this machine, for #1449's and #1450's rows.
+const GLM_NESTED = join(SCRATCH, "glm-nest", "acme", "demo")
+mkdirSync(dirname(GLM_NESTED), { recursive: true })
+git(SCRATCH, "init", "-q", GLM_NESTED)
+git(GLM_NESTED, "remote", "add", "origin", "https://github.com/acme-blue/nested.git")
+writeFileSync(join(GLM_REPO, "connect.sql"), "\\c host=db.example.com dbname=app\nselect 1;\n")
 // The leak guard's lists as core holds them, with ext.links guarding a made-up org's repositories, as its own test sets them.
 const LISTS = join(CHECKOUT, "extensions", "core", "lists")
 const LEAK = join(SCRATCH, "leak")
@@ -885,6 +891,8 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1173 GNU mv to the shell's folder attached to its target option in a cluster after a cd to a variable | -ft",
       "#1173 GNU mv to the shell's folder by its long target option after a cd to a variable | --target-directory",
       "#1173 GNU mv to the shell's folder by its shortened long target option after a cd to a variable | --target",
+      // grep's -r, which takes no value: the folder name after it is the search's pattern
+      "#1448 grep -r whose pattern names a folder in its own folder | -r",
       // cd's -P, alone or among its other options, which take no value: the folder after it is the cd's own operand
       "#1663 a commit after a cd whose -P comes before -L | -PL",
       "#1663 a commit after a physical cd into a link, then a climb | -P",
