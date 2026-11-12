@@ -160,10 +160,13 @@ A manager answers the permission prompt its session's stuck alert names, by the 
 ```bash
 playground picker <session> allow <key>
 playground picker <session> deny <key> "<why, and the simpler shape to run instead>"
+playground picker <session> allow <key> --rule <name>
 ```
 
+When a standing rule settles the answer, add `--rule <name>`, the name `playground rules` lists it under, to either form; picker refuses a name no rules file holds and presses nothing.
+
 Allow presses Yes once in the session's herdr pane while its prompt shows that call, a subagent's command included; deny presses No (Escape), and the relay sends the session the reason.
-Each answer is a line in `ops/picker.log`: the time, the manager, the answer, the session and the command's first 120 characters.
+Each answer is a line in `ops/picker.log`: the time, the manager, the answer, the session, the command's first 120 characters and, with `--rule`, `under **<name>**`, which a deny's message to the session names too.
 Done when it prints that line; it refuses any caller but the session's manager or the primary dispatcher, a deny with no reason, a dispatcher's session, a session in no herdr pane, and a key no waiting call or shown prompt matches, which means the prompt changed: wait for its next alert.
 An ops-unstick alert that says picker cannot answer the prompt found no waiting call surely its own, and names the close and resume below.
 Picker also refuses a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
