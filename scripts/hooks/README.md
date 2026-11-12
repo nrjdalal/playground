@@ -927,9 +927,9 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   The mark and this check each do nothing without the other, so the job's revision and this check go live in either order.
 - While the mode stands, `scripts/hooks/no-prepare-write.ts` refuses a factory session's writes that reach the org before the claim, a closed list, each in any form the shared reader (`scripts/hooks/shell.ts`) finds:
   - `chat_post_message`, a chat post, on a Slack server;
-  - `create_branch`, `create_or_update_file`, `create_pull_request`, `delete_file` and `push_files` on a GitHub server;
-  - `gh api` with a write method (any but GET or HEAD) to `repos/<owner>/<repo>/pulls`, `repos/<owner>/<repo>/git/refs` or `repos/<owner>/<repo>/git/refs/<ref>`, the endpoint in any spelling (a leading `/`, the API host), or to an endpoint it cannot read;
-  - `gh api graphql` whose query names `createCommitOnBranch`, `createPullRequest`, `createRef`, `deleteRef`, `updateRef` or `updateRefs`, or whose query it cannot read;
+  - `create_branch`, `create_or_update_file`, `create_pull_request`, `delete_file`, `merge_pull_request`, `push_files` and `update_pull_request_branch` on a GitHub server;
+  - `gh api` with a write method (any but GET or HEAD) to `repos/<owner>/<repo>/` then `contents/<path>`, `git/refs`, `git/refs/<ref>`, `merges`, `pulls`, `pulls/<n>/merge` or `pulls/<n>/update-branch`, the endpoint in any spelling (a leading `/`, the API host), or to an endpoint it cannot read;
+  - `gh api graphql`, the endpoint in any spelling (`/graphql`, the API host, an Enterprise host's `api/graphql`), whose query names `createCommitOnBranch`, `createPullRequest`, `createRef`, `deleteRef`, `mergeBranch`, `mergePullRequest`, `updatePullRequestBranch`, `updateRef` or `updateRefs`, or whose query it cannot read;
   - `gh pr create`;
   - `git push`, past git's own options (`GIT_TAKES`), since a prepared branch on the org's remote reaches the org before the claim;
   - `save_comment`, a tracker comment, and `save_issue`, a tracker issue save (an assign or a state change), on a Linear server.
