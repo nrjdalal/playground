@@ -614,8 +614,11 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A shell call opens its folder, each argument, each file a redirect names (`<`, `<>`, `>`, `>>`), each file a word's substitution reads (`$(< f)`, `$(cat f)`), each match on disk of a glob or a brace (`**` read as `*`, at most 64 brace alternatives and 200 matches), `~+` (the folder the call runs in) and a link, read by its real path.
   A checkout is the nearest folder at or above the path's real form holding `.git`, read once a call through `git config` for its remotes; a path in no checkout, or in one whose remotes git cannot read, runs, since only an owner the policy guards refuses.
   A read path the hook cannot read fails closed: a word holding a variable or a substitution it cannot read, xargs's `-I` word, `~-` before a `cd` on the line, and the folder a `cd` it cannot follow left.
-  It reads the line's steady variables, the session's own variables the line never names, a for loop's literal values, a `$(cat f)` and a `$(pwd)` or `$(echo ...)` substitution first, and refuses after the org tools' and the database rules, so their reason names the call.
+  It reads the shell's own values first: the line's steady variables, the session's own variables the line never names, a for loop's literal values, and a `${NAME:-word}` or `${NAME:?}` as the session's value or the literal word.
+  It also reads a pure substitution: `$(cat f)`, `$(pwd)`, `$(echo ...)`, git's own folders (`$(git rev-parse --show-toplevel)`, `--git-dir`, `--git-common-dir`), and `$(dirname ...)` or `$(basename ...)` of a path it holds, so the worktree recipe's path reads.
+  It refuses after the org tools' and the database rules, so their reason names the call.
   A command that reads nothing (below), the shell's own `for`, `select` and `case` words, `[`, `[[`, `test`, `exit`, `basename` and `dirname` take such a word as text.
+  So do the words a program takes as code or an assignment: awk's program and `-v` values, sed's script (`-e`, else its first operand), and inline code (`python -c`, `node` or `bun -e`, `perl` or `ruby -e`).
   A recursive read is read all the way down: `rg`, `find`, and `grep` and its kin under `-r`, `-R` or their long forms, each folder they name or else their own, a `Grep`'s folder, a `Glob` pattern's literal start (absolute too), and the folder a `**` in a shell word starts from.
   The walk goes 4 folders deep and at most 5000 folders (`BELOW_DEPTH`, `BELOW_FOLDERS`), passing over `.git` and `node_modules` and reading a link by its real path without walking into it, and a folder past that limit refuses.
   A policy the hook cannot read guards no org for this check, so a read tool and a shell call run where `gh`, `git` and the fetchers fail closed: a read of a checkout needs the policy to name its owner.
@@ -631,7 +634,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   `RUNNER_CALL` takes its database clients from `DB_CLIENTS`, so every client the database rule reads reaches the parse, whatever orgs the policy guards.
   A replay of its verdicts tells a GLM session's calls apart by each transcript entry's `message.model` (`glm-5.3`, `glm-5.3-flash`), not the session's name, and reads every GLM transcript on disk, since a day's window can hold none.
   Out of its reach, as residual risk: a URL held in a variable, a program named through one (`G="git -C <dir>"; $G log`), a program that fetches by itself (`bun -e`, Python's urllib), and an org script found through a `PATH` the call sets or run through a link the call makes, each tracked as its own follow-up issue.
-  So are a client fed its input by a pipe or by `mysql`'s `source`, a recursive reader other than those above, and a path built by arithmetic, and a glob or brace past its 200-match or 64-alternative cap leaves its further paths unchecked.
+  So are a client fed its input by a pipe or by `mysql`'s `source`, a recursive reader other than those above, a path built by arithmetic, and a file a program's inline code opens, and a glob or brace past its 200-match or 64-alternative cap leaves its further paths unchecked.
   A database URL in a container runner's own words (an `-e` value) goes unchecked once a client word follows, tracked as its own follow-up issue.
 
 ## no-headless-login
