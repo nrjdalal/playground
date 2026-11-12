@@ -236,6 +236,24 @@ export const builtPaths = (sources: string[]): string[] => [
   ...new Set(sources.flatMap((source) => source.match(BUILT_PATH) ?? [])),
 ]
 
+// A source that spawns a child Bun runs code the import scan cannot follow (a `bun -e` text, a path it reads at run time), so test:file builds every shared package's dist for it.
+const SPAWNS_BUN = /\[\s*(?:"bun"|'bun'|`bun`|process\.execPath)\s*[,\]]/
+
+// What test:file, or with `types` check-types:tests, builds for the given sources: their built imports and paths, and for a source that spawns a child Bun each built shared package's dist.
+export const testSpecifiers = (
+  sources: string[],
+  built: Set<string | undefined>,
+  types: boolean,
+): string[] => [
+  ...workspaceImports(sources, types),
+  ...builtPaths(sources),
+  ...(!types && sources.some((source) => SPAWNS_BUN.test(source))
+    ? [...built]
+        .filter((name): name is string => Boolean(name?.startsWith("@packages/")))
+        .map((name) => `packages/${name.slice("@packages/".length)}/dist`)
+    : []),
+]
+
 // Where a built import's file lives, by its workspace's exports and the conditions the reader takes (Bun's runtime, or tsc's types), so a test file outside any workspace resolves as the code it imports does; it throws when the file is not there yet.
 export const builtFile = (specifier: string, root: string, conditions: string[]): string => {
   if (
@@ -373,7 +391,7 @@ export const prebuildTests = async (paths: string[], types = false): Promise<num
       .map(({ pkg }) => pkg.name),
   )
   const missing = unbuilt(
-    [...workspaceImports(sources, types), ...builtPaths(sources)].filter(
+    testSpecifiers(sources, built, types).filter(
       (specifier) => specifier.startsWith("generated/") || built.has(packageOf(specifier)),
     ),
     ROOT,

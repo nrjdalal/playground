@@ -24,6 +24,7 @@ const {
   reach,
   sourcesIn,
   staleInstall,
+  testSpecifiers,
   unbuilt,
   workspaceImports,
 } = prebuild
@@ -153,6 +154,20 @@ test("in the factory's main checkout prebuild stops before any build and says wh
   } finally {
     rmSync(dir, { force: true, recursive: true })
   }
+})
+
+// yard.test.ts's `bun -e` scenarios import the hosted app through a path read at run time, so a fresh clone's test:file built nothing and 8 rows failed on "Cannot find module '@packages/db'"
+test("testSpecifiers adds every built shared package for a test:file source that spawns a child Bun, whose script the import scan cannot follow", () => {
+  const built = new Set(["@api/hono", "@packages/db", "@packages/env"])
+  expect(
+    testSpecifiers(['Bun.spawnSync(["bun", "-e", script], { cwd: API })'], built, false),
+  ).toEqual(["packages/db/dist", "packages/env/dist"])
+  expect(testSpecifiers(["spawnSync([process.execPath, file])"], built, false)).toEqual([
+    "packages/db/dist",
+    "packages/env/dist",
+  ])
+  expect(testSpecifiers(['Bun.spawnSync(["git", "status"])'], built, false)).toEqual([])
+  expect(testSpecifiers(['Bun.spawnSync(["bun", "-e", script])'], built, true)).toEqual([])
 })
 
 test("workspaceImports finds static, dynamic and bare imports of workspace packages", () => {
