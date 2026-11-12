@@ -236,10 +236,10 @@ export const builtPaths = (sources: string[]): string[] => [
   ...new Set(sources.flatMap((source) => source.match(BUILT_PATH) ?? [])),
 ]
 
-// A source that spawns a child Bun runs code the import scan cannot follow (a `bun -e` text, a path it reads at run time), so test:file builds every shared package's dist for it.
-const SPAWNS_BUN = /\[\s*(?:"bun"|'bun'|`bun`|process\.execPath)\s*[,\]]/
+// A source that spawns a child process may start Bun on code the import scan cannot follow (a `bun -e` text, a path read at run time, a helper's binary in a variable), so test:file builds every shared package's dist for it, whatever the program.
+const SPAWNS = /\b(?:spawn|spawnSync|execFile|execFileSync|execSync|fork)\s*\(|(?:^|[^\w$])\$`/m
 
-// What test:file, or with `types` check-types:tests, builds for the given sources: their built imports and paths, and for a source that spawns a child Bun each built shared package's dist.
+// What test:file, or with `types` check-types:tests, builds for the given sources: their built imports and paths, and for a source that spawns a child process each built shared package's dist.
 export const testSpecifiers = (
   sources: string[],
   built: Set<string | undefined>,
@@ -247,7 +247,7 @@ export const testSpecifiers = (
 ): string[] => [
   ...workspaceImports(sources, types),
   ...builtPaths(sources),
-  ...(!types && sources.some((source) => SPAWNS_BUN.test(source))
+  ...(!types && sources.some((source) => SPAWNS.test(source))
     ? [...built]
         .filter((name): name is string => Boolean(name?.startsWith("@packages/")))
         .map((name) => `packages/${name.slice("@packages/".length)}/dist`)
