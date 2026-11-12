@@ -7,6 +7,7 @@ import {
   share,
   type Spec,
   upload,
+  wordsOf,
 } from "../../../../../../extensions/slack/skills/slack/scripts/upload"
 
 const REPO = join(import.meta.dir, "..", "..", "..", "..", "..", "..")
@@ -124,8 +125,8 @@ describe("dm upload (PG-649)", () => {
     test("a text file's words reach both guards with its name, a picture's name alone", async () => {
       const { checks, raws, texts } = seen()
       const notes = { bytes: new TextEncoder().encode("hello"), name: "notes.png", text: true }
-      expect(await guarded("C0MADEUP01", notes, checks)).toBeUndefined()
-      expect(await guarded("C0MADEUP01", FILES[0]!, checks)).toBeUndefined()
+      expect(await guarded("C0MADEUP01", wordsOf(notes), checks)).toBeUndefined()
+      expect(await guarded("C0MADEUP01", wordsOf(FILES[0]!), checks)).toBeUndefined()
       expect(texts).toEqual(["notes.png\nhello", "before.png"])
       expect(JSON.parse(raws[0]!)).toEqual({
         tool_input: { channel: "C0MADEUP01", text: "notes.png\nhello" },
@@ -136,10 +137,10 @@ describe("dm upload (PG-649)", () => {
     test("either guard's refusal is the reason", async () => {
       const refuse = async () => "a term the channel may not see"
       const pass = async () => undefined
-      expect(await guarded("C0MADEUP01", FILES[0]!, { playground: refuse, public: pass })).toBe(
+      expect(await guarded("C0MADEUP01", "before.png", { playground: refuse, public: pass })).toBe(
         "a term the channel may not see",
       )
-      expect(await guarded("C0MADEUP01", FILES[0]!, { playground: pass, public: refuse })).toBe(
+      expect(await guarded("C0MADEUP01", "before.png", { playground: pass, public: refuse })).toBe(
         "a term the channel may not see",
       )
     })
@@ -177,17 +178,31 @@ describe("dm upload (PG-649)", () => {
 
     test("the spec's words reach Slack as the complete's initial_comment (PG-1921)", async () => {
       const { put, slack, steps } = stub()
-      const words = { ...SPEC, text: "the fix is live" } as Spec
+      const words: Spec = { ...SPEC, text: "the fix is live" }
       await share("item-1", { check: async () => undefined, put, read: async () => words, slack })
       expect(steps.at(-1)?.params?.initial_comment).toBe("the fix is live")
+    })
+
+    test("words a guard refuses fail the share as the message's, before any file reaches Slack (PG-1921)", async () => {
+      const { put, slack, steps } = stub()
+      await expect(
+        share("item-1", {
+          check: async (_channel, words) =>
+            words === "the fix is live" ? "a term the channel may not see" : undefined,
+          put,
+          read: async () => ({ ...SPEC, text: "the fix is live" }),
+          slack,
+        }),
+      ).rejects.toThrow("the message: a term the channel may not see")
+      expect(steps).toEqual([])
     })
 
     test("a file a guard refuses fails the share, naming it, before any file reaches Slack", async () => {
       const { put, slack, steps } = stub()
       await expect(
         share("item-1", {
-          check: async (_channel, file) =>
-            file.text ? "a term the channel may not see" : undefined,
+          check: async (_channel, words) =>
+            words.includes("hello") ? "a term the channel may not see" : undefined,
           put,
           read: async () => SPEC,
           slack,

@@ -2194,7 +2194,6 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         })
         await store.answerItem(db, posted.id, { action: "send" }, { actor })
         const spec = await uploadSpec(db, posted.id, read)
-        expect(spec).toHaveProperty("text", "hi")
         expect(spec).toEqual({
           channel: "C0MADEUP01",
           files: [
@@ -2205,6 +2204,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
               text: true,
             },
           ],
+          text: "hi",
           thread: "1700000000.000100",
         })
       })
