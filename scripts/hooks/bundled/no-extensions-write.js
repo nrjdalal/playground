@@ -10479,7 +10479,7 @@ async function inspect(raw, environment, unknown = false) {
     }
     const slot = slotWords(parsed);
     if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
+      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, { ...env, files: new Map(env.files), vars: new Map(env.vars) }, visit, false);
     const { args, first, name, xargs } = parsed;
     const findutils = GNU_NAMED.exec(name)?.[1];
     if (first && (findutils === "find" || findutils === "xargs")) {
