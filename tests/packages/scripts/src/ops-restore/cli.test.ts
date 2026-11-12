@@ -465,17 +465,16 @@ describe("the Dashboard's Restore now runs the same steps at once (#1919)", () =
     expect(readFileSync(join(m.main, "README.md"), "utf8")).toBe("stray\n")
   })
 
-  test("while upkeep holds the main checkout, nothing runs", async () => {
-    const m = await machine()
-    m.wipe()
-    const pressed = await restoreNow(m.ctx(T0), {
-      guards: GUARDS,
-      main: m.main,
-      upkeep: async () => true,
+  test("while a run slot's holder runs upkeep on the main checkout, nothing runs", async () => {
+    const m = await machine({
+      "ps -o command= -p 4242": { code: 0, out: "bun install --cwd /x\n" },
     })
+    m.wipe()
+    writeFileSync(join(m.ops, "run-slot.holder"), "ops 4242 2026-11-07T06:00:00Z 1 medium\n")
+    const pressed = await restoreNow(m.ctx(T0), { guards: GUARDS, main: m.main })
     expect(pressed.code).toBe(1)
     expect(pressed.text).toContain("so nothing was restored")
-    expect(m.runs).toEqual([])
+    expect(m.runs).toEqual(["ps -o command= -p 4242"])
     expect(missingGuards(m.main, GUARDS)).toEqual(GUARDS)
   })
 

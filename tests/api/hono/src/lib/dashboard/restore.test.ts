@@ -83,7 +83,7 @@ const git = (cwd: string, ...args: string[]) => {
 }
 
 // A scratch main checkout at the place the route reads on a fixture stack: one guard's bundle that the checkout's own factory settings register, a link-skills.sh that leaves a mark, and a package.json with nothing to install, cloned from an origin of its own.
-const scratchCheckout = (): string => {
+const scratchCheckout = (link = 'touch "$(dirname "$0")/../linked"\n'): string => {
   const main = join(ensureFixture(), "checkout")
   rmSync(main, { force: true, recursive: true })
   const origin = mkdtempSync(join(scratch, "origin-"))
@@ -95,7 +95,7 @@ const scratchCheckout = (): string => {
       hooks: { PreToolUse: [{ hooks: [{ command: "bun scripts/hooks/bundled/no-stash.js" }] }] },
     }),
   )
-  writeFileSync(join(origin, "scripts", "link-skills.sh"), 'touch "$(dirname "$0")/../linked"\n')
+  writeFileSync(join(origin, "scripts", "link-skills.sh"), link)
   writeFileSync(join(origin, "package.json"), '{ "name": "scratch-main", "private": true }\n')
   writeFileSync(join(origin, ".gitignore"), "linked\nbun.lock\nnode_modules\n")
   git(origin, "init", "-q", "-b", "main")
@@ -173,11 +173,13 @@ describe("POST /ops/restore (#1919)", () => {
   test("a press with no origin, another origin, or from off this machine is refused before the session is read, and nothing runs", async () => {
     const main = scratchCheckout()
     wipe(main)
-    spies.push(signedIn("owner"))
+    const session = signedIn("owner")
+    spies.push(session)
     expect((await press({}, peer("127.0.0.1"))).status).toBe(403)
     expect((await press({ origin: "http://evil.localhost" }, peer("127.0.0.1"))).status).toBe(403)
     expect((await press({ origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)
     expect((await press({ origin: trusted() })).status).toBe(403)
+    expect(session).not.toHaveBeenCalled()
     expect(existsSync(join(main, ...GUARD))).toBe(false)
   })
 
@@ -187,5 +189,44 @@ describe("POST /ops/restore (#1919)", () => {
     spies.push(signedIn("admin"))
     expect((await press({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(403)
     expect(existsSync(join(main, ...GUARD))).toBe(false)
+  })
+
+  // A real install and link-skills.sh outlast Bun.serve's 10 s idle limit, which drops a quiet request, so the press runs on a real server with a link-skills.sh that takes 11 s; a second press while it runs is refused.
+  test("a restore longer than the server's idle limit still answers with its words, and a second press meanwhile is refused", async () => {
+    const main = scratchCheckout('sleep 11\ntouch "$(dirname "$0")/../linked"\n')
+    wipe(main)
+    spies.push(signedIn("owner"))
+    const server = Bun.serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 })
+    try {
+      const first = fetch(`http://127.0.0.1:${server.port}/ops/restore`, {
+        headers: { origin: trusted() },
+        method: "POST",
+      })
+      await Bun.sleep(1_000)
+      const second = await press({ origin: trusted() }, peer("127.0.0.1"))
+      expect(second.status).toBe(409)
+      expect(await second.text()).toContain("A restore is already running")
+      const response = await first
+      expect(response.status).toBe(200)
+      expect(((await response.json()) as { data: { status: string } }).data.status).toBe("restored")
+      expect(existsSync(join(main, ...GUARD))).toBe(true)
+      expect(existsSync(join(main, "linked"))).toBe(true)
+    } finally {
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test("a stack with no checkout to restore refuses the press", async () => {
+    spies.push(signedIn("owner"))
+    const hosted = process.env.PLAYGROUND_HOSTED
+    process.env.PLAYGROUND_HOSTED = "1"
+    try {
+      const response = await press({ origin: trusted() }, peer("127.0.0.1"))
+      expect(response.status).toBe(409)
+      expect(await response.text()).toContain("This stack has no checkout to restore")
+    } finally {
+      if (hosted === undefined) delete process.env.PLAYGROUND_HOSTED
+      else process.env.PLAYGROUND_HOSTED = hosted
+    }
   })
 })

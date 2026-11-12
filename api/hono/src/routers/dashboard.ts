@@ -574,7 +574,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Settings > Jobs' Restore now, on the owner's click: runs ops-restore's own steps once (`packages/scripts/src/ops-restore/cli.ts --now`) from this API's checkout, for a main checkout whose guards are gone while the job is stopped or off. The checkout comes from the server alone: the main checkout this API's checkout sits in on a stack that reads this machine, the fixture's scratch `checkout` folder on a fixture or test stack. A checkout whose guards are all there is left as it is (`intact`), as is one an install, `link-skills.sh` or `playground update` holds; otherwise it puts the files back, installs and runs `link-skills.sh` (`restored`), or names the step it stopped at (`stopped`), and tells ops and the dispatcher. Refused (409) on a stack with no checkout to restore and while a restore runs.",
+        "Settings > Jobs' Restore now, on the owner's click: runs ops-restore's own steps once (`packages/scripts/src/ops-restore/cli.ts --now`) from this API's checkout, for a main checkout whose guards are gone while the job is stopped or off. The checkout comes from the server alone: the main checkout this API's checkout sits in on a stack that reads this machine, the fixture's scratch `checkout` folder on a fixture or test stack. A checkout whose guards are all there is left as it is (`intact`), as is one an install, `link-skills.sh` or `playground update` holds; otherwise it puts the files back, installs and runs `link-skills.sh` (`restored`), or names the step it stopped at (`stopped`), and tells ops and the dispatcher. Refused (409) on a stack with no checkout to restore and while a restore runs. The request waits for the whole run, past the server's 10 s idle limit.",
       responses: {
         200: {
           description: "What the restore did, in words",
@@ -597,6 +597,11 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
       },
     }),
     async (c) => {
+      // a restore (a run-slot wait, an install, link-skills.sh) outlasts Bun.serve's 10 s idle limit, so this one request waits for its words
+      ;(c.env as { timeout?: (request: Request, seconds: number) => void } | undefined)?.timeout?.(
+        c.req.raw,
+        0,
+      )
       try {
         return c.json({ data: await restoreCheckout() })
       } catch (error) {
