@@ -299,15 +299,6 @@ export const listItems = (data: string, filter: { kind?: Kind; scope?: string } 
   return rows
 }
 
-// Whether two contents hold the same item, field by field, so a landed proposal's content compares equal to the accepted copy's.
-const sameContent = (a: Content, b: Content): boolean =>
-  a.body === b.body &&
-  JSON.stringify(a.value) === JSON.stringify(b.value) &&
-  (a.files === null) === (b.files === null) &&
-  (!a.files ||
-    (Object.keys(b.files ?? {}).length === Object.keys(a.files).length &&
-      Object.entries(a.files).every(([name, text]) => b.files?.[name] === text)))
-
 // An item as it stands, its accepted copy else its proposal, or as the revision named wrote it.
 export const showItem = (data: string, ref: Ref, rev?: string) => {
   const dir = scopeDir(data, ref.scope)
@@ -332,15 +323,29 @@ export const showItem = (data: string, ref: Ref, rev?: string) => {
     proposed: ["proposed", proposed, rev],
     rejected: ["rejected", proposed, `${rev}^`],
   } as const
-  const own =
+  const ownState =
     item === `${ref.kind} ${ref.key}`
       ? written === "accepted" || written === "rejected"
         ? written
         : "proposed"
       : null
-  const reads = own ? [ownRead[own]] : [ownRead.accepted, ownRead.proposed]
-  // a proposal that has since landed reads accepted, the state bare show reads, when its content is the accepted copy's
-  const landed = own === "proposed" ? readIn(dir, ref) : null
+  const reads = ownState ? [ownRead[ownState]] : [ownRead.accepted, ownRead.proposed]
+  // a proposal that has since landed reads accepted: the commit that next changed proposed/ is its accept, its reject, or the proposal that replaced it, since judgeItem accepts only that path's last writer
+  const next =
+    ownState === "proposed"
+      ? extGit(dir, [
+          "log",
+          "--reverse",
+          "--ancestry-path",
+          "--format=%(trailers:key=State,valueonly)%x00",
+          "--end-of-options",
+          `${rev}..HEAD`,
+          "--",
+          proposed,
+        ])
+          .out.split("\0")[0]
+          ?.trim()
+      : undefined
   for (const [state, at, tree] of reads) {
     const listed = extGit(dir, ["ls-tree", "-r", "--name-only", tree, "--", at])
     if (listed.code !== 0) return null
@@ -356,7 +361,7 @@ export const showItem = (data: string, ref: Ref, rev?: string) => {
       ...ref,
       content,
       rev,
-      state: landed && sameContent(landed, content) ? "accepted" : state,
+      state: next === "accepted" ? "accepted" : state,
     }
   }
   return null

@@ -94,6 +94,27 @@ test("show --rev reads a proposal that has since landed as accepted, a live prop
   expect(showItem(scratch, gate, proposal)?.state).toBe("accepted")
 })
 
+// PG-1907: a proposal's state follows the commit that next changed proposed/, so an accept a later accept replaced still reads accepted, and a pending or rejected proposal keeps its state however its text compares
+test("show --rev reads a proposal by the commit that next changed its proposed copy", () => {
+  const walk = { ...ref, key: "walk", kind: "rule" as const }
+  const text = (body: string) => ({ attachments: [], body, files: null, value: null })
+  setSetting(scratch, { key: "clock.ownerZone", scope: ME, value: "Europe/Lisbon" }, OWNER)
+  const p1 = revOf(putItem(scratch, walk, text("Walk one.\n"), WORKER, false))
+  revOf(judgeItem(scratch, walk, p1, { kind: "score", score: 5 }, REVIEWER))
+  const p2 = revOf(putItem(scratch, walk, text("Walk two.\n"), WORKER, false))
+  revOf(judgeItem(scratch, walk, p2, { kind: "score", score: 5 }, REVIEWER))
+  expect(showItem(scratch, walk, p1)?.state).toBe("accepted")
+  expect(showItem(scratch, walk, p2)?.state).toBe("accepted")
+  const pending = revOf(putItem(scratch, walk, text("Walk two.\n"), WORKER, false))
+  expect(showItem(scratch, walk, pending)?.state).toBe("proposed")
+  const doomed = { ...ref, key: "doomed", kind: "rule" as const }
+  const rejected = revOf(putItem(scratch, doomed, text("Doomed.\n"), WORKER, false))
+  revOf(judgeItem(scratch, doomed, rejected, { kind: "reject" }, REVIEWER))
+  const landed = revOf(putItem(scratch, doomed, text("Doomed.\n"), WORKER, false))
+  revOf(judgeItem(scratch, doomed, landed, { kind: "score", score: 5 }, REVIEWER))
+  expect(showItem(scratch, doomed, rejected)?.state).toBe("proposed")
+})
+
 // PG-1377: put chmods each executable name, so a name the item does not hold, such as ../x, is refused before it reaches chmodSync
 test("put refuses an executable name the item does not hold", () => {
   const refusal = {
