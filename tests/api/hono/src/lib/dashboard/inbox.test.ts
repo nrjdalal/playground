@@ -2856,6 +2856,108 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(await listed(posted.id)).toMatchObject({ archived: false, snoozed: false })
     })
 
+    test("an update marked Done archives onto the Archive shelf, archivedAt set and dismissedAt cleared (PG-1909)", async () => {
+      const posted = await update()
+      await store.dismissItems(db, [posted.id])
+      const archived = await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      if (!archived.ok) throw new Error(archived.message)
+      expect(archived.item.answer).toEqual({ archivedAt: expect.any(String) })
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+    })
+
+    test("an answered card marked Done archives onto the Archive shelf alone, out of In progress, and its poster's close keeps it there (PG-1909)", async () => {
+      const posted = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, posted.id, { action: "deny" }, { actor })
+      await store.dismissItems(db, [posted.id])
+      const archived = await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      if (!archived.ok) throw new Error(archived.message)
+      expect(archived.item.status).toBe("denied")
+      expect(archived.item.answer).toMatchObject({ archivedAt: expect.any(String), choice: "deny" })
+      expect(archived.item.answer).not.toHaveProperty("dismissedAt")
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+      expect((await store.ackItem(db, posted.id)).ok).toBe(true)
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+      const back = await store.answerItem(db, posted.id, { action: "unarchive" }, { actor })
+      expect(back.ok && back.item.answer).not.toHaveProperty("archivedAt")
+      expect(await listed(posted.id)).toMatchObject({ archived: false })
+    })
+
+    test("a go its poster still carries out, In progress, refuses Archive until it is on Done (PG-1909)", async () => {
+      const posted = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, posted.id, { action: "approve" }, { actor })
+      expect(await store.answerItem(db, posted.id, { action: "archive" }, { actor })).toMatchObject(
+        { code: "CONFLICT", ok: false },
+      )
+      expect(await listed(posted.id)).toEqual({ archived: false, items: true, snoozed: false })
+      await store.dismissItems(db, [posted.id])
+      const archived = await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      expect(archived.ok).toBe(true)
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+    })
+
+    test("a go the Dashboard carried out itself, on Done, archives (PG-1909)", async () => {
+      const posted = await post(decision(ACCEPT))
+      const accept = async () => ({ code: 0, err: "", out: "rev 9b8c7d6 is accepted" })
+      const ran = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve", seen: posted.updatedAt },
+        { accept, actor },
+      )
+      expect(ran.ok && ran.item.answer).toMatchObject({ accepted: { exitCode: 0 } })
+      const archived = await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      expect(archived.ok).toBe(true)
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+    })
+
+    test("a waiting card that carries an earlier failed send still archives, as before (PG-1909)", async () => {
+      const posted = await post(decision(PREVIEWS.ship))
+      const writer = new SQL(url, { max: 1 })
+      try {
+        await writer`update inbox_item set delivery = ${JSON.stringify({ code: "LOST", reason: "lost", status: "failed" })}::jsonb where id = ${posted.id}`
+      } finally {
+        await writer.close()
+      }
+      const archived = await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      expect(archived.ok && archived.item).toMatchObject({
+        delivery: { status: "failed" },
+        status: "open",
+      })
+      expect(await store.settleItem(db, posted.id)).toMatchObject({ ok: true })
+    })
+
+    test("an answered card whose send failed refuses Archive, as before (PG-1909)", async () => {
+      const posted = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, posted.id, { action: "deny" }, { actor })
+      const writer = new SQL(url, { max: 1 })
+      try {
+        await writer`update inbox_item set delivery = ${JSON.stringify({ code: "LOST", reason: "lost", status: "failed" })}::jsonb where id = ${posted.id}`
+      } finally {
+        await writer.close()
+      }
+      expect(await store.answerItem(db, posted.id, { action: "archive" }, { actor })).toMatchObject(
+        {
+          code: "CONFLICT",
+          ok: false,
+        },
+      )
+      expect(await store.dismissItems(db, [posted.id])).toBe(1)
+    })
+
+    test("an item the owner dismissed still refuses Archive (PG-1909)", async () => {
+      const dismissedUpdate = await update()
+      await store.answerItem(db, dismissedUpdate.id, { action: "dismiss" }, { actor })
+      const dismissedAnswer = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, dismissedAnswer.id, { action: "deny" }, { actor })
+      await store.answerItem(db, dismissedAnswer.id, { action: "dismiss" }, { actor })
+      for (const { id } of [dismissedUpdate, dismissedAnswer]) {
+        expect(await store.answerItem(db, id, { action: "archive" }, { actor })).toMatchObject({
+          code: "CONFLICT",
+          ok: false,
+        })
+      }
+    })
+
     test("Dismiss on a waiting decision, draft or secret sets it aside as clear did, telling its poster so, and sends it to Done marked dismissed", async () => {
       const draft = await post({
         from: "dispatcher",

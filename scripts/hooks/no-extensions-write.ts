@@ -16,7 +16,7 @@ import {
 } from "../../packages/settings/src/rendered"
 import { settingFields } from "../../packages/settings/src/settings"
 import { eachInput } from "./codex"
-import { bunCall, FILE_TOOLS, gitCall, real } from "./no-main-checkout"
+import { bunCall, FILE_TOOLS, gitCall, inPlace, real } from "./no-main-checkout"
 import { fromFactory, opsLead } from "./role"
 import {
   codeFed,
@@ -152,8 +152,9 @@ const RSYNC_FLAGS = new Set(["backup", "partial"])
 const RSYNC_TEMP = /^-[^-@BefMT]*T/
 // Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
 const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
-// Homebrew's GNU coreutils and findutils under their g prefix (gcp, grm, gfind): a coreutils name reads as the remover or writer it names, and gfind and gxargs are examined again as find and xargs, so the tool lookup never yields either
-const GNU_NAMED = /^g(cp|dd|find|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink|xargs)$/
+// Homebrew's GNU builds under their g prefix (gcp, grm, gfind, gsed, gtar): a g name reads as the program it names, a remover, a writer or one unreadCdWrites reads, and gfind and gxargs are examined again as find and xargs, so the tool lookup never yields either
+const GNU_NAMED =
+  /^g(chmod|cp|dd|find|install|ln|mkdir|mktemp|mv|rm|rmdir|sed|shred|sort|tar|tee|touch|truncate|unlink|xargs)$/
 // A writer's options that take a value rather than name a target, by short letter (`gnu` for a GNU build alone, `bsd` for macOS's alone) and GNU's long name, with the long flags whose exact name wins over a value option it prefixes: cp's and ln's suffix, install's suffix, flags, group, mode, owner, strip program, and macOS's destdir, hash, link flags, metalog and tags, mkdir's mode, mv's suffix, touch's adjustment, date, reference file and stamp; cp's, install's, ln's and mv's -t names their target folder, and macOS install's -M its metalog, read apart
 const WRITER_TAKES: Record<
   string,
@@ -327,6 +328,209 @@ const after = (word: Word, cut: number): Word => ({
   raw: word.raw?.startsWith(word.value.slice(0, cut)) ? word.raw.slice(cut) : undefined,
   value: word.value.slice(cut),
 })
+
+// The shell's own folder, which a program that writes there by no operand (tar extracting, curl -O) names after an unread cd, so the hook can place it no more than the cd
+const SHELL_FOLDER: Word = { quoted: false, value: "." }
+// The long option of `long` a word names, by its full name or any prefix of one letter or more, as getopt_long reads a unique one; an ambiguous prefix names one of them, so the reading stays fail-closed
+const longOf = (name: string, long: string[]): string | undefined =>
+  long.find((l) => l === name) ??
+  (name.length > 2 ? long.find((l) => l.startsWith(name)) : undefined)
+// A program's words past its options, each option's value skipped: a short letter in `takes` takes the rest of its cluster or the next word, as does a long option in `long` with no = of its own
+function operandsPast(args: Word[], takes: string, long: string[]): Word[] {
+  const out: Word[] = []
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k].value
+    if (v === "--") return [...out, ...args.slice(k + 1)]
+    if (v.startsWith("--")) {
+      if (!v.includes("=") && longOf(v, long)) k++
+    } else if (/^-./.test(v)) {
+      const at = v
+        .slice(1)
+        .split("")
+        .findIndex((c) => takes.includes(c))
+      if (at !== -1 && at === v.length - 2) k++
+    } else out.push(args[k])
+  }
+  return out
+}
+// The values an option of `short` or `long` names, attached, after an = or as the next word, read past a cluster's letters until one in `takes` takes the rest of the cluster, or the next word when it ends it; a long one by any prefix, or by its exact name alone under `exact`, as curl reads it
+function optionValues(
+  args: Word[],
+  short: string,
+  takes: string,
+  long: string[],
+  exact = false,
+): Word[] {
+  const out: Word[] = []
+  for (let k = 0; k < args.length && args[k].value !== "--"; k++) {
+    const v = args[k].value
+    const eq = v.indexOf("=")
+    if (v.startsWith("--")) {
+      const name = eq === -1 ? v : v.slice(0, eq)
+      if (exact ? long.includes(name) : longOf(name, long))
+        if (eq !== -1) out.push(after(args[k], eq + 1))
+        else if (args[k + 1]) out.push(args[++k])
+    } else if (/^-./.test(v))
+      for (let j = 1; j < v.length; j++) {
+        if (!takes.includes(v[j])) continue
+        const last = j + 1 === v.length
+        const value = last ? args[++k] : after(args[k], j + 1)
+        if (short.includes(v[j]) && value) out.push(value)
+        break
+      }
+  }
+  return out
+}
+// tar's short options that take a value, and both tars' long ones that do, so a value word that looks like -C reads as that value; bsdtar's --cd is its -C
+const TAR_TAKES = "bCfFgHIKLNTVX"
+const TAR_LONG_TAKES = [
+  "--block-size",
+  "--blocking-factor",
+  "--cd",
+  "--directory",
+  "--exclude",
+  "--exclude-from",
+  "--exclude-tag",
+  "--file",
+  "--files-from",
+  "--format",
+  "--gid",
+  "--gname",
+  "--group",
+  "--include",
+  "--index-file",
+  "--label",
+  "--listed-incremental",
+  "--mode",
+  "--mtime",
+  "--newer",
+  "--newer-mtime",
+  "--newer-mtime-than",
+  "--newer-than",
+  "--older",
+  "--older-mtime",
+  "--older-mtime-than",
+  "--older-than",
+  "--options",
+  "--owner",
+  "--passphrase",
+  "--record-size",
+  "--strip-components",
+  "--suffix",
+  "--to-command",
+  "--transform",
+  "--uid",
+  "--uname",
+  "--use-compress-program",
+]
+// Where tar extracting writes: each -C, --directory or --cd folder, read past the values tar's other options take, an old-style first word's letters taking the words after it in turn, or the shell's own folder when it names none; nothing when it does not extract
+function tarWrites(args: Word[]): Word[] {
+  const into: Word[] = []
+  let extracts = false
+  let k = 0
+  const first = args[0]?.value ?? ""
+  if (/^[A-Za-z]+$/.test(first)) {
+    k = 1
+    for (const c of first) {
+      if (c === "x") extracts = true
+      if (!TAR_TAKES.includes(c) || !args[k]) continue
+      if (c === "C") into.push(args[k])
+      k++
+    }
+  }
+  for (; k < args.length && args[k].value !== "--"; k++) {
+    const v = args[k].value
+    const eq = v.indexOf("=")
+    if (v.startsWith("--")) {
+      const name = eq === -1 ? v : v.slice(0, eq)
+      if (longOf(name, ["--extract", "--get"])) extracts = true
+      const takes = longOf(name, TAR_LONG_TAKES)
+      if (!takes) continue
+      const value = eq !== -1 ? after(args[k], eq + 1) : args[++k]
+      if ((takes === "--directory" || takes === "--cd") && value) into.push(value)
+    } else if (/^-./.test(v))
+      for (let j = 1; j < v.length; j++) {
+        if (v[j] === "x") extracts = true
+        if (!TAR_TAKES.includes(v[j])) continue
+        const value = j + 1 === v.length ? args[++k] : after(args[k], j + 1)
+        if (v[j] === "C" && value) into.push(value)
+        break
+      }
+  }
+  if (!extracts) return []
+  return into.length > 0 ? into : [SHELL_FOLDER]
+}
+// chmod's mode word, octal or symbolic, which names no file
+const MODE = /^(?:[0-7]+|[ugoa]*[-+=][-+=rwxXstugo,]*)$/
+// curl's short options that take a value, of which -o, -c and -D write the file they name, and its long ones that write, each taken by its exact name alone, as curl takes it (--cookie is no --cookie-jar)
+const CURL_TAKES = "AbcCdDeEFHKmoPQrtTuUwxXyYz"
+const CURL_WRITES = [
+  "--alt-svc",
+  "--cookie-jar",
+  "--dump-header",
+  "--etag-save",
+  "--hsts",
+  "--libcurl",
+  "--output",
+  "--output-dir",
+  "--stderr",
+  "--trace",
+  "--trace-ascii",
+]
+// A short cluster that holds curl's -O before any letter whose value takes the rest of the cluster (-sSO, not -XPOST)
+function remoteName(v: string): boolean {
+  if (!/^-[^-]/.test(v)) return false
+  for (const c of v.slice(1)) {
+    if (c === "O") return true
+    if (CURL_TAKES.includes(c)) return false
+  }
+  return false
+}
+
+// The words a program on neither REMOVERS nor WRITERS writes after a cd the hook cannot read: an in-place sed's or perl's files, every file chmod, truncate or shred names, tar's -C folder or the shell's when it extracts, curl's and sort's output files, git rm's pathspecs from git's own folder or its pathspec file's, and a mktemp template outside the temp folder
+function unreadCdWrites(tool: string, args: Word[], env: Env, getopt: boolean): Word[] {
+  if (tool === "sed" || tool === "perl") return inPlace(tool, args)
+  if (tool === "chmod") {
+    // macOS chmod stops its options at its first operand, the mode, a dash-led one (-w) too, so every later word is a file, a dashed one too
+    const at = args.findIndex((w) => !/^-./.test(w.value) || /^-[gorstuwXx]/.test(w.value))
+    const files = getopt ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", [])
+    return MODE.test(files[0]?.value ?? "") ? files.slice(1) : files
+  }
+  if (tool === "truncate") return operandsPast(args, "rs", ["--reference", "--size"])
+  if (tool === "shred")
+    return operandsPast(args, "ns", ["--iterations", "--random-source", "--size"])
+  if (tool === "tar") return tarWrites(args)
+  if (tool === "curl") {
+    const files = optionValues(args, "cDo", CURL_TAKES, CURL_WRITES, true)
+    const named = args.some((a) => a.value.startsWith("--remote-name") || remoteName(a.value))
+    return named && !args.some((a) => a.value.startsWith("--output-dir"))
+      ? [...files, SHELL_FOLDER]
+      : files
+  }
+  if (tool === "sort") return optionValues(args, "o", "koStT", ["--output"])
+  if (tool === "git") {
+    const { cwd, rest, sub } = gitCall(args, { ...env, cwd: undefined })
+    if (sub !== "rm") return []
+    const words = args.slice(args.length - rest.length)
+    // a pathspec file names paths the hook does not read, each from git's own folder
+    const listed = words.some((w) => longOf(w.value.split("=")[0], ["--pathspec-from-file"]))
+    const specs = [
+      ...operandsPast(words, "", ["--pathspec-from-file"]),
+      ...(listed ? [SHELL_FOLDER] : []),
+    ]
+    return cwd === undefined
+      ? specs
+      : specs.map((w) => (w.value.startsWith("/") ? w : { ...w, value: join(cwd, w.value) }))
+  }
+  if (tool === "mktemp") {
+    if (args.some((a) => a.value === "--tmpdir")) return []
+    // macOS's -t takes a prefix, and makes a template given beside it where that template says; GNU's takes none, so its lone template reads as that value
+    if (args.some((a) => /^-[^-]*t/.test(a.value))) return operandsPast(args, "pt", ["--suffix"])
+    const into = optionValues(args, "p", "p", ["--tmpdir"])
+    return into.length > 0 ? into : operandsPast(args, "p", ["--suffix"])
+  }
+  return []
+}
 
 // The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install, ln and mv (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch; and every word the shell may split (`Word.splits`), since one of its words may land as a target
 function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): Word[] {
@@ -1569,7 +1773,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       : WRITERS.has(tool)
         ? writeTargets(tool, args, gnu, posix)
         : []
-    const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined
+    const unlisted =
+      env.cwdUnread && !remover && !WRITERS.has(tool)
+        ? unreadCdWrites(tool, args, env, !gnu || posix)
+        : []
+    const loose = env.cwdUnread
+      ? [...operands, ...unlisted].find((word) => !placed(word, env, steady))
+      : undefined
     if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))
   }
   const named = namings(command)

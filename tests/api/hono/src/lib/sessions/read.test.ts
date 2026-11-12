@@ -14,6 +14,7 @@ import {
   liveRegistered,
   liveSessions,
   readEntries,
+  readEntriesAfter,
   readSession,
   readSteps,
   relationOf,
@@ -413,6 +414,14 @@ describe.skipIf(!dockerUp())("reading sessions back", () => {
     expect(newest.entries.map((entry) => entry.uuid)).toEqual(["w3", "w4"])
     const older = await readEntries(db, WORKER, { before: newest.before!, kinds: [], limit: 2 })
     expect([older.entries.map((entry) => entry.uuid), older.before]).toEqual([["w1", "w2"], null])
+  })
+
+  test("the log pages forward after a cursor, for a bot's read of the dispatcher's log (#1888)", async () => {
+    const first = (await readEntries(db, WORKER, { kinds: [], limit: 10 })).entries[0]!.seq
+    const page = await readEntriesAfter(db, WORKER, { after: first, limit: 2 })
+    expect([page.entries.map((entry) => entry.uuid), page.hasMore]).toEqual([["w2", "w3"], true])
+    const next = await readEntriesAfter(db, WORKER, { after: page.entries.at(-1)!.seq, limit: 2 })
+    expect([next.entries.map((entry) => entry.uuid), next.hasMore]).toEqual([["w4"], false])
   })
 
   test("the log can hold only the kinds asked for", async () => {

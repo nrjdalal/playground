@@ -56,9 +56,10 @@ type Environment = Record<string, string | undefined>
 type Target = { byText?: true; label: string; where: "guarded" | "other" | "unknown" }
 // What a hit in a write's text is, and the plain-words fix its refusal names.
 export type Hit = { detail: string; fix: string }
-// What one guard guards, so another guard (no-public-leak, no-extension-repo-write) reads every write as this one does: the repositories it guards, what in a text it refuses, how its refusal reads, whether Linear and Slack (hosts) and git commits and pushes count, and whether any write that changes a guarded repository's git data or name is refused whatever its text (anyWrite).
+// What one guard guards, so another guard (no-public-leak, no-extension-repo-write) reads every write as this one does: the repositories it guards, what in a text it refuses, how its refusal reads, whether Linear and Slack (hosts) and git commits and pushes count, and whether any write that changes a guarded repository's git data or name is refused whatever its text (anyWrite), a git push that writes only branches other than the default passing (branchPush).
 export type Policy = {
   anyWrite?: true
+  branchPush?: true
   find: (text: string) => Hit | undefined
   gates?: Gate[]
   git: boolean
@@ -1172,7 +1173,9 @@ async function git(
           "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes",
           PLACE_FIX,
         )
-      return push(subtree ? rest.slice(1) : rest, here, [], subtree ? SUBTREE_TAKES : PUSH_TAKES)
+      return subtree
+        ? push(rest.slice(1), here, [], SUBTREE_TAKES)
+        : push(rest, here, [], PUSH_TAKES, sub === "push")
     }
   }
   if (sub !== "commit" && sub !== "push") return
@@ -1301,17 +1304,90 @@ function pushTarget(remote: Word | undefined, dir: string | undefined): Target {
   return decide(urls(remote.value) ?? [literal(remote.value)])
 }
 
+// Under branchPush, the flags a push of branches may carry; any other (--all, --mirror, --tags, --delete, --repo, -o) leaves it refused.
+const BRANCH_PUSH_FLAGS = new Set([
+  "--dry-run",
+  "--force",
+  "--force-if-includes",
+  "--force-with-lease",
+  "--no-verify",
+  "--quiet",
+  "--set-upstream",
+  "--verbose",
+  "-f",
+  "-n",
+  "-q",
+  "-u",
+  "-v",
+])
+
+// Under branchPush, whether a push names its remote and writes only branches other than the default (main, master and the remote's HEAD), each refspec read as a literal: no HEAD or @ as the branch, glob, tag, other refs/ path, delete, or refspec remote.<name>.push could remap.
+function branchOnly(flags: Flag[], positionals: Word[], dir: string): boolean {
+  const [remote, ...specs] = positionals
+  if (!remote || specs.length === 0 || flags.some((f) => !BRANCH_PUSH_FLAGS.has(f.name)))
+    return false
+  const defaults = new Set(["main", "master"])
+  if (!/[:/]/.test(remote.value)) {
+    const config = gitText(dir, ["config", "--list"], "the checkout's git config")
+    if (
+      config.unknown ||
+      config.value.split("\n").some((line) => line.startsWith(`remote.${remote.value}.push=`))
+    )
+      return false
+    const head = gitText(
+      dir,
+      ["symbolic-ref", "--short", `refs/remotes/${remote.value}/HEAD`],
+      "the remote's default branch",
+    )
+    if (!head.unknown)
+      defaults.add(
+        head.value
+          .trim()
+          .slice(remote.value.length + 1)
+          .toLowerCase(),
+      )
+  }
+  return specs.every((spec) => {
+    if (unreadable(spec) || /[*?[\\\s]/.test(spec.value)) return false
+    const [source, destination, more] = spec.value.replace(/^\+/, "").split(":")
+    if (more !== undefined || !source || destination === "") return false
+    // With no destination, git pushes the local ref of that name, so a tag of that name pushes the tag.
+    if (destination === undefined) {
+      const tags = gitText(
+        dir,
+        ["for-each-ref", "--format=%(refname)", `refs/tags/${source}`],
+        "the tags of that name",
+      )
+      if (tags.unknown || tags.value.trim() !== "") return false
+    }
+    const name = (destination ?? source).replace(/^(?:refs\/)?heads\//, "")
+    return (
+      name !== "" && !/^(?:refs\/|@$|head$|tag$)/i.test(name) && !defaults.has(name.toLowerCase())
+    )
+  })
+}
+
 // git push publishes the names of the refs it pushes and the messages of every commit the remote does not hold yet.
 async function push(
   rest: Word[],
   env: Env,
   checkout: Repo[],
   takes = PUSH_TAKES,
+  plain = false,
 ): Promise<string | undefined> {
   const { flags, positionals } = parseFlags(rest, takes)
   if (state().policy.anyWrite) {
     const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value
-    return judge("git push", pushTarget(remote, env.cwd), [], env)
+    const target = pushTarget(remote, env.cwd)
+    if (
+      plain &&
+      state().policy.branchPush &&
+      target.where === "guarded" &&
+      env.cwd &&
+      branchOnly(flags, positionals, env.cwd)
+    )
+      return
+    return judge("git push", target, [], env)
   }
   const names = new Set(flags.map((f) => f.name))
   const [remote, ...refspecs] = positionals

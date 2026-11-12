@@ -9055,7 +9055,7 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     if (sub === "push" || sub === "send-pack" || subtree) {
       if (carried)
         return refuse2("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
-      return push(subtree ? rest.slice(1) : rest, here, [], subtree ? SUBTREE_TAKES : PUSH_TAKES);
+      return subtree ? push(rest.slice(1), here, [], SUBTREE_TAKES) : push(rest, here, [], PUSH_TAKES, sub === "push");
     }
   }
   if (sub !== "commit" && sub !== "push")
@@ -9160,11 +9160,58 @@ function pushTarget(remote, dir) {
   }
   return decide(urls(remote.value) ?? [literal(remote.value)]);
 }
-async function push(rest, env, checkout, takes = PUSH_TAKES) {
+var BRANCH_PUSH_FLAGS = new Set([
+  "--dry-run",
+  "--force",
+  "--force-if-includes",
+  "--force-with-lease",
+  "--no-verify",
+  "--quiet",
+  "--set-upstream",
+  "--verbose",
+  "-f",
+  "-n",
+  "-q",
+  "-u",
+  "-v"
+]);
+function branchOnly(flags, positionals, dir) {
+  const [remote, ...specs] = positionals;
+  if (!remote || specs.length === 0 || flags.some((f) => !BRANCH_PUSH_FLAGS.has(f.name)))
+    return false;
+  const defaults = new Set(["main", "master"]);
+  if (!/[:/]/.test(remote.value)) {
+    const config = gitText(dir, ["config", "--list"], "the checkout's git config");
+    if (config.unknown || config.value.split(`
+`).some((line) => line.startsWith(`remote.${remote.value}.push=`)))
+      return false;
+    const head = gitText(dir, ["symbolic-ref", "--short", `refs/remotes/${remote.value}/HEAD`], "the remote's default branch");
+    if (!head.unknown)
+      defaults.add(head.value.trim().slice(remote.value.length + 1).toLowerCase());
+  }
+  return specs.every((spec) => {
+    if (unreadable(spec) || /[*?[\\\s]/.test(spec.value))
+      return false;
+    const [source, destination, more] = spec.value.replace(/^\+/, "").split(":");
+    if (more !== undefined || !source || destination === "")
+      return false;
+    if (destination === undefined) {
+      const tags = gitText(dir, ["for-each-ref", "--format=%(refname)", `refs/tags/${source}`], "the tags of that name");
+      if (tags.unknown || tags.value.trim() !== "")
+        return false;
+    }
+    const name = (destination ?? source).replace(/^(?:refs\/)?heads\//, "");
+    return name !== "" && !/^(?:refs\/|@$|head$|tag$)/i.test(name) && !defaults.has(name.toLowerCase());
+  });
+}
+async function push(rest, env, checkout, takes = PUSH_TAKES, plain = false) {
   const { flags, positionals } = parseFlags(rest, takes);
   if (state().policy.anyWrite) {
     const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value;
-    return judge("git push", pushTarget(remote, env.cwd), [], env);
+    const target = pushTarget(remote, env.cwd);
+    if (plain && state().policy.branchPush && target.where === "guarded" && env.cwd && branchOnly(flags, positionals, env.cwd))
+      return;
+    return judge("git push", target, [], env);
   }
   const names = new Set(flags.map((f) => f.name));
   const [remote, ...refspecs] = positionals;

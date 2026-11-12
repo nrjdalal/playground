@@ -562,7 +562,7 @@ const SED_VALUES = new Set(["--expression", "--file", "--line-length"])
 const BSD_SUFFIX = /^(\.[\w.-]*)?$/
 
 // The files sed -i or perl -i edits in place (none without -i): every positional, but the first when no script flag gave the script.
-function inPlace(name: string, args: Word[]): Word[] {
+export function inPlace(name: string, args: Word[]): Word[] {
   const letters = LETTERS[name]
   if (!letters) return []
   let edits = false

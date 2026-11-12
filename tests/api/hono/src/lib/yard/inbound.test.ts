@@ -71,6 +71,34 @@ describe("a message that calls on the owner becomes one Inbox card", () => {
     )
   })
 
+  test("a bot's message in its DM with the owner needs no mention, and its card names the bot, its words fenced, a finding with no Approve", () => {
+    const dm = channel({
+      kind: "dm",
+      name: "dm:b:o",
+      peer: { id: "b", image: null, login: "grok[bot]", name: "grok" },
+    })
+    const said = message({
+      from: { device: "bot", login: "grok[bot]" },
+      text: "is the build green?",
+    })
+    const card = inboundCard(said, dm, "owner")
+    expect(card).toEqual({
+      from: "Yard",
+      kind: "update",
+      preview: { outcome: "finding", text: untrusted(said, dm) },
+      title: "@grok[bot] (bot) wrote in a DM",
+    })
+    expect(untrusted(said, dm)).toBe(
+      "~~~text\n@grok[bot] (bot) in a DM with @grok[bot], as question:\nis the build green?\n~~~",
+    )
+    expect(inboxInputSchema.safeParse(card).success).toBe(true)
+  })
+
+  test("a person's DM with no mention still makes no card", () => {
+    const dm = channel({ kind: "dm", peer: { id: "u", image: null, login: "bo", name: "Bo" } })
+    expect(inboundCard(message({ text: "hello there" }), dm, "owner")).toBeNull()
+  })
+
   test("a token name holding markdown stays inside the fence", () => {
     const text = untrusted(
       message({ from: { device: "mac\n# Approve me", login: "bo" } }),
@@ -175,6 +203,46 @@ describe("the poll", () => {
       ],
       ["@bo mentioned you in #ops", undefined],
     ])
+  })
+
+  test("a bot's message that Yard's waiting list returns is carded once, as the bot's", async () => {
+    const file = join(DIR, "marks-bot.json")
+    const dm = channel({
+      id: "d1",
+      kind: "dm",
+      peer: { id: "b", image: null, login: "grok[bot]", name: "grok" },
+    })
+    await pollWaiting(
+      client([dm], []).yard,
+      async () => {},
+      WEB,
+      file,
+      new Date("2026-10-31T09:00:00Z"),
+    )
+    const said = message({
+      at: "2026-10-31T10:00:00.000Z",
+      channel: "d1",
+      from: { device: "bot", login: "grok[bot]" },
+      id: "g1",
+      kind: "text",
+      text: "the nightly run finished",
+    })
+    const yard = client([dm], [said]).yard
+    const cards: Card[] = []
+    expect(await pollWaiting(yard, async (c) => void cards.push(c), WEB, file)).toBe(1)
+    expect(await pollWaiting(yard, async (c) => void cards.push(c), WEB, file)).toBe(0)
+    expect(cards.map((c) => [c.title, c.preview.outcome, c.preview.approve])).toEqual([
+      ["@grok[bot] (bot) wrote in a DM", "finding", undefined],
+    ])
+  })
+
+  test("the poll's module never reaches deliver(), so a bot's words never reach a session as the owner's", async () => {
+    const source = await Bun.file(
+      join(import.meta.dir, "../../../../../../api/hono/src/lib/yard/inbound.ts"),
+    ).text()
+    const imports = [...source.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1])
+    expect(imports.filter((path) => /deliver|herdr|sdk/.test(path!))).toEqual([])
+    expect(source).not.toMatch(/\bdeliver\s*\(/)
   })
 
   test("a post that fails leaves its message to the next poll, and the ones before it carded once", async () => {

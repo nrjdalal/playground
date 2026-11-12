@@ -103,7 +103,8 @@ Sessions already running move at their next restart, so nothing is closed just t
 
 The leads keep watch with a sweep: every 15 minutes each one runs `playground sweep`, which prints only what changed since its last sweep (new alerts, the merge queue, the load, ETAs that have passed, a parked row's hold that has closed, and for Ops, once an hour, each ops switch still on with its reason) or `quiet`,
 and on news it checks its own agents for a picker waiting, a permission prompt, silence with no report, or a session gone, and acts on it.
-A stuck session tells its manager at once: the manager allows a permission prompt when the command is needed and otherwise denies it with a simpler way to do it (`playground picker`), and a session still stuck after 5 minutes goes to Playground; what only the owner can answer becomes a decision in Playground's Inbox, since he reads the Inbox rather than every chat.
+A stuck session tells its manager at once: the manager allows a permission prompt when the command is needed and otherwise denies it with a simpler way to do it (`playground picker`), citing the standing rule that settles the answer when one does, and a session still stuck after 5 minutes goes to Playground;
+what only the owner can answer becomes a decision in Playground's Inbox, since he reads the Inbox rather than every chat.
 A worker silent for an hour after a review round, with no push and no report, is asked why, and a bug it found outside its chore becomes an issue of its own at once rather than a detour, unless it blocks the PR.
 The Builder also chases any open PR of ours that has seen no opening, commit, verdict or comment for 30 minutes and is not just waiting on its checks or its turn on merge-on-ready, and any whose last 4 review scores are the same score below 5, where it narrows the change, moves the check to a simpler layer, or parks the PR.
 An ops job reminds the poster of every answer of the owner's in the Inbox that its poster has not confirmed within 15 minutes, whether it failed to reach the session or reached it and was never carried out, and a lead hears only when that poster is down, so an answer he gave is never left undone.
@@ -244,6 +245,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A merge of `canary` makes a new head, which needs its own checks and 5/5.
   Merges go one at a time, under the factory's merge lock, which pr:merge takes itself.
   A wrong refusal goes to the Builder, the only one who merges by hand, on an override.
+- Every extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n>`, so none lands on its default branch unless the account every session pushes as opened it, a reviewer session other than its author scored it 5/5 at its head, and its checks passed.
 - A lead that overrules a reviewer's FAIL says so on the PR, in one `Lead ruling:` line with the evidence and the issue the fault moved to, so the next reviewer reads the FAIL as settled; the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
 - No session but the dashboard's runner restarts the live dashboard.
 - No session, and no fork or sub-agent one runs, stops a process it did not start: the **signal** rule.
