@@ -2327,7 +2327,7 @@ export function DashboardNav({ account }: { account: string }) {
   ]
   const groups = navGroups(threads.data !== undefined, workers, yardShown, order)
   const sessionsOf = new Map(groups.map(({ label, sessions }) => [label, sessions]))
-  const moved = groups.flatMap(({ label }) => (label === "Threads" ? [] : [label]))
+  const shown = groups.flatMap(({ label }) => (label === "Threads" ? [] : [label]))
   const draw = (label: OrderedGroup, sessions: Worker[]) =>
     label === "Channels" || label === "Direct messages" ? (
       <YardGroup group={label} shell="dashboard" />
@@ -2393,8 +2393,8 @@ export function DashboardNav({ account }: { account: string }) {
         <ThreadsGroup data={threads.data} onPage={threads.setPage} onPatch={threads.patch} />
       )}
       <MovableGroups
-        groups={moved}
-        onMove={(from, to) => setOrder(moveGroup(order, moved, from, to))}
+        groups={shown}
+        onMove={(from, to) => setOrder(moveGroup(order, shown, from, to))}
       >
         {(label) => draw(label, sessionsOf.get(label) ?? [])}
       </MovableGroups>
