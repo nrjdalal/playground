@@ -84,6 +84,24 @@ beforeAll(async () => {
   git(dirs.alias, "config", "alias.sq", "push 'git@github.com:quillco/acme-skills.git' main")
   git(dirs.alias, "config", "alias.bs", "push https://github.com/quillco/acme\\-skills main")
   git(dirs.alias, "config", "alias.open", `push "${EXT} main`)
+  dirs.trunk = await clone("trunk", ["origin", `${EXT}.git`])
+  git(dirs.trunk, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+  dirs.tagged = await clone("tagged", ["origin", `${EXT}.git`])
+  git(
+    dirs.tagged,
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@t",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "x",
+  )
+  git(dirs.tagged, "tag", "v1")
+  dirs.mapped = await clone("mapped", ["origin", `${EXT}.git`])
+  git(dirs.mapped, "config", "remote.origin.push", "refs/heads/*:refs/heads/main")
 })
 
 afterAll(async () => {
@@ -586,6 +604,66 @@ describe("a start folder reached through a link reads as the clone it links to",
     expect(
       await run(bash("git push origin HEAD:main", join(scratch, "link-other"))),
     ).toBeUndefined()
+  })
+})
+
+describe("a push of branches other than the default passes, and every other push stays refused", () => {
+  test.each(
+    rows([
+      ["a branch by remote name", "git push origin HEAD:feature", "ext"],
+      ["a branch by its own name with -u", "git push -u origin feature", "ext"],
+      ["a branch by URL", `git push ${EXT} HEAD:feature`],
+      ["a branch by its full ref", "git push origin HEAD:refs/heads/feature", "ext"],
+      ["a force-push to a branch", "git push --force-with-lease origin HEAD:feature", "ext"],
+      ["a force-push to a branch by +", "git push origin +HEAD:feature", "ext"],
+      ["main when the remote's HEAD names another branch", "git push origin HEAD:main2", "trunk"],
+      ["the merge gate", "bun run ext:merge quillco/acme-skills 3"],
+      ["a draft marked ready", "gh pr ready 3 -R quillco/acme-skills"],
+    ]),
+  )("%s", async (_, command, dir) => {
+    expect(await run(bash(command, at(dir)))).toBeUndefined()
+  })
+
+  test.each(
+    rows([
+      ["the default by remote name", "git push origin main", "ext"],
+      ["the default by HEAD:main", "git push origin HEAD:main", "ext"],
+      ["the default by its full ref", "git push origin HEAD:refs/heads/main", "ext"],
+      ["the default by heads/", "git push origin HEAD:heads/main", "ext"],
+      ["the default in another case", "git push origin HEAD:Main", "ext"],
+      ["master", `git push ${EXT} HEAD:master`],
+      ["the remote's HEAD branch", "git push origin HEAD:trunk", "trunk"],
+      ["a force-push to the default", `git push -f ${EXT} HEAD:main`],
+      ["one of two refspecs the default", "git push origin HEAD:feature HEAD:main", "ext"],
+      ["HEAD with no destination", "git push origin HEAD", "ext"],
+      ["HEAD as the destination", "git push origin feature:HEAD", "ext"],
+      ["@ as the destination", "git push origin feature:@", "ext"],
+      ["a remote with no refspec", "git push origin", "ext"],
+      ["a bare push in a clone", "git push -u", "ext"],
+      ["a local tag by its name", "git push origin v1", "tagged"],
+      ["a tag ref", "git push origin HEAD:refs/tags/v1", "ext"],
+      ["the tag keyword", "git push origin tag v1", "ext"],
+      ["--tags", "git push --tags origin HEAD:feature", "ext"],
+      ["--follow-tags", "git push --follow-tags origin HEAD:feature", "ext"],
+      ["--all", "git push --all origin", "ext"],
+      ["--delete of a branch", "git push --delete origin feature", "ext"],
+      ["a delete by an empty source", "git push origin :feature", "ext"],
+      ["a glob", "git push origin 'refs/heads/*:refs/heads/*'", "ext"],
+      ["--repo", "git push --repo=origin origin HEAD:feature", "ext"],
+      ["a push option", "git push -o x origin HEAD:feature", "ext"],
+      ["a refspec in a variable", "git push origin $B", "ext"],
+      ["a remote whose push refspec remaps", "git push origin feature", "mapped"],
+      [
+        "a branch after a remote added in the call",
+        `git remote add e ${EXT} && git push e HEAD:feature`,
+      ],
+      ["a branch with -c", "git -c k=v push origin HEAD:feature", "ext"],
+      ["send-pack of a branch", `git send-pack ${EXT} feature`],
+      ["subtree push of a branch", `git subtree push --prefix=x ${EXT} feature`],
+    ]),
+  )("%s is refused", async (_, command, dir) => {
+    const reason = await refused(bash(command, at(dir)))
+    expect(reason).toContain("bun run ext:merge <owner>/<repo> <n>")
   })
 })
 
