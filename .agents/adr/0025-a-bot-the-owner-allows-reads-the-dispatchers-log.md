@@ -29,4 +29,4 @@ The Yard relay carried the owner's own reads and the writes the paired key signs
 
 ## The meetings rule
 
-The owner's meetings rule keeps a meeting's words in the dispatcher's session, and the log route is its one exception. That rule is an item of the owner's login extension (`rule meetings`), not a repo file, so its exception line is a reviewed revision of that item, `b09d08278ecd2ab584f025ac7366ed43f5a3ad58`.
+The owner's meetings rule keeps a meeting's words in the dispatcher's session, and the log route is its one exception. That rule is an item of the owner's login extension (`rule meetings`), not a repo file, so its exception line is a reviewed revision of that item, `db31fb18e72d16a5aca3617c2e67d45833fe9b58`.
