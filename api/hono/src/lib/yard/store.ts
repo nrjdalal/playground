@@ -4,23 +4,31 @@ import { reachesConsole } from "@packages/auth/access"
 import {
   type Database,
   user,
+  yardBot,
   yardChannel,
   yardInvite,
   yardMember,
   yardMessage,
   yardToken,
 } from "@packages/db"
-import { type Channel, type Message, tokenNameSchema } from "@packages/message"
+import {
+  botLogin,
+  botNameSchema,
+  type Channel,
+  type Message,
+  tokenNameSchema,
+} from "@packages/message"
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 
 import { ApiError } from "@/lib/error"
 import { live, take } from "@/lib/yard/limits"
-import { heldBecause } from "@/lib/yard/tier"
+import { HELD_KINDS, heldBecause, mentionsOf } from "@/lib/yard/tier"
 
 type YardChannel = typeof yardChannel.$inferSelect
 
-// Who is calling: a member signed in on the web, or one of their tokens, whose name is the device a post carries.
+// Who is calling: a member signed in on the web, or one of their tokens, whose name is the device a post carries; bot names the member who made a bot's token's user (yard_bot), and whether the owner lets it read the dispatcher's log.
 export type Caller = {
+  bot?: { madeBy: string; readsLog?: boolean }
   device: string
   id: string
   login: string
@@ -53,6 +61,9 @@ const taken = (error: unknown): boolean => {
 }
 
 const notFound = (what: string) => new ApiError(404, "NOT_FOUND", `${what} not found`)
+
+// A DM's name, by both user ids sorted, so either side opens the same row.
+const dmName = (a: string, b: string) => `dm:${[a, b].sort().join(":")}`
 
 type MessageRow = typeof yardMessage.$inferSelect
 
@@ -190,7 +201,7 @@ export const openDm = async (db: Database, caller: Caller, login: string): Promi
     .where(sql`lower(${user.login}) = ${login.toLowerCase()}`)
   if (!peer || !reachesConsole(peer, "member")) throw notFound("Member")
   if (peer.id === caller.id) throw new ApiError(400, "BAD_REQUEST", "A DM is between two members")
-  const name = `dm:${[caller.id, peer.id].sort().join(":")}`
+  const name = dmName(caller.id, peer.id)
   await db.transaction(async (tx) => {
     await tx
       .insert(yardChannel)
@@ -226,26 +237,56 @@ const memberOf = async (db: Database, caller: Caller, id: string): Promise<YardC
   return row.channel
 }
 
-// A channel's messages, newest page first and each page oldest first: every sent one, and the caller's own pending and denied ones; with parent, that message's thread.
+// A bot's token reaches one channel alone, its DM with its maker, so any other reads 403 before anything about it is read.
+const fenceBot = async (db: Database, caller: Caller, channelId: string) => {
+  if (!caller.bot) return
+  const [dm] = await db
+    .select({ id: yardChannel.id })
+    .from(yardChannel)
+    .where(eq(yardChannel.name, dmName(caller.id, caller.bot.madeBy)))
+  if (dm?.id !== channelId)
+    throw new ApiError(403, "FORBIDDEN", "A bot reaches only its DM with its maker")
+}
+
+// A channel's messages, newest page first and each page oldest first: every sent one, and the caller's own pending and denied ones; with parent, that message's thread; with after, the page that follows that message, oldest first, so a client without a socket reads what is new.
 export const messages = async (
   db: Database,
   caller: Caller,
   channelId: string,
-  { before, limit = 50, parent }: { before?: string; limit?: number; parent?: string },
+  {
+    after,
+    before,
+    limit = 50,
+    parent,
+  }: { after?: string; before?: string; limit?: number; parent?: string },
 ): Promise<{ hasMore: boolean; messages: Message[] }> => {
+  await fenceBot(db, caller, channelId)
   await memberOf(db, caller, channelId)
+  const seen = and(
+    eq(yardMessage.channelId, channelId),
+    or(eq(yardMessage.status, "sent"), eq(yardMessage.userId, caller.id)),
+    parent ? eq(yardMessage.parentId, parent) : isNull(yardMessage.parentId),
+    live(),
+  )
+  const id = sql`${yardMessage.id} collate "C"`
+  if (after) {
+    const [mark] = await db
+      .select({ at: yardMessage.at, id: yardMessage.id })
+      .from(yardMessage)
+      .where(and(eq(yardMessage.id, after), seen))
+    if (!mark) throw notFound("Message")
+    const rows = await db
+      .select()
+      .from(yardMessage)
+      .where(and(seen, sql`(${yardMessage.at}, ${id}) > (${mark.at}, ${mark.id} collate "C")`))
+      .orderBy(asc(yardMessage.at), asc(id))
+      .limit(limit + 1)
+    return { hasMore: rows.length > limit, messages: rows.slice(0, limit).map(toMessage) }
+  }
   const rows = await db
     .select()
     .from(yardMessage)
-    .where(
-      and(
-        eq(yardMessage.channelId, channelId),
-        or(eq(yardMessage.status, "sent"), eq(yardMessage.userId, caller.id)),
-        parent ? eq(yardMessage.parentId, parent) : isNull(yardMessage.parentId),
-        before ? lt(yardMessage.at, new Date(before)) : undefined,
-        live(),
-      ),
-    )
+    .where(and(seen, before ? lt(yardMessage.at, new Date(before)) : undefined))
     .orderBy(desc(yardMessage.at), desc(yardMessage.id))
     .limit(limit + 1)
   return { hasMore: rows.length > limit, messages: rows.slice(0, limit).reverse().map(toMessage) }
@@ -256,7 +297,7 @@ const shownAt = sql<string>`date_trunc('milliseconds', coalesce(${yardMessage.de
 
 export type Waiting = { held: boolean; message: Message; shownAt: string }
 
-// What waits on the caller past a mark, which the local Playground cards in its Inbox, oldest first by when it showed, then by id: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, and their own posts held for their approval; the mark is a time and, from the second read on, the last item's id, so rows in that item's millisecond still wait; each list reads at most limit rows, and when one comes back full both stop at the earlier full list's last row, so the next mark skips no row either list left out.
+// What waits on the caller past a mark, which the local Playground cards in its Inbox, oldest first by when it showed, then by id: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, every message a bot they made sends, which reaches only its DM with them, but the line each read of the log posts (kind log, which no bot posts itself), and their own posts held for their approval; the mark is a time and, from the second read on, the last item's id, so rows in that item's millisecond still wait; each list reads at most limit rows, and when one comes back full both stop at the earlier full list's last row, so the next mark skips no row either list left out.
 export const waiting = async (
   db: Database,
   caller: Caller,
@@ -280,7 +321,10 @@ export const waiting = async (
         sql`${yardMessage.userId} is distinct from ${caller.id}`,
         past,
         sql`${shownAt} > ${yardMember.joinedAt}`,
-        sql`${yardMessage.text} ~* ${mentionPattern(caller.login)}`,
+        or(
+          sql`${yardMessage.text} ~* ${mentionPattern(caller.login)}`,
+          sql`${yardMessage.kind} <> 'log' and exists (select 1 from ${yardBot} where ${yardBot.userId} = ${yardMessage.userId} and ${yardBot.madeBy} = ${caller.id})`,
+        ),
         live(),
       ),
     )
@@ -340,6 +384,19 @@ export const post = async (
   body: { kind: Message["kind"]; links?: string[]; parent?: string; text: string },
   limits: Record<keyof typeof POST_LIMITS, number> = POST_LIMITS,
 ): Promise<Message> => {
+  await fenceBot(db, caller, channelId)
+  // a bot has no browser to approve a held post, so it posts only what no rule holds: no held kind, mention or link
+  if (
+    caller.bot &&
+    ((HELD_KINDS as readonly string[]).includes(body.kind) ||
+      mentionsOf(body.text).length > 0 ||
+      body.links?.length)
+  )
+    throw new ApiError(
+      403,
+      "FORBIDDEN",
+      "A bot posts plain text alone: no held kind, mention or link",
+    )
   const channel = await memberOf(db, caller, channelId)
   const { firstInDm } = await POST_RULES[channel.kind](db, caller, channel)
   if (body.parent) {
@@ -356,7 +413,9 @@ export const post = async (
   await take(db, `post:${caller.login}`, "second", limits.loginSecond)
   await take(db, `post:${caller.login}`, "day", limits.loginDay)
   await take(db, `channel:${channelId}`, "hour", limits.channelHour)
-  const held = heldBecause({ ...body, firstInDm, postRule: channel.postRule, via: caller.via })
+  const held = caller.bot
+    ? null
+    : heldBecause({ ...body, firstInDm, postRule: channel.postRule, via: caller.via })
   const [row] = await db
     .insert(yardMessage)
     .values({
@@ -466,16 +525,177 @@ export const revokeToken = async (db: Database, caller: Caller, id: string) => {
   return tokenOut(row)
 }
 
-// The member a token names, when it is live and its owner still holds the member rung, stamping its last use.
+// The member a token names, when it is live, stamping its last use, with the bot row when its user is a bot.
 export const tokenOwner = async (db: Database, value: string) => {
   const [row] = await db
-    .select({ name: yardToken.name, tokenId: yardToken.id, user })
+    .select({ bot: yardBot, name: yardToken.name, tokenId: yardToken.id, user })
     .from(yardToken)
     .innerJoin(user, eq(user.id, yardToken.userId))
+    .leftJoin(yardBot, eq(yardBot.userId, yardToken.userId))
     .where(and(eq(yardToken.hash, hashOf(value)), isNull(yardToken.revokedAt)))
   if (!row) return null
   await db.update(yardToken).set({ lastUsedAt: new Date() }).where(eq(yardToken.id, row.tokenId))
-  return { device: row.name, user: row.user }
+  return {
+    bot: row.bot ? { madeBy: row.bot.madeBy, readsLog: row.bot.readsLog } : null,
+    device: row.name,
+    user: row.user,
+  }
+}
+
+// The device a bot's one token names on its posts.
+export const BOT_DEVICE = "bot"
+
+type BotRow = { createdAt: Date; id: string; name: string; readsLog: boolean }
+
+const botOut = (row: BotRow, dm: string | undefined) => ({
+  createdAt: row.createdAt.toISOString(),
+  dm: dm ?? "",
+  login: botLogin(row.name),
+  name: row.name,
+  readsLog: row.readsLog,
+})
+
+// The bots the caller made, A to Z by name, each with its DM's id, which the bot reads and posts in.
+export const bots = async (db: Database, caller: Caller) => {
+  const rows = await db
+    .select({
+      createdAt: yardBot.createdAt,
+      id: user.id,
+      name: user.name,
+      readsLog: yardBot.readsLog,
+    })
+    .from(yardBot)
+    .innerJoin(user, eq(user.id, yardBot.userId))
+    .where(eq(yardBot.madeBy, caller.id))
+    .orderBy(asc(user.name))
+  const names = rows.map((row) => dmName(row.id, caller.id))
+  const dms = names.length
+    ? await db
+        .select({ id: yardChannel.id, name: yardChannel.name })
+        .from(yardChannel)
+        .where(inArray(yardChannel.name, names))
+    : []
+  return rows.map((row) => botOut(row, dms.find((dm) => dm.name === dmName(row.id, caller.id))?.id))
+}
+
+// A bot the owner makes: its own user, on the member rung with a login no GitHub sign-in can claim (botLogin), its DM with its maker, its one token, whose secret is returned this once and kept only as its hash, and with log, the owner's leave to read the dispatcher's log.
+export const createBot = async (
+  db: Database,
+  caller: Caller,
+  name: string,
+  { log = false }: { log?: boolean } = {},
+) => {
+  botNameSchema.parse(name)
+  await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR)
+  const id = crypto.randomUUID()
+  const dm = crypto.randomUUID()
+  const value = secret("yard_")
+  let row: BotRow
+  try {
+    row = await db.transaction(async (tx) => {
+      const now = new Date()
+      await tx.insert(user).values({
+        email: `${id}@bot.yard.invalid`,
+        id,
+        login: botLogin(name),
+        name,
+        role: "member",
+        roleSetAt: now,
+      })
+      const [bot] = await tx
+        .insert(yardBot)
+        .values({ madeBy: caller.id, readsLog: log, userId: id })
+        .returning()
+      await tx.insert(yardToken).values({ hash: hashOf(value), name: BOT_DEVICE, userId: id })
+      await tx.insert(yardChannel).values({ id: dm, kind: "dm", name: dmName(id, caller.id) })
+      await tx
+        .insert(yardMember)
+        .values([id, caller.id].map((userId) => ({ channelId: dm, userId })))
+      return { createdAt: bot!.createdAt, id, name, readsLog: bot!.readsLog }
+    })
+  } catch (error) {
+    if (taken(error)) throw new ApiError(409, "CONFLICT", `A bot named ${name} exists`)
+    throw error
+  }
+  return { bot: botOut(row, dm), secret: value }
+}
+
+// Revokes a bot the caller made: its user goes, with its token, its bot row and its DM, so its next call reads 401 and nothing it said stays behind.
+export const revokeBot = async (db: Database, caller: Caller, name: string) => {
+  const [row] = await db
+    .select({
+      createdAt: yardBot.createdAt,
+      id: user.id,
+      name: user.name,
+      readsLog: yardBot.readsLog,
+    })
+    .from(yardBot)
+    .innerJoin(user, eq(user.id, yardBot.userId))
+    .where(and(eq(yardBot.madeBy, caller.id), eq(user.login, botLogin(name))))
+  if (!row) throw notFound("Bot")
+  const [dm] = await db.transaction(async (tx) => {
+    const gone = await tx
+      .delete(yardChannel)
+      .where(eq(yardChannel.name, dmName(row.id, caller.id)))
+      .returning({ id: yardChannel.id })
+    await tx.delete(user).where(eq(user.id, row.id))
+    return gone
+  })
+  return botOut(row, dm?.id)
+}
+
+// The Account page's log switch: whether a bot the caller made may read the dispatcher's log, from its next read.
+export const setReadsLog = async (
+  db: Database,
+  caller: Caller,
+  name: string,
+  readsLog: boolean,
+) => {
+  const [found] = await db
+    .select({ id: user.id })
+    .from(yardBot)
+    .innerJoin(user, eq(user.id, yardBot.userId))
+    .where(and(eq(yardBot.madeBy, caller.id), eq(user.login, botLogin(name))))
+  if (!found) throw notFound("Bot")
+  await db.update(yardBot).set({ readsLog }).where(eq(yardBot.userId, found.id))
+  return (await bots(db, caller)).find((bot) => bot.name === name)!
+}
+
+// A bot's read of the log reaches its maker's Mac: the maker's login, which the Mac checks against its own token's, and the bot's DM, where the read's line goes.
+export const logReadOf = async (db: Database, caller: Caller & { bot: { madeBy: string } }) => {
+  const [maker] = await db
+    .select({ login: user.login })
+    .from(user)
+    .where(eq(user.id, caller.bot.madeBy))
+  const [dm] = await db
+    .select({ id: yardChannel.id })
+    .from(yardChannel)
+    .where(eq(yardChannel.name, dmName(caller.id, caller.bot.madeBy)))
+  if (!maker?.login || !dm) throw notFound("Bot")
+  return { dm: dm.id, login: maker.login }
+}
+
+// The line a read of the log leaves in the bot's DM, as the bot's, kind log, so its maker sees each read and the Inbox cards none (waiting).
+export const logLine = async (
+  db: Database,
+  caller: Caller,
+  dm: string,
+  text: string,
+): Promise<Message> => {
+  const [row] = await db
+    .insert(yardMessage)
+    .values({
+      at: new Date(),
+      channelId: dm,
+      device: caller.device,
+      kind: "log",
+      login: caller.login,
+      status: "sent",
+      text,
+      userId: caller.id,
+    })
+    .returning()
+  return toMessage(row!)
 }
 
 const inviteOut = (row: typeof yardInvite.$inferSelect, requestedBy: string | null) => ({

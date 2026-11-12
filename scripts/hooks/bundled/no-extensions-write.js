@@ -2,9 +2,9 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-extensions-write.ts
-import { existsSync, statSync } from "fs";
+import { existsSync as existsSync4, readFileSync as readFileSync4, statSync as statSync3 } from "fs";
 import { homedir as homedir4 } from "os";
-import { dirname as dirname3, join as join6, resolve as resolve4, sep as sep2 } from "path";
+import { dirname as dirname4, join as join7, resolve as resolve5, sep as sep2 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -50,20 +50,184 @@ applyEnvAliases();
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
-import { join, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
+import { isAbsolute, join, resolve } from "path";
+var dataDirOf = (env, home = env.HOME || homedir()) => {
+  const named = env.PLAYGROUND_DATA_DIR;
+  if (!named)
+    return join(home, ".playground");
+  if (!isAbsolute(named))
+    throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
+  return resolve(named);
+};
 var dataDir = (env = process.env) => dataDirOf(env);
 
-// packages/settings/src/rendered.ts
-import { join as join2 } from "path";
-var CORE = "core";
-var extensionsDir = (data) => join2(data, "extensions");
+// packages/settings/src/folder.ts
+import {
+  existsSync as existsSync2,
+  mkdirSync,
+  readdirSync,
+  readFileSync as readFileSync2,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync
+} from "fs";
+import { basename, dirname, join as join3, relative } from "path";
 
-// scripts/hooks/no-main-checkout.ts
-import { readdirSync, readFileSync, realpathSync } from "fs";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join5, normalize, resolve as resolve3, sep } from "path";
+// packages/config/src/kinds.ts
+var ROSTER_KINDS = [
+  "assistant",
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "orchestrator",
+  "planner",
+  "probe",
+  "researcher",
+  "reviewer",
+  "runner",
+  "tester",
+  "worker"
+];
+var isRosterKind = (value) => ROSTER_KINDS.includes(value);
+var FACTORY_ROLE_OF_KIND = {
+  assistant: "lead",
+  builder: "lead",
+  dispatcher: "dispatcher",
+  ops: "lead",
+  optimizer: "lead",
+  orchestrator: "lead",
+  planner: "lead",
+  probe: "probe",
+  researcher: "worker",
+  reviewer: "reviewer",
+  runner: "runner",
+  tester: "tester",
+  worker: "worker"
+};
+var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
+var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
+var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
+var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
+var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
+var DEFAULT_SESSION_NAMES = {
+  aliases: {},
+  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
+};
+var NAMES = Symbol.for("playground.sessionNames");
+var held = globalThis;
+var setSessionNames = (next) => {
+  held[NAMES] = next;
+};
+var getSessionNames = () => held[NAMES] ?? DEFAULT_SESSION_NAMES;
+var namedKinds = () => {
+  const { aliases, names } = getSessionNames();
+  return new Map([
+    ...Object.entries(names).map(([kind, name]) => [name, kind]),
+    [`${names.dispatcher}-2`, "dispatcher"],
+    ...Object.entries(aliases),
+    ["optimizer", "optimizer"]
+  ]);
+};
+var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
+function roleOfName(name) {
+  const kind = placedKindOfName(name);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+var SEATLESS = new Set(["ended", "parked"]);
+
+// packages/safe-delete/src/index.ts
+var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
+var PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/;
+var CARVE_OUTS = {
+  "dashboard-supervisor": {
+    bytes: 256 * 1024 ** 2,
+    files: 4000,
+    folder: "ops/dashboard/builds"
+  },
+  jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" },
+  "jobs-installed": {
+    bytes: 64 * 1024,
+    files: 1,
+    folder: "Library/LaunchAgents",
+    home: true,
+    name: PLAYGROUND_AGENT
+  }
+};
+
+// packages/settings/src/rendered.ts
+import { existsSync, readFileSync } from "fs";
+import { join as join2 } from "path";
+import { fileURLToPath } from "url";
+var CORE = "core";
+var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
+var extensionsDir = (data) => join2(data, "extensions");
+var scopeDir = (data, scope) => scope === CORE ? coreDir() : join2(data, "extensions", scope);
+var loginPath = (data) => join2(data, "extensions", "login");
+var loginOf = (data, env = process.env) => {
+  if (env.PLAYGROUND_LOGIN)
+    return env.PLAYGROUND_LOGIN;
+  try {
+    const login = readFileSync(loginPath(data), "utf8").trim();
+    if (login)
+      return login;
+  } catch {}
+  throw new Error(`no login for the extensions in ${loginPath(data)}: run playground ext init`);
+};
+var fixFor = (file) => {
+  const list = /^hooks\/(.+)\.json$/.exec(file)?.[1];
+  if (list && !existsSync(join2(coreDir(), "lists", `${list}.json`)))
+    return `tell your lead, and the dispatcher hands the owner ! playground ext put <login> list ${list} <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`;
+  return file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher asks the owner to set up settings, then fill in and save Privacy on the Dashboard's Settings page, which writes it";
+};
+var readRenderedSync = (data, file) => {
+  const dir = extensionsDir(data);
+  if (!existsSync(dir))
+    return {};
+  const parts = file.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === ".."))
+    return { refusal: `${file} is not a path inside the extensions (${dir})` };
+  const path = parts[0] === CORE ? join2(coreDir(), ...parts.slice(1)) : join2(dir, file);
+  return existsSync(path) ? { path } : { refusal: `the extensions root (${dir}) holds no ${file}: ${fixFor(file)}` };
+};
+var readPolicySync = (data, org) => {
+  const read = readRenderedSync(data, "policy.json");
+  if (read.refusal)
+    return { refusal: read.refusal };
+  if (!read.path)
+    return { settings: { schemaVersion: 1, values: {} } };
+  let policy;
+  try {
+    policy = JSON.parse(readFileSync(read.path, "utf8"));
+  } catch {
+    return {
+      refusal: `the extensions' policy.json does not parse (${read.path}): ${fixFor("policy.json")}`
+    };
+  }
+  return {
+    settings: {
+      schemaVersion: 1,
+      values: { ...policy.values, ...org ? policy.orgs?.[org.toLowerCase()] : undefined }
+    }
+  };
+};
+
+// packages/settings/src/folder.ts
+var STALE_MS = 5 * 60000;
+var scopesIn = (data) => {
+  const root = extensionsDir(data);
+  return existsSync2(root) ? readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory() && existsSync2(join3(root, entry.name, ".git"))).map((entry) => entry.name).sort() : [];
+};
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
+function getEnumValues(entries) {
+  const numericValues = Object.values(entries).filter((v) => typeof v === "number");
+  const values = Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
+  return values;
+}
 function joinValues(array, separator = "|") {
   return array.map((val) => stringifyPrimitive(val)).join(separator);
 }
@@ -72,6 +236,24 @@ function jsonStringifyReplacer(_, value) {
     return value.toString();
   return value;
 }
+
+class Cached {
+  constructor(getter) {
+    this._getter = getter;
+    this._value = undefined;
+  }
+  get value() {
+    const getter = this._getter;
+    if (getter !== undefined) {
+      this._value = getter();
+      this._getter = undefined;
+    }
+    return this._value;
+  }
+}
+function cached(getter) {
+  return new Cached(getter);
+}
 function nullish(input) {
   return input === null || input === undefined;
 }
@@ -79,6 +261,14 @@ function cleanRegex(source) {
   const start = source.startsWith("^") ? 1 : 0;
   const end = source.endsWith("$") ? source.length - 1 : source.length;
   return source.slice(start, end);
+}
+function floatSafeRemainder(val, step) {
+  const ratio = val / step;
+  const roundedRatio = Math.round(ratio);
+  const tolerance = 4 * Number.EPSILON * Math.max(Math.abs(ratio), 1);
+  if (Math.abs(ratio - roundedRatio) < tolerance)
+    return 0;
+  return ratio - roundedRatio;
 }
 function assignProp(target, prop, value) {
   Object.defineProperty(target, prop, {
@@ -92,6 +282,52 @@ function rawShape(def) {
   const desc = Object.getOwnPropertyDescriptor(def, "shape");
   return desc?.get ? desc.get.raw : desc?.value;
 }
+function sourceShape(schema) {
+  return rawShape(schema._zod.def) ?? schema._zod.def.shape;
+}
+function deferProp(target, key, getter) {
+  Object.defineProperty(target, key, {
+    get() {
+      const value = getter();
+      assignProp(this, key, value);
+      return value;
+    },
+    enumerable: true,
+    configurable: true
+  });
+}
+function putProp(target, key, value) {
+  if (key in target)
+    assignProp(target, key, value);
+  else
+    target[key] = value;
+}
+function mirrorShape(target, source, keys, wrap) {
+  const raw = sourceShape(source);
+  for (const key of keys) {
+    const desc = Object.getOwnPropertyDescriptor(raw, key);
+    if (!desc.enumerable)
+      continue;
+    if (desc.get) {
+      deferProp(target, key, () => {
+        const value = source._zod.def.shape[key];
+        return wrap ? wrap(value, key) : value;
+      });
+    } else
+      putProp(target, key, wrap ? wrap(desc.value, key) : desc.value);
+  }
+}
+function mirrorProps(target, source) {
+  for (const key of Reflect.ownKeys(source)) {
+    const desc = Object.getOwnPropertyDescriptor(source, key);
+    if (!desc.enumerable)
+      continue;
+    if (desc.get)
+      deferProp(target, key, () => source[key]);
+    else
+      putProp(target, key, desc.value);
+  }
+}
 function mergeDefs(...defs) {
   const mergedDescriptors = {};
   for (const def of defs) {
@@ -100,6 +336,9 @@ function mergeDefs(...defs) {
   }
   return Object.defineProperties({}, mergedDescriptors);
 }
+function esc(str) {
+  return JSON.stringify(str);
+}
 function slugify(input) {
   return input.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
@@ -107,6 +346,21 @@ var captureStackTrace = "captureStackTrace" in Error ? Error.captureStackTrace :
 function isObject(data) {
   return typeof data === "object" && data !== null && !Array.isArray(data);
 }
+var allowsEval = /* @__PURE__ */ cached(() => {
+  if (globalConfig.jitless) {
+    return false;
+  }
+  if (typeof navigator !== "undefined" && navigator?.userAgent?.includes("Cloudflare")) {
+    return false;
+  }
+  try {
+    const F = Function;
+    new F("");
+    return true;
+  } catch (_) {
+    return false;
+  }
+});
 function isPlainObject(o) {
   if (isObject(o) === false)
     return false;
@@ -134,6 +388,7 @@ function shallowClone(o) {
     return new Set(o);
   return o;
 }
+var propertyKeyTypes = /* @__PURE__ */ new Set(["string", "number", "symbol"]);
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -166,6 +421,11 @@ function stringifyPrimitive(value) {
     return `"${value}"`;
   return `${value}`;
 }
+function optionalKeys(shape) {
+  return Object.keys(shape).filter((k) => {
+    return shape[k]._zod.optin !== undefined && shape[k]._zod.optout === "optional";
+  });
+}
 var NUMBER_FORMAT_RANGES = /* @__PURE__ */ (() => ({
   safeint: [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
   int32: [-2147483648, 2147483647],
@@ -177,6 +437,106 @@ var BIGINT_FORMAT_RANGES = {
   int64: [/* @__PURE__ */ BigInt("-9223372036854775808"), /* @__PURE__ */ BigInt("9223372036854775807")],
   uint64: [/* @__PURE__ */ BigInt(0), /* @__PURE__ */ BigInt("18446744073709551615")]
 };
+function pick(schema, mask) {
+  const currDef = schema._zod.def;
+  const checks = currDef.checks;
+  const hasChecks = checks && checks.length > 0;
+  if (hasChecks) {
+    throw new Error(".pick() cannot be used on object schemas containing refinements");
+  }
+  const newShape = {};
+  mirrorShape(newShape, schema, maskedKeys(schema, mask));
+  return clone(schema, mergeDefs(currDef, { shape: newShape, checks: [] }));
+}
+function maskedKeys(schema, mask) {
+  const raw = sourceShape(schema);
+  const keys = [];
+  for (const key of Reflect.ownKeys(mask)) {
+    if (!Object.getOwnPropertyDescriptor(raw, key)?.enumerable) {
+      throw new Error(`Unrecognized key: "${String(key)}"`);
+    }
+    if (mask[key])
+      keys.push(key);
+  }
+  return keys;
+}
+function omit(schema, mask) {
+  const currDef = schema._zod.def;
+  const checks = currDef.checks;
+  const hasChecks = checks && checks.length > 0;
+  if (hasChecks) {
+    throw new Error(".omit() cannot be used on object schemas containing refinements");
+  }
+  const omitted = new Set(maskedKeys(schema, mask));
+  const newShape = {};
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)).filter((key) => !omitted.has(key)));
+  return clone(schema, mergeDefs(currDef, { shape: newShape, checks: [] }));
+}
+function extend(schema, shape) {
+  if (!isPlainObject(shape)) {
+    throw new Error("Invalid input to extend: expected a plain object");
+  }
+  const checks = schema._zod.def.checks;
+  const hasChecks = checks && checks.length > 0;
+  if (hasChecks) {
+    const existingShape = sourceShape(schema);
+    for (const key of Reflect.ownKeys(shape)) {
+      if (Object.getOwnPropertyDescriptor(existingShape, key) !== undefined) {
+        throw new Error("Cannot overwrite keys on object schemas containing refinements. Use `.safeExtend()` instead.");
+      }
+    }
+  }
+  return clone(schema, mergeDefs(schema._zod.def, { shape: extended(schema, shape) }));
+}
+function extended(schema, shape) {
+  const newShape = {};
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)));
+  mirrorProps(newShape, shape);
+  return newShape;
+}
+function safeExtend(schema, shape) {
+  if (!isPlainObject(shape)) {
+    throw new Error("Invalid input to safeExtend: expected a plain object");
+  }
+  return clone(schema, mergeDefs(schema._zod.def, { shape: extended(schema, shape) }));
+}
+function merge(a, b) {
+  if (!b?._zod?.def) {
+    throw new Error("Invalid input to merge: expected an object schema. To merge a plain shape, use `.extend()`.");
+  }
+  if (a._zod.def.checks?.length) {
+    throw new Error(".merge() cannot be used on object schemas containing refinements. Use .safeExtend() instead.");
+  }
+  const newShape = {};
+  mirrorShape(newShape, a, Reflect.ownKeys(sourceShape(a)));
+  mirrorShape(newShape, b, Reflect.ownKeys(sourceShape(b)));
+  const def = mergeDefs(a._zod.def, {
+    shape: newShape,
+    get catchall() {
+      return b._zod.def.catchall;
+    },
+    checks: b._zod.def.checks ?? []
+  });
+  return clone(a, def);
+}
+function partial(Class, schema, mask, name = "partial") {
+  const currDef = schema._zod.def;
+  const checks = currDef.checks;
+  const hasChecks = checks && checks.length > 0;
+  if (hasChecks) {
+    throw new Error(`.${name}() cannot be used on object schemas containing refinements`);
+  }
+  const selected = mask ? new Set(maskedKeys(schema, mask)) : undefined;
+  const newShape = {};
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), Class && ((value, key) => selected && !selected.has(key) ? value : new Class({ type: "optional", innerType: value })));
+  return clone(schema, mergeDefs(schema._zod.def, { shape: newShape, checks: [] }));
+}
+function required(Class, schema, mask) {
+  const selected = mask ? new Set(maskedKeys(schema, mask)) : undefined;
+  const newShape = {};
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), (value, key) => selected && !selected.has(key) ? value : new Class({ type: "nonoptional", innerType: value }));
+  return clone(schema, mergeDefs(schema._zod.def, { shape: newShape }));
+}
 function aborted(x, startIndex = 0) {
   if (x.aborted === true)
     return true;
@@ -347,6 +707,10 @@ function defineBound(proto, key, fn) {
     }
   });
 }
+function claim(inst, sentinel) {
+  const proto = Object.getPrototypeOf(inst);
+  return sentinel in proto ? undefined : proto;
+}
 var installing;
 var broke = false;
 var breaker = {
@@ -385,6 +749,24 @@ function defineLazyInternal(inst, key, compute) {
     },
     set(value) {
       Object.defineProperty(this, key, { configurable: true, writable: true, value });
+    }
+  });
+}
+function installLazyProp(inst, key, make, enumerable) {
+  const proto = claim(inst, key);
+  if (!proto)
+    return;
+  Object.defineProperty(proto, key, {
+    configurable: true,
+    get() {
+      const desc = { configurable: true, writable: true, enumerable, value: undefined };
+      Object.defineProperty(this, key, desc);
+      desc.value = make(this);
+      Object.defineProperty(this, key, desc);
+      return desc.value;
+    },
+    set(value) {
+      Object.defineProperty(this, key, { configurable: true, writable: true, enumerable, value });
     }
   });
 }
@@ -829,6 +1211,7 @@ function datetime(args) {
 var anyString = /^[\s\S]{0,}$/;
 var integer = /^-?\d+$/;
 var number = /^-?\d+(?:\.\d+)?$/;
+var boolean = /^(?:true|false)$/i;
 var lowercase = /^[^A-Z]*$/;
 var uppercase = /^[^a-z]*$/;
 
@@ -843,6 +1226,136 @@ var _whenHasLength = (payload) => {
   const val = payload.value;
   return !nullish(val) && val.length !== undefined;
 };
+var numericOriginMap = {
+  number: "number",
+  bigint: "bigint",
+  object: "date"
+};
+var $ZodCheckLessThan = /* @__PURE__ */ $constructor("$ZodCheckLessThan", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const origin = numericOriginMap[typeof def.value];
+  inst._zod.check = (payload) => {
+    if (def.inclusive ? payload.value <= def.value : payload.value < def.value) {
+      return;
+    }
+    payload.issues.push({
+      origin: numericOriginMap[typeof payload.value] ?? origin,
+      code: "too_big",
+      maximum: typeof def.value === "object" ? def.value.getTime() : def.value,
+      input: payload.value,
+      inclusive: def.inclusive,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckGreaterThan = /* @__PURE__ */ $constructor("$ZodCheckGreaterThan", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const origin = numericOriginMap[typeof def.value];
+  inst._zod.check = (payload) => {
+    if (def.inclusive ? payload.value >= def.value : payload.value > def.value) {
+      return;
+    }
+    payload.issues.push({
+      origin: numericOriginMap[typeof payload.value] ?? origin,
+      code: "too_small",
+      minimum: typeof def.value === "object" ? def.value.getTime() : def.value,
+      input: payload.value,
+      inclusive: def.inclusive,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckMultipleOf = /* @__PURE__ */ $constructor("$ZodCheckMultipleOf", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  inst._zod.check = (payload) => {
+    if (typeof payload.value !== typeof def.value)
+      throw new Error("Cannot mix number and bigint in multiple_of check.");
+    const isMultiple = typeof payload.value === "bigint" ? def.value !== BigInt(0) && payload.value % def.value === BigInt(0) : floatSafeRemainder(payload.value, def.value) === 0;
+    if (isMultiple)
+      return;
+    payload.issues.push({
+      origin: typeof payload.value,
+      code: "not_multiple_of",
+      divisor: def.value,
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckNumberFormat = /* @__PURE__ */ $constructor("$ZodCheckNumberFormat", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  def.format = def.format || "float64";
+  const isInt = def.format?.includes("int");
+  const origin = isInt ? "int" : "number";
+  const [minimum, maximum] = NUMBER_FORMAT_RANGES[def.format];
+  inst._zod.check = (payload) => {
+    const input = payload.value;
+    if (isInt) {
+      if (!Number.isInteger(input)) {
+        payload.issues.push({
+          expected: origin,
+          format: def.format,
+          code: "invalid_type",
+          continue: false,
+          input,
+          inst
+        });
+        return;
+      }
+      if (!Number.isSafeInteger(input)) {
+        if (input > 0) {
+          payload.issues.push({
+            input,
+            code: "too_big",
+            maximum: Number.MAX_SAFE_INTEGER,
+            note: "Integers must be within the safe integer range.",
+            inst,
+            origin,
+            inclusive: true,
+            continue: !def.abort
+          });
+        } else {
+          payload.issues.push({
+            input,
+            code: "too_small",
+            minimum: Number.MIN_SAFE_INTEGER,
+            note: "Integers must be within the safe integer range.",
+            inst,
+            origin,
+            inclusive: true,
+            continue: !def.abort
+          });
+        }
+        return;
+      }
+    }
+    if (input < minimum) {
+      payload.issues.push({
+        origin: "number",
+        input,
+        code: "too_small",
+        minimum,
+        inclusive: true,
+        inst,
+        continue: !def.abort
+      });
+    }
+    if (input > maximum) {
+      payload.issues.push({
+        origin: "number",
+        input,
+        code: "too_big",
+        maximum,
+        inclusive: true,
+        inst,
+        continue: !def.abort
+      });
+    }
+  };
+});
 var $ZodCheckMaxLength = /* @__PURE__ */ $constructor("$ZodCheckMaxLength", (inst, def) => {
   var _a;
   $ZodCheck.init(inst, def);
@@ -1017,6 +1530,48 @@ var $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (ins
     payload.value = def.tx(payload.value);
   };
 });
+
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/doc.js
+class Doc {
+  constructor(args = [], closed = {}) {
+    this.content = [];
+    this.indent = 0;
+    this.args = args;
+    this.closed = closed;
+  }
+  indented(fn) {
+    this.indent += 1;
+    try {
+      fn(this);
+    } finally {
+      this.indent -= 1;
+    }
+  }
+  write(arg) {
+    if (typeof arg === "function") {
+      arg(this, { execution: "sync" });
+      arg(this, { execution: "async" });
+      return;
+    }
+    const content = arg;
+    const lines = content.split(`
+`).filter((x) => x);
+    const minIndent = Math.min(...lines.map((x) => x.length - x.trimStart().length));
+    const dedented = lines.map((x) => x.slice(minIndent)).map((x) => " ".repeat(this.indent * 2) + x);
+    for (const line of dedented) {
+      this.content.push(line);
+    }
+  }
+  compile() {
+    const F = Function;
+    const content = this?.content ?? [``];
+    const factory = new F(...Object.keys(this.closed), `return function (${this.args.join(", ")}) {
+${content.join(`
+`)}
+};`);
+    return factory(...Object.values(this.closed));
+  }
+}
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/versions.js
 var version = {
@@ -1511,6 +2066,69 @@ var $ZodJWT = /* @__PURE__ */ $constructor("$ZodJWT", (inst, def) => {
     });
   };
 });
+var $ZodNumber = /* @__PURE__ */ $constructor("$ZodNumber", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.pattern = number;
+  inst._zod.parse = (payload, _ctx) => {
+    if (def.coerce)
+      try {
+        payload.value = Number(payload.value);
+      } catch (_) {}
+    const input = payload.value;
+    if (typeof input === "number" && !Number.isNaN(input) && Number.isFinite(input)) {
+      return payload;
+    }
+    const received = typeof input === "number" ? Number.isNaN(input) ? "NaN" : !Number.isFinite(input) ? String(input) : undefined : undefined;
+    payload.issues.push({
+      expected: "number",
+      code: "invalid_type",
+      input,
+      inst,
+      ...received ? { received } : {}
+    });
+    return payload;
+  };
+});
+var $ZodNumberFormat = /* @__PURE__ */ $constructor("$ZodNumberFormat", (inst, def) => {
+  $ZodCheckNumberFormat.init(inst, def);
+  $ZodNumber.init(inst, def);
+});
+var $ZodBoolean = /* @__PURE__ */ $constructor("$ZodBoolean", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.pattern = boolean;
+  inst._zod.parse = (payload, _ctx) => {
+    if (def.coerce)
+      try {
+        payload.value = Boolean(payload.value);
+      } catch (_) {}
+    const input = payload.value;
+    if (typeof input === "boolean")
+      return payload;
+    payload.issues.push({
+      expected: "boolean",
+      code: "invalid_type",
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodUnknown = /* @__PURE__ */ $constructor("$ZodUnknown", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload) => payload;
+});
+var $ZodNever = /* @__PURE__ */ $constructor("$ZodNever", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, _ctx) => {
+    payload.issues.push({
+      expected: "never",
+      code: "invalid_type",
+      input: payload.value,
+      inst
+    });
+    return payload;
+  };
+});
 function capSize(inst, size) {
   const caps = sizeCaps(inst._zod.def.checks);
   if (!caps.length)
@@ -1578,6 +2196,310 @@ var $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
     return payload;
   };
   capSize(inst, arraySize);
+});
+function handlePropertyResult(result, final, key, input, optin, optout) {
+  const isPresent = key in input;
+  const isOptionalOut = optout === "optional";
+  if (!isPresent && isOptionalOut && optin === "optional") {
+    return;
+  }
+  if (result.issues.length) {
+    if (optin !== undefined && isOptionalOut && !isPresent) {
+      return;
+    }
+    final.issues.push(...prefixIssues(key, result.issues));
+  }
+  if (!isPresent && optin === undefined) {
+    if (!result.issues.length) {
+      final.issues.push({
+        code: "invalid_type",
+        expected: "nonoptional",
+        input: undefined,
+        path: [key]
+      });
+    }
+    return;
+  }
+  if (result.value === undefined) {
+    if (isPresent || optin === "defaulted" && !isOptionalOut) {
+      final.value[key] = undefined;
+    }
+  } else {
+    final.value[key] = result.value;
+  }
+}
+var NO_SYMBOL_KEYS = [];
+function normalizeDef(def) {
+  const keys = Object.keys(def.shape);
+  const ownSymbols = Object.getOwnPropertySymbols(def.shape);
+  const symbolKeys = ownSymbols.length ? ownSymbols : NO_SYMBOL_KEYS;
+  const allKeys = symbolKeys.length ? [...keys, ...symbolKeys] : keys;
+  for (const k of allKeys) {
+    if (!def.shape?.[k]?._zod?.traits?.has("$ZodType")) {
+      throw new Error(`Invalid element at key "${String(k)}": expected a Zod schema`);
+    }
+  }
+  const okeys = optionalKeys(def.shape);
+  return {
+    ...def,
+    allKeys,
+    symbolKeys,
+    keySet: new Set(keys),
+    numKeys: keys.length,
+    optionalKeys: new Set(okeys)
+  };
+}
+function handleCatchall(proms, input, payload, ctx, def, inst, abortEarly) {
+  const unrecognized = [];
+  const keySet = def.keySet;
+  const _catchall = def.catchall._zod;
+  const t = _catchall.def.type;
+  const optin = _catchall.optin;
+  const optout = _catchall.optout;
+  let seen = 0;
+  for (const key in input) {
+    if (abortEarly && payload.issues.length !== seen) {
+      if (aborted(payload, seen))
+        break;
+      seen = payload.issues.length;
+    }
+    if (keySet.has(key))
+      continue;
+    if (key === "__proto__") {
+      if (t === "never")
+        unrecognized.push(key);
+      continue;
+    }
+    if (t === "never") {
+      unrecognized.push(key);
+      continue;
+    }
+    const r = _catchall.run({ value: input[key], issues: [] }, ctx);
+    if (r instanceof Promise) {
+      proms.push(r.then((r) => handlePropertyResult(r, payload, key, input, optin, optout)));
+    } else {
+      handlePropertyResult(r, payload, key, input, optin, optout);
+    }
+  }
+  if (unrecognized.length) {
+    payload.issues.push({
+      code: "unrecognized_keys",
+      keys: unrecognized,
+      input,
+      inst,
+      continue: true
+    });
+  }
+  if (!proms.length)
+    return payload;
+  return Promise.all(proms).then(() => {
+    return payload;
+  });
+}
+var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
+  $ZodType.init(inst, def);
+  const desc = Object.getOwnPropertyDescriptor(def, "shape");
+  const sh = desc?.get ? desc.get.raw : def.shape ?? {};
+  if (sh) {
+    const get = () => {
+      const newSh = { ...sh };
+      Object.defineProperty(def, "shape", { value: newSh });
+      get.raw = newSh;
+      return newSh;
+    };
+    get.raw = sh;
+    Object.defineProperty(def, "shape", { get });
+  }
+  const _normalized = cached(() => normalizeDef(def));
+  defineLazyInternal(inst, "propValues", (zod) => {
+    const shape = zod.def.shape;
+    const propValues = {};
+    for (const key in shape) {
+      const field = shape[key]._zod;
+      if (field.values) {
+        if (!Object.prototype.hasOwnProperty.call(propValues, key)) {
+          assignProp(propValues, key, new Set);
+        }
+        for (const v of field.values)
+          propValues[key].add(v);
+        if (field.optin !== undefined)
+          propValues[key].add(undefined);
+      }
+    }
+    return propValues;
+  });
+  const isObject2 = isObject;
+  const catchall = def.catchall;
+  let value;
+  const memo = globalConfig.memoizer;
+  memo?.attach(inst);
+  inst._zod.parse = (payload, ctx) => {
+    value ?? (value = _normalized.value);
+    const input = payload.value;
+    if (!isObject2(input)) {
+      payload.issues.push({
+        expected: "object",
+        code: "invalid_type",
+        input,
+        inst
+      });
+      return payload;
+    }
+    payload.value = memo ? memo.alloc(inst, payload, {}, ctx) : {};
+    const proms = [];
+    const shape = value.shape;
+    const abortEarly = ctx?.abortEarly;
+    let seen = payload.issues.length;
+    for (const key of value.allKeys) {
+      if (abortEarly && payload.issues.length !== seen) {
+        if (aborted(payload, seen))
+          break;
+        seen = payload.issues.length;
+      }
+      if (key === "__proto__")
+        continue;
+      const el = shape[key];
+      const optin = el._zod.optin;
+      const optout = el._zod.optout;
+      const r = el._zod.run({ value: input[key], issues: [] }, ctx);
+      if (r instanceof Promise) {
+        proms.push(r.then((r) => handlePropertyResult(r, payload, key, input, optin, optout)));
+      } else {
+        handlePropertyResult(r, payload, key, input, optin, optout);
+      }
+    }
+    if (!catchall) {
+      return proms.length ? Promise.all(proms).then(() => payload) : payload;
+    }
+    return handleCatchall(proms, input, payload, ctx, _normalized.value, inst, abortEarly === true);
+  };
+});
+var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) => {
+  $ZodObject.init(inst, def);
+  const superParse = inst._zod.parse;
+  const _normalized = cached(() => normalizeDef(def));
+  const memo = globalConfig.memoizer;
+  const generateFastpass = (shape) => {
+    const normalized = _normalized.value;
+    const syms = normalized.symbolKeys;
+    const doc = new Doc(["payload", "ctx"], { shape, inst, memo, syms });
+    const parseStr = (k) => `shape[${k}]._zod.run({ value: input[${k}], issues: [] }, ctx)`;
+    const prefixStr = (id, k) => `
+          let ${id}_ab = false;
+          for (let i = 0; i < ${id}.issues.length; i++) {
+            const iss = ${id}.issues[i];
+            iss.path = iss.path ? [${k}, ...iss.path] : [${k}];
+            payload.issues.push(iss);
+            if (iss.continue !== true) ${id}_ab = true;
+          }
+          if (${id}_ab && ctx && ctx.abortEarly) {
+            payload.value = newResult;
+            return payload;
+          }`;
+    doc.write(`const input = payload.value;`);
+    const ids = Object.create(null);
+    let counter = 0;
+    for (const key of normalized.allKeys) {
+      ids[key] = `key_${counter++}`;
+    }
+    doc.write(memo ? `const newResult = memo.alloc(inst, payload, {}, ctx);` : `const newResult = {};`);
+    for (const key of normalized.allKeys) {
+      if (key === "__proto__")
+        continue;
+      const id = ids[key];
+      const k = typeof key === "symbol" ? `syms[${syms.indexOf(key)}]` : esc(key);
+      const isPresent = `${k} in input`;
+      const schema = shape[key];
+      const optin = schema?._zod?.optin;
+      const isOptionalIn = optin !== undefined;
+      const isOptionalOut = schema?._zod?.optout === "optional";
+      doc.write(`const ${id} = ${parseStr(k)};`);
+      if (isOptionalIn && isOptionalOut) {
+        const assign = optin === "optional" ? `${id}_present` : `${id}.value !== undefined || ${id}_present`;
+        doc.write(`
+        const ${id}_present = ${isPresent};
+        if (!${id}.issues.length || ${id}_present) {
+          if (${id}.issues.length) {${prefixStr(id, k)}
+          }
+
+          if (${assign}) {
+            newResult[${k}] = ${id}.value;
+          }
+        }
+
+      `);
+      } else if (!isOptionalIn) {
+        doc.write(`
+        const ${id}_present = ${isPresent};
+        if (${id}.issues.length) {${prefixStr(id, k)}
+        }
+        if (!${id}_present && !${id}.issues.length) {
+          payload.issues.push({
+            code: "invalid_type",
+            expected: "nonoptional",
+            input: undefined,
+            path: [${k}]
+          });
+          if (ctx && ctx.abortEarly) {
+            payload.value = newResult;
+            return payload;
+          }
+        }
+
+        if (${id}_present) {
+          newResult[${k}] = ${id}.value;
+        }
+
+      `);
+      } else {
+        doc.write(`
+        if (${id}.issues.length) {${prefixStr(id, k)}
+        }
+      `);
+        if (optin === "defaulted") {
+          doc.write(`newResult[${k}] = ${id}.value;`);
+        } else {
+          doc.write(`
+        if (${id}.value !== undefined || ${isPresent}) {
+          newResult[${k}] = ${id}.value;
+        }
+      `);
+        }
+      }
+    }
+    doc.write(`payload.value = newResult;`);
+    doc.write(`return payload;`);
+    return doc.compile();
+  };
+  let fastpass;
+  const isObject2 = isObject;
+  const jit = !globalConfig.jitless;
+  const allowsEval2 = allowsEval;
+  const fastEnabled = jit && allowsEval2.value;
+  const catchall = def.catchall;
+  let value;
+  inst._zod.parse = (payload, ctx) => {
+    value ?? (value = _normalized.value);
+    const input = payload.value;
+    if (!isObject2(input)) {
+      payload.issues.push({
+        expected: "object",
+        code: "invalid_type",
+        input,
+        inst
+      });
+      return payload;
+    }
+    if (jit && fastEnabled && ctx?.async === false && ctx.jitless !== true) {
+      if (!fastpass)
+        fastpass = generateFastpass(def.shape);
+      payload = fastpass(payload, ctx);
+      if (!catchall)
+        return payload;
+      return handleCatchall([], input, payload, ctx, value, inst, ctx?.abortEarly === true);
+    }
+    return superParse(payload, ctx);
+  };
 });
 function handleUnionResults(results, final, inst, ctx) {
   for (const result of results) {
@@ -1910,6 +2832,51 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
     if (proms.length) {
       return Promise.all(proms).then(() => payload);
     }
+    return payload;
+  };
+});
+var $ZodEnum = /* @__PURE__ */ $constructor("$ZodEnum", (inst, def) => {
+  $ZodType.init(inst, def);
+  const values = getEnumValues(def.entries);
+  const valuesSet = new Set(values);
+  inst._zod.values = valuesSet;
+  defineLazyInternal(inst, "pattern", (zod) => {
+    const patternValues = getEnumValues(zod.def.entries).filter((k) => propertyKeyTypes.has(typeof k));
+    return new RegExp(patternValues.length ? `^(${patternValues.map((o) => escapeRegex(o.toString())).join("|")})$` : "^[^\\s\\S]$");
+  });
+  inst._zod.parse = (payload, _ctx) => {
+    const input = payload.value;
+    if (valuesSet.has(input)) {
+      return payload;
+    }
+    payload.issues.push({
+      code: "invalid_value",
+      values,
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodLiteral = /* @__PURE__ */ $constructor("$ZodLiteral", (inst, def) => {
+  $ZodType.init(inst, def);
+  const values = new Set(def.values);
+  inst._zod.values = values;
+  defineLazyInternal(inst, "pattern", (zod) => {
+    const vals = zod.def.values;
+    return new RegExp(vals.length ? `^(${vals.map((o) => typeof o === "string" ? escapeRegex(o) : o ? escapeRegex(o.toString()) : String(o)).join("|")})$` : "^[^\\s\\S]$");
+  });
+  inst._zod.parse = (payload, _ctx) => {
+    const input = payload.value;
+    if (values.has(input)) {
+      return payload;
+    }
+    payload.issues.push({
+      code: "invalid_value",
+      values: def.values,
+      input,
+      inst
+    });
     return payload;
   };
 });
@@ -2850,6 +3817,74 @@ function _isoDuration(Class, params) {
     ...normalizeParams(params)
   });
 }
+function _number(Class, params) {
+  return new Class(snapshotChecks({ type: "number", checks: [], ...normalizeParams(params) }));
+}
+function _int(Class, params) {
+  return new Class({
+    type: "number",
+    check: "number_format",
+    abort: false,
+    format: "safeint",
+    ...normalizeParams(params)
+  });
+}
+function _boolean(Class, params) {
+  return new Class({
+    type: "boolean",
+    ...normalizeParams(params)
+  });
+}
+function _unknown(Class) {
+  return new Class({
+    type: "unknown"
+  });
+}
+function _never(Class, params) {
+  return new Class({
+    type: "never",
+    ...normalizeParams(params)
+  });
+}
+function _lt(value, params) {
+  return new $ZodCheckLessThan({
+    check: "less_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: false
+  });
+}
+function _lte(value, params) {
+  return new $ZodCheckLessThan({
+    check: "less_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: true
+  });
+}
+function _gt(value, params) {
+  return new $ZodCheckGreaterThan({
+    check: "greater_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: false
+  });
+}
+function _gte(value, params) {
+  return new $ZodCheckGreaterThan({
+    check: "greater_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: true
+  });
+}
+function _multipleOf(value, params) {
+  return new $ZodCheckMultipleOf({
+    check: "multiple_of",
+    ...normalizeParams(params),
+    value
+  });
+}
 function _maxLength(maximum, params) {
   const ch = new $ZodCheckMaxLength({
     check: "max_length",
@@ -3640,6 +4675,107 @@ var stringProcessor = (schema, ctx, _json, _params) => {
     }
   }
 };
+var numberProcessor = (schema, ctx, _json, params) => {
+  const json = _json;
+  const { minimum, maximum, multipleOf, exclusiveMaximum, exclusiveMinimum, isInt } = aggregateChecks(schema);
+  json.type = isInt ? "integer" : "number";
+  const exMin = typeof exclusiveMinimum === "number" && exclusiveMinimum >= (minimum ?? Number.NEGATIVE_INFINITY);
+  const exMax = typeof exclusiveMaximum === "number" && exclusiveMaximum <= (maximum ?? Number.POSITIVE_INFINITY);
+  const legacy = ctx.target === "draft-04" || ctx.target === "openapi-3.0";
+  if (exMin) {
+    if (legacy) {
+      json.minimum = exclusiveMinimum;
+      json.exclusiveMinimum = true;
+    } else {
+      json.exclusiveMinimum = exclusiveMinimum;
+    }
+  } else if (typeof minimum === "number") {
+    json.minimum = minimum;
+  }
+  if (exMax) {
+    if (legacy) {
+      json.maximum = exclusiveMaximum;
+      json.exclusiveMaximum = true;
+    } else {
+      json.exclusiveMaximum = exclusiveMaximum;
+    }
+  } else if (typeof maximum === "number") {
+    json.maximum = maximum;
+  }
+  if (multipleOf) {
+    const divisors = new Set;
+    for (const divisor of multipleOf) {
+      if (Number.isFinite(divisor) && divisor !== 0)
+        divisors.add(Math.abs(divisor));
+      else
+        handleUnrepresentable(schema, ctx, json, params, `A multipleOf divisor of ${divisor} cannot be represented in JSON Schema`);
+    }
+    const [first, ...rest] = divisors;
+    if (first !== undefined)
+      json.multipleOf = first;
+    if (rest.length)
+      json.allOf = [...json.allOf ?? [], ...rest.map((m) => ({ multipleOf: m }))];
+  }
+};
+var booleanProcessor = (_schema, _ctx, json, _params) => {
+  json.type = "boolean";
+};
+var neverProcessor = (_schema, _ctx, json, _params) => {
+  json.not = {};
+};
+var unknownProcessor = (_schema, _ctx, _json, _params) => {};
+var enumProcessor = (schema, _ctx, json, _params) => {
+  const def = schema._zod.def;
+  const values = getEnumValues(def.entries);
+  if (values.length === 0) {
+    json.not = {};
+    return;
+  }
+  if (values.every((v) => typeof v === "number"))
+    json.type = "number";
+  if (values.every((v) => typeof v === "string"))
+    json.type = "string";
+  json.enum = values;
+};
+var literalProcessor = (schema, ctx, json, params) => {
+  const def = schema._zod.def;
+  if (def.values.length === 0) {
+    json.not = {};
+    return;
+  }
+  const vals = [];
+  for (const val of def.values) {
+    if (val === undefined) {
+      if (handleUnrepresentable(schema, ctx, json, params, "Literal `undefined` cannot be represented in JSON Schema"))
+        return;
+    } else if (typeof val === "bigint") {
+      if (handleUnrepresentable(schema, ctx, json, params, "BigInt literals cannot be represented in JSON Schema"))
+        return;
+      vals.push(Number(val));
+    } else {
+      vals.push(val);
+    }
+  }
+  if (vals.length === 0) {} else if (vals.length === 1) {
+    const val = vals[0];
+    json.type = val === null ? "null" : typeof val;
+    if (ctx.target === "draft-04" || ctx.target === "openapi-3.0") {
+      json.enum = [val];
+    } else {
+      json.const = val;
+    }
+  } else {
+    if (vals.every((v) => typeof v === "number"))
+      json.type = "number";
+    if (vals.every((v) => typeof v === "string"))
+      json.type = "string";
+    if (vals.every((v) => typeof v === "boolean"))
+      json.type = "boolean";
+    if (vals.every((v) => v === null))
+      json.type = "null";
+    json.enum = vals;
+  }
+};
 var customProcessor = (schema, ctx, json, params) => {
   handleUnrepresentable(schema, ctx, json, params, "Custom types cannot be represented in JSON Schema");
 };
@@ -3670,6 +4806,44 @@ function inputOptin(schema) {
   }
   return schema._zod.optin;
 }
+var objectProcessor = (schema, ctx, _json, params) => {
+  const json = _json;
+  const def = schema._zod.def;
+  const shape = def.shape;
+  const symbolKeys = Object.getOwnPropertySymbols(shape);
+  if (symbolKeys.length && handleUnrepresentable(schema, ctx, json, params, "Symbol keys cannot be represented in JSON Schema")) {
+    return;
+  }
+  json.type = "object";
+  json.properties = {};
+  for (const key in shape) {
+    assignProp(json.properties, key, processSchema(shape[key], ctx, {
+      ...params,
+      path: [...params.path, "properties", key]
+    }));
+  }
+  const requiredKeys = [];
+  for (const key of Object.keys(shape)) {
+    const field = def.shape[key];
+    if (ctx.io === "input" ? inputOptin(field) === undefined : field._zod.optout === undefined) {
+      requiredKeys.push(key);
+    }
+  }
+  if (requiredKeys.length > 0) {
+    json.required = requiredKeys;
+  }
+  if (def.catchall?._zod.def.type === "never") {
+    json.additionalProperties = false;
+  } else if (!def.catchall) {
+    if (ctx.io === "output")
+      json.additionalProperties = false;
+  } else if (def.catchall) {
+    json.additionalProperties = processSchema(def.catchall, ctx, {
+      ...params,
+      path: [...params.path, "additionalProperties"]
+    });
+  }
+};
 var unionProcessor = (schema, ctx, json, params) => {
   const def = schema._zod.def;
   const isExclusive = def.inclusive === false;
@@ -4369,6 +5543,106 @@ var ZodJWT = /* @__PURE__ */ $constructor("ZodJWT", (inst, def) => {
   $ZodJWT.init(inst, def);
   ZodStringFormat.init(inst, def);
 });
+var ZodNumber = /* @__PURE__ */ $constructor("ZodNumber", (inst, def) => {
+  $ZodNumber.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => numberProcessor(inst, ctx, json, params);
+  inst.isFinite = true;
+}, /* @__PURE__ */ derived({
+  minValue: (inst) => {
+    const { minimum, exclusiveMinimum } = aggregateChecks(inst);
+    return Math.max(minimum ?? Number.NEGATIVE_INFINITY, exclusiveMinimum ?? Number.NEGATIVE_INFINITY);
+  },
+  maxValue: (inst) => {
+    const { maximum, exclusiveMaximum } = aggregateChecks(inst);
+    return Math.min(maximum ?? Number.POSITIVE_INFINITY, exclusiveMaximum ?? Number.POSITIVE_INFINITY);
+  },
+  isInt: (inst) => {
+    const { isInt, multipleOf } = aggregateChecks(inst);
+    return !!isInt || !!multipleOf?.some(Number.isSafeInteger);
+  },
+  format: (inst) => aggregateChecks(inst).format ?? null
+}, {
+  gt(value, params) {
+    return this.check(_gt(value, params));
+  },
+  gte(value, params) {
+    return this.check(_gte(value, params));
+  },
+  min(value, params) {
+    return this.check(_gte(value, params));
+  },
+  lt(value, params) {
+    return this.check(_lt(value, params));
+  },
+  lte(value, params) {
+    return this.check(_lte(value, params));
+  },
+  max(value, params) {
+    return this.check(_lte(value, params));
+  },
+  int(params) {
+    return this.check(int(params));
+  },
+  safe(params) {
+    return this.check(int(params));
+  },
+  positive(params) {
+    return this.check(_gt(0, params));
+  },
+  nonnegative(params) {
+    return this.check(_gte(0, params));
+  },
+  negative(params) {
+    return this.check(_lt(0, params));
+  },
+  nonpositive(params) {
+    return this.check(_lte(0, params));
+  },
+  multipleOf(value, params) {
+    return this.check(_multipleOf(value, params));
+  },
+  step(value, params) {
+    return this.check(_multipleOf(value, params));
+  },
+  finite() {
+    return this;
+  }
+}));
+function number2(params) {
+  return _number(ZodNumber, params);
+}
+var ZodNumberFormat = /* @__PURE__ */ $constructor("ZodNumberFormat", (inst, def) => {
+  $ZodNumberFormat.init(inst, def);
+  ZodNumber.init(inst, def);
+});
+function int(params) {
+  return _int(ZodNumberFormat, params);
+}
+var ZodBoolean = /* @__PURE__ */ $constructor("ZodBoolean", (inst, def) => {
+  $ZodBoolean.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => booleanProcessor(inst, ctx, json, params);
+});
+function boolean2(params) {
+  return _boolean(ZodBoolean, params);
+}
+var ZodUnknown = /* @__PURE__ */ $constructor("ZodUnknown", (inst, def) => {
+  $ZodUnknown.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => unknownProcessor(inst, ctx, json, params);
+});
+function unknown() {
+  return _unknown(ZodUnknown);
+}
+var ZodNever = /* @__PURE__ */ $constructor("ZodNever", (inst, def) => {
+  $ZodNever.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => neverProcessor(inst, ctx, json, params);
+});
+function never(params) {
+  return _never(ZodNever, params);
+}
 var ZodArray = /* @__PURE__ */ $constructor("ZodArray", (inst, def) => {
   _ensureDefaultMemoizer();
   $ZodArray.init(inst, def);
@@ -4394,6 +5668,64 @@ var ZodArray = /* @__PURE__ */ $constructor("ZodArray", (inst, def) => {
 });
 function array(element, params) {
   return _array(ZodArray, element, params);
+}
+var ZodObject = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
+  _ensureDefaultMemoizer();
+  $ZodObjectJIT.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => objectProcessor(inst, ctx, json, params);
+  installLazyProp(inst, "shape", (self) => self._zod.def.shape, false);
+}, {
+  keyof() {
+    return _enum(Object.keys(this._zod.def.shape));
+  },
+  catchall(catchall) {
+    return this.clone(mergeDefs(this._zod.def, { catchall }));
+  },
+  passthrough() {
+    return this.clone(mergeDefs(this._zod.def, { catchall: unknown() }));
+  },
+  loose() {
+    return this.clone(mergeDefs(this._zod.def, { catchall: unknown() }));
+  },
+  strict() {
+    return this.clone(mergeDefs(this._zod.def, { catchall: never() }));
+  },
+  strip() {
+    return this.clone(mergeDefs(this._zod.def, { catchall: undefined }));
+  },
+  extend(incoming) {
+    return extend(this, incoming);
+  },
+  safeExtend(incoming) {
+    return safeExtend(this, incoming);
+  },
+  merge(other) {
+    return merge(this, other);
+  },
+  pick(mask) {
+    return pick(this, mask);
+  },
+  omit(mask) {
+    return omit(this, mask);
+  },
+  partial(...args) {
+    return partial(ZodOptional, this, args[0]);
+  },
+  exactPartial(...args) {
+    return partial(ZodExactOptional, this, args[0], "exactPartial");
+  },
+  required(...args) {
+    return required(ZodNonOptional, this, args[0]);
+  }
+});
+function strictObject(shape, params) {
+  return new ZodObject({
+    type: "object",
+    shape,
+    catchall: never(),
+    ...normalizeParams(params)
+  });
 }
 var ZodUnion = /* @__PURE__ */ $constructor("ZodUnion", (inst, def) => {
   $ZodUnion.init(inst, def);
@@ -4441,6 +5773,73 @@ function record(keyType, valueType, params) {
     type: "record",
     keyType,
     valueType,
+    ...normalizeParams(params)
+  });
+}
+var ZodEnum = /* @__PURE__ */ $constructor("ZodEnum", (inst, def) => {
+  $ZodEnum.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => enumProcessor(inst, ctx, json, params);
+  inst.enum = def.entries;
+  inst.options = [...inst._zod.values];
+  const keys = new Set(Object.keys(def.entries));
+  inst.extract = (values, params) => {
+    const newEntries = {};
+    for (const value of values) {
+      if (keys.has(value)) {
+        newEntries[value] = def.entries[value];
+      } else
+        throw new Error(`Key ${value} not found in enum`);
+    }
+    return new ZodEnum({
+      ...def,
+      checks: [],
+      ...normalizeParams(params),
+      entries: newEntries
+    });
+  };
+  inst.exclude = (values, params) => {
+    const newEntries = { ...def.entries };
+    for (const value of values) {
+      if (keys.has(value)) {
+        delete newEntries[value];
+      } else
+        throw new Error(`Key ${value} not found in enum`);
+    }
+    return new ZodEnum({
+      ...def,
+      checks: [],
+      ...normalizeParams(params),
+      entries: newEntries
+    });
+  };
+});
+function _enum(values, params) {
+  const entries = Array.isArray(values) ? Object.fromEntries(values.map((v) => [v, v])) : values;
+  return new ZodEnum({
+    type: "enum",
+    entries,
+    ...normalizeParams(params)
+  });
+}
+var ZodLiteral = /* @__PURE__ */ $constructor("ZodLiteral", (inst, def) => {
+  $ZodLiteral.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => literalProcessor(inst, ctx, json, params);
+  inst.values = new Set(def.values);
+  Object.defineProperty(inst, "value", {
+    get() {
+      if (def.values.length > 1) {
+        throw new Error("This schema contains multiple valid literal values. Use `.values` instead.");
+      }
+      return def.values[0];
+    }
+  });
+});
+function literal(value, params) {
+  return new ZodLiteral({
+    type: "literal",
+    values: Array.isArray(value) ? value : [value],
     ...normalizeParams(params)
   });
 }
@@ -4641,9 +6040,214 @@ var defineSettings = (defined) => {
     get: (settings, key) => (key in settings.values) ? settings.values[key] : defined[key].default
   };
 };
+var settingFields = () => [...fields.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, field]) => ({ field, key }));
 var extLinkSchema = string2().regex(/^(?:\*|[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38})$/, "a link is a GitHub org, lowercase, or * for every repo");
 var extOrderSchema = array(extScopeSchema).refine((names) => new Set(names).size === names.length, "an extension is in the order once");
 var extLinksSchema = record(extScopeSchema, array(extLinkSchema));
+
+// packages/settings/src/jobs.ts
+var jobSchema = strictObject({
+  callsModel: boolean2(),
+  command: string2().min(1).optional(),
+  config: record(string2(), unknown()).optional(),
+  cwd: string2().min(1).optional(),
+  description: string2().min(1),
+  disabledWhy: string2().optional(),
+  enabled: boolean2(),
+  heartbeat: string2().min(1),
+  launchd: string2().min(1).optional(),
+  model: string2().min(1).optional(),
+  neverPause: boolean2().optional(),
+  pausedFor: string2().optional(),
+  program: array(string2().min(1)).min(1).optional(),
+  runtime: _enum(["herdr"]).optional(),
+  schedule: union([
+    strictObject({ always: literal(true) }),
+    strictObject({ every: number2().int().positive() })
+  ]),
+  stop: string2().min(1).optional()
+});
+var fromStored = (row) => {
+  if (!row || typeof row !== "object" || Array.isArray(row))
+    return row;
+  const kept = Object.fromEntries(Object.entries(row).filter(([key]) => Object.hasOwn(jobSchema.shape, key)));
+  return kept.runtime === undefined ? kept : { ...kept, runtime: "herdr" };
+};
+var jobRowSchema = jobSchema.partial();
+var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
+var terminal = (name, command, job) => ({
+  callsModel: false,
+  command,
+  cwd: "{checkout}",
+  enabled: false,
+  heartbeat: name,
+  runtime: "herdr",
+  ...job
+});
+var launchd = (name, job) => ({
+  callsModel: false,
+  cwd: "{checkout}",
+  enabled: false,
+  heartbeat: name,
+  launchd: `com.playground.${name}`,
+  program: ["{bun}", "--no-env-file", `{checkout}/packages/scripts/src/${name}/cli.ts`],
+  ...job
+});
+var bunJob = (name, root = "{checkout}") => `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`;
+var JOBS = {
+  "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
+    description: "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
+    schedule: { always: true }
+  }),
+  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
+    cwd: "{dashboard}",
+    description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
+    schedule: { every: 300 }
+  }),
+  "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
+    cwd: "{dashboard}",
+    description: "Keeps the live dashboard running on its branch's latest head.",
+    enabled: true,
+    schedule: { every: 60 },
+    stop: "dashboard"
+  }),
+  "ops-dm-watch": terminal("ops-dm-watch", bunJob("ops-dm-watch"), {
+    description: "In Slack mode, hands each message in the owner's DM to the dispatcher, the session in the assistant seat too when no reply lands in 3 minutes.",
+    schedule: { every: 60 }
+  }),
+  "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
+    description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
+    schedule: { every: 86400 }
+  }),
+  "ops-flow": launchd("ops-flow", {
+    description: "Tells the leads when a session holds a run slot over 15 minutes, or a model slot over 120.",
+    schedule: { every: 60 }
+  }),
+  "ops-herdr": launchd("ops-herdr", {
+    description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
+    schedule: { every: 60 }
+  }),
+  "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
+    description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
+    schedule: { every: 60 }
+  }),
+  "ops-merge-train": terminal("ops-merge-train", "python3 -I {checkout}/scripts/ops/merge-train/run.py", {
+    description: "Runs the merge train: builds a train of ready PRs and checks each step.",
+    neverPause: true,
+    schedule: { every: 60 }
+  }),
+  "ops-restore": {
+    ...launchd("ops-restore", {
+      description: "Restores a lost main checkout by the playbook's steps once a guard is gone on two looks 5 minutes apart.",
+      schedule: { every: 60 }
+    }),
+    cwd: "{dashboard}",
+    program: [
+      "{bun}",
+      "--no-env-file",
+      "{dashboard}/packages/scripts/src/ops-restore/cli.ts",
+      "--main",
+      "{checkout}"
+    ]
+  },
+  "ops-session-resume": launchd("ops-session-resume", {
+    description: "Queues a carry-on line for each factory session once its usage limit resets.",
+    schedule: { every: 60 }
+  }),
+  "ops-sweep": terminal("ops-sweep", bunJob("ops-sweep"), {
+    description: "The Ops lead's sweep: runners, probes, asks, heartbeats and the forecast.",
+    schedule: { every: 300 }
+  }),
+  "ops-tick": launchd("ops-tick", {
+    description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
+    schedule: { every: 60 }
+  }),
+  "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
+    description: "Reads every live session's screen and clears a factory session stuck on a prompt.",
+    neverPause: true,
+    schedule: { every: 120 }
+  }),
+  "ops-usage": terminal("ops-usage", "python3 -I {checkout}/scripts/ops/usage/run.py", {
+    description: "Reads the account's usage windows into usage.json every 5 minutes.",
+    enabled: true,
+    neverPause: true,
+    schedule: { every: 300 }
+  }),
+  "ops-wa": terminal("ops-wa", `${bunJob("ops-wa")} --data {data}`, {
+    description: "Holds the WhatsApp link on the spare number: hands each owner message to the dispatcher, sends its replies, and drops every other message.",
+    schedule: { always: true }
+  }),
+  "ops-zai-usage": launchd("ops-zai-usage", {
+    description: "Reads the GLM plan's credits into zai-usage.json, which the spawn gate reads.",
+    schedule: { every: 300 }
+  })
+};
+var OLD_KEYS = { "ops-dashboard": ["jobs.opsDesk"] };
+var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([name, job]) => [
+  jobKey(name),
+  {
+    aliases: OLD_KEYS[name],
+    default: job,
+    description: `The ${name} ops job: ${job.description}`,
+    merge: true,
+    schema: jobRowSchema,
+    stored: fromStored
+  }
+])));
+var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
+
+// scripts/hooks/codex.ts
+import { isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
+var HEADERS = ["*** Add File: ", "*** Delete File: ", "*** Update File: ", "*** Move to: "];
+var SHELL_PATCH = /(?:^|[\n;&|(`]|\$\()\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:\S*\/)?(?:apply_patch|applypatch)(?=$|[\s;&|)<>'"`])/;
+var patchPaths = (text) => text.split(`
+`).flatMap((line) => {
+  const trimmed = line.trim();
+  const header = HEADERS.find((h) => trimmed.startsWith(h));
+  return header && trimmed.length > header.length ? [trimmed.slice(header.length)] : [];
+});
+var writeOf = (input, path, patch) => {
+  const cwd = typeof input.cwd === "string" ? input.cwd : "/";
+  return JSON.stringify({
+    ...input,
+    tool_input: { content: patch, file_path: isAbsolute2(path) ? path : resolve2(cwd, path) },
+    tool_name: "Write"
+  });
+};
+function guardInputs(raw) {
+  let input;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return [raw];
+  }
+  if (typeof input !== "object" || input === null || typeof input.turn_id !== "string")
+    return [raw];
+  const tool = input.tool_name;
+  const command = input.tool_input?.command;
+  const text = typeof command === "string" ? command : "";
+  const shell = tool === "Bash" && SHELL_PATCH.test(text);
+  if (tool !== "apply_patch" && !shell)
+    return [raw];
+  const paths = patchPaths(text);
+  if (paths.length === 0)
+    return null;
+  return [...shell ? [raw] : [], ...paths.map((path) => writeOf(input, path, text))];
+}
+async function eachInput(raw, guard, judge) {
+  const inputs = guardInputs(raw);
+  if (!inputs)
+    return `${guard} hook refuses an apply_patch whose patch names no file it can read: give the patch whole in the call itself, with each file on its own *** Add File, *** Update File or *** Delete File line.`;
+  for (const input of inputs) {
+    const reason = await judge(input);
+    if (reason)
+      return reason;
+  }
+}
+
+// scripts/hooks/no-main-checkout.ts
+import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync3, realpathSync as realpathSync2 } from "fs";
+import { basename as basename3, dirname as dirname3, isAbsolute as isAbsolute4, join as join6, normalize, resolve as resolve4, sep } from "path";
 
 // packages/settings/src/live.ts
 var liveSettings = defineSettings({
@@ -4661,78 +6265,13 @@ var liveSettings = defineSettings({
 
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
-import { join as join3 } from "path";
-
-// packages/config/src/kinds.ts
-var ROSTER_KINDS = [
-  "assistant",
-  "builder",
-  "dispatcher",
-  "ops",
-  "optimizer",
-  "orchestrator",
-  "planner",
-  "probe",
-  "researcher",
-  "reviewer",
-  "runner",
-  "tester",
-  "worker"
-];
-var isRosterKind = (value) => ROSTER_KINDS.includes(value);
-var FACTORY_ROLE_OF_KIND = {
-  assistant: "lead",
-  builder: "lead",
-  dispatcher: "dispatcher",
-  ops: "lead",
-  optimizer: "lead",
-  orchestrator: "lead",
-  planner: "lead",
-  probe: "probe",
-  researcher: "worker",
-  reviewer: "reviewer",
-  runner: "runner",
-  tester: "tester",
-  worker: "worker"
-};
-var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
-var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
-var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
-var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
-var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
-var DEFAULT_SESSION_NAMES = {
-  aliases: {},
-  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
-};
-var NAMES = Symbol.for("playground.sessionNames");
-var held = globalThis;
-var setSessionNames = (next) => {
-  held[NAMES] = next;
-};
-var getSessionNames = () => held[NAMES] ?? DEFAULT_SESSION_NAMES;
-var namedKinds = () => {
-  const { aliases, names } = getSessionNames();
-  return new Map([
-    ...Object.entries(names).map(([kind, name]) => [name, kind]),
-    [`${names.dispatcher}-2`, "dispatcher"],
-    ...Object.entries(aliases),
-    ["optimizer", "optimizer"]
-  ]);
-};
-var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
-function roleOfName(name) {
-  const kind = placedKindOfName(name);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
-}
-var SEATLESS = new Set(["ended", "parked"]);
-
-// scripts/hooks/role.ts
+import { join as join4 } from "path";
 var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
 var names;
 function loadNames(environment = process.env) {
   names ??= (async () => {
     try {
-      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const setting = join4(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
       const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
         env: { ...process.env, ...environment },
         stderr: "ignore",
@@ -4747,17 +6286,45 @@ function loadNames(environment = process.env) {
   return names;
 }
 async function registryName(sessionId, environment = process.env) {
-  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir2(), ".claude"), "sessions");
+  const dir = join4(environment.CLAUDE_CONFIG_DIR || join4(homedir2(), ".claude"), "sessions");
   for await (const file of new Bun.Glob("*.json").scan(dir)) {
     try {
-      const entry = await Bun.file(join3(dir, file)).json();
+      const entry = await Bun.file(join4(dir, file)).json();
       if (entry.sessionId === sessionId && typeof entry.name === "string")
         return entry.name;
     } catch {}
   }
 }
+async function opsLead(raw, environment = process.env) {
+  try {
+    const session = sessionOf(raw);
+    if (typeof session !== "string" || await sessionRole(environment, session) !== "lead")
+      return false;
+    const name = await registryName(session, environment);
+    return name !== undefined && await rosterKind(name, environment) === "ops";
+  } catch {
+    return false;
+  }
+}
+async function codexName(sessionId, environment = process.env) {
+  if (!environment.CODEX_HOME)
+    return;
+  let name;
+  try {
+    const index = await Bun.file(join4(environment.CODEX_HOME, "session_index.jsonl")).text();
+    for (const line of index.split(`
+`)) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.id === sessionId && typeof entry.thread_name === "string")
+          name = entry.thread_name;
+      } catch {}
+    }
+  } catch {}
+  return name;
+}
 async function rosterKind(name, environment = process.env) {
-  const path = join3(dataDirOf(environment), "roster.json");
+  const path = join4(dataDirOf(environment), "roster.json");
   try {
     const roster = await Bun.file(path).json();
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
@@ -4776,7 +6343,7 @@ async function sessionRole(environment, sessionId) {
   if (typeof sessionId !== "string")
     return "";
   try {
-    const name = await registryName(sessionId, environment) ?? "";
+    const name = await registryName(sessionId, environment) ?? await codexName(sessionId, environment) ?? "";
     const role = name && await rosterRole(name, environment);
     if (role)
       return role;
@@ -4798,42 +6365,41 @@ function sessionOf(raw) {
 }
 
 // scripts/hooks/shell.ts
+import { AsyncLocalStorage } from "async_hooks";
+import { realpathSync, statSync as statSync2 } from "fs";
 import { homedir as homedir3 } from "os";
-import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, resolve as resolve3 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
-var deadline;
+var deadlines = new AsyncLocalStorage;
 async function withDeadline(budget, body) {
-  const outer = deadline;
-  deadline = performance.now() + budget;
-  try {
-    return await body();
-  } finally {
-    deadline = outer;
-  }
+  return await deadlines.run(performance.now() + budget, body);
+}
+function pastDeadline() {
+  const deadline = deadlines.getStore();
+  if (deadline !== undefined && performance.now() > deadline)
+    throw new RangeError("past the hook's time");
 }
 var steps = 0;
 function tick() {
-  if (++steps % 1024 !== 0 || deadline === undefined)
-    return;
-  if (performance.now() > deadline)
-    throw new RangeError("past the hook's time");
+  if (++steps % 1024 === 0)
+    pastDeadline();
 }
 function lexScript(value, env) {
-  if (deadline !== undefined && value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return lex(value, env.known);
 }
 function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
-  if (deadline !== undefined && script.length + count * value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
-var held2 = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
+var held2 = (text) => text.value.length > MAX_BYTES ? unknown2(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
 var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
@@ -4886,6 +6452,7 @@ var onlyReserved = (cmd) => cmd.words.length > 0 && cmd.words.every((w) => !w.qu
 var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
+  "-": ["", ""],
   builtin: ["", ""],
   busybox: ["", ""],
   caffeinate: ["-d -i -m -s -u", "-t -w"],
@@ -5309,7 +6876,7 @@ var ESCAPES = {
   t: "\t",
   v: "\v"
 };
-var unknown = (why) => ({ unknown: why, value: UNKNOWN });
+var unknown2 = (why) => ({ unknown: why, value: UNKNOWN });
 var setLog = new WeakMap;
 var setVar = (vars, key, value) => {
   vars.set(key, value);
@@ -5323,7 +6890,7 @@ function varsSince(vars, cursor) {
   const log = setLog.get(vars) ?? [];
   return [cursor === undefined ? [...vars.keys()] : log.slice(cursor), log.length];
 }
-var merge = (out, part) => {
+var merge2 = (out, part) => {
   out.value += part.value;
   if (part.splits)
     out.splits = true;
@@ -5334,12 +6901,12 @@ var merge = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join4 = (parts, separator = "") => {
+var join5 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
       out.value += separator;
-    merge(out, part);
+    merge2(out, part);
   });
   return out;
 };
@@ -5347,6 +6914,7 @@ var slice = (word, from) => {
   const dropped = word.value.slice(0, from).split(READ).length - 1;
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
+var visible = (value) => value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ");
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
 var PLAIN = /^[\w./=,:@%-]$/;
 var unreadWord = (word) => {
@@ -5409,7 +6977,7 @@ var G_WRAPPERS = new Map([
   ["gtimeout", "timeout"]
 ]);
 var program = (value) => {
-  const base = basename(value.replace(/^=/, ""));
+  const base = basename2(value.replace(/^=/, ""));
   const lower = base.toLowerCase();
   if (SHELL_OWN.has(lower) && value !== lower)
     return value;
@@ -5560,6 +7128,8 @@ function walk(lx, scope, nested, inherit) {
       if (after === "&&")
         done.chained = true;
       done.chain = lx.token;
+      if (lx.orRun)
+        done.orRun = true;
       const last = lx.commands[lx.commands.length - 1]?.words;
       const compound = !!done.group && last?.length === 1 && OPENS.has(reserved[0] ?? "") && !HELD.has(reserved[0] ?? "");
       if (reserved.some((w) => HELD.has(w)) || compound)
@@ -5592,8 +7162,10 @@ function walk(lx, scope, nested, inherit) {
         done.atLeastOnce = true;
       depth = Math.max(0, depth + opened - closed);
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0));
-      if (depth === 0 && FREES.has(op))
+      if (depth === 0 && FREES.has(op)) {
         lx.token = freshToken();
+        lx.orRun = op === "||";
+      }
       after = op;
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted)
@@ -5690,7 +7262,7 @@ function procSub(lx) {
   return {
     procs: topLevel(lx.commands.slice(from), scope),
     quoted: false,
-    ...unknown("a process substitution")
+    ...unknown2("a process substitution")
   };
 }
 function heredocs(lx, pending, nested) {
@@ -5716,6 +7288,23 @@ function heredocs(lx, pending, nested) {
     const body = lines.map((line) => `${line}
 `).join("");
     doc.redirect.body = doc.quoted ? { value: body } : expandHeredoc(body);
+    if (!doc.quoted)
+      textCommands(lx, body);
+  }
+}
+function textCommands(lx, text) {
+  const sub = { ...lx, i: 0, src: text };
+  while (sub.i < text.length) {
+    tick();
+    const c = text[sub.i];
+    if (c === "\\")
+      sub.i += 2;
+    else if (c === "$")
+      dollar(sub, true);
+    else if (c === "`")
+      backtick(sub);
+    else
+      sub.i++;
   }
 }
 function expandHeredoc(body) {
@@ -5753,15 +7342,15 @@ function word(lx) {
     } else if (c === '"') {
       out.quoted = true;
       lx.i++;
-      merge(out, double(lx));
+      merge2(out, double(lx));
     } else if (c === "$" && next === "'") {
       out.quoted = true;
-      merge(out, ansi(lx));
+      merge2(out, ansi(lx));
     } else if (c === "$" && next === '"')
       lx.i++;
     else if (c === "$" || c === "`") {
       const text = c === "$" ? dollar(lx) : backtick(lx);
-      merge(out, text);
+      merge2(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
       if (marked(text.value))
@@ -5804,8 +7393,8 @@ function double(lx) {
       lx.i += 2;
     } else if (c === "$" || c === "`") {
       const from = lx.i;
-      const text = c === "$" ? dollar(lx) : backtick(lx);
-      merge(out, text);
+      const text = c === "$" ? dollar(lx, true) : backtick(lx);
+      merge2(out, text);
       if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
         out.splits = true;
     } else {
@@ -5825,16 +7414,17 @@ function ansi(lx) {
   lx.i = i + 1;
   return { value: decode2(raw) };
 }
-function dollar(lx) {
+function dollar(lx, plain = false) {
   tick();
   const { src } = lx;
+  const readText = plain ? textCommands : inner;
   const next = src[lx.i + 1] ?? "";
-  const variable = (name) => name !== undefined && lx.known[name] !== undefined ? { value: lx.known[name], variable: name } : { ...unknown("a shell variable"), variable: name };
+  const variable = (name) => name !== undefined && lx.known[name] !== undefined ? { value: lx.known[name], variable: name } : { ...unknown2("a shell variable"), variable: name };
   if (src.startsWith("$((", lx.i)) {
-    const end = balanced(src, lx.i + 1, "(", ")");
-    inner(lx, src.slice(lx.i + 3, end - 2));
+    const end = balanced(src, lx.i + 1, "(", ")", plain);
+    readText(lx, src.slice(lx.i + 3, end - 2));
     lx.i = end;
-    return unknown("an arithmetic expansion");
+    return unknown2("an arithmetic expansion");
   }
   if (next === "(") {
     lx.i += 2;
@@ -5843,9 +7433,9 @@ function dollar(lx) {
     return substituted(lx.commands.slice(from), lx.known);
   }
   if (next === "{") {
-    const end = balanced(src, lx.i + 1, "{", "}");
+    const end = balanced(src, lx.i + 1, "{", "}", plain);
     const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1];
-    inner(lx, src.slice(lx.i + 2, end - 1));
+    readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
   }
@@ -5863,7 +7453,7 @@ function dollar(lx) {
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2;
-    return unknown("a shell variable");
+    return unknown2("a shell variable");
   }
   lx.i++;
   return { value: "$" };
@@ -5881,14 +7471,14 @@ function inner(lx, src) {
       sub.i++;
   }
 }
-function balanced(src, from, open, close) {
+function balanced(src, from, open, close, plain = false) {
   let depth = 0;
   for (let i = from;i < src.length; i++) {
     tick();
     const c = src[i];
     if (c === "\\")
       i++;
-    else if (c === "'") {
+    else if (c === "'" && !plain) {
       const end = src.indexOf("'", i + 1);
       i = end === -1 ? src.length : end;
     } else if (c === open)
@@ -5911,13 +7501,13 @@ function backtick(lx) {
   }
   lx.i = i + 1;
   list({ ...lx, i: 0, src: inner }, lx.scopes.push(lx.scope) - 1, false);
-  return unknown("a command substitution");
+  return unknown2("a command substitution");
 }
 var echoes = false;
 function substituted(inner, known) {
   const [only] = inner;
   if (inner.length !== 1 || only.stdin || only.group)
-    return unknown("a command substitution");
+    return unknown2("a command substitution");
   const made = mktempPath(only, known);
   if (made)
     return { value: made };
@@ -5938,7 +7528,7 @@ function substituted(inner, known) {
   const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value)) && printed.every((v) => !v.includes("\\"));
   if (echoes && first?.value === "echo" && !first.quoted && only.redirects.length === 0 && words && !args[0]?.value.startsWith("-"))
     return { value: printed.join(" ") };
-  return unknown("a command substitution");
+  return unknown2("a command substitution");
 }
 var MKTEMP_FLAGS = new Set(["d", "q"]);
 var MKTEMP_LONG = new Set(["--directory", "--quiet"]);
@@ -6109,6 +7699,7 @@ async function runAll(lexed, env, visit, builtins) {
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
+  orElse(cmd, env);
   unchain(cmd, env);
   if (cmd.opaque) {
     env.cwdAnywhere = true;
@@ -6267,11 +7858,15 @@ function again(lexed, cmd, parsed) {
 async function nested(cmd, env, body) {
   const chain = env.cwdChain;
   const token = env.cwdChainToken;
+  const lineOr = env.cwdOr;
   env.cwdChain = [];
   env.cwdChainToken = undefined;
+  env.cwdOr = undefined;
   try {
     return await body();
   } finally {
+    const scriptOr = env.cwdOr;
+    env.cwdOr = scriptOr && scriptOr.orChain === undefined ? { ...scriptOr, cdChain: cmd.chain, scope: cmd.scope } : lineOr;
     const left = [...new Set([...chain ?? [], ...env.cwdChain ?? []])];
     env.cwdChain = keep(left, env);
     env.cwdChainToken = left.length > 0 ? chain?.length ? token : cmd.chain : undefined;
@@ -6310,10 +7905,10 @@ function places(env, fallback) {
 }
 function ancestors(path) {
   const out = [];
-  for (let dir = dirname(path);; dir = dirname(dir)) {
+  for (let dir = dirname2(path);; dir = dirname2(dir)) {
     tick();
     out.push(dir);
-    if (dir === dirname(dir))
+    if (dir === dirname2(dir))
       return out;
   }
 }
@@ -6322,7 +7917,8 @@ async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
     return homedir3();
-  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
+  const lexical = dir.value === "-" ? undefined : pathOf(dir, env);
+  const typed = await folder(lexical && physicalCd(args) ? kernelPath(dir, env.cwd, lexical) : lexical);
   const sign = typed ? undefined : tildeSign(name, dir, env);
   const base = sign && (sign === "-" ? env.old?.dir : env.cwd);
   return base ? await folder(base + dir.value.slice(2)) : typed;
@@ -6330,7 +7926,7 @@ async function cdTarget(name, args, env) {
 async function folder(path) {
   if (!path)
     return;
-  return await isFolder(path) ? path : undefined;
+  return isFolder(path) ? path : undefined;
 }
 function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
@@ -6342,6 +7938,7 @@ function cdTargets(name, cmd, parsed, env, from) {
     return { back: true, paths: [], unread: true };
   const paths = new Set;
   const many = manyTimes(cmd, parsed);
+  const physical = physicalCd(parsed.args);
   let unread = dirs.length > 1;
   for (const typed of dirs.length > 1 ? dirs : [dir]) {
     const word = env.hold?.(typed, cmd, env) ?? typed;
@@ -6354,14 +7951,23 @@ function cdTargets(name, cmd, parsed, env, from) {
         unread = true;
         continue;
       }
-      paths.add(path);
+      const landed = physical ? kernelPath(word, base, path) : path;
+      paths.add(landed);
       if (many && word.value.split("/").includes("..")) {
-        for (const up of ancestors(path))
+        for (const up of ancestors(landed))
           paths.add(up);
       }
     }
   }
   return { back: dirs.length > 1, paths: [...paths], unread };
+}
+var physicalCd = (args) => args.some((a) => /^-[^-]/.test(a.value) && a.value.includes("P"));
+function kernelPath(word, base, lexical) {
+  try {
+    return realpathSync.native(isAbsolute3(word.value) ? word.value : `${base}/${word.value}`);
+  } catch {
+    return lexical;
+  }
 }
 function tildeMove(move, name, parsed, env, from, back) {
   const dir = parsed.args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
@@ -6400,10 +8006,11 @@ async function chdirTo(name, cmd, parsed, env) {
     return;
   }
   const chained = cmd.chained && !negated(cmd);
-  if (sureToRun(cmd, parsed) && !unread && paths.length === 1 && (chained || await isFolder(paths[0]))) {
+  if (sureToRun(cmd, parsed) && !unread && paths.length === 1 && (chained || isFolder(paths[0]))) {
     env.cwdSure = paths[0];
     env.cwdMaybe = [];
     env.cwdUnread = false;
+    env.cwdOr = chained ? undefined : { before: from, cdChain: cmd.chain, scope: cmd.scope };
     if (env.old)
       env.oldFrom = bases;
     if (chained) {
@@ -6413,11 +8020,44 @@ async function chdirTo(name, cmd, parsed, env) {
     return;
   }
   env.cwdSure = undefined;
-  const behind = onceOrMore(cmd, parsed) && !unread && !move.back && paths.length > 0 && (chained || (await Promise.all(paths.map(isFolder))).every(Boolean));
+  env.cwdOr = undefined;
+  const behind = onceOrMore(cmd, parsed) && !unread && !move.back && paths.length > 0 && (chained || paths.every(isFolder));
   env.cwdMaybe = keep([...new Set([...move.back ? back : behind ? [] : from, ...paths])], env);
   env.cwdUnread = env.cwdUnread || unread || from.length === 0 && paths.length === 0;
 }
 var negated = (cmd) => markers(cmd.words).filter((word) => word === "!").length % 2 === 1;
+var EXITS = new Set(["exit"]);
+function orElse(cmd, env) {
+  const or = env.cwdOr;
+  if (!or)
+    return;
+  if (cmd.chain === or.orChain) {
+    if (or.exits && cmd.detached)
+      env.cwdOr = { ...or, exits: false };
+    return;
+  }
+  if (cmd.chain === or.cdChain) {
+    if (!or.joined)
+      env.cwdOr = { ...or, joined: true };
+    return;
+  }
+  if (or.orChain === undefined && cmd.orRun) {
+    env.cwdOr = {
+      ...or,
+      exits: EXITS.has(parse3(cmd).name) && !cmd.detached && cmd.scope === or.scope,
+      landed: { maybe: env.cwdMaybe ?? [], sure: env.cwdSure },
+      orChain: cmd.chain
+    };
+    env.cwdMaybe = keep([...new Set([...startFolders(env), ...or.before])], env);
+    env.cwdSure = undefined;
+    return;
+  }
+  if ((or.joined || or.exits) && or.landed) {
+    env.cwdMaybe = or.landed.maybe;
+    env.cwdSure = or.landed.sure;
+  }
+  env.cwdOr = undefined;
+}
 function unchain(cmd, env) {
   if (!env.cwdChain?.length || cmd.chain === env.cwdChainToken)
     return;
@@ -6437,9 +8077,9 @@ function keep(folders, env) {
   env.cwdUnread = true;
   return folders.slice(0, MAX_FOLDERS);
 }
-async function isFolder(path) {
+function isFolder(path) {
   try {
-    return (await Bun.file(path).stat()).isDirectory();
+    return statSync2(path).isDirectory();
   } catch {
     return false;
   }
@@ -6483,13 +8123,13 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const scripts = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")];
-  if (deadline !== undefined && scripts.some((s) => s.unknown === LARGE))
+  const scripts = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown2("a script file")];
+  if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;
 }
 async function outputs(cmds, env) {
-  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join5(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -6499,8 +8139,8 @@ async function record2(cmd, name, args, env) {
     if (!path)
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
-    const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join4([await existing(path, env), out]) : out));
+    const out = stdout ? await outputOf(cmd, env) : unknown2(`what ${name || "a command"} writes to stderr`);
+    env.files.set(path, held2(r.op === ">>" ? join5([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -6509,7 +8149,7 @@ async function record2(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join4([await existing(path, env), input]) : input));
+      env.files.set(path, held2(append ? join5([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -6521,7 +8161,7 @@ async function outputOf(cmd, env) {
   if (name === "") {
     if (cmd.inner)
       return outputs(cmd.inner(), env);
-    return cmd.group || cmd.words.some((w) => GROUPING.has(w.value) && !w.quoted) ? unknown("the output of a command group") : { value: "" };
+    return cmd.group || cmd.words.some((w) => GROUPING.has(w.value) && !w.quoted) ? unknown2("the output of a command group") : { value: "" };
   }
   if (name === "cat") {
     const sources = args.filter((a) => a.value === "-" || !a.value.startsWith("-"));
@@ -6535,15 +8175,15 @@ async function outputOf(cmd, env) {
       const part = s.value !== "-" ? await readPath(s, env) : k === first ? await stdinOf(cmd, env) : { value: "" };
       size += part.value.length;
       if (size > MAX_BYTES)
-        return unknown(LARGE);
+        return unknown2(LARGE);
       parts.push(part);
     }
-    return join4(parts);
+    return join5(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
   if (!PRINTERS.has(name))
-    return unknown(`the output of ${name}`);
+    return unknown2(`the output of ${name}`);
   const values = await Promise.all(args.map((a) => resolveText(a, env)));
   const hidden = values.find((v) => v.unknown);
   if (hidden)
@@ -6580,7 +8220,7 @@ async function stdinOf(cmd, env) {
   tick();
   const input = cmd.redirects.findLast((r) => !r.bodyFed && ownFeed(r));
   if (!input)
-    return held2(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see"));
+    return held2(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown2("stdin the hook cannot see"));
   return held2(await redirectText(input, env, false));
 }
 async function scriptStdin(cmd, env) {
@@ -6608,16 +8248,16 @@ var rootFed = (cmd) => stdinFed(cmd) && stdinShell(cmd) === "root";
 async function stdinText(cmd, env) {
   const input = stdinRedirect(cmd);
   if (!input)
-    return cmd.stdin ? outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see");
+    return cmd.stdin ? outputOf(cmd.stdin, env) : unknown2("stdin the hook cannot see");
   return redirectText(input, env, true);
 }
 async function redirectText(input, env, shells) {
   if (input.target?.procs)
     return outputs(input.target.procs, env);
   if (input.op === "<" || input.op === "<>")
-    return input.target ? readPath(input.target, env) : unknown("an input redirect");
+    return input.target ? readPath(input.target, env) : unknown2("an input redirect");
   if (!input.body)
-    return unknown("a heredoc the hook could not read");
+    return unknown2("a heredoc the hook could not read");
   const set = shells && input.body.variable ? env.vars.get(input.body.variable) : undefined;
   if (input.body.unknown && input.body.value === `${UNKNOWN}
 ` && set && !set.unknown)
@@ -6650,7 +8290,7 @@ async function resolveText(text, env) {
     if (k + 1 < pieces.length)
       value += file.value + pieces[k + 1];
     if (value.length > MAX_BYTES)
-      return unknown(LARGE);
+      return unknown2(LARGE);
   }
   for (const piece of pieces.slice(text.reads.length + 1))
     value += READ + piece;
@@ -6659,32 +8299,32 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
-  if (isAbsolute(text.value))
+  if (isAbsolute3(text.value))
     return text.value;
-  return env.cwd ? resolve2(env.cwd, text.value) : undefined;
+  return env.cwd ? resolve3(env.cwd, text.value) : undefined;
 }
 async function readFile(path) {
   const file = Bun.file(path);
   try {
     const stats = await file.stat();
     if (!stats.isFile())
-      return unknown(`${path}, which is not a regular file`);
+      return unknown2(`${path}, which is not a regular file`);
     if (stats.size > MAX_BYTES)
-      return unknown(`${path}, which is too large to read`);
+      return unknown2(`${path}, which is too large to read`);
     return { value: await file.text() };
   } catch (error) {
     if (error.code === "ENOENT")
       return;
-    return unknown(`${path}, which the hook cannot read`);
+    return unknown2(`${path}, which the hook cannot read`);
   }
 }
 async function readPath(path, env) {
   const resolved = pathOf(path, env);
   if (!resolved && path.unknown)
-    return unknown(`a file path built from ${path.unknown}, which the hook cannot expand: name the file by its literal absolute path`);
+    return unknown2(`a file path built from ${path.unknown}, which the hook cannot expand: name the file by its literal absolute path`);
   if (!resolved)
-    return unknown("a file path the hook cannot resolve");
-  return env.files.get(resolved) ?? await readFile(resolved) ?? unknown(`${resolved}, which does not exist yet`);
+    return unknown2("a file path the hook cannot resolve");
+  return env.files.get(resolved) ?? await readFile(resolved) ?? unknown2(`${resolved}, which does not exist yet`);
 }
 function knownVariables(command, environment, cwd) {
   const values = {
@@ -6784,7 +8424,7 @@ var READ2 = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})(?!\[)/.source;
 var TEXT = /[^"$`\\]/.source;
 var WORD = new RegExp(String.raw`^(?:(?:[\w./:=@%+,~-]|${READ2})+|'[^']*'|"(?:${TEXT}|${READ2})*")`);
 var REDIRECT2 = /^(?:[<>]&(?:\d+|-)|<<<|&>>?|>>?\|?|<>?)/;
-var KEEPS_PROGRAM = /^(?:builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/;
+var KEEPS_PROGRAM = /^(?:-|builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/;
 var PROMPT_PARAM = /^(?:PS[0-4]|PROMPT[2-4]?|RPROMPT2?|RPS[12]|SPROMPT)(?!\w)/;
 var QUOTED_DOC = /^<<(-?)[ \t]*((?:[\w.-]*(?:'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])[\w.-]*)+)(?=[\s;&|<>]|$)/;
 function quotedBodiesOut(command) {
@@ -6870,7 +8510,8 @@ function namings(command) {
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
   const text = quotedBodiesOut(command);
-  let blind = EVALUATES.some((evaluates) => evaluates.test(text)) || SUBSCRIPT.test(text) || SUBSCRIPT.test(unquoted(text)) || QUALIFIER.test(singleQuotesOut(text)) || INDIRECTS.test(text);
+  const singleQuotedOut = singleQuotesOut(text);
+  let blind = EVALUATES.some((evaluates) => evaluates.test(text)) || SUBSCRIPT.test(singleQuotedOut) || SUBSCRIPT.test(unquoted(singleQuotedOut)) || QUALIFIER.test(singleQuotedOut) || INDIRECTS.test(text);
   for (const [, flags, closed] of text.matchAll(/\$\{\(([^)]*)(\)?)/g))
     if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags))
       blind = true;
@@ -7317,7 +8958,7 @@ var held3 = (word, env, steady) => !marked(word.value) || !!heldWord(word, env, 
 // scripts/hooks/no-main-checkout.ts
 function real(path) {
   const found = resolved(path);
-  if (found !== undefined || !isAbsolute2(path))
+  if (found !== undefined || !isAbsolute4(path))
     return found ?? nearest(path);
   const parts = normalize(path).split(sep).filter(Boolean);
   let low = 0;
@@ -7329,24 +8970,24 @@ function real(path) {
     else
       low = mid;
   }
-  return join5(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
+  return join6(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
 }
 var resolved = (path) => {
   try {
-    return realpathSync(path);
+    return realpathSync2(path);
   } catch {
     return;
   }
 };
 function nearest(path) {
   const rest = [];
-  for (let dir = path;; dir = dirname2(dir)) {
+  for (let dir = path;; dir = dirname3(dir)) {
     const found = resolved(dir);
     if (found !== undefined)
-      return join5(found, ...rest.reverse());
-    if (dir === dirname2(dir))
+      return join6(found, ...rest.reverse());
+    if (dir === dirname3(dir))
       return path;
-    rest.push(basename2(dir));
+    rest.push(basename3(dir));
   }
 }
 var FILE_TOOLS = {
@@ -7360,29 +9001,48 @@ var RUNNERS = new Set(["npx"]);
 var TOOLS = new Set(["lefthook", "turbo"]);
 function bunCall(args, env) {
   let cwd = env.cwd;
+  let xCwd;
+  let chained = env.cwd;
   let filtered = false;
+  let sub = -1;
   const words = [];
   let k = 0;
   for (;k < args.length; k++) {
     const v = args[k].value;
-    if (v === "--cwd")
-      cwd = args[k + 1] && pathOf(args[++k], env);
-    else if (v.startsWith("--cwd="))
-      cwd = pathOf({ ...args[k], value: v.slice(6) }, env);
-    else if (v === "--filter" || v === "-F") {
+    const value = v === "--cwd" ? args[k + 1] : v.startsWith("--cwd=") ? { ...args[k], value: v.slice(6) } : undefined;
+    if (v === "--cwd" || v.startsWith("--cwd=")) {
+      if (v === "--cwd")
+        k++;
+      cwd = value && pathOf(value, env);
+      chained = value && pathOf(value, { ...env, cwd: chained });
+      if (words[0] === "x")
+        xCwd = { dir: cwd };
+    } else if (v === "--filter" || v === "-F") {
       filtered = true;
       k++;
     } else if (v.startsWith("--filter="))
       filtered = true;
+    else if (words[0] === "x" && RUNNER_TAKES.has(v))
+      k++;
     else if (!v.startsWith("-")) {
-      words.push(v);
+      if (v === "x" && words.length === 1 && words[0] === "x" && args[sub - 1]?.value.startsWith("-")) {
+        sub = k;
+        continue;
+      }
+      if (words.push(v) === 1)
+        sub = k;
       if (v !== "run" && v !== "x")
         break;
     }
   }
-  return { at: k, cwd, filtered, words };
+  return { at: k, chained, cwd, filtered, sub, words, xCwd };
 }
-function gitCall(args, env) {
+var landing = (word, env, from) => {
+  if (!word || pathOf(word, { ...env, cwd: from }) === undefined)
+    return;
+  return kernelPath(word, from, real(resolve4(from ?? "", word.value)));
+};
+function gitCall(args, env, local) {
   let cwd = env.cwd;
   let gitDir;
   let workTree;
@@ -7391,23 +9051,39 @@ function gitCall(args, env) {
   for (;k < args.length && args[k].value.startsWith("-"); k++) {
     const v = args[k].value;
     if (v === "-C")
-      cwd = args[k + 1] && pathOf(args[++k], { ...env, cwd });
+      cwd = args[k + 1] && landing(args[++k], env, cwd);
     else if (v === "--git-dir" || v.startsWith("--git-dir=")) {
       const word = value(k, "--git-dir");
       if (v === "--git-dir")
         k++;
-      gitDir = word && pathOf(word, { ...env, cwd });
+      gitDir = landing(word, env, cwd);
     } else if (v === "--work-tree" || v.startsWith("--work-tree=")) {
       const word = value(k, "--work-tree");
       if (v === "--work-tree")
         k++;
-      workTree = word && pathOf(word, { ...env, cwd });
+      workTree = landing(word, env, cwd);
     } else if (GIT_TAKES.has(v))
       k++;
   }
-  const repo = gitDir?.replace(/\/+$/, "");
-  const tree = repo?.endsWith(`${sep}.git`) ? dirname2(repo) : workTree ?? cwd;
-  return { cwd: tree, rest: args.slice(k + 1).map((a) => a.value), sub: args[k]?.value };
+  const checkout = (dir) => {
+    const repo = dir?.replace(/\/+$/, "");
+    return repo?.endsWith(`${sep}.git`) ? dirname3(repo) : undefined;
+  };
+  const also = [];
+  for (const key of ["GIT_DIR", "GIT_WORK_TREE"]) {
+    const set = local?.get(key) ?? env.vars.get(key);
+    if (!set || set.value === "")
+      continue;
+    const word = { ...set, quoted: true };
+    const at = unreadWord(word) ? undefined : landing(word, env, cwd);
+    also.push(key === "GIT_DIR" ? checkout(at) ?? at : at);
+  }
+  return {
+    also,
+    cwd: checkout(gitDir) ?? workTree ?? cwd,
+    rest: args.slice(k + 1).map((a) => a.value),
+    sub: args[k]?.value
+  };
 }
 var GIT_MOVES = new Set([
   "am",
@@ -7425,18 +9101,99 @@ var GIT_MOVES = new Set([
   "update-ref"
 ]);
 var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
-var RUNNER_TAKES = new Set(["--package", "-p"]);
+var RUNNER_TAKES = new Set([
+  "--ca",
+  "--cafile",
+  "--cwd",
+  "--env-file",
+  "--minimum-release-age",
+  "--package",
+  "--registry",
+  "-p"
+]);
+var LETTERS = {
+  perl: {
+    "0": "digits",
+    C: "rest",
+    D: "rest",
+    E: "script",
+    F: "rest",
+    I: "rest",
+    M: "rest",
+    V: "rest",
+    d: "rest",
+    e: "script",
+    i: "edit",
+    l: "digits",
+    m: "rest",
+    x: "rest"
+  },
+  sed: { I: "edit", e: "script", f: "script", i: "edit", l: "value" }
+};
 var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
+var BSD_SUFFIX = /^(\.[\w.-]*)?$/;
+function inPlace(name, args) {
+  const letters = LETTERS[name];
+  if (!letters)
+    return [];
+  let edits = false;
+  let scripted = false;
+  const positionals = [];
+  for (let k = 0;k < args.length; k++) {
+    const v = args[k].value;
+    if (v === "--") {
+      positionals.push(...args.slice(k + 1));
+      break;
+    }
+    if (name === "sed" && v.startsWith("--")) {
+      const flag = v.split("=")[0];
+      if (flag === "--in-place")
+        edits = true;
+      else if (SED_VALUES.has(flag)) {
+        scripted ||= flag !== "--line-length";
+        if (!v.includes("="))
+          k++;
+      }
+    } else if (/^-[^-]/.test(v)) {
+      for (let j = 1;j < v.length; j++) {
+        const kind = letters[v[j]];
+        const rest = v.slice(j + 1);
+        if (kind === "digits")
+          j += /^(x[0-9A-Fa-f]*|[0-7]*)/.exec(rest)[0].length;
+        else if (kind === "edit") {
+          edits = true;
+          if (name === "sed" && rest === "" && BSD_SUFFIX.test(args[k + 1]?.value ?? "-"))
+            k++;
+          break;
+        } else if (kind === "script" || kind === "value") {
+          scripted ||= kind === "script";
+          if (rest === "")
+            k++;
+          break;
+        } else if (kind === "rest")
+          break;
+      }
+    } else if (!v.startsWith("-"))
+      positionals.push(args[k]);
+  }
+  if (!edits)
+    return [];
+  return scripted ? positionals : positionals.slice(1);
+}
+var BROWSER_SAVES = new Set(["pdf", "screenshot"]);
 var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 if (false) {}
 
 // scripts/hooks/no-extensions-write.ts
 var shown = (word) => (word.raw ?? word.value).replaceAll(UNKNOWN, () => "$\u2026").replaceAll(READ, () => "$\u2026");
-var ROUTE = "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand.";
+var WHY_ROOT = "every guard reads its list and policy.json from there, so a session's write would change what a guard allows.";
+var ROUTE = `${WHY_ROOT} A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand.`;
 var PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"]);
 var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves";
 var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
 var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
+var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
+var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(\u2026) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS = new Set([
   "[",
@@ -7456,48 +9213,6 @@ var READERS = new Set([
   "wc"
 ]);
 var FIND_ACTS = /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/;
-var XARGS_ARG_FILE = /^-[0oprtx]*a|^--a(?:r(?:g(?:-(?:f(?:i(?:le?)?)?)?)?)?)?(?:=|$)/;
-var XARGS_NUL = /^-[0oprtx]*0|^--nu(?:ll?)?$/;
-var XARGS_DELIMITER = /^-[0oprtx]*d|^--d(?:e(?:l(?:i(?:m(?:i(?:t(?:er?)?)?)?)?)?)?)?(?:=|$)/;
-function xargsOptions(cmd, first) {
-  const start = cmd.words.findIndex((word) => /(?:^|\/)g?xargs$/i.test(word.value));
-  if (start === -1)
-    return [];
-  const end = first ? cmd.words.indexOf(first) : -1;
-  return cmd.words.slice(start + 1, end > start ? end : undefined).map((word) => word.value);
-}
-function xargsWords(text) {
-  const words = [];
-  let word;
-  let quote;
-  for (let i = 0;i < text.length; i++) {
-    const c = text[i];
-    if (quote) {
-      if (c === quote)
-        quote = undefined;
-      else if (c === `
-`)
-        return;
-      else
-        word += c;
-    } else if (c === "'" || c === '"') {
-      quote = c;
-      word ??= "";
-    } else if (c === "\\")
-      word = (word ?? "") + (text[++i] ?? "");
-    else if (/\s/.test(c)) {
-      if (word !== undefined)
-        words.push(word);
-      word = undefined;
-    } else
-      word = (word ?? "") + c;
-  }
-  if (quote)
-    return;
-  if (word !== undefined)
-    words.push(word);
-  return words;
-}
 var FIND_WRITES = /^-(?:fls|fprint|fprint0|fprintf)$/;
 var GIT_READS = new Set([
   "blame",
@@ -7524,7 +9239,7 @@ var RSYNC_PATHS = [
 var RSYNC_FLAGS = new Set(["backup", "partial"]);
 var RSYNC_TEMP = /^-[^-@BefMT]*T/;
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
-var GNU_NAMED = /^g(cp|dd|find|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink|xargs)$/;
+var GNU_NAMED = /^g(chmod|cp|dd|find|install|ln|mkdir|mktemp|mv|rm|rmdir|sed|shred|sort|tar|tee|touch|truncate|unlink|xargs)$/;
 var WRITER_TAKES = {
   cp: { gnu: "S", long: ["no-preserve", "sparse", "suffix"], short: "" },
   install: {
@@ -7541,10 +9256,37 @@ var WRITER_TAKES = {
 };
 var DUPLICATE = /^(?:\d+|-)$/;
 var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !DUPLICATE.test(target?.value ?? "");
+function redirectsWrite(commands) {
+  return commands.some((cmd) => cmd.redirects.some(writer) || !!cmd.inner && redirectsWrite(cmd.inner()));
+}
+function caseOpener(cmd) {
+  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted);
+  const before = cmd.words.slice(0, Math.max(at, 0));
+  const word = cmd.words[at + 2];
+  return at !== -1 && (before.length === 0 || onlyReserved({ ...cmd, words: before })) && word?.value === "in" && !word.quoted;
+}
+function casePatterns(commands) {
+  const out = new Set;
+  for (let k = 0;k < commands.length; k++) {
+    if (!caseOpener(commands[k]) && commands[k].follows !== ";;")
+      continue;
+    let end = k;
+    while (commands[end + 1]?.follows === "|")
+      end++;
+    const body = commands[end + 1];
+    const run = commands.slice(k, end + 1);
+    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
+      continue;
+    for (const c of run)
+      out.add(c);
+  }
+  return out;
+}
 var GLOB = /[*?[{(]/;
 var RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/;
+var TEXT_RUNS = new RegExp(`${RUNS.source}|^(?:AGENT_BROWSER_[A-Z0-9_]+|BROWSER|GH_[A-Z0-9_]+)$`);
 var GIT_TEXT = /^GIT_(?:AUTHOR|COMMITTER)_/;
-var CLI = join6("packages", "scripts", "src", "playground", "cli.ts");
+var CLI = join7("packages", "scripts", "src", "playground", "cli.ts");
 var varsRun = new WeakMap;
 function runsVariable(vars) {
   const [cursor, found] = varsRun.get(vars) ?? [undefined, false];
@@ -7603,6 +9345,33 @@ function ghFilters(parsed) {
   }
   return filters;
 }
+var GH_POSTS = new Set([
+  "issue comment",
+  "issue create",
+  "issue edit",
+  "pr comment",
+  "pr create",
+  "pr edit"
+]);
+function ghTexts(parsed) {
+  const { args, first, name } = parsed;
+  const texts = new Set;
+  if (name !== "gh" || !first || marked(first.value))
+    return texts;
+  const [verb, sub] = args.map((a) => a.value);
+  if (!GH_POSTS.has(`${verb} ${sub}`))
+    return texts;
+  if (args.some((a) => GH_WEB.test(a.value) || /^(?:-[^-=bt]*e|--editor(?:=|$))/.test(a.value)))
+    return texts;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (["-b", "--body", "-t", "--title"].includes(value) && args[k + 1])
+      texts.add(args[++k]);
+    else if (/^(?:-[bt].|--(?:body|title)=)/.test(value))
+      texts.add(args[k]);
+  }
+  return texts;
+}
 function gitConfigs(args) {
   const configs = [];
   for (let k = 0;k < args.length; k++) {
@@ -7623,6 +9392,209 @@ var after = (word, cut) => ({
   raw: word.raw?.startsWith(word.value.slice(0, cut)) ? word.raw.slice(cut) : undefined,
   value: word.value.slice(cut)
 });
+var SHELL_FOLDER = { quoted: false, value: "." };
+var longOf = (name, long) => long.find((l) => l === name) ?? (name.length > 2 ? long.find((l) => l.startsWith(name)) : undefined);
+function operandsPast(args, takes, long) {
+  const out = [];
+  for (let k = 0;k < args.length; k++) {
+    const v = args[k].value;
+    if (v === "--")
+      return [...out, ...args.slice(k + 1)];
+    if (v.startsWith("--")) {
+      if (!v.includes("=") && longOf(v, long))
+        k++;
+    } else if (/^-./.test(v)) {
+      const at = v.slice(1).split("").findIndex((c) => takes.includes(c));
+      if (at !== -1 && at === v.length - 2)
+        k++;
+    } else
+      out.push(args[k]);
+  }
+  return out;
+}
+function optionValues(args, short, takes, long, exact = false) {
+  const out = [];
+  for (let k = 0;k < args.length && args[k].value !== "--"; k++) {
+    const v = args[k].value;
+    const eq = v.indexOf("=");
+    if (v.startsWith("--")) {
+      const name = eq === -1 ? v : v.slice(0, eq);
+      if (exact ? long.includes(name) : longOf(name, long)) {
+        if (eq !== -1)
+          out.push(after(args[k], eq + 1));
+        else if (args[k + 1])
+          out.push(args[++k]);
+      }
+    } else if (/^-./.test(v))
+      for (let j = 1;j < v.length; j++) {
+        if (!takes.includes(v[j]))
+          continue;
+        const last = j + 1 === v.length;
+        const value = last ? args[++k] : after(args[k], j + 1);
+        if (short.includes(v[j]) && value)
+          out.push(value);
+        break;
+      }
+  }
+  return out;
+}
+var TAR_TAKES = "bCfFgHIKLNTVX";
+var TAR_LONG_TAKES = [
+  "--block-size",
+  "--blocking-factor",
+  "--cd",
+  "--directory",
+  "--exclude",
+  "--exclude-from",
+  "--exclude-tag",
+  "--file",
+  "--files-from",
+  "--format",
+  "--gid",
+  "--gname",
+  "--group",
+  "--include",
+  "--index-file",
+  "--label",
+  "--listed-incremental",
+  "--mode",
+  "--mtime",
+  "--newer",
+  "--newer-mtime",
+  "--newer-mtime-than",
+  "--newer-than",
+  "--older",
+  "--older-mtime",
+  "--older-mtime-than",
+  "--older-than",
+  "--options",
+  "--owner",
+  "--passphrase",
+  "--record-size",
+  "--strip-components",
+  "--suffix",
+  "--to-command",
+  "--transform",
+  "--uid",
+  "--uname",
+  "--use-compress-program"
+];
+function tarWrites(args) {
+  const into = [];
+  let extracts = false;
+  let k = 0;
+  const first = args[0]?.value ?? "";
+  if (/^[A-Za-z]+$/.test(first)) {
+    k = 1;
+    for (const c of first) {
+      if (c === "x")
+        extracts = true;
+      if (!TAR_TAKES.includes(c) || !args[k])
+        continue;
+      if (c === "C")
+        into.push(args[k]);
+      k++;
+    }
+  }
+  for (;k < args.length && args[k].value !== "--"; k++) {
+    const v = args[k].value;
+    const eq = v.indexOf("=");
+    if (v.startsWith("--")) {
+      const name = eq === -1 ? v : v.slice(0, eq);
+      if (longOf(name, ["--extract", "--get"]))
+        extracts = true;
+      const takes = longOf(name, TAR_LONG_TAKES);
+      if (!takes)
+        continue;
+      const value = eq !== -1 ? after(args[k], eq + 1) : args[++k];
+      if ((takes === "--directory" || takes === "--cd") && value)
+        into.push(value);
+    } else if (/^-./.test(v))
+      for (let j = 1;j < v.length; j++) {
+        if (v[j] === "x")
+          extracts = true;
+        if (!TAR_TAKES.includes(v[j]))
+          continue;
+        const value = j + 1 === v.length ? args[++k] : after(args[k], j + 1);
+        if (v[j] === "C" && value)
+          into.push(value);
+        break;
+      }
+  }
+  if (!extracts)
+    return [];
+  return into.length > 0 ? into : [SHELL_FOLDER];
+}
+var MODE = /^(?:[0-7]+|[ugoa]*[-+=][-+=rwxXstugo,]*)$/;
+var CURL_TAKES2 = "AbcCdDeEFHKmoPQrtTuUwxXyYz";
+var CURL_WRITES = [
+  "--alt-svc",
+  "--cookie-jar",
+  "--dump-header",
+  "--etag-save",
+  "--hsts",
+  "--libcurl",
+  "--output",
+  "--output-dir",
+  "--stderr",
+  "--trace",
+  "--trace-ascii"
+];
+function remoteName(v) {
+  if (!/^-[^-]/.test(v))
+    return false;
+  for (const c of v.slice(1)) {
+    if (c === "O")
+      return true;
+    if (CURL_TAKES2.includes(c))
+      return false;
+  }
+  return false;
+}
+var CHMOD_DASH_MODE = /^-[gorstuwXx]/;
+function unreadCdWrites(tool, args, env, stopsAtOperand) {
+  if (tool === "sed" || tool === "perl")
+    return inPlace(tool, args);
+  if (tool === "chmod") {
+    const at = args.findIndex((w) => !/^-./.test(w.value) || CHMOD_DASH_MODE.test(w.value));
+    const files = stopsAtOperand ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", []);
+    return MODE.test(files[0]?.value ?? "") ? files.slice(1) : files;
+  }
+  if (tool === "truncate")
+    return operandsPast(args, "rs", ["--reference", "--size"]);
+  if (tool === "shred")
+    return operandsPast(args, "ns", ["--iterations", "--random-source", "--size"]);
+  if (tool === "tar")
+    return tarWrites(args);
+  if (tool === "curl") {
+    const files = optionValues(args, "cDo", CURL_TAKES2, CURL_WRITES, true);
+    const named = args.some((a) => a.value.startsWith("--remote-name") || remoteName(a.value));
+    return named && !args.some((a) => a.value.startsWith("--output-dir")) ? [...files, SHELL_FOLDER] : files;
+  }
+  if (tool === "sort")
+    return optionValues(args, "o", "koStT", ["--output"]);
+  if (tool === "git") {
+    const { cwd, rest, sub } = gitCall(args, { ...env, cwd: undefined });
+    if (sub !== "rm")
+      return [];
+    const words = args.slice(args.length - rest.length);
+    const listed = words.some((w) => longOf(w.value.split("=")[0], ["--pathspec-from-file"]));
+    const specs = [
+      ...operandsPast(words, "", ["--pathspec-from-file"]),
+      ...listed ? [SHELL_FOLDER] : []
+    ];
+    return cwd === undefined ? specs : specs.map((w) => w.value.startsWith("/") ? w : { ...w, value: join7(cwd, w.value) });
+  }
+  if (tool === "mktemp") {
+    if (args.some((a) => a.value === "--tmpdir"))
+      return [];
+    if (args.some((a) => /^-[^-]*t/.test(a.value)))
+      return operandsPast(args, "pt", ["--suffix"]);
+    const into = optionValues(args, "p", "p", ["--tmpdir"]);
+    return into.length > 0 ? into : operandsPast(args, "p", ["--suffix"]);
+  }
+  return [];
+}
 function writeTargets(name, args, gnu, posix = false) {
   const splits = args.filter((word) => word.splits);
   if (name === "dd")
@@ -7701,7 +9673,79 @@ var GUARD_KEYS = new Set([
   "usage.keychainService"
 ]);
 var JOB_PREFIX = "jobs.";
-var BY_APPROVE = "a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it";
+var NO_TUNING = () => false;
+var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var parsed = (text) => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+};
+function tunes(key, text, scoped, held) {
+  if (scoped)
+    return false;
+  const value = parsed(text);
+  if (key === "glm.readOnlyLoad5")
+    return typeof value === "number" && Number.isFinite(value) && value > 0;
+  if (!key.startsWith(JOB_PREFIX) || !isRecord(value))
+    return false;
+  const row = held(key);
+  if (row === undefined || row.elsewhere || !isRecord(row.rendered))
+    return false;
+  const ran = row.rendered.schedule;
+  if (!isRecord(ran) || typeof ran.every !== "number")
+    return false;
+  const { schedule } = value;
+  return isRecord(schedule) && Object.keys(schedule).length === 1 && typeof schedule.every === "number" && Number.isInteger(schedule.every) && schedule.every > 0 && Bun.deepEquals({ ...value, schedule: null }, { ...row.stored, schedule: null }, true);
+}
+var storedAt = (data, scope) => {
+  const file = join7(scopeDir(data, scope), "settings.json");
+  if (!existsSync4(file))
+    return {};
+  try {
+    const values = JSON.parse(readFileSync4(file, "utf8"));
+    return isRecord(values) ? values : undefined;
+  } catch {
+    return;
+  }
+};
+function tuningOf(environment) {
+  const data = dataDir(environment);
+  const policy = readPolicySync(data);
+  if (policy.refusal !== undefined)
+    return NO_TUNING;
+  let login;
+  try {
+    login = loginOf(data, environment);
+  } catch {
+    return NO_TUNING;
+  }
+  const others = [CORE, ...scopesIn(data)].filter((scope) => scope !== login);
+  const own = storedAt(data, login);
+  const theirs = others.map((scope) => storedAt(data, scope));
+  if (own === undefined || theirs.some((values) => values === undefined))
+    return NO_TUNING;
+  const { values } = policy.settings;
+  const held = (key) => {
+    const stored = own[key] ?? {};
+    if (!isRecord(stored))
+      return;
+    const field = settingFields().find((entry) => entry.key === key)?.field;
+    const old = field?.aliases ?? [];
+    return {
+      elsewhere: old.some((name) => (name in own)) || theirs.some((at) => at !== undefined && [key, ...old].some((name) => (name in at))),
+      rendered: values[key] ?? field?.default,
+      stored
+    };
+  };
+  return (key, value, scoped) => tunes(key, value, scoped, held);
+}
+var loneCall = (commands) => {
+  const [cmd] = commands;
+  return commands.length === 1 && cmd.words[0]?.value === "playground" && !cmd.inner && [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].every((word) => !word.procs);
+};
+var BY_APPROVE = "a key only the owner sets: post a guard decision with playground ask new (.agents/dashboard/asks.md), whose Approve writes it";
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
 var SWITCHES = {
@@ -7714,7 +9758,7 @@ function isCli(word, dirs) {
     return false;
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir }));
   if (program(word.value) === "playground")
-    return !word.value.includes("/") || !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory());
+    return !word.value.includes("/") || !paths.some((path) => !!path && existsSync4(path) && statSync3(path).isDirectory());
   const cli = (sep2 + CLI).toLowerCase();
   return paths.some((path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
 }
@@ -7745,8 +9789,9 @@ function scoreAsOther(words, cmd, parsed, env) {
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at));
 }
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
-var AWK_RUNS = /system|getline|[>@]/;
-var awkRuns = (program) => AWK_RUNS.test(program) || awkPipe(program);
+var AWK_RUNS = /system|[>@]/;
+var AWK_PATTERN = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.)*\//g;
+var awkRuns = (program) => AWK_RUNS.test(program.replace(AWK_PATTERN, "$1$2RE")) || awkPipe(program);
 var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
 var AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g;
 function awkPipe(program) {
@@ -7863,7 +9908,7 @@ function programLines({ args, first }, rooted) {
   return (awkPrograms(args) ?? []).filter(({ value }) => rooted || awkRuns(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
 }
 var SEDS = new Set(["gsed", "sed"]);
-var literal = (w) => !w.glob && !marked(w.value);
+var literal2 = (w) => !w.glob && !marked(w.value);
 var SED_FLAG = /^-[Enrsuz]+$|^--(?:null-data|posix|quiet|regexp-extended|separate|silent|unbuffered)$/;
 var SED_BRACKET = String.raw`\[\^?\]?[^\]/[\n]*\]`;
 var SED_BODY = String.raw`(?:[^/\\\n[]|\\.|${SED_BRACKET})*/`;
@@ -7892,8 +9937,86 @@ function sedReads(args) {
       operands.push(args[k]);
   }
   const read = scripts.length ? scripts : operands.slice(0, 1);
-  return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value));
+  return read.length > 0 && read.every((w) => literal2(w) && SED_SCRIPT.test(w.value));
 }
+var SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/;
+var SED_SUFFIX = /^(?:\.[\w.~-]*)?$/;
+var SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
+var SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}${SED_TEXT}[gpI0-9]*)[ \t]*`;
+var SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`);
+function sedInPlace(cmd, parsed) {
+  const { args, local, name } = parsed;
+  if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed))
+    return;
+  const scripts = [];
+  const operands = [];
+  let inPlace = false;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    const suffix = SED_IN_PLACE.exec(value);
+    if (value === "-e") {
+      if (!args[k + 1])
+        return;
+      scripts.push(args[++k]);
+    } else if (value === "--") {
+      operands.push(...args.slice(k + 1));
+      break;
+    } else if (suffix) {
+      inPlace = true;
+      if (suffix[1])
+        continue;
+      const word = args[++k];
+      if (!word || !literal2(word) || !SED_SUFFIX.test(word.value))
+        return;
+    } else if (value.startsWith("-") && value !== "-") {
+      if (!/^-[Enrsuz]+$/.test(value))
+        return;
+    } else
+      operands.push(args[k]);
+  }
+  const read = scripts.length ? scripts : operands.slice(0, 1);
+  if (!inPlace || read.length === 0)
+    return;
+  if (!read.every((w) => literal2(w) && SED_EDIT.test(w.value)))
+    return;
+  return new Set(read);
+}
+function perlInPlace(cmd, parsed, env) {
+  const { args, local, name } = parsed;
+  if (program(name) !== "perl" || !ownProgram(cmd, parsed))
+    return;
+  if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL")))
+    return;
+  const scripts = [];
+  let inPlace = false;
+  let k = 0;
+  for (;k < args.length && args[k].value.startsWith("-") && args[k].value !== "-"; k++) {
+    const { value } = args[k];
+    if (value === "--") {
+      k++;
+      break;
+    }
+    if (!PERL_IN_PLACE.test(value))
+      return;
+    if (value.endsWith("i"))
+      inPlace = true;
+    if (value.endsWith("e")) {
+      if (!args[k + 1])
+        return;
+      scripts.push(args[++k]);
+    }
+  }
+  const files = args.slice(k);
+  if (!inPlace || scripts.length === 0 || files.length === 0)
+    return;
+  if (!scripts.every((w) => literal2(w) && PERL_SCRIPT.test(w.value)))
+    return;
+  if (!files.every((w) => literal2(w) && PERL_FILE.test(w.value)))
+    return;
+  return new Set(scripts);
+}
+var PERL_IN_PLACE = /^-[lnpw]*[ei]?$/;
+var inPlaceScripts = (cmd, parsed, env) => sedInPlace(cmd, parsed) ?? perlInPlace(cmd, parsed, env);
 var PERL_FLAG = /^-[alnpw]*[eE]?$/;
 var PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
 var PERL_RE = `/${PERL_BODY}`;
@@ -7926,11 +10049,62 @@ function perlReads({ args, local }, env) {
     }
   }
   const files = args.slice(k);
-  return scripts.length > 0 && scripts.every((w) => literal(w) && PERL_SCRIPT.test(w.value)) && files.every((w) => literal(w) && PERL_FILE.test(w.value));
+  return scripts.length > 0 && scripts.every((w) => literal2(w) && PERL_SCRIPT.test(w.value)) && files.every((w) => literal2(w) && PERL_FILE.test(w.value));
 }
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
 }
+function ansiOut(text) {
+  let out = "";
+  let quote = "";
+  for (let i = 0;i < text.length; i++) {
+    const c = text[i];
+    if (quote === "'") {
+      if (c === "$" && text[i + 1] === "'") {
+        out += "q";
+        continue;
+      }
+      quote = c === "'" ? "" : quote;
+    } else if (c === "\\") {
+      out += c + (text[i + 1] ?? "");
+      i++;
+      continue;
+    } else if (quote === "" && c === "$" && text[i + 1] === "'") {
+      for (i += 2;i < text.length && text[i] !== "'"; i++)
+        if (text[i] === "\\")
+          i++;
+      out += "q";
+      continue;
+    } else if (c === "'" && quote === "")
+      quote = "'";
+    else if (c === '"')
+      quote = quote === '"' ? "" : '"';
+    out += c;
+  }
+  return out;
+}
+function evaluatedParts(text) {
+  const unquoted = singleQuotesOut(quotedBodiesOut(ansiOut(text)));
+  const outside = unquoted.replace(/(?<!e)"(?:[^"\\$]|\\.)*"/g, "q");
+  if (/@P\}|\$\{?~/.test(outside))
+    return [text];
+  const parts = [];
+  for (const [found, pattern] of [
+    [CODE_QUALIFIER, new RegExp(CODE_QUALIFIER.source, "g")],
+    [FLAG, FLAGS],
+    [FILE_RUN, FILE_RUNS]
+  ])
+    if (found.test(outside)) {
+      const written = [...unquoted.matchAll(pattern)].map(([part]) => part);
+      parts.push(...written.length > 0 ? written : [unquoted]);
+    }
+  return parts;
+}
+var CODE_QUALIFIER = new RegExp(QUALIFIER.source.replace("([^\\s[{<])[^]*?\\1", "([^\\s[{<\\w])[^\\n]*?\\1").replace("|\\+\\w+", ""));
+var FLAG = /\$\{\([^)]*[eP]/;
+var FLAGS = /\$\{\([^)]*[eP][^)]*\)[^}]*\}?/g;
+var FILE_RUN = /(?:^|[\s;&|(<>])=\(/;
+var FILE_RUNS = /=\([^)]*\)?/g;
 function narrow(cmd, env) {
   const parsed = parse3(cmd);
   const { args, first } = parsed;
@@ -7952,11 +10126,20 @@ function narrow(cmd, env) {
     return sedReads(args);
   if (base === "perl")
     return perlReads(parsed, env);
-  if (base === "cut")
+  if (base === "cut" || base === "date" || base === "echo" || base === "lsof")
     return true;
+  if (base === "bash") {
+    const [flag, script] = args;
+    return args.length === 2 && flag.value === "-c" && script.quoted && !marked(script.value) && !wholeLine(lex(script.value, env.known).commands, env, true);
+  }
   if (base === "gh") {
     const filters = ghFilters(parsed);
-    return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value));
+    const texts = filters.size > 0 ? filters : ghTexts(parsed);
+    return texts.size > 0 && args.every((a) => texts.has(a) || !/\s/.test(a.value));
+  }
+  if (base === "cd") {
+    const [folder] = args;
+    return args.length === 1 && literal2(folder) && !/^(?:-|~[-+0-9])/.test(folder.value);
   }
   if (base === "sort")
     return !args.some(({ value }) => /^-[a-zA-Z]*o|^--./.test(value));
@@ -7969,6 +10152,7 @@ function rooted(commands) {
     return true;
   return commands.some((cmd) => !!stdinShell(cmd) || !!cmd.inner && rooted(cmd.inner()) || [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => !!word.procs && rooted(word.procs)));
 }
+var ownFolder = (word, env) => !!word && literal2(word) && word.value.startsWith("/") && env.cwdSure !== undefined && places(env).every(({ cwd }) => cwd === resolve5(word.value));
 function quietCommit(cmd, parsed, env) {
   const { args, local, name } = parsed;
   if (name !== "git" || local.size > 0 || !ownProgram(cmd, parsed))
@@ -7976,20 +10160,35 @@ function quietCommit(cmd, parsed, env) {
   const { rest, sub } = gitCall(args, env);
   if (sub !== "commit")
     return false;
-  const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
-  if (before.some((w) => w === "-c" || w === "-C" || /^--(?:config-env|exec-path|git-dir|work-tree)/.test(w)))
+  const before = args.slice(0, args.length - rest.length - 1);
+  if (before.some(({ value }, k) => value === "-c" || /^--(?:config-env|exec-path|git-dir|work-tree)/.test(value) || value === "-C" && !ownFolder(before[k + 1], env)))
     return false;
   return args.every((word, at) => !/\s/.test(word.value) || word.quoted && !marked(word.value) && (/^(?:-[a-zA-Z]*m|--message)$/.test(args[at - 1]?.value ?? "") || word.value.startsWith("--message=")));
 }
-function wholeLine(commands, env) {
+function wholeLine(commands, env, readsOnly = false) {
+  const edited = !readsOnly && commands.some((cmd) => edits(cmd, parse3(cmd), env));
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])];
-    if (words.some((word) => word.procs && wholeLine(word.procs, env)))
+    if (words.some((word) => word.procs && wholeLine(word.procs, env, readsOnly)))
       return true;
+    const parsed = parse3(cmd);
+    const base = parsed.first && program(parsed.first.value);
+    if (base === "bash" && commands.length > 1)
+      return true;
+    if (edited && base === "date")
+      return true;
+    if (!readsOnly && quietRun(cmd, parsed, env))
+      return false;
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
-    return writes || !(narrow(cmd, env) || quietCommit(cmd, parse3(cmd), env));
+    return writes || !(narrow(cmd, env) || !readsOnly && inPlaceScripts(cmd, parsed, env));
   });
 }
+function quietRun(cmd, parsed, env) {
+  const slot = slotWords(parsed);
+  const commit = slot ? { ...cmd, words: slot } : cmd;
+  return quietCommit(commit, slot ? parse3(commit) : parsed, env);
+}
+var edits = (cmd, parsed, env) => quietRun(cmd, parsed, env) || inPlaceScripts(cmd, parsed, env) !== undefined;
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
 var SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g;
 var SHELL_WORD = /(["']?)\bshell\b\1(\s*:\s*false\b(?=\s*[,})]))?/g;
@@ -8048,23 +10247,23 @@ function shellRunnerArgs(text) {
   }
   return out;
 }
-function runsOf(parsed, vars, whole, rootLine) {
+function runsOf(parsed, vars, whole, rootLine, text) {
   const { args, first, local } = parsed;
   const values = [...local.values(), ...vars].flatMap((text) => {
     tick();
     return text.unknown ? [] : [text.value];
   });
   for (const word of whole ? first ? [first, ...args] : args : [])
-    for (const text of texts(word)) {
-      values.push(text.value.replace(/^!/, ""));
+    for (const piece of text.has(word) ? [] : texts(word)) {
+      values.push(piece.value.replace(/^!/, ""));
       if (rootLine)
-        values.push(...text.value.split("\\n"));
-      values.push(...shellRunnerArgs(text.value));
+        values.push(...piece.value.split("\\n"));
+      values.push(...shellRunnerArgs(piece.value));
     }
   values.push(...programLines(parsed, rootLine));
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value));
 }
-function cliWrite(words) {
+function cliWrite(words, tuning) {
   const [command, verb, ...rest] = words.map((w) => marked(w.value) ? undefined : w.value);
   if (command === undefined)
     return words.length ? "playground with a command word it cannot read" : undefined;
@@ -8099,12 +10298,16 @@ function cliWrite(words) {
     const key = positional[0];
     if (unread || key === undefined)
       return `playground settings ${verb} with a word it cannot read`;
-    if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX))
+    const job = key.startsWith(JOB_PREFIX);
+    if (!GUARD_KEYS.has(key) && !job)
       return;
-    return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : key.startsWith(JOB_PREFIX) ? `playground settings ${verb} of ${key}, ${BY_APPROVE}` : `playground settings ${verb} of ${key}, a key a guard reads`;
+    const value = positional[1];
+    if (verb === "set" && value !== undefined && tuning(key, value, scoped))
+      return;
+    return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : job ? `playground settings ${verb} of ${key}, ${BY_APPROVE}` : `playground settings ${verb} of ${key}, a key a guard reads`;
   }
   if (verb === "accept")
-    return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set";
+    return "playground ext accept, the owner's own call: post it as an accept decision with playground ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set";
   if (verb === "put")
     return unread || positional[1] === "list" ? "playground ext put of a list, or with a word it cannot read, which may render into a guard's list" : undefined;
   if (EXT_WRITES.has(verb) && !(dry && EXT_DRY.has(verb)))
@@ -8120,7 +10323,7 @@ var texts = (word) => {
     out.push({ ...word, value: v.slice(2) });
   return out;
 };
-async function inspect(raw, environment, unknown2 = false) {
+async function inspect(raw, environment, unknown = false) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   const input = toolInput ?? {};
   const directory = typeof cwd === "string" ? cwd : undefined;
@@ -8141,14 +10344,15 @@ async function inspect(raw, environment, unknown2 = false) {
   };
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
   if (typeof file === "string") {
-    const expanded = /^~(?:\/|$)/.test(file) ? join6(home, file.slice(1)) : file;
-    return inRoot(resolve4(directory ?? "", expanded)) ? refuse(`a write to ${file}`) : undefined;
+    const expanded = /^~(?:\/|$)/.test(file) ? join7(home, file.slice(1)) : file;
+    return inRoot(resolve5(directory ?? "", expanded)) ? refuse(`a write to ${file}`) : undefined;
   }
   if (tool !== "Bash")
     return;
   const { command } = input;
   if (typeof command !== "string")
     return;
+  let tuning = await opsLead(raw, environment) ? tuningOf(environment) : NO_TUNING;
   if (command.length > 131072)
     return refuse(TOO_LONG);
   const relative = (env) => env.cwd && above(env.cwd, false) ? root.slice(real(env.cwd).length + 1) : undefined;
@@ -8156,7 +10360,8 @@ async function inspect(raw, environment, unknown2 = false) {
     const near = relative(env);
     return value.includes(needle) || !!near && value.includes(near);
   };
-  const guarded = (body, env) => holds(body, env) || body.includes("~") || needle.split(sep2).filter(Boolean).some((part) => body.toLowerCase().includes(part.toLowerCase()));
+  const touches = (body, env) => holds(body, env) || needle.split(sep2).filter(Boolean).some((part) => body.toLowerCase().includes(part.toLowerCase()));
+  const guarded = (body, env) => touches(body, env) || body.includes("~");
   const judged = new Map;
   const names = (word, env, remover, literal = false) => {
     const quotedGlob = literal && !word.glob;
@@ -8178,7 +10383,7 @@ async function inspect(raw, environment, unknown2 = false) {
       const glob = GLOB.exec(text.value);
       if (glob && !quotedGlob && !marked(text.value)) {
         const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env);
-        const folder = dir && dirname3(dir);
+        const folder = dir && dirname4(dir);
         if (folder && (inRoot(folder) || above(folder, true)))
           return `${text.value}, a glob in ${folder}`;
       }
@@ -8190,6 +10395,9 @@ async function inspect(raw, environment, unknown2 = false) {
   let steadyAt = () => NONE2;
   let whole = false;
   let rootLine = false;
+  let patterns = new Set;
+  let lineWrites = false;
+  let textDepth = 0;
   const varsRead = new WeakMap;
   const varsJudged = new WeakMap;
   const since = (store, vars, key) => {
@@ -8202,7 +10410,24 @@ async function inspect(raw, environment, unknown2 = false) {
       return vars.get(k) ?? [];
     });
   };
+  const unwritten = (named, cmd, env) => !lineWrites && !named.endsWith(" in its text") && !inRoot(named) && (textDepth > 0 || READERS.has(program(parse3(cmd).name)) || narrow(cmd, env));
   const visit = async (cmd, parsed, env) => {
+    if (patterns.has(cmd))
+      return;
+    if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
+      const shellCall = SHELLS.has(parsed.name);
+      const { inline, operand } = shellCall ? shellOperand(parsed.args, parsed.name) : { inline: false, operand: parsed.args[0] };
+      if (inline && operand && unreadWord(operand) && !/\S/.test(visible(operand.value)))
+        return refuse(`a ${parsed.name} -c of ${shown({ ...operand, raw: operand.raw ?? operand.source })}, a script the hook cannot read; run its commands as calls of their own`);
+      if (inline && operand && evaluatedParts(operand.value).some((part) => touches(part, env)))
+        return refuse(EVALUATES_ROOT);
+      const path = !inline && operand ? pathOf(operand, env) : undefined;
+      const written = path === undefined ? undefined : env.files.get(path);
+      if (written && (written.unknown || marked(written.value)))
+        return refuse(`${parsed.name} ${shown(operand)}, a script this line wrote with text the hook cannot read; run its commands as calls of their own`);
+      if (shellCall)
+        return;
+    }
     const slot = slotWords(parsed);
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
@@ -8240,15 +10465,12 @@ async function inspect(raw, environment, unknown2 = false) {
     if (unplaced?.target)
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env);
-    const xargsOwn = xargs ? xargsOptions(cmd, first) : [];
-    const delimiter = xargsOwn.some((word) => XARGS_DELIMITER.test(word));
-    const argFile = xargsOwn.some((word) => XARGS_ARG_FILE.test(word));
-    const argFileUnread = argFile && (!reads(parsed, env) || !!cmd.stdin || cmd.redirects.some((r) => r.op.startsWith("<")));
-    const fed = !xargs ? undefined : argFile ? unknown("the file its -a names") : await stdinOf(cmd, env);
-    const fedSplit = !fed || fed.unknown ? undefined : delimiter || xargsOwn.some((word) => XARGS_NUL.test(word)) ? fed.value.split(/\s+/).filter(Boolean) : xargsWords(fed.value);
-    const stdinWords = !fed ? [] : fedSplit ? fedSplit.map((value) => ({ quoted: false, value })) : [{ quoted: false, value: UNKNOWN }];
+    const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined;
+    const wholeText = new Set(whole && !rootLine && ownProgram(cmd, parsed) && ![...parsed.local.keys(), ...env.vars.keys()].some((key) => TEXT_RUNS.test(key) || marked(key)) ? [...ghFilters(parsed), ...browserCode ? [browserCode] : []] : []);
+    const fed = xargs ? await stdinOf(cmd, env) : undefined;
+    const stdinWords = !fed ? [] : fed.unknown ? [{ quoted: false, value: UNKNOWN }] : fed.value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
     const calls = reader ? [] : cliCalls(parsed, env);
-    const write = calls.map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords])).find(Boolean) ?? (calls.some((words) => scoreAsOther(words, cmd, parsed, env)) ? SCORE_AS_OTHER : undefined);
+    const write = calls.map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords], tuning)).find(Boolean) ?? (calls.some((words) => scoreAsOther(words, cmd, parsed, env)) ? SCORE_AS_OTHER : undefined);
     if (write)
       return refuse(write);
     const vars = !reader && first ? since(varsRead, env.vars, "") : [];
@@ -8265,24 +10487,24 @@ async function inspect(raw, environment, unknown2 = false) {
     const away = places(env).every(({ cwd }) => cwd !== undefined && !above(cwd, true) && !inRoot(cwd));
     const evaluated = rootLine || cmd.scope !== 0 || !away ? undefined : evalProgram(parsed);
     const masked = evaluated && !evaluated.glob && !marked(evaluated.value) ? maskRegexes(evaluated.value, (body) => guarded(body, env)) : undefined;
-    const own = (word) => word === evaluated && masked !== undefined ? { ...word, value: masked } : word;
-    for (const raw of reader ? [] : [...script, ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine)]) {
+    const shownEval = evaluated && masked !== undefined ? { ...evaluated, value: masked } : undefined;
+    const own = (word) => word === evaluated && shownEval ? shownEval : word;
+    const shownText = new Set([...wholeText].map(own));
+    for (const raw of reader ? [] : [
+      ...script,
+      ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine, shownText)
+    ]) {
       const line = xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw;
       if (seen.has(line))
         continue;
       seen.add(line);
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map }, visit, true);
+      textDepth++;
+      const verdict = await run(lex(line, env.known), { ...env, vars: new Map }, visit, true).finally(() => textDepth--);
       if (verdict)
         return verdict;
     }
     const quiet = !whole && quietCommit(cmd, parsed, env);
-    for (const word of quiet ? args : []) {
-      if (!/\s/.test(word.value))
-        continue;
-      const named = lex(word.value.replace(/^--message=/, ""), env.known).commands.flatMap((c) => cliCalls(parse3(c), env)).map((words) => cliWrite(words)).find(Boolean);
-      if (named)
-        return refuse(named);
-    }
+    const sedScripts = whole ? undefined : inPlaceScripts(cmd, parsed, env);
     if (!first || EXPORTS3.has(name) || reader)
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
@@ -8293,7 +10515,7 @@ async function inspect(raw, environment, unknown2 = false) {
     if (env.cwdAnywhere)
       return refuse(`${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`);
     const steady = steadyAt(cmd);
-    const filters = whole ? new Set : ghFilters(parsed);
+    const filters = whole ? shownText : ghFilters(parsed);
     for (const here of places(env)) {
       if (inRoot(here.cwd))
         return refuse(`${verb} run inside ${root}`);
@@ -8326,74 +10548,54 @@ async function inspect(raw, environment, unknown2 = false) {
       }
       const literal = !whole && narrow(cmd, here);
       for (const word of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word))) {
-        const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
+        const text = quiet && /\s/.test(word.value) || !!sedScripts?.has(word) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;
         const named = names(word, here, remover, literal);
         if (named)
-          return refuse(`${verb} on ${named}`);
+          return (unwritten(named, cmd, here) ? refuseUnwritten : refuse)(`${verb} on ${named}`);
       }
       if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`);
-      if (fed && (remover || argFileUnread) && (fed.unknown || marked(fed.value) || !fedSplit))
-        return refuse(`${verb} under xargs fed by ${fed.unknown ?? (fedSplit ? "a value it cannot read" : "stdin holding a quote it does not close")}, a value the hook does not hold; write the paths literally in the call`);
+      if (fed && remover && (fed.unknown || marked(fed.value)))
+        return refuse(`${verb} under xargs fed by ${fed.unknown ?? "a value it cannot read"}, a value the hook does not hold; write the paths literally in the call`);
       if (fed) {
-        const named = !fed.unknown && [...fed.value.split(/\s+/), ...fedSplit ?? []].filter(Boolean).map((value) => names({ quoted: false, value }, here, remover)).find(Boolean);
+        const named = !fed.unknown && fed.value.split(/\s+/).filter(Boolean).map((value) => names({ quoted: false, value }, here, remover)).find(Boolean);
         if (named)
           return refuse(`${verb} under xargs on ${named}`);
       }
     }
-    if (!env.cwdUnread)
-      return;
-    const unsplit = fed && !fed.unknown && (marked(fed.value) || delimiter || !fedSplit);
-    const fedWords = unsplit ? [{ quoted: false, value: UNKNOWN }] : stdinWords;
-    const replace = xargs?.replace;
-    const fromStdin = new Set(fedWords);
-    const inPlace = (word) => args.map((arg) => {
-      if (!replace || !arg.value.includes(replace))
-        return arg;
-      const put = { ...arg, value: arg.value.replaceAll(replace, word.value) };
-      fromStdin.add(put);
-      return put;
-    });
-    const shapes = [
-      args,
-      ...!xargs ? [] : replace ? fedWords.map(inPlace) : [[...args, ...fedWords], ...fedWords.map((word) => [...args, word])]
-    ];
+    const end = args.findIndex((word) => word.value === "--");
     const option = (word) => /^-./.test(word.value);
-    const operandsOf = (typed) => {
-      const lead = typed.findIndex((word, i) => !/^-(?:[EHLPXdsx]+|O\d*|D)$/.test(word.value) && typed[i - 1]?.value !== "-D");
-      const given = tool === "find" && (lead === -1 || /^[-(!]/.test(typed[lead].value) && typed[lead].value !== "-f") ? [{ quoted: false, value: "." }, ...typed] : typed;
-      const end = given.findIndex((word) => word.value === "--");
-      const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(given[0]?.value === "--") : given.findIndex((word) => !option(word));
-      const values = tool === "mv" ? writeTargets(tool, given, gnu, posix) : tool === "rsync" ? given.flatMap((word, k) => {
-        const long = /^--([^=]+)=?/.exec(word.value);
-        const path = long && !RSYNC_FLAGS.has(long[1]) && RSYNC_PATHS.some((name) => name.startsWith(long[1]));
-        const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length;
-        if (!cut)
-          return [];
-        if (cut < word.value.length)
-          return [after(word, cut)];
-        return given[k + 1] ? [given[k + 1]] : [];
-      }) : tool === "find" ? given.flatMap((word, k) => FIND_WRITES.test(word.value) && given[k + 1] ? [given[k + 1]] : []) : [];
-      return remover ? [
-        ...given.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)),
-        ...values
-      ] : WRITERS.has(tool) ? writeTargets(tool, given, gnu, posix) : [];
-    };
-    const loose = shapes.flatMap(operandsOf).find((word) => !placed(word, env, steady));
-    if (!loose)
-      return;
-    const unread = fed && fromStdin.has(loose) && (fed.unknown || unsplit) ? fed.unknown ?? (delimiter ? "stdin split on its -d delimiter" : fedSplit ? "stdin holding a part it cannot read" : "stdin holding a quote it does not close") : undefined;
-    return refuse(afterUnreadCd(unread ? `${verb} under xargs on the words it reads from ${unread}` : `${verb} on ${shown(loose)}`));
+    const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(args[0]?.value === "--") : args.findIndex((word) => !option(word));
+    const values = tool === "mv" ? writeTargets(tool, args, gnu, posix) : tool === "rsync" ? args.flatMap((word, k) => {
+      const long = /^--([^=]+)=?/.exec(word.value);
+      const path = long && !RSYNC_FLAGS.has(long[1]) && RSYNC_PATHS.some((name) => name.startsWith(long[1]));
+      const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length;
+      if (!cut)
+        return [];
+      if (cut < word.value.length)
+        return [after(word, cut)];
+      return args[k + 1] ? [args[k + 1]] : [];
+    }) : tool === "find" ? args.flatMap((word, k) => FIND_WRITES.test(word.value) && args[k + 1] ? [args[k + 1]] : []) : [];
+    const operands = remover ? [
+      ...args.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)),
+      ...values
+    ] : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : [];
+    const unlisted = env.cwdUnread && !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env, !gnu || posix) : [];
+    const loose = env.cwdUnread ? [...operands, ...unlisted].find((word) => !placed(word, env, steady)) : undefined;
+    if (loose)
+      return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`));
   };
   const named = namings(command);
   const known = knownVariables(command, environment, directory);
   const steered = Object.keys(known).filter((key) => named.counts.has(key));
-  if (unknown2)
+  if (unknown)
     for (const key of steered)
       delete known[key];
   const lexed = lex(command, known);
+  if (!loneCall(lexed.commands))
+    tuning = NO_TUNING;
   steadyAt = steadyNames(named, lexed.commands);
   const env = {
     cwd: directory,
@@ -8402,20 +10604,25 @@ async function inspect(raw, environment, unknown2 = false) {
     known,
     old: { dir: directory },
     process: environment,
-    vars: new Map
+    vars: new Map,
+    visitShells: true
   };
   rootLine = rooted(lexed.commands);
+  if (evaluatedParts(command).some((part) => touches(part, env)))
+    return refuse(EVALUATES_ROOT);
   whole = rootLine || wholeLine(lexed.commands, env);
+  patterns = casePatterns(lexed.commands);
+  lineWrites = redirectsWrite(lexed.commands);
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER);
   const verdict = await run(lexed, env, visit, true);
-  if (verdict || unknown2 || steered.length === 0)
+  if (verdict || unknown || steered.length === 0)
     return verdict;
   return inspect(raw, environment, true);
 }
 async function check(raw, environment = process.env, budget = 1e4) {
   try {
-    return await withDeadline(budget, async () => inspect(raw, environment));
+    return await withDeadline(budget, async () => eachInput(raw, "no-extensions-write", (one) => inspect(one, environment)));
   } catch (error) {
     if (error instanceof RangeError)
       return refuse(TOO_LONG);
@@ -8451,5 +10658,6 @@ if (import.meta.main) {
 export {
   GUARD_KEYS,
   check,
-  guarded
+  guarded,
+  tunes
 };

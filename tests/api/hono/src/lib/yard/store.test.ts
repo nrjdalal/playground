@@ -3,6 +3,8 @@ import { join } from "node:path"
 
 import { SQL } from "bun"
 
+import { testContainerName } from "../../../../../container"
+
 process.env.BETTER_AUTH_SECRET ||= "yard-store-test-secret-not-for-use-anywhere"
 const { createDatabase } = await import("../../../../../../packages/db/dist/index.mjs")
 const store = await import("../../../../../../api/hono/src/lib/yard/store")
@@ -48,6 +50,8 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("yard-store"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",
@@ -202,6 +206,28 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       expect(
         (await store.waiting(db, web("di"), { since })).filter((i) => i.message.channel === id),
       ).toEqual([])
+    })
+
+    test("waiting lists every message a bot sends in its DM to the bot's maker, with no mention, and not to a member outside the DM", async () => {
+      const since = new Date(Date.now() - 1000).toISOString()
+      const { bot } = await store.createBot(db, web("ada", true), "waiter")
+      const [row] = await sql`select id from "user" where login = ${bot.login}`
+      const asBot: Caller = {
+        bot: { madeBy: "ada" },
+        device: store.BOT_DEVICE,
+        id: row!.id,
+        login: bot.login,
+        owner: false,
+        via: "token",
+      }
+      const said = await send(asBot, bot.dm, { kind: "question", text: "is the build green?" })
+      await send(web("ada", true), bot.dm, { kind: "answer", text: "yes, all green" })
+      const inDm = async (caller: Caller) =>
+        (await store.waiting(db, caller, { since }))
+          .filter((item) => item.message.channel === bot.dm)
+          .map((item) => [item.held, item.message.id, item.message.from.login])
+      expect(await inDm(web("ada", true))).toEqual([[false, said.id, "waiter[bot]"]])
+      expect(await inDm(web("bo"))).toEqual([])
     })
 
     test("a mention held, then approved after a later mark, still waits, from when it was sent", async () => {

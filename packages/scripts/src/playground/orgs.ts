@@ -7,7 +7,6 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
-  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -15,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, isAbsolute, join, relative, resolve } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 
 import { configDirOf, dataDir } from "@packages/env/data-dir"
 import { MARKER, makeScratch, removeScratch } from "@packages/safe-delete"
@@ -26,8 +25,11 @@ import {
   extLinksSchema,
   loginOf,
   markerPath,
+  orgFolderOf,
+  pathsOf,
   readPolicyOrDefaults,
   scopeDir,
+  within,
 } from "@packages/settings"
 
 // The core scope's skill folders in the checkout, read in this order; the last holds core's own skills beside upstream's, vendored as published.
@@ -185,6 +187,8 @@ export type OrgsIo = {
   claude: (args: string[]) => { code: number; out: string } | undefined
   data: string
   err: (line: string) => void
+  // The home folder, where each org ext.links guards keeps its own folder, named for it, that its workers open in.
+  home: string
   // The login whose scope a session reads first; it throws, naming ext init, when none is set.
   login: () => string
   origin: (repo: string) => string
@@ -213,7 +217,11 @@ export const resolveFor = async (
     )
     if (scopes.length) return { refusal: (error as Error).message }
   }
-  const owner = org?.toLowerCase() ?? (repo ? ownerOf(io.origin(repo)) : undefined)
+  const owner =
+    org?.toLowerCase() ??
+    (repo
+      ? (ownerOf(io.origin(repo)) ?? orgFolderOf(io.home, repo, policy.settings.values))
+      : undefined)
   const plan = planFor(owner, policy.settings.values, login)
   const resolved = resolveSkills(plan, (scope) =>
     scope === CORE
@@ -227,6 +235,17 @@ export const resolveFor = async (
   return { plan, ...resolved }
 }
 
+// Whether the session's checkout already lists this very skill in its own .claude/skills, which Claude Code shows by its bare name, so the plugin's copy would list it a second time.
+const listedBy = (repo: string, winner: Winner): boolean => {
+  try {
+    return readFileSync(join(repo, ".claude", "skills", winner.name, "SKILL.md")).equals(
+      readFileSync(join(winner.dir, "SKILL.md")),
+    )
+  } catch {
+    return false
+  }
+}
+
 const resolveSet = async (
   io: OrgsIo,
   repo?: string,
@@ -234,21 +253,8 @@ const resolveSet = async (
   const resolved = await resolveFor(io, repo)
   if (resolved.refusal !== undefined) return { refusal: resolved.refusal }
   for (const line of resolved.left) io.err(line)
-  return { plugin: writePlugin(io.data, resolved.plan.own ?? "home", resolved.winners) }
-}
-
-// A path as written and as resolved, so a checkout reached through a symlinked folder (/tmp, /private/tmp) still matches.
-const pathsOf = (path: string): string[] => {
-  try {
-    return [path, realpathSync(path)]
-  } catch {
-    return [path]
-  }
-}
-
-const within = (path: string, root: string): boolean => {
-  const rel = relative(root, path)
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
+  const winners = repo ? resolved.winners.filter((w) => !listedBy(repo, w)) : resolved.winners
+  return { plugin: writePlugin(io.data, resolved.plan.own ?? "home", winners) }
 }
 
 // Whether a personal link points into Playground's own checkout, which link-skills.sh made and the home set now replaces; a link anywhere else (inscope's cache, another checkout) is the user's own.
@@ -369,6 +375,7 @@ export const orgsIo = (checkout: string, data: string): OrgsIo => ({
   },
   data,
   err: console.error,
+  home: homedir(),
   login: () => loginOf(data),
   origin: (repo) =>
     Bun.spawnSync(["git", "-C", repo, "remote", "get-url", "origin"]).stdout.toString().trim(),

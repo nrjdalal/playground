@@ -1,6 +1,6 @@
 // PreToolUse hook: puts a reviewer or tester session (role.ts), its sub-agents included, in read mode while its roster row serves an outside author's PR or names none, and in read mode refuses a Bash or Monitor line unless every command on it is one the allowlist below names, since running the PR's tests, scripts or installs runs its author's code on this machine.
 import "../../packages/env/src/aliases"
-import { existsSync, mkdirSync, realpathSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
@@ -34,6 +34,8 @@ export type Lookup = {
   ) => boolean
   main: string
   prsOf: (sessionId: unknown) => Promise<string[]>
+  // the program a script's first line runs it with (runnerOf): `env`'s program for an env line, "" for one it cannot read or a script it cannot open, undefined with no shebang
+  runner: (script: string) => string | undefined
 }
 
 const CHECKERS = new Set(["reviewer", "tester"])
@@ -138,7 +140,7 @@ const GITHUB_URL = /^(?:https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]
 const unread = (repo: string, n: number) =>
   `GitHub did not answer for ${repo}#${n}, so the hook counts it as an outside author's PR until a read of it succeeds. It reads again an hour after the failed read, or at once after its worker or lead removes hook-outside-pr/${repo.replace("/", "__")}__${n}.json in the data folder with playground rm.`
 const REASONS = {
-  none: "its roster row names no PR, so the hook cannot rule out an outside author's code. A checker spawn.sh started without --pr has none; its worker or lead names the PR it serves from the main checkout: bun scripts/roster.ts set <this session's name> pr=<pull url>.",
+  none: "its roster row names no PR, so the hook cannot rule out an outside author's code. A row written before spawn.sh required a checker's --pr <pull url> has none; its worker or lead names the PR it serves from the main checkout: bun scripts/roster.ts set <this session's name> pr=<pull url>.",
   outside:
     "it serves an outside author's PR, whose tests, scripts and installs run that author's code on this machine. Read the PR instead: the Read, Grep and Glob tools, gh pr diff, git diff and git show <rev> in the clone, and move a clone with no node_modules (a fresh one, never an installed one, whose git hooks would run) with git fetch and git checkout --detach. Score on the PR's own GitHub checks, and say in the verdict that its code was read, not run.",
 }
@@ -233,6 +235,15 @@ export async function inspect(
       (root) => under(path, root) && path.slice(root.length).toLowerCase().includes("/skills/"),
     )
   }
+  // Whether a folder sits in the main checkout's own work tree: the first folder up from it that holds .git is the main checkout, so another clone or worktree inside it, a folder outside any, and an unknown one are not.
+  const inMain = (folder: string | undefined): boolean => {
+    if (folder === undefined) return false
+    const main = real(lookup.main)
+    for (let at = real(folder); ; at = dirname(at)) {
+      if (lookup.holds(at, ".git")) return at === main
+      if (dirname(at) === at) return false
+    }
+  }
   const permitted = (cmd: Command, parsed: Parsed, here: Env): boolean => {
     const { args, first, local, name } = parsed
     // a bare assignment reaches a later program only through a variable the session already exports (PATH, BASH_ENV), and one on a command reaches it always
@@ -242,7 +253,10 @@ export async function inspect(
     const program = first ? pathOf(first, here) : undefined
     if (first && first.value.includes("/")) {
       if (program && under(program, slot) && program.length === slot.length) return true
-      return skillScript(program)
+      // bun reads files from the folder it runs in before a script (bunfig.toml's preload, .env's variables, and whatever a later bun adds), so a skill script whose shebang runs any program but one that reads no folder's files runs only from the main checkout's own tree
+      if (!skillScript(program)) return false
+      const runner = lookup.runner(real(program!))
+      return runner === undefined || FOLDERLESS.has(runner) || inMain(here.cwd)
     }
     const words = [name, ...args.map((a) => a.value)]
     // git first, since read-only.ts's git reads say nothing of the folder git takes its repository from
@@ -365,6 +379,39 @@ const isPr = (read: unknown): read is Pr =>
     (key) => typeof (read as Record<string, unknown>)[key] === "string",
   )
 
+// A script's first line, or undefined when it cannot be read.
+const firstLine = (script: string): string | undefined => {
+  try {
+    return readFileSync(script, "utf8").split("\n", 1)[0]
+  } catch {
+    return undefined
+  }
+}
+
+// The runners that read no file from the folder they run in; every other runner (bun, bun-canary, deno, an env line read as a word it is not) is held to the main checkout's tree, so a shape runnerOf misreads fails closed.
+const FOLDERLESS = new Set(["bash", "node", "python", "python3", "sh", "zsh"])
+// env's options that take the next word as their value (an unset name, a folder, a search path)
+const ENV_VALUED = new Set(["--chdir", "--unset", "-C", "-P", "-u"])
+
+// Pure: the program a shebang line runs, by its name: the interpreter's own, or the word env runs after its options, assignments and -S's split (`#!/usr/bin/env -S bun --flag`, `env -u NAME bun`); undefined with no shebang, and "" for an env line it cannot read (an unknown option, a program built from a variable, no program at all).
+export const runnerOf = (line: string | undefined): string | undefined => {
+  if (!line?.startsWith("#!")) return undefined
+  const [interpreter, ...rest] = line.slice(2).trim().split(/\s+/)
+  if (!interpreter) return undefined
+  if (basename(interpreter) !== "env") return basename(interpreter)
+  for (let i = 0; i < rest.length; i++) {
+    const word = rest[i]!
+    if (ENV_VALUED.has(word)) i++
+    else if (word === "-S" || word === "--split-string" || /^-[iv0]+$/.test(word)) continue
+    else if (/^(?:--(?:chdir|unset)=|-[CPu].)/.test(word) || word === "--ignore-environment")
+      continue
+    else if (word.startsWith("-S")) return /[$\\]/.test(word) ? "" : basename(word.slice(2))
+    else if (word.startsWith("-")) return ""
+    else if (!word.includes("=")) return /[$\\]/.test(word) ? "" : basename(word)
+  }
+  return ""
+}
+
 // The machine's own lookup: the session's roster row by its registry name, and a PR's author by gh, kept in the data folder since it never changes; a read that fails is kept for an hour, so a PR GitHub cannot answer costs one call an hour.
 export function live(environment: Environment): Lookup {
   const data = dataDirOf(environment)
@@ -410,6 +457,10 @@ export function live(environment: Environment): Lookup {
       } catch {
         return []
       }
+    },
+    runner: (script) => {
+      const line = firstLine(script)
+      return line === undefined ? "" : runnerOf(line)
     },
   }
 }

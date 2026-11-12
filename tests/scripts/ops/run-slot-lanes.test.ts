@@ -13,6 +13,8 @@ const look = (m: ReturnType<typeof machine>) => {
   return { err: run.stderr.toString(), slots: run.stdout.toString() }
 }
 const slots = (setup: Setup) => look(machine(setup)).slots
+// slots at a load5 of 2, under load_line's cap, so a row reads the CPU gate alone and run-slot-2's load5 wait (issue 1403) stays open
+const cpu = (setup: Setup) => slots({ load5: 2, ...setup })
 // a machine whose cached reading is past its 10 s with `last` swap-ins a second, so its next look reads vm_stat again with that as the reading before
 const after = (setup: Setup, last: number) => {
   const m = machine(setup)
@@ -59,7 +61,7 @@ describe("slots 2 to 4 open on the CPU's idle share", () => {
 })
 
 // load1 64 after a burst of starts, 73 after a clone let through at load5 under 30, and 58 at 04:15Z on 3 Nov: a spike shuts the lanes however idle top found the CPU
-describe("load1 at 45 is a hard stop", () => {
+describe("load1 at 45, the stop while run-slot.load1-max is absent, is a hard stop", () => {
   test("load1 at 45 shuts slots 2 to 4 at 80% idle", () => {
     expect(slots({ idle: 80, load1: 45 })).toBe("1\n")
   })
@@ -73,20 +75,20 @@ describe("load1 at 45 is a hard stop", () => {
 // 5 Nov, 06:19 to 07:45Z: a 50% bar from load1 30 to 45 left the CPU at a median 48% idle, and 14 of its 30 CPU shuts read 40 to 49% idle
 describe("from load1 30 up to 45 the CPU must be 40% idle", () => {
   test("idle 56% at load1 31 opens them", () => {
-    expect(slots({ idle: 56, load1: 31 })).toBe("4\n")
+    expect(cpu({ idle: 56, load1: 31 })).toBe("4\n")
   })
 
   test("idle 50% at load1 44.9 opens them", () => {
-    expect(slots({ idle: 50, load1: 44.9 })).toBe("4\n")
+    expect(cpu({ idle: 50, load1: 44.9 })).toBe("4\n")
   })
 
   test("idle 45% at load1 31 opens them", () => {
-    expect(slots({ idle: 45, load1: 31 })).toBe("4\n")
+    expect(cpu({ idle: 45, load1: 31 })).toBe("4\n")
   })
 
   test("idle 40% at load1 44.9 opens them, and 39.9% at load1 30 shuts them", () => {
-    expect(slots({ idle: 40, load1: 44.9 })).toBe("4\n")
-    expect(slots({ idle: 39.9, load1: 30 })).toBe("1\n")
+    expect(cpu({ idle: 40, load1: 44.9 })).toBe("4\n")
+    expect(cpu({ idle: 39.9, load1: 30 })).toBe("1\n")
   })
 
   test("idle 56% at load1 31 with swap-ins at 100/s two readings in a row shuts them, as mem_ok reads it", () => {
@@ -95,25 +97,25 @@ describe("from load1 30 up to 45 the CPU must be 40% idle", () => {
 
   // PG-704's 08:47Z reading on 3 Nov, its runs waiting on paging: 176M of this Mac's 24 GB unused, a free share under 1%, so mem_ok shuts it
   test("the 08:47Z reading shuts them through mem_ok: load1 31, 57% idle, 176M of memory unused", () => {
-    expect(slots({ free: 0, idle: 57, load1: 31 })).toBe("1\n")
+    expect(cpu({ free: 0, idle: 57, load1: 31 })).toBe("1\n")
   })
 
   test("the 10:39:51Z reading on 3 Nov shuts them: load1 31.53, 32.89% idle, swap-ins at 335/s", () => {
-    expect(slots({ idle: 32.89, load1: 31.53, swapins: 335 })).toBe("1\n")
+    expect(cpu({ idle: 32.89, load1: 31.53, swapins: 335 })).toBe("1\n")
   })
 
   test("4 Nov's 19:29:23Z reading opens them: load1 33.75, 60.94% idle, no swap-ins", () => {
-    expect(slots({ idle: 60.94, load1: 33.75, swapins: 0 })).toBe("4\n")
+    expect(cpu({ idle: 60.94, load1: 33.75, swapins: 0 })).toBe("4\n")
   })
 })
 
 describe("under load1 30 the CPU must be 40% idle", () => {
   test("load1 at 29 leaves them open", () => {
-    expect(slots({ idle: 80, load1: 29.9 })).toBe("4\n")
+    expect(cpu({ idle: 80, load1: 29.9 })).toBe("4\n")
   })
 
   test("idle 45% at load1 29.9 opens them", () => {
-    expect(slots({ idle: 45, load1: 29.9 })).toBe("4\n")
+    expect(cpu({ idle: 45, load1: 29.9 })).toBe("4\n")
   })
 })
 
@@ -145,24 +147,36 @@ describe("memory shuts slots 2 to 4 as mem_ok reads it", () => {
 })
 
 describe("the gauges", () => {
-  test("an unread top shuts slots 2 to 4 and says so once a run", () => {
+  test("an unread top keeps slots 2 to 4 open and says so once a run", () => {
     const m = machine()
     writeFileSync(join(m.bin, "top"), "#!/bin/bash\nexit 1\n")
     chmodSync(join(m.bin, "top"), 0o755)
     const { err, slots } = look(m)
-    expect(slots).toBe("1\n")
-    expect(err.match(/^run-slot\.sh: cannot read the CPU's idle share /gm)).toHaveLength(1)
+    expect(slots).toBe("4\n")
+    expect(
+      err.match(
+        /^run-slot\.sh: cannot read the CPU's idle share \(top -l 2 -n 0\), so the lanes go by the load and memory alone$/gm,
+      ),
+    ).toHaveLength(1)
   })
 
-  // top's first sample reads since boot, so a top that prints it alone gives no idle share, rather than its 98%
-  test("a top that prints its first sample alone shuts them", () => {
+  // an idle share that reads - is a dark sensor, not a busy CPU (issue 1818)
+  test("a top that prints no CPU usage line keeps them open", () => {
+    const m = machine()
+    writeFileSync(join(m.bin, "top"), "#!/bin/bash\necho no cpu usage reading\n")
+    chmodSync(join(m.bin, "top"), 0o755)
+    expect(look(m).slots).toBe("4\n")
+  })
+
+  // top's first sample reads since boot, so a top that prints it alone gives no idle share, rather than its 98%, which no longer counts as busy (issue 1818)
+  test("a top that prints its first sample alone keeps them open", () => {
     const m = machine()
     writeFileSync(
       join(m.bin, "top"),
       '#!/bin/bash\necho "CPU usage: 1.00% user, 1.00% sys, 98.00% idle "\n',
     )
     chmodSync(join(m.bin, "top"), 0o755)
-    expect(look(m).slots).toBe("1\n")
+    expect(look(m).slots).toBe("4\n")
   })
 
   test("a run that said an unread top once leaves no marker behind", async () => {
@@ -277,11 +291,11 @@ describe("the gauges", () => {
     },
   )
 
-  test("an unread top shuts them with why=cpu", async () => {
+  test("an unread top keeps them open, its lanes line naming the dark idle", async () => {
     const m = machine({ idle: 80, load1: 18 })
     writeFileSync(join(m.bin, "top"), "#!/bin/bash\nexit 1\n")
     expect(await m.runs("worker-x")).toBe(true)
-    expect(lanes(m)).toEqual([expect.stringMatching(/ shut why=cpu idle=-% load1=18\.00 /)])
+    expect(lanes(m)).toEqual([expect.stringMatching(/ open idle=-% load1=18\.00 /)])
   })
 
   test("a read subcommand records no lanes line", () => {

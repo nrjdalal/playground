@@ -38,7 +38,7 @@ import {
 import { settingSummary, type SessionEffort, type SessionSetting } from "@/lib/dashboard/setting"
 import { feedItemOf, hostSessions, type FeedItem, type Worker } from "@/lib/dashboard/workers"
 import { SESSION_FILE } from "@/lib/sessions/own"
-import { transcriptPath } from "@/lib/sessions/paths"
+import { dataDir, transcriptPath } from "@/lib/sessions/paths"
 
 // The dashboard's second way to reach a session, beside herdr's: a session it hosts itself on the Claude Agent SDK, which runs the installed `claude` on this user's own login. Phase 1 hosts one throwaway session, probe-sdk, in the folder PLAYGROUND_SDK_PROBE_DIR names. A message goes in as a user message on its input stream, never typed into a terminal, and its replies reach the dashboard from its transcript, as every other session's do. What it asks (a tool to run, a picker, a plan) waits on its canUseTool callback, shown as a NeedsYou card and answered by the card's Submit.
 export const SDK_PROBE = "probe-sdk"
@@ -64,7 +64,7 @@ type Pending = {
   settle: (result: PermissionResult) => void
 }
 
-// What the hosted session takes from the API's environment: the user's shell basics and Claude Code's config folder, nothing else, plus PLAYGROUND_ROLE=probe, which makes it a factory probe for the factory's hooks. The API's environment holds its .env (the database URL, auth secrets, PLAYGROUND_SDK_PROBE_DIR) and the Claude Code session or terminal it runs under; none of it reaches the session, and with no API key it runs on the login alone.
+// What the hosted session takes from the API's environment: the user's shell basics and Claude Code's config folder, nothing else, plus PLAYGROUND_ROLE=probe, which makes it a factory probe for the factory's hooks, and PLAYGROUND_DATA_DIR naming the stack's own data folder, so a factory script the session runs on a fixture stack writes there, never this machine's. The API's environment holds its .env (the database URL, auth secrets, PLAYGROUND_SDK_PROBE_DIR) and the Claude Code session or terminal it runs under; none of it reaches the session, and with no API key it runs on the login alone.
 const HOSTED_ENV = [
   "CLAUDE_CONFIG_DIR",
   "HOME",
@@ -79,13 +79,14 @@ const HOSTED_ENV = [
 
 export const hostedEnv = (
   from: Record<string, string | undefined> = process.env,
+  data: string = dataDir(),
 ): Record<string, string> => {
   const env: Record<string, string> = {}
   for (const key of HOSTED_ENV) {
     const value = from[key]
     if (value !== undefined) env[key] = value
   }
-  return { ...env, PLAYGROUND_ROLE: "probe" }
+  return { ...env, PLAYGROUND_DATA_DIR: data, PLAYGROUND_ROLE: "probe" }
 }
 
 // Pure: what the session asks, as the card that shows it. A picker is AskUserQuestion's questions; ExitPlanMode is a plan; anything else is a tool it asks to run, shown with its whole input. Clipping and hidden characters follow the Feed's own rules.

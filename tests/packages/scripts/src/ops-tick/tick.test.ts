@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
 import {
   appendFileSync,
   chmodSync,
@@ -21,13 +21,16 @@ import {
   type Context,
   cronMatches,
   cycle,
+  idleCompact,
   leadOf,
   nextDue,
   resultOf,
+  runSlotHold,
   runner,
   switchAccount,
   trashPurge,
 } from "../../../../../packages/scripts/src/ops-tick/tick"
+import { NO_CHECKOUT } from "../../../../../packages/scripts/src/playground/probe"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
 import { watchTorn } from "../torn-reads"
@@ -193,6 +196,128 @@ describe("roll gate", () => {
     await beat("roll-gate").run(ctx)
     expect(await Bun.file(join(ops, "dashboard", "roll-now")).exists()).toBe(false)
     expect(sent).toEqual([])
+  })
+})
+
+// #1779: a run-slot hold past 30 minutes while a waiter queues is told to ops once per hold.
+describe("run-slot hold", () => {
+  const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z")
+  // A pid known dead: a child spawned and awaited is gone by the time it returns
+  const deadPid = async (): Promise<number> => {
+    const child = Bun.spawn(["true"])
+    await child.exited
+    return child.pid
+  }
+  const hold = (
+    ops: string,
+    slot: string,
+    who: string,
+    pid: number,
+    sinceMs: number,
+    waiters: string[],
+  ) => {
+    writeFileSync(join(ops, `${slot}.holder`), `${who} ${pid} ${iso(sinceMs)} 4 3\n`)
+    mkdirSync(join(ops, "run-slot.waiters"), { recursive: true })
+    for (const ticket of waiters) writeFileSync(join(ops, "run-slot.waiters", ticket), "")
+    appendFileSync(
+      join(ops, "run-slot.runs.log"),
+      `2026-10-19T12:00:00Z ask ${who} ${pid} bun run test:file tests/scripts/long.test.ts\n`,
+    )
+  }
+  // Counts the Bun.file calls that name run-slot.runs.log during run()
+  const runsLogReads = async (run: () => Promise<void>): Promise<number> => {
+    const spy = spyOn(Bun, "file")
+    try {
+      await run()
+      return spy.mock.calls.filter((c) => String(c[0]).endsWith("run-slot.runs.log")).length
+    } finally {
+      spy.mockRestore()
+    }
+  }
+
+  test("a hold past 30 minutes with a waiter queued tells ops once, naming the holder, its command and its run time", async () => {
+    const ops = scratch()
+    const now = at(13, 10)
+    const since = now.getTime() - 40 * 60_000
+    hold(ops, "run-slot", "g7wkr2-worker", process.pid, since, [
+      `1760000000-${process.pid}-y8wqk2-worker`,
+    ])
+    hold(ops, "run-slot-2", "k3v9q2-worker", process.pid, now.getTime() - 10 * 60_000, [])
+    const { ctx, sent } = fake(ops, now)
+    await runSlotHold(ctx)
+    expect(sent).toEqual([
+      {
+        text: `run-slot: g7wkr2-worker's run has held run-slot for 40 min while 1 waiter queues: bun run test:file tests/scripts/long.test.ts (pid ${process.pid}, since ${iso(since)})`,
+        to: "ops",
+      },
+    ])
+  })
+
+  test("a hold past 30 minutes with no live waiter queued tells ops nothing", async () => {
+    const ops = scratch()
+    const now = at(13, 10)
+    const dead = await deadPid()
+    hold(ops, "run-slot", "g7wkr2-worker", process.pid, now.getTime() - 40 * 60_000, [
+      `1760000000-${dead}-y8wqk2-worker`,
+    ])
+    const { ctx, sent } = fake(ops, now)
+    await runSlotHold(ctx)
+    expect(sent).toEqual([])
+  })
+
+  test("a due hold with no waiter at all reads no runs.log and sends nothing", async () => {
+    const ops = scratch()
+    const now = at(13, 10)
+    hold(ops, "run-slot", "g7wkr2-worker", process.pid, now.getTime() - 40 * 60_000, [])
+    const { ctx, sent } = fake(ops, now)
+    const reads = await runsLogReads(() => runSlotHold(ctx))
+    expect(sent).toEqual([])
+    expect(reads).toBe(0)
+  })
+
+  test("a second pass on the same hold tells nothing more", async () => {
+    const ops = scratch()
+    const now = at(13, 10)
+    hold(ops, "run-slot", "g7wkr2-worker", process.pid, now.getTime() - 40 * 60_000, [
+      `1760000000-${process.pid}-y8wqk2-worker`,
+    ])
+    const first = fake(ops, now)
+    await runSlotHold(first.ctx)
+    expect(first.sent).toHaveLength(1)
+    const second = fake(ops, at(13, 15))
+    const reads = await runsLogReads(() => runSlotHold(second.ctx))
+    expect(second.sent).toEqual([])
+    expect(reads).toBe(0)
+  })
+
+  test("a pass with no hold due reads no runs.log, and sends nothing", async () => {
+    const ops = scratch()
+    const now = at(13, 10)
+    hold(ops, "run-slot", "g7wkr2-worker", process.pid, now.getTime() - 10 * 60_000, [
+      `1760000000-${process.pid}-y8wqk2-worker`,
+    ])
+    const { ctx, sent } = fake(ops, now)
+    const reads = await runsLogReads(() => runSlotHold(ctx))
+    expect(sent).toEqual([])
+    expect(reads).toBe(0)
+  })
+
+  test("a due hold still alerts once, reading runs.log once", async () => {
+    const ops = scratch()
+    const now = at(13, 10)
+    const since = now.getTime() - 40 * 60_000
+    hold(ops, "run-slot", "g7wkr2-worker", process.pid, since, [
+      `1760000000-${process.pid}-y8wqk2-worker`,
+    ])
+    const { ctx, sent } = fake(ops, now)
+    const reads = await runsLogReads(() => runSlotHold(ctx))
+    expect(sent).toEqual([
+      {
+        text: `run-slot: g7wkr2-worker's run has held run-slot for 40 min while 1 waiter queues: bun run test:file tests/scripts/long.test.ts (pid ${process.pid}, since ${iso(since)})`,
+        to: "ops",
+      },
+    ])
+    expect(reads).toBe(1)
   })
 })
 
@@ -848,6 +973,105 @@ describe("the beats that send no line", () => {
       "removed 1 (20261020T000000Z-s)",
     )
   })
+
+  test("the trash purge removes its batch at any load", async () => {
+    const ops = scratch()
+    const trash = join(ops, "..", "trash")
+    const now = new Date("2026-11-02T12:17:00Z")
+    mkdirSync(join(trash, "20261020T000000Z-s", "1"), { recursive: true })
+    mkdirSync(join(trash, "20261101T000000Z-s", "1"), { recursive: true })
+    const { ctx, runs, sent } = fake(ops, now)
+    await trashPurge(
+      undefined,
+      () => 100e9,
+      async () => {},
+    )(ctx)
+    expect(existsSync(join(trash, "20261020T000000Z-s"))).toBe(false)
+    expect(existsSync(join(trash, "20261101T000000Z-s"))).toBe(true)
+    expect(runs).toEqual([])
+    expect(sent).toEqual([])
+    const log = await Bun.file(join(ops, "log", "trash-purge.log")).text()
+    expect(log).toContain("removed 1 (20261020T000000Z-s)")
+    expect(log).not.toContain("left for load")
+  })
+
+  test("the trash purge strips rebuildables from the batches it keeps", async () => {
+    const ops = scratch()
+    const trash = join(ops, "..", "trash")
+    const now = new Date("2026-11-02T12:17:00Z")
+    mkdirSync(join(trash, "20261020T000000Z-s", "1"), { recursive: true })
+    mkdirSync(join(trash, "20261101T000000Z-s", "1", "review-clone", "node_modules", "react"), {
+      recursive: true,
+    })
+    writeFileSync(
+      join(trash, "20261101T000000Z-s", "1", "review-clone", "node_modules", "react", "index.js"),
+      "x",
+    )
+    writeFileSync(
+      join(trash, "20261101T000000Z-s", "manifest.jsonl"),
+      `${JSON.stringify({
+        at: "2026-11-01T00:00:00.000Z",
+        files: 1,
+        id: "20261101T000000Z-s/1",
+        path: "/desk/wt",
+        reason: "playground rm",
+        session: "s",
+        size: 10,
+      })}\n`,
+    )
+    const { ctx, runs, sent } = fake(ops, now)
+    await trashPurge(
+      undefined,
+      () => 100e9,
+      async () => {},
+    )(ctx)
+    expect(existsSync(join(trash, "20261020T000000Z-s"))).toBe(false)
+    expect(existsSync(join(trash, "20261101T000000Z-s"))).toBe(true)
+    expect(existsSync(join(trash, "20261101T000000Z-s", "1", "review-clone", "node_modules"))).toBe(
+      false,
+    )
+    expect(runs).toEqual([])
+    expect(sent).toEqual([])
+    expect(await Bun.file(join(ops, "log", "trash-purge.log")).text()).toContain(
+      "removed 1 (20261020T000000Z-s), stripped 1 folders (20261101T000000Z-s)",
+    )
+  })
+
+  test("the idle compact runs the Dashboard checkout's idle-compact bin straight every 5 minutes and logs each line it prints", async () => {
+    expect(beat("idle-compact").cron).toBe("*/5 * * * *")
+    const ops = scratch()
+    const said = "compacted aaaaaa-worker: 250k tokens, idle 55 min\n"
+    const { ctx, runs, sent } = fake(ops, at(20, 5), { "idle-compact": said })
+    await idleCompact(ctx, "/desk")
+    expect(runs).toEqual([
+      [
+        "env",
+        "PLAYGROUND_LIVE_READS=1",
+        "bun",
+        "--cwd",
+        "/desk/api/hono",
+        "--no-env-file",
+        "/desk/api/hono/src/bin/idle-compact.ts",
+      ],
+    ])
+    expect(runs[0]).not.toContain("run")
+    expect(runs[0]).toContain("/desk/api/hono/src/bin/idle-compact.ts")
+    expect(sent).toEqual([])
+    expect(await Bun.file(join(ops, "log", "idle-compact.log")).text()).toContain(
+      "compacted aaaaaa-worker: 250k tokens, idle 55 min",
+    )
+  })
+
+  test("the idle compact refuses with no Dashboard checkout, writes no log line on a quiet pass, and a failed pass reads failed", async () => {
+    const ops = scratch()
+    await expect(idleCompact(fake(ops, at(20, 5)).ctx, null)).rejects.toThrow(NO_CHECKOUT)
+    expect(existsSync(join(ops, "log", "idle-compact.log"))).toBe(false)
+    const quiet = fake(ops, at(20, 5))
+    await idleCompact(quiet.ctx, "/desk")
+    expect(existsSync(join(ops, "log", "idle-compact.log"))).toBe(false)
+    const failing = fake(ops, at(20, 10), { "idle-compact": { code: 1, err: "herdr is down\n" } })
+    await expect(idleCompact(failing.ctx, "/desk")).rejects.toThrow("idle-compact: herdr is down")
+  })
 })
 
 describe("the optimizer's beats", () => {
@@ -1315,7 +1539,7 @@ describe("canary pull", () => {
 describe("relay watch", () => {
   const ID = "f167b6b9-f570-4f15-a4b4-eb15b8c4876f"
 
-  // The relay's outbox with its three cursors last moved at moved, and the ops manager in the roster, beside the relay's own row unless the machine has no relay.
+  // The relay's outbox with its three cursors last moved at moved, and the ops manager in the roster, beside the relay's own row unless the machine has no relay. Every Inbox post below runs while Ops' waiter is down, the alerts-wait pid file absent, the one down sign the watch reads; a live wait is process.pid, which kill(pid, 0) reads live.
   const outbox = (ops: string, moved: Date, relay = true) => {
     mkdirSync(join(ops, "outbox"), { recursive: true })
     for (const file of ["cursor.json", "dm-cursor.json", "linear-cursor.json"]) {
@@ -1328,6 +1552,21 @@ describe("relay watch", () => {
     if (relay) agents.push({ kind: "runner", name: "runner-plain-relay", role: "runner" })
     writeFileSync(join(ops, "..", "roster.json"), JSON.stringify({ agents }))
   }
+
+  // A live alerts-wait for name, its pid file holding this run's own pid.
+  const waiterUp = (ops: string, name: string) => {
+    mkdirSync(join(ops, "outbox", "alerts-wait"), { recursive: true })
+    writeFileSync(join(ops, "outbox", "alerts-wait", `${name}.pid`), String(process.pid))
+  }
+
+  // The waiter queue's lines, each {at, job, text, to}, the late-stop route's record.
+  const waiterLines = (ops: string): { at: string; job: string; text: string; to: string }[] =>
+    existsSync(join(ops, "outbox", "ops-stuck-alert.jsonl"))
+      ? readFileSync(join(ops, "outbox", "ops-stuck-alert.jsonl"), "utf8")
+          .trimEnd()
+          .split("\n")
+          .map((l) => JSON.parse(l))
+      : []
 
   // A context whose runs answer bun run ask, recording each call with its stdin; a "pending" peek leaves a line in a queue past cursor.json's offset for drain.ts's peek to read, any other leaves none.
   const watch = (ops: string, now: Date, peek: string, code = 0) => {
@@ -1344,7 +1583,7 @@ describe("relay watch", () => {
     return { asks, ctx, sent }
   }
 
-  test("posts one Inbox alert once a line has waited past two cycles with no relay cursor moving, and resolves it once a cursor moves", async () => {
+  test("posts one Inbox alert once Ops' waiter is down and a line has waited past two cycles with no relay cursor moving, and resolves it once a cursor moves", async () => {
     const ops = scratch()
     outbox(ops, at(14, 7))
     const seen = watch(ops, at(14, 20), "pending: ops-unstick.jsonl")
@@ -1606,6 +1845,133 @@ describe("relay watch", () => {
     const next = watch(ops, at(15, 10), "pending: ops-unstick.jsonl")
     await beat("relay-watch").run(next.ctx)
     expect(next.asks).toHaveLength(1)
+  })
+
+  test("queues the late-stop line for ops' waiter once a line has waited past two cycles, then the dispatcher's at the escalation window, and posts no Inbox alert while Ops' waiter is live", async () => {
+    const ops = scratch()
+    outbox(ops, at(14, 7))
+    waiterUp(ops, OLD.ops)
+    const ramp: unknown[][] = []
+    for (const minute of [20, 25]) {
+      const tick = watch(ops, at(14, minute), "pending: ops-unstick.jsonl")
+      await beat("relay-watch").run(tick.ctx)
+      ramp.push(waiterLines(ops))
+      expect(tick.asks).toEqual([])
+      expect(tick.sent).toEqual([])
+    }
+    expect(ramp).toEqual([[], []])
+    const told = watch(ops, at(14, 30), "pending: ops-unstick.jsonl")
+    await beat("relay-watch").run(told.ctx)
+    expect(waiterLines(ops)).toEqual([
+      {
+        at: iso(at(14, 30)),
+        job: "stuck-alert",
+        text: `The ops relay is down: no ops line has gone out since ${iso(at(14, 7))}. Resume runner-plain-relay.`,
+        to: OLD.ops,
+      },
+    ])
+    expect(told.sent).toEqual([])
+    expect(told.asks).toEqual([])
+    const escalated = watch(ops, at(14, 35), "pending: ops-unstick.jsonl")
+    await beat("relay-watch").run(escalated.ctx)
+    expect(waiterLines(ops)).toEqual([
+      {
+        at: iso(at(14, 30)),
+        job: "stuck-alert",
+        text: `The ops relay is down: no ops line has gone out since ${iso(at(14, 7))}. Resume runner-plain-relay.`,
+        to: OLD.ops,
+      },
+      {
+        at: iso(at(14, 35)),
+        job: "stuck-alert",
+        text: `The ops relay is down: no ops line has gone out since ${iso(at(14, 7))}. Resume runner-plain-relay. Ops has not picked it up. Resolve it; post it to the owner's Inbox only if you cannot.`,
+        to: OLD.dispatcher,
+      },
+    ])
+    expect(escalated.asks).toEqual([])
+    const again = watch(ops, at(14, 40), "pending: ops-unstick.jsonl")
+    await beat("relay-watch").run(again.ctx)
+    expect(waiterLines(ops)).toHaveLength(2)
+    expect(again.asks).toEqual([])
+  })
+
+  test("posts the Inbox alert once Ops has no live waiter, and never while its waiter runs", async () => {
+    const ops = scratch()
+    outbox(ops, at(14, 7))
+    for (const minute of [20, 25])
+      await beat("relay-watch").run(watch(ops, at(14, minute), "pending: ops-unstick.jsonl").ctx)
+    const down = watch(ops, at(14, 30), "pending: ops-unstick.jsonl")
+    await beat("relay-watch").run(down.ctx)
+    expect(waiterLines(ops)).toEqual([])
+    expect(down.asks).toHaveLength(1)
+    expect(JSON.parse(down.asks[0]!.stdin!).title).toBe(
+      `The ops relay is down: no ops line has gone out since ${iso(at(14, 7))}. Resume runner-plain-relay.`,
+    )
+    const up = scratch()
+    outbox(up, at(14, 7))
+    waiterUp(up, OLD.ops)
+    for (const minute of [20, 25])
+      await beat("relay-watch").run(watch(up, at(14, minute), "pending: ops-unstick.jsonl").ctx)
+    const live = watch(up, at(14, 30), "pending: ops-unstick.jsonl")
+    await beat("relay-watch").run(live.ctx)
+    expect(live.asks).toEqual([])
+    expect(waiterLines(up).map((l) => l.to)).toEqual([OLD.ops])
+  })
+
+  test("a hold set over an open Inbox alert resolves the item before the watch goes quiet", async () => {
+    const ops = scratch()
+    outbox(ops, at(14, 7))
+    for (const minute of [20, 25])
+      await beat("relay-watch").run(watch(ops, at(14, minute), "pending: ops-unstick.jsonl").ctx)
+    await beat("relay-watch").run(watch(ops, at(14, 30), "pending: ops-unstick.jsonl").ctx)
+    writeFileSync(join(ops, "sweep-hold-until"), `${iso(at(16, 0))}\n`)
+    const held = watch(ops, at(14, 35), "pending: ops-unstick.jsonl")
+    await beat("relay-watch").run(held.ctx)
+    expect(held.asks.map((a) => a.argv)).toEqual([
+      [
+        "bun",
+        "run",
+        "--silent",
+        "--cwd",
+        "/repo",
+        "ask",
+        "resolve",
+        ID,
+        "--by",
+        OLD.ops,
+        "--note",
+        "The sweep hold stands: Ops set ops/sweep-hold-until, and the watch stays quiet until it passes",
+      ],
+    ])
+    expect(existsSync(join(ops, "tick", "relay-watch.json"))).toBe(false)
+  })
+
+  test("posts nothing while ops/sweep-hold-until holds a future time, judges fresh once it passes, and reads an empty or unreadable hold as none", async () => {
+    const ops = scratch()
+    outbox(ops, at(14, 7))
+    writeFileSync(join(ops, "sweep-hold-until"), `${iso(at(15, 0))}\n`)
+    const held: unknown[] = []
+    for (const minute of [30, 40, 50]) {
+      const tick = watch(ops, at(14, minute), "pending: ops-unstick.jsonl")
+      await beat("relay-watch").run(tick.ctx)
+      held.push(...tick.asks)
+      expect(waiterLines(ops)).toEqual([])
+    }
+    expect(held).toEqual([])
+    writeFileSync(join(ops, "sweep-hold-until"), `${iso(at(14, 45))}\n`)
+    const fresh = watch(ops, at(14, 50), "pending: ops-unstick.jsonl")
+    await beat("relay-watch").run(fresh.ctx)
+    expect(fresh.sent).toEqual([])
+    expect(fresh.asks).toEqual([])
+    writeFileSync(join(ops, "sweep-hold-until"), "")
+    waiterUp(ops, OLD.ops)
+    const due = watch(ops, at(15, 20), "pending: ops-unstick.jsonl")
+    await beat("relay-watch").run(due.ctx)
+    expect(due.asks).toEqual([])
+    expect(waiterLines(ops).map((l) => l.to)).toEqual([OLD.ops])
+    writeFileSync(join(ops, "sweep-hold-until"), "not a time at all")
+    await beat("relay-watch").run(watch(ops, at(15, 50), "pending: ops-unstick.jsonl").ctx)
+    expect(waiterLines(ops).map((l) => l.to)).toEqual([OLD.ops, OLD.dispatcher])
   })
 })
 

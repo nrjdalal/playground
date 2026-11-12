@@ -12,9 +12,18 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
+// the render_jobs harness runs jobs.ts through python, whose import graph (probe.ts's @packages/config/kinds among them) resolves through the built dists no import here reached, so a fresh checkout's render died on "Cannot find module" and its failure log then raised on the ops folder it never made (issue 1496); importing jobs.ts selects those builds
+import "../../../packages/scripts/src/playground/jobs"
+
 const upPy = join(import.meta.dir, "..", "..", "..", "scripts", "ops", "up.py")
 const scratch = mkdtempSync(join(tmpdir(), "ops-up-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
+
+// bun first on PATH, behind a launchctl that refuses every call, so a pass's real render can never reach the real launchctl whatever jobs the registry turns on
+const fakeBin = join(scratch, "fake-bin")
+mkdirSync(fakeBin)
+writeFileSync(join(fakeBin, "launchctl"), "#!/bin/sh\nexit 1\n", { mode: 0o755 })
+const BUN_PATH = `${fakeBin}:${dirname(process.execPath)}:/usr/bin:/bin`
 
 // The data folder up.py reads under a config folder: its jobs.json, roster and up.log.
 const dataOf = (config: string) => join(config, "playground")
@@ -77,7 +86,7 @@ test("--sessions names a session of a kind only kinds.ts knows", () => {
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
-      PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      PATH: BUN_PATH,
     },
     stderr: "pipe",
     stdout: "pipe",
@@ -128,33 +137,33 @@ const exitOf = (jobs: object[], ...args: string[]) => {
   }
 }
 
-// a job row stored before cmux left the runtimes still names cmux or auto, and ops-up starts it in herdr.
-test("a pass exits 0 and starts a down job stored as cmux or auto in herdr", () => {
-  const cmuxJob = {
+// a job row an older install stored may hold any runtime word, and ops-up starts it in herdr, the one runtime.
+test("a pass exits 0 and starts a down job in herdr whatever runtime word its row holds", () => {
+  const oldJob = {
     command: "bash /x/ops/ops-dashboard/loop.sh",
     name: "ops-dashboard",
-    runtime: "cmux",
+    runtime: "made-up",
     stop: "dashboard",
   }
-  const autoJob = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "auto" }
+  const herdrJob = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "herdr" }
   const launchdJob = { launchd: "blue.acme.x", name: "x" }
-  expect(exitOf([cmuxJob, autoJob, launchdJob])).toEqual({
+  expect(exitOf([oldJob, herdrJob, launchdJob])).toEqual({
     code: 0,
     started: ["ops-dashboard", "ops-x"],
     stderr: "",
   })
   // a row that names no runtime and has a command starts in herdr too, as a hand-kept jobs.json row the render never parsed
-  expect(exitOf([{ ...cmuxJob, runtime: undefined }])).toEqual({
+  expect(exitOf([{ ...oldJob, runtime: undefined }])).toEqual({
     code: 0,
     started: ["ops-dashboard"],
     stderr: "",
   })
 })
 
-// an old ~/.zshrc hook still calls up.py --once-per-cmux in each terminal it opens, so an argument up.py does not know starts nothing.
+// an argument up.py does not know starts nothing.
 test("an argument up.py does not know is refused with its usage and runs no pass", () => {
   const job = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "herdr" }
-  for (const args of [["--once-per-cmux"], ["--restarted"], ["--sessions", "x"]])
+  for (const args of [["--once"], ["--restarted"], ["--sessions", "x"]])
     expect(exitOf([job], ...args)).toEqual({
       code: 1,
       started: [],
@@ -309,6 +318,48 @@ test("a job on a deleted executable is restarted, or reported once when launchd 
   expect(log).not.toContain("ops-w")
 })
 
+// Loads up.py and runs one pass per health answer given, every notify.sh call recorded rather than made.
+const DOWN = `${LOAD}calls = []
+up.render_jobs = lambda: None
+up.ptable.table = lambda: {}
+up.once.running = lambda name, marker: None
+up.run = lambda argv, timeout=60: (calls.append(argv) if argv[0].endswith("notify.sh") else None, (0, ""))[1]
+for answer in json.loads(sys.argv[2]):
+    up.healthy = lambda job, answer=answer: tuple(answer)
+    up.up(True)
+print(json.dumps(calls))
+`
+
+// a launchd job turned on but never installed once logged "keeps it alive" every pass and told nobody, so a run of down passes is told to ops once, and again only after a healthy pass.
+test("a launchd job down 3 passes in a row is told to ops once, and again only after it comes back and goes down", () => {
+  const config = mkdtempSync(join(scratch, "down-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  writeFileSync(
+    join(ops, "jobs.json"),
+    JSON.stringify({ jobs: [{ heartbeat: "ops-l", launchd: "com.x.ops-l", name: "ops-l" }] }),
+  )
+  const down = [false, "no heartbeat"]
+  const answers = [down, down, down, down, [true, "ok"], down, down, down]
+  const child = Bun.spawnSync(["python3", "-I", "-c", DOWN, upPy, JSON.stringify(answers)], {
+    env: {
+      CLAUDE_CONFIG_DIR: config,
+      PLAYGROUND_DATA_DIR: join(config, "playground"),
+      HOME: scratch,
+      PATH: "/usr/bin:/bin",
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  const told = [
+    join(dirname(upPy), "notify.sh"),
+    "up",
+    "ops-l has been unhealthy (no heartbeat) for 3 passes in a row; launchd job com.x.ops-l is not bringing it back, so check it is installed and loaded (playground doctor)",
+  ]
+  expect(JSON.parse(child.stdout.toString())).toEqual([told, told])
+})
+
 // Loads up.py and starts one herdr job, recording every herdr call rather than making it.
 const STARTED = `${LOAD}calls = []
 up.herdr = lambda: ("/x/herdr", "")
@@ -397,7 +448,7 @@ test("a pass renders jobs.json from the store, keeps it when the store has no po
         CLAUDE_CONFIG_DIR: config,
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: scratch,
-        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+        PATH: BUN_PATH,
       },
       stderr: "pipe",
     })
@@ -419,6 +470,64 @@ test("a pass renders jobs.json from the store, keeps it when the store has no po
   expect(readFileSync(join(ops, "up.log"), "utf8")).toContain("jobs.json kept: ")
 })
 
+// issue 1538: a dead render's own error must reach up.log, so a pass makes the ops folder before its lock; on a fresh data dir the folder is missing, and the lock's open, then log()'s append, raised FileNotFoundError, hiding the render's error behind it; the pass runs main() with up() cut to its render
+test("a dead render with no ops folder shows the render's own error in up.log, not a missing-folder raise", () => {
+  const config = join(scratch, "config-dead-render")
+  mkdirSync(dataOf(config), { recursive: true })
+  const dead = join(scratch, "dead-render.ts")
+  writeFileSync(dead, `console.error("the render died here"); process.exit(2)\n`)
+  const pass = Bun.spawnSync(
+    [
+      "python3",
+      "-I",
+      "-c",
+      `${LOAD}up.JOBS_RENDER = sys.argv[2]\nup.up = lambda quiet: up.render_jobs()\nsys.argv = sys.argv[:1]\nup.main()`,
+      upPy,
+      dead,
+    ],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        HOME: scratch,
+        PATH: BUN_PATH,
+      },
+      stderr: "pipe",
+    },
+  )
+  expect(pass.stderr.toString()).not.toContain("FileNotFoundError")
+  expect(readFileSync(join(dataOf(config), "ops", "up.log"), "utf8")).toContain(
+    "the render died here",
+  )
+})
+
+// a launchd job turned on reaches launchd only through the render's install into HOME's LaunchAgents, so each pass hands it that folder.
+test("a pass hands the render HOME's LaunchAgents folder to install into", () => {
+  const config = join(scratch, "config-install")
+  mkdirSync(dataOf(config), { recursive: true })
+  const render = join(scratch, "argv-render.ts")
+  const argv = join(scratch, "argv-render.json")
+  writeFileSync(
+    render,
+    `require("node:fs").writeFileSync(${JSON.stringify(argv)}, JSON.stringify(process.argv.slice(2)))\n`,
+  )
+  const pass = Bun.spawnSync(
+    ["python3", "-I", "-c", `${LOAD}up.JOBS_RENDER = sys.argv[2]\nup.render_jobs()`, upPy, render],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: dataOf(config),
+        HOME: scratch,
+        PATH: BUN_PATH,
+      },
+      stderr: "pipe",
+    },
+  )
+  expect(pass.stderr.toString()).toBe("")
+  const args = JSON.parse(readFileSync(argv, "utf8")) as string[]
+  expect(args[args.indexOf("--install") + 1]).toBe(join(scratch, "Library", "LaunchAgents"))
+})
+
 test("a pass writes jobs.json into the data folder dataDir() resolves, playground over an old dispatcher beside it", () => {
   const config = join(scratch, "config-fresh")
   mkdirSync(join(config, "dispatcher", "ops"), { recursive: true })
@@ -428,7 +537,7 @@ test("a pass writes jobs.json into the data folder dataDir() resolves, playgroun
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
-      PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      PATH: BUN_PATH,
     },
     stderr: "pipe",
   })
@@ -453,7 +562,7 @@ test("a pass moves a turned-off job's plist from ops/launch-agents to the data f
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: data,
       HOME: scratch,
-      PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+      PATH: BUN_PATH,
     },
     stderr: "pipe",
   })
@@ -469,6 +578,9 @@ test("a pass moves a turned-off job's plist from ops/launch-agents to the data f
   expect(log).toContain("jobs: kept com.playground.ops-odd.plist:")
   expect(log).not.toContain("jobs.json kept: ")
 })
+
+const PR_1 = "https://github.com/o/r/pull/1"
+const PR_2 = "https://github.com/o/r/pull/2"
 
 // Loads up.py and prints --sessions' resume lines, with no session running, no factory session unguarded and no checkout around a cwd.
 const RESUMES = `${LOAD}up.unguarded = lambda: []
@@ -486,14 +598,16 @@ test("a resume reads the roster and its backend pin from the data folder spawn.s
       agents: [
         { name: "p1-worker", status: "working" },
         { name: "p2-worker", status: "working" },
+        { kind: "reviewer", name: "p3-reviewer", pr: PR_2, prs: [PR_1, PR_2], status: "working" },
       ],
     }),
   )
-  for (const name of ["p1-worker", "p2-worker"]) {
+  for (const name of ["p1-worker", "p2-worker", "p3-reviewer"]) {
     mkdirSync(join(config, "projects", name), { recursive: true })
+    const model = name === "p3-reviewer" ? "claude-opus-5-5" : "glm-5.3-flash"
     writeFileSync(
       join(config, "projects", name, `s-${name}.jsonl`),
-      `${JSON.stringify({ agentName: name, cwd: "/nowhere", model: "glm-5.3-flash" })}\n`,
+      `${JSON.stringify({ agentName: name, cwd: "/nowhere", model })}\n`,
     )
   }
   writeFileSync(join(data, "backends", "p1-worker"), "glm\n")
@@ -513,4 +627,29 @@ test("a resume reads the roster and its backend pin from the data folder spawn.s
   expect(lines.find((line) => line.includes(" resume p2-worker "))).toEndWith(
     " s-p2-worker --backend glm",
   )
+  expect(lines.find((line) => line.includes(" resume p3-reviewer "))).toEndWith(
+    ` s-p3-reviewer --backend claude --pr ${PR_2},${PR_1}`,
+  )
+})
+
+// #1296: up.py read a relative value against its own folder, as every Python reader of PLAYGROUND_DATA_DIR did
+test("a relative PLAYGROUND_DATA_DIR is refused from any folder, and an absolute one names one folder", () => {
+  const at = mkdtempSync(join(scratch, "relative-"))
+  for (const dir of ["a", "b"]) mkdirSync(join(at, dir))
+  const read = (value: string, cwd: string) => {
+    const r = Bun.spawnSync(["python3", "-I", "-c", `${LOAD}\nprint(up.DATA)`, upPy], {
+      cwd,
+      env: { HOME: at, PATH: process.env.PATH, PLAYGROUND_DATA_DIR: value },
+    })
+    return { code: r.exitCode, err: r.stderr.toString(), out: r.stdout.toString().trim() }
+  }
+  expect([read(join(at, "d"), join(at, "a")).out, read(join(at, "d"), join(at, "b")).out]).toEqual([
+    join(at, "d"),
+    join(at, "d"),
+  ])
+  for (const r of [read("d", join(at, "a")), read("d", join(at, "b"))]) {
+    expect(r.code).not.toBe(0)
+    expect(r.out).toBe("")
+    expect(r.err).toContain("PLAYGROUND_DATA_DIR is relative (d)")
+  }
 })

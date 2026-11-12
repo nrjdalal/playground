@@ -18,7 +18,7 @@ describe("the roster's kind", () => {
     { args: ["worker", "worker-brave-otter", "b.md"], kind: "kind=worker" },
     { args: ["runner", "runner-brave-otter", "b.md"], kind: "kind=runner" },
     {
-      args: ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"],
+      args: ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1"],
       kind: "kind=tester",
     },
     { args: ["column", "probe", "probe-x", "ops", "w1:p2", "p.md"], kind: "kind=probe" },
@@ -47,8 +47,11 @@ describe("the roster's kind", () => {
   test.each<[string, (name: string, worker: string) => string[]]>([
     ["worker", (name) => ["worker", name, "b.md"]],
     ["runner", (name) => ["runner", name, "b.md"]],
-    ["reviewer", (name, worker) => ["column", "reviewer", name, worker, "w1:p2", "r.md"]],
-    ["tester", (name, worker) => ["column", "tester", name, worker, "w1:p2", "t.md"]],
+    [
+      "reviewer",
+      (name, worker) => ["column", "reviewer", name, worker, "w1:p2", "r.md", "--pr", "1"],
+    ],
+    ["tester", (name, worker) => ["column", "tester", name, worker, "w1:p2", "t.md", "--pr", "1"]],
     ["probe", (name) => ["column", "probe", name, "ops", "w1:p2", "p.md"]],
   ])(
     "a spawn of each kind under the name bun run name gives writes that name and its kind (#966): %s",
@@ -89,7 +92,7 @@ describe("the roster's kind", () => {
     ],
     [
       "column",
-      ["column", "reviewer", "k3m9px-worker", "worker-a", "w1:p2", "r.md"],
+      ["column", "reviewer", "k3m9px-worker", "worker-a", "w1:p2", "r.md", "--pr", "1"],
       "k3m9px-worker reads as a worker, not a reviewer",
     ],
   ])("a %s start refuses a name that reads as another kind, naming both", async (_, args, why) => {
@@ -108,7 +111,7 @@ describe("the roster's kind", () => {
     ["runner", ["runner", "night-watch", "b.md"], "night-watch gives no kind: bun run name runner"],
     [
       "column",
-      ["column", "tester", "herdr-check", "worker-a", "w1:p2", "t.md"],
+      ["column", "tester", "herdr-check", "worker-a", "w1:p2", "t.md", "--pr", "1"],
       "herdr-check gives no kind: bun run name tester",
     ],
   ])("a %s start refuses a new name that gives no kind", async (_, args, why) => {
@@ -156,7 +159,7 @@ describe("the roster's kind", () => {
 
   test("a resume keeps the roster's kind over the name's, and reads an <id>-<kind> name with no entry by its last word", async () => {
     const roster = await spawn(
-      ["resume", "k3m9px-worker", root],
+      ["resume", "k3m9px-worker", root, "--pr", "1"],
       [],
       {
         ROSTER_JSON: rosterOf([
@@ -170,7 +173,7 @@ describe("the roster's kind", () => {
     expect(launchAfterRm(roster)).toStartWith(
       "(env PLAYGROUND_ROLE=reviewer claude --resume k3m9px-worker ",
     )
-    const bare = await spawn(["resume", "k3m9px-tester", root], [], {}, undefined, {
+    const bare = await spawn(["resume", "k3m9px-tester", root, "--pr", "1"], [], {}, undefined, {
       name: "k3m9px-tester",
       backend: "claude",
     })
@@ -183,7 +186,7 @@ describe("the roster's kind", () => {
 
   test("a resume reads the roster's kind first, so a name with no role prefix reopens as its kind", async () => {
     const r = await spawn(
-      ["resume", "k3v9q2-wizard", root],
+      ["resume", "k3v9q2-wizard", root, "--pr", "1"],
       [],
       {
         ROSTER_JSON: rosterOf([
@@ -233,18 +236,22 @@ describe("the roster's kind", () => {
   })
 
   test("a checker whose entry holds a pr takes its title too, since roster.ts sets one there (#2161)", async () => {
-    const r = await spawn(["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"], [], {
-      ROSTER_JSON: rosterOf([
-        { name: "reviewer-x", pr: "https://github.com/o/r/pull/1", task: "t", title: "" },
-      ]),
-    })
+    const r = await spawn(
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
+      [],
+      {
+        ROSTER_JSON: rosterOf([
+          { name: "reviewer-x", pr: "https://github.com/o/r/pull/1", task: "t", title: "" },
+        ]),
+      },
+    )
     expect(r.code).toBe(0)
     expect(r.roster).toContain("title=Plain test work")
   })
 
   test("a checker's worker link is written for a worker the roster gives the worker kind", async () => {
     const r = await spawn(
-      ["column", "reviewer", "reviewer-x", "x7mh4d-worker", "w1:p2", "r.md"],
+      ["column", "reviewer", "reviewer-x", "x7mh4d-worker", "w1:p2", "r.md", "--pr", "1"],
       [],
       {
         ROSTER_JSON: rosterOf([{ kind: "worker", name: "x7mh4d-worker" }]),
@@ -252,7 +259,10 @@ describe("the roster's kind", () => {
     )
     expect(r.code).toBe(0)
     expect(r.roster).toContain("worker=x7mh4d-worker")
-    const lead = await spawn(["column", "reviewer", "reviewer-x", "builder", "w1:p2", "r.md"], [])
+    const lead = await spawn(
+      ["column", "reviewer", "reviewer-x", "builder", "w1:p2", "r.md", "--pr", "1"],
+      [],
+    )
     expect(lead.roster?.some((arg) => arg.startsWith("worker="))).toBe(false)
   })
 })

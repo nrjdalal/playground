@@ -3,5 +3,5 @@ import { ChannelView } from "@/components/yard/channel-view"
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const [{ id }, role] = await Promise.all([params, yardRole()])
-  return <ChannelView id={id} role={role} />
+  return <ChannelView id={id} role={role} shell="yard" />
 }

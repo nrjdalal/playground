@@ -3,7 +3,6 @@ import { join } from "node:path"
 
 import { dataDirOf } from "../../../env/src/data-dir"
 import { extSettings } from "../../../settings/src/ext"
-import { firefightingSettings } from "../../../settings/src/firefighting"
 import { scopesIn } from "../../../settings/src/folder"
 import { CORE, extensionsDir, loginOf, readPolicySync } from "../../../settings/src/rendered"
 import {
@@ -26,7 +25,7 @@ import {
 type Environment = Record<string, string | undefined>
 
 export type Hit = { kind: string; leg: 1 | 2; line: number; path: string; where: string }
-// A linked org's terms: the run-time list every scope derives for no-public-leak, the tracker keys a hit may write bare (its keys and each org's firefighting prefixes), the org scopes' own names, the GitHub orgs and repositories ext.links and ext.repos give them, and the public repositories trace-count reads past.
+// A linked org's terms: the run-time list every scope derives for no-public-leak, the tracker keys a hit may write bare (the list's own), the org scopes' own names, the GitHub orgs and repositories ext.links and ext.repos give them, and the public repositories trace-count reads past.
 export type Terms = {
   github: string[]
   keys: string[]
@@ -54,17 +53,11 @@ export async function orgTerms(env: Environment): Promise<Terms | { refusal: str
   if (!base.settings) return { refusal: base.refusal }
   const links = extSettings.get(base.settings, "ext.links")
   const repos = extSettings.get(base.settings, "ext.repos")
-  const prefixes: string[] = []
-  for (const org of orgs) {
-    const policy = readPolicySync(data, org)
-    if (!policy.settings) return { refusal: policy.refusal }
-    prefixes.push(...firefightingSettings.get(policy.settings, "firefighting.start.prefixes"))
-  }
   const named = new Set(orgs.map((org) => org.toLowerCase()))
   const github = [
     ...new Set(orgs.flatMap((org) => [...(links[org] ?? []), ...(repos[org] ? [repos[org]] : [])])),
   ].filter((term) => term !== "*" && !named.has(term.toLowerCase()))
-  const keys = [...new Set([...read.list.linearKeys, ...prefixes].filter(Boolean))]
+  const keys = [...new Set(read.list.linearKeys.filter(Boolean))]
   return { github, keys, list: read.list, orgs, repos: reposOf(base.settings) }
 }
 

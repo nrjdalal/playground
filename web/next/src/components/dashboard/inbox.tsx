@@ -170,6 +170,7 @@ import {
   type Shelf,
   SHELF_LABELS,
   shelfRow,
+  shelfToOpen,
   takenBy,
   updatedSince,
   upfrontLink,
@@ -1434,7 +1435,7 @@ export function InboxCard({
       {buttons.includes("archive") &&
         verb(
           "Archive",
-          "out of your list, unanswered; its poster keeps waiting and is told nothing",
+          "onto the Archive shelf, as it stands; its poster is told nothing, and one that waits keeps waiting",
           <RiArchive2Line />,
           () => void onAnswer("archive"),
         )}
@@ -1988,7 +1989,7 @@ export function NewPill({
   )
 }
 
-// The Inbox's first load: its open row where it will sit, a blank count and the Mark all as read room kept, the Spinner under it, so the data lands below without moving the row
+// The Inbox's first load: its open row where it will sit with no count until there is one to show, the Mark all as read room kept, the Spinner under it, so the data lands below without moving the row
 function InboxLoading() {
   return (
     <section aria-busy aria-label="Inbox" className="@container flex flex-col gap-3">
@@ -2003,11 +2004,6 @@ function InboxLoading() {
             <span className="flex min-w-0 flex-1 items-center gap-2 pr-10">
               <RiInboxLine className="size-3.5 shrink-0" aria-hidden />
               <span className="text-muted-foreground truncate">Inbox</span>
-              <Badge
-                aria-hidden
-                variant="outline"
-                className="text-2xs h-4 w-5 px-1.5 font-mono tabular-nums"
-              />
             </span>
             <ShelfMark empty />
           </AccordionTrigger>
@@ -2097,7 +2093,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     taken.current = 0
   })
   // a link to an item (a Waiting on your inbox badge, Playground's row) scrolls the list to it once it is read
-  useNeedsYouTarget(data !== undefined, (anchor) => {
+  useNeedsYouTarget(data !== undefined, (anchor, source) => {
     // one still behind the pill takes what waits, so the next try finds its row
     if (held.some((item) => needsYouAnchor(item.id) === anchor)) {
       take()
@@ -2108,11 +2104,9 @@ export function Inbox({ viewing }: { viewing: boolean }) {
       setListOpen(true)
       return false
     }
-    // a card on a shut shelf (an answer's chip names one) opens its shelf first, so the next try finds its row
-    const shelf = shelves.find(([, , list]) =>
-      list.some((item) => needsYouAnchor(item.id) === anchor),
-    )?.[0]
-    if (shelf && !shelvesOpen.includes(shelf)) {
+    // a click on a card on a shut shelf (an answer's chip names one) opens its shelf first, so the next try finds its row
+    const shelf = shelfToOpen(anchor, source, shelves, shelvesOpen)
+    if (shelf) {
       setShelvesOpen((keys) => [...keys, shelf])
       return false
     }

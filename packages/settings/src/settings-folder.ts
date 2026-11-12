@@ -13,7 +13,7 @@ import {
   writeFiles,
   writeRoot,
 } from "./folder"
-import { jobSchema, orgJob, orgJobKey } from "./jobs"
+import { fromStored, jobSchema, orgJob, orgJobKey } from "./jobs"
 import { CORE, extensionsDir, loginOf, scopeDir } from "./rendered"
 import { secretIn } from "./secrets"
 import {
@@ -25,6 +25,7 @@ import {
   SCHEMA_VERSION,
   settingFields,
   settingsFor,
+  storedValue,
 } from "./settings"
 
 // The settings half of the extensions folder: each scope's values in <scope>/settings.json, each write one commit in that scope's clone whose author is who asked, whose message is the reason and whose Setting trailer names the key, with the root's policy.json rebuilt from every scope beside it.
@@ -43,10 +44,14 @@ const readValues = (data: string, scope: string): Record<string, unknown> => {
   }
 }
 
-// Every value set at a scope, core's (in the checkout, where scopeDir finds it) first; a key no piece defines stays a row, so a write of another key keeps it.
+// Every value set at a scope, core's (in the checkout, where scopeDir finds it) first, each as the read takes it (storedValue, and fromStored for an org's own job row, which no field defines), so a write that sends a row back with its change, as Settings > Jobs' toggle and the Inbox's Approve do, sends it as the read takes it; a key no piece defines stays a row, so a write of another key keeps it.
 export const settingRows = (data: string): Row[] =>
   [CORE, ...scopesIn(data).filter((scope) => scope !== CORE)].flatMap((scope) =>
-    Object.entries(readValues(data, scope)).map(([key, value]) => ({ key, scope, value })),
+    Object.entries(readValues(data, scope)).map(([key, value]) => ({
+      key,
+      scope,
+      value: orgJobKey(key) ? fromStored(value) : storedValue(key, value),
+    })),
   )
 
 // policy.json: the settings a session in the home set reads, and those of a session in each guarded org's repos.
@@ -163,7 +168,7 @@ const scriptKeys = (data: string, scope: string): string[] => [
   ...new Set(scriptFilesOf(data, scope).map((parts) => parts[1]!)),
 ]
 
-// An org's own job row as a write stores it, checked as the render reads it (orgJob): the job's schema, its own heartbeat, no stop group, a command and cwd in a script folder the scope ships, and no other org already adding the job, since the render runs the first org's row in A to Z order and refuses the rest.
+// An org's own job row as a write stores it, checked as the render reads it (orgJob), as it stands, so a misspelled key is refused: the job's schema, its own heartbeat, no stop group, a command and cwd in a script folder the scope ships, and no other org already adding the job, since the render runs the first org's row in A to Z order and refuses the rest.
 const orgJobRow = (
   data: string,
   input: { key: string; scope: string; value: unknown },
@@ -183,7 +188,13 @@ const orgJobRow = (
       input.key in readValues(data, scope) &&
       !(
         "refused" in
-        orgJob(input.key, scope, readValues(data, scope)[input.key], login, scriptKeys(data, scope))
+        orgJob(
+          input.key,
+          scope,
+          fromStored(readValues(data, scope)[input.key]),
+          login,
+          scriptKeys(data, scope),
+        )
       ),
   )
   if (holder)

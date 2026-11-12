@@ -3,4 +3,4 @@ A Claude session writes each GLM task's brief with its files, its steps and a do
 No org's data reaches GLM: a GLM session reads and writes no org's tickets, repos, chat, docs or databases, and a job that touches them runs on Claude with every GLM variable cleared, since a child of a GLM shell inherits them.
 While load5 is over {glm.readOnlyLoad5} a GLM session is read-only, and it waits for the load to fall or reports to its lead.
 GLM's unused credits lapse at each reset, so a lead gives it the next eligible task while it has room.
-The `no-glm-heavy-path` hook holds the fence, the load and the org tools, refusing a GLM session a headless Claude run and every org's tracker, chat, docs and repos (scripts/hooks/README.md), and spawn.sh refuses a GLM reviewer, tester or org start (SESSIONS.md, Spawn).
+The `no-glm-heavy-path` hook holds the fence, the load and the org tools, refusing a GLM session a headless Claude run, every org's tracker, chat, docs and repos, a read of an org's checkout and a database off this machine (scripts/hooks/README.md), and spawn.sh refuses a GLM reviewer, tester or org start (playbook's SPAWN.md, --backend glm).

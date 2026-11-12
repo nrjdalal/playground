@@ -13,7 +13,7 @@ import { join } from "node:path"
 
 import { settingsFor } from "../../../packages/settings/src/settings"
 import { slotSettings } from "../../../packages/settings/src/slots"
-import { SCRIPT, stop, machine } from "./run-slot-fake"
+import { SCRIPT, machine, runSlot, set, stop } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang: 60s, twice the slowest case under SLOW_CHILD=1.5 but local CI's, which sets its own
 setDefaultTimeout(60_000)
@@ -56,14 +56,6 @@ describe("run-slot-2 with the lanes shut", () => {
 
 // a hand-set runner-host/slot-off kept the runner box idle for two days, so a switch carries a reason and an expiry, and drops itself past it
 describe("an ops switch carries a reason and an expiry", () => {
-  const set = async (m: ReturnType<typeof machine>, ...args: string[]) => {
-    const p = Bun.spawn(["bash", SCRIPT, "set", ...args], {
-      cwd: m.root,
-      env: m.env(),
-      stderr: "pipe",
-    })
-    return { code: await p.exited, err: await new Response(p.stderr).text() }
-  }
   const aside = (m: ReturnType<typeof machine>) =>
     readdirSync(m.ops).filter((f) => f.startsWith("run-slot.3-off.expired-"))
   const log = (m: ReturnType<typeof machine>) => {
@@ -132,10 +124,11 @@ describe("an ops switch carries a reason and an expiry", () => {
 describe("a model-bound run", () => {
   // Starts argv through run-slot --model-bound in the background, reading its stderr as it comes
   const model = (m: ReturnType<typeof machine>, who: string, argv: string[]) => {
-    const p = Bun.spawn(["bash", SCRIPT, who, "--model-bound", "--", ...argv], {
+    const p = runSlot(["bash", SCRIPT, who, "--model-bound", "--", ...argv], {
       cwd: m.root,
       env: m.env(),
       stderr: "pipe",
+      ops: m.ops,
     })
     let err = ""
     let ended = false
@@ -202,7 +195,11 @@ describe("a model-bound run", () => {
       join(m.ops, "run-slot-model-1.holder"),
       `worker-gone ${gone.pid} 2026-10-29T00:00:00Z 0 model\n`,
     )
-    const p = Bun.spawn(["bash", SCRIPT, "clear-stale"], { env: m.env(), stdout: "pipe" })
+    const p = runSlot(["bash", SCRIPT, "clear-stale"], {
+      env: m.env(),
+      stdout: "pipe",
+      ops: m.ops,
+    })
     expect(await new Response(p.stdout).text()).toContain(
       "run-slot-model-1: cleared a stale holder",
     )
@@ -245,7 +242,7 @@ describe("what the command leaves in its process group", () => {
     const loop = `${trap}while :; do sleep 0.2; done`
     // the loop's output goes to /dev/null, so a loop left behind never holds the caller's stdout open; the command exits only once the loop has exec'd, since until then the fork still carries this command line (its pid file's path) and the reap logs that one (#592: a loaded CI run did)
     const command = `bash -c '${loop}' >/dev/null 2>&1 & echo $! > ${pidFile}; while ps -p $! -o command= | grep -qF ${pidFile}; do sleep 0.05; done; exit 7`
-    const p = Bun.spawn(
+    const p = runSlot(
       [
         "bash",
         "-c",
@@ -259,7 +256,7 @@ describe("what the command leaves in its process group", () => {
         "-c",
         command,
       ],
-      { cwd: m.root, env: m.env(), stdout: "pipe" },
+      { cwd: m.root, env: m.env(), stdout: "pipe", ops: m.ops },
     )
     const out = await new Response(p.stdout).text()
     const code = await p.exited
@@ -294,9 +291,10 @@ describe("what the command leaves in its process group", () => {
 describe("box-off", () => {
   // run-slot.sh box-off's words for a scratch state folder, the ssh key at a path of its own
   const boxOff = async (m: ReturnType<typeof machine>, key: string) => {
-    const p = Bun.spawn(["bash", SCRIPT, "box-off"], {
+    const p = runSlot(["bash", SCRIPT, "box-off"], {
       env: m.env({ RUNNER_HOST_KEY: key }),
       stdout: "pipe",
+      ops: m.ops,
     })
     expect(await p.exited).toBe(0)
     return (await new Response(p.stdout).text()).split("\n").filter(Boolean)

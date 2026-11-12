@@ -42,7 +42,7 @@ describe("a start refuses a brief that is not a file (#1471)", () => {
     ["runner", ["runner", "runner-calm-heron", "brief-r.md"], "runner-calm-heron", none],
     [
       "column",
-      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "handoffs/rev.md"],
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "handoffs/rev.md", "--pr", "1"],
       "reviewer-x",
       none,
     ],
@@ -171,7 +171,7 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
         "wait-output",
         "w5:p1",
         "--regex",
-        "Yes, I trust|New MCP server found in this project|⏵⏵",
+        "Yes, I trust|New MCP server found in this project|[0-9]+ new MCP servers found|⏵⏵",
         "--source",
         "visible",
         "--timeout",
@@ -183,7 +183,9 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
       `playground ${dir}/playground.sock ${dir}/config.toml`,
     )
     expect(readFileSync(lw(r.home, "runtimes", "worker-brave-otter"), "utf8")).toBe("herdr\n")
-    expect(readFileSync(lw(r.home, "backends", "worker-brave-otter"), "utf8")).toBe("claude\n")
+    expect(readFileSync(lw(r.home, "backends", "worker-brave-otter"), "utf8")).toBe(
+      "claude-code claude\n",
+    )
     expect(execLine(r, "worker-brave-otter")).toBe(
       `exec spawn.sh resume worker-brave-otter ${root} ${sid}`,
     )
@@ -262,7 +264,7 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
     expect(r.roster?.some((w) => /^(?:surface|workspace)=./.test(w))).toBe(false)
     const bad = await spawn(col.with(4, "surface:3"), [], {}, undefined, undefined, herdrPin())
     expect(bad.code).toBe(1)
-    expect(bad.err).toContain("surface:3 is a cmux surface, and spawn.sh starts nothing in cmux")
+    expect(bad.err).toContain("surface:3 is not a herdr pane id (w1:p2)")
     expect(placing(bad)).toEqual([])
   })
 
@@ -482,13 +484,18 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
       { FAKE_SCREENS: "trust,mcp,ready" },
       undefined,
       undefined,
-      herdrPin(),
+      (home) => {
+        herdrPin()(home)
+        writeFileSync(join(home, ".mcp.json"), JSON.stringify({ mcpServers: { fs: {} } }))
+      },
     )
     expect(r.code).toBe(0)
     expect(placing(r).filter((c) => c[1] === "send-keys")).toEqual([
       ["pane", "send-keys", "w5:p1", "down"],
       ["pane", "send-keys", "w5:p1", "enter"],
-      ["pane", "send-keys", "w5:p1", "esc"],
+      ["pane", "send-keys", "w5:p1", "up"],
+      ["pane", "send-keys", "w5:p1", "up"],
+      ["pane", "send-keys", "w5:p1", "enter"],
     ])
   })
 

@@ -6,7 +6,7 @@ description: Start, view, check, update, add to and remove Playground from your 
 
 # The playground command
 
-`playground` starts Playground from your terminal and opens the Dashboard. Your sessions run in herdr, and `playground view` shows them. Run it from any terminal. The Dashboard and its background jobs run in herdr too. `playground --help`, or `--help` after any command, lists every command. A word a command does not take, such as `playground ext list skills`, is refused before the command runs: it exits 2 and prints the command's usage, so a typo never reads as success. The `ask`, `changelog`, `dm`, `ingest`, `queues` and `thread` commands, `playground picker`'s reason and `playground ext search`'s words pass on whole.
+`playground` starts Playground from your terminal and opens the Dashboard. Your sessions run in herdr, and `playground view` shows them. Run it from any terminal. The Dashboard and its background jobs run in herdr too. `playground --help`, or `--help` after any command, lists every command. A word a command does not take, such as `playground ext list skills`, is refused before the command runs: it exits 2 and prints the command's usage, so a typo never reads as success. The `ask`, `changelog`, `dm`, `ingest`, `queues`, `thread` and `wa` commands, `playground picker`'s reason and `playground ext search`'s words pass on whole.
 
 ## Install
 
@@ -29,9 +29,9 @@ On a fresh install, the first `playground` first cuts the Dashboard's own checko
 
 ## Start the dispatcher: `playground dispatcher`
 
-`playground dispatcher` starts the dispatcher, the session you talk with, in a herdr workspace of its own. It takes nothing.
+`playground dispatcher` starts the dispatcher, the session you talk with, in a herdr workspace of its own, on Claude Code. `--harness codex` starts it on Codex instead (spawn.sh's `--harness`, which the Dashboard's **Start** passes from the `harness.alpha` setting), and `--brief <file>` starts it from that file in the data folder, the handoff Settings' **Switch Alpha** asks for; it takes nothing else.
 It sets up first what the installer and `playground` would have, so the Dashboard's **Start** works on a fresh install: when a file the installer links into `~/.playground` is missing (the factory settings every session starts with among them) it runs the installer's linking step, `scripts/link-skills.sh`; when the pinned herdr is missing it installs it as `playground herdr pin` does; then it starts each herdr server that is down as `playground` does. When a step fails, it exits 1 with that step's reason and starts nothing.
-Its brief is `brief-<dispatcher>.md` in the data folder, written once from `scripts/briefs/dispatcher.md` when it is missing, so your own edits to it stay.
+Without `--brief`, its brief is `brief-<dispatcher>.md` in the data folder, written once from `scripts/briefs/dispatcher.md` when it is missing, so your own edits to it stay.
 It exits 0 once the dispatcher starts, 3 when a session already holds the dispatcher's name (it starts nothing), and 1 with spawn.sh's reason when a gate refuses the start, or herdr's when herdr cannot come up.
 
 ## Start a manager: `playground planner`, `playground builder`, `playground ops`, `playground optimizer`
@@ -103,7 +103,7 @@ If an update stops partway, after your checkout has moved (a crash, a closed ter
 
 ## Move a machine onto Playground: `playground migrate`
 
-`playground migrate --archive <checkout> --pre-squash <sha> --org <org>` runs once, on a machine that ran the factory before Playground. First it moves the old data folder in `~/.claude` to `~/.playground` and leaves each old name as a link to it, so a path written before the switch still reads. It reads each value the old tree held from the archive checkout, at its `canary` (or `--old <rev>`) and at the pre-squash commit, and writes it into your login's scope: the settings and the release owners' list. Your own rules come with your private extension, so it reads none. The managers' session names come from this machine's roster, `ext.order` puts your login first and the org `--org` gives after it, `ext.links` links your login to every repo and the org's extension to the org's repos and every repo (or, when your login's scope holds the older `orgs.map` and `orgs.always`, links each owner `orgs.map` names to its org and each `orgs.always` org to every repo), `factory.archiveRepo` is the archive checkout's GitHub origin, `factory.repo` is this checkout's, and `factory.publicRepo` lists this checkout's with the factory's and Yard's public repositories. It also brings the hand-made skills into the org's scope, unless that scope's clone already holds them. A value already set stays as it is, so a second run changes nothing. Then it moves the machine itself, so run it with the Dashboard's job stopped. Every old name it moves comes from the migration table the archive checkout holds at the pre-squash commit (its `.github/notes/migrate/table.json`): each renamed job takes its new name in `jobs.json` and in your settings, the dropped jobs leave `jobs.json`, every job's path into an old data folder points into `~/.playground`, the old script copies move into the data folder's `archive/` folder, a copy whose name `archive/` already holds staying where it is and the command exiting 1, the state folder and files the table lists move to their new names, and each variable your shell profiles and LaunchAgents set under an old name takes its new one, with the old file kept beside it as `<file>.pre-migrate`. Last, whatever the other steps did, it runs `playground herdr pin`, which puts Playground's own herdr in place. `--dry-run` prints what each step would write and downloads nothing. A step that finds no value names the file it read, the other steps still run, and the command exits 1.
+`playground migrate --archive <checkout> --pre-squash <sha> --org <org>` runs once, on a machine that ran the factory before Playground. First it moves the old data folder in `~/.claude` to `~/.playground` and leaves each old name as a link to it, so a path written before the switch still reads. It reads each value the old tree held from the archive checkout, at its `canary` (or `--old <rev>`) and at the pre-squash commit, and writes it into your login's scope: the settings and the release owners' list. Your own rules come with your private extension, so it reads none. The managers' session names come from this machine's roster, `ext.order` puts your login first and the org `--org` gives after it, `ext.links` links your login to every repo and the org's extension to the org's repos and every repo (or, when your login's scope holds the older `orgs.map` and `orgs.always`, links each owner `orgs.map` names to its org and each `orgs.always` org to every repo), `factory.archiveRepo` is the archive checkout's GitHub origin, `factory.repo` is this checkout's, and `factory.publicRepo` is this checkout's too. It also brings the hand-made skills into the org's scope, unless that scope's clone already holds them. A value already set stays as it is, so a second run changes nothing. Then it moves the machine itself, so run it with the Dashboard's job stopped. Every old name it moves comes from the migration table the archive checkout holds at the pre-squash commit (its `.github/notes/migrate/table.json`): each renamed job takes its new name in `jobs.json` and in your settings, the dropped jobs leave `jobs.json`, every job's path into an old data folder points into `~/.playground`, the old script copies move into the data folder's `archive/` folder, a copy whose name `archive/` already holds staying where it is and the command exiting 1, the state folder and files the table lists move to their new names, and each variable your shell profiles and LaunchAgents set under an old name takes its new one, with the old file kept beside it as `<file>.pre-migrate`. Last, whatever the other steps did, it runs `playground herdr pin`, which puts Playground's own herdr in place. `--dry-run` prints what each step would write and downloads nothing. A step that finds no value names the file it read, the other steps still run, and the command exits 1.
 
 ## Remove: `playground uninstall`
 
@@ -128,7 +128,7 @@ It refuses a file that is not an HTML page, and a `--by` or `--for` that names n
 
 ## Wait for stuck alerts: `playground alerts-wait`
 
-`playground alerts-wait <name>` waits until a session that `<name>` manages gets stuck, prints the alert, and exits.
+`playground alerts-wait <name>` waits until the next alert for a session that `<name>` manages, a stuck session's or the relay watch's late-stop line, prints the alert, and exits.
 It wakes on the stuck alerts a session's own hook sends; the 5-minute reminder to the dispatcher and the alert for a session quiet 15 minutes come by the relay alone.
 A manager keeps it running as a background task and starts it again after each alert, so it hears in a second or two rather than waiting for the relay.
 
@@ -137,6 +137,7 @@ A manager keeps it running as a background task and starts it again after each a
 `playground picker <session> allow <key>` or `playground picker <session> deny <key> "<reason>"` is how a manager answers the permission prompt a session it runs is stuck on, once that session's alert reaches it with the command and its key.
 `allow` presses Yes, once, in the session's own pane after reading that the pane's prompt shows that command; `deny` presses No and sends the session the reason, so it can try a simpler way.
 Each answer is a line in `ops/picker.log` under `~/.playground`, naming who answered, the session and the start of the command.
+When one of your standing rules settles the answer, `--rule <name>` after the key records that rule in the line and in a deny's message; a name that matches no rule presses nothing.
 It refuses anyone but the session's manager or the primary dispatcher, a deny with no reason, a session that is not running or runs in no herdr pane, a dispatcher's own prompt, a key that no prompt showing matches, and a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
 For that last one, since a herdr pane takes no key from a session's hand, the manager closes the session with `spawn.sh close` and resumes it under its name by its session id, with the reason as its brief and, for a reviewer or tester, `--pr` with the PRs its roster row names, so the prompted call never runs.
 
@@ -144,27 +145,32 @@ For that last one, since a herdr pane takes no key from a session's hand, the ma
 
 `playground rm <path> [--reason "<why>"]` moves a file or folder into the trash, `~/.playground/trash`, rather than deleting it, so it can come back for 7 days.
 Each delete lands in `trash/<UTC-ts>-<session>/<n>/`, and a line in that folder's `manifest.jsonl` records where it came from, who deleted it, why, and its size and file count.
+Its `node_modules` folders and `web/next/.next` are removed from the trashed copy, since a `bun install` or a build rebuilds them, and the move's and the restore's lines both say so.
 The dashboard moves its own leftovers there too: a fixture stack's scratch folder and a Vibeground's record and `.env`, and so do the factory's scripts: `sync:shadcn`'s old `ui/` folder, the skill folders `vendor:upstream` replaces, and a leads worktree whose first install failed.
 `playground rm --list` prints what the trash holds, and `playground rm --restore <id>` puts one item back where it was, refusing when something already stands there, and a worktree's restore also refuses as its `--worktree` lines below say.
 It refuses, before moving anything:
 
-- HOME, any folder that holds it, and `~/.config`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/Library`, `~/Music` and `~/.playground` with everything in them, checked after symlinks resolve.
+- HOME, any folder that holds it, and `~/.config`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/Library`, `~/Music` and `~/.playground` with everything in them but the caller's own `scratch/<name>/` and `scratchpad/<name>/` there, checked after symlinks resolve.
 - The main checkout and everything in it but the worktrees under `.claude/worktrees/`.
-- A path over 5,000 files or 2 GB, and a fourth delete within a minute from one session; these and a protected path are also sent to the dispatcher.
+- A path over 5,000 files or 2 GB, and a fourth delete within a minute from one session; these and a protected path are also sent to the dispatcher, a session at the per-minute limit once for each burst, however many deletes it then tries.
 - A move to another disk, since that would copy rather than rename.
 
-A script of the factory's own may take one carve-out from the protected list (`CARVE_OUTS` in `packages/safe-delete`), which `playground rm` never takes: it moves an entry directly in its one folder in the data folder (`~/.playground`, or `PLAYGROUND_DATA_DIR`), under the carve-out's own file and size cap, and the folder itself, its parent, a sibling and anything deeper stay refused.
+A script of the factory's own may take a carve-out from the protected list (`CARVE_OUTS` in `packages/safe-delete`) for each folder it removes from, which `playground rm` never takes: it moves an entry directly in that folder, in the data folder (`~/.playground`, or `PLAYGROUND_DATA_DIR`) or, for a carve-out that says so, in your home folder, under the carve-out's own file and size cap and, when it names a file pattern, only a plain file matching it, and the folder itself, its parent, a sibling and anything deeper stay refused.
 The Dashboard's supervisor takes `dashboard-supervisor`, through `packages/scripts/src/trash-build.ts` alone: an old production build out of `ops/dashboard/builds`, at most 4,000 files and 256 MB.
 The trash records the script as who deleted it, and `--restore` puts its entry back into that folder.
 The ops runner's render takes `jobs`: the plist of a job `jobs.json` no longer holds, out of `ops/launch-agents`, one file of at most 64 KB.
+It also takes `jobs-installed`: the plist of a launchd job turned off, out of `~/Library/LaunchAgents`, one `com.playground.*.plist` file of at most 64 KB, so no other app's agent can move.
 
-`playground rm --worktree <path>` removes a worktree under `.claude/worktrees/`: it refuses when the roster cannot be read, when a live session on the roster holds it by its branch, its name or its pull request's number, when a running `node_modules` clone reads from it or copies into it, when a symlink outside it points into it, when a process works inside it, when `git status --porcelain` lists an uncommitted change in it (the refusal names the count and the first three paths), or when its HEAD's work has not landed on `origin/canary`, then moves it to the trash and runs `git worktree prune`.
+`playground rm --worktree <path>` removes a worktree under `.claude/worktrees/`: it refuses when the roster cannot be read, when a live session on the roster holds it by its branch, its name (but a manager's, below) or its pull request's number, when a running `node_modules` clone reads from it or copies into it, when a symlink outside it points into it, when a process works inside it, when `git status --porcelain` lists an uncommitted change in it (the refusal names the count and the first three paths), or when its HEAD's work has not landed on `origin/canary`, then moves it to the trash and runs `git worktree prune`.
 A folder outside `.claude/worktrees/` is refused with `--worktree` or `--discard`, before any decision is read, and the refusal names the route that works: plain `playground rm <path>` up to 5,000 files or 2 GB, and the lead's cleanup for a bigger tree.
-A session holds it by its name when the folder's or the branch's name, after its `PG-<n>-` prefix, is that name or starts with it and a `-`, so `ops` holds `PG-12-ops` and `PG-12-ops-job` while `PG-5-stops` and `PG-864-second-dispatcher` stay free of `ops` and `dispatcher`; a session's id that holds a digit (`k3m9px` of `k3m9px-worker`) holds any folder or branch whose name contains it.
+A session holds it by its name when the folder's or the branch's name, after its `PG-<n>-` prefix, is that name or starts with it and a `-`, so `lint` holds `PG-12-lint` and `PG-13-lint-job` while `PG-5-splint` stays free of it.
+A manager seat, a session whose roster kind, or else its name, places it as a manager (`ops`, `dispatcher`), holds none by its name alone, since its name names the work it routes, while its branch and its pull request still hold.
+A session's id that holds a digit (`k3m9px` of `k3m9px-worker`) holds any folder or branch whose name contains it.
 A live session that holds it in none of these ways is not seen as holding it; the trash keeps the worktree 7 days for `--restore`.
 Its trash entry keeps the branch, the commit and the main checkout's record folder of the worktree, which the prune deletes, so `--restore` brings it back as git reads it: it writes a gone record folder back, recreates a gone branch at that commit and rebuilds the index from it, keeping the files, and leaves a record folder still there as it is; it refuses before the move when the branch now points at another commit, naming both, or when the commit has gone, naming it and, for a worktree on a branch, the `git branch` command that recreates the branch once the commit is fetched.
 When its `git branch` or `git reset` fails after the move, it exits 1 with `restored <path>, but git cannot read it yet`, naming the failed step and git's error.
 `--pr <url>` names the pull request whose session used the worktree, so another live session of that pull request, its merging worker or a sibling checker, no longer holds it by that number alone; a hold by branch, name, clone, link or process still counts.
+Once the worktree's own pull request (`--pr`'s, else its branch's) reads merged or closed and the worktree sits at that pull request's head, a live session that holds it by its branch or by that pull request's number holds it no more, and the run prints `<path> is freed by #<n>, which reads <state>, past <name>'s roster row (<status>)`; commits past that head keep every hold and the run names them, as does a hold by name, id or another pull request's number, or a clone, link or process, and a state GitHub cannot read keeps every hold.
 A process inside it is named in the refusal, `<path> is held by pid <n> (<command>) working in <folder>`, and nothing is signalled, so the session that started it closes it by its own handle.
 When that process is agent-browser, the refusal adds its session, from its `--session` argument or its socket's name, else `default`, and the close that frees the folder: `agent-browser session <name>, which agent-browser --session <name> close frees`.
 A clone is read from run-slot's clone holder record (`run-slot-clone.holder` in the data folder's `ops`), which names its source and destination while its pid lives, since the clone's `cp` only reads its source and works in whatever folder run-slot was called from, so neither end need be a process's working folder; the refusal reads `<path> is held by <session>'s node_modules clone (pid <n>) from <source> into <destination>`.
@@ -176,10 +182,10 @@ A session passes `--discard` as it is once the worktree's pull request has merge
 The pull request is the one `--pr` names, else the one whose branch the worktree has checked out, read through `gh`, and it counts only when exactly one pull request answers, it is the worktree's own (its branch is the worktree's, or its head is the worktree's HEAD, so a stacked branch does not pass under its parent's), and its head is the worktree's HEAD or an ancestor of it; an open one, none, or a state `gh` cannot read keeps the decision's gate.
 A caller is a session when `PLAYGROUND_ROLE` is set, or when a claude process runs above it (the shell-pane launcher's caller check, which reads each process from the system, so no prefix on the call changes it); a call detached from its parent (its parent is pid 1), or whose parent the system cannot read, needs the decision too, and a terminal no session runs in passes `--discard` alone.
 Known residual, read as a terminal's: a call a session moves outside its own process tree, through a long-lived daemon (a `tmux` server, `at`) or a detached shell between it and pid 1, or a chain rm cannot climb to its end, finds no claude process above it.
-So for an open, missing or unreadable pull request, a session posts the `delete` decision with `bun run ask new` (`bun run ask example delete` prints one to start from), naming the full path and why (it refuses a short name, such as a worktree's folder name alone, and names the full path to write), and once it reads approved runs `playground rm --worktree <path> --discard --decision <id>`; an open, denied or missing decision, another kind, or one naming another path is refused.
+So for an open, missing or unreadable pull request, a session posts the `delete` decision with `playground ask new` (`playground ask example delete` prints one to start from), naming the full path and why (it refuses a short name, such as a worktree's folder name alone, and names the full path to write), and once it reads approved runs `playground rm --worktree <path> --discard --decision <id>`; an open, denied or missing decision, another kind, or one naming another path is refused.
 Discarded work goes into the trash with the worktree, so it comes back with it.
 A worktree whose trash entry holds no git record, one trashed before the entry kept it or one git could not read, comes back with its files alone, and git does not list it as a worktree.
-Ops empties the trash every hour: each delete over 7 days old goes, and the oldest go sooner while the disk has under 50 GB free.
+Ops empties the trash every hour: each delete over 7 days old goes, and the oldest go sooner while the disk has under 50 GB free, at any load. Each hour it also strips every delete's `node_modules` folders and `web/next/.next`, which a `bun install` or a build rebuilds.
 
 ## Read the rules: `playground rules`
 
@@ -192,7 +198,7 @@ When you, an org and Playground each hold a rule of that name, yours is the one 
 `playground settings list`, `get <key>`, `why <key>`, `set <key> <value> --reason "<why>"` and `reset <key> --reason "<why>"` read and change your settings in your extensions folder, with no Dashboard needed.
 Every change needs its reason, and `--scope` sets it for an org (its name) or for you (your GitHub login, the default).
 [Settings and extensions](/docs/extensions#settings) has each command and how a scope wins.
-`playground settings import-jobs <jobs.json>` brings a hand-kept `jobs.json` into settings once, at the switch; [Ops jobs](/docs/jobs) has the rest.
+`playground settings import-jobs <jobs.json>` brings a hand-kept `jobs.json` into settings once, at the switch, and a session's import is refused but for `--dry-run`, which lists what it would write; [Ops jobs](/docs/jobs) has the rest.
 
 ## Use your extensions: `playground ext`
 
@@ -217,21 +223,25 @@ Adding an account that is already listed replaces its secret and leaves its row 
 
 ## Yard: `playground yard`
 
-`playground yard` reaches Yard, the hosted Playground's channels and DMs, from this Mac, with the address in `YARD_API_URL` and its approve pages at `YARD_WEB_URL`, read from your environment or the factory checkout's `.env`.
+`playground yard` reaches Yard, the hosted Playground's channels and DMs, from this Mac, with the address in `YARD_API_URL` and its approve pages at `YARD_WEB_URL`, read from your environment or the live dashboard checkout's `.env`.
 `playground yard login` asks for a Yard token (`yard_...`), with no echo, checks it with Yard and keeps it in the Keychain under `playground-yard`, where the local Dashboard reads it too; `playground yard logout` removes it.
 `playground yard channels` lists your channels and DMs with their unread and mention counts.
 `playground yard read <channel>` prints a channel's last 50 messages, oldest first, by `#name`, a DM's `@login` or an id, and leaves your unread counts as they are.
 `playground yard post <channel> <text> [--kind <kind>]` posts as this Mac; a post Yard holds for your approval prints its approve page, and its card reaches your [Inbox](/docs/inbox) within a minute.
+`playground yard bot add <name>` makes a bot on Yard, `<name>[bot]`, with its own DM with you and its own token, which goes straight into the Keychain item `playground-yard-bot-<name>` and never shows; it prints the item's name and the DM's id, and a reveal card in your [Inbox](/docs/inbox) copies the token for you to paste into the bot.
+The bot's token reads and posts only in that DM; hand the bot [Connect a bot](/docs/yard-bot), which says how.
+`playground yard bot add <name> --log` also lets the bot read your dispatcher's log through this Mac, with every secret hidden first and each read noted in its DM; the switch beside it on Yard's Account page turns that off or on again.
+`playground yard bot revoke <name>` revokes it, stops this Mac answering its reads of the log and deletes its Keychain item; Revoke beside it on Yard's Account page revokes it on Yard alone, so run the command after it to delete the item and take the bot off this Mac's list of log readers too.
 
 ## Skill sets: `playground orgs`
 
-`playground orgs resolve --repo <folder>` writes the one skill set a session in that folder loads and prints its folder; spawning a session runs it, so you rarely need to.
+`playground orgs resolve --repo <folder>` writes the one skill set a session in that folder loads, less each skill whose `SKILL.md` the folder's own `.claude/skills` already holds byte for byte, and prints its folder; spawning a session runs it, so you rarely need to.
 `playground orgs home` writes the home set, the one a session you start yourself gets, and installs it in Claude Code for your user; `scripts/link-skills.sh` runs it.
 `playground ext which <skill> [--repo <folder> | --org <org>]` prints the folder of the copy of a skill a session in that folder, or in a repo of that org, loads, so a job can run a skill's script from whichever scope holds it.
 `playground ext why <skill> [--repo <folder> | --org <org>]` prints that copy with its scope and each scope whose copy it shadows.
 [Skills and orgs](/docs/skills#which-skill-wins) has the order a skill is taken in.
 
-## Scripts: `playground ask`, `changelog`, `dm`, `ingest`, `queues` and `thread`
+## Scripts: `playground ask`, `changelog`, `dm`, `ingest`, `queues`, `thread` and `wa`
 
 Each runs the package script of the same name in the Dashboard's checkout, the one on branch `live.branch`, passing on every word after it, so `playground ask get #i12` is `bun run ask get #i12` there. The Dashboard's checkout holds the address of the database the Dashboard shows, so an item posted this way reaches your Inbox from any folder.
 
@@ -240,9 +250,10 @@ Each runs the package script of the same name in the Dashboard's checkout, the o
 - `playground dm send <file>` posts the reply in the file, named by its absolute path, to your own Slack DM in Slack mode, framed, and records each post so the DM watch tells it from your messages.
 - `playground dm upload <item id>` shares a Slack send's files into its channel and thread, read from the answered Inbox item that id names; the Inbox runs it on Send or Approve.
   Both run the bundled Slack extension's scripts, which read the Slack token from the Keychain; with that extension off in Settings, either one says `Slack is not set up here` and runs nothing, and so does `dm send` with no DM set up (`slack.dmChannel` and `slack.dmOwner`), pointing you to the Inbox.
-- `playground ingest` reads every Claude Code session Playground has run (every one on this machine with `PLAYGROUND_ALL_SESSIONS=true`) into the Dashboard's database; `--follow` keeps reading, and `status` says how far it is.
+- `playground ingest` reads every Claude Code and Codex session Playground has run (every one on this machine with `PLAYGROUND_ALL_SESSIONS=true`) into the Dashboard's database; `--follow` keeps reading, and `status` says how far it is.
 - `playground queues` prints the merge queue and the work queue.
 - `playground thread` opens, routes, renames and lists the Inbox's threads.
+- `playground wa send <file>` sends the reply in the file, named by its absolute path, to your WhatsApp through ops-wa, the WhatsApp link on a spare number, and only to your own number (`wa.owner`); it refuses a body holding a token shape, and says so when ops-wa is not running. `playground wa relink` sets the old link aside after WhatsApp logged the device out, so ops-wa's next start posts a new pairing card.
 
 ## Troubleshooting
 

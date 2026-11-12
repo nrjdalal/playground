@@ -6,18 +6,24 @@ import { config } from "dotenv"
 import { NODE_ENV } from "@/lib/constants"
 
 import { applyEnvAliases } from "./aliases"
+import { introducedEnvKeys } from "./spawn-env"
 
 if (typeof window === "undefined") {
   try {
     // Load base .env file
     const envPath = path.resolve(process.cwd(), "../../.env")
-    config({ path: envPath, quiet: true })
+    const held = new Set(Object.keys(process.env))
+    const base = config({ path: envPath, quiet: true })
+    for (const key of Object.keys(base.parsed ?? {})) {
+      if (!held.has(key)) introducedEnvKeys.add(key)
+    }
 
     // Load environment-specific .env file if NODE_ENV is set
     const nodeEnv = process.env.NODE_ENV
     if (nodeEnv && NODE_ENV.safeParse(nodeEnv).success) {
       const envSpecificPath = path.resolve(process.cwd(), `../../.env.${nodeEnv}`)
-      config({ path: envSpecificPath, override: true, quiet: true })
+      const stage = config({ path: envSpecificPath, override: true, quiet: true })
+      for (const key of Object.keys(stage.parsed ?? {})) introducedEnvKeys.add(key)
     }
   } catch (e) {
     console.error(e)

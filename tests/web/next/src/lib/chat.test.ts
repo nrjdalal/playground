@@ -252,6 +252,26 @@ describe("a turn's name", () => {
     expect([...names]).toEqual(["t1"])
   })
 
+  // A stream row draws again only when its message object changes (sameStep), so a frame that grows one turn hands every other message back as the object it was; the dashboard tab's CPU once grew with the stream because each frame rebuilt them all.
+  test("a step that grows one turn keeps every other message's object", () => {
+    const first = shown([], [prompt(0), tool(1), prompt(2), tool(3)])
+    const next = shown(first, [prompt(0), tool(1), prompt(2), tool(3), tool(4)])
+    expect(next.map((m, i) => m === first[i])).toEqual([true, true, true, false])
+    expect(next[3]?.metadata?.steps).toEqual(["t3", "t4"])
+  })
+
+  test("a result that answers a call changes that turn's object and no other", () => {
+    const first = shown([], [prompt(0), tool(1), prompt(2), tool(3)])
+    const next = shown(first, [
+      prompt(0),
+      tool(1),
+      prompt(2),
+      tool(3),
+      step({ at: at(4), id: "r3", kind: "result", text: "done", toolUseId: "t3" }),
+    ])
+    expect(next.map((m, i) => m === first[i])).toEqual([true, true, true, false])
+  })
+
   test("a turn opened with its prompt out of the window keeps its name when Load older brings the prompt in", () => {
     const all = [prompt(0), ...Array.from({ length: 450 }, (_, i) => tool(i + 1))]
     let history = withSteps(historyOf("s"), all.slice(-400))

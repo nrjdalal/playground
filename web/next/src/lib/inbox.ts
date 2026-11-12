@@ -12,7 +12,7 @@ import { useQuery } from "@tanstack/react-query"
 import { agentLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { isProbe } from "@/lib/dashboard"
-import { needsYouAnchor } from "@/lib/needs-you"
+import { needsYouAnchor, type TargetSource } from "@/lib/needs-you"
 import type { ShownState } from "@/lib/status-icons"
 import { fullTime } from "@/lib/time"
 
@@ -143,11 +143,11 @@ export const sendFailed = (item: InboxItem): boolean =>
 
 // The failures Retry is offered after, the API's RETRY_CODES restated since the web imports its types alone (a test holds the two equal): nothing was typed, so a retry cannot type the answer twice.
 export const RETRY_CODES = [
-  "CMUX_FAILED",
   "INPUT_NOT_EMPTY",
   "LOST",
   "NOT_FOUND",
   "ON_PICKER",
+  "SESSIONS_FAILED",
   "UPLOAD_FAILED",
 ] as const
 
@@ -375,7 +375,7 @@ export const SHELF_LABELS: Record<Exclude<Shelf, "inbox">, string> = {
   snoozed: "Later",
 }
 
-// A card's verbs, beside its own answers and Reply: Seen marks it read, Done sends it to Done, Later puts it off until a time, Archive takes it off his list unanswered and Move back returns it, and Dismiss sends it to Done marked dismissed.
+// A card's verbs, beside its own answers and Reply: Seen marks it read, Done sends it to Done, Later puts it off until a time, Archive takes it off his list or Done onto the Archive shelf and Move back returns it, and Dismiss sends it to Done marked dismissed.
 export type Verb = "archive" | "dismiss" | "done" | "later" | "moveBack" | "seen"
 
 // Pure: whether an item still waits on his answer: an open decision, draft or secret ask he has not replied to.
@@ -386,17 +386,22 @@ export const waiting = (item: InboxItem): boolean =>
 const dismissedMark = (item: InboxItem): boolean =>
   item.answer !== null && "dismissed" in item.answer && item.answer.dismissed === true
 
-// Pure: the verbs a card offers on its shelf, by its state: Seen while unread; what waits takes Later, Archive and Dismiss; an update in the list takes Done too; an answered, working or failed one takes Done and Dismiss; an archived one Later, Move back and Dismiss; and one on Done its Dismiss until dismissed, with Move back on one set aside while it waited.
+// Pure: the verbs a card offers on its shelf, by its state: Seen while unread; what waits takes Later, Archive and Dismiss; an update in the list takes Done too; an answered, working or failed one takes Done and Dismiss; an archived one Later, Move back and Dismiss, with no Later on one answered; and one on Done its Archive and Dismiss until dismissed, with Move back and no Archive on one set aside while it waited, and no Archive on one whose send failed.
 export function verbs(item: InboxItem, shelf: Shelf): Verb[] {
   if (shelf === "done") {
+    const archives = item.status !== "cleared" && item.delivery?.status !== "failed"
     return [
       ...(item.status === "cleared" ? (["moveBack"] as const) : []),
-      ...(dismissedMark(item) ? [] : (["dismiss"] as const)),
+      ...(dismissedMark(item)
+        ? []
+        : ([...(archives ? (["archive"] as const) : []), "dismiss"] as const)),
     ]
   }
-  // a set-aside one from before Archive kept items open has no Later, since it is no longer open
+  // Later takes what waits or an update alone, so a set-aside one and one archived from Done once answered have none (PG-1909)
   if (shelf === "archived") {
-    return item.status === "cleared" ? ["moveBack", "dismiss"] : ["later", "moveBack", "dismiss"]
+    return waiting(item) || item.kind === "update"
+      ? ["later", "moveBack", "dismiss"]
+      : ["moveBack", "dismiss"]
   }
   const seen = item.readAt === null ? (["seen"] as const) : []
   if (waiting(item)) return [...seen, "later", "archive", "dismiss"]
@@ -864,6 +869,19 @@ export const inboxPosters = (items: readonly InboxItem[]): Set<string> =>
 export const inboxTarget = (anchor: string, items: readonly InboxItem[]): boolean => {
   const prefix = needsYouAnchor("")
   return anchor.startsWith(prefix) && items.some((item) => item.id === anchor.slice(prefix.length))
+}
+
+// Pure: the shut shelf an asked-for card waits on, opened for a click alone; null for none.
+export const shelfToOpen = (
+  anchor: string,
+  source: TargetSource,
+  shelves: readonly (readonly [Shelf, unknown, readonly InboxItem[]])[],
+  open: readonly string[],
+): Shelf | null => {
+  const shelf = shelves.find(([, , list]) =>
+    list.some((item) => needsYouAnchor(item.id) === anchor),
+  )?.[0]
+  return source === "click" && shelf && !open.includes(shelf) ? shelf : null
 }
 
 // Pure: a decision's rows as its card shows them (choicesOf), or null for a secret and any other item.

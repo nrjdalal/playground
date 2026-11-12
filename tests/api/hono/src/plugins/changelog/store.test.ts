@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { SQL } from "bun"
 
 import type { NewEntry } from "../../../../../../api/hono/src/plugins/changelog/sources"
+import { testContainerName } from "../../../../../container"
 
 // The store against a throwaway Postgres in Docker published on 127.0.0.1 only, migrated as the dashboard's is, so the source-key rule is the table's own. Skipped where Docker is not running.
 const MIGRATIONS = join(import.meta.dir, "../../../../../../packages/db/drizzle")
@@ -34,6 +35,8 @@ describe.skipIf(!dockerUp())("the changelog store", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("changelog-store"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",

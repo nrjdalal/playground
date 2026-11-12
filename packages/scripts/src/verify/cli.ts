@@ -46,12 +46,14 @@ import { EXTENSION_NODE_SCRIPT, extensionNode } from "./extension-node"
 import { facets } from "./facets"
 import { FOCUS_PAGES, focusMarksPage } from "./focus-marks"
 import { DASHBOARD_MAP } from "./map"
+import { memoryReport } from "./memory"
 import { RAIL_PAGES, rail } from "./rail"
 import { postCard, replyFocus, settleCard } from "./reply-focus"
 import { rowsFit } from "./row-fit"
 import { sendFocus } from "./send-focus"
 import { sendTop } from "./send-top"
 import { slashMenu } from "./slash-menu"
+import { STREAM_RENDERS_SCRIPT, streamRenders } from "./stream-renders"
 import { tooltips } from "./tooltips"
 import { TYPING_LAG_SCRIPT, typingLag } from "./typing-lag"
 import { uploadKeep } from "./upload-keep"
@@ -106,6 +108,12 @@ Checks (default: all)
                 percentile (RAIL), reporting keydown to paint beside it unjudged; it writes into
                 the fixture's transcripts and empties the box after, so only on this checkout's
                 own fixture stack
+  stream-renders
+                on /dashboard at 1280x800, with Playground's turn written past the stream's cap,
+                writes 10 steps into that turn one at a time and counts what each component drew
+                while they landed, failing when a text part's words, a row or a row's name link
+                drew past what a step may draw (its own, plus a clock tick's row each); it writes
+                into the fixture's transcripts, so only on this checkout's own fixture stack
   rows          on /dashboard, at the stock sidebar width and at 11rem, every menu row above
                 the footer is 32px, every row's and member row's words fit its box and none
                 runs past its padded edge, no first-line label ends in an ellipsis at the
@@ -113,8 +121,10 @@ Checks (default: all)
                 its neighbours, and the sidebar body is never wider than it shows, so it
                 scrolls only up and down
   screenshots   each route, full page, at 1280x800, 1782x972 and 390x844, light then dark
-                (named -dark), named before-* or after-* by --label; only on a stack whose
-                /api/health reports dashboard: fixture, since any other shows live sessions
+                (named -dark), named before-* or after-* by --label, each from a fresh load
+                and shot once its data is in (again when the shot leaves it loading); only
+                on a stack whose /api/health reports dashboard: fixture, since any other
+                shows live sessions
   cls           each route loads cold (storage, page cookies and HTTP cache cleared) then warm
                 with no layout shift over 0.001 that input did not cause, naming each element
                 that moved; with /dashboard, a chat view with no composer loads too, and the
@@ -129,6 +139,10 @@ Checks (default: all)
                 shows nothing; not in all
   map           the dashboard map matches the code: its pages, sidebar groups and API routes, and
                 each page's shows is a list with no empty entry, sorted A to Z
+  memory        every auto-memory file on this machine (the data folder's memory/ and each
+                project's) holds no secret, person's or org's name, private record, production
+                host or public IP address, and each MEMORY.md index stays within 200 lines and
+                18 KB; needs no stack, and is not in all
   cursor        on /dashboard at 1280, Send and Attach show the pointer, a plain disabled button
                 not-allowed, and the sidebar rail keeps its resize cursor; with no live
                 dispatcher it skips Send and Attach and says so
@@ -206,8 +220,9 @@ Options
   --json           print the results as JSON
 
 Beyond the agent sign-in, which it signs out of again, and send-top, send-focus, slash-menu,
-reply-focus, typing-lag and upload-keep, which a stack that reads live data refuses, and
-aside-bar's row jump, which skips one, it only reads, so it is safe against the live dashboard.`
+reply-focus, stream-renders, typing-lag and upload-keep, which a stack that reads live data
+refuses, and aside-bar's row jump, which skips one, it only reads, so it is safe against the
+live dashboard.`
 
 const parse = () => {
   try {
@@ -547,6 +562,34 @@ const typingLags = (at: Target) =>
     )
   })
 
+// As typing-lag: its counter is an init script, written to a file for the run, and it writes into the fixture's transcripts, so only this checkout's own stack.
+const streamRendersChecks = (at: Target) =>
+  guard("stream-renders", async () => {
+    if (!fixture)
+      return {
+        check: "stream-renders",
+        detail: "needs this checkout's own stack, not --web and --api",
+        ok: false,
+      }
+    const source = await fixtureOnly(at, "stream-renders")
+    if (!source.ok) return source
+    const script = join(tmpdir(), `playground-verify-stream-renders-${process.pid}.js`)
+    await Bun.write(script, STREAM_RENDERS_SCRIPT)
+    return holding(
+      () => Bun.file(script).delete(),
+      () =>
+        browse(
+          at,
+          "stream-renders",
+          async (browser) => {
+            await browser.signIn(at)
+            return [await streamRenders(browser, at, fixture)]
+          },
+          [script],
+        ),
+    )
+  })
+
 const uploadKeeps = (at: Target) =>
   guard("upload-keep", async () => {
     const source = await fixtureOnly(at, "upload-keep")
@@ -695,6 +738,13 @@ const tooltipChecks = (at: Target) =>
 
 const results: Result[] = []
 if (check === "map") results.push(...(await guard("map", map)))
+else if (check === "memory")
+  results.push(
+    ...(await guard("memory", async () => {
+      const { detail, ok } = await memoryReport()
+      return [{ check: "memory", detail, ok }]
+    })),
+  )
 else {
   const at = target()
   if (check === "health" || check === "all") {
@@ -751,6 +801,7 @@ else {
   if (check === "send-top") results.push(...(await sendTops(at)))
   if (check === "send-focus") results.push(...(await sendFocuses(at)))
   if (check === "typing-lag") results.push(...(await typingLags(at)))
+  if (check === "stream-renders") results.push(...(await streamRendersChecks(at)))
   if (check === "aside-bar") results.push(...(await asideBars(at)))
   if (check === "changelog-entry") results.push(...(await changelogEntries(at)))
   if (check === "cls" || check === "all") results.push(...(await layoutShifts(at, check === "all")))

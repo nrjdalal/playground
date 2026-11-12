@@ -16,6 +16,7 @@ KEY=${RUNNER_HOST_KEY:-$HOME/.ssh/playground_runner}
 
 usage() { sed -n '2,/^[^#]/{/^#/p;}' "$0" >&2; exit 2; }
 if [ "${1:-}" = drift ] && [ $# -le 2 ]; then
+  case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "host.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
   LIVE=${PLAYGROUND_DATA_DIR:-$HOME/.playground}/ops/runner-host
   differs=0
   for f in ci.sh suite.sh; do

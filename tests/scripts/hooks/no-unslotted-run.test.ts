@@ -155,6 +155,18 @@ describe("a run through run-slot, a light run, or one outside the worktrees runs
     ["an install through run-slot", `${SLOT} bun install --ignore-scripts --cwd ${WORKTREE}`],
     ["a clone through run-slot", `${SLOT} cp -cR ${LEADS}/node_modules ${WORKTREE}/`],
     ["the suite through run-slot", `${SLOT} bun run test`],
+    ["a package runner's -p turbo build through run-slot", `${SLOT} bunx -p turbo turbo run build`],
+    ["bun x's -p turbo build through run-slot", `${SLOT} bun x -p turbo turbo run build`],
+    ["a shell beside -p turbo through run-slot", `${SLOT} bunx -p turbo sh -c 'turbo run "build"'`],
+    ["a shell beside -p next through run-slot", `${SLOT} npx -p next sh -c 'next build>log'`],
+    [
+      "a runner --cwd in a worktree through run-slot",
+      `${SLOT} bun --cwd=${WORKTREE} x --cwd=. next build`,
+    ],
+    [
+      "a runner --cwd the hook cannot read through run-slot",
+      `${SLOT} bunx --cwd="$D" turbo run build`,
+    ],
     [
       "check-types through run-slot with env in front",
       `NODE_ENV=production ${SLOT} env SKIP_ENV_VALIDATION=true bun run check-types`,
@@ -489,5 +501,35 @@ describe("a git commit whose message commitlint passes, or one the hook cannot r
     ["-F after a script a source reads", "source gen.sh; git commit -F bad.txt"],
   ] as [string, string, string?][])("%s", async (_, command, cwd = REPO) => {
     expect(await commit(command, cwd)).toBeUndefined()
+  })
+})
+
+// a conventional header of the given length, as commitlint's header-max-length counts it
+const header = (length: number) => {
+  const head = "fix(scope): "
+  return head + "a".repeat(length - head.length)
+}
+
+describe("a git commit -m whose header runs over commitlint's 100 characters is refused, naming the limit", () => {
+  test.each([
+    ["101 characters", `git commit -m "${header(101)}"`],
+    ["101 characters over a short body", `git commit -m "${header(101)}" -m "body line"`],
+  ])("%s", async (_, command) => {
+    const reason = await commit(command)
+    expect(reason).toContain("no-unslotted-run hook refuses this git commit")
+    expect(reason).toContain("header-max-length")
+    expect(reason).toContain("100")
+  })
+})
+
+describe("a git commit whose header is 100 characters or fewer, or one the hook reads no header of, runs", () => {
+  test.each([
+    ["exactly 100 characters", `git commit -m "${header(100)}"`],
+    ["99 characters", `git commit -m "${header(99)}"`],
+    ["a -F message file", "git commit -F good.txt"],
+    ["an editor commit", "git commit"],
+    ["a multi-line -m whose first line is under the limit", `git commit -m "${GOOD}\n\nbody line"`],
+  ])("%s", async (_, command) => {
+    expect(await commit(command)).toBeUndefined()
   })
 })

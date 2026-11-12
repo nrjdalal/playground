@@ -1,9 +1,12 @@
 "use client"
 
+import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { SetUpSettings } from "@/components/settings/set-up-settings"
+import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import {
   Item,
   ItemActions,
@@ -13,12 +16,20 @@ import {
   ItemTitle,
 } from "@/components/ui/item"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/components/ui/toast"
 import { ACCOUNTS_QUERY_KEY, readAccounts } from "@/lib/accounts"
-import { JOBS_QUERY_KEY, type JobRow, readJobs, saveJobToggle } from "@/lib/jobs"
-import { whenWords } from "@/lib/ops"
+import {
+  JOBS_QUERY_KEY,
+  type JobRow,
+  parseJobConfig,
+  readJobs,
+  saveJobConfig,
+  saveJobToggle,
+} from "@/lib/jobs"
+import { useOps, whenWords } from "@/lib/ops"
 
-// Settings > Jobs: each ops job Playground ships, what it does, when it runs and whether it is on, and a switch that turns it on or off at your login's scope, its enabled field alone. Before the settings are set up it shows Set up settings, as Privacy does.
+// Settings > Jobs: each ops job Playground ships and each org's own job, what it does, when it runs and whether it is on, and a switch that turns it on or off at its scope (your login's, or an org's for its own job), its enabled field alone, and for a job with a config that config with the job's last refusal of it and an edit that saves it at once. Before the settings are set up it shows Set up settings, as Privacy does.
 export function Jobs() {
   const login = useQuery({ queryKey: ACCOUNTS_QUERY_KEY, queryFn: readAccounts })
   const scope = login.data?.scope
@@ -53,8 +64,10 @@ export function Jobs() {
 
 function JobList({ jobs, scope }: { jobs: JobRow[]; scope: string }) {
   const queryClient = useQueryClient()
+  const ops = useOps(true)
+  const refusedOf = (job: JobRow) => ops.data?.find((row) => row.job === job.name)?.configRefused
   const toggle = useMutation({
-    mutationFn: ({ job, on }: { job: JobRow; on: boolean }) => saveJobToggle(job, on, scope),
+    mutationFn: ({ job, on }: { job: JobRow; on: boolean }) => saveJobToggle(job, on),
     onError: (error) => toast.add({ title: error.message, type: "error" }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: JOBS_QUERY_KEY }),
     onSuccess: (_, { job, on }) =>
@@ -68,18 +81,36 @@ function JobList({ jobs, scope }: { jobs: JobRow[]; scope: string }) {
       </p>
       <ItemGroup className="gap-2">
         {jobs.map((job) => (
-          <Item key={job.key} role="listitem" size="sm" variant="outline" className="items-start">
+          <Item
+            key={`${job.key} ${job.scope}`}
+            role="listitem"
+            size="sm"
+            variant="outline"
+            className="items-start"
+          >
             <ItemContent className="min-w-0 gap-1.5 py-1 text-xs">
               <ItemTitle className="font-mono">{job.name}</ItemTitle>
               <ItemDescription className="text-xs">{job.description}</ItemDescription>
               <p className="text-muted-foreground text-2xs">
                 {[
                   job.schedule ? (whenWords(job.schedule) ?? "") : "",
-                  job.set ? "set in your settings" : "default",
+                  !job.set
+                    ? "default"
+                    : job.scope === scope
+                      ? "set in your settings"
+                      : `set in ${job.scope}'s settings`,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
               </p>
+              {job.config && (
+                <JobConfig
+                  key={JSON.stringify(job.config)}
+                  config={job.config}
+                  job={job}
+                  refused={refusedOf(job)}
+                />
+              )}
             </ItemContent>
             <ItemActions>
               <Switch
@@ -94,5 +125,92 @@ function JobList({ jobs, scope }: { jobs: JobRow[]; scope: string }) {
         ))}
       </ItemGroup>
     </>
+  )
+}
+
+// A job's config card: its config as JSON in a box you edit, the job's last refusal of it from its heartbeat, and Save, which writes the object at the job's scope at once, since the click is already yours.
+function JobConfig({
+  config,
+  job,
+  refused,
+}: {
+  config: Record<string, unknown>
+  job: JobRow
+  refused: string | undefined
+}) {
+  const queryClient = useQueryClient()
+  const shown = JSON.stringify(config, null, 2)
+  const save = useMutation({
+    mutationFn: (next: Record<string, unknown>) => saveJobConfig(job, next),
+    onError: (error) => toast.add({ title: error.message, type: "error" }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: JOBS_QUERY_KEY }),
+    onSuccess: () => toast.add({ title: `${job.name}'s config saved`, type: "success" }),
+  })
+  const form = useForm({
+    defaultValues: { text: shown },
+    onSubmit: async ({ value }) => {
+      const parsed = parseJobConfig(value.text)
+      if ("config" in parsed) await save.mutateAsync(parsed.config)
+    },
+  })
+  const id = `job-config-${job.name}-${job.scope}`
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        void form.handleSubmit()
+      }}
+    >
+      <FieldGroup className="mt-1 gap-2">
+        <form.Field
+          name="text"
+          validators={{
+            onChange: ({ value }) => {
+              const parsed = parseJobConfig(value)
+              return "error" in parsed ? parsed.error : undefined
+            },
+          }}
+        >
+          {(field) => {
+            const error = field.state.meta.errors[0]
+            return (
+              <>
+                <Field data-invalid={Boolean(error)}>
+                  <FieldLabel htmlFor={id} className="text-xs">
+                    Config
+                  </FieldLabel>
+                  <Textarea
+                    aria-invalid={Boolean(error)}
+                    className="font-mono text-xs md:text-xs"
+                    disabled={save.isPending}
+                    id={id}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    spellCheck={false}
+                    value={field.state.value}
+                  />
+                  {error && <FieldError>{String(error)}</FieldError>}
+                  {refused && (
+                    <FieldDescription className="text-destructive text-xs">
+                      The job refused its config: {refused}
+                    </FieldDescription>
+                  )}
+                </Field>
+                <div>
+                  <Button
+                    disabled={save.isPending || Boolean(error) || field.state.value === shown}
+                    size="sm"
+                    type="submit"
+                    variant="outline"
+                  >
+                    Save
+                  </Button>
+                </div>
+              </>
+            )
+          }}
+        </form.Field>
+      </FieldGroup>
+    </form>
   )
 }

@@ -4,16 +4,17 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  asksDecision,
   check,
   type Deps,
   DASHBOARD_DEADLINE_MS,
-  DRAFT_REASON,
   readStatus,
   LEAD_REASON,
   REASON,
   STEPS_REASON,
 } from "../../../scripts/hooks/no-chat-question"
 import { capital, OLD, OLD_NAMES } from "../../session-names"
+import { ITEMS } from "./inbox-items"
 import { storeWith } from "./render-set"
 
 const script = join(import.meta.dir, "..", "..", "..", "scripts", "hooks", "no-chat-question.ts")
@@ -216,9 +217,9 @@ describe("a manager's reply that asks Quilla a decision is refused until it is i
 
   test("the reason sends the session to an open item on the same thing before a new one", () => {
     expect(REASON).toBe(
-      "name the open #iN on the same thing if one exists (bun run ask open lists them), else post it with bun run ask new, then say in chat that it's in the inbox as #iN",
+      "name the open #iN on the same thing if one exists (playground ask open lists them), else post it with playground ask new, then say in chat that it's in the inbox as #iN",
     )
-    expect(REASON.indexOf("bun run ask open")).toBeLessThan(REASON.indexOf("bun run ask new"))
+    expect(REASON.indexOf("playground ask open")).toBeLessThan(REASON.indexOf("playground ask new"))
   })
 
   // cmux restores a session without PLAYGROUND_ROLE, so a manager is also known by its session name or roster kind, as role.ts reads them.
@@ -385,6 +386,70 @@ describe("what passes", () => {
     ).toBeUndefined()
   })
 
+  // a progress card counts for steps alone, so it never stands in for the decision a chat ask puts to the owner (#1486)
+  test("a decision asked beside a progress card is refused, since the card is listed, not open", async () => {
+    expect(
+      await stop("Should I merge PR 12 now? Progress is in #i42.", {
+        statuses: { "#i42": "listed" },
+      }),
+    ).toBe(`${REASON} (#i42 is listed, not open or archived while open)`)
+    expect(
+      await stop(
+        `Should I merge PR 12 now?\n1. Rotate the key.\n2. Restart the API.\n3. Check /api/health.\nProgress is in #i42.`,
+        {
+          statuses: { "#i42": "listed" },
+        },
+      ),
+    ).toBe(`${REASON} (#i42 is listed, not open or archived while open)`)
+  })
+
+  // a table row answers its own cell's question, so its ? is no ask; a row's other words still are; on 7 Nov two such rows beside a progress card each brought a copy of the card (#1486)
+  test("a question in a markdown table row is no ask, while a plain question line and a row's ask phrase still are", () => {
+    expect(asksDecision("| Check | Result |\n|---|---|\n| Did it still answer then? | yes |")).toBe(
+      false,
+    )
+    expect(asksDecision("Did it still answer then?")).toBe(true)
+    expect(asksDecision("| Step | Who |\n|---|---|\n| Merge now? | your call |")).toBe(true)
+  })
+
+  test.each([
+    ["a header row with a ? column", "| PR | Merged? |\n|---|---|\n| 1493 | yes |", false],
+    [
+      "a row whose last cell asks",
+      "| PR | Score | Next |\n|---|---|---|\n| 1493 | 3/5 | Merge after the fix? |",
+      true,
+    ],
+    ["a one-cell row", "| Merge PR 12 now? |", true],
+    [
+      "a row whose answer cell is empty",
+      "| Check | Result |\n|---|---|\n| Ship it today? |  |",
+      true,
+    ],
+    ["a line opening with a pipe and no closing one", "| Ship it today?", true],
+  ])("a table's ? asks only when no cell after it answers it: %s", (_name, reply, asks) => {
+    expect(asksDecision(reply)).toBe(asks)
+  })
+
+  test("a table of answered questions naming a progress card passes", async () => {
+    expect(
+      await stop(
+        "| Check | Result |\n|---|---|\n| Did it still answer then? | yes |\n\nProgress is in #i42.",
+        {
+          statuses: { "#i42": "listed" },
+        },
+      ),
+    ).toBeUndefined()
+  })
+
+  // an open decision the owner archived still waits on the owner, so an ask naming it passes, as it did before the listed rule (#1486)
+  test("a decision asked again beside an open decision the owner archived passes", async () => {
+    expect(
+      await stop("It's in the inbox as #i41: ship canary 3f9a2c1 tonight?", {
+        statuses: { "#i41": "archived while open" },
+      }),
+    ).toBeUndefined()
+  })
+
   test("a reply naming a closed item and an open one", async () => {
     expect(
       await stop("#i40 is done. The next call is #i41: should it wait?", {
@@ -429,7 +494,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
 
   test("the reason sends the steps to one card whose progress is edited in place", () => {
     expect(STEPS_REASON).toBe(
-      "put these steps in one Inbox card (bun run ask new; the open #iN on the same thing if one exists, bun run ask open lists them), edit each step's progress into that card, then name it in chat as #iN in one line",
+      "put these steps in one Inbox card (playground ask new; the open #iN on the same thing if one exists, playground ask open lists them), edit each step's progress into that card, then name it in chat as #iN in one line",
     )
   })
 
@@ -439,7 +504,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
 
   test("a named item that is not open fails closed with why", async () => {
     expect(await stop(`${STEPS}\nTracked in #i40.`, { statuses: { "#i40": "approved" } })).toBe(
-      `${STEPS_REASON} (#i40 is approved, not open)`,
+      `${STEPS_REASON} (#i40 is approved, not open or listed)`,
     )
   })
 
@@ -459,13 +524,49 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
     ).toBeUndefined()
   })
 
-  test("a lead's steps go to the dispatcher as a draft, so the card is posted once", async () => {
-    expect(DRAFT_REASON).toBe(
-      "send these steps to the dispatcher as a draft for one Inbox card rather than posting it, so the card is posted once, send each step's progress to the dispatcher as an edit to that draft, then say in chat in one line that the dispatcher has the draft",
-    )
-    expect(await stop(STEPS, { role: "lead" })).toBe(DRAFT_REASON)
-    expect(await stop(STEPS, { role: "manager" })).toBe(DRAFT_REASON)
-    expect(await stop(STEPS, { name: "x7mh4d-builder", role: "" })).toBe(DRAFT_REASON)
+  // an update is stored done from the moment it is posted while the Inbox still lists it, so a gate that took open alone asked for a copy of the card on every progress edit (#1486)
+  test("passed: 3 numbered steps that name a progress card the Inbox lists", async () => {
+    expect(
+      await stop(`${STEPS}\nProgress is in #i42.`, { statuses: { "#i42": "listed" } }),
+    ).toBeUndefined()
+  })
+
+  test.each(["archived", "archived while open", "denied", "dismissed", "done", "settled"])(
+    "refused: 3 numbered steps whose only card is %s",
+    async (standing) => {
+      expect(await stop(`${STEPS}\nProgress is in #i42.`, { statuses: { "#i42": standing } })).toBe(
+        `${STEPS_REASON} (#i42 is ${standing}, not open or listed)`,
+      )
+    },
+  )
+
+  // a lead's or another manager's reply in its pane is its report to its manager, which folds its lines into the owner's one card, so steps or a table there are no card of their own (#1522)
+  test.each([
+    [
+      "a report table whose rows name no issue",
+      "| Run | Result |\n|---|---|\n| canary | 3 refused |\n| branch | 0 refused |",
+    ],
+    [
+      "a 3-item numbered report",
+      "Done:\n1. Rebased onto canary.\n2. Fixed the stale doc line.\n3. Ran the touched tests: 12 pass.",
+    ],
+    [
+      "a 5-item list of what a self-review fixed",
+      "The self-review fixed:\n1. A stale doc line.\n2. A missing test case.\n3. A typo in the reason.\n4. The README's order.\n5. A wrapped sentence.",
+    ],
+    [
+      "a table of two commands with their results",
+      "| Command | Result |\n|---|---|\n| `bun run test:file a.test.ts` | 12 pass, 0 fail |\n| `bun run check-types` | clean |",
+    ],
+  ])("passed: a lead's report, %s", async (_name, last) => {
+    expect(await stop(last, { role: "lead" })).toBeUndefined()
+    expect(await stop(last, { role: "manager" })).toBeUndefined()
+    expect(await stop(last, { name: "x7mh4d-builder", role: "" })).toBeUndefined()
+  })
+
+  test("a lead's steps pass, while the dispatcher's own steps still refuse", async () => {
+    expect(await stop(STEPS, { role: "lead" })).toBeUndefined()
+    expect(await stop(STEPS, { role: "dispatcher" })).toBe(STEPS_REASON)
   })
 
   test("the dispatcher's own steps keep the Inbox reason, a draft line included", async () => {
@@ -476,45 +577,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
     )
   })
 
-  test.each([
-    ["sent", "Sent these steps to the dispatcher as a draft."],
-    ["handed", "I handed the card to the dispatcher as a draft."],
-    ["went", "They went to the dispatcher as a draft for one card."],
-    ["says the reason's own words for", "The dispatcher has the draft."],
-    ["says it has been sent", "These have been sent to the dispatcher as a draft."],
-    ["says it has sent", "I've sent these to the dispatcher as a draft."],
-    ["says it passed", "These were passed to the dispatcher as a draft."],
-  ])("passed: a lead's steps it %s to the dispatcher as a draft", async (_name, line) => {
-    expect(await stop(`${STEPS}\n${line}`, { role: "lead" })).toBeUndefined()
-  })
-
-  test.each([
-    ["a hand-off not made yet", "I haven't sent the dispatcher the draft yet."],
-    ["a hand-off denied", "I have not sent these to the dispatcher as a draft."],
-    [
-      "a hand-off denied with a word between",
-      "I haven't yet sent these to the dispatcher as a draft.",
-    ],
-    ["a draft line inside a fence", "```\nsent dispatcher draft\n```"],
-    ["a draft line in a blockquote", "> Sent these steps to the dispatcher as a draft."],
-    ["a draft PR in a status line", "All checks passed; the dispatcher reviews the draft PR next."],
-    ["a draft PR beside the dispatcher", "PR #859 went up as a draft; the dispatcher has it."],
-    ["a note on a draft PR", "Sent the dispatcher a note on the draft PR."],
-    [
-      "a hand-off once a PR lands",
-      "These will be sent to the dispatcher as a draft once #500 lands.",
-    ],
-    [
-      "a hand-off after the merge",
-      "They're to be sent to the dispatcher as a draft after the merge.",
-    ],
-    ["a hand-off it will get done", "I'll get these sent to the dispatcher as a draft next."],
-    ["a hand-off still to come", "Will be sent to the dispatcher as a draft."],
-  ])("refused: a lead's steps beside %s", async (_name, line) => {
-    expect(await stop(`${STEPS}\n${line}`, { role: "lead" })).toBe(DRAFT_REASON)
-  })
-
-  test("a lead's draft line passes its steps, never a decision it asks", async () => {
+  test("a lead's steps pass, never a decision it asks", async () => {
     expect(
       await stop(`${STEPS}\nSent these steps to the dispatcher as a draft. Should I start?`, {
         role: "lead",
@@ -558,7 +621,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
   ])("refused: steps that are not all tracked work, %s", async (_name, last) => {
     const statuses = { "#i40": "approved", "#i41": "approved", "#i42": "approved" }
     expect(await stop(last, { statuses })).toStartWith(STEPS_REASON)
-    expect(await stop(last, { role: "lead", statuses })).toStartWith(DRAFT_REASON)
+    expect(await stop(last, { role: "lead", statuses })).toBeUndefined()
   })
 
   test("passed: a worker's steps, which go to its lead", async () => {
@@ -590,12 +653,12 @@ test("run as Claude Code runs it, a report stops with no output", async () => {
 
 describe("the dashboard read's time limits (#1269)", () => {
   // A checkout whose bun run ask writes its pid beside it, then answers each ref after its delay, as the live dashboard's does under load.
-  const stubDashboard = (delays: Record<string, number>, status = "open") => {
+  const stubDashboard = (delays: Record<string, number>, item: object = { status: "open" }) => {
     const dir = mkdtempSync(join(tmpdir(), "no-chat-question-dashboard-"))
     mkdirSync(join(dir, "api", "hono", "src", "bin"), { recursive: true })
     writeFileSync(
       join(dir, "api", "hono", "src", "bin", "dashboard-ask.ts"),
-      `const ref = process.argv[3]\nawait Bun.write(\`\${import.meta.dir}/\${ref.slice(1)}.pid\`, String(process.pid))\nawait Bun.sleep(${JSON.stringify(delays)}[ref] ?? 0)\nconsole.log(JSON.stringify({ status: ${JSON.stringify(status)} }))\n`,
+      `const ref = process.argv[3]\nawait Bun.write(\`\${import.meta.dir}/\${ref.slice(1)}.pid\`, String(process.pid))\nawait Bun.sleep(${JSON.stringify(delays)}[ref] ?? 0)\nconsole.log(JSON.stringify(${JSON.stringify(item)}))\n`,
     )
     return dir
   }
@@ -613,6 +676,16 @@ describe("the dashboard read's time limits (#1269)", () => {
       },
       { itemStatus, sessionName: () => undefined },
     )
+
+  // bun run ask get prints the whole item: an update is stored done from its post on, so whether the Inbox lists it, and what was done with it, is read from its answer and readAt (#1486)
+  test.each(ITEMS.filter((c) => c.standing))(
+    "$name reads $standing",
+    async ({ item, standing }) => {
+      const dashboard = stubDashboard({}, item)
+      stubs.push(dashboard)
+      expect(await readStatus("#i1", dashboard)).toBe(standing as string)
+    },
+  )
 
   test("an open item bun run ask takes 5s to read, as under a load spike, reads as open", async () => {
     const dashboard = stubDashboard({ "#i1": 5000 })
@@ -674,5 +747,71 @@ describe("the dashboard read's time limits (#1269)", () => {
       expect(hook.timeout).toBe(15)
       expect(DASHBOARD_DEADLINE_MS).toBeLessThan(hook.timeout * 1000)
     }
+  })
+})
+
+describe("a session with a manager asks it by SendMessage, never by an AskUserQuestion picker (#1758)", () => {
+  const call = (tool = "AskUserQuestion") =>
+    JSON.stringify({
+      hook_event_name: "PreToolUse",
+      session_id: "s-1",
+      tool_input: { questions: [{ options: [], question: "Which one?" }] },
+      tool_name: tool,
+    })
+  const picker = (env: Record<string, string>, name?: string, tool?: string) =>
+    check(
+      call(tool),
+      { CLAUDE_CONFIG_DIR: config, PLAYGROUND_DATA_DIR: join(config, "playground"), ...env },
+      { itemStatus: fakeDashboard(), ownerNames: async () => OWNER, sessionName: () => name },
+    )
+  const refused = (reason: string | undefined) => {
+    expect(reason).toContain("AskUserQuestion")
+    expect(reason).toContain("SendMessage")
+  }
+
+  test.each(["probe", "reviewer", "runner", "tester", "worker"])(
+    "refused: a %s by its PLAYGROUND_ROLE",
+    async (role) => refused(await picker({ PLAYGROUND_ROLE: role })),
+  )
+
+  test.each(["q7w2zk-probe", "k3m9px-worker", "b7k2mq-reviewer"])(
+    "refused: %s by its session name, resumed with no role",
+    async (name) => refused(await picker({}, name)),
+  )
+
+  test.each(["dispatcher", "lead", "manager"])(
+    "allowed: a %s by its PLAYGROUND_ROLE",
+    async (role) => expect(await picker({ PLAYGROUND_ROLE: role })).toBeUndefined(),
+  )
+
+  test("allowed: the dispatcher and a lead by their session names", async () => {
+    for (const name of [OLD.dispatcher, "x7mh4d-builder"])
+      expect(await picker({}, name)).toBeUndefined()
+  })
+
+  test("allowed: a session with no role and no roster name, as the owner's own", async () => {
+    expect(await picker({})).toBeUndefined()
+    expect(await picker({}, "my-notes")).toBeUndefined()
+  })
+
+  test("allowed: the hosted session, a probe by role the Agent SDK starts", async () => {
+    expect(
+      await picker({ CLAUDE_CODE_ENTRYPOINT: "sdk-ts", PLAYGROUND_ROLE: "probe" }),
+    ).toBeUndefined()
+  })
+
+  test("allowed: a worker's other tools", async () => {
+    expect(await picker({ PLAYGROUND_ROLE: "worker" }, undefined, "Bash")).toBeUndefined()
+  })
+
+  test("run as Claude Code runs it, a worker's picker is refused with exit 2 and the reason", async () => {
+    const run = Bun.spawn(["bun", "--no-env-file", script], {
+      env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli", PLAYGROUND_ROLE: "worker" },
+      stderr: "pipe",
+      stdin: new Blob([call()]),
+      stdout: "pipe",
+    })
+    expect(await run.exited).toBe(2)
+    refused(await new Response(run.stderr).text())
   })
 })

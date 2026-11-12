@@ -369,7 +369,7 @@ describe("SessionRow", () => {
           createElement(OpsJobRow, {
             now: NOW,
             row: {
-              does: null,
+              does: "",
               job: "ops-dashboard",
               lastBeatAt: "2026-10-06T11:59:50.000Z",
               name: "Dashboard updates",
@@ -498,6 +498,24 @@ describe("SessionRow", () => {
     expect(bare).not.toContain(pathOf(RiAnthropicFill))
     expect(tipsOf(bare)).toHaveLength(1)
   })
+
+  for (const [name, role] of [
+    ["ops", "manager"],
+    ["runner-pride", "runner"],
+    ["worker-greed", "worker"],
+  ] as const) {
+    test(`a ${role} row that opens nothing keeps the effort's place with no effort, so its logo lines up with a row that has one`, () => {
+      const html = row(name, role, [], { model: "claude-opus-5-5" })
+      const logo = html.indexOf(pathOf(RiAnthropicFill))
+      expect(logo).toBeGreaterThan(-1)
+      expect(
+        html.indexOf(
+          '<span class="size-4 shrink-0 group-data-[collapsible=icon]:hidden"></span>',
+          logo,
+        ),
+      ).toBeGreaterThan(logo)
+    })
+  }
 
   test("an idle worker, a runner and a manager show no ETA", () => {
     const eta = "2026-10-06T12:20:00.000Z"
@@ -1212,7 +1230,7 @@ describe("OpsJobRow", () => {
       "Dashboard updates (ops-dashboard) · Keeps the Dashboard on the newest canary · Running · beat just now · Its schedule says every 5 min, its heartbeat every 60s",
     )
     expect(html).toContain('aria-description="Dashboard updates (ops-dashboard)')
-    expect(render(job({ does: null, schedule: null }))).not.toContain("null")
+    expect(render(job({ does: "", schedule: null }))).not.toContain("null")
   })
 
   test("Failing and Down read red, with the reason on hover", () => {

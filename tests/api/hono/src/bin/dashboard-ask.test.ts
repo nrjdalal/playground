@@ -7,6 +7,7 @@ import { SQL } from "bun"
 
 import { ASK_EXAMPLES } from "../../../../../api/hono/src/lib/dashboard/ask-shape"
 import { ASK_CODE_COLUMNS } from "../../../../../packages/config/src/inbox"
+import { testContainerName } from "../../../../container"
 import { onLiveDashboard } from "../../../../dashboard-fixture"
 import { liveReadsEnv } from "../../../../live-reads"
 import { slowChild } from "../../../../slow-child"
@@ -104,6 +105,8 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("dashboard-ask"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",
@@ -252,6 +255,25 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     }
   })
 
+  // a draft with no link is a public post's, which holds the owner's own words alone (the public rule), so its check runs before the item posts
+  test("refuses a public post's draft whose words hold a work figure, naming the kind and never the words, and posts one in the owner's words", async () => {
+    const launch = (text: string) => ({
+      from: "worker-envy",
+      kind: "draft",
+      preview: { noLink: "the owner posts it on the company page", text, to: "the company page" },
+      title: "Post the launch note?",
+    })
+    const refused = await cli(["new"], JSON.stringify(launch("I merged 12 PRs this week.")))
+    expect(refused.code).toBe(1)
+    expect(refused.stderr).toContain("ask: a draft with no link is a public post's")
+    expect(refused.stderr).toContain("this one holds a work figure")
+    expect(refused.stderr).not.toContain("12 PRs")
+    expect(refused.stdout).toBe("")
+    const { id } = await post(launch("The board is live: every session on one page. Try it today."))
+    const got = await cli(["get", id])
+    expect(JSON.parse(got.stdout)).toMatchObject({ kind: "draft", status: "open" })
+  })
+
   test("refuses an invalid item with the reason, and posts nothing", async () => {
     const result = await cli(["new"], JSON.stringify({ ...DECISION, preview: undefined }))
     expect(result.code).toBe(1)
@@ -279,7 +301,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect(posted.code).toBe(0)
     expect(posted.stdout).toMatch(/^\S+\n$/)
     expect(posted.stderr).toContain("ask: this ask is one block of prose")
-    expect(posted.stderr).toContain("bun run ask example code|decision|ui")
+    expect(posted.stderr).toContain("playground ask example code|decision|ui")
     const wide = await cli(
       ["new"],
       JSON.stringify({

@@ -183,19 +183,20 @@ describe("load units", () => {
   })
 })
 
+// each machine's clock stands at NOW, so a line `ago` seconds back stays inside or outside the minute however long the looks take
+const NOW = Math.floor(Date.now() / 1000)
+const iso = (ago: number) => new Date((NOW - ago) * 1000).toISOString().replace(/\.\d+Z$/, "Z")
+// run-slot.runs.log's start line for a run on slot `ago` seconds back, and its end line `ended` seconds back when given
+const ran = (ops: string, pid: number, slot: string, ago: number, ended?: number) =>
+  appendFileSync(
+    join(ops, "run-slot.runs.log"),
+    `${iso(ago)} start worker-r ${pid} ${slot} waited=0s\n` +
+      (ended === undefined ? "" : `${iso(ended)} end worker-r ${pid} rc=0 ran=${ago - ended}s\n`),
+  )
+
 // #610: load1 shows a run's load about a minute after it starts, so a drained queue once started five suites in 70 s at load1 16, and load1 reached 64; while the runs started in the last minute outnumber those that ended in it, the next medium or big run waits, at any load.
 describe("a burst of starts", () => {
   const medium = { RUN_SLOT_SIZE: "medium" }
-  // each machine's clock stands at NOW, so a line `ago` seconds back stays inside or outside the minute however long the looks take
-  const NOW = Math.floor(Date.now() / 1000)
-  const iso = (ago: number) => new Date((NOW - ago) * 1000).toISOString().replace(/\.\d+Z$/, "Z")
-  // run-slot.runs.log's start line for a run on slot `ago` seconds back, and its end line `ended` seconds back when given
-  const ran = (ops: string, pid: number, slot: string, ago: number, ended?: number) =>
-    appendFileSync(
-      join(ops, "run-slot.runs.log"),
-      `${iso(ago)} start worker-r ${pid} ${slot} waited=0s\n` +
-        (ended === undefined ? "" : `${iso(ended)} end worker-r ${pid} rc=0 ran=${ago - ended}s\n`),
-    )
 
   test("a medium run waits while a run started under a minute ago, with load1 under every line", async () => {
     const m = machine({ load1: 2, now: NOW })
@@ -253,7 +254,7 @@ describe("a burst of starts", () => {
     expect(await run.ran()).toBe(true)
   })
 
-  test("a small run and the merge train's go on beside a fresh start", async () => {
+  test("a fresh small run and the merge train's go on beside a fresh start", async () => {
     const m = machine({ load1: 2, now: NOW })
     ran(m.ops, 101, "run-slot", 5)
     expect(await m.runs("worker-s", { RUN_SLOT_SIZE: "small" })).toBe(true)
@@ -268,6 +269,54 @@ describe("a burst of starts", () => {
     ran(old.ops, 101, "run-slot", 61)
     expect(await old.canTake("run-slot-2", "worker-m", medium)).toBe(true)
   })
+})
+
+// 7 Nov 13:10 to 13:15Z: a released backlog started 12 runs on run-slot and run-slot-2, small ones included, and load5 crossed the 15 cap at 13:16:08Z, since neither reading shows a start until about a minute after it; a small run whose waiter has waited past the backlog line also waits for the burst to clear, while a fresh small run in a queue with no backlog starts at once and the dashboard's and the merge train's runs keep their exemption
+describe("a small run in a draining backlog", () => {
+  const backlog = { RUN_SLOT_SIZE: "small", RUN_SLOT_BACKLOG_WAIT: "1", RUN_SLOT_POLL: "0.2" }
+
+  test("a waited small run holds while a freed slot's minute is hot, then starts once it clears", async () => {
+    const m = machine({ load1: 2, now: NOW, off: ["run-slot.3-off", "run-slot.4-off"] })
+    m.hold("run-slot", 3, "big")
+    m.hold("run-slot-2", 3, "big")
+    const run = m.start("worker-s", backlog)
+    // saw, not waits: waits stops the run, and this one must go on to start once the minute clears
+    expect(await run.saw(WAITING)).toBe(true)
+    await Bun.sleep(1000)
+    appendFileSync(
+      join(m.ops, "run-slot.runs.log"),
+      `${iso(1)} start worker-r 102 run-slot-3 waited=0s\n`,
+    )
+    m.release("run-slot-2")
+    await Bun.sleep(3000)
+    const startedHot = existsSync(run.marker)
+    appendFileSync(join(m.ops, "run-slot.runs.log"), `${iso(0)} end worker-r 102 rc=0 ran=1s\n`)
+    expect(await run.ran()).toBe(true)
+    expect(startedHot).toBe(false)
+  })
+
+  test("with no backlog a small run starts at once", async () => {
+    const m = machine({ load1: 2, now: NOW })
+    expect(await m.runs("worker-s", backlog)).toBe(true)
+  })
+
+  test("the dashboard's and the merge train's runs still start in a backlog", async () => {
+    const m = machine({ load1: 2, now: NOW })
+    ran(m.ops, 101, "run-slot", 10)
+    expect(await m.runs("ops-dashboard", { RUN_SLOT_BACKLOG_WAIT: "1" })).toBe(true)
+    expect(await m.runs("ops-merge-train", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+  })
+
+  for (const [label, ns, want] of [
+    ["an old small ticket", 1, false],
+    ["a fresh small ticket", Date.now() * 1_000_000, true],
+  ] as const)
+    test(`can-take inside a burst answers ${want} for ${label}`, async () => {
+      const m = machine({ load1: 2, now: NOW })
+      ran(m.ops, 101, "run-slot", 10)
+      m.ticket(ns, "worker-s", "s2 22 1 small")
+      expect(await m.canTake("run-slot-2", `${ns}-${process.pid}-worker-s`)).toBe(want)
+    })
 })
 
 describe("the queue's order", () => {

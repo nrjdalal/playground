@@ -1,9 +1,9 @@
-import { pairKeySchema } from "@packages/message"
+import { isBotLogin, pairKeySchema } from "@packages/message"
 import { z } from "zod"
 
 export { RELAY_PREFIX } from "@packages/message"
 
-// The relay's words, read by both ends: the hosted hub, which forwards the owner's browser's reads, and this Mac, which answers them from its own dashboard. Pure, so the hosted build imports it with nothing that reads a machine.
+// The relay's words, read by both ends: the hosted hub, which forwards the owner's browser's reads and a bot's read of the dispatcher's log, and this Mac, which answers them from its own dashboard. Pure, so the hosted build imports it with nothing that reads a machine.
 
 // How old a forwarded request may be when this Mac reads it, so a frame replayed later does nothing.
 export const RELAY_MAX_AGE_MS = 30_000
@@ -14,6 +14,9 @@ export const RELAY_TIMEOUT_MS = 25_000
 // How often this Mac tells the hub it is there, and how long a silent socket stays online: a sleeping Mac leaves its socket half-open, so the hub counts one silent for RELAY_SILENT_MS as gone.
 export const RELAY_HEARTBEAT_MS = 15_000
 export const RELAY_SILENT_MS = 45_000
+
+// The code this Mac closes a socket with once its next one holds the relay, so the hub lets it go with nothing on the bus: the ping and gone a close sends otherwise are still in flight when Vercel freezes the instance, and fail at its next thaw; outside the 4400 to 4599 a refused upgrade closes with.
+export const RELAY_REPLACED_CLOSE = 4100
 
 // The dashboard's reads the relay carries, A to Z, every one a GET: no first-run or onboarding route (requireThisMachine is the only guard on the passwordless sign-in), no write, and no route on the never-from-Yard list. A write never goes here: it takes RELAY_WRITES, checked with the paired key by requireSignedWrite in mac.ts.
 export const RELAY_GETS = [
@@ -113,6 +116,9 @@ export function pathOn(routes: readonly string[], target: string): boolean {
 export const relayAllowed = (method: string, target: string): boolean =>
   method === "GET" && pathOn(RELAY_GETS, target)
 
+// The one read a bot's frame takes, apart from the owner's lists: the dispatcher's log, answered only for a bot on the Mac's yard.logReaders, and redacted there before it leaves. A bot's frame on any RELAY_GETS or RELAY_WRITES route is refused.
+export const BOT_GETS = ["/api/v1/dashboard/dispatcher/log"] as const
+
 // The hub's request to this Mac: a fresh id and the time it was sent, which the Mac checks before anything runs, and the signed-in owner's GitHub login.
 export const relayRequestSchema = z.strictObject({
   at: z.iso.datetime(),
@@ -123,6 +129,19 @@ export const relayRequestSchema = z.strictObject({
   type: z.literal("request"),
 })
 export type RelayRequest = z.infer<typeof relayRequestSchema>
+
+// The hub's read for a bot the owner made, which Yard let read the log: the bot's own login, and the owner's, whose Mac it reaches.
+export const relayBotSchema = z.strictObject({
+  at: z.iso.datetime(),
+  bot: z.string().min(1).max(64).refine(isBotLogin, "a bot's login"),
+  dm: z.string().min(1).max(64),
+  id: z.uuid(),
+  login: z.string().min(1).max(64),
+  method: z.literal("GET"),
+  path: z.string().min(1).max(2048),
+  type: z.literal("bot"),
+})
+export type RelayBotRead = z.infer<typeof relayBotSchema>
 
 // The hub's pair request to this Mac: the owner's browser's public key, which waits on the Mac until the owner approves it there, with the same fresh id and time as a request.
 export const relayPairSchema = z.strictObject({

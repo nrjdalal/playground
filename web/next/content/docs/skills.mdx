@@ -11,14 +11,14 @@ Playground gives each session one set of skills, chosen by the repo it works in.
 
 ## Where skills come from
 
-| Scope      | What it holds                                                                                                                                                                                                        |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| your login | your own skills, in your login's extension                                                                                                                                                                           |
-| an org     | an org's own skills and its overrides, in its extension                                                                                                                                                              |
-| core       | `skills/playground` (Playground's own skills), `skills/zerostarter` (the starter the app is built on) and `extensions/core` (core's own skills, the factory's playbook among them, and the upstream skills it keeps) |
+| Scope      | What it holds                                                                                                                                                                                                                                               |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| your login | your own skills, in your login's extension                                                                                                                                                                                                                  |
+| an org     | an org's own skills and its overrides, in its extension                                                                                                                                                                                                     |
+| core       | `skills/playground` (an index alone, since Playground's own skills are core's), `skills/zerostarter` (the starter the app is built on) and `extensions/core` (Playground's own skills, the factory's playbook among them, and the upstream skills it keeps) |
 
 A session gets its skills as one plugin, never as links in `~/.claude/skills`, since a skill there would take a name over every plugin's.
-Each session Playground starts loads a set written for its repo the moment it starts, so a skill an extension adds reaches the next session with no install (`playground orgs resolve`).
+Each session Playground starts loads a set written for its repo the moment it starts, so a skill an extension adds reaches the next session with no install (`playground orgs resolve`); the set leaves out a skill whose `SKILL.md` the repo's own `.claude/skills` already holds byte for byte, so the session lists it once.
 A session you start yourself gets the home set, `ws-home@ws`, which `scripts/link-skills.sh` installs for your user and renews on each run (`playground orgs home`); `scripts/link-skills.sh` also removes a link in `~/.claude/skills` at a name the home set ships when the link points into Playground's own checkout, and keeps a link that points anywhere else, your own skill, naming the clash in one line.
 `.agents/skills`, `.claude/skills` and `.github/skills` all link to `skills/zerostarter`, so an agent in this repo reads the starter's skills from the place its tool looks.
 
@@ -36,7 +36,7 @@ An org is a set of rules, guard lists and skills for the repos of one GitHub org
 
 A skill resolves by its folder's name, from the first scope that holds it, and only that copy loads:
 
-1. each scope in `ext.order`'s order, your login's first when the list leaves it out, an extension kept only when `ext.links` links it to the repo's GitHub owner or to every repo (`*`), so an org can override a skill in its own repos;
+1. each scope in `ext.order`'s order, your login's first when the list leaves it out, an extension kept only when `ext.links` links it to the repo's GitHub owner, to the org whose own folder `~/<org>` holds a folder with no GitHub origin, or to every repo (`*`), so an org can override a skill in its own repos;
 2. each bundled extension `ext.bundled` turns on, from `extensions/<name>/skills` in the checkout, unless an installed extension already has that name; one that is off loads no skill;
 3. core: `skills/playground`, then `skills/zerostarter`, then `extensions/core/skills`.
 

@@ -20,6 +20,7 @@ import type { GroupImperativeHandle } from "react-resizable-panels"
 import { AppManager } from "@/components/apps/app-manager"
 import { AppPane } from "@/components/apps/app-pane"
 import { AsideDocs, AsideDocsIcon, AsideDocsPane } from "@/components/dashboard/aside-docs"
+import { SPLIT_MIN, letGo, splitCookie, type Split } from "@/components/dashboard/aside-split"
 import { COMPOSER_ID, Composer, composerId } from "@/components/dashboard/composer"
 import { CountBadge, cornerMarks } from "@/components/dashboard/count-badge"
 import { useDashboard } from "@/components/dashboard/dashboard"
@@ -29,6 +30,7 @@ import { Pages } from "@/components/dashboard/pages"
 import { useDotSources } from "@/components/dashboard/tab-dot"
 import { WorkerStream } from "@/components/dashboard/worker-stream"
 import { Hint } from "@/components/hint"
+import { PAGE_PANE } from "@/components/shell/page-pane"
 import { SidebarFloatingTrigger } from "@/components/shell/sidebar-floating-trigger"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
@@ -124,9 +126,6 @@ export const SIDE_TOP = "pt-3"
 if (typeof window !== "undefined") moveOldKeys(window.localStorage)
 
 const AUTO_HIDE_KEY = "playground:aside:autoHide"
-// how near the middle, in percent of the width, a let-go drag of the split snaps to it
-const SNAP = 5
-export const snapsToMiddle = (page: number) => page !== 50 && Math.abs(page - 50) < SNAP
 // the chat keeps the same 12px under its composer as above it; the scrolling panes run to the bottom edge, so no black band sits under the floating bar
 const CHAT_BOTTOM = "mb-3"
 // a wide screen's tab bar floats 12px over the aside's bottom edge, so each pane leaves the bar's 42px (a 32px square, p-1 and a border) and a 14px gap under its last line, the nearest step past 12px
@@ -192,12 +191,12 @@ export const pageIcon = (pathname: string) =>
   pathname.split("/")[2] === "threads" ? RiChatThreadLine : RiWindowLine
 
 // Every dashboard page with the aside window beside it: its Inbox, Playground's chat, your apps and, on a session's own view, its Pages, then the Apps manager, in one resizable split the dashboard's layout draws once, so its sizes and its picked tab hold from page to page. A phone shows one at a time: the page's own tab first, then the aside's, in one bar at the bottom.
-export function DashboardAside({ children }: { children: ReactNode }) {
+export function DashboardAside({ children, split }: { children: ReactNode; split: Split | null }) {
   const { allowed, approvals, asideChat, dispatcher, dispatchers, outbox, selected } =
     useDashboard()
   const pathname = usePathname()
   const view = asideView(pathname, selected, dispatcher)
-  const split = useRef<GroupImperativeHandle>(null)
+  const splitRef = useRef<GroupImperativeHandle>(null)
   const prefs = useAppPrefs()
   const apps = dashboardApps()
   const shown = shownApps(apps, prefs)
@@ -282,7 +281,7 @@ export function DashboardAside({ children }: { children: ReactNode }) {
     setTab("inbox")
     setSide("inbox")
   }, [at])
-  // a link to an inbox item (a Waiting on your inbox badge, Playground's row, an answer's chip) opens the Inbox tab, where the list scrolls to it, a shelved one's included
+  // a link to an inbox item (a Waiting on your inbox badge, Playground's row, an answer's chip) opens the Inbox tab, where the list scrolls to it, a click opening a shut shelf's first
   useNeedsYouTarget(Boolean(inbox.data), (anchor) => {
     const { archived = [], items = [], snoozed = [] } = inbox.data ?? {}
     if (inboxTarget(anchor, [...items, ...archived, ...snoozed])) {
@@ -398,7 +397,7 @@ export function DashboardAside({ children }: { children: ReactNode }) {
             keepMounted
             hidden={false}
             data-dashboard-page=""
-            className="col-start-1 row-start-1 flex min-h-0 flex-col overflow-y-auto data-hidden:invisible"
+            className={cn("col-start-1 row-start-1 data-hidden:invisible", PAGE_PANE)}
           >
             {children}
           </TabsContent>
@@ -434,17 +433,20 @@ export function DashboardAside({ children }: { children: ReactNode }) {
   return (
     <div className="h-svh max-md:[&>div>:first-child]:basis-full! max-md:[&>div>:not(:first-child)]:hidden!">
       <ResizablePanelGroup
-        groupRef={split}
+        groupRef={splitRef}
         orientation="horizontal"
-        // a drag let go near the middle settles on it
-        onLayoutChanged={(layout, { isUserInteraction }) => {
-          const page = layout.page ?? 50
-          if (isUserInteraction && snapsToMiddle(page))
-            split.current?.setLayout({ aside: 50, page: 50 })
+        defaultLayout={split ?? undefined}
+        // a drag let go near the middle settles on it, and the cookie keeps where the owner let go for the next load
+        onLayoutChanged={(layout, { isUserInteraction, requestedLayout }) => {
+          if (!isUserInteraction) return
+          const page = requestedLayout?.page ?? layout.page ?? 50
+          const kept = letGo(page)
+          if (kept !== page) splitRef.current?.setLayout({ aside: 50, page: 50 })
+          document.cookie = splitCookie(kept)
         }}
       >
-        <ResizablePanel id="page" defaultSize="50%" minSize="30%">
-          <div data-dashboard-page="" className="flex h-full flex-col overflow-y-auto">
+        <ResizablePanel id="page" defaultSize="50%" minSize={`${SPLIT_MIN}%`}>
+          <div data-dashboard-page="" className={cn("h-full", PAGE_PANE)}>
             {children}
           </div>
         </ResizablePanel>
@@ -453,7 +455,7 @@ export function DashboardAside({ children }: { children: ReactNode }) {
           withHandle
           className="hover:[&>div]:bg-muted-foreground focus-visible:[&>div]:bg-muted-foreground [&>div]:bg-muted-foreground/40 [&>div]:h-10 [&>div]:rounded-sm"
         />
-        <ResizablePanel id="aside" defaultSize="50%" minSize="30%">
+        <ResizablePanel id="aside" defaultSize="50%" minSize={`${SPLIT_MIN}%`}>
           <AsideDocs value={openInAside}>
             <Tabs
               value={side}

@@ -139,19 +139,30 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
     expect(built.env.CLAUDE_CODE_ENABLE_TELEMETRY).toBe("0")
   })
 
+  // the dispatcher reads a file of its own, since the memory trial starts it on (ADR 0022), and the optimizer the managers' shared file (spawn-manager-deny.test.ts)
   test.each([
-    ["a worker", ["worker", "worker-brave-otter", "b.md"]],
-    ["a runner", ["runner", "runner-calm-heron", "b.md"]],
-    ["a reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"]],
-    ["a tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"]],
-    ["the dispatcher", ["column", "dispatcher", "dispatcher", "ops", "w1:p2", "h.md"]],
-    ["an optimizer", ["manager", "optimizer", "b.md"]],
-  ])("%s keeps today's settings, with no sandbox", async (_, args) => {
+    ["a worker", ["worker", "worker-brave-otter", "b.md"], "factory-settings-400k.json"],
+    ["a runner", ["runner", "runner-calm-heron", "b.md"], "factory-settings-400k.json"],
+    [
+      "a reviewer",
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
+      "factory-settings-400k.json",
+    ],
+    [
+      "a tester",
+      ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1"],
+      "factory-settings-400k.json",
+    ],
+    [
+      "the dispatcher",
+      ["column", "dispatcher", "dispatcher", "ops", "w1:p2", "h.md"],
+      "factory-settings-400k-memory-dispatcher.json",
+    ],
+    ["an optimizer", ["manager", "optimizer", "b.md"], "factory-settings-manager-400k.json"],
+  ])("%s keeps today's settings, with no sandbox", async (_, args, file) => {
     const r = await spawn(args, [])
     expect(r.code, r.err).toBe(0)
-    expect(launchAfterRm(r)).toContain(
-      ` --settings ${settingsOf(r, "factory-settings-400k.json")} `,
-    )
-    expect(builtOf(r, "factory-settings-400k.json").sandbox).toBeUndefined()
+    expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, file)} `)
+    expect(builtOf(r, file).sandbox).toBeUndefined()
   })
 })

@@ -2,15 +2,16 @@
 """login-flip.py: say when the factory should move to another Claude account, and to which (dispatcher, 14 Oct:
 the switch is the factory's, never an ask to the owner). It reads usage.json, which follows the stored login, and reads each other
 account in ACCOUNTS that has a long-lived token in the Keychain (service usage.keychainService) from one 1-token call's rate-limit
-headers, at most every 14 minutes. The current account is login-flip.json's `factory`, else the stored login. Ending accounts (ENDS) come first: the first usable one in ending_order() is the target whenever
+headers, at most every 14 minutes. The current account reads through the pool rule beat.factory_login carries: login-flip.json's `factory` while it is a pool
+account whose token is still in the Keychain, else the pool account the split gives the best share, else the stored login. Ending accounts (ENDS) come first: the first usable one in ending_order() is the target whenever
 the factory is on another account; with none usable, once the current login reaches its line, the renewing account with MIN_ROOM
 whose week resets soonest. It names the target once ("switch due to ..."), or says once that no account has room. Prints nothing otherwise.
-It also writes the split, each account's share of new sessions (week left per hour to its deadline, a fifth of that for an own account while that deadline is over a day away), which spawn.sh's no-account default follows. --dry-run reads no token and changes nothing. State in login-flip.json in the state folder, ~/.playground/ops/usage."""
+It also writes the split, each account's share of new sessions (week left per hour to its deadline, a fifth of that for an own account while that deadline is over a day away, none for one parked until a later time), which spawn.sh's no-account default follows. --dry-run reads no token and changes nothing. State in login-flip.json in the state folder, the data folder's ops/usage."""
 import datetime, json, os, shutil, subprocess, sys, time
 
-HERE = os.path.expanduser("~/.playground/ops/usage")  # the state folder by name, so a run by its repo path still reads the live state
+HERE = os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state
 sys.path.insert(0, os.path.dirname(HERE))
-from beat import OPS, checkout, setting  # noqa: E402
+from beat import OPS, checkout, factory_login, setting  # noqa: E402
 
 # the stored login's own reading: usage.json names the account the factory spends (its `factory` key below), which may be another
 STORED = os.path.join(HERE, "stored-login.json")
@@ -33,6 +34,8 @@ ENDING_FIRST, ENDS_LEAD = [a["email"] for a in ROWS if a.get("endsFirst")], 2 * 
 RENEWS = {a["email"]: a["renews"] for a in ROWS if "renews" in a}  # each renewing account's billing day of the month (None until known), for the dashboard's Renews lines
 # the owner, 3 Nov: the accounts the owner pays for personally (own) are spent less, a fifth of their weight, unless their deadline is within a day, so their week left is still spent before it resets
 OWN, OWN_SHARE, OWN_SOON = {a["email"] for a in ROWS if a.get("own")}, 0.2, 24 * 3600
+# an account parked until a time (parkedUntil) takes no new session before it, so its week is kept, e.g. for the owner until its reset
+PARKED = {a["email"]: datetime.datetime.fromisoformat(a["parkedUntil"].replace("Z", "+00:00")).timestamp() for a in ROWS if a.get("parkedUntil")}
 PROBE_MODEL = setting("models.probe")
 
 
@@ -61,8 +64,10 @@ def probe(email):
     five = h.get("anthropic-ratelimit-unified-5h-utilization") is not None
     got = {"five": round(f("5h-utilization") * 100) if five else None, "fiveReset": f("5h-reset") if five else None, "week": round(f("7d-utilization") * 100), "weekReset": f("7d-reset")}
     # dispatcher, 16 Oct: a limited account is read once and not again until its reset ("never retry, never fall back to another account")
-    if h.get("anthropic-ratelimit-unified-status") == "rejected":
-        got["limitedUntil"] = got["weekReset"] if got["week"] >= 100 or (got["five"] or 0) < 100 else got["fiveReset"]
+    if got["week"] >= 100:
+        got["limitedUntil"] = got["weekReset"]  # a full week is limited until its reset, whatever the status header says
+    elif h.get("anthropic-ratelimit-unified-status") == "rejected":
+        got["limitedUntil"] = got["weekReset"] if (got["five"] or 0) < 100 else got["fiveReset"]
     return got
 
 
@@ -92,7 +97,7 @@ except (OSError, ValueError):
     state = {}
 now = time.time()
 seen = state.setdefault("seen", {})
-current = state.get("factory") or acct  # the account the factory's sessions run on (spawn.sh --account), else the stored login
+current = factory_login(state.get("factory"), ACCOUNTS, (state.get("split") or {}).get("shares") or {}, SERVICE) or acct  # the account the factory's sessions run on (spawn.sh --account), the pool rule beat.py carries
 # a usage.json run.py took from a probe already came from seen, and stamping it again would stop run.py's next probe
 if acct in ACCOUNTS and u.get("source") != "token/ratelimit-headers":
     last, seen[acct] = seen.get(acct) or {}, {"at": now}
@@ -145,9 +150,9 @@ def ends_at(a):
 
 
 def usable(a):
-    """An account: not within ENDS_LEAD of its end, not refused, its week under 100% and its 5-hour window under FIVE_H_AT or reset."""
+    """An account: not parked, not within ENDS_LEAD of its end, not refused, its week under 100% and its 5-hour window under FIVE_H_AT or reset."""
     s, end = seen.get(a) or {}, ends_at(a)
-    if (end is not None and now >= end - ENDS_LEAD) or now < s.get("limitedUntil", 0):
+    if now < PARKED.get(a, 0) or (end is not None and now >= end - ENDS_LEAD) or now < s.get("limitedUntil", 0):
         return False
     if s.get("weekReset") and now >= s["weekReset"]:
         week = 0
@@ -159,7 +164,7 @@ def usable(a):
 
 
 def weight(a):
-    """Week points left per hour to the account's deadline: its week reset or, for an ending account, ENDS_LEAD before its end, whichever comes first, an own account's OWN_SHARE of that while its deadline is over OWN_SOON away; 0 when it is not usable or its deadline is unknown or past."""
+    """Week points left per hour to the account's deadline: its week reset or, for an ending account, ENDS_LEAD before its end, whichever comes first, an own account's OWN_SHARE of that while its deadline is over OWN_SOON away; 0 when it is not usable (a parked one included) or its deadline is unknown or past."""
     end, reset = ends_at(a), resets(a)
     deadline = min(reset, end - ENDS_LEAD) if end is not None else reset
     if not usable(a) or not now < deadline < float("inf"):
@@ -226,6 +231,10 @@ else:
 weights = {a: weight(a) for a in TARGETS}
 total = sum(weights.values())
 state["split"] = {"at": now, "shares": {a: w / total if total else 0 for a, w in weights.items()}}
+
+# an account that leaves the pool drops out of `accounts`, so its readers probe and count pool accounts alone
+if "accounts" in state:
+    state["accounts"] = [a for a in state["accounts"] if a in TARGETS]
 
 # the rotation as data, so ops-usage copies it into usage.json for the dashboard's usage tooltip
 state["rotation"] = {"pool": [{"account": a, "ending": a in ENDS, "endsAt": ENDS.get(a), "renewsOn": RENEWS.get(a)} for a in TARGETS]}

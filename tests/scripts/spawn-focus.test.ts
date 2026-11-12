@@ -34,7 +34,7 @@ describe("focus holds every new session", () => {
     const until = new Date(Date.now() + 3_600_000)
     for (const role of ["reviewer", "tester"]) {
       const own = await spawn(
-        ["column", role, `${role}-owner`, "owner-desk", "w1:p2", "r.md"],
+        ["column", role, `${role}-owner`, "owner-desk", "w1:p2", "r.md", "--pr", "1"],
         [],
         {},
         script,
@@ -44,7 +44,7 @@ describe("focus holds every new session", () => {
       expect(own.code).toBe(0)
     }
     const other = await spawn(
-      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"],
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
       [],
       {},
       script,
@@ -66,7 +66,7 @@ describe("focus holds every new session", () => {
     })
     const resume = (name: string) =>
       spawn(
-        ["resume", name, root, "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"],
+        ["resume", name, root, "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27", "--pr", "1"],
         [],
         { ROSTER_JSON },
         script,
@@ -82,45 +82,68 @@ describe("focus holds every new session", () => {
     expect(other.err).toContain(`focus stands for owner-desk until ${until.toISOString()}`)
   })
 
-  test("on, a --firefighting start goes on while a firefighting trigger file stands, and is refused while none does", async () => {
+  test("on, a --priority start goes on while priority.json stands, and is refused while none does", async () => {
     const until = new Date(Date.now() + 3_600_000)
-    for (const trigger of ["firefighting-stop.json", "firefighting-headstart.json"]) {
-      const r = await spawn([...lead, "--firefighting"], [], {}, script, undefined, (home) => {
-        focus(until)(home)
-        writeFileSync(join(home, ".playground", trigger), "{}")
-      })
-      expect(r.code).toBe(0)
-    }
-    const none = await spawn([...lead, "--firefighting"], [], {}, script, undefined, focus(until))
+    const r = await spawn([...lead, "--priority"], [], {}, script, undefined, (home) => {
+      focus(until)(home)
+      writeFileSync(join(home, ".playground", "priority.json"), "{}")
+    })
+    expect(r.code).toBe(0)
+    const none = await spawn([...lead, "--priority"], [], {}, script, undefined, focus(until))
     expect(none.code).not.toBe(0)
     expect(placing(none)).toEqual([])
     expect(none.err).toContain("--priority starts only while a priority file stands in")
   })
 
-  // priority.json and the old stop and head-start files pass focus; a job's own start file, priority-start.json or its old name, passes the load and slots gates alone (#1334)
+  // every priority file passes focus: priority.json, an org's own priority-<name>.json, and a job's own start file, priority-start.json, so no gate but the machine's own delays a job's ticket start (#1334, #1881)
   test.each([
-    ["--priority", "priority.json", true],
-    ["--firefighting", "priority.json", true],
-    ["--priority", "firefighting-stop.json", true],
-    ["--priority", "priority-start.json", false],
-    ["--priority", "firefighting-start.json", false],
-    ["--firefighting", "firefighting-start.json", false],
-  ] as [string, string, boolean][])(
-    "on, a %s start while %s stands passes focus: %p",
-    async (flag, file, passes) => {
-      const until = new Date(Date.now() + 3_600_000)
-      const r = await spawn([...lead, flag], [], {}, script, undefined, (home) => {
-        focus(until)(home)
-        writeFileSync(join(home, ".playground", file), "{}")
-      })
-      if (passes) expect(r.code).toBe(0)
-      else {
-        expect(r.code).not.toBe(0)
-        expect(placing(r)).toEqual([])
-        expect(r.err).toContain(`focus stands for`)
-      }
+    "priority.json",
+    "priority-stop.json",
+    "priority-headstart.json",
+    "priority-start.json",
+  ])("on, a --priority start while %s stands passes focus", async (file) => {
+    const until = new Date(Date.now() + 3_600_000)
+    const r = await spawn([...lead, "--priority"], [], {}, script, undefined, (home) => {
+      focus(until)(home)
+      writeFileSync(join(home, ".playground", file), "{}")
+    })
+    expect(r.err).not.toContain("focus stands for")
+    expect(r.code).toBe(0)
+  })
+
+  // the machine's own gates still hold a job's start: memory pressure, and swap-ins while free reads high
+  test.each([
+    [{ FAKE_PRESSURE: "4" }, "the memory gate holds it: pressure level is 4"],
+    [
+      { FAKE_FREE: "62", FAKE_PRESSURE: "1", FAKE_SWAPINS: "150" },
+      "the memory gate holds it: swap-ins are 150/s",
+    ],
+  ] as [Record<string, string>, string][])(
+    "a --priority start while priority-start.json stands still meets the memory gate: %p",
+    async (env, refusal) => {
+      const r = await spawn(
+        ["worker", "worker-brave-otter", "b.md", "--priority"],
+        [],
+        env,
+        script,
+        undefined,
+        (home) => writeFileSync(join(home, ".playground", "priority-start.json"), "{}"),
+      )
+      expect(r.code).not.toBe(0)
+      expect(placing(r)).toEqual([])
+      expect(r.err).toContain(refusal)
     },
   )
+
+  test("on, a --priority start passes focus while a job's priority-start.json stands beside an org's own priority-stop.json", async () => {
+    const until = new Date(Date.now() + 3_600_000)
+    const r = await spawn([...lead, "--priority"], [], {}, script, undefined, (home) => {
+      focus(until)(home)
+      for (const file of ["priority-start.json", "priority-stop.json"])
+        writeFileSync(join(home, ".playground", file), "{}")
+    })
+    expect(r.code).toBe(0)
+  })
 
   test("lapsed, past its end, the start goes on", async () => {
     const r = await spawn(lead, [], {}, script, undefined, focus(new Date(Date.now() - 60_000)))

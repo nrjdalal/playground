@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -134,6 +135,7 @@ export type Session = { name?: string; pid: number; procStart?: string; raw?: st
 // The factory's settings as link-skills.sh links them, which every launch rebuilds into its own file with the factory's one compact window.
 export const FACTORY_SETTINGS = {
   autoCompactWindow: 400000,
+  autoMemoryEnabled: false,
   env: { KEEP: "1" },
   hooks: {
     PreToolUse: [{ hooks: [{ command: "no-env-dump", type: "command" }], matcher: "Bash" }],
@@ -325,6 +327,11 @@ export async function spawn(
       ranIn(config, dir, name, id)
   // Every case runs in herdr, the one runtime spawn.sh starts in, so each home holds the fake herdr's pin; a case's own setup replaces it.
   herdrPin()(home)
+  // SCRATCH_DATA runs the case on a scratch data folder, as a run beside the live one does: the seeded folder moves out of the home's .playground, and PLAYGROUND_DATA_DIR names it.
+  if (env.SCRATCH_DATA) {
+    renameSync(join(home, ".playground"), join(home, "scratch-data"))
+    env = { ...env, PLAYGROUND_DATA_DIR: join(home, "scratch-data") }
+  }
   setup?.(home)
   // a worker or checker starts with a title, so each case gives one unless it names its own or NO_TITLE leaves it off.
   const titled =
@@ -356,6 +363,8 @@ export async function spawn(
     roster: await read("roster.args"),
     rosterScript: (await read("roster.script"))?.[0],
     rosterLog: (await read("roster.log"))?.filter(Boolean),
+    rosterAtClose: (await read("roster-at-close.log"))?.filter(Boolean),
+    rosterAtRun: (await read("roster-at-run.log"))?.filter(Boolean),
     security: (await read("security.args"))?.filter(Boolean),
   }
 }
@@ -432,13 +441,23 @@ export const others = (n: number, from = 1000): Session[] =>
 export const workers = (n: number, from = 2000): Session[] =>
   Array.from({ length: n }, (_, k) => ({ name: `worker-w-${k}`, pid: from + k }))
 
-// A fake herdr at the path its pin names: it logs each call as one line of words each ended by a unit separator, answers placement as herdr 0.9.5 does, and shows the screens FAKE_SCREENS lists (trust, trustcut, mcp, mcpstatus, cut, bare, blank, ready) one row per wait, each matched against the wait's regex.
+// A fake herdr at the path its pin names: it logs each call as one line of words each ended by a unit separator, answers placement as herdr 0.9.5 does, and shows the screens FAKE_SCREENS lists (trust, trustcut, mcp, mcpother, mcpmany, mcpmanyother, mcpplugin, mcpseven, mcpsevenother, mcpstatus, cut, bare, blank, ready) one row per wait, each matched against the wait's regex, and a picker's whole screen to a read, its pointer moved by the keys sent since, FAKE_LOST_KEY naming one herdr dropped.
 const herdrBin = join(bin, "herdr-fake")
 writeFileSync(
   herdrBin,
   `#!/bin/bash
 printf '%s\\037' "$@" >> "$HOME/herdr.calls"; echo >> "$HOME/herdr.calls"
 echo "$HERDR_SESSION $HERDR_SOCKET_PATH $HERDR_CONFIG_PATH" > "$HOME/herdr.env"
+# a spawn.sh close of the named session landing during this call, which ends its roster row
+ends() {
+  python3 -I -c 'import json, sys
+p = sys.argv[1]
+r = json.load(open(p))
+for a in r["agents"]:
+    if a.get("name") == sys.argv[2]:
+        a["status"] = "ended"
+json.dump(r, open(p, "w"))' "$HOME/.playground/roster.json" "$1"
+}
 case "$1 \${2:-}" in
   "--version "*) echo "herdr \${FAKE_HERDR_VERSION:-0.9.5}" ;;
   "status server") [ -n "$FAKE_HERDR_DOWN" ] && echo '{"running":false}' || echo '{"running":true}' ;;
@@ -450,12 +469,19 @@ case "$1 \${2:-}" in
     echo '{"result":{"pane":{"pane_id":"w1:p7","workspace_id":"w1"}}}' ;;
   "pane list")
     [ -z "$FAKE_HERDR_LIST_FAIL" ] || exit 1
+    [ -z "$FAKE_HERDR_LIST_ENDS" ] || ends "$FAKE_HERDR_LIST_ENDS"
     cat "$HOME/herdr.panes" 2>/dev/null || echo '{"result":{"panes":[]}}' ;;
   "pane rename")
     [ -z "$FAKE_HERDR_RENAME_EATS" ] || rm -f "$HOME"/.playground/launch/*.herdr
     [ -z "$FAKE_HERDR_RENAME_FAIL" ] || { echo "error: label taken" >&2; exit 1; } ;;
-  "pane close") [ -z "$FAKE_HERDR_CLOSE_FAIL" ] || { echo "error: pane w2:p3 not found" >&2; exit 1; } ;;
+  "pane close")
+    # the roster writes made before the pane closes, which a restore running beside the close reads
+    cp "$HOME/roster.log" "$HOME/roster-at-close.log" 2>/dev/null || : > "$HOME/roster-at-close.log"
+    [ -z "$FAKE_HERDR_CLOSE_FAIL" ] || { echo "error: pane w2:p3 not found" >&2; exit 1; } ;;
   "pane run")
+    # the roster writes made before the session's launch runs, which a checker's first tool call reads
+    cp "$HOME/roster.log" "$HOME/roster-at-run.log" 2>/dev/null || : > "$HOME/roster-at-run.log"
+    [ -z "$FAKE_HERDR_RUN_ENDS" ] || ends "$FAKE_HERDR_RUN_ENDS"
     [ -z "$FAKE_HERDR_RUN_SAYS" ] || { echo "$FAKE_HERDR_RUN_SAYS" >&2; exit 1; }
     [ -z "$FAKE_HERDR_RUN_FAIL" ] || exit 1 ;;
   "pane wait-output")
@@ -465,7 +491,10 @@ case "$1 \${2:-}" in
     case "\${screens[$n]:-ready}" in
       trust) l="❯ 1. Yes, I trust this folder" ;;
       trustcut) l="❯ 1. Yes, I trust" ;;
-      mcp) l="New MCP server found in this project:" ;;
+      mcp) l="New MCP server found in this project: fs" ;;
+      mcpother) l="New MCP server found in this project: evil" ;;
+      mcpmany | mcpmanyother | mcpplugin) l="2 new MCP servers found in this project" ;;
+      mcpseven | mcpsevenother) l="7 new MCP servers found in this project" ;;
       mcpstatus) l="⏵⏵ bypass permissions on · 1 MCP server failed" ;;
       cut) l="⏵⏵ bypass permissions" ;;
       bare) l="⏵⏵" ;;
@@ -475,6 +504,50 @@ case "$1 \${2:-}" in
     # herdr matches the regex against one screen row at a time, so a row it does not match times out
     [[ $l =~ $5 ]] || { echo '{"error":{"code":"timeout","message":"timed out waiting for output match"}}'; exit 1; }
     printf '{"result":{"matched_line":"%s"}}\\n' "$l" ;;
+  "pane read")
+    n=$(( $(cat "$HOME/herdr.screen" 2>/dev/null || echo 1) - 1 ))
+    IFS=, read -ra screens <<<"\${FAKE_SCREENS:-ready}"
+    one= many=
+    case "\${screens[$n]:-ready}" in
+      mcp) one=fs ;;
+      mcpother) one=evil ;;
+      mcpmany) many="fs|git" ;;
+      mcpmanyother) many="fs|evil" ;;
+      mcpplugin) many="fs|git (from plugin tools)" ;;
+      mcpseven) many="fs|git|a|b|c|d|e" ;;
+      mcpsevenother) many="fs|git|a|b|c|d|evil" ;;
+    esac
+    # the keys sent since the screen's wait, less the FAKE_LOST_KEY-th, which herdr dropped
+    keys=$(tr '\\037' ' ' < "$HOME/herdr.calls" | awk -v lost="\${FAKE_LOST_KEY:-0}" '$2 == "wait-output" {k = ""; c = 0} $2 == "send-keys" && ++c != lost {k = k " " $4} END {print k}')
+    ups=0 downs=0
+    for key in $keys; do
+      [ "$key" = up ] && ups=$((ups + 1))
+      [ "$key" = down ] && downs=$((downs + 1))
+    done
+    if [ -n "$one" ]; then
+      rows=("Use this MCP server" "Use this and all future MCP servers in this project" "Continue without using this MCP server")
+      focus=$((2 - ups + downs))
+      [ "$focus" -ge 0 ] || focus=0
+      [ "$focus" -le 2 ] || focus=2
+      printf '%s\\n' "New MCP server found in this project: $one" "MCP servers may execute code or access system resources."
+      for i in 0 1 2; do
+        [ "$i" = "$focus" ] && p="❯" || p=" "
+        printf '%s %s\\n' "$p" "\${rows[$i]}"
+      done
+    elif [ -n "$many" ]; then
+      IFS="|" read -ra names <<<"$many"
+      # the picker shows five servers at a time and scrolls with the focus; a down past the last server marks "Enable selected"
+      focus=$downs
+      [ "$focus" -le "\${#names[@]}" ] || focus=\${#names[@]}
+      shown=$((focus < \${#names[@]} ? focus : \${#names[@]} - 1))
+      from=$((shown > 4 ? shown - 4 : 0))
+      printf '%s\\n' "\${#names[@]} new MCP servers found in this project" "Select any you wish to enable." "MCP servers may execute code or access system resources."
+      for ((i = from; i < from + 5 && i < \${#names[@]}; i++)); do
+        [ "$i" = "$focus" ] && p="❯" || p=" "
+        printf '%s [✔] %s\\n' "$p" "\${names[$i]}"
+      done
+      [ "$focus" = "\${#names[@]}" ] && echo "❯   Enable selected" || echo "    Enable selected"
+    fi ;;
 esac
 exit 0
 `,

@@ -48,7 +48,7 @@ describe("a Yard message's links", () => {
     const view = await read("channel-view.tsx")
     const body = view.slice(view.indexOf("export function YardMessageView"))
     expect(body.slice(0, body.indexOf("\n}\n"))).toContain("<MessageLinks links={message.links} />")
-    expect(view).toContain("<YardMessageView key={message.id}")
+    expect(view).toContain("<YardMessageView message={message}")
     expect(await read("approve.tsx")).toContain("<YardMessageView message={message}")
   })
 })

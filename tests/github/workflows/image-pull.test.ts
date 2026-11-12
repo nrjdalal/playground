@@ -54,6 +54,7 @@ describe("the Suite job pulls every image a test starts before the shard runs", 
   })
 
   test("an image counts only where a test spawns docker run with it", () => {
+    // not a container start: the rows are sample source text the parser below reads, nothing here spawns
     const source = [
       'const IMAGE = "postgres:18-alpine"',
       'Bun.spawnSync(["docker", "run", "-d", "--rm", "-p", "127.0.0.1::5432", IMAGE])',

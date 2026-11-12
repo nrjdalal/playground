@@ -67,13 +67,14 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
     )
     expect(command).toContain(`~/.playground/brief-${OLD.dispatcher}-2.md`)
     expect(command).not.toContain("Report to")
-    expect(pinOf(r, `${OLD.dispatcher}-2`)).toBe("glm")
+    expect(pinOf(r, `${OLD.dispatcher}-2`)).toBe("claude-code glm")
     expect(r.roster).toEqual([
       "set",
       `${OLD.dispatcher}-2`,
       "kind=dispatcher",
       "surface=",
       `task=brief-${OLD.dispatcher}-2.md`,
+      "memory=off",
     ])
   })
 
@@ -104,7 +105,7 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
       `CLAUDE_CODE_OAUTH_TOKEN="$tk" env PLAYGROUND_ROLE=dispatcher claude -n ${OLD.dispatcher}-2 --model claude-opus-5-5 `,
     )
     expect(command).not.toContain("api.z.ai")
-    expect(pinOf(r, `${OLD.dispatcher}-2`)).toBe("claude")
+    expect(pinOf(r, `${OLD.dispatcher}-2`)).toBe("claude-code claude")
   })
 
   test.each([
@@ -489,7 +490,7 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
       .filter((l) => !l.startsWith("spawn.sh: "))
     expect(lines[0]).toStartWith("  spawn.sh worker ")
     expect(r.err).toContain("  --effort <level> ")
-    expect(lines.at(-1)).toStartWith("    The runtime is recorded at the start")
+    expect(lines.at(-1)).toStartWith("    The runtime is recorded at every start and resume")
   })
 
   // The optimizer is a manager that reports to OLD.dispatcher and runs on Claude (brief-optimizer.md), so it starts as a lead.
@@ -514,13 +515,14 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
     )
     expect(command).toContain("~/.playground/brief-optimizer.md")
     expect(command).toContain("(to: dispatcher)")
-    expect(pinOf(r, "optimizer")).toBe("claude")
+    expect(pinOf(r, "optimizer")).toBe("claude-code claude")
     expect(r.roster).toEqual([
       "set",
       "optimizer",
       "kind=optimizer",
       "surface=",
       "task=brief-optimizer.md",
+      "memory=off",
     ])
   })
 
@@ -566,7 +568,16 @@ describe("the typed launch line stays under the 1,024-byte typed-line limit", ()
     { label: "an account worker", args: ["worker", NAME, BRIEF, "--account", email] },
     {
       label: "a checker column",
-      args: ["column", "reviewer", "reviewer-long-name-of-many-words", "worker-x", "w1:p2", BRIEF],
+      args: [
+        "column",
+        "reviewer",
+        "reviewer-long-name-of-many-words",
+        "worker-x",
+        "w1:p2",
+        BRIEF,
+        "--pr",
+        "1",
+      ],
     },
     {
       label: "a resume with a brief",

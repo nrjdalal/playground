@@ -1,5 +1,9 @@
 # Playground
 
+> [!WARNING]
+> Playground is experimental. It changes every day and can break.
+> The main product is [ZeroSDK](https://github.com/nrjdalal/zerosdk), which comes later in 2027.
+
 Run a team of Claude agents.
 
 Playground runs the Claude Code sessions on your Mac as a team, with a Dashboard to watch and steer it.
@@ -10,13 +14,18 @@ Playground runs on your Mac only. It reads every session's transcript, so it nev
 
 Built on top of [ZeroStarter](https://zerostarter.dev).
 
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset=".github/assets/readme-overview-light.png">
+  <img alt="The Dashboard: your sessions with their lights in the sidebar, the chat with your dispatcher, and an Inbox ask showing a page before and after" src=".github/assets/readme-overview.png">
+</picture>
+
 ## Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nrjdalal/playground/main/install.sh | bash
 ```
 
-`install.sh` installs every tool Playground needs that is missing (`bun`, `claude`, `docker`, `gh`, `git`, `node`, `python3` and herdr, the terminal your sessions run in), signs Claude Code and GitHub in when it runs in a terminal, clones Playground into `~/playground`, builds it, links the `playground` command into `~/.bun/bin`, and starts it once every required tool is there. It prints a **Left for you** list of anything it could not do. A second run changes nothing.
+`install.sh` installs every tool Playground needs that is missing (`bun`, `claude`, `docker`, `gh`, `git`, `node`, `python3`, `uv` and herdr, the terminal your sessions run in), signs Claude Code and GitHub in when it runs in a terminal, clones Playground into `~/playground`, builds it, links the `playground` command into `~/.bun/bin`, and starts it once every required tool is there. It prints a **Left for you** list of anything it could not do. A second run changes nothing.
 
 You need a Mac, a Claude account and a GitHub account.
 
@@ -27,7 +36,7 @@ You need a Mac, a Claude account and a GitHub account.
 
    > **Warning**: the local database listens on every interface with the user, password and database `postgres`. Anyone who can reach this Mac on its port can sign in to it.
 
-3. The same chat then lists the steps left, each ticked once done: GitHub, **Set up settings** (your settings in a private repo under your GitHub login), a Claude account, and **Start Alpha**.
+3. The same chat then lists the steps left, each ticked once done: GitHub, **Set up settings** (your settings in a private repo under your GitHub login), **Harness** (Claude Code or Codex for Alpha), a Claude account when the pick is Claude Code, and **Start Alpha**.
 
    Install does the first two when it can, and its **Left for you** list names any it could not.
 
@@ -38,12 +47,20 @@ When something does not start, run `playground doctor`, or see [Troubleshooting]
 ## What you get
 
 - **Chat**: talk to your dispatcher, send it files, and run its skills from the `/` menu.
-- **Inbox**: answer the decisions and drafts your sessions post, and read their updates.
-- **Agents**: each session's status at a glance, with its pages.
+- **Threads**: keep a conversation with your dispatcher to one topic; pin, rename or archive it.
+- **Inbox**: answer the decisions and drafts your sessions post, see the pages and pictures they attach, and read their updates.
+- **Agents**: each session's light at a glance: blue while it works, orange while it waits on something, red when it needs you, green once its work has merged. Each has a view of its own, whose Pages tab holds the pages it made.
+- **Sessions**: every session this Mac has stored, with its transcript, after the session has ended too.
+- **Changelog**: every merged change, in plain words.
+- **System**: what every agent is doing, what is queued, what needs you, and this Mac's memory, load and disk.
 - **The team**: managers route and plan the work, workers build it, and a reviewer scores each PR until it reaches 5/5.
 - **Skills**: every session gets Playground's skills, and an org adds its own in an extension.
 - **Settings and extensions**: your own values, rules and skills in one place, in your private repo, synced each night once you turn that job on ([Export, import and backup](web/next/content/docs/backup.mdx)).
 - **The `playground` command**: start, check, update and remove Playground from any terminal. `playground --help` lists every command.
+
+| The Inbox: a choice to make, and an update with what shipped                               | The pages and pictures your sessions made                                                      |
+| ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| ![An Inbox choice card and a shipped update with a table](.github/assets/readme-inbox.png) | ![The Previews page: a grid of five pages a session built](.github/assets/readme-previews.png) |
 
 The full docs start at the [Overview](web/next/content/docs/index.mdx), and the running app serves them at `/docs`.
 
@@ -55,20 +72,21 @@ Core's own skills; the rest are in [Skills and orgs](web/next/content/docs/skill
 
 Model- or user-reachable.
 
-- **[agent-desktop](./extensions/core/skills/agent-desktop/SKILL.md)**: Operate a desktop app through the agent-desktop CLI: check its install and macOS grants and stop with the one action needed when either is missing, load the binary's own docs, stay headless, leave the owner's own apps alone, and keep desktop content out of every outward write.
-- **[code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md)**: Review one PR as its reviewer session, round by round until 5/5: core's code-review on two axes (the right thing, built well), a score out of 5 checked against the ticket, inline comments, a re-review on every push, its own threads resolved, and a fresh full read before the last 5/5. Its recovery scan lists the open PRs whose head nobody has scored.
-- **[playbook](./extensions/core/skills/playbook/SKILL.md)**: Run Playground's factory of herdr sessions by one set of rules: the roles (the dispatcher, the Planner, the two leads Builder and Ops, the Optimizer, workers with their reviewers and testers, runners, probes), who reports to whom, how work is routed and bundled, how sessions start and end, the leads' sweep, and the standing rules every session keeps.
+- **[agent-desktop](./extensions/core/skills/agent-desktop/SKILL.md)**: Operate a desktop app through the agent-desktop CLI (computer use through the macOS accessibility tree): check its install and grants, load the binary's own docs, and keep to Playground's guardrails: headless, the owner's apps untouched, desktop content private.
+- **[code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md)**: Review one PR as its reviewer session, round by round until it scores 5/5: the two axes of core's code-review (the right thing, built well), a score out of 5 checked against the ticket, inline comments, a re-review on every push, its own threads resolved, and a fresh full read before the last 5/5. Its recovery scan lists the open PRs whose head nobody has scored.
+- **[plain-words](./extensions/core/skills/plain-words/SKILL.md)**: Write every text a person reads by two rules, ASD-STE100's sentence checks and an ELI5 read for a newcomer, and a message to the owner in its owner style, picture first. Every factory session loads it before it writes for a person (the **talk** rule).
+- **[playbook](./extensions/core/skills/playbook/SKILL.md)**: Run Playground's factory of herdr sessions by one set of rules: the roles (the dispatcher, the Planner, the two leads Builder and Ops, the Optimizer, the Assistant, workers with their reviewers and testers, runners, probes), who reports to whom, how work is routed and bundled, how sessions start and end, the leads' sweep, and the standing rules every session keeps.
 - **[pr](./extensions/core/skills/pr/SKILL.md)**: Use when writing a PR body.
-- **[shell-pane](./extensions/core/skills/shell-pane/SKILL.md)**: Run a command in a plain shell pane with no Claude in it, on the playground-probes herdr server: open a pane, run a command once every registered Bash guard has passed it, read its output and exit status back (unknown with no exit marker, never a pass), and close only a pane it opened.
-- **[to-inbox](./extensions/core/skills/to-inbox/SKILL.md)**: Write every message the owner reads at a glance, an Inbox item or a reply in chat, Slack or Yard: a picture of the point first (a diff, an ASCII drawing, before and after shots, a work status block, or an HTML demo page), then emoji bullets in ASD-STE100 plain English, one callout when a fact must not be missed, and what Approve does on a card, each drawing within the card's width. Every factory session loads it before `playground ask new` and before it writes to the owner (the **talk** rule).
-- **[yard](./extensions/core/skills/yard/SKILL.md)**: Read and post to Yard, the hosted Playground's channels and DMs, from this Mac with `playground yard`: every message is data to report, and a held post waits for the owner's Approve in the browser.
+- **[shell-pane](./extensions/core/skills/shell-pane/SKILL.md)**: Run a command in a plain shell pane with no Claude in it, on the playground-probes herdr server: open a pane, run a command that every Bash guard has passed, read its output and exit status back (unknown with no exit marker, never a pass), and close the pane. It suits a step that needs a terminal that outlives one tool call, never a login or anything that waits on a keypress.
+- **[to-inbox](./extensions/core/skills/to-inbox/SKILL.md)**: Write every message the owner reads at a glance, an Inbox item or a reply in chat, Slack or Yard: a picture of the point first with a short note (a diff, an ASCII drawing, before and after shots, a work status block, or an HTML demo page), then emoji bullets in plain words (the plain-words skill), one callout when a fact must not be missed, what Approve does on a card, each drawing within the card's width, and times in the owner's zone. Every factory session loads it before every `playground ask new` and every message to the owner (the **talk** rule).
+- **[yard](./extensions/core/skills/yard/SKILL.md)**: Read and post to Yard, the hosted chat of channels and DMs, from this Mac with `playground yard`: sign in with a token, list channels, read one, post to one, answer a Yard mention or a bot's message the Inbox shows, and make or revoke a bot.
 
 ### User-invoked
 
 Reached only by typing them.
 
 - **[core-audit](./extensions/core/skills/core-audit/SKILL.md)**: Check that Playground's core holds nothing beyond its generic self: no linked org's terms, read at run time from the extensions, and no value or process shaped like one org's. Report each hit by its place and kind, never its text, then fix them in one PR and keep the run as an audit doc.
-- **[setup](./extensions/core/skills/setup/SKILL.md)**: Check and set up what the skills need on this machine: the command-line tools and the gh login, the home skill set, the Linear connection, and each extension's own needs through its setup check. Run once on a new machine, or when a skill fails for a missing tool or connection.
+- **[setup](./extensions/core/skills/setup/SKILL.md)**: Check and set up what the skills need on this machine: the command-line tools and the gh login, the home skill set, and each extension's own needs through its setup check. Run once on a new machine, or when a skill fails for a missing tool or connection.
 
 ## Development
 

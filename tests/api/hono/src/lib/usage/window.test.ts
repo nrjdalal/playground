@@ -299,6 +299,39 @@ describe("readAccountUsages", () => {
     expect(stopped.find((a) => a.account === "bo@example.com")!.usage.stale).toBe(true)
   })
 
+  test("a map entry with a full week and its reset ahead reads fresh past the 30 minutes, and stale once usage.json is (#1587)", async () => {
+    // run.py's fresh() serves a full week until its reset, so its readAt stops moving while the entry stays
+    const entry = { readAt: "2026-10-06T07:48:00Z", week: 100, weekReset: 1794000000 }
+    const fresh = await readAccountUsages(null, withMap({ "bo@example.com": entry }), NOW)
+    expect(fresh.find((a) => a.account === "bo@example.com")!.usage.stale).toBe(false)
+    // a usage.json written 20 minutes ago still means the job stopped writing the map
+    const stopped = await readAccountUsages(
+      null,
+      withMap({ "bo@example.com": entry }, "2026-10-06T08:10:00Z"),
+      NOW,
+    )
+    expect(stopped.find((a) => a.account === "bo@example.com")!.usage.stale).toBe(true)
+  })
+
+  test("a map entry limited below 100 reads fresh while its limit stands, and stale once usage.json is (#1587)", async () => {
+    // fresh()'s limitedUntil line keeps the entry in the map with its readAt frozen, so the limit itself keeps it fresh
+    const entry = {
+      limitedUntil: 1791360000,
+      readAt: "2026-10-06T07:48:00Z",
+      week: 40,
+      weekReset: 1794000000,
+    }
+    const fresh = await readAccountUsages(null, withMap({ "bo@example.com": entry }), NOW)
+    expect(fresh.find((a) => a.account === "bo@example.com")!.usage.stale).toBe(false)
+    // a usage.json written 20 minutes ago still means the job stopped writing the map
+    const stopped = await readAccountUsages(
+      null,
+      withMap({ "bo@example.com": entry }, "2026-10-06T08:10:00Z"),
+      NOW,
+    )
+    expect(stopped.find((a) => a.account === "bo@example.com")!.usage.stale).toBe(true)
+  })
+
   test("an accounts value that is no map adds no account", async () => {
     for (const accounts of [["bo@example.com"], "bo@example.com", null]) {
       const listed = await readAccountUsages(null, withMap(accounts), NOW)

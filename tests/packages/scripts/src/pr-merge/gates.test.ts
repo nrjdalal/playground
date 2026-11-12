@@ -228,6 +228,57 @@ describe("gatesOf", () => {
     })
   })
 
+  // #1676: run 42670675952 ended failure with every job it ran green and no gate job at all
+  test("a run that finished green without its gate job names the rerun, while one still running waits", () => {
+    const job = (name: string, status = "COMPLETED") => ({
+      conclusion: status === "COMPLETED" ? "SUCCESS" : null,
+      detailsUrl: `https://github.com/nrjdalal/playground/actions/runs/42670675952/job/${name.length}`,
+      name,
+      startedAt: "2026-11-09T18:04:17Z",
+      status,
+      workflowName: "auto-check-build",
+    })
+    const test = { ...job("test"), workflowName: "auto-test" }
+    expect(
+      ciGate([job("Lint and Build"), job("Suite (1)"), test], { required: REQUIRED_CHECKS }),
+    ).toEqual({
+      detail:
+        "no Audit, Lint, and Build check on the head, though every job of its auto-check-build run passed: GitHub ended that run without creating it; rerun it with `gh run rerun 42670675952`",
+      name: "ci",
+      ok: false,
+    })
+    expect(
+      ciGate([job("Lint and Build"), job("Suite (1)", "IN_PROGRESS"), test], {
+        required: REQUIRED_CHECKS,
+      }),
+    ).toEqual({
+      detail: "no Audit, Lint, and Build check on the head yet: GitHub runs it on every push",
+      name: "ci",
+      ok: false,
+    })
+  })
+
+  test("a second run on the head with fewer shards names its own run id, not the first run's", () => {
+    const job = (run: number, name: string) => ({
+      conclusion: "SUCCESS",
+      detailsUrl: `https://github.com/nrjdalal/playground/actions/runs/${run}/job/${name.length}`,
+      name,
+      startedAt: run === 42670675952 ? "2026-11-09T18:04:17Z" : "2026-11-09T17:40:00Z",
+      status: "COMPLETED",
+      workflowName: "auto-check-build",
+    })
+    const test = { ...job(42670675952, "test"), workflowName: "auto-test" }
+    const checks = [
+      job(42668000001, "Suite (15)"),
+      job(42670675952, "Lint and Build"),
+      job(42670675952, "Suite (1)"),
+      test,
+    ]
+    expect(ciGate(checks, { required: REQUIRED_CHECKS }).detail).toContain(
+      "`gh run rerun 42670675952`",
+    )
+  })
+
   test("an older cancelled run beside a newer pass of the same check passes", () => {
     expect(ciGate([CANCELLED, PASSED_RUN])).toEqual({
       detail: "1 check passed",
@@ -291,5 +342,75 @@ describe("a head with no finished GitGuardian check", () => {
     const running = { conclusion: "", name: "GitGuardian Security Checks", status: "IN_PROGRESS" }
     const gates = gatesOf(facts({ checks: [...greenChecks(), running] }), { gitGuardian: true })
     expect(gates.filter((g) => !g.ok).map((g) => g.name)).toEqual(["ci"])
+  })
+})
+
+describe("the parent gate refuses a stacked PR while its parent is unmerged (PG-1274)", () => {
+  const stacked = (line: string) => `${SKILL_BODY}\n- ${line}`
+  const parent = (patch: Partial<PrFacts>) =>
+    gatesOf(facts(patch)).find((gate) => gate.name === "parent")
+
+  test("an open parent refuses, naming it", () => {
+    const gate = parent({ body: stacked("Stacked on #12"), parents: [{ n: 12, state: "OPEN" }] })
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("#12")
+    expect(gate?.detail).toContain("still open")
+  })
+
+  test("a parent closed without merging refuses, saying how to clear it", () => {
+    const gate = parent({ body: stacked("Stacked on #12"), parents: [{ n: 12, state: "CLOSED" }] })
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("closed without merging")
+    expect(gate?.detail).toContain("remove the `Stacked on #12` line")
+  })
+
+  test("a parent whose state did not read refuses, so the gate fails closed", () => {
+    const parents = [{ n: 12, state: "unreadable: gh exited 1" }]
+    const gate = parent({ body: stacked("Stacked on #12"), parents })
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("could not be read")
+  })
+
+  test("a body with a Stacked on line never reaches the gates with its parents unread", () => {
+    const gate = parent({ body: `${stacked("stacked on #12")}\nSTACKED ON #12` })
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("#12")
+  })
+
+  test("every parent merged, or none declared, passes as today", () => {
+    const merged = [
+      { n: 12, state: "MERGED" },
+      { n: 13, state: "MERGED" },
+    ]
+    expect(parent({ body: stacked("Stacked on #12, Stacked on #13"), parents: merged })?.ok).toBe(
+      true,
+    )
+    expect(parent({ body: SKILL_BODY, parents: [] })).toBeUndefined()
+    expect(parent({ body: SKILL_BODY })).toBeUndefined()
+    expect(parent({})).toBeUndefined()
+  })
+
+  test("a list of parents on one line names each, and a declared parent left out of the states reads as never read", () => {
+    const merged = [
+      { n: 78, state: "MERGED" },
+      { n: 75, state: "MERGED" },
+    ]
+    for (const line of ["Stacked on #78 and #75", "stacked on #78, #75", "Stacked on #78 & #75"])
+      expect(parent({ body: stacked(line), parents: merged })?.ok).toBe(true)
+    const gate = parent({ body: stacked("Stacked on #78 and #75"), parents: [merged[0]!] })
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("#75")
+    expect(gate?.detail).not.toContain("#78")
+  })
+
+  test("one unmerged parent among merged ones refuses, naming that one alone", () => {
+    const parents = [
+      { n: 12, state: "MERGED" },
+      { n: 13, state: "OPEN" },
+    ]
+    const gate = parent({ body: stacked("Stacked on #12, Stacked on #13"), parents })
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("#13")
+    expect(gate?.detail).not.toContain("#12")
   })
 })

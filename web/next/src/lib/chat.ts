@@ -3,7 +3,7 @@
 import { Chat } from "@ai-sdk/react"
 import type { Entry, EntryAttachment, Worker } from "@api/hono"
 import { markerOf } from "@packages/config/threads"
-import { useQueryClient } from "@tanstack/react-query"
+import { replaceEqualDeep, useQueryClient } from "@tanstack/react-query"
 import type { ChatTransport, DynamicToolUIPart, FileUIPart, UIMessage, UIMessageChunk } from "ai"
 import {
   useCallback,
@@ -232,7 +232,7 @@ export const withTranscript = (
   ...messages.filter((m) => m.metadata?.outbox),
 ]
 
-// Pure: each turn keeps the name it had when it holds a step it held before, as the stream drops its oldest steps or Load older brings in earlier ones, so its row and an opened tool row in it are never drawn anew.
+// Pure: each turn keeps the name it had when it holds a step it held before, as the stream drops its oldest steps or Load older brings in earlier ones, and a turn that reads as it did stays the object it was, so its row and an opened tool row in it are never drawn anew.
 export function keepTurnIds(
   previous: DashboardMessage[],
   transcript: DashboardMessage[],
@@ -240,6 +240,7 @@ export function keepTurnIds(
   const named = new Map<string, string>()
   for (const message of previous)
     for (const step of message.metadata?.steps ?? []) named.set(step, message.id)
+  const held = new Map(previous.map((message) => [message.id, message]))
   // a name another message has of its own stays its own
   const own = new Set(transcript.map((message) => message.id))
   const taken = new Set<string>()
@@ -248,7 +249,8 @@ export function keepTurnIds(
     const id =
       kept && !taken.has(kept) && (kept === message.id || !own.has(kept)) ? kept : message.id
     taken.add(id)
-    return id === message.id ? message : { ...message, id }
+    // a frame that grows one turn hands every other message back as the object it was, and the grown one keeps the parts it kept, so the stream draws that turn alone
+    return replaceEqualDeep(held.get(id), id === message.id ? message : { ...message, id })
   })
 }
 

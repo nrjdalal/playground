@@ -58,7 +58,9 @@ describe("--backend glm runs the session on Z.ai's GLM through Claude Code", () 
     expect(command(r)).not.toContain("--backend")
     // A probe runs in the sandbox, from a file of its own (spawn-sandbox.test.ts holds the block).
     const sandbox = /PLAYGROUND_ROLE=probe /.test(command(r)) ? "sandbox-" : ""
-    const glm = join(r.home, ".playground", `factory-settings-glm-${sandbox}400k.json`)
+    // A dispatcher or a lead reads the managers' file, which denies the Agent and Workflow tools (spawn-manager-deny.test.ts).
+    const manager = /PLAYGROUND_ROLE=(dispatcher|lead) /.test(command(r)) ? "manager-" : ""
+    const glm = join(r.home, ".playground", `factory-settings-glm-${manager}${sandbox}400k.json`)
     expect(command(r).split(" --settings ")).toHaveLength(2)
     expect(command(r)).toContain(` --settings ${glm} --dangerously-skip-permissions`)
     const built = JSON.parse(readFileSync(glm, "utf8"))
@@ -73,6 +75,7 @@ describe("--backend glm runs the session on Z.ai's GLM through Claude Code", () 
         CLAUDE_CODE_ENABLE_TELEMETRY: "0",
         OTEL_METRICS_EXPORTER: "none",
       },
+      ...(manager ? { permissions: { deny: ["Agent", "Workflow"] } } : {}),
     })
     const seen = [...placing(r).flat(), ...(r.roster ?? []), r.out, r.err].join("\n")
     expect(seen).not.toContain(TOKEN)
@@ -154,10 +157,19 @@ describe("--backend glm runs the session on Z.ai's GLM through Claude Code", () 
   })
 
   test.each([
-    ["column reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"]],
-    ["column tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"]],
-    ["resume reviewer-x", ["resume", "reviewer-x", root, "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"]],
-    ["resume tester-x", ["resume", "tester-x", root, "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"]],
+    [
+      "column reviewer",
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
+    ],
+    ["column tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1"]],
+    [
+      "resume reviewer-x",
+      ["resume", "reviewer-x", root, "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27", "--pr", "1"],
+    ],
+    [
+      "resume tester-x",
+      ["resume", "tester-x", root, "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27", "--pr", "1"],
+    ],
   ])("a %s stays on Claude: --backend glm is refused before herdr runs", async (_, args) => {
     const r = await spawn([...args, "--backend", "glm"], [])
     expect(r.code).toBe(1)

@@ -6,17 +6,18 @@ The stored login (Claude Code's keychain item "Claude Code-credentials") is read
 (api.anthropic.com/api/oauth/usage) into usage/stored-login.json, which login-flip.py reads, and into usage-<local part>.json beside
 usage.json, the file the dashboard's Week tooltip reads. It never refreshes that token (a refresh
 rotates the refresh token Claude Code holds); an expired one waits for Claude Code to refresh it.
-While login-flip.json names a `factory` account other than the stored login (the factory's sessions run on that account's token,
-spawn.sh --account), usage.json holds that account's limits instead: login-flip's own reading of it, from one 1-token call's
-rate-limit headers (a setup-token's inference scope cannot read /usage), taken here when login-flip's is 14 minutes old or more and
-shared through login-flip.json, so the two never probe the same account twice in that time. usage.json then adds `readAt` (when the
+login-flip.json's `factory` login reads through the pool rule beat.factory_login carries: itself while the pool still lists it and its
+token still reads (has_token's Keychain check), else the pool account the split gives the best share. While that login is an account other than the stored login (the
+factory's sessions run on its token, spawn.sh --account), usage.json holds that account's limits instead: login-flip's own reading of it, from one 1-token call's
+rate-limit headers (a setup-token's inference scope cannot read /usage), taken here when login-flip's is 14 minutes old or more and its
+limitedUntil has passed, and shared through login-flip.json, so the two never probe the same account twice in that time. usage.json then adds `readAt` (when the
 limits were measured), `source` "token/ratelimit-headers" and `storedLogin` (the stored login's account and week). Remove `factory`
-from login-flip.json when the factory moves back to the stored login. login-flip.json's `accounts` lists every account the factory's
-sessions spend into; each is probed the same way, and usage.json's `accounts` holds each fresh week reading, which week-marks.py sums.
+from login-flip.json when the factory moves back to the stored login. login-flip.json's `accounts` lists every pool account the factory's
+sessions spend into, login-flip.py pruning it to the pool on each run; each is probed the same way, and usage.json's `accounts` holds each fresh week reading, which week-marks.py sums.
 ops/alerts-usage.json holds, while each lasts, one alert per factory account whose week is past 90, 97 or 98% (usage.json's account
 and each in its `accounts`), and the logged-in account's 5-hour window at 90% or more; ops-unstick folds it in.
 Each alert's `name` is its account, since the leads' sweep keys an alert by its kind and name.
-While login-flip.json names no `factory`, each Claude account the Dashboard's Add a Claude account keeps (usage.accounts, its
+While login-flip.json's `factory` resolves to no account, each Claude account the Dashboard's Add a Claude account keeps (usage.accounts, its
 setup-token under usage.keychainService) comes before the stored login: usage.json holds the first one's probe reading, since the
 dispatcher's sessions run on it, and the stored login's only when none of them reads. With neither a stored login nor an added account, the job beats "waiting", not an error.
 usage.json's `rotation` is login-flip.json's: `pool`, each account login-flip.py switches between (its TARGETS), whether its plan ends, when, and the day of the month a renewing one renews.
@@ -27,7 +28,7 @@ ccusage refresh never fires; a failed or timed-out run leaves the last figures a
 """
 import datetime, fcntl, json, os, shutil, subprocess, sys, time, urllib.request
 
-HERE = os.path.expanduser("~/.playground/ops/usage")  # the state folder by name, so a run by its repo path still reads the live state
+HERE = os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state
 OPS = os.path.dirname(HERE)
 OUT = os.path.join(os.path.dirname(OPS), "usage.json")
 STORED = os.path.join(HERE, "stored-login.json")
@@ -38,7 +39,7 @@ API = os.environ.get("PLAYGROUND_USAGE_API") or "https://api.anthropic.com/api/o
 PROBE_URL = os.environ.get("PLAYGROUND_PROBE_URL") or "https://api.anthropic.com/v1/messages"  # the new-user gate points it at a closed loopback port, so its made-up token never leaves the Mac
 STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 sys.path.insert(0, OPS)
-from beat import beat, checkout, setting  # noqa: E402
+from beat import beat, checkout, factory_login, setting  # noqa: E402
 
 PROBE_MODEL, SERVICE = setting("models.probe"), setting("usage.keychainService")
 
@@ -129,7 +130,11 @@ def probe(email):
     f = lambda k: float(h.get(f"anthropic-ratelimit-unified-{k}") or 0)
     # no 5-hour headers: an account with no 5-hour limit, so none, never 0%
     five = h.get("anthropic-ratelimit-unified-5h-utilization") is not None
-    return {"five": round(f("5h-utilization") * 100) if five else None, "fiveReset": f("5h-reset") if five else None, "week": round(f("7d-utilization") * 100), "weekReset": f("7d-reset")}
+    got = {"five": round(f("5h-utilization") * 100) if five else None, "fiveReset": f("5h-reset") if five else None, "week": round(f("7d-utilization") * 100), "weekReset": f("7d-reset")}
+    # a full week is limited until its reset, whatever the status header says, the same marking login-flip.py's probe sets
+    if got["week"] >= 100:
+        got["limitedUntil"] = got["weekReset"]
+    return got
 
 
 def flip_file():
@@ -140,9 +145,9 @@ def flip_file():
 
 
 def seen(flip, email, now):
-    """login-flip.json's reading of one account, probed again when it is PROBE_EVERY old, so login-flip.py and this job share one probe."""
+    """login-flip.json's reading of one account, probed again when it is PROBE_EVERY old and past its limitedUntil, so login-flip.py and this job share one probe."""
     s = (flip.get("seen") or {}).get(email) or {}
-    if now - s.get("at", 0) >= PROBE_EVERY:
+    if now - s.get("at", 0) >= PROBE_EVERY and now >= s.get("limitedUntil", 0):
         got = probe(email)
         if got:
             s = dict(got, at=now, via="token")
@@ -157,8 +162,11 @@ def accounts_reading():
     flip, now, out = flip_file() or {}, time.time(), {}
     for email in flip.get("accounts") or []:
         s = seen(flip, email, now)
-        if now - s.get("at", 0) < FRESH_FOR and s.get("week") is not None and s.get("weekReset"):
-            out[email] = {"readAt": iso(s["at"]), "week": s["week"], "weekReset": int(s["weekReset"])}
+        if fresh(s, now) and s.get("weekReset"):
+            row = {"readAt": iso(s["at"]), "week": s["week"], "weekReset": int(s["weekReset"])}
+            if s.get("limitedUntil"):
+                row = {"limitedUntil": int(s["limitedUntil"]), **row}
+            out[email] = row
     return out
 
 
@@ -182,10 +190,19 @@ def rotation(flip):
     return {"pool": [{"account": e["account"], "ending": e["ending"], "endsAt": e.get("endsAt"), "renewsOn": e.get("renewsOn")} for e in pool]} if isinstance(pool, list) and all(map(entry, pool)) else None
 
 
-def factory_reading(stored, flip):
-    """usage.json's data for login-flip.json's `factory` account, when that is not the stored login; else None."""
-    factory = flip.get("factory")
-    if not factory or (stored and factory == stored["account"]):
+def resolved_factory(flip):
+    """The factory login the pool rule (beat.factory_login) resolves for this file: the file's pool and split against its `factory`, the token read the rule's validity test."""
+    pool = rotation(flip)
+    return factory_login(flip.get("factory"), [e["account"] for e in pool["pool"]] if pool else None, (flip.get("split") or {}).get("shares") or {}, SERVICE)
+
+
+_UNRESOLVED = object()  # factory_reading's resolved argument: absent, so the caller's None (the rule resolving to none) is taken as handed in
+
+
+def factory_reading(stored, flip, accounts, resolved=_UNRESOLVED):
+    """usage.json's data for the factory login resolved_factory resolves (the cycle hands one resolution in, so a cycle resolves once), when that is not the stored login and usage.accounts still lists it; else None."""
+    factory = resolved_factory(flip) if resolved is _UNRESOLVED else resolved
+    if not factory or (stored and factory == stored["account"]) or (accounts is not None and factory not in accounts):
         return None
     now = time.time()
     s = seen(flip, factory, now)
@@ -195,14 +212,19 @@ def factory_reading(stored, flip):
 
 
 def fresh(s, now):
-    return now - s.get("at", 0) < FRESH_FOR and s.get("week") is not None
+    # a full week cannot change before its weekReset, so its last reading stays fresh until then and goes stale again after
+    if s.get("week") is not None and s["week"] >= 100 and s.get("weekReset"):
+        return now < s["weekReset"]
+    # a reading seen() holds until its limitedUntil stays fresh that long, then goes stale as before
+    return (now - s.get("at", 0) < FRESH_FOR or now < s.get("limitedUntil", 0)) and s.get("week") is not None
 
 
 def probed(account, s, stored, now):
     """usage.json's data from one account's probe reading, naming the stored login beside it when there is one."""
     limits = {"seven_day": {"used_percentage": s["week"], "resets_at": int(s["weekReset"]) if s.get("weekReset") else None}}
     if s.get("five") is not None:
-        limits["five_hour"] = {"used_percentage": s["five"], "resets_at": int(s["fiveReset"]) if s.get("fiveReset") else None}
+        # a 5-hour figure past its reset says nothing about the window now, so it counts as none in use
+        limits["five_hour"] = {"used_percentage": 0 if s.get("fiveReset") and now >= s["fiveReset"] else s["five"], "resets_at": int(s["fiveReset"]) if s.get("fiveReset") else None}
     data = {"account": account, "rate_limits": limits, "readAt": iso(s["at"]), "source": "token/ratelimit-headers", "writtenAt": iso(now)}
     if stored:
         data["storedLogin"] = {"account": stored["account"], "week": (stored["rate_limits"].get("seven_day") or {}).get("used_percentage")}
@@ -240,7 +262,7 @@ while True:
         FACTORY = [a["email"] for a in setting("usage.accounts") if a.get("provider", "claude") == "claude"]
     except SystemExit as e:
         problems.append(f"usage.accounts: {e}")
-        FACTORY = []
+        FACTORY = None  # no list known, so no account counts as removed this cycle
     try:
         stored = stored_login()
         write(STORED, stored)
@@ -249,14 +271,15 @@ while True:
         no_login = isinstance(e, NoLogin)
         problems.append(f"stored login: {type(e).__name__}: {e}")
     flip = flip_file() or {}
+    resolved = resolved_factory(flip)
     try:
-        data = factory_reading(stored, flip)
+        data = factory_reading(stored, flip, FACTORY, resolved)
     except Exception as e:
         problems.append(f"factory account: {type(e).__name__}: {e}")
-    # a factory login-flip names, the stored login included, is the account the sessions run on, so the added ones are read only while it names none
-    if not data and not flip.get("factory"):
+    # the factory login, resolved through the pool rule, is the account the sessions run on, so the added ones are read only while it resolves to none
+    if not data and not resolved:
         try:
-            data = added_reading(stored, flip, FACTORY)
+            data = added_reading(stored, flip, FACTORY or [])
         except Exception as e:
             problems.append(f"added account: {type(e).__name__}: {e}")
     data = data or stored
@@ -273,8 +296,8 @@ while True:
         write(OUT, data)
         account, limits = data["account"], data["rate_limits"]
         # the outbox needs a session to relay it; the marks also go to ops/alerts-usage.json, which ops-unstick folds into alerts-pending.json
-        out = week_alerts(data, FACTORY)
-        if account in FACTORY:
+        out = week_alerts(data, FACTORY or [])
+        if account in (FACTORY or []):
             # dispatcher, 8 Oct: the 5-hour window at 90% or more, while it lasts, so the Builder slows spawns before the cap
             five = limits.get("five_hour") or {}
             if isinstance(five.get("used_percentage"), (int, float)) and five["used_percentage"] >= 90:

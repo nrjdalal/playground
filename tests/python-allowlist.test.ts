@@ -3,7 +3,6 @@ import { join } from "node:path"
 
 // Cut from `git ls-files '*.py'` at this branch's head; each Python port removes its own entries until the list is empty.
 const ALLOWLIST = Object.freeze([
-  "extensions/core/skills/code-review-loop/scripts/state.py",
   "scripts/ops/beat.py",
   "scripts/ops/dashboard/watch-stuck.py",
   "scripts/ops/merge-train/run.py",
@@ -17,7 +16,6 @@ const ALLOWLIST = Object.freeze([
   "scripts/ops/usage/near-limit.py",
   "scripts/ops/usage/run.py",
   "scripts/ops/usage/week-marks.py",
-  "tests/test_code_review_loop.py",
   "tests/test_docker_rm_volumes.py",
   "tests/test_kill_by_name.py",
   "tests/test_links.py",

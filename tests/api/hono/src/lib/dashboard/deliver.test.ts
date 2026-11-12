@@ -528,7 +528,7 @@ describe("deliver", () => {
     let reads = 0
     deps.board = async () => (reads++, cut)
     const refused = await deliver({ actor, text: "hi", to: "dispatcher" }, deps)
-    expect(refused).toMatchObject({ code: "CMUX_FAILED", ok: false })
+    expect(refused).toMatchObject({ code: "SESSIONS_FAILED", ok: false })
     expect(refused.ok ? "" : refused.reason).not.toContain("No live session is named")
     expect(reads).toBe(2)
     expect(typed).toEqual([])
@@ -624,13 +624,13 @@ describe("deliver", () => {
     expect(typed).toEqual([])
   })
 
-  test("a board that cannot be read is CMUX_FAILED, with the read's own words", async () => {
+  test("a board that cannot be read is SESSIONS_FAILED, with the read's own words", async () => {
     const { deps } = fakes(live([]))
     deps.board = async () => {
       throw new Error("Access denied")
     }
     const result = await deliver({ actor, text: "hi", to: "dispatcher" }, deps)
-    expect(result).toMatchObject({ code: "CMUX_FAILED" })
+    expect(result).toMatchObject({ code: "SESSIONS_FAILED" })
     expect(result.ok ? "" : result.reason).toBe("Could not read the sessions: Access denied")
   })
 
@@ -817,7 +817,7 @@ describe("deliver", () => {
         deliver({ actor, text: "a1\na2", to: "dispatcher" }, deps),
         deliver({ actor, text: "b1", to: "dispatcher" }, deps),
       ])
-      expect(a).toMatchObject({ code: "CMUX_FAILED" })
+      expect(a).toMatchObject({ code: "SESSIONS_FAILED" })
       expect(b.ok).toBe(true)
       expect(typed).toEqual(["b1"])
     })
@@ -868,13 +868,13 @@ describe("deliver", () => {
     }
   })
 
-  test("a session's own read that does not answer is CMUX_FAILED, and nothing is typed", async () => {
+  test("a session's own read that does not answer is SESSIONS_FAILED, and nothing is typed", async () => {
     const { deps, typed } = fakes(board())
     deps.readSession = async () => {
       throw new Error("herdr did not answer")
     }
     const result = await deliver({ actor, text: "hi", to: "dispatcher" }, deps)
-    expect(result).toMatchObject({ code: "CMUX_FAILED", ok: false })
+    expect(result).toMatchObject({ code: "SESSIONS_FAILED", ok: false })
     expect(result.ok ? "" : result.reason).toBe("Could not read the sessions: herdr did not answer")
     expect(typed).toEqual([])
   })
@@ -989,10 +989,14 @@ describe("deliver with attachments", () => {
   })
 })
 
-// deliver() types into a session's pane as if the owner typed it, so only the owner's own clicks reach it, and nothing else speaks for the owner: the composer, and the owner's answer to an inbox item or his comment through its Reply. An ops job, a script or any other route sends through SendMessage instead.
+// deliver() types into a session's pane as if the owner typed it, so only the owner's own acts reach it, and nothing else speaks for the owner: the composer, the owner's answer to an inbox item or his comment through its Reply, and his answer to a card from WhatsApp, which ask whatsapp reads from ops-wa's own folder (ADR 0024). An ops job, a script or any other route sends through SendMessage instead.
 const ROOT = join(import.meta.dir, "../../../../../..")
 const DELIVER = "api/hono/src/lib/dashboard/deliver.ts"
-const CALLERS = ["api/hono/src/routers/dashboard.ts", "api/hono/src/routers/inbox.ts"]
+const CALLERS = [
+  "api/hono/src/bin/dashboard-ask.ts",
+  "api/hono/src/routers/dashboard.ts",
+  "api/hono/src/routers/inbox.ts",
+]
 const SOURCE = /\.(?:[cm]?[jt]sx?)$/
 const DELIVER_MODULE = /["'][^"']*\/deliver(?:\.[cm]?[jt]sx?)?["']/
 const DELIVER_STAR = /\*\s*(?:as\s+[\w$]+\s*)?from\s*["'][^"']*\/deliver(?:\.[cm]?[jt]sx?)?["']/
@@ -1014,7 +1018,7 @@ const deliverCallers = (files: Record<string, string>): string[] =>
     .map(([path]) => path)
 
 describe("who calls deliver()", () => {
-  test("only the composer's route and the inbox's, its answer and its Reply", async () => {
+  test("only the composer's route, the inbox's, its answer and its Reply, and ask whatsapp", async () => {
     const listed = Bun.spawnSync(
       ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
       {
@@ -1949,8 +1953,8 @@ describe("deliver to a herdr session", () => {
       [new HerdrRefused("agent.prompt", "timeout", ""), "INTERRUPTED"],
       [new HerdrRefused("agent.prompt", "agent_prompt_stalled", ""), "INTERRUPTED"],
       [new HerdrTimedOut("agent.prompt"), "INTERRUPTED"],
-      [new HerdrDown("connect ENOENT"), "CMUX_FAILED"],
-      [new HerdrRefused("agent.prompt", "invalid_request", ""), "CMUX_FAILED"],
+      [new HerdrDown("connect ENOENT"), "SESSIONS_FAILED"],
+      [new HerdrRefused("agent.prompt", "invalid_request", ""), "SESSIONS_FAILED"],
     ]
     for (const [error, code] of cases) {
       const { deps } = herdr(error)

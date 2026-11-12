@@ -3,8 +3,11 @@ import type { PairKey } from "@packages/message"
 import { z } from "zod"
 
 import {
+  RELAY_REPLACED_CLOSE,
   RELAY_SILENT_MS,
   RELAY_TIMEOUT_MS,
+  type RelayBotRead,
+  relayBotSchema,
   relayHeartbeatSchema,
   type RelayPair,
   relayPairSchema,
@@ -20,8 +23,8 @@ import { redisChannel } from "@/lib/yard/channel"
 
 type MacSocket = { close?: () => void; send: (data: string) => void }
 
-// A frame the hub carries to the Mac: a read, a pair request or a signed write.
-type Frame = RelayPair | RelayRequest | RelayWrite
+// A frame the hub carries to the Mac: a read, a bot's read, a pair request or a signed write.
+type Frame = RelayBotRead | RelayPair | RelayRequest | RelayWrite
 
 // A socket the hub holds, and when it last heard from it.
 type Held = { heard: number; socket: MacSocket }
@@ -39,7 +42,10 @@ export type Forwarded = RelayResponse | { type: "offline" } | { type: "timeout" 
 // How long an instance waits, from when its message reaches the bus, for the one holding the Mac's socket to say it took a request or a ping, before it reads the Mac as offline.
 export const RELAY_ACK_MS = 2000
 
-// What the instances tell each other over Redis, in transit alone: a request, a pair request or a signed write for the instance holding the Mac's socket, its ack, the Mac's answer, a status ping and its pong, and a socket gone.
+// The request ids the subscriber remembers, oldest dropped first, so a request on the bus twice (a publish whose first try landed and then reported closed) still reaches the Mac once.
+const SEEN_MAX = 500
+
+// What the instances tell each other over Redis, in transit alone: a request, a bot's read, a pair request or a signed write for the instance holding the Mac's socket, its ack, the Mac's answer, a status ping and its pong, and a socket gone.
 const busSchema = z.discriminatedUnion("kind", [
   z.object({ id: z.string(), kind: z.literal("ack") }),
   z.object({ kind: z.literal("gone"), since: z.string(), userId: z.string() }),
@@ -47,7 +53,7 @@ const busSchema = z.discriminatedUnion("kind", [
   z.object({ id: z.string(), kind: z.literal("pong") }),
   z.object({
     kind: z.literal("request"),
-    request: z.union([relayRequestSchema, relayPairSchema, relayWriteSchema]),
+    request: z.union([relayBotSchema, relayRequestSchema, relayPairSchema, relayWriteSchema]),
     userId: z.string(),
   }),
   z.object({ kind: z.literal("response"), response: relayResponseSchema, userId: z.string() }),
@@ -74,6 +80,7 @@ export function createHub({
   silentMs?: number
   timeoutMs?: number
 } = {}) {
+  const delivered = new Set<string>()
   const macs = new Map<string, Held>()
   const offlineSince = new Map<string, string>()
   const waiting = new Map<string, Waiting>()
@@ -189,7 +196,14 @@ export function createHub({
       if (live(data.userId)) void send({ id: data.id, kind: "pong" })
     } else if (data.kind === "pong") pings.get(data.id)?.()
     else if (data.kind === "request") {
-      if (deliver(data.userId, data.request)) void send({ id: data.request.id, kind: "ack" })
+      // A repeat is dropped before the Mac sees it, so it answers once and its refusal for the copy never races the real answer; one no live socket took is left unseen, so a retry after the Mac moved still delivers.
+      const key = `request:${data.request.id}`
+      if (delivered.has(key)) return
+      if (deliver(data.userId, data.request)) {
+        delivered.add(key)
+        if (delivered.size > SEEN_MAX) delivered.delete(delivered.keys().next().value!)
+        void send({ id: data.request.id, kind: "ack" })
+      }
     } else if (waiting.get(data.response.id)?.userId === data.userId)
       settle(data.response.id, data.response)
   }
@@ -220,13 +234,16 @@ export function createHub({
   }
 
   return {
-    // Holds the owner's Mac socket, a newer one replacing the old, and returns what lets it go; a socket that goes fails what still waits on it, on every instance.
-    attach(userId: string, socket: MacSocket): () => void {
+    // Holds the owner's Mac socket, a newer one replacing the old, and returns what lets it go by its close code: a socket that goes fails what waits on it on every instance, one closed as replaced goes from here alone.
+    attach(userId: string, socket: MacSocket): (code?: number) => void {
       const held: Held = { heard: now().getTime(), socket }
       macs.set(userId, held)
       offlineSince.delete(userId)
       bus?.listen()
-      return () => drop(userId, held, now().toISOString())
+      return (code) => {
+        if (code !== RELAY_REPLACED_CLOSE) return drop(userId, held, now().toISOString())
+        if (macs.get(userId) === held) macs.delete(userId)
+      }
     },
 
     // Takes a frame the owner's Mac sent on socket, which says it is there: a heartbeat is answered with one, so the Mac hears the hub too, an answer settles its own request, here or on the instance that waits on it, and anything else is dropped.
@@ -253,6 +270,25 @@ export function createHub({
       if (found) {
         if (found.userId === userId) settle(frame.data.id, frame.data)
       } else void send({ kind: "response", response: frame.data, userId })
+    },
+
+    // Sends a bot's GET to its maker's Mac, naming the bot, with a fresh id and time, through the instance holding its socket, and waits for its answer.
+    botRead(
+      userId: string,
+      login: string,
+      { bot, dm }: { bot: string; dm: string },
+      path: string,
+    ): Promise<Forwarded> {
+      return carry(userId, {
+        at: now().toISOString(),
+        bot,
+        dm,
+        id: id(),
+        login,
+        method: "GET",
+        path,
+        type: "bot",
+      })
     },
 
     // Sends one GET to the owner's Mac with a fresh id and time, through the instance holding its socket, and waits for its answer.

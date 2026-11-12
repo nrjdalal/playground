@@ -4,22 +4,22 @@ import { join } from "node:path"
 import { factorySettings, ownerSettings, type Settings } from "@packages/settings"
 
 import { dataDir } from "../../../env/src/data-dir"
+import { originRepo } from "../playground/setting"
 
 type Environment = Record<string, string | undefined>
 
-// Today's public repositories, the factory's and Yard's, which the guard and the ratchet read while factory.publicRepo is unset, and which migrate seeds it with beside the checkout's origin.
-export const TODAY_PUBLIC = ["nrjdalal/playground", "nrjdalal/playground-yard"]
-
-// The repositories, and the owner's names (owner.names, then the archive's owner), read from the settings at run time so no private name is written in the tree; an unset archive is empty, which leaves its links unmeasured.
+// The repositories, and the owner's names (owner.names, then the archive's owner), read from the settings at run time so no private name is written in the tree; an unset archive is empty, which leaves its links unmeasured, and an unset public repository is the origin of the checkout this code runs from (a bundled guard the main checkout), none with no origin.
 export type Repos = { archive: string; owner: string[]; public: string[] }
-export const reposOf = (settings: Settings): Repos => {
+export const reposOf = (settings: Settings, checkout?: string): Repos => {
   const archive = factorySettings.get(settings, "factory.archiveRepo").toLowerCase()
   const archiveOwner = archive ? [archive.split("/")[0]!] : []
   const set = [factorySettings.get(settings, "factory.publicRepo")].flat().filter(Boolean)
   return {
     archive,
     owner: [...new Set([...ownerSettings.get(settings, "owner.names"), ...archiveOwner])],
-    public: set.length ? set.map((repo) => repo.toLowerCase()) : TODAY_PUBLIC,
+    public: set.length
+      ? set.map((repo) => repo.toLowerCase())
+      : [originRepo(checkout)].filter(Boolean),
   }
 }
 // The repositories with neither key set, as a machine with no store reads them.
@@ -74,12 +74,12 @@ export const anyOf = (items: string[], tail = ""): RegExp | undefined =>
     ? new RegExp(`(?<![a-z\\d])(?:${items.map(escape).join("|")})${tail}(?![a-z\\d])`, "gi")
     : undefined
 
-// A name in either case, standing alone, never inside an address or the archive's own link (archiveLinks counts that).
-const ownerWord = (name: string, archive: string): string => {
+// A name in either case, standing alone, never inside an address, and never followed by a slash and a path word, which reads as data (a repository URL, a slug such as the archive's own link, which archiveLinks counts, or any path).
+const ownerWord = (name: string): string => {
   const cased = [...name].map((c) =>
     /[a-z]/i.test(c) ? `[${c.toLowerCase()}${c.toUpperCase()}]` : escape(c),
   )
-  return `(?<![a-zA-Z\\d])(?<![\\w.+-]@[\\w.-]*)${cased.join("")}(?![a-zA-Z\\d])(?![\\w.+-]*@)(?!/${escape(archive.split("/")[1] ?? "")}(?![\\w.-]))`
+  return `(?<![a-zA-Z\\d])(?<![\\w.+-]@[\\w.-]*)${cased.join("")}(?![a-zA-Z\\d])(?!/[\\w-])(?![\\w.+-]*@)`
 }
 // The owner's names, a quote set against the owner (`the owner, 24 Oct: "`, `the owner said`), or anyone's dated quote (`Corin, 23 Oct: "`), so the repo's text names no person and quotes no one; none with no names to read, as a list kind has none with an empty list. Case is spelled out, since a dated quote's name is read by its capital.
 const ownerName = (repos: Repos): RegExp | undefined => {
@@ -87,7 +87,7 @@ const ownerName = (repos: Repos): RegExp | undefined => {
   const MONTH = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
   return new RegExp(
     [
-      ...repos.owner.map((name) => ownerWord(name, repos.archive)),
+      ...repos.owner.map(ownerWord),
       `\\b[Tt]he owner(?:,[^:"\\n]{0,40})?:\\s*["“]`,
       "\\b[Tt]he owner (?:said|wrote)\\b",
       `\\b[A-Z][a-z]+, \\d{1,2} ${MONTH}\\b[^"\\n]{0,30}: *["“]`,

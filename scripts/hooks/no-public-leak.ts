@@ -23,8 +23,8 @@ type Environment = Record<string, string | undefined>
 
 const PERSON = "Say the role (the owner, a reviewer, a worker) in place of the person."
 
-// What a refusal says of each kind it refuses, and its plain-words fix; #NNN and the old session names are the public repository's own words, so a write may hold them.
-const SAID: Partial<Record<Kind, Hit>> = {
+// What a refusal says of each kind it refuses, and its plain-words fix, which the public-draft check (public-draft.ts) says too; #NNN and the old session names are the public repository's own words, so a write may hold them.
+export const SAID: Partial<Record<Kind, Hit>> = {
   archiveLinks: {
     detail: "an archive link",
     fix: "Describe what it points to, or link this repository's own copy.",

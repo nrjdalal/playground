@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import type { Comment, PrFacts } from "../../../../../packages/scripts/src/pr-merge/gates"
 import type { Outcome, Run, RunResult } from "../../../../../packages/scripts/src/pr-merge/merge"
-import { mergeReady } from "../../../../../packages/scripts/src/pr-merge/ready"
+import { mergeReady, readyReport } from "../../../../../packages/scripts/src/pr-merge/ready"
 import { TYPES_BUDGET_MS } from "../../../../../packages/scripts/src/pr-merge/types"
 import { SKILL_BODY } from "./bodies"
 import "./scratch-config"
@@ -93,16 +93,16 @@ describe("pr:train ready", () => {
       status: "IN_PROGRESS",
     }))
     const wait = world(factsOf({ checks: running }))
-    expect(await wait.ready()).toEqual({ refused: [] })
+    expect(await wait.ready()).toEqual({ refused: [], unreadable: [] })
     const none = world(factsOf({ checks: [] }))
-    expect(await none.ready()).toEqual({ refused: [] })
+    expect(await none.ready()).toEqual({ refused: [], unreadable: [] })
     expect([...wait.merges, ...none.merges]).toEqual([])
   })
 
   test("a PR template body merges, and a body that is not the template holds it", async () => {
     expect((await world(factsOf({ body: SKILL_BODY })).ready()).merged?.n).toBe(7)
     const short = world(factsOf({ body: "Outcome: one line.\n" }))
-    expect(await short.ready()).toEqual({ refused: [] })
+    expect(await short.ready()).toEqual({ refused: [], unreadable: [] })
     expect(short.merges).toEqual([])
   })
 
@@ -129,6 +129,43 @@ describe("pr:train ready", () => {
     expect(budgets).toHaveLength(2)
     expect(budgets[0]).toBeLessThanOrEqual(TYPES_BUDGET_MS)
     expect(budgets[1]).toBeLessThanOrEqual((budgets[0] ?? 0) - 20)
+  })
+
+  // #1581: the merge train's job logs a failing run, so the error a held PR carries reaches its log as canary's throw did, while a call that merged exits 0 for the job to log the merge
+  test("an unreadable PR is named on stderr, exiting 1 only when nothing merged", async () => {
+    const why = "not gated: facts unreadable (gh pr view exited 1: API rate limit exceeded)"
+    const three = async (mergeable: boolean) => {
+      const run: Run = async (args) =>
+        args.join(" ").startsWith("pr list")
+          ? ok([3, 5, 7].map((n) => JSON.stringify({ author: OWNER, draft: false, n })).join("\n"))
+          : { code: 1, stderr: "unexpected gh", stdout: "" }
+      const lockRoot = mkdtempSync(join(scratch, "lock-"))
+      const queue = join(lockRoot, "merge-queue.json")
+      writeFileSync(queue, JSON.stringify({ queue: [{ pr: 3 }, { pr: 5 }, { pr: 7 }] }))
+      const facts = async (_run: Run, _repo: string, n: number): Promise<PrFacts> => {
+        if (n === 5) throw new Error("gh pr view exited 1: API rate limit exceeded")
+        return factsOf(n === 7 && mergeable ? { n } : { comments: [], n })
+      }
+      const merge = async (): Promise<Outcome> => ({
+        gates: [],
+        kind: "merged",
+        sha: "f".repeat(40),
+      })
+      return mergeReady({ repo: REPO }, run, {
+        facts,
+        git: async () => ok(),
+        lockRoot,
+        merge,
+        queue,
+      })
+    }
+    const unready = await three(false)
+    expect(unready.merged).toBeUndefined()
+    expect(unready.unreadable).toEqual([{ n: 5, why }])
+    expect(readyReport(unready)).toMatchObject({ code: 1, errors: [`✗ #5 ${why}`] })
+    const merged = await three(true)
+    expect(merged.merged?.n).toBe(7)
+    expect(readyReport(merged)).toMatchObject({ code: 0, errors: [`✗ #5 ${why}`] })
   })
 
   test("a refusal from pr:merge is named and nothing reads as merged", async () => {

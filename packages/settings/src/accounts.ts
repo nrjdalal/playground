@@ -12,7 +12,7 @@ const label = z
     "a label of lowercase letters, digits, dots, dashes and underscores",
   )
 
-// One Claude account the factory spends, keyed by its email (provider unset reads as claude): an ending one names its plan's end (null until known) and may lead the ending ones; a renewing one its billing day (null until known); the near-limit marks count it when nearLimit is set; an own one (the owner's personal account) takes a fifth of its share of new sessions unless its deadline is within a day; its week's reset day and hour (UTC) stand in for a reading that gives none.
+// One Claude account the factory spends, keyed by its email (provider unset reads as claude): an ending one names its plan's end (null until known) and may lead the ending ones; a renewing one its billing day (null until known); the near-limit marks count it when nearLimit is set; an own one (the owner's personal account) takes a fifth of its share of new sessions unless its deadline is within a day; a parked one takes none until its parkedUntil; its week's reset day and hour (UTC) stand in for a reading that gives none.
 const claudeAccount = z.strictObject({
   email,
   ends: z.string().datetime({ offset: true }).nullable().optional(),
@@ -20,6 +20,7 @@ const claudeAccount = z.strictObject({
   label: label.optional(),
   nearLimit: z.boolean().optional(),
   own: z.boolean().optional(),
+  parkedUntil: z.string().datetime({ offset: true }).optional(),
   provider: z.literal("claude").optional(),
   renews: z.number().int().min(1).max(31).nullable().optional(),
   weekReset: z
@@ -60,7 +61,7 @@ export const accountSettings = defineSettings({
   "usage.accounts": {
     default: [],
     description:
-      "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
+      "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), the time until which no new session starts on it (parkedUntil), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
     schema: z
       .array(account)
       .refine(

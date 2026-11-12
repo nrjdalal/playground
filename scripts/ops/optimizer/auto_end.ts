@@ -9,6 +9,8 @@ import { basename, dirname, join } from "node:path"
 
 import { recordPath } from "../../../api/hono/src/lib/dev/stop"
 import { kindOf, managerKindOfName } from "../../../packages/config/src/kinds"
+import { freedOf, type Pr, type RmDeps } from "../../../packages/scripts/src/playground/rm"
+import STATUSES from "../../roster-statuses.json"
 import {
   type CollectInput,
   collect,
@@ -84,16 +86,29 @@ export async function endOne(target: Target, why: string, deps: EndDeps): Promis
     : [{ text, to }]
 }
 
-// ops-tick's sweep: every session idle_sessions.ts flags with a flag that ends it.
+// ops-tick's sweep: every session idle_sessions.ts flags with a flag that ends it; a worker whose PR closed last unmerged is kept instead, one line asking its lead to reassign or end it.
 export async function sweep(input: CollectInput, deps: EndDeps): Promise<Line[]> {
   const out: Line[] = []
   for (const row of await collect(input)) {
+    const kept = row.why.find((w) => w.startsWith("worker-pr-closed"))
+    if (kept) {
+      out.push({
+        text: `Kept ${row.name}: ${kept}; reassign it or end it`,
+        to: leadOf(row.lead, row.worker),
+      })
+      continue
+    }
     const why = endsOn(row)
     if (!why) continue
-    const sha = row.sha
-      ? `, ${row.mergedPr ? `#${row.mergedPr} ` : ""}merged as ${row.sha.slice(0, 7)}`
+    // A pr-done end names the PR that decided it: a merge with its sha, a close by number alone.
+    const mark = /^(?:checker-pr-done|worker-prs-done)\b/.test(why)
+      ? row.sha
+        ? `, #${row.donePr} merged as ${row.sha.slice(0, 7)}`
+        : why.endsWith("(closed)") && row.donePr
+          ? `, #${row.donePr} closed`
+          : ""
       : ""
-    out.push(...(await endOne(row, `${why}${sha}`, deps)))
+    out.push(...(await endOne(row, `${why}${mark}`, deps)))
   }
   return out
 }
@@ -337,14 +352,39 @@ export async function cleanWorktree(
   return `removed ${path}${containers}${deleted ? `, branch ${branch}` : ""}`
 }
 
+// Whether a worktree's PR, as rm's reader returns it (its head beside its number and state, or none), is finished: merged or closed, rm's freed reading.
+export const finishedOf = (pr: Pr | null): boolean => freedOf(pr) !== undefined
+
+// Why the cleanup's held check keeps a worktree, with rm's roster, clone and link holders and the worktree's own PR's freed state among them: null when nothing holds it. Its process check reads none, since the stack dev:stop is about to stop, and rm's saved-work checks run after it.
+export const cleanupHeld = async (
+  path: string,
+  pr: string | undefined,
+  rm: RmDeps,
+): Promise<string | null> => {
+  const { worktreeRefusal } = await import("../../../packages/safe-delete/src/index")
+  return worktreeRefusal(
+    path,
+    { home: rm.home, main: rm.main, trash: join(rm.data, "trash") },
+    {
+      clones: rm.clones,
+      discard: true,
+      freed: freedOf(await rm.prState(path, pr)),
+      live: STATUSES.live,
+      merged: () => null,
+      places: rm.places,
+      ...(pr ? { pr } : {}),
+      procs: [],
+      roster: join(rm.data, "roster.json"),
+    },
+  )
+}
+
 // This machine's cleanup deps: git, the main checkout this one belongs to, bun run dev:stop in the worktree, playground rm's PR state, playground rm --worktree from this checkout, docker ps -a and docker rm -fv, and the live dashboard's database name.
 export async function cleanupDeps(): Promise<CleanupDeps | null> {
   const common = await git(REPO, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
   if (!common) return null
   const { isLiveDatabase, livePair } = await import("../../../api/hono/src/lib/dev/live-dashboard")
   const { rmDeps } = await import("../../../packages/scripts/src/playground/rm")
-  const { worktreeRefusal } = await import("../../../packages/safe-delete/src/index")
-  const STATUSES = (await import("../../roster-statuses.json")).default
   const pair = livePair()
   const rm = rmDeps(REPO)
   return {
@@ -357,27 +397,9 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
       const lines = out.split("\n")
       return { ok: code === 0, out: lines.find((l) => l.startsWith("dev:stop:")) ?? lines.at(-1)! }
     },
-    finished: async (path, pr) => {
-      const state = await rm.prState(path, pr)
-      return state === "MERGED" || state === "CLOSED"
-    },
+    finished: async (path, pr) => finishedOf(await rm.prState(path, pr)),
     git,
-    // rm's roster, clone and link holders alone: its process check would see the stack dev:stop is about to stop, and its saved-work checks run after the stop
-    held: async (path, pr) =>
-      worktreeRefusal(
-        path,
-        { home: rm.home, main: rm.main, trash: join(rm.data, "trash") },
-        {
-          clones: rm.clones,
-          discard: true,
-          live: STATUSES.live,
-          merged: () => null,
-          places: rm.places,
-          ...(pr ? { pr } : {}),
-          procs: [],
-          roster: join(rm.data, "roster.json"),
-        },
-      ),
+    held: (path, pr) => cleanupHeld(path, pr, rm),
     live: (container) => isLiveDatabase(container, pair),
     liveBranch: pair.branch,
     main: dirname(common),

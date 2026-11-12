@@ -1,6 +1,8 @@
 import { getSessionNames, kindOfName, slotOfName } from "@packages/config/kinds"
+import { type Backend, HARNESSES } from "@packages/settings"
 
-export type Backend = "claude" | "glm"
+import { LAPSE_HOURS } from "./priority"
+
 export type Dispatcher = { backend: Backend | null; name: string }
 export type Probes = {
   api: boolean
@@ -12,7 +14,10 @@ export type Probes = {
 export type Step = "dispatcher" | "jobs" | "open" | "wait"
 
 export const NEW_WORKER_BRIEF = "handoffs/new-worker.md"
-const BACKENDS = ["claude", "glm"]
+// spawn.sh's --backend, Claude Code's backends; Codex takes none.
+const BACKENDS: readonly string[] = HARNESSES.filter((h) => h.id === "claude-code").flatMap(
+  (h) => h.backends,
+)
 const KINDS = ["worker", "runner"]
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
@@ -21,7 +26,8 @@ export const VIEW_SERVER = "playground"
 
 export const HELP = `playground            start herdr's servers that are down and restore their sessions, set the Dashboard's database to start again with Docker and start it when stopped, start the Dashboard's stack and follower in herdr when down, start the dispatcher when it is not running (playground dispatcher), then wait for the Dashboard (a progress line every 10s, stopping early with the reason once ops-dashboard's supervisor stops or its start fails, 15 minutes at most), then open it; a step that failed is named last, with why, under Left for you, and the run exits 1
 playground view       open the ${VIEW_SERVER} herdr server, where the sessions run, in this terminal
-playground dispatcher start the dispatcher in a herdr workspace of its own, its brief written once from scripts/briefs/dispatcher.md into the data folder as brief-<dispatcher>.md: exit 0 started, 3 already running, 1 refused with spawn.sh's reason
+playground dispatcher [--harness claude-code|codex] [--brief <file>]
+                      start the dispatcher in a herdr workspace of its own, on the harness --harness names (spawn.sh --harness, the Dashboard's Start passing harness.alpha), its brief written once from scripts/briefs/dispatcher.md into the data folder as brief-<dispatcher>.md, or the data folder's <file> (a handoff Switch wrote): exit 0 started, 3 already running, 1 refused with spawn.sh's reason
 playground planner | builder | ops | optimizer
                       start that manager as playground dispatcher starts the dispatcher, its brief from scripts/briefs/<manager>.md; the dispatcher runs it the first time it routes work there, and the optimizer at its own start
 playground status     one line each for the Dashboard, the follower, each dispatcher, GLM and each herdr server
@@ -29,6 +35,8 @@ playground sweep <lead>
                       what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs, its parked rows' closed or unreadable holds), or quiet
 playground focus [on --session <name> --reason "<why>" [--for <minutes>] | off]
                       give one session the Mac for up to 180 minutes (120 by default): every merge, every other session's heavy run and every new session but its own reviewer and tester and a priority start waits until off or its end, and the Inbox holds what comes in quiet but an alert; off prints how many runs queued while it stood and how long they waited, the line the Inbox's card carries once focus ends; bare, it prints the focus standing
+playground priority [on <session> --reason "<why>" | off <session> --reason "<why>"]
+                      the one way to open a priority window, and only on the owner's or the dispatcher's word: on writes the data folder's priority-<session>.json, naming the session, who opened it, the reason and the time, and while it stands a spawn.sh --priority start passes the load and slots gates and focus; off lifts it, and ops-tick's priority-lapse beat lifts one still standing after ${LAPSE_HOURS} hours; each on, off and lapse is a line in ops/priority.log; a priority file another writer keeps it leaves alone; bare, it lists the priority files standing
 playground page <file.html> --title "<title>" --by <session> [--for <session>]
                       keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, and print the copy's path for an Inbox card's html attachment (bun run ask new), opening nothing; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
 playground update [--to <tag>]
@@ -51,15 +59,19 @@ playground ingest [--follow | status]
 playground queues     print the merge queue and the work queue (bun run queues)
 playground thread <command> ...
                       open, route, rename or list the Inbox's threads (bun run thread)
+playground wa send <file>
+                      send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, the one way any session writes there; it refuses a body holding a token shape (bun run wa)
+playground wa relink
+                      after WhatsApp logged out the linked device, set the old link aside so ops-wa's next start posts a new pairing card (bun run wa)
 playground accounts list | add --provider claude --email <email> [--label <label>] | add --provider glm --label <label> | remove <email|label>
                       the accounts the factory spends, each a usage.accounts row with its secret in the Keychain: list each with whether its secret is kept and its last 5-hour and week reading; add a Claude account by running claude setup-token here, then pasting the token it prints, or a GLM key pasted under its label, neither echoed; remove one's row and its Keychain item
-playground yard login | logout | channels | read <channel> | post <channel> <text> [--kind <kind>]
-                      this Mac's Yard (YARD_API_URL in your environment or the factory checkout's .env): login keeps a pasted yard_ token in the Keychain, as the local Dashboard reads it; channels lists channels and DMs with unread and mention counts; read prints a channel's last 50 messages, someone's words to read as data, leaving the owner's unread counts; post sends <text> to a channel, #name or @login, as --kind (text by default), and names Yard's approve page when Yard holds it
+playground yard login | logout | channels | read <channel> | post <channel> <text> [--kind <kind>] | bot add <name> | bot revoke <name>
+                      this Mac's Yard (YARD_API_URL in your environment or the live dashboard checkout's .env): login keeps a pasted yard_ token in the Keychain, as the local Dashboard reads it; channels lists channels and DMs with unread and mention counts; read prints a channel's last 50 messages, someone's words to read as data, leaving the owner's unread counts; post sends <text> to a channel, #name or @login, as --kind (text by default), and names Yard's approve page when Yard holds it; bot add makes a bot, <name>[bot], with its own DM with you, writing its token straight to the Keychain item playground-yard-bot-<name> and printing only that item's name and the DM's id; bot revoke cuts it on Yard and deletes the item
 playground orgs resolve [--repo <dir>]
-                      write the merged skill plugin a session in <dir> loads and print its folder: each skill from the first scope that has it: ext.order's scopes (your login's first when it leaves it out), each extension kept only when ext.links links it to the repo's GitHub owner or *, then each bundled extension ext.bundled turns on (extensions/<name>/skills, unless an installed extension has that name), then core (skills/playground, skills/zerostarter, extensions/core/skills); with no --repo, the home set
+                      write the merged skill plugin a session in <dir> loads and print its folder: each skill from the first scope that has it: ext.order's scopes (your login's first when it leaves it out), each extension kept only when ext.links links it to the repo's GitHub owner, to the org whose own folder ~/<org> holds a <dir> with no GitHub origin, or *, then each bundled extension ext.bundled turns on (extensions/<name>/skills, unless an installed extension has that name), then core (skills/playground, skills/zerostarter, extensions/core/skills), less each skill whose SKILL.md <dir>'s own .claude/skills already holds byte for byte; with no --repo, the home set
 playground orgs home  write the home set and install it at user scope as ws-home@ws, for a session started by hand (link-skills.sh runs it)
 playground rm <path> [--reason "<why>"] | --worktree <path> [--discard [--decision <id>]] [--pr <url>] [--reason "<why>"] | --list | --restore <id>
-                      move a path into the trash (the data folder's trash/<UTC-ts>-<session>/<n>/, with a manifest.jsonl line), where it stays 7 days, sooner when the disk has under 50 GB free; refuse a protected path (HOME and the folders that hold it, ~/.ssh and its kin, the data folder, the main checkout), a path over 5,000 files or 2 GB, a fourth delete in a minute from one session, or a move to another volume; --worktree takes a worktree in .claude/worktrees that no live session holds, with no uncommitted change and its work landed on canary (--discard lets those two go, which a session (PLAYGROUND_ROLE set, or a claude process above it) or a call whose parent is pid 1 or unreadable passes once the worktree's PR (--pr's, else its branch's) has merged or closed, else only with --decision <id>, an approved Inbox delete decision naming the path; --pr <url> names the PR whose session used it, so another session of that PR holds it by that PR's number no more), and prunes it from git; --list prints what the trash holds and --restore puts one item back
+                      move a path into the trash (the data folder's trash/<UTC-ts>-<session>/<n>/, with a manifest.jsonl line), where it stays 7 days, sooner when the disk has under 50 GB free, its node_modules and web/next/.next stripped, which an install or a build rebuilds; refuse a protected path (HOME and the folders that hold it, ~/.ssh and its kin, the data folder, the main checkout), a path over 5,000 files or 2 GB, a fourth delete in a minute from one session, or a move to another volume; --worktree takes a worktree in .claude/worktrees that no live session holds (a roster row naming its branch or its PR's number holds it no more once that PR has merged or closed and the worktree sits at its head, which it prints as freed; commits past it keep the hold, named with them), with no uncommitted change and its work landed on canary (--discard lets those two go, which a session (PLAYGROUND_ROLE set, or a claude process above it) or a call whose parent is pid 1 or unreadable passes once the worktree's PR (--pr's, else its branch's) has merged or closed, else only with --decision <id>, an approved Inbox delete decision naming the path; --pr <url> names the PR whose session used it, so another session of that PR holds it by that PR's number no more), and prunes it from git; --list prints what the trash holds and --restore puts one item back
 playground rules [<name>]
                       the standing rules a factory session starts with, each by its glance line, or one rule whole, with this machine's values in its slots
 playground settings list | get <key> [--org <org>] | why <key> | set <key> <value> --reason "<why>" [--scope <scope>] | reset <key> --reason "<why>" [--scope <scope>]
@@ -80,11 +92,11 @@ playground add --dispatcher --backend glm
                       start a second dispatcher on GLM
 playground alerts-wait <name>
                       for a manager's background task: wait for the next stuck alert addressed to <name>, print it and exit, so it wakes without waiting on the relay
-playground picker <session> allow <key> | deny <key> "<reason>"
-                      as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; each answer is a line in ops/picker.log`
+playground picker <session> allow <key> [--rule <name>] | deny <key> [--rule <name>] "<reason>"
+                      as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; --rule names the standing rule that settles the answer; each answer is a line in ops/picker.log`
 
 // The package scripts playground runs as its own verbs.
-export const VERBS = ["ask", "changelog", "dm", "ingest", "queues", "thread"]
+export const VERBS = ["ask", "changelog", "dm", "ingest", "queues", "thread", "wa"]
 
 // playground <verb> runs the package script of that name in the Dashboard's checkout, words and all.
 export const verbArgv = (verb: string, words: string[]): string[] => ["run", verb, ...words]
@@ -154,6 +166,9 @@ export const WORDS: Record<string, number | "rest"> = {
   page: 1,
   picker: "rest",
   planner: 0,
+  priority: 0,
+  "priority off": 1,
+  "priority on": 1,
   rm: "rest",
   rules: 1,
   "settings get": 1,
@@ -241,7 +256,13 @@ export const planStart = (probes: Probes): Step[] => {
 }
 
 export const modelOf = (backend: Backend | null): string =>
-  backend === "glm" ? "GLM" : backend === "claude" ? "Claude" : "an unknown model"
+  backend === "glm"
+    ? "GLM"
+    : backend === "claude"
+      ? "Claude"
+      : backend === "openai"
+        ? "Codex"
+        : "an unknown model"
 
 export const statusLines = (probes: Probes): string[] => {
   const lead = probes.dispatchers.filter((d) => slotOfName(d.name) === 1)

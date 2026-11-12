@@ -4,7 +4,21 @@ import { tmpdir } from "node:os"
 import { join, resolve, sep } from "node:path"
 
 import { atOnce, buildName, DOCKERS, dockerBuild, portlessCompose } from "./docker-build"
-import { bunCall, cwdFlag, mainCheckout, turboWords } from "./no-main-checkout"
+import {
+  bunCall,
+  cwdFlag,
+  mainCheckout,
+  packagedTools,
+  real,
+  RUNNER_TAKES,
+  ranIn,
+  runnerFolders,
+  toolName,
+  turboWords,
+  unreadFolder,
+  withChained,
+  X,
+} from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
   ASSIGN,
@@ -179,8 +193,6 @@ const anywhere = (what: string, command: string) =>
 // bun scripts that build packages/* or run the whole suite
 const BUN_SCRIPTS = new Set(["build", "check-types", "test"])
 const RUNNERS = new Set(["bunx", "npx"])
-// bunx's and npx's options whose next word is their value
-const RUNNER_TAKES = new Set(["--package", "-p"])
 // bun test's options, and bun's runtime ones it also takes, whose next word is their value (bun test --help, bun --help), so it is no test file; --bail, -c, --changed, --config, --elide-lines, --inspect, --parallel and --shell take theirs only attached
 const TEST_TAKES = new Set([
   "--conditions",
@@ -234,10 +246,31 @@ const TEST_TAKES = new Set([
 const TURBO_TASKS = new Set(["build", "check-types", "lint", "test"])
 const TURBO_LIGHT = /^(?:--help|-h|--version|--dry(?:-run)?(?:=.*)?)$/
 
+// A program's words as the shell reads each one as a line, its quotes removed and its redirects dropped, so a script word (sh -c '<script>') shows the words of every command in it
+const lineWords = (values: string[]) =>
+  values.flatMap((v) => lex(v).commands.flatMap((c) => c.words.map((w) => w.value)))
+
+// Whether a program a runner's -p puts next beside (sh -c '<script>', env) runs next build among its words.
+const nextBuild = (values: string[]) =>
+  lineWords(values).some((v, k, all) => program(v) === "next" && all[k + 1] === "build")
+
+// The folder next build builds, its first word that is no option, read from the folder it runs in
+const nextDir = (args: Word[], env: Env) => {
+  const dir = args.find((a) => !a.value.startsWith("-"))
+  return dir ? [pathOf(dir, env)] : []
+}
+
 // The heavy task a turbo call runs, as `turbo run <task>` or turbo's own `turbo <task>`, or undefined.
 function turboTask(words: Word[]): string | undefined {
-  if (words.some((w) => TURBO_LIGHT.test(w.value))) return
-  const tasks = words.map((w) => w.value).filter((v) => !v.startsWith("-"))
+  const values = words.map((w) => w.value)
+  // a program a runner's -p puts turbo beside (sh -c '<script>', env) may run turbo from any of its words, so each word's own words count, and a light turbo call among them makes no other light
+  const beside =
+    values[0] !== undefined &&
+    !values[0].startsWith("-") &&
+    values[0] !== "run" &&
+    !TURBO_TASKS.has(values[0])
+  if (!beside && values.some((v) => TURBO_LIGHT.test(v))) return
+  const tasks = (beside ? lineWords(values) : values).filter((v) => v !== "" && !v.startsWith("-"))
   return (tasks[0] === "run" ? tasks.slice(1) : tasks).find((t) => TURBO_TASKS.has(t))
 }
 
@@ -251,7 +284,15 @@ function heavy(
   name: string,
   args: Word[],
   env: Env,
-): { anywhere?: true; dir: string | undefined; fix?: string; what: string } | undefined {
+):
+  | {
+      also?: (string | undefined)[]
+      anywhere?: true
+      dir: string | undefined
+      fix?: string
+      what: string
+    }
+  | undefined {
   const compose = portlessCompose(name, args)
   if (DOCKERS.has(name) || compose) {
     const build = compose
@@ -273,30 +314,72 @@ function heavy(
     return
   }
   if (name === "next")
-    return args[0]?.value === "build" ? { dir: env.cwd, what: "next build" } : undefined
+    return args[0]?.value === "build"
+      ? { also: nextDir(args.slice(1), env), dir: env.cwd, what: "next build" }
+      : undefined
   // turbo by name, path or versioned package, through bunx, npx or bun x past their options, read as no-main-checkout reads it
   const turbo = turboWords(name, args, env)
   if (turbo) {
     const task = turboTask(turbo)
-    return task ? { dir: cwdFlag(turbo, env), what: `turbo run ${task}` } : undefined
+    return task
+      ? {
+          also: runnerFolders(name, args, env, turbo),
+          dir: cwdFlag(turbo, env),
+          what: `turbo run ${task}`,
+        }
+      : undefined
   }
   if (RUNNERS.has(name)) {
     const words = args.filter(
       (a, k) => !a.value.startsWith("-") && !RUNNER_TAKES.has(args[k - 1]?.value ?? ""),
     )
-    return program(words[0]?.value ?? "") === "next" && words[1]?.value === "build"
-      ? { dir: env.cwd, what: `${name} next build` }
-      : undefined
+    const values = words.map((w) => w.value)
+    const base = name === "bunx" ? bunCall([X, ...args], env).chained : env.cwd
+    if (program(values[0] ?? "") === "next" && values[1] === "build")
+      return {
+        also: [
+          ...(runnerFolders(name, args, env, []) ?? []),
+          ...nextDir(words.slice(2), { ...env, cwd: base }),
+        ],
+        dir: env.cwd,
+        what: `${name} next build`,
+      }
+    if (packagedTools(args).includes("next") && nextBuild(values))
+      return { also: runnerFolders(name, args, env, []), dir: env.cwd, what: `${name} next build` }
+    return name === "bunx" ? heavy("bun", [X, ...args], env) : undefined
   }
   if (name !== "bun") return
-  const { at, cwd, filtered, words } = bunCall(args, env)
+  const { at, chained, cwd, filtered, sub, words } = bunCall(args, env)
   const rest = args.slice(at + 1)
   if (words[0] === "install" || words[0] === "i") {
     if (rest.some((a) => ["--dry-run", "--help", "-h"].includes(a.value))) return
     return { dir: cwdFlag(rest, { ...env, cwd }), what: "bun install" }
   }
   if (words[0] === "x" && program(words[1] ?? "") === "next" && rest[0]?.value === "build")
-    return { dir: cwd, what: "bun x next build" }
+    return {
+      also: [
+        ...(runnerFolders(name, args, env, []) ?? []),
+        ...nextDir(rest.slice(1), { ...env, cwd: chained }),
+      ],
+      dir: cwd,
+      what: "bun x next build",
+    }
+  if (
+    words[0] === "x" &&
+    packagedTools(args.slice(sub + 1)).includes("next") &&
+    nextBuild([words[1] ?? "", ...rest.map((a) => a.value)])
+  )
+    return { also: runnerFolders(name, args, env, []), dir: cwd, what: "bun x next build" }
+  // bun x runs any program in the folder its --cwd options chain to, so that program is read as the shell would read it there
+  if (words[0] === "x" && words[1] && args[at]?.value === words[1]) {
+    const ran = heavy(toolName(words[1]), rest, {
+      ...env,
+      cwd: chained,
+    })
+    if (ran) {
+      return { ...ran, also: withChained(ran.also, chained), what: `bun x ${ran.what}` }
+    }
+  }
   // bun run test:file passes its words to bun test, and with no file runs the whole suite as bun test does
   const testFile = words[0] === "run" && words[1] === "test:file"
   if (words[0] === "test" || testFile) {
@@ -332,9 +415,14 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   if (tool !== "Bash") return
   const command = (toolInput as { command?: unknown } | null)?.command
   if (typeof command !== "string") return
-  const worktrees = join(main, ".claude", "worktrees") + sep
+  const worktrees = [
+    join(main, ".claude", "worktrees"),
+    real(join(main, ".claude", "worktrees")),
+  ].map((w) => w + sep)
+  // a link into a worktree runs its build there, so the path is judged as written and with its links followed
   const inWorktree = (dir: string | undefined) =>
-    dir !== undefined && resolve(dir).startsWith(worktrees)
+    dir !== undefined &&
+    [resolve(dir), real(resolve(dir))].some((d) => worktrees.some((w) => d.startsWith(w)))
   const directory = typeof cwd === "string" ? cwd : undefined
   // the line's own commands, set once it is read below
   let line: Command[] = []
@@ -386,13 +474,25 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
       const line = words()
       if (found?.anywhere && line !== undefined)
         return refuseDocker(found.what, "", line, found.fix)
-      if (found && line !== undefined && (found.dir === undefined || inWorktree(found.dir)))
+      if (
+        found &&
+        line !== undefined &&
+        ranIn(found.dir, found.also).some((dir) => dir === undefined || inWorktree(dir))
+      )
         return anywhere(found.what, line)
     }
     // every folder the shell may be in, so a heavy run after a cd the reader cannot be sure of is caught wherever that cd may have left it
     for (const here of places(env)) {
       const found = heavy(name, args, here)
-      if (!found || !(found.anywhere || inWorktree(found.dir))) continue
+      if (
+        !found ||
+        !(
+          found.anywhere ||
+          unreadFolder(found.also) ||
+          ranIn(found.dir, found.also).some(inWorktree)
+        )
+      )
+        continue
       // run-slot execs the first word after its --, so the fix keeps the program, its words and every assignment before it behind env, and drops every wrapper (exec, timeout, env's own options)
       const line = words()
       if (line === undefined) return

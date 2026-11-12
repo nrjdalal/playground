@@ -38,7 +38,11 @@ describe("the slots gate admits a new worker only when run-slot has room for its
   })
 
   test.each(["reviewer", "tester"])("a %s start passes on the same full lanes", async (role) => {
-    const r = await start(["column", role, `${role}-x`, "worker-x", "w1:p2", "b.md"], 4, 2)
+    const r = await start(
+      ["column", role, `${role}-x`, "worker-x", "w1:p2", "b.md", "--pr", "1"],
+      4,
+      2,
+    )
     expect(r.code).toBe(0)
     expect(capacityLog(r)).toEqual([expect.objectContaining({ verdict: "pass" })])
   })
@@ -62,8 +66,7 @@ describe("the slots gate admits a new worker only when run-slot has room for its
 
   // run-slot's queue full, as on 6 Nov's urgent start: the free lanes lack the load units, and 8 runs wait.
   const fullQueue = slots(2, 8, 3)
-  const standing = (home: string) =>
-    writeFileSync(join(home, ".playground", "firefighting-stop.json"), "{}")
+  const standing = (home: string) => writeFileSync(join(home, ".playground", "priority.json"), "{}")
   const trigger = (home: string) => {
     fullQueue(home)
     standing(home)
@@ -71,13 +74,13 @@ describe("the slots gate admits a new worker only when run-slot has room for its
   const urgent = (args: string[], setup: (home: string) => void) =>
     spawn(args, [], { FAKE_CPU_IDLE: "80" }, undefined, undefined, setup)
 
-  test("a --firefighting worker start passes a full queue while its trigger file stands (#1147)", async () => {
-    const r = await urgent([...worker, "--firefighting"], trigger)
+  test("a --priority worker start passes a full queue while priority.json stands (#1147)", async () => {
+    const r = await urgent([...worker, "--priority"], trigger)
     expect(r.code).toBe(0)
     expect(capacityLog(r)).toEqual([
       expect.objectContaining({
         readings: expect.objectContaining({
-          priority: expect.stringMatching(/\/\.playground\/firefighting-stop\.json$/),
+          priority: expect.stringMatching(/\/\.playground\/priority\.json$/),
           lanes_free: 0,
           waiters: 8,
         }),
@@ -86,35 +89,53 @@ describe("the slots gate admits a new worker only when run-slot has room for its
     ])
   })
 
-  test("a worker start without --firefighting keeps the slots gate while a trigger file stands", async () => {
+  test("a worker start without --priority keeps the slots gate while priority.json stands", async () => {
     const r = await urgent(worker, trigger)
     expect(r.code).not.toBe(0)
     expect(placing(r)).toEqual([])
     expect(r.err).toContain("the slots gate holds it")
   })
 
-  test.each(["--priority", "--firefighting"])(
-    "a %s worker start with no priority file standing is refused, naming the files",
-    async (flag) => {
-      const r = await urgent([...worker, flag], fullQueue)
+  test("a --priority worker start with no priority file standing is refused, naming the files", async () => {
+    const r = await urgent([...worker, "--priority"], fullQueue)
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain("--priority starts only while a priority file stands in")
+    expect(r.err).toContain(
+      "priority.json, priority-start.json or another priority-<name>.json), and none does",
+    )
+    expect(r.err).toContain('playground priority on <session> --reason "<why>" opens one')
+  })
+
+  // the old names went with the core start job: --firefighting is no flag, and an old file name is no priority file
+  test("a --firefighting worker start passes no gate while priority.json stands", async () => {
+    const r = await urgent([...worker, "--firefighting"], trigger)
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+  })
+
+  test.each(["firefighting-stop.json", "firefighting-headstart.json", "firefighting-start.json"])(
+    "a --priority worker start while only the old %s stands is refused",
+    async (file) => {
+      const r = await urgent([...worker, "--priority"], (home) => {
+        fullQueue(home)
+        writeFileSync(join(home, ".playground", file), "{}")
+      })
       expect(r.code).not.toBe(0)
       expect(placing(r)).toEqual([])
       expect(r.err).toContain("--priority starts only while a priority file stands in")
-      expect(r.err).toContain("priority.json or priority-start.json")
     },
   )
 
-  // --priority and its old name, --firefighting, each pass a full queue under every file, the two new ones and the three old names they replace (#1334)
+  // --priority passes a full queue under every priority file: priority.json, a job's priority-start.json and an org's own priority-<name>.json (#1334)
   test.each(
-    ["--priority", "--firefighting"].flatMap((flag) =>
-      [
-        "priority.json",
-        "priority-start.json",
-        "firefighting-stop.json",
-        "firefighting-headstart.json",
-        "firefighting-start.json",
-      ].map((file) => [flag, file]),
-    ),
+    [
+      "priority.json",
+      "priority-start.json",
+      "priority-stop.json",
+      "priority-headstart.json",
+      "priority-acme.json",
+    ].map((file) => ["--priority", file]),
   )("a %s worker start passes a full queue while %s stands (#1334)", async (flag, file) => {
     const r = await urgent([...worker, flag!], (home) => {
       fullQueue(home)
@@ -136,7 +157,7 @@ describe("the slots gate admits a new worker only when run-slot has room for its
 
   test.each([
     ["a worker start", worker],
-    ["a --firefighting worker start, its trigger file standing,", [...worker, "--firefighting"]],
+    ["a --priority worker start, priority.json standing,", [...worker, "--priority"]],
   ])("%s is refused when run-slot.sh room gives no reading", async (_, args) => {
     // a scratch checkout holding spawn.sh, its data-folder resolver and a run-slot.sh that prints nothing
     const checkout = mkdtempSync(join(scratch, "no-room-"))

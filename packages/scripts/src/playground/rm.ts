@@ -83,6 +83,12 @@ export type Decision = {
 }
 
 export type PrState = "CLOSED" | "MERGED" | "OPEN"
+export type Pr = { head: string; number: number; state: PrState }
+// A worktree's PR once it reads MERGED or CLOSED, as the hold check's freed: its head beside its number and state, or undefined while it reads OPEN or GitHub cannot read it. The hold check frees a row naming the worktree by its branch or by this PR's number only when the PR's head is the worktree's HEAD; commits past it keep the hold, named with them.
+export const freedOf = (
+  pr: Pr | null,
+): { head: string; number: number; state: "CLOSED" | "MERGED" } | undefined =>
+  pr && pr.state !== "OPEN" ? { head: pr.head, number: pr.number, state: pr.state } : undefined
 
 // What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR state by its --pr or else its branch (null when none reads), the session the caller is (callerOf), and the session's name.
 export type RmDeps = {
@@ -95,7 +101,7 @@ export type RmDeps = {
   merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
   places: () => string[]
-  prState: (path: string, pr?: string) => Promise<PrState | null>
+  prState: (path: string, pr?: string) => Promise<Pr | null>
   procs: () => Proc[] | null
   session: () => Promise<string>
 }
@@ -207,17 +213,19 @@ const merged = (sha: string, at: string): boolean | null => {
 
 // Pure: a worktree's PR state, counted only when exactly one PR answers, since a branch name used twice can find another's, that PR is this worktree's own (its branch is the worktree's, or its head is HEAD, so a stacked child does not pass under its parent's PR), and its head is HEAD or an ancestor of it; else null.
 export const prStateOf = (
-  prs: { headRefName: string; headRefOid: string; state: PrState }[] | null,
+  prs: { headRefName: string; headRefOid: string; number: number; state: PrState }[] | null,
   at: { branch: string | null; head: string },
   holds: (sha: string) => boolean,
-): PrState | null => {
+): Pr | null => {
   const only = prs?.length === 1 ? prs[0]! : null
   if (!only || (only.headRefName !== at.branch && only.headRefOid !== at.head)) return null
-  return only.headRefOid === at.head || holds(only.headRefOid) ? only.state : null
+  return only.headRefOid === at.head || holds(only.headRefOid)
+    ? { head: only.headRefOid, number: only.number, state: only.state }
+    : null
 }
 
 // A worktree's PR state from gh in it, the --pr URL's else its branch's, by prStateOf, or null when gh or git cannot answer.
-const prState = async (path: string, pr?: string): Promise<PrState | null> => {
+const prState = async (path: string, pr?: string): Promise<Pr | null> => {
   const gh = (args: string[]) => {
     try {
       const run = Bun.spawnSync(["gh", ...args], { cwd: path, stderr: "ignore", stdout: "pipe" })
@@ -231,12 +239,15 @@ const prState = async (path: string, pr?: string): Promise<PrState | null> => {
   const named = gitIn(path, "symbolic-ref", "--quiet", "--short", "HEAD")
   const branch = named.ok ? named.out : null
   if (!pr && !branch) return null
-  const fields = ["--json", "headRefName,headRefOid,state"]
+  const fields = ["--json", "headRefName,headRefOid,number,state"]
   const list = pr
     ? gh(["pr", "view", pr, ...fields, "--jq", "[.]"])
     : gh(["pr", "list", "--head", branch!, "--state", "all", "--limit", "2", ...fields])
   const states = new Set(["CLOSED", "MERGED", "OPEN"])
-  const prs = Array.isArray(list) && list.every((p) => states.has(p?.state)) ? list : null
+  const prs =
+    Array.isArray(list) && list.every((p) => states.has(p?.state) && Number.isInteger(p?.number))
+      ? list
+      : null
   return prStateOf(
     prs,
     { branch, head: head.out },
@@ -294,7 +305,7 @@ export const discardRefusal = async (
 ): Promise<string | null> => {
   const route = `post an Inbox delete decision with bun run ask new naming ${resolve(path)} and why (bun run ask example delete prints one to start from), then run playground rm --worktree ${path} --discard --decision <id> once it is approved`
   if (id === undefined) {
-    const state = await deps.prState(path, pr)
+    const state = (await deps.prState(path, pr))?.state
     if (state === "MERGED" || state === "CLOSED") return null
     return `${caller} passes --discard only with --decision <id>: ${route}`
   }
@@ -373,11 +384,14 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     return 2
   }
   const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
+  // the worktree's own PR, asked of GitHub once a run, as the discard gate and the roster's hold both read it for args.path and args.pr
+  let ownRead: Promise<Pr | null> | undefined
+  const read: RmDeps = { ...deps, prState: (path, pr) => (ownRead ??= deps.prState(path, pr)) }
   // a folder outside the worktrees folder skips the gate, since quarantine refuses its --worktree naming plain playground rm
   if ("discard" in args && args.discard && inWorktrees(args.path, roots)) {
     const caller = await deps.caller()
     const refusal = caller
-      ? await discardRefusal(args.path, args.decision, caller, deps, args.pr)
+      ? await discardRefusal(args.path, args.decision, caller, read, args.pr)
       : null
     if (refusal) {
       console.error(`playground: ${refusal}`)
@@ -391,10 +405,11 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
       )
     return 0
   }
-  const keptGit =
+  const kept =
     "restore" in args
-      ? listTrash(roots.trash).find((entry) => entry.id === args.restore)?.git
+      ? listTrash(roots.trash).find((entry) => entry.id === args.restore)
       : undefined
+  const keptGit = kept?.git
   const relinkRefused = keptGit && relinkRefusal(roots.main, keptGit)
   if (relinkRefused) {
     console.error(`playground: ${relinkRefused}`)
@@ -402,6 +417,11 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   }
   const session = "restore" in args ? "" : await deps.session()
   const git = "worktree" in args && args.worktree ? worktreeGit(args.path) : undefined
+  // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold
+  const freed =
+    "worktree" in args && args.worktree
+      ? freedOf(await read.prState(args.path, args.pr))
+      : undefined
   const done =
     "restore" in args
       ? restore(args.restore, roots)
@@ -415,8 +435,10 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
               ? {
                   clones: deps.clones,
                   discard: args.discard,
+                  ...(freed ? { freed } : {}),
                   live: STATUSES.live,
                   merged: deps.merged,
+                  note: (line: string) => console.log(`playground: ${line}`),
                   places: deps.places,
                   ...(args.pr ? { pr: args.pr } : {}),
                   procs: deps.procs(),
@@ -437,13 +459,15 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
       console.error(`playground: restored ${done.path}, but git cannot read it yet: ${relinked}`)
       return 1
     }
-    console.log(`Restored ${done.path}`)
+    console.log(
+      `Restored ${done.path}${kept?.stripped ? ", and a bun install in it rebuilds what the strip removed" : ""}`,
+    )
     return 0
   }
   if ("worktree" in args && args.worktree)
     Bun.spawnSync(["git", "-C", roots.main, "worktree", "prune"])
   console.log(
-    `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back`,
+    `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back${done.stripped ? ", and a bun install in it rebuilds what the strip removed" : ""}${done.stripFailed ? ` (the strip stopped partway: ${done.stripFailed}; the hourly strip takes the rest)` : ""}`,
   )
   return 0
 }

@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 
+import { testContainerName } from "../../../../container"
+
 // Port 9 is closed on this machine (verify's own tests use it as one): connecting is refused at once.
 const CLOSED = "postgres://postgres:pw@127.0.0.1:9/postgres"
 const PASSWORD = "health-test"
@@ -72,6 +74,8 @@ describe.skipIf(!dockerUp())("with the database up", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("health"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",

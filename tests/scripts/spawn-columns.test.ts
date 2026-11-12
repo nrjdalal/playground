@@ -2,6 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, mkdirSync, readdirSync, symlinkSync } from "node:fs"
 import { join } from "node:path"
 
+import { KINDS } from "../../packages/settings/src/settings"
 import { OLD } from "../session-names"
 import { bin, launchAfterRm, placing, root, scratch, script, spawn } from "./spawn-fake"
 
@@ -17,7 +18,7 @@ describe("under the gates it spawns", () => {
       `You are ${OLD.dispatcher}, the Playground factory's dispatcher; ${OLD.ops} briefs you`,
     )
     expect(command).not.toContain("Report to")
-    expect(r.roster).toEqual(["set", OLD.dispatcher, "kind=dispatcher", "task=h.md"])
+    expect(r.roster).toEqual(["set", OLD.dispatcher, "kind=dispatcher", "task=h.md", "memory=on"])
   })
 
   test("a manager's column names it once: a lead reports to the dispatcher", async () => {
@@ -151,7 +152,7 @@ describe("under the gates it spawns", () => {
 
   test("a reviewer a lead spawns is not nested under the lead", async () => {
     const r = await spawn(
-      ["column", "reviewer", "reviewer-changelog-700", OLD.builder, "w1:p2", "b.md"],
+      ["column", "reviewer", "reviewer-changelog-700", OLD.builder, "w1:p2", "b.md", "--pr", "1"],
       [],
     )
     expect(r.code).toBe(0)
@@ -159,8 +160,11 @@ describe("under the gates it spawns", () => {
       "set",
       "reviewer-changelog-700",
       "kind=reviewer",
+      "prs+=1",
+      "pr=1",
       "title=Plain test work",
       "task=b.md",
+      "memory=off",
     ])
   })
 
@@ -249,39 +253,48 @@ describe("under the gates it spawns", () => {
     },
   )
 
-  test("a checker's resume on an ended row naming only an issue clears its pr, since no pull request is named yet (#1135)", async () => {
+  test("a checker's resume on an ended row naming an issue beside its pull request keeps both in prs, its pr the pull request (#1135)", async () => {
     const issue = "https://github.com/acme/factory/issues/5"
     const r = await checkerStart("resume", { pr: PR_A, prs: [PR_A], status: "ended" }, [
       "--pr",
-      issue,
+      `${issue},${PR_B}`,
     ])
     expect(r.code).toBe(0)
-    expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${issue}`, "pr="])
+    expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${issue},${PR_B}`, `pr=${PR_B}`])
   })
 
-  test.each(["resume", "column"])(
-    "a checker's %s on an ended row naming no PR is refused before any pane opens, naming --pr (#1135)",
-    async (mode) => {
-      const r = await checkerStart(mode, { pr: PR_A, prs: [PR_A], status: "ended" })
+  test.each([
+    ["resume", { pr: PR_A, prs: [PR_A], status: "ended" }],
+    ["column", { pr: PR_A, prs: [PR_A], status: "ended" }],
+    ["resume", { status: "working" }],
+    ["column", { status: "working" }],
+    ["column", null],
+  ] as [string, object | null][])(
+    "a checker's %s naming no PR is refused before any pane opens, naming --pr, on any row: %p (#1400)",
+    async (mode, row) => {
+      const r = await checkerStart(mode, row)
       expect(r.code).not.toBe(0)
-      expect(r.err).toContain("--pr <url>")
+      expect(r.err).toContain("--pr <pull url>")
       expect(r.roster).toBeUndefined()
       expect(placing(r)).toEqual([])
     },
   )
 
-  test.each([
-    ["resume", { status: "working" }],
-    ["column", { status: "working" }],
-    ["column", null],
-  ] as [string, object | null][])(
-    "a checker's %s on a live row, or no row, naming no PR, starts as before: %p",
-    async (mode, row) => {
-      const r = await checkerStart(mode, row)
+  test.each(["resume", "column"])(
+    "a checker's %s writes its row's pr before its launch runs in the pane, since its first tool call reads it (#1400)",
+    async (mode) => {
+      const r = await checkerStart(mode, { status: "working" }, ["--pr", PR_B])
       expect(r.code).toBe(0)
-      expect(statusAndPrs(r)).toEqual([])
+      expect(r.rosterAtRun?.join("\n")).toContain(`pr=${PR_B}`)
     },
   )
+
+  test("a worker's row is written once its session has started, as before (#1400)", async () => {
+    const r = await spawn(["worker", "worker-brave-otter", "b.md", "--title", "T"], [])
+    expect(r.code).toBe(0)
+    expect(r.rosterAtRun).toEqual([])
+    expect(r.rosterLog?.length).toBe(1)
+  })
 
   test.each([
     ["column", null, [`prs+=${PR_B}`, `pr=${PR_B}`]],
@@ -298,11 +311,63 @@ describe("under the gates it spawns", () => {
     },
   )
 
-  test("a checker's column on no row naming only an issue adds it to prs with no pr, since no pull request is named yet (#1135)", async () => {
-    const issue = "https://github.com/acme/factory/issues/5"
-    const r = await checkerStart("column", null, ["--pr", issue])
+  test.each([
+    ["resume", { pr: PR_A, prs: [PR_A], status: "ended" }],
+    ["column", null],
+  ] as [string, object | null][])(
+    "a checker's %s naming only an issue is refused before any pane opens, since its row would name no pr: %p (#1400)",
+    async (mode, row) => {
+      const r = await checkerStart(mode, row, ["--pr", "https://github.com/acme/factory/issues/5"])
+      expect(r.code).not.toBe(0)
+      expect(r.err).toContain("--pr <pull url>")
+      expect(r.roster).toBeUndefined()
+      expect(placing(r)).toEqual([])
+    },
+  )
+
+  // a checker scoring an extension item could not start, since --pr took a GitHub pull request alone, and a restart of one holding an item in its prs closed its pane, then failed its resume (#1851).
+  const ITEM = "acme/script/start-up"
+
+  test("a checker's start naming only an extension item passes, its row's prs the item and its pr unset (#1851)", async () => {
+    const r = await checkerStart("column", null, ["--pr", ITEM])
     expect(r.code).toBe(0)
-    expect(statusAndPrs(r)).toEqual([`prs+=${issue}`])
+    expect(statusAndPrs(r)).toEqual([`prs+=${ITEM}`, "pr="])
+  })
+
+  test("a checker's restart naming a pull request and an extension item passes, its pr the pull request (#1851)", async () => {
+    const r = await checkerStart("resume", { pr: PR_A, prs: [PR_A, ITEM], status: "ended" }, [
+      "--pr",
+      `${PR_A},${ITEM}`,
+    ])
+    expect(r.code).toBe(0)
+    expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${PR_A},${ITEM}`, `pr=${PR_A}`])
+  })
+
+  test.each(["-acme/script/start-up", "acme/widget/start-up", "acme/script/Start-Up"])(
+    "--pr refuses the extension item %s before any pane opens (#1851)",
+    async (bad) => {
+      const r = await checkerStart("column", null, ["--pr", bad])
+      expect(r.code).not.toBe(0)
+      expect(r.err).toContain("<scope>/<kind>/<key>")
+      expect(placing(r)).toEqual([])
+    },
+  )
+
+  test("spawn.sh's extension item form names the kinds playground ext takes (#1851)", async () => {
+    const source = await Bun.file(script).text()
+    expect(source).toContain(`/(${KINDS.join("|")})/`)
+  })
+
+  test("a checker's failed roster write refuses its start before its pane opens (#1400)", async () => {
+    const r = await spawn(
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", PR_B],
+      [],
+      { FAKE_ROSTER_BROKEN: "1" },
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("its roster write failed before its pane opened")
+    expect(placing(r)).toEqual([])
+    expect(readdirSync(join(r.home, ".playground", "launch"))).toEqual([])
   })
 
   test.each([

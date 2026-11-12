@@ -129,7 +129,7 @@ import {
   withoutRef,
   withoutSenderName,
 } from "@/lib/agent-label"
-import { useAgentsBoard } from "@/lib/agents"
+import { socketsOf, useAgentsBoard } from "@/lib/agents"
 import {
   attachmentsOf,
   firstLineOf,
@@ -177,7 +177,7 @@ import { fullTime } from "@/lib/time"
 
 // A message's recipient by its label, the board's socket address resolved to its session; plain text, since the row it sits in is one button, and the open row links it.
 function Recipient({ to }: { to: string }) {
-  const sockets = useAgentsBoard().data?.sockets
+  const sockets = useAgentsBoard(socketsOf).data
   return agentLabel(sockets?.[to] ?? withoutRef(to))
 }
 
@@ -493,7 +493,7 @@ export function StepRow({
   worker: Worker
 }) {
   const at = message.metadata?.at ?? null
-  const sockets = useAgentsBoard().data?.sockets
+  const sockets = useAgentsBoard(socketsOf).data
   // the Undo marker's own typed state holds its Dismiss back the same way
   const markerHeld = useTypedHold(marker?.typedAt ?? null)
   if (message.role === "assistant") {

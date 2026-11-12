@@ -2,9 +2,11 @@
 
 import "../../packages/env/src/aliases"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { basename, join } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
+import { orgFolderOf } from "../../packages/settings/src/ext"
 // The rules' own keys register on import, so their defaults fill a slot the extensions do not set.
 import "../../packages/settings/src/rules"
 import {
@@ -120,7 +122,10 @@ export async function load(cwd: unknown, environment: Record<string, string | un
   ]
   const policy = await readPolicy(data)
   const base = policy.settings?.values ?? {}
-  const owner = repoOwner(cwd)
+  const owner =
+    repoOwner(cwd) ||
+    (typeof cwd === "string" && orgFolderOf(environment.HOME || homedir(), cwd, base)) ||
+    ""
   const user = login(data, environment)
   for (const org of extChain(base, user, owner)
     .filter((name) => name !== user && name !== CORE)

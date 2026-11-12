@@ -7,10 +7,12 @@ import {
   type Env,
   GIT_TAKES,
   lex,
+  pastDeadline,
   places,
   run,
   stdinShell,
   type StdinKind,
+  UNKNOWN,
   withDeadline,
 } from "../../../scripts/hooks/shell"
 import { type Paths, REFUSED_FORMS } from "./fixtures/refused-forms"
@@ -36,6 +38,27 @@ describe("git's value-taking options live in one list", () => {
       .filter((file) => file.endsWith(".ts") && file !== "shell.ts")
       .filter((file) => readFileSync(join(HOOKS, file), "utf8").includes('"--namespace"'))
     expect(copies).toEqual([])
+  })
+})
+
+describe("each withDeadline call keeps its own deadline (PG-1690)", () => {
+  // a check reads its verdict once its wait is over: past its own deadline, or in time
+  const check = (budget: number, wait: Promise<unknown>) =>
+    withDeadline(budget, async () => {
+      await wait
+      try {
+        pastDeadline()
+        return "in time"
+      } catch {
+        return "past"
+      }
+    })
+
+  test("two overlapping checks in one Promise.all both keep their verdicts, and leave no deadline behind", async () => {
+    const short = check(1, Bun.sleep(20))
+    const long = check(60_000, short)
+    expect(await Promise.all([short, long])).toEqual(["past", "in time"])
+    expect(() => pastDeadline()).not.toThrow()
   })
 })
 
@@ -73,12 +96,15 @@ const madePaths = (prefix: string): Paths => {
     BARE: join(root, "bare"),
     CLI_DIR: join(root, "cli"),
     DATA: join(root, "data"),
+    FOREIGN_TREE: join(root, "foreign-tree"),
+    FOREIGN_TREE_IN_MAIN: join(root, "main", ".claude", "worktrees", "foreign"),
     HOME: join(root, "home"),
     LINK: join(root, "home", "store"),
     LIST: join(extensions, "hooks", "list.json"),
     MAIN: join(root, "main"),
     ROOT: extensions,
     SCOPE: join(extensions, "login"),
+    TREE_LINK: join(root, "main", ".claude", "worktrees", "a", "into-main"),
     WORDS: join(root, "home", "words"),
     WORK: join(root, "home", "work"),
   }
@@ -244,5 +270,108 @@ describe("stdinShell reads su with no command of its own as a root shell", () =>
     ["su with a user given a command of its own", "su root -c 'ls -la'", undefined],
   ])("%s", (_, line, kind) => {
     expect(stdinShell(lex(line).commands[0])).toBe(kind)
+  })
+})
+
+// The shell expands an unquoted heredoc's body as it reads it, so each command substitution and each backquoted command there runs; a quoted delimiter expands nothing, and a backslash keeps a dollar or a backquote literal
+describe("an unquoted heredoc body's substitutions are lexed as the commands the shell runs (PG-1428)", () => {
+  const programs = (line: string) =>
+    lex(line).commands.map((c) => c.words.map((w) => w.value).join(" "))
+
+  test.each<[string, string, string[]]>([
+    [
+      "a command substitution in an unquoted body",
+      "true <<EOF\n$(probe a)\nEOF",
+      ["probe a", "true"],
+    ],
+    ["a backquoted command in an unquoted body", "true <<EOF\n`probe a`\nEOF", ["probe a", "true"]],
+    [
+      "a command substitution in a tab-stripped body",
+      "cat <<-EOF\n\t$(probe a)\n\tEOF",
+      ["probe a", "cat"],
+    ],
+    [
+      "a command substitution inside a parameter expansion's default",
+      "true <<EOF\n${X:-$(probe a)}\nEOF",
+      ["probe a", "true"],
+    ],
+    [
+      "a command substitution after a lone quote, which a body keeps as text",
+      "true <<EOF\nit's $(probe a)\nEOF",
+      ["probe a", "true"],
+    ],
+    [
+      "two substitutions on two lines",
+      "true <<EOF\n$(probe a)\n`probe b`\nEOF",
+      ["probe a", "probe b", "true"],
+    ],
+    [
+      "a substitution in the second of two heredocs on one command",
+      "cat <<A <<B\nfirst\nA\n$(probe a)\nB",
+      ["probe a", "cat"],
+    ],
+    [
+      "a substitution in a heredoc on a descriptor other than stdin",
+      "cat 3<<EOF\n$(probe a)\nEOF",
+      ["probe a", "cat"],
+    ],
+    [
+      "a substitution in a heredoc feeding a loop",
+      'while read l; do echo "$l"; done <<EOF\n$(probe a)\nEOF',
+      ["while read l", `do echo ${UNKNOWN}`, "probe a", "done"],
+    ],
+    [
+      "a command substitution past a quote inside a parameter expansion",
+      "true <<EOF\nA ${X:-'$(probe a)'} B\nEOF",
+      ["probe a", "true"],
+    ],
+    [
+      "a command substitution on the line after a parameter expansion's quote",
+      "true <<EOF\n${X:-'}\n$(probe a)\n'\nEOF",
+      ["probe a", "true"],
+    ],
+    [
+      "a command substitution inside an arithmetic expansion",
+      "true <<EOF\n$(( $(probe a) + 1 ))\nEOF",
+      ["probe a", "true"],
+    ],
+    ["a quoted delimiter's body", "true <<'EOF'\n$(probe a)\nEOF", ["true"]],
+    ["a double-quoted delimiter's body", 'true <<"EOF"\n$(probe a)\nEOF', ["true"]],
+    ["an escaped dollar in an unquoted body", "true <<EOF\n\\$(probe a)\nEOF", ["true"]],
+    ["escaped backquotes in an unquoted body", "true <<EOF\n\\`probe a\\`\nEOF", ["true"]],
+    [
+      "a substitution in an unquoted body inside a command substitution, whose own value stays unread",
+      "x=$(cat <<EOF\n$(probe a)\nEOF\n); true",
+      ["probe a", "cat", `x=${UNKNOWN}`, "true"],
+    ],
+  ])("%s", (_, line, expected) => {
+    expect(programs(line)).toEqual(expected)
+  })
+
+  // inside double quotes a quote is a plain character too, so the substitution past one in a parameter expansion runs (PG-1571), while an unquoted word's quote still quotes it
+  test.each<[string, string, string[]]>([
+    [
+      "a double-quoted parameter expansion with a substitution past a quote",
+      `echo "\${X:-'$(probe a)'}"`,
+      ["probe a", `echo ${UNKNOWN}`],
+    ],
+    [
+      "a double-quoted arithmetic expansion with a substitution",
+      'echo "$(( $(probe a) + 1 ))"',
+      ["probe a", `echo ${UNKNOWN}`],
+    ],
+    [
+      "an unquoted parameter expansion's single-quoted default",
+      "echo ${X:-'$(probe a)'}",
+      [`echo ${UNKNOWN}`],
+    ],
+  ])("%s", (_, line, expected) => {
+    expect(programs(line)).toEqual(expected)
+  })
+
+  test("the body's own value stays the text the shell reads it as, marked unread where it expands", () => {
+    const [sub, cmd] = lex("true <<EOF\n$(probe a)\nEOF").commands
+    expect(sub.words.map((w) => w.value)).toEqual(["probe", "a"])
+    expect(cmd.redirects[0].body?.unknown).toBe("an expansion in an unquoted heredoc")
   })
 })
