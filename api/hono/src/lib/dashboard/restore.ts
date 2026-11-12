@@ -1,7 +1,6 @@
 import { join } from "node:path"
 
-import { spawnEnv } from "@packages/env/api-hono"
-
+import { runCommand } from "@/lib/dashboard/dispatcher-start"
 import {
   checkoutRoot,
   currentSource,
@@ -39,26 +38,16 @@ export async function restoreCheckout({
   if (running) throw new RestoreError("A restore is already running")
   running = true
   try {
-    const child = Bun.spawn(
-      [
-        "bun",
-        "--no-env-file",
-        join(root, "packages/scripts/src/ops-restore/cli.ts"),
-        "--main",
-        main,
-        "--now",
-      ],
-      {
-        env: { ...spawnEnv(), PLAYGROUND_DATA_DIR: dataDir() },
-        stderr: "pipe",
-        stdin: "ignore",
-        stdout: "pipe",
-      },
-    )
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
+    // through env, so the child's data folder is this stack's own (the fixture's on a fixture stack), on runCommand's one spawner
+    const { code, stderr, stdout } = await runCommand([
+      "env",
+      `PLAYGROUND_DATA_DIR=${dataDir()}`,
+      "bun",
+      "--no-env-file",
+      join(root, "packages/scripts/src/ops-restore/cli.ts"),
+      "--main",
+      main,
+      "--now",
     ])
     const text = (stdout.trim() || stderr.trim()).split("\n").at(-1) || `exit ${code}`
     return { status: STATUS[code as keyof typeof STATUS] ?? "stopped", text }
