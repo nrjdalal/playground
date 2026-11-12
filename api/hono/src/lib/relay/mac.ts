@@ -123,20 +123,20 @@ export async function requireSignedWrite(
   return { write }
 }
 
-// Pure but for seen, which it shares with requireRelay: the bot's read a frame holds, or the answer that refuses it, before any route runs. It refuses as refuseStale does, then a bot off readers (the yard.logReaders setting), then a path off BOT_GETS, so a bot reaches no RELAY_GETS or RELAY_WRITES route.
+// Pure but for seen, which it shares with requireRelay: the bot's read a frame holds, or the answer that refuses it, before any route runs. It refuses as refuseStale does, then a bot off readers (the yard.logReaders setting) or one whose DM is not the one its login is listed with, as a bot made again under a revoked bot's name, then a path off BOT_GETS, so a bot reaches no RELAY_GETS or RELAY_WRITES route.
 export function requireBotRead(
   raw: string,
   {
     readers,
     ...deps
-  }: { login: string; now: Date; readers: () => readonly string[]; seen: SeenIds },
+  }: { login: string; now: Date; readers: () => Readonly<Record<string, string>>; seen: SeenIds },
 ): { read: RelayBotRead } | { refused: RelayResponse } | null {
   const frame = relayBotSchema.safeParse(parse(raw))
   if (!frame.success) return null
   const read = frame.data
   const stale = refuseStale(read, deps)
   if (stale) return { refused: stale }
-  if (!readers().some((reader) => sameLogin(reader, read.bot)))
+  if (!Object.entries(readers()).some(([bot, dm]) => sameLogin(bot, read.bot) && dm === read.dm))
     return { refused: json(read.id, 403, "FORBIDDEN", "This Mac lets no such bot read its log") }
   if (!pathOn(BOT_GETS, read.path))
     return { refused: json(read.id, 403, "FORBIDDEN", "A bot reads the dispatcher's log alone") }
@@ -168,8 +168,8 @@ type AnswerDeps = {
   kindOf?: (key: string) => Promise<string | null>
   login: string
   now?: Date
-  // the bots' logins on yard.logReaders, the only ones whose read this Mac answers; none by default
-  readers?: () => readonly string[]
+  // yard.logReaders, each bot's login to its DM, the only ones whose read this Mac answers; none by default
+  readers?: () => Readonly<Record<string, string>>
   seen: SeenIds
   // the ids of the writes this Mac took, kept on disk across a restart
   writeIds?: Pick<WriteIdStore, "claim">
@@ -212,7 +212,7 @@ export async function answerRelay(
     kindOf,
     login,
     now = new Date(),
-    readers = () => [],
+    readers = () => ({}),
     seen,
     writeIds = remoteWriteIds,
   }: AnswerDeps,
@@ -324,8 +324,8 @@ type RelayDeps = {
   kindOf?: (key: string) => Promise<string | null>
   // the login the token's /me answers
   login: (token: string) => Promise<string>
-  // the bots' logins on yard.logReaders
-  readers?: () => readonly string[]
+  // yard.logReaders, each bot's login to its DM
+  readers?: () => Readonly<Record<string, string>>
   recycleMs?: number
   silentMs?: number
   // the Keychain token, or null with none

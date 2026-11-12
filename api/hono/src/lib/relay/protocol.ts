@@ -134,6 +134,7 @@ export type RelayRequest = z.infer<typeof relayRequestSchema>
 export const relayBotSchema = z.strictObject({
   at: z.iso.datetime(),
   bot: z.string().min(1).max(64).refine(isBotLogin, "a bot's login"),
+  dm: z.string().min(1).max(64),
   id: z.uuid(),
   login: z.string().min(1).max(64),
   method: z.literal("GET"),

@@ -329,7 +329,7 @@ if (env.YARD_API_URL && readsLive()) {
     // read at each bot's read, so a bot add --log or a revoke counts from the next one, and a policy.json that does not parse lets no bot read
     readers: () => {
       const read = readPolicyOrDefaults(dataDir())
-      return read.refusal === undefined ? yardSettings.get(read.settings, "yard.logReaders") : []
+      return read.refusal === undefined ? yardSettings.get(read.settings, "yard.logReaders") : {}
     },
     token: () => keychain().read(),
   })

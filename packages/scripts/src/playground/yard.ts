@@ -26,8 +26,11 @@ export type YardIo = {
   client: (base: string, token: string) => YardClient
   err: (line: string) => void
   keychain: Keychain
-  // this Mac's yard.logReaders, the bots whose read of the dispatcher's log it answers
-  logReaders: { add: (login: string) => Promise<void>; remove: (login: string) => Promise<void> }
+  // this Mac's yard.logReaders, the bots whose read of the dispatcher's log it answers, each login to the DM it was made with
+  logReaders: {
+    add: (login: string, dm: string) => Promise<void>
+    remove: (login: string) => Promise<void>
+  }
   out: (line: string) => void
   // one line read with no echo when stdin is a terminal, else stdin's first line
   readSecret: (prompt: string) => Promise<string>
@@ -152,7 +155,7 @@ async function bot(words: string[], client: YardClient, io: YardIo): Promise<num
     const { bot, secret } = await client.addBot(name!, { log })
     try {
       await item.write(secret)
-      if (log) await io.logReaders.add(bot.login)
+      if (log) await io.logReaders.add(bot.login, bot.dm)
     } catch (error) {
       // a bot whose token no Keychain keeps could never be handed on, so it goes at once
       await client.revokeBot(name!).catch(() => {})
@@ -195,31 +198,31 @@ const setting = async (name: string, live: string | null): Promise<string | unde
   )
 }
 
-// yard.logReaders at the login's scope, one commit per change, a login added once and taken off when it is there.
+// yard.logReaders at the login's scope, one commit per change: a login set to its bot's DM, or taken off when it is there.
 const logReaders = (data: string): YardIo["logReaders"] => {
-  const change = async (login: string, add: boolean) => {
+  const change = async (login: string, dm: string | null) => {
     const read = readPolicyOrDefaults(data)
     if (read.refusal !== undefined) throw new Error(read.refusal)
     const now = yardSettings.get(read.settings, "yard.logReaders")
-    const has = now.includes(login)
-    if (has === add) return
+    if ((now[login] ?? null) === dm) return
+    const { [login]: _, ...rest } = now
     const set = setSetting(
       data,
       {
         key: "yard.logReaders",
         scope: loginOf(data),
-        value: add ? [...now, login] : now.filter((each) => each !== login),
+        value: dm === null ? rest : { ...rest, [login]: dm },
       },
       {
         actor: "cli",
         author: "owner",
         inboxRef: null,
-        reason: `playground yard bot ${add ? "add --log" : "revoke"} ${login}`,
+        reason: `playground yard bot ${dm === null ? "revoke" : "add --log"} ${login}`,
       },
     )
     if (!set.ok) throw new Error(set.message)
   }
-  return { add: (login) => change(login, true), remove: (login) => change(login, false) }
+  return { add: (login, dm) => change(login, dm), remove: (login) => change(login, null) }
 }
 
 export const yardIo = async (

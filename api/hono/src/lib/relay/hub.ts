@@ -273,10 +273,16 @@ export function createHub({
     },
 
     // Sends a bot's GET to its maker's Mac, naming the bot, with a fresh id and time, through the instance holding its socket, and waits for its answer.
-    botRead(userId: string, login: string, bot: string, path: string): Promise<Forwarded> {
+    botRead(
+      userId: string,
+      login: string,
+      { bot, dm }: { bot: string; dm: string },
+      path: string,
+    ): Promise<Forwarded> {
       return carry(userId, {
         at: now().toISOString(),
         bot,
+        dm,
         id: id(),
         login,
         method: "GET",

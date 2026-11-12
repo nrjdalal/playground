@@ -423,7 +423,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       const { after } = c.req.valid("query")
       const { dm, login } = await store.logReadOf(db, { ...caller, bot: caller.bot })
       const path = `${BOT_GETS[0]}${after === undefined ? "" : `?after=${after}`}`
-      const answer = await hub.botRead(caller.bot.madeBy, login, caller.login, path)
+      const answer = await hub.botRead(caller.bot.madeBy, login, { bot: caller.login, dm }, path)
       if (answer.type !== "response")
         throw new ApiError(503, "MAC_OFFLINE", "The owner's Mac is offline")
       const body = Buffer.from(answer.body, "base64")
