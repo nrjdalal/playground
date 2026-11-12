@@ -249,8 +249,76 @@ function checkHold(pairs: [string, string][]): void {
     )
 }
 
+// Every key set, report and assign take: a mistyped one once left two rows reading working for over an hour.
+const KNOWN_KEYS: readonly string[] = [
+  "asks",
+  "backlogNext",
+  "backlogTaken",
+  "branch",
+  "eta",
+  "hold",
+  "kind",
+  "lastReport",
+  "lastReportAt",
+  "lead",
+  "memory",
+  "mode",
+  "owner",
+  "pr",
+  "prs",
+  "prs+",
+  "prs-",
+  "reportsTo",
+  "repo",
+  "role",
+  "schedule",
+  "size",
+  "slot",
+  "status",
+  "surface",
+  "task",
+  "ticket",
+  "title",
+  "worker",
+  "workspace",
+]
+
+// The edit distance between two words, so a key one or two edits from a real one reads as its typo.
+const editDistance = (a: string, b: string): number => {
+  let row = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i]
+    for (let j = 1; j <= b.length; j++)
+      next.push(
+        Math.min(next[j - 1]! + 1, row[j]! + 1, row[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1)),
+      )
+    row = next
+  }
+  return row[b.length]!
+}
+
+function checkKeys(cmd: string, pairs: [string, string][]): void {
+  for (const [k] of pairs) {
+    if (KNOWN_KEYS.includes(k)) continue
+    let near: string | null = null
+    let best = 3
+    for (const known of KNOWN_KEYS) {
+      const at = editDistance(k, known)
+      if (at < best) {
+        best = at
+        near = known
+      }
+    }
+    throw new Refusal(
+      `roster.ts: ${cmd} takes a key the roster knows (${KNOWN_KEYS.join(", ")}), not "${k}"${near ? `: did you mean "${near}"?` : ""}`,
+      2,
+    )
+  }
+}
+
 // Every key=value check set, report and assign share.
-function checkPairs(name: string, pairs: [string, string][]): void {
+function checkPairs(cmd: string, name: string, pairs: [string, string][]): void {
+  checkKeys(cmd, pairs)
   checkKind(pairs)
   checkStatus(name, pairs)
   checkEta(pairs)
@@ -353,7 +421,7 @@ async function main(argv: string[]): Promise<void> {
     : ""
   if (cmd === "set") {
     const pairs = pairsOf(rest)
-    checkPairs(name!, pairs)
+    checkPairs(cmd, name!, pairs)
     const entry = agent(roster, name!, pairs)
     checkRetask(roster, entry, pairs, factoryRepo)
     // A new task on an agent holding a pr would show the old PR beside it, so it goes through assign; a title alone renames the row.
@@ -368,7 +436,7 @@ async function main(argv: string[]): Promise<void> {
     const [text, ...more] = rest
     if (text === undefined) throw new Refusal(USAGE, 2)
     const pairs = pairsOf(more)
-    checkPairs(name!, pairs)
+    checkPairs(cmd, name!, pairs)
     const entry = agent(roster, name!, pairs)
     checkRetask(roster, entry, pairs, factoryRepo)
     entry.lastReport = text
@@ -379,7 +447,7 @@ async function main(argv: string[]): Promise<void> {
     const [title, task, ...more] = rest
     if (title === undefined || task === undefined) throw new Refusal(USAGE, 2)
     const pairs = pairsOf(more)
-    checkPairs(name!, pairs)
+    checkPairs(cmd, name!, pairs)
     const entry = agent(roster, name!, pairs, task)
     checkRetask(roster, entry, pairs, factoryRepo, true)
     // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end holds it while any is open.
