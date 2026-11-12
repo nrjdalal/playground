@@ -68,6 +68,7 @@ import {
   storePasteReport,
 } from "@/lib/dashboard/paste-report"
 import { restartPrs, restartSession } from "@/lib/dashboard/restart"
+import { restoreCheckout, RestoreError } from "@/lib/dashboard/restore"
 import { readRoster } from "@/lib/dashboard/roster"
 import {
   answerHosted,
@@ -567,6 +568,42 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
       responses: { 200: { description: "OK" }, ...authErrorResponses },
     }),
     async (c) => c.json({ data: await readOps() }),
+  )
+  .post(
+    "/ops/restore",
+    describeRoute({
+      tags: ["Dashboard"],
+      description:
+        "Settings > Jobs' Restore now, on the owner's click: runs ops-restore's own steps once (`packages/scripts/src/ops-restore/cli.ts --now`) from this API's checkout, for a main checkout whose guards are gone while the job is stopped or off. The checkout comes from the server alone: the main checkout this API's checkout sits in on a stack that reads this machine, the fixture's scratch `checkout` folder on a fixture or test stack. A checkout whose guards are all there is left as it is (`intact`), as is one an install, `link-skills.sh` or `playground update` holds; otherwise it puts the files back, installs and runs `link-skills.sh` (`restored`), or names the step it stopped at (`stopped`), and tells ops and the dispatcher. Refused (409) on a stack with no checkout to restore and while a restore runs.",
+      responses: {
+        200: {
+          description: "What the restore did, in words",
+          content: {
+            "application/json": {
+              schema: resolver(
+                z.object({
+                  data: z.object({
+                    status: z.enum(["intact", "restored", "stopped"]),
+                    text: z.string(),
+                  }),
+                }),
+              ),
+            },
+          },
+        },
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        409: errorResponse("CONFLICT", "No checkout to restore, or a restore already runs"),
+      },
+    }),
+    async (c) => {
+      try {
+        return c.json({ data: await restoreCheckout() })
+      } catch (error) {
+        if (error instanceof RestoreError) throw new ApiError(409, "CONFLICT", error.message)
+        throw error
+      }
+    },
   )
   .get(
     "/stacks",
