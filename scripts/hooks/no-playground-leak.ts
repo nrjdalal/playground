@@ -1233,9 +1233,12 @@ async function git(
   // A checkout with no remote publishes nothing; one the hook cannot find may be a guarded org's.
   if (dir && checkout.length === 0) return
   if (state().policy.anyWrite) {
-    // A commit changes only the local clone, so under anyWrite it is refused only in a guarded repository's clone.
+    // A commit changes only the local clone, so under anyWrite it is refused only in a guarded repository's clone, and under branchPush it passes there on a branch the push rule lets through, while nothing in the call could move HEAD or where git writes first.
     const target = decide(dir ? checkout : [undefined])
-    return target.where === "guarded" ? judge("git commit", target, [], env) : undefined
+    if (target.where !== "guarded") return
+    const onBranch =
+      state().policy.branchPush && dir && !carried && !state().movedBefore && branchHead(dir)
+    return onBranch ? undefined : judge("git commit", target, [], env)
   }
   const { flags } = parseFlags(rest, COMMIT_TAKES)
   const texts: Text[] = [branch(dir)]
@@ -1414,6 +1417,31 @@ function branchOnly(flags: Flag[], positionals: Word[], dir: string): boolean {
       name !== "" && !/^(?:refs\/|@$|head$|tag$)/i.test(name) && !defaults.has(name.toLowerCase())
     )
   })
+}
+
+// Under branchPush, whether the checkout's HEAD, read before the call runs, is a named branch the push rule lets through: not main, master or any remote's HEAD branch.
+function branchHead(dir: string): boolean {
+  const head = gitText(dir, ["symbolic-ref", "--short", "-q", "HEAD"], "the checkout's branch")
+  const name = head.value.trim().toLowerCase()
+  if (head.unknown || name === "") return false
+  const remotes = gitText(dir, ["remote"], "the checkout's remotes")
+  if (remotes.unknown) return false
+  const defaults = new Set(["main", "master"])
+  for (const remote of remotes.value.split("\n").filter(Boolean)) {
+    const ref = gitText(
+      dir,
+      ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`],
+      "the remote's default branch",
+    )
+    if (!ref.unknown)
+      defaults.add(
+        ref.value
+          .trim()
+          .slice(remote.length + 1)
+          .toLowerCase(),
+      )
+  }
+  return !defaults.has(name)
 }
 
 // git push publishes the names of the refs it pushes and the messages of every commit the remote does not hold yet.

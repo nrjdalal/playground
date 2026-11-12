@@ -10103,7 +10103,10 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     return;
   if (state().policy.anyWrite) {
     const target = decide(dir ? checkout : [undefined]);
-    return target.where === "guarded" ? judge2("git commit", target, [], env) : undefined;
+    if (target.where !== "guarded")
+      return;
+    const onBranch = state().policy.branchPush && dir && !carried && !state().movedBefore && branchHead(dir);
+    return onBranch ? undefined : judge2("git commit", target, [], env);
   }
   const { flags } = parseFlags(rest, COMMIT_TAKES);
   const texts = [branch(dir)];
@@ -10239,6 +10242,23 @@ function branchOnly(flags, positionals, dir) {
     const name = (destination ?? source).replace(/^(?:refs\/)?heads\//, "");
     return name !== "" && !/^(?:refs\/|@$|head$|tag$)/i.test(name) && !defaults.has(name.toLowerCase());
   });
+}
+function branchHead(dir) {
+  const head = gitText(dir, ["symbolic-ref", "--short", "-q", "HEAD"], "the checkout's branch");
+  const name = head.value.trim().toLowerCase();
+  if (head.unknown || name === "")
+    return false;
+  const remotes = gitText(dir, ["remote"], "the checkout's remotes");
+  if (remotes.unknown)
+    return false;
+  const defaults = new Set(["main", "master"]);
+  for (const remote of remotes.value.split(`
+`).filter(Boolean)) {
+    const ref = gitText(dir, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`], "the remote's default branch");
+    if (!ref.unknown)
+      defaults.add(ref.value.trim().slice(remote.length + 1).toLowerCase());
+  }
+  return !defaults.has(name);
 }
 async function push(rest, env, checkout, takes = PUSH_TAKES, plain = false) {
   const { flags, positionals } = parseFlags(rest, takes);
@@ -10548,7 +10568,7 @@ var policy = (repos) => ({
   hosts: false,
   place: "an extension repository",
   what: "a write to an extension repository",
-  why: `The sync renders each extension repository's main into every session's store. A session pushes a branch other than the default by its remote and refspec (git push origin HEAD:<branch>), opens a pull request, and lands it with bun run ext:merge <owner>/<repo> <n> at the review's 5/5. For anything else: ${OWNER_ROUTE}`
+  why: `The sync renders each extension repository's main into every session's store. A session commits in its clone on a branch other than the default, as a git commit call of its own, pushes that branch by its remote and refspec (git push origin HEAD:<branch>), opens a pull request, and lands it with bun run ext:merge <owner>/<repo> <n> at the review's 5/5. For anything else: ${OWNER_ROUTE}`
 });
 async function check6(raw, environment = process.env, budget = 8000) {
   const data = dataDir(environment);
