@@ -359,7 +359,7 @@ const parsed = (text: string): unknown => {
 // What a job's key holds: the row the login's scope stores, {} when it stores none, whether another scope stores one or any scope one under an old name, and the whole row policy.json renders over the registry's entry, the entry itself when no scope stores a row
 export type Held = { elsewhere: boolean; rendered: unknown; stored: Record<string, unknown> }
 
-// Pure: whether a set of the key to the value text, as the CLI parses it, only tunes a number: glm.readOnlyLoad5 to a positive load limit, or a job's row equal field for field to the row the login's scope stores but a schedule of a positive integer interval, where the rendered row already runs on one; a set replaces the stored row and the render reads each field it leaves out from the registry, so the stored row is what it must keep, and a --scope, a row another scope stores, a job policy.json lacks and any other key tune nothing
+// Pure: whether a set of the key to the value text, as the CLI parses it, only tunes a number: glm.readOnlyLoad5 to a positive load limit, or a job's row equal field for field to the row the login's scope stores but a schedule of a positive integer interval, where the rendered row already runs on one; a set replaces the stored row and the render reads each field it leaves out from the registry, so the stored row is what it must keep, and a --scope, a row another scope stores, a job neither policy.json nor the registry holds and any other key tune nothing
 export function tunes(
   key: string,
   text: string,
