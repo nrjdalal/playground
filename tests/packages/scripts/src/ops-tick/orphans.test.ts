@@ -104,6 +104,27 @@ describe("orphansOf", () => {
     ).toEqual([])
   })
 
+  // portless's shared proxy, which a stack's dev.ts starts from its worktree's node_modules and portless detaches, so its parent is pid 1; every stack routes through it, so a dependency's binary under node_modules is never this repo's script
+  test("never selects a dependency's binary under a gone worktree's node_modules, the shared proxy's shape", () => {
+    expect(
+      select([
+        row(
+          730,
+          1,
+          `bun ${gone}/node_modules/portless/dist/cli.js proxy start --foreground -p 1355 --skip-trust`,
+          "1-02:00:00",
+        ),
+        row(731, 1, `${gone}/node_modules/.bin/portless proxy start -p 1355`),
+        row(732, 1, `${gone}/node_modules/turbo-darwin-arm64/bin/turbo daemon`),
+        row(733, 1, `bun ${gone}/web/next/node_modules/next/dist/bin/next dev`),
+      ]),
+    ).toEqual([])
+    // this repo's own script run through a dependency's binary is still this repo's script
+    expect(select([row(734, 1, `${gone}/node_modules/.bin/tsx ${gone}/scripts/x.ts`)])).toEqual([
+      734,
+    ])
+  })
+
   test("never selects a process that names no worktree of this checkout", () => {
     expect(
       select([
