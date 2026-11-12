@@ -197,6 +197,16 @@ describe("scheduled, on an accepted revision of the code it runs (#1880)", () =>
     expect(existsSync(join(ops, "pass-started"))).toBe(true)
   }, 20_000)
 
+  test("an entry that can no longer be read, as a rebase or a rename leaves it, keeps the job running (#1880)", async () => {
+    const { main, ops } = skillJob()
+    writeFileSync(join(ops, "pass-release"), "")
+    const proc = spawn(main)
+    expect(await waitFor(() => existsSync(join(ops, "ops-watch.json")))).toBe(true)
+    rmSync(main)
+    await Bun.sleep(1_000)
+    expect(proc.exitCode).toBeNull()
+  }, 20_000)
+
   test("the controls keep running: a change outside its own skill, a proposal under proposed/, and a core job with no revision", async () => {
     const { main, ops, scope } = skillJob()
     writeFileSync(join(ops, "pass-release"), "")
