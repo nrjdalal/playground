@@ -72,6 +72,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    The fill rule: a slot is a word of capitals and digits with two underscores on each side, in backticks since the formatter turns a bare one bold, such as `__NAME__` for the session's own name, and a fill replaces those tokens alone, every one of them:
    a `sed` fill takes `/g`, since a slot can sit twice on one line (`__PR__` does in both templates) and a bare `s/…/…/` fills only the first, which spawn.sh then refuses as a slot left.
    So `<owner>/<name>` and every other angle-bracket word stays as written for the reader (22 Oct: a fill of `<name>` by `sed` also rewrote `--repo <owner>/<name>`), and a brief or template that names a token in its own text spells it in words (two underscores, NAME, two underscores), so a fill leaves that text alone.
+   A brief that names an extension item's revision pastes its sha whole from `playground ext why <scope> <kind> <key>`, never typed or joined from two, since one brief's sha took its tail from the revision before.
    Fill the brief and read it back in one call, then run spawn.sh in a later call, once the read shows every slot filled: spawn.sh refuses a brief still holding a slot of its role's template, naming each one, and a fill a hook refused in the same batch as the spawn would leave one.
    The template points at code-review-loop, dev and ui-verify for every step, so the filled brief adds only what its PR needs beyond them.
    The reviewer template's `__SPEC__` slot, under its This PR heading, holds the PR's scope as the lead ruled it, the bar the review scores against and any harness the reviewer re-runs, so the reviewer scores the ruled scope rather than the issue's first Done when.
@@ -96,6 +97,7 @@ Done when `ListAgents` shows the session busy on the brief and the roster shows 
 A reviewer's round sorts its findings into blocking, should-fix and nits; the worker's answer follows these rules, so a PR's rounds stay short and its nits land where they cost nothing.
 
 - A fix push carries only blocking and should-fix items, plus the `canary` merge the reviewer asks for (code-review-loop's step 8), and a body-only fix is a `gh pr edit` with no push, so a push always moves the head for a reason the reviewer named.
+- When a scope ruling drops or changes an item, change the PR's title in the same update as its body (`gh pr edit <n> --title <title> --body-file <file>`), since the merge commit and the Changelog take the title: one PR merged under a title naming an item its ruling had dropped.
 - Keep a nit only if it fixes a wrong statement, a misleading name or comment, or a real readability problem; drop a style-only nit with a one-line note.
 - A head at 5/5 with green checks merges as it stands; fold each kept nit into the next PR that touches the same file, never a nits-only PR.
 - Post one sort comment per PR, naming each nit kept, with the PR it waits for, or dropped, with why.
