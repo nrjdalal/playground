@@ -573,7 +573,8 @@ describe("a replay of a mark-reading hook", () => {
     const summary = JSON.stringify({
       isCompactSummary: true,
       message: {
-        content: "Summary: earlier the session ran <command-name>/writing-for-agents</command-name>.",
+        content:
+          "Summary: earlier the session ran <command-name>/writing-for-agents</command-name>.",
         role: "user",
       },
       sessionId: "s1",
