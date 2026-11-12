@@ -375,7 +375,7 @@ export const SHELF_LABELS: Record<Exclude<Shelf, "inbox">, string> = {
   snoozed: "Later",
 }
 
-// A card's verbs, beside its own answers and Reply: Seen marks it read, Done sends it to Done, Later puts it off until a time, Archive takes it off his list unanswered and Move back returns it, and Dismiss sends it to Done marked dismissed.
+// A card's verbs, beside its own answers and Reply: Seen marks it read, Done sends it to Done, Later puts it off until a time, Archive takes it off his list or Done onto the Archive shelf and Move back returns it, and Dismiss sends it to Done marked dismissed.
 export type Verb = "archive" | "dismiss" | "done" | "later" | "moveBack" | "seen"
 
 // Pure: whether an item still waits on his answer: an open decision, draft or secret ask he has not replied to.

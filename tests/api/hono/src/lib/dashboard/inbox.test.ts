@@ -2882,6 +2882,19 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(await listed(posted.id)).toMatchObject({ archived: false })
     })
 
+    test("a go its poster still carries out, In progress, refuses Archive until it is on Done (PG-1909)", async () => {
+      const posted = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, posted.id, { action: "approve" }, { actor })
+      expect(await store.answerItem(db, posted.id, { action: "archive" }, { actor })).toMatchObject(
+        { code: "CONFLICT", ok: false },
+      )
+      expect(await listed(posted.id)).toEqual({ archived: false, items: true, snoozed: false })
+      await store.dismissItems(db, [posted.id])
+      const archived = await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      expect(archived.ok).toBe(true)
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+    })
+
     test("an item the owner dismissed still refuses Archive (PG-1909)", async () => {
       const dismissedUpdate = await update()
       await store.answerItem(db, dismissedUpdate.id, { action: "dismiss" }, { actor })

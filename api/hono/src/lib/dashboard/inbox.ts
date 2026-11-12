@@ -1799,6 +1799,10 @@ export async function answerItem(
 const waits = (item: InboxItem): boolean =>
   item.kind !== "update" && item.status === "open" && choiceOf(item) !== "replied"
 
+// Pure: whether its poster still carries an answer out, which the web shows In progress: a go not yet closed, or a secret its sink has not taken (PG-1909).
+const carrying = (answer: { ackedAt?: string; choice: string; results?: unknown }): boolean =>
+  (isGo(answer.choice) && !answer.ackedAt) || (answer.choice === "provided" && !answer.results)
+
 // the change a write is made against, so a double click or a second tab cannot write it twice
 const unchanged = (current: InboxItem) =>
   and(
@@ -1821,10 +1825,12 @@ async function archive(
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const answer = current.answer
   const dismissed = answer !== null && "dismissed" in answer && answer.dismissed === true
-  // a card he answered or sent to Done archives too, but a set-aside one, which the Archive shelf already holds (PG-1909)
+  // a card on Done archives too: one he sent there, or one answered that its poster no longer carries out, never one In progress or a set-aside one, which the Archive shelf already holds (PG-1909)
   const done =
     current.status !== "cleared" &&
-    (current.status !== "open" || (answer !== null && "dismissedAt" in answer))
+    answer !== null &&
+    ("dismissedAt" in answer ||
+      (current.status !== "open" && "choice" in answer && !carrying(answer)))
   if (
     (!waits(current) && current.kind !== "update" && !done) ||
     dismissed ||
