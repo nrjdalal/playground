@@ -892,8 +892,12 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   and `bun run precommit:light` runs the staged check before a commit lane's commit.
   A push with hooks off reads nothing, and CI's build is the backstop there.
   Its tests are `bun run test:file tests/lefthook.test.ts tests/packages/scripts/src/precommit-light.test.ts`.
-- Both pre-push jobs that read the pushed refs on stdin, `conflict-markers` and `keeps-canary`, run as lefthook scripts, each a one-line `.lefthook/pre-push/<name>.sh` that execs its check, since lefthook 2.2.2 skips every pre-push command and job while the checked-out branch has nothing new against its upstream, a push of another branch included, and runs a script on every push.
-  `audit`, `ensure-branches` and `hooks-bundle`, which read no pushed ref, stay commands; `tests/lefthook.test.ts` pins both scripts and runs them under the real lefthook with the checked-out branch level.
+- A Co-authored-by trailer, which AGENTS.md's Commits rule keeps out, is dropped by lefthook's commit-msg step `co-authored-by` (`packages/scripts/src/commit-trailer.ts <msgfile>`), in any case, first of its steps and with one line saying so, so the commit goes through on its first try.
+  A commit made with `--no-verify` skips commit-msg, as one made after `bun run precommit:light` once did, so lefthook's pre-push script `commit-trailer` (`commit-trailer.ts --push`) refuses a pushed commit no remote-tracking ref holds yet whose message holds the trailer.
+  Its refusal names each such commit and the amend that drops the line through commit-msg: `git commit --amend --no-edit` for the checked-out commit alone, else a `git rebase --rebase-merges --exec` of that amend.
+  Its tests are `bun run test:file tests/lefthook.test.ts`.
+- The pre-push jobs that read the pushed refs on stdin, `commit-trailer`, `conflict-markers` and `keeps-canary`, run as lefthook scripts, each a one-line `.lefthook/pre-push/<name>.sh` execing its check, since lefthook 2.2.2 skips every pre-push command and job while the checked-out branch has nothing new against its upstream, a push of another branch included, and runs a script on every push.
+  `audit`, `ensure-branches` and `hooks-bundle`, which read no pushed ref, stay commands; `tests/lefthook.test.ts` pins the three scripts and runs them under the real lefthook with the checked-out branch level.
 
 ## no-outside-pr-code
 
