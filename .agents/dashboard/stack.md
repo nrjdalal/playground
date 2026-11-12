@@ -109,7 +109,7 @@
   They draw no Inbox aside, so no Preview row, since the pane reads machine stacks whose routes the hosted API never mounts; `tests/web/next/src/lib/local-pages.test.ts` holds `/yard`'s import graph clear of the aside, while the owner's relayed `/dashboard` draws it with its reads through the relay, but for its Preview row's frame and the badge's `/api/health`,
   which read the hosted API, so no preview shows there and the badge names the hosted build.
   `tests/api/hono/src/hosted.test.ts` holds the mounted routes to the allowlist and the hosted import graph to no local-only package or machine-reading folder.
-  Yard's router (`api/hono/src/routers/yard.ts`, its logic in `api/hono/src/lib/yard/`) takes a session or a `yard_` bearer token, on the `member` rung (`yardCaller`), but on the owner rung to make, approve or deny an invite, and on the user rung, which an invitee holds before it joins, to redeem one.
+  Yard's router (`api/hono/src/routers/yard.ts`, its logic in `api/hono/src/lib/yard/`) takes a session or a `yard_` bearer token, on the `member` rung (`yardCaller`), but on the owner rung to make, approve or deny an invite and to make, list or revoke a bot, and on the user rung, which an invitee holds before it joins, to redeem one.
   A token never approves, makes tokens or touches invites, which a signed-in browser alone does.
   The owner's token makes, lists and revokes bots (`/api/v1/yard/bots`), the one token route that makes a credential, since `playground yard bot add` runs on the Mac.
   A bot is a user of its own whose login, `<name>[bot]`, no GitHub sign-in can claim and `githubLoginSchema` refuses, its `yard_bot` row naming its maker.
