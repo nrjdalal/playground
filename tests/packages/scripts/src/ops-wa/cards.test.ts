@@ -10,6 +10,7 @@ import {
   replyOf,
   termsOf,
   waitingLine,
+  waits,
 } from "../../../../../packages/scripts/src/ops-wa/cards"
 import { UNSET_REPOS } from "../../../../../packages/scripts/src/trace-count/kinds"
 
@@ -24,6 +25,7 @@ const LIST = {
 const TERMS = termsOf(LIST, UNSET_REPOS)
 
 const ask = (over: Partial<Card> = {}, preview: Partial<Card["preview"]> = {}): Card => ({
+  answer: null,
   from: "builder",
   id: "00000000-0000-4000-8000-000000000012",
   kind: "decision",
@@ -83,6 +85,28 @@ describe("which cards go to WhatsApp", () => {
 
   test("an answered card stays", () => {
     expect(goesOut(ask({ status: "approved" }), TERMS)).toBe(false)
+  })
+})
+
+describe("which kept cards count as waiting", () => {
+  const NOW = Date.parse("2026-11-11T03:00:00Z")
+  test("an open card counts, one the owner replied to or put away until a later time does not", () => {
+    expect(waits(ask(), NOW)).toBe(true)
+    expect(waits(ask({ answer: { choice: "replied" } }), NOW)).toBe(false)
+    expect(waits(ask({ answer: { snoozedUntil: "2026-11-12T00:00:00Z" } }), NOW)).toBe(false)
+  })
+  test("a put-away counts once its time passes, and an archived one only after a dismissal", () => {
+    expect(waits(ask({ answer: { snoozedUntil: "2026-11-11T00:00:00Z" } }), NOW)).toBe(true)
+    expect(waits(ask({ answer: { archivedAt: "2026-11-10T00:00:00Z" } }), NOW)).toBe(false)
+    expect(
+      waits(
+        ask({
+          answer: { archivedAt: "2026-11-10T00:00:00Z", dismissedAt: "2026-11-11T00:00:00Z" },
+        }),
+        NOW,
+      ),
+    ).toBe(true)
+    expect(waits(ask({ status: "approved" }), NOW)).toBe(false)
   })
 })
 

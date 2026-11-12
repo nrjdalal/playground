@@ -6,6 +6,13 @@ import { type Kind, type PublicList, patterns, type Repos } from "../trace-count
 
 // An open Inbox item as `ask open --json` prints it, the fields a card on WhatsApp reads.
 export type Card = {
+  // what the owner's answer holds of the fields the waiting line reads, null before one
+  answer: {
+    archivedAt?: string
+    choice?: string
+    dismissedAt?: string
+    snoozedUntil?: string
+  } | null
   from: string
   id: string
   kind: "decision" | "draft" | "update"
@@ -70,6 +77,13 @@ export const goesOut = (card: Card, terms: Terms): boolean =>
   roleOfName(card.from) !== "" &&
   (card.kind === "update" ? card.preview.scope === FACTORY_SCOPE : factoryAsk(card)) &&
   !holds(wordsOf(card), terms.org)
+
+// Pure: whether a kept card still asks of the owner now, the Inbox tab's test: open, not answered with replied, and awake, neither put away until a time nor archived with no dismissal since.
+export const waits = (card: Card, now: number): boolean =>
+  card.status === "open" &&
+  card.answer?.choice !== "replied" &&
+  !(card.answer?.snoozedUntil !== undefined && Date.parse(card.answer.snoozedUntil) > now) &&
+  !(card.answer?.archivedAt !== undefined && card.answer.dismissedAt === undefined)
 
 // Pure: the text with every term no-public-leak refuses and every token shape written as [hidden].
 export const redact = (text: string, terms: Terms): string =>
