@@ -9538,6 +9538,17 @@ var CURL_WRITES = [
   "--trace",
   "--trace-ascii"
 ];
+function remoteName(v) {
+  if (!/^-[^-]/.test(v))
+    return false;
+  for (const c of v.slice(1)) {
+    if (c === "O")
+      return true;
+    if (CURL_TAKES2.includes(c))
+      return false;
+  }
+  return false;
+}
 function unreadCdWrites(tool, args, env, getopt) {
   if (tool === "sed" || tool === "perl")
     return inPlace(tool, args);
@@ -9554,7 +9565,7 @@ function unreadCdWrites(tool, args, env, getopt) {
     return tarWrites(args);
   if (tool === "curl") {
     const files = optionValues(args, "cDo", CURL_TAKES2, CURL_WRITES, true);
-    const named = args.some((a) => /^-[^-]*O|^--remote-name/.test(a.value));
+    const named = args.some((a) => a.value.startsWith("--remote-name") || remoteName(a.value));
     return named && !args.some((a) => a.value.startsWith("--output-dir")) ? [...files, SHELL_FOLDER] : files;
   }
   if (tool === "sort")

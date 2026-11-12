@@ -477,6 +477,15 @@ const CURL_WRITES = [
   "--trace",
   "--trace-ascii",
 ]
+// A short cluster that holds curl's -O before any letter whose value takes the rest of the cluster (-sSO, not -XPOST)
+function remoteName(v: string): boolean {
+  if (!/^-[^-]/.test(v)) return false
+  for (const c of v.slice(1)) {
+    if (c === "O") return true
+    if (CURL_TAKES.includes(c)) return false
+  }
+  return false
+}
 
 // The words a program on neither REMOVERS nor WRITERS writes after a cd the hook cannot read: an in-place sed's or perl's files, every file chmod, truncate or shred names, tar's -C folder or the shell's when it extracts, curl's and sort's output files, git rm's pathspecs from git's own folder or its pathspec file's, and a mktemp template outside the temp folder
 function unreadCdWrites(tool: string, args: Word[], env: Env, getopt: boolean): Word[] {
@@ -493,7 +502,7 @@ function unreadCdWrites(tool: string, args: Word[], env: Env, getopt: boolean): 
   if (tool === "tar") return tarWrites(args)
   if (tool === "curl") {
     const files = optionValues(args, "cDo", CURL_TAKES, CURL_WRITES, true)
-    const named = args.some((a) => /^-[^-]*O|^--remote-name/.test(a.value))
+    const named = args.some((a) => a.value.startsWith("--remote-name") || remoteName(a.value))
     return named && !args.some((a) => a.value.startsWith("--output-dir"))
       ? [...files, SHELL_FOLDER]
       : files

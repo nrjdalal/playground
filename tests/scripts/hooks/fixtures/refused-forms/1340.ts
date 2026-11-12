@@ -101,6 +101,11 @@ export const groups: Group[] = [
         `cd "$X"; gtar -xf /tmp/a.tar --index-file -C /tmp/out`,
       ],
       ["macOS chmod's dash-led mode after a cd to a variable", `cd "$X"; chmod -w -policy.json`],
+      ["curl's -O after a cd to a variable", `cd "$X"; curl -O https://example.com/policy.json`],
+      [
+        "curl's -O in a cluster after a cd to a variable",
+        `cd "$X"; curl -sSO https://example.com/policy.json`,
+      ],
     ],
   },
 ]
