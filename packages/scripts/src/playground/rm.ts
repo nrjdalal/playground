@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
 import {
@@ -14,6 +14,7 @@ import {
   restore,
   type Roots,
   type WorktreeGit,
+  worktreeRepo,
 } from "@packages/safe-delete"
 
 import { targetWords } from "../../../../api/hono/src/lib/dashboard/delete-targets"
@@ -343,6 +344,9 @@ export const worktreeGit = (path: string): WorktreeGit | undefined => {
   return { branch: branch.ok ? branch.out : null, gitdir: gitdir.out, sha: sha.out }
 }
 
+// A worktree's own repo, the main checkout or another, whose .git/worktrees/<name> its record folder is.
+const repoOf = (git: WorktreeGit): string => dirname(dirname(dirname(git.gitdir)))
+
 // Why a worktree's restore would leave it on another commit or unreadable, or null; a record folder still there is kept as it is.
 const relinkRefusal = (main: string, git: WorktreeGit): string | null => {
   if (existsSync(git.gitdir)) return null
@@ -410,13 +414,14 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
       ? listTrash(roots.trash).find((entry) => entry.id === args.restore)
       : undefined
   const keptGit = kept?.git
-  const relinkRefused = keptGit && relinkRefusal(roots.main, keptGit)
+  const relinkRefused = keptGit && relinkRefusal(repoOf(keptGit), keptGit)
   if (relinkRefused) {
     console.error(`playground: ${relinkRefused}`)
     return 1
   }
   const session = "restore" in args ? "" : await deps.session()
   const git = "worktree" in args && args.worktree ? worktreeGit(args.path) : undefined
+  const repo = "worktree" in args && args.worktree ? worktreeRepo(args.path, roots) : null
   // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold
   const freed =
     "worktree" in args && args.worktree
@@ -455,7 +460,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     return 1
   }
   if ("path" in done) {
-    const relinked = keptGit ? relink(done.path, roots.main, keptGit) : null
+    const relinked = keptGit ? relink(done.path, repoOf(keptGit), keptGit) : null
     if (relinked) {
       console.error(`playground: restored ${done.path}, but git cannot read it yet: ${relinked}`)
       return 1
@@ -465,8 +470,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     )
     return 0
   }
-  if ("worktree" in args && args.worktree)
-    Bun.spawnSync(["git", "-C", roots.main, "worktree", "prune"])
+  if (repo) Bun.spawnSync(["git", "-C", repo, "worktree", "prune"])
   console.log(
     `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back${done.stripped ? ", and a bun install in it rebuilds what the strip removed" : ""}${done.stripFailed ? ` (the strip stopped partway: ${done.stripFailed}; the hourly strip takes the rest)` : ""}`,
   )

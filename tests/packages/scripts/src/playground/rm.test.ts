@@ -846,6 +846,149 @@ test("a session's --worktree --discard on a folder outside the worktrees folder 
   expect(existsSync(outside)).toBe(false)
 })
 
+// Another repo in HOME, on main with a remote, and its worktree <repo>/.claude/worktrees/app-1 on APP-1-thing, holding one commit not pushed and an installed node_modules.
+const otherRepo = (root: string, home: string) => {
+  const repo = join(home, "code", "app")
+  git(root, "init", "--bare", "-q", join(root, "app.git"))
+  mkdirSync(repo, { recursive: true })
+  git(repo, "init", "-q", "-b", "main")
+  file(join(repo, ".gitignore"), "node_modules\n")
+  git(repo, "add", ".")
+  git(repo, "commit", "-qm", "init")
+  git(repo, "remote", "add", "origin", join(root, "app.git"))
+  git(repo, "push", "-q", "origin", "main")
+  const worktrees = join(repo, ".claude", "worktrees")
+  const wt = join(worktrees, "app-1")
+  git(repo, "worktree", "add", "-q", "-b", "APP-1-thing", wt)
+  file(join(wt, "work.txt"))
+  git(wt, "add", ".")
+  git(wt, "commit", "-qm", "work")
+  file(join(wt, "node_modules", "dep", "index.js"))
+  return { repo, worktrees, wt }
+}
+
+// runRm's exit, and what it printed to stderr.
+const rmSaid = async (words: string[], deps: RmDeps) => {
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    return { code: await runRm(words, deps), said }
+  } finally {
+    console.error = error
+  }
+}
+
+// PG-1942: a finished worktree of another repo, in that repo's own .claude/worktrees, goes as one of this checkout's does
+test("--worktree takes another repo's worktree once its PR merged or closed: git in its own repo forgets it, its node_modules stays out of the trash, and --restore brings it back there", async () => {
+  for (const state of ["MERGED", "CLOSED"] as const) {
+    const { deps, home, root } = machine()
+    const { repo, wt } = otherRepo(root, home)
+    const head = git(wt, "rev-parse", "HEAD")
+    const asked: string[] = []
+    const finished: RmDeps = {
+      ...deps,
+      caller: async () => "a session (role worker)",
+      merged: (sha, at) => (asked.push(`merged ${at}`), state === "MERGED" && sha === head),
+      prState: async (path) => (asked.push(`pr ${path}`), { head, number: 7, state }),
+    }
+    expect(await rmSaid([wt], finished)).toEqual({
+      code: 1,
+      said: [`playground: ${wt} is a worktree: playground rm --worktree removes it`],
+    })
+    const words = state === "MERGED" ? ["--worktree", wt] : ["--worktree", wt, "--discard"]
+    expect(await rmSaid(words, finished)).toEqual({ code: 0, said: [] })
+    expect(existsSync(wt)).toBe(false)
+    expect(asked.every((line) => line.endsWith(` ${wt}`))).toBe(true)
+    expect(asked).toContain(`pr ${wt}`)
+    expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(wt)
+    const [entry] = listTrash(join(deps.data, "trash"))
+    expect(entry).toMatchObject({ path: wt, stripped: 1 })
+    expect(existsSync(join(deps.data, "trash", entry!.id, "app-1", "work.txt"))).toBe(true)
+    expect(existsSync(join(deps.data, "trash", entry!.id, "app-1", "node_modules"))).toBe(false)
+    expect(await runRm(["--restore", entry!.id], finished)).toBe(0)
+    expect(git(wt, "symbolic-ref", "--short", "HEAD")).toBe("APP-1-thing")
+    expect(git(wt, "rev-parse", "HEAD")).toBe(head)
+    expect(git(repo, "worktree", "list", "--porcelain")).toContain(`worktree ${wt}\n`)
+  }
+})
+
+test("--worktree refuses another repo's worktree with unpushed commits and no finished PR as it refuses one here, and --discard --decision takes it on an approved delete decision", async () => {
+  const { deps, home, root } = machine()
+  const { repo, wt } = otherRepo(root, home)
+  const discard = `playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`
+  expect(await rmSaid(["--worktree", wt], deps)).toEqual({
+    code: 1,
+    said: [
+      `playground: ${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): ${discard}`,
+    ],
+  })
+  const session = { ...deps, caller: async () => "a session (role worker)" }
+  expect(await rmSaid(["--worktree", wt, "--discard"], session)).toEqual({
+    code: 1,
+    said: [
+      `playground: a session (role worker) passes --discard only with --decision <id>: post an Inbox delete decision with bun run ask new naming ${wt} and why (bun run ask example delete prints one to start from), then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`,
+    ],
+  })
+  expect(existsSync(wt)).toBe(true)
+  const approved = async (id: string): Promise<Decision | null> =>
+    id === "#i9"
+      ? {
+          kind: "decision",
+          preview: { type: "delete", what: `the worktree ${wt}` },
+          status: "approved",
+        }
+      : null
+  const words = ["--worktree", wt, "--discard", "--decision", "#i9"]
+  expect(await rmSaid(words, { ...session, decision: approved })).toEqual({ code: 0, said: [] })
+  expect(existsSync(wt)).toBe(false)
+  expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(wt)
+})
+
+test("--worktree refuses, in another repo, a folder in its .claude/worktrees git does not list as its worktree, the repo's own checkout, and its worktree outside .claude/worktrees", async () => {
+  const { deps, home, root } = machine()
+  const { repo, worktrees, wt } = otherRepo(root, home)
+  const plain = join(worktrees, "plain")
+  file(join(plain, "index.html"))
+  const clone = join(worktrees, "clone")
+  mkdirSync(clone)
+  git(clone, "init", "-q", "-b", "main")
+  const forged = join(worktrees, "forged")
+  mkdirSync(forged)
+  writeFileSync(join(forged, ".git"), readFileSync(join(wt, ".git")))
+  const third = join(home, "code", "third")
+  mkdirSync(third, { recursive: true })
+  git(third, "init", "-q", "-b", "main")
+  file(join(third, "README.md"))
+  git(third, "add", ".")
+  git(third, "commit", "-qm", "init")
+  const stranger = join(worktrees, "stranger")
+  git(third, "worktree", "add", "-q", "-b", "other", stranger)
+  const outside = join(home, "code", "app-wt")
+  git(repo, "worktree", "add", "-q", "-b", "APP-2-thing", outside)
+  const session = {
+    ...deps,
+    caller: async () => "a session (role worker)",
+    merged: () => true,
+    prState: async () => ({ head: "x", number: 7, state: "MERGED" as const }),
+  }
+  const ours = join(deps.main, ".claude", "worktrees")
+  for (const path of [plain, clone, forged, stranger, repo, outside])
+    for (const words of [
+      ["--worktree", path],
+      ["--worktree", path, "--discard"],
+    ]) {
+      expect(await rmSaid(words, session)).toEqual({
+        code: 1,
+        said: [
+          `playground: --worktree takes a folder in ${ours}, not ${path}: playground rm ${path} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
+        ],
+      })
+      expect(existsSync(path)).toBe(true)
+    }
+  expect(git(repo, "worktree", "list", "--porcelain")).toContain(`worktree ${outside}\n`)
+})
+
 // PG-825: a Bash prefix drops PLAYGROUND_ROLE, but not the claude process above the call
 test("a caller with no role, or whose role a prefix dropped, is still a session when a claude process runs above it, and --discard needs its decision", async () => {
   const { deps, main, root } = machine()
