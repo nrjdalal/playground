@@ -34,6 +34,7 @@ The kind also decides how the card closes.
 A decision or a draft the session decided another way is settled.
 An update its session has settled is resolved by that session: an alert that fixed itself, a progress card whose last step is done.
 Until then an update stays editable, unless you dismiss it, so a card the session will replace, such as a mock's first version, is edited in place before then.
+An edit that changes an update you marked Done brings it back to your list unread, so one job keeps one card.
 
 An ask or an update about the factory's own work carries `scope: "factory"`, so it can reach you on WhatsApp too; any other card stays in the Inbox.
 

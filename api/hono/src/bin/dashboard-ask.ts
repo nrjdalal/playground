@@ -65,8 +65,8 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
        bun run ask edit <id|#iN> < item.json
                                                 replaces your own item's title, preview and attachments
                                                 in place, checked as new checks it, so one card carries a
-                                                progress to its end: an update until it is Done or dismissed,
-                                                an ask, answered or not, until it closes; one put away with Later stays put away
+                                                progress to its end: an update until it is dismissed (an edit
+                                                after Done brings it back unread), an ask, answered or not, until it closes; one put away with Later stays put away
        bun run ask example <code|decision|delete|questions|slack|ui>
                                                 prints an item to start from: an ask's picture and its note, bullets,
                                                 then what Approve does (.agents/dashboard/asks.md, The ask's shape),
@@ -271,6 +271,10 @@ if (command === "new" || command === "edit") {
     // the id alone on stdout, as a poster's `id=$(bun run ask new < f)` takes it; the tag the owner sees beside it on stderr
     if (command === "new") console.log(result.item.id)
     console.error(`ask: ${command === "edit" ? "edited" : "posted"} ${itemTag(result.item.ref)}`)
+    if ("reopened" in result && result.reopened)
+      console.error(
+        "ask: reopened it: the owner had marked it Done, and it is back in the list as unread",
+      )
     // a draft whose link is a Slack message replies to it, so the poster checks it is still unanswered
     const link = (result.item.preview as { link?: string }).link ?? ""
     if (result.item.kind === "draft" && link.includes("/thread/")) {

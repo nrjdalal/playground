@@ -1168,7 +1168,7 @@ export function answerPayload(
   }
 }
 
-// Pure: what the owner's Dismiss on an answered card, or Done or Dismiss on an update, tells its poster: drop it. A card its poster has not closed names how to close it (a go with why it has no link, a reply by its ack, anything else by reading it), and an update, which the owner closed, takes no more edits.
+// Pure: what the owner's Dismiss on an answered card, or Done or Dismiss on an update, tells its poster: drop it. A card its poster has not closed names how to close it (a go with why it has no link, a reply by its ack, anything else by reading it), and an update he sent to Done comes back with its poster's next edit that changes its words, while one he dismissed takes no more.
 export function closedPayload(
   item: InboxItem,
   verb: "dismiss" | "done",
@@ -1484,7 +1484,7 @@ const ownRefused = (
   return message ? { code: "VALIDATION_ERROR", message, ok: false } : undefined
 }
 
-// Pure: an item its poster can no longer edit: done or dismissed by the owner, settled, resolved, or closed by its poster's ack.
+// Pure: an item its poster can no longer edit: done or dismissed by the owner, settled, resolved, or closed by its poster's ack; editItem still takes an update the owner sent to Done (ownerDone).
 const closed = (item: InboxItem): boolean => {
   const answer = item.answer
   if (answer === null) return false
@@ -1493,14 +1493,34 @@ const closed = (item: InboxItem): boolean => {
   return "choice" in answer && (answer.choice === "resolved" || answer.choice === "settled")
 }
 
-// The poster replaces its own item's title and preview in place (`bun run ask edit`), checked as postItem checks a new one, so one card carries a progress to its end: an update until the owner presses Done or Dismiss or its poster resolves it, and an ask until it closes, answered, archived, put away with Later or replied to alike, an edit to one he replied to taking the reply off so it waits on him again. Another session's item, a change of kind and a closed item are refused.
+// Pure: an update the owner sent to Done with his Done, not his Dismiss, its poster's resolve or ack, which an edit that changes its words brings back to the list unread, so a thread keeps one card (PG-1926).
+const ownerDone = (item: InboxItem): boolean => {
+  const answer = item.answer
+  if (item.kind !== "update" || answer === null) return false
+  if (!("dismissedAt" in answer && answer.dismissedAt)) return false
+  if ("dismissed" in answer && answer.dismissed) return false
+  if ("ackedAt" in answer && answer.ackedAt) return false
+  return !("choice" in answer)
+}
+
+// Pure: what a card says, its files by name alone, since bun run ask copies a file under a new id on every edit.
+const wordsOf = ({ preview, title }: { preview: unknown; title: string }): unknown =>
+  JSON.parse(
+    JSON.stringify({ preview, title }, (key, value) =>
+      key === "attachments" && Array.isArray(value)
+        ? value.map(({ id: _, ...rest }: InboxAttachment) => rest)
+        : value,
+    ),
+  )
+
+// The poster replaces its own item's title and preview in place (`bun run ask edit`), checked as postItem checks a new one, so one card carries a progress to its end: an update until the owner presses Dismiss or its poster resolves it, an edit that changes its words after his Done bringing it back to the list unread (reopened), and an ask until it closes, answered, archived, put away with Later or replied to alike, an edit to one he replied to taking the reply off so it waits on him again. Another session's item, a change of kind and a closed item are refused.
 export async function editItem(
   db: Database,
   key: string,
   input: unknown,
   now = new Date(),
   settingsData?: string,
-): Promise<{ item: InboxItem; ok: true } | Refused> {
+): Promise<{ item: InboxItem; ok: true; reopened?: true } | Refused> {
   const parsed = inboxInputSchema.safeParse(input)
   if (!parsed.success) {
     return { code: "VALIDATION_ERROR", message: zodMessage(parsed.error), ok: false }
@@ -1515,7 +1535,8 @@ export async function editItem(
   if (parsed.data.kind !== item.kind) {
     return { code: "VALIDATION_ERROR", message: `This item is a ${item.kind}`, ok: false }
   }
-  if (closed(item)) {
+  const reopens = ownerDone(item) && !isDeepStrictEqual(wordsOf(parsed.data), wordsOf(item))
+  if (closed(item) && !reopens) {
     return {
       code: "CONFLICT",
       message: "This item is closed: done, dismissed, settled, resolved or closed by its poster",
@@ -1527,6 +1548,10 @@ export async function editItem(
     .set({
       // an edit answers his reply, so the card waits on him again
       ...(choiceOf(item) === "replied" && { answer: null }),
+      ...(reopens && {
+        answer: sql`nullif(${inboxItem.answer} - 'dismissedAt', '{}'::jsonb)`,
+        readAt: null,
+      }),
       preview: parsed.data.preview,
       title: parsed.data.title,
       // past the stamp he read, even inside its millisecond, so an answer whose seen names the old words is refused (answerItem)
@@ -1538,7 +1563,7 @@ export async function editItem(
   if (!row) {
     return { code: "CONFLICT", message: "This item changed while editing it; try again", ok: false }
   }
-  return { item: toItem(row), ok: true }
+  return { item: toItem(row), ok: true, ...(reopens && { reopened: true as const }) }
 }
 
 // By its id, or by its tag (#i41, i41), as a person or an agent would name it.
@@ -2722,7 +2747,7 @@ export async function dismissItems(
       ),
     )
     .returning()
-  // Done tells an update's poster done, so it posts a new card rather than editing this one; an answered card's poster hears nothing
+  // Done tells an update's poster done, and its next edit that changes the card's words brings it back to the list (PG-1926); an answered card's poster hears nothing
   for (const row of rows) {
     const item = toItem(row)
     const was = before.get(row.id)
