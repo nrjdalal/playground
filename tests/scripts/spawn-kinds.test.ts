@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 
 import {
@@ -139,14 +139,7 @@ describe("every session compacts in one 400k window (#1805)", () => {
 
   test("the built file keeps every hook command of the real factory settings byte for byte", async () => {
     const real = readFileSync(join(root, "scripts", "factory-settings.json"), "utf8")
-    const r = await spawn(
-      ["worker", "worker-brave-otter", "b.md"],
-      [],
-      {},
-      undefined,
-      undefined,
-      (home) => writeFileSync(join(home, ".playground", "factory-settings.json"), real),
-    )
+    const r = await spawn(["worker", "worker-brave-otter", "b.md"], [])
     expect(r.code).toBe(0)
     const source = JSON.parse(real)
     const built = builtOf(r, "factory-settings-400k.json")

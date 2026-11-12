@@ -1638,7 +1638,8 @@ if sandbox:
     def denied(folder):
         paths = [os.path.join(folder, name) for name in sorted(os.listdir(folder))]
         return [d for p in paths if p != own for d in (denied(p) if own.startswith(p + os.sep) else [p])]
-    deny = denied(main)
+    # The extensions root, the data folder's extensions folder, which every guard reads its lists from, is denied too, so a sandboxed session writes the rest of the data folder alone.
+    deny = denied(main) + [os.path.join(data, "extensions")]
     home = os.path.expanduser("~")
     settings["sandbox"] = {
         # Bypass mode would run the unsandboxed retry with no prompt, and a sandbox that cannot start would run every command unsandboxed.
