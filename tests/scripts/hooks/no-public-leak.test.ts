@@ -216,8 +216,9 @@ describe("a write to the public repository holding private text is refused", () 
 
 // Checkouts of the public repository with nothing pushed: `mailed`, whose newest commit's message holds a made-up address, and `clean`, whose messages hold none; gh pr create reads the commits it may push before a push the same call runs first.
 describe("a refusal names the text that held the term", () => {
-  const dirs = { clean: "", mailed: "" }
+  const dirs = { clean: "", mailed: "", separated: "" }
   let sha = ""
+  let separated = ""
   const git = (dir: string, ...args: string[]): string => {
     const proc = Bun.spawnSync(
       ["git", "-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args],
@@ -250,6 +251,25 @@ describe("a refusal names the text that held the term", () => {
     dirs.mailed = await checkout("mailed", "Fix the import\n\nReported-by: quilla@madeup.test")
     dirs.clean = await checkout("clean", "Fix the import")
     sha = git(dirs.mailed, "rev-parse", "--short", "HEAD")
+    dirs.separated = await checkout(
+      "separated",
+      "Fix the import\x1eReported-by: quilla@madeup.test",
+    )
+    separated = git(dirs.separated, "rev-parse", "--short", "HEAD")
+  })
+
+  test("a commit message holding the byte that splits the log keeps the text after it, under that commit", async () => {
+    const reason = await at(`gh pr create --title "Fix the import" --body ok`, dirs.separated)
+    expect(reason).toContain(
+      `an email address, in the message of commit ${separated}, which it may push`,
+    )
+  })
+
+  test("a ship's notes file names its notes file", async () => {
+    const file = join(scratch, "notes-mailed.md")
+    await Bun.write(file, "Mail quilla@madeup.test\n")
+    const reason = await at(`gh release create v1 ${R} -F ${file}`, dirs.clean)
+    expect(reason).toContain("an email address, in its notes file")
   })
 
   test("a commit message alone holding an address names that commit, which gh pr create may push", async () => {
