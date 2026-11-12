@@ -434,7 +434,7 @@ export function quarantine(
     return refused(
       carve
         ? `${abs} holds over ${cap.files} files or ${cap.bytes} bytes, past the ${opts.carveOut} carve-out's cap`
-        : `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire`,
+        : `${abs} holds over ${whole ? "" : `${LIMITS.files} files or `}${LIMITS.bytes / 1024 ** 3} GB, past the tripwire`,
       "tripwire",
     )
   mkdirSync(trash, { recursive: true })
