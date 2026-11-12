@@ -20,16 +20,20 @@ export const procsOf = (out: string): Proc[] =>
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
-// Pure but for exists: each process whose parent is pid 1 and whose command names a path inside a worktree folder of worktrees, every such worktree gone; a worktree is read by its whole folder name, so foo never stands for foo-2.
+// A dependency's file, never this repo's script: portless's shared proxy runs detached from a stack's node_modules with parent pid 1, and every stack routes through it.
+const DEPENDENCY = /(^|\/)node_modules(\/|$)/
+
+// Pure but for exists: each process whose parent is pid 1 and whose command names this repo's own script inside a worktree folder of worktrees, never a file under node_modules, every such worktree gone; a worktree is read by its whole folder name, so foo never stands for foo-2.
 export const orphansOf = (
   procs: Proc[],
   worktrees: string,
   exists: (path: string) => boolean,
 ): Orphan[] => {
-  const inside = new RegExp(`${escaped(worktrees)}/([^/\\s'"]+)/`, "g")
+  const inside = new RegExp(`${escaped(worktrees)}/([^/\\s'"]+)/([^\\s'"]*)`, "g")
   return procs.flatMap((p) => {
     if (p.ppid !== 1) return []
-    const named = [...new Set([...p.command.matchAll(inside)].map((m) => join(worktrees, m[1]!)))]
+    const scripts = [...p.command.matchAll(inside)].filter((m) => !DEPENDENCY.test(m[2]!))
+    const named = [...new Set(scripts.map((m) => join(worktrees, m[1]!)))]
     return named.length && named.every((path) => !exists(path))
       ? [{ ...p, worktree: named[0]! }]
       : []

@@ -256,7 +256,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 ## A factory script's orphan
 
 - A factory script left running after its starter and its worktree are gone (parent pid 1) belongs to no session, so the signal rule gives it to Ops: ops-tick's nightly clean ends it by its own pid, TERM then KILL past a 5-second grace, and names each in `ops/log/nightly-clean.log` and its outbox line, with nothing to the Inbox.
-  The check lives in `packages/scripts/src/ops-tick/orphans.ts`: `orphansOf` selects a process whose parent is pid 1 and whose command names a path in a worktree under the checkout's `.claude/worktrees`, read by its whole folder name, once every such worktree is gone, and `endOrphans` sends KILL only to a pid `ps` still lists with the same command.
+  The check lives in `packages/scripts/src/ops-tick/orphans.ts`: `orphansOf` selects a process whose parent is pid 1 and whose command names this repo's own script in a worktree under the checkout's `.claude/worktrees`, read by its whole folder name, once every such worktree is gone,
+  never a dependency's binary under `node_modules` such as the shared portless proxy, and `endOrphans` sends KILL only to a pid `ps` still lists with the same command.
   Tests: `bun run test:file tests/packages/scripts/src/ops-tick/orphans.test.ts tests/packages/scripts/src/ops-tick/nightly-clean.test.ts`.
 
 ## bun run test:skills
