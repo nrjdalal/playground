@@ -283,7 +283,7 @@ describe("quarantine, listTrash and restore", () => {
     const worktrees = join(roots.main, ".claude", "worktrees")
     expect(quarantine(big, { ...opts, worktree: holders }, roots, { now: NOW })).toEqual({
       kind: "refused",
-      refused: `--worktree takes a folder in ${worktrees}, not ${big}: playground rm ${big} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
+      refused: `--worktree takes a folder in ${worktrees} or a git worktree in another repo's .claude/worktrees, not ${big}: playground rm ${big} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
     })
     expect(quarantine(big, opts, roots, { now: NOW })).toMatchObject({ kind: "tripwire" })
     expect(existsSync(big)).toBe(true)

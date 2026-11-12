@@ -89,6 +89,7 @@ A hook test that spawns a shell hands it a fixed PATH, `/usr/bin:/bin` with its 
 A test that lists items keeps to the items it made, filtering the list by their ids (the "an update starts unread" test in `tests/api/hono/src/lib/dashboard/inbox.test.ts`), since a file's tests share one database and another test's items can land in its list: with the clock 30 days ahead, one test's list took four older updates another test had left.
 `Bun.which(name)` reads the PATH the process started with, so code under test that looks a tool up that way runs the real tool wherever one is installed and misses a stub the test prepends to `process.env.PATH`: look it up with `Bun.which(name, { PATH: process.env.PATH ?? "" })` (`packages/scripts/src/ops-ext-sync/sync.ts`), or take the lookup as a dependency the test passes in.
 A PATH shim for a bash script under test goes on its PATH before the script starts and acts once the test arms it (the `python3` and `stat` shims in `tests/scripts/ops/run-slot-look-marks.test.ts`), since bash keeps the path of each command it has run, so a shim written once the script has run that command is never called.
+A test of a slow route runs past 12s on a real `Bun.serve`, since Bun.serve's default `idleTimeout` of 10s drops a quiet request at about 12s, not 10 (an 11s run stayed green with the route's `server.timeout(request, 0)` taken out, a 15s one went red with `ECONNRESET` at 12.1s, measured 12 Nov; `tests/api/hono/src/lib/dashboard/restore.test.ts`).
 
 ## End-to-end tests
 

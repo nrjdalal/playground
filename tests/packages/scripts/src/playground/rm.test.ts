@@ -10,6 +10,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -355,6 +356,20 @@ test("runRm clears an ended session's whole scratchpad folder over the tripwire'
   expect(
     readdirSync(folder, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()),
   ).toHaveLength(5001)
+})
+
+// the file count does not apply to an ended session's whole folder, so its refusal names the byte cap alone
+test("runRm refuses an ended session's whole scratchpad folder over 2 GB, naming the 2 GB cap alone", async () => {
+  const { deps, pad, told } = pads([{ name: "a4b5c6-worker", status: "ended" }])
+  const folder = join(pad, "a4b5c6-worker")
+  mkdirSync(folder, { recursive: true })
+  writeFileSync(join(folder, "big.bin"), "")
+  truncateSync(join(folder, "big.bin"), 2 * 1024 ** 3 + 1)
+  expect(await runRm([folder], deps)).toBe(1)
+  expect(existsSync(join(folder, "big.bin"))).toBe(true)
+  expect(told.filter((line) => line.includes("past the tripwire"))).toEqual([
+    expect.stringContaining(" holds over 2 GB, past the tripwire"),
+  ])
 })
 
 test("runRm keeps the tripwire's file count for the caller's own scratchpad folder, a path inside an ended folder and any other path", async () => {
@@ -824,7 +839,7 @@ test("a session's --worktree --discard on a folder outside the worktrees folder 
       console.error = error
     }
     expect(said).toEqual([
-      `playground: --worktree takes a folder in ${worktrees}, not ${outside}: playground rm ${outside} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
+      `playground: --worktree takes a folder in ${worktrees} or a git worktree in another repo's .claude/worktrees, not ${outside}: playground rm ${outside} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
     ])
     expect(existsSync(outside)).toBe(true)
   }
@@ -1089,7 +1104,7 @@ test("--worktree refuses, in another repo, a folder in its .claude/worktrees git
       expect(await rmSaid(words, session)).toEqual({
         code: 1,
         said: [
-          `playground: --worktree takes a folder in ${ours}, not ${path}: playground rm ${path} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
+          `playground: --worktree takes a folder in ${ours} or a git worktree in another repo's .claude/worktrees, not ${path}: playground rm ${path} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
         ],
       })
       expect(existsSync(path)).toBe(true)

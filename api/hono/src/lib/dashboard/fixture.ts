@@ -281,7 +281,7 @@ export const fixtureSchema = z.object({
     probes: z.record(z.string(), z.string()),
     totalBytes: z.number(),
   }),
-  // The owner's made-up threads, which bun run ingest writes into a fixture stack's database once it has read the transcripts their messages are in.
+  // The owner's made-up threads, which the API's start writes into a fixture stack's database while its thread table is empty, and bun run ingest once it has read the transcripts their messages are in.
   threads: z.array(fixtureThread).optional(),
   // How far the made-up dashboard's build is behind the branch it follows, as the update check reports it (lib/dashboard/update.ts), so a fixture stack shows the update icon and Update now without running git.
   update: z
