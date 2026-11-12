@@ -134,11 +134,11 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       return c.json({ data: { login, owner } })
     },
   )
-  // what the local Playground cards in its Inbox: mentions, a thread's replies included, which a channel's page of top-level messages leaves out, and your own held posts
+  // what the local Playground cards in its Inbox: mentions, a thread's replies included, which a channel's page of top-level messages leaves out, your bots' messages and your own held posts
   .get(
     "/waiting",
     doc(
-      "What waits on you past a mark, oldest first by when it showed, then by id: every sent message that names you in the channels and DMs you are in, a thread's replies included, and your own posts held for your approval; take the last item's shownAt as the next since and its message's id as the next after",
+      "What waits on you past a mark, oldest first by when it showed, then by id: every sent message that names you in the channels and DMs you are in, a thread's replies included, every message a bot you made sends in its DM with you, and your own posts held for your approval; take the last item's shownAt as the next since and its message's id as the next after",
       z.object({
         items: z.array(
           z.object({ held: z.boolean(), message: messageSchema, shownAt: z.iso.datetime() }),

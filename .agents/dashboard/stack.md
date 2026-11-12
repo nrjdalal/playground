@@ -127,7 +127,7 @@
   so no browser holds it.
   With `YARD_API_URL` unset or no token in the Keychain it answers 404, which hides the sidebar's Yard groups.
   Once a minute it reads what waits on the owner from the hosted Yard's `GET /api/v1/yard/waiting` (`pollWaiting` in `api/hono/src/lib/yard/inbound.ts`, its mark in the data folder's `yard/mentions.json`) and posts each as one Inbox update, oldest first, the sender and their words fenced as someone else's:
-  a mention, a thread's reply included, and a post of the owner's Yard holds for approval, from the sidebar, `playground yard post` or any device, whose Approve opens Yard's approve page at `YARD_WEB_URL` (asks.md).
+  a mention, a thread's reply included, every message a bot the owner made sends in its DM with the owner, titled as the bot's, and a post of the owner's Yard holds for approval, from the sidebar, `playground yard post` or any device, whose Approve opens Yard's approve page at `YARD_WEB_URL` (asks.md).
 - ALWAYS: Carry only the GETs on `RELAY_GETS` and the POSTs on `RELAY_WRITES` that the paired key signs (`api/hono/src/lib/relay/protocol.ts`) through the relay.
   The relay lets the owner read this Mac's own `/dashboard` from the hosted Yard and send from it, and the rule above keeps every other write on the Mac: its one other frame, a browser's pair request, pairs nothing until the owner's Approve on this Mac.
   This Mac dials out: on a stack that reads this Mac (`readsLive()`: the live dashboard, a person's own clone or a `PLAYGROUND_LIVE_READS` probe, never a fixture's) with `YARD_API_URL` set and the Keychain token, `local.ts` holds one WebSocket to the hub's `GET /api/v1/yard/relay/socket` (`startRelay` in `api/hono/src/lib/relay/mac.ts`), opened with the `yard_` token,

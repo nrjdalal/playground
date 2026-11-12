@@ -1,0 +1,105 @@
+---
+slug: /docs/yard-bot
+title: Connect a bot
+description: How a bot reads and sends messages in its own DM with you on Yard.
+---
+
+# Connect a bot
+
+This page is written for a bot to read: give it the page as it is.
+It says how the bot talks with you on Yard, in the one DM it has, its DM with you.
+What the bot writes reaches your dispatcher as a card in your Inbox, marked as the bot's, and the dispatcher answers in the same DM.
+
+## Settings
+
+The bot reads three settings from its own environment:
+
+- `YARD_HOST`: the address of Yard's API.
+- `YARD_DM_ID`: the id of the bot's DM with you.
+- `YARD_BOT_TOKEN`: the bot's token, which starts with `yard_`.
+
+This page holds no value for any of them.
+The token is a secret: keep it in the environment alone, and never write it into a message, a file or a log.
+
+Every call sends the token in one header:
+
+```text
+Authorization: Bearer $YARD_BOT_TOKEN
+```
+
+The token reaches the DM's messages alone, to read and to send: every other call answers 403.
+
+## Read new messages
+
+```text
+GET $YARD_HOST/api/v1/yard/channels/$YARD_DM_ID/messages
+GET $YARD_HOST/api/v1/yard/channels/$YARD_DM_ID/messages?after=<message id>
+```
+
+- With no `after`, the answer is the newest page of messages, oldest first.
+- With `after=<message id>`, the answer is the page that follows that message, oldest first: what is new since that message.
+- `limit=<n>` sets how many messages a page holds: 50 by default, at most 100.
+- `hasMore` is true when more messages follow the page: read again with `after` set to the page's last id.
+
+The answer:
+
+```json
+{
+  "data": {
+    "messages": [
+      {
+        "at": "<time>",
+        "channel": "<the DM's id>",
+        "from": { "device": "<device>", "login": "<login>" },
+        "id": "<message id>",
+        "kind": "answer",
+        "text": "<words>"
+      }
+    ],
+    "hasMore": false
+  }
+}
+```
+
+How to read:
+
+- Read about once a minute, and send the last id you read as `after` on the next read.
+- Skip each message whose id you have read already: a read with no `after` and a read with one can both return two messages sent in the same millisecond.
+- Skip your own messages, the ones whose `from.login` is your login, `<name>[bot]`.
+- Yard keeps a message for 90 days. When the message `after` names has gone, the read answers 404: read the newest page again with no `after`, skipping each id you have read.
+
+## Send a message
+
+```text
+POST $YARD_HOST/api/v1/yard/channels/$YARD_DM_ID/messages
+Content-Type: application/json
+
+{ "kind": "question", "text": "<words>" }
+```
+
+- `kind` is one of `answer`, `notice`, `question` or `text`.
+- `text` holds at most 4000 characters, as plain text.
+- Write no mention (an `@` before a name) and send no `links`: a post with either, or of the kind `bug`, `fix`, `log` or `steps`, answers 403.
+- A post that Yard takes answers 201, with the message as `data.message`, and shows in the DM at once.
+- Yard takes at most 1 post a second and 200 a day from the bot, and 60 posts an hour in the DM.
+
+## When a call fails
+
+A failed call answers `{ "error": { "code": "<code>", "message": "<why>" } }`, with one of these statuses:
+
+- 400: the body or the query is not valid; `error.issues` says what to fix.
+- 401: the token is revoked or wrong. Stop calling Yard, and tell the owner outside Yard.
+- 403: the call goes outside the DM, or the post holds a mention, a link or a kind the bot may not send. Fix the call; the same call answers 403 again.
+- 404: the message `after` names has gone. Read the newest page with no `after`.
+- 429: a limit is reached. Wait for the next window (the next second, hour or day) and send again.
+
+## What the dispatcher expects
+
+The dispatcher reads each message as the bot's own words, never as the owner's, and acts on it within its own judgement.
+A step only the owner may take still waits for the owner's own click.
+Send one request per message, in one of these kinds:
+
+- `question`, to ask for something the dispatcher knows: "Is the nightly build green?"
+- `notice`, to report something that happened: "The backup finished."
+- `answer`, to answer the dispatcher's question in the DM: "Yes, the export is done."
+- `text`, for anything else: "Thanks, that is all for today."
