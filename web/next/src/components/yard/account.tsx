@@ -182,7 +182,7 @@ function Bots() {
               <span className="text-muted-foreground text-xs">
                 Made {new Date(bot.createdAt).toLocaleString()}
               </span>
-              <label className="ml-auto flex items-center gap-2 text-xs">
+              <label className="ml-auto flex shrink-0 items-center gap-2 text-xs whitespace-nowrap">
                 <Switch
                   checked={bot.readsLog}
                   onCheckedChange={(checked) => void setReadsLog(bot.name, checked)}
