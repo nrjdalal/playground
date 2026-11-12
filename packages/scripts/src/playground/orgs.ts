@@ -7,7 +7,6 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
-  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -15,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, isAbsolute, join, relative, resolve } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 
 import { configDirOf, dataDir } from "@packages/env/data-dir"
 import { MARKER, makeScratch, removeScratch } from "@packages/safe-delete"
@@ -24,11 +23,13 @@ import {
   CORE,
   extChain,
   extLinksSchema,
-  guardedOrgs,
   loginOf,
   markerPath,
+  orgFolderOf,
+  pathsOf,
   readPolicyOrDefaults,
   scopeDir,
+  within,
 } from "@packages/settings"
 
 // The core scope's skill folders in the checkout, read in this order; the last holds core's own skills beside upstream's, vendored as published.
@@ -196,12 +197,6 @@ export type OrgsIo = {
   personal: string
 }
 
-// The org whose own folder in the home folder holds dir, for a folder with no GitHub origin, such as that org folder itself, where its workers open; ext.links guards the orgs it reads, and a value its schema refuses reads as none.
-const orgFolderOf = (home: string, dir: string, values: Record<string, unknown>) =>
-  guardedOrgs({ "ext.links": extLinksSchema.safeParse(values["ext.links"]).data }).find((org) =>
-    pathsOf(dir).some((path) => pathsOf(join(home, org)).some((root) => within(path, root))),
-  )
-
 // What a session in repo, or in a repo of org, resolves to (the home set with neither): ext.order and ext.links from the extensions' policy (their defaults until a first setting writes it), each skill from the first scope that has it, each bundled extension ext.bundled turns on read after the installed extensions and before core; a root ext init stopped in, holding no scope's folder yet, resolves with no login; a refusal when the policy does not parse, or when scopes are there and no login names whose they are.
 export const resolveFor = async (
   io: OrgsIo,
@@ -260,20 +255,6 @@ const resolveSet = async (
   for (const line of resolved.left) io.err(line)
   const winners = repo ? resolved.winners.filter((w) => !listedBy(repo, w)) : resolved.winners
   return { plugin: writePlugin(io.data, resolved.plan.own ?? "home", winners) }
-}
-
-// A path as written and as resolved, so a checkout reached through a symlinked folder (/tmp, /private/tmp) still matches.
-const pathsOf = (path: string): string[] => {
-  try {
-    return [path, realpathSync(path)]
-  } catch {
-    return [path]
-  }
-}
-
-const within = (path: string, root: string): boolean => {
-  const rel = relative(root, path)
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
 }
 
 // Whether a personal link points into Playground's own checkout, which link-skills.sh made and the home set now replaces; a link anywhere else (inscope's cache, another checkout) is the user's own.
