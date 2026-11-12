@@ -19,11 +19,20 @@ const readCursor = async (
   const raw = await Bun.file(path)
     .text()
     .catch(() => undefined)
-  if (raw === undefined) return { at: {}, whole: false }
-  const parsed: unknown = JSON.parse(raw.trim() || "0")
-  return typeof parsed === "number"
-    ? { at: { [ALERTS]: parsed }, whole: false }
-    : { at: parsed as Record<string, number>, whole: true }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw?.trim() || "0")
+  } catch {}
+  if (typeof parsed === "number") return { at: { [ALERTS]: parsed }, whole: false }
+  // a cursor that does not read as offsets (cut off, or not JSON) is none, so the wait still runs
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    !Array.isArray(parsed) &&
+    Object.values(parsed).every((n) => typeof n === "number")
+  )
+    return { at: parsed as Record<string, number>, whole: true }
+  return { at: {}, whole: false }
 }
 
 // An alert queued WAITER_GRACE_MS before the wait began is past answering, since a prompt times out in 120s: a waiter started after days down skips its backlog rather than replaying it one run at a time (62 alerts on 7 Nov).

@@ -118,6 +118,25 @@ describe("playground alerts-wait (PG-2184)", () => {
     )
   })
 
+  test("a cursor that does not read as offsets, cut off or not JSON, is read as none, so the wait still prints the next new line", async () => {
+    for (const bad of [
+      "{",
+      "null",
+      "abc",
+      '{"ops-stuck-alert.jsonl":',
+      '{"ops-stuck-alert.jsonl":"x"}',
+    ]) {
+      const outbox = join(dir, `bad-${Buffer.from(bad).toString("hex")}`)
+      const file = join(outbox, "ops-firefighting-headsup.jsonl")
+      await Bun.write(file, job("firefighting-headsup", "builder", "HEADS-UP before the wait"))
+      await Bun.write(join(outbox, "alerts-wait", "builder"), bad)
+      const waiting = alertsWait("builder", outbox, 5, BEGAN)
+      await Bun.sleep(30)
+      appendFileSync(file, job("firefighting-headsup", "builder", "HEADS-UP after"))
+      expect(await within(waiting)).toBe("2026-10-26T05:40:00Z HEADS-UP after")
+    }
+  })
+
   test("waits for an outbox file that does not exist yet", async () => {
     const outbox = join(dir, "fresh")
     const waiting = alertsWait("ops", outbox, 5, BEGAN)
