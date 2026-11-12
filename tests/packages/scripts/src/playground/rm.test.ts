@@ -15,7 +15,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { CARVE_OUTS } from "../../../../../packages/safe-delete/src"
+import { CARVE_OUTS, listTrash } from "../../../../../packages/safe-delete/src"
 import {
   callerOf,
   clonesOf,
@@ -289,7 +289,7 @@ test("runRm clears a path in the caller's own scratchpad folder", async () => {
   expect(existsSync(join(pad, "j6rjgy-worker"))).toBe(true)
 })
 
-test("runRm clears the whole scratchpad folder of a session the roster lists as finished, or lists not at all", async () => {
+test("runRm clears the whole scratchpad folder of a session the roster lists as finished, or lists not at all, and --restore brings it back", async () => {
   const { deps, pad } = pads([
     { name: "a4b5c6-reviewer", status: "ended" },
     { name: "d7e8f9-runner", status: "parked" },
@@ -301,6 +301,11 @@ test("runRm clears the whole scratchpad folder of a session the roster lists as 
     expect(existsSync(join(pad, name))).toBe(false)
   }
   expect(existsSync(pad)).toBe(true)
+  const moved = listTrash(join(deps.data, "trash")).find(
+    (entry) => entry.path === join(pad, "q1w2e3"),
+  )!
+  expect(await runRm(["--restore", moved.id], deps)).toBe(0)
+  expect(existsSync(join(pad, "q1w2e3", "shots", "a.png"))).toBe(true)
 })
 
 test("runRm refuses a live session's scratchpad folder, every path in it, and its bare id's folder while any of that id's rows is live, to any other session", async () => {

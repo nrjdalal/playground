@@ -64,6 +64,7 @@ export type WorktreeGit = { branch: string | null; gitdir: string; sha: string }
 export type TrashEntry = {
   at: string
   carveOut?: string
+  ended?: string
   files: number
   git?: WorktreeGit
   id: string
@@ -171,6 +172,34 @@ const ownScratchOf = (home: string, session: string): string[] =>
       ].map(real)
     : []
 
+// What tells an ended session's scratchpad folder: the roster's path and the statuses it counts as live.
+export type Ended = { live: string[]; roster: string }
+
+// The folder directly in scratchpad/ that path is or sits in, when it is a real folder (not a symlink) no live roster row names, as its own name or as `<folder>-<role>` (a bare id's folder while any of that id's sessions runs); none while the roster cannot be read.
+const endedPadOf = (path: string, home: string, ended: Ended): string | undefined => {
+  const pad = real(join(home, ".playground", "scratchpad"))
+  const abs = resolve(path)
+  const own = join(real(dirname(abs)), basename(abs))
+  if (own === pad || !inside(own, pad)) return undefined
+  const folder = join(pad, own.slice(pad.length + 1).split(sep)[0]!)
+  const name = basename(folder)
+  if (!SESSION.test(name) || !lstat(folder)?.isDirectory()) return undefined
+  let agents: unknown
+  try {
+    agents = JSON.parse(readFileSync(ended.roster, "utf8")).agents
+  } catch {
+    return undefined
+  }
+  if (!Array.isArray(agents)) return undefined
+  const live = agents.some(
+    (agent) =>
+      ended.live.includes(agent?.status) &&
+      typeof agent?.name === "string" &&
+      (agent.name === name || agent.name.startsWith(`${name}-`)),
+  )
+  return live ? undefined : folder
+}
+
 const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string | null => {
   const held = whyHolds(path, roots)
   if (held) return held
@@ -186,11 +215,19 @@ const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string 
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, and nothing else.
-export function isProtected(path: string, roots: Roots, session?: string): string | null {
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders and ended the scratchpad folders of ended sessions (endedPadOf), and nothing else.
+export function isProtected(
+  path: string,
+  roots: Roots,
+  session?: string,
+  ended: string[] = [],
+): string | null {
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
-  const scratch = session === undefined ? [] : ownScratchOf(real(roots.home), session)
+  const scratch = [
+    ...(session === undefined ? [] : ownScratchOf(real(roots.home), session)),
+    ...ended,
+  ]
   return whyProtected(own, roots, scratch) ?? whyProtected(real(abs), roots, scratch)
 }
 
@@ -222,8 +259,9 @@ const carveOutOf = (
   roots: Roots,
   table: Record<string, CarveOut>,
   session?: string,
+  ended: string[] = [],
 ): CarveOut | Refusal | null => {
-  const why = isProtected(path, roots, session)
+  const why = isProtected(path, roots, session, ended)
   if (!why) return null
   const found = carveOut === undefined ? why : carveOutAt(path, carveOut, roots, table)
   return typeof found === "string"
@@ -345,6 +383,7 @@ export function quarantine(
   path: string,
   opts: {
     carveOut?: string
+    ended?: Ended
     git?: WorktreeGit
     reason: string
     session: string
@@ -357,7 +396,15 @@ export function quarantine(
   if (!SESSION.test(opts.session))
     return refused(`the session name ${opts.session} is not a word of letters, digits and hyphens`)
   if (!lstat(abs)) return refused(`no such path ${abs}`)
-  const carve = carveOutOf(abs, opts.carveOut, roots, io.carveOuts ?? CARVE_OUTS, opts.session)
+  const ended = opts.ended && endedPadOf(abs, roots.home, opts.ended)
+  const carve = carveOutOf(
+    abs,
+    opts.carveOut,
+    roots,
+    io.carveOuts ?? CARVE_OUTS,
+    opts.session,
+    ended ? [ended] : [],
+  )
   if (carve && "refused" in carve) return carve
   const isWorktree = inWorktrees(abs, roots)
   if (isWorktree && !opts.worktree)
@@ -426,6 +473,7 @@ export function quarantine(
   const entry: TrashEntry = {
     at: now.toISOString(),
     ...(carve ? { carveOut: opts.carveOut } : {}),
+    ...(ended ? { ended } : {}),
     files,
     ...(opts.git ? { git: opts.git } : {}),
     id,
@@ -466,7 +514,16 @@ export function restore(
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
-  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts, entry.session)
+  // an ended session's folder comes back only into scratchpad/, and only while nothing but a real folder stands there
+  const pad = real(join(roots.home, ".playground", "scratchpad"))
+  const back =
+    entry.ended &&
+    dirname(entry.ended) === pad &&
+    inside(entry.path, entry.ended) &&
+    (!lstat(entry.ended) || lstat(entry.ended)!.isDirectory())
+      ? [entry.ended]
+      : []
+  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts, entry.session, back)
   if (carve && "refused" in carve) return carve
   if (lstat(entry.path)) return refused(`${entry.path} already exists; move it aside first`)
   if (!existsSync(dirname(entry.path)))
