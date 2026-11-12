@@ -9,7 +9,7 @@ import {
   statSync,
 } from "node:fs"
 import { loadavg } from "node:os"
-import { basename, dirname, isAbsolute, join, resolve } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { guardedOrgs } from "../../packages/settings/src/ext"
@@ -1027,6 +1027,20 @@ function globRoot(
     root: segments.slice(0, at).join("/") || "/",
   }
 }
+// The edit tools, each with the input that names the file it changes
+const EDIT_TOOLS: Record<string, string> = {
+  Edit: "file_path",
+  MultiEdit: "file_path",
+  NotebookEdit: "notebook_path",
+  Write: "file_path",
+}
+// A file's path from the root of the checkout that holds it, the nearest folder above it with a .git, as a commit names it; undefined outside any checkout
+function fromCheckout(file: string): string | undefined {
+  for (let at = dirname(file); ; at = dirname(at)) {
+    if (existsSync(join(at, ".git"))) return relative(at, file)
+    if (dirname(at) === at) return
+  }
+}
 // The read tools, each with the input that names what it reads; a Grep or a Glob with no path reads the session's folder
 const READ_TOOLS: Record<string, string> = { Glob: "path", Grep: "path", Read: "file_path" }
 // the shell's commands that read no file, which run inside an org's checkout and open only an argument with a slash or a tilde, since their plain words are text
@@ -1697,6 +1711,18 @@ async function inspect(
       "an MCP tool reaches an org's or an outside service's data",
     )
   const directory = typeof cwd === "string" ? cwd : undefined
+  // an edit to an Opus path is refused at the first touch, as its commit would be, so a GLM worker stops before it writes the change
+  if (typeof tool === "string" && tool in EDIT_TOOLS) {
+    const given = toolInput?.[EDIT_TOOLS[tool]]
+    const file =
+      typeof given !== "string" || given === ""
+        ? undefined
+        : isAbsolute(given)
+          ? given
+          : directory && resolve(directory, given)
+    const path = file ? fromCheckout(file) : undefined
+    return path && heavy(path) ? refuse(`${tool} call`, [path]) : undefined
+  }
   if (typeof tool === "string" && tool in READ_TOOLS) {
     const orgs = await guardedOf(environment)
     if (!Array.isArray(orgs)) return

@@ -18,6 +18,7 @@ CI starts only on a pull request into `canary`, so open your draft PR before you
 Push bare, then confirm the push with `git -C <your worktree> ls-remote origin refs/heads/<branch>`, which prints your local head's sha (`git -C <your worktree> rev-parse HEAD`) once it has landed; a piped push reads its last command's exit, and `no-false-green` refuses one with no pipefail.
 
 Every git call names its tree, `git -C <your worktree> ...`, so a shell left in another folder moves nothing there. Run spawn.sh by its absolute path, `"${PLAYGROUND_REPO:?}/scripts/spawn.sh"`, from your own folder. Every background command carries its own `cd <absolute path>` or `--cwd`, since a background task starts in the main checkout.
+On GLM, a file under `OPUS_PATHS` is a Claude worker's: its first edit is refused, so stop and report to your lead, who staffs it by brief-rush's GLM rule (`scripts/briefs/brief-rush.md`).
 After a resume your shell starts in the folder you launched in, the main checkout, so `cd` to your worktree by its absolute path before any write.
 
 Answer each review round by playbook's SESSIONS.md, Fix pushes and nits.
