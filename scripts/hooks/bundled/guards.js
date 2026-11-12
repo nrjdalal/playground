@@ -2761,6 +2761,7 @@ import { join as join10 } from "path";
 
 // packages/settings/src/folder.ts
 import {
+  chmodSync,
   existsSync as existsSync4,
   mkdirSync,
   readdirSync,

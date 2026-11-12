@@ -540,6 +540,8 @@ const copyTree = (data: string, scope: string, from: string, who: Who) =>
         ["Import", from],
       ],
     },
+    undefined,
+    (file) => (statSync(join(from, file)).mode & 0o111) !== 0,
   )
 
 // The guards' list files of a folder (scripts/hooks in a checkout) into the login's lists, one commit, then the root's lists derived: what a fresh machine seeds its guards with.

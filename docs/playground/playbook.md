@@ -142,7 +142,7 @@ Playground is classified: nothing about it appears in any guarded org's ticket, 
 
 Playground is classified.
 Nothing about it, the factory or its sessions goes into any guarded org's ticket, PR, commit, branch, comment, Slack message or DM, and file in its repos.
-Every session is spawned with the factory's own settings file, which `scripts/link-skills.sh` installs at `~/.playground/factory-settings.json` without touching your own settings, so its `no-playground-leak` hook runs wherever the session works, in a guarded org's checkout too.
+Every session is spawned with the factory's own settings file, which spawn.sh builds from the checkout's `scripts/factory-settings.json` without touching your own settings, so its `no-playground-leak` hook runs wherever the session works, in a guarded org's checkout too.
 A session resumed without its settings (a bare `claude --resume`; herdr's own resume is off) drops that file, so Playground's own project settings carry the hook as well, and a session resumed where its folder's settings lack the hook is started again with the file.
 The hook refuses a Linear or Slack write, a write to a guarded org's repository through gh, git, curl or the GitHub MCP, and a commit or push in its checkout, when its text names Playground, one of its skills, a session by the name the roster gives it or an older one such as `worker-envy`, the roster, the live dashboard or `~/.playground`.
 The fixed names are one list, the leak hook's terms file in `scripts/hooks/`, and every skill folder under `skills/` and every agent's name in the roster join them, so a new skill or a renamed session is covered at once.
