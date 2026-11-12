@@ -16,9 +16,9 @@ import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field
 import { Input } from "@/components/ui/input"
 import { toast } from "@/components/ui/toast"
 import { inviteRequests } from "@/lib/yard"
-import { INVITES_KEY, TOKENS_KEY, yardApi } from "@/lib/yard-api"
+import { BOTS_KEY, INVITES_KEY, TOKENS_KEY, yardApi } from "@/lib/yard-api"
 
-// Account and tokens: each token is a device's way to post without a browser, named for that device (never "web"), its secret shown once. A member asks the owner to let someone in here, and the owner sees those requests.
+// Account and tokens: each token is a device's way to post without a browser, named for that device (never "web"), its secret shown once. A member asks the owner to let someone in here, and the owner sees those requests and the bots `playground yard bot add` made.
 export function Account({ role }: { role: string | null | undefined }) {
   const client = useQueryClient()
   const { data: tokens } = useQuery({
@@ -123,7 +123,14 @@ export function Account({ role }: { role: string | null | undefined }) {
             ))}
           </ul>
         )}
-        {roleAtLeast(role, "owner") ? <InviteRequests /> : <RequestInvite />}
+        {roleAtLeast(role, "owner") ? (
+          <>
+            <Bots />
+            <InviteRequests />
+          </>
+        ) : (
+          <RequestInvite />
+        )}
       </div>
     </PageShell>
   )
@@ -137,6 +144,50 @@ const None = ({ children }: { children: string }) => (
     </EmptyHeader>
   </Empty>
 )
+
+// The bots the owner made from the Mac, each with Revoke, which cuts its token and its DM at once.
+function Bots() {
+  const client = useQueryClient()
+  const { data: bots } = useQuery({
+    queryFn: async () => (await yardApi.bots()).bots,
+    queryKey: BOTS_KEY,
+  })
+  const revoke = async (name: string) => {
+    try {
+      await yardApi.revokeBot(name)
+      await client.invalidateQueries({ queryKey: BOTS_KEY })
+    } catch (error) {
+      toast.add({ title: (error as Error).message, type: "error" })
+    }
+  }
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-medium">Bots</h2>
+      {bots?.length === 0 ? (
+        <None>No bots yet. playground yard bot add makes one from your Mac.</None>
+      ) : (
+        <ul className="divide-y rounded-md border text-sm">
+          {bots?.map((bot) => (
+            <li key={bot.name} className="flex items-center gap-3 px-3 py-2">
+              <span className="font-medium">{bot.login}</span>
+              <span className="text-muted-foreground text-xs">
+                Made {new Date(bot.createdAt).toLocaleString()}
+              </span>
+              <Button
+                className="ml-auto"
+                onClick={() => void revoke(bot.name)}
+                size="sm"
+                variant="outline"
+              >
+                Revoke
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
 
 // Each member's request to let someone in, opening its own page to approve or deny it.
 function InviteRequests() {
