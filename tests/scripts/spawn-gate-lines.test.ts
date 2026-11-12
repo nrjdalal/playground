@@ -56,7 +56,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
       ["load", { FAKE_LOAD5: "24.00" }],
       ["memory", { FAKE_PRESSURE: "4" }],
       ["memory", { FAKE_SWAPINS: "150" }],
-    ] as const)("the %s gate still holds a --reads-only worker start", async (gate, env) => {
+    ] as const)("the %s gate still holds a --reads-only worker start at %o", async (gate, env) => {
       const worker = ["worker", "worker-brave-otter", "b.md", "--size", "small"]
       for (const args of [worker, [...worker, "--reads-only"]]) {
         const r = await spawn(args, [], { ...env })
