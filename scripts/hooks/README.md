@@ -936,7 +936,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   - `git push`, past git's own options (`GIT_TAKES`), since a prepared branch on the org's remote reaches the org before the claim;
   - `save_comment`, a tracker comment, and `save_issue`, a tracker issue save (an assign or a state change), on a Linear server.
 
-  Every other call runs: reads, local git, a GraphQL query or any other mutation, every other `gh api` write and every other gh call.
+  Every other call runs: reads, local git, a GraphQL query or any other mutation, every other `gh api` write (a `git/commits` or `git/trees` POST, which moves no ref) and every other gh call.
 
 - It is a check with no process of its own: [guards](#guards) runs it on Bash, and [no-playground-leak](#no-playground-leak)'s process runs it first on the MCP tools, since that hook's matcher already takes every GitHub, Linear and Slack tool, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
 - It fails open, since the session's brief is the first bar: a session the registry or the roster does not hold is not marked, and a read that fails, a roster that does not parse among them, lets the call run and writes one JSON line naming the session, the tool and the error to the data folder's `ops/no-prepare-write.log`, so a broken read shows.
