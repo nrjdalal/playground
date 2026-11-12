@@ -12335,7 +12335,7 @@ import {
   statSync as statSync4
 } from "fs";
 import { loadavg } from "os";
-import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute5, join as join14, resolve as resolve7 } from "path";
+import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute5, join as join14, relative as relative2, resolve as resolve7 } from "path";
 
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
@@ -12896,10 +12896,11 @@ function packageScripts(dir) {
   }
 }
 var FOLDER_FIX = "Name the folder literally, in a call of its own, or report to your lead.";
+var programWord = (w, env) => (w.raw && marked(w.value) ? heldWord({ ...w, raw: defaulted(w.raw, env.known, () => false) }, env, NONE2) : undefined) ?? w;
 function orgScript(parsed, env) {
   const { args, first, name } = parsed;
   if (first?.value.includes("/")) {
-    const program = pathOf(first, env);
+    const program = pathOf(programWord(first, env), env);
     if (!program)
       return {
         fix: FOLDER_FIX,
@@ -13250,6 +13251,20 @@ function globRoot(pattern, base) {
     deep: rest.length > 1 || rest[0].includes("**"),
     root: segments.slice(0, at).join("/") || "/"
   };
+}
+var EDIT_TOOLS = {
+  Edit: "file_path",
+  MultiEdit: "file_path",
+  NotebookEdit: "notebook_path",
+  Write: "file_path"
+};
+function fromCheckout(file) {
+  for (let at = dirname6(file);; at = dirname6(at)) {
+    if (existsSync8(join14(at, ".git")))
+      return relative2(at, file);
+    if (dirname6(at) === at)
+      return;
+  }
 }
 var READ_TOOLS = { Glob: "path", Grep: "path", Read: "file_path" };
 var READS_NOTHING = new Set(["date", "echo", "printf", "pwd", "true"]);
@@ -13856,6 +13871,12 @@ async function inspect6(raw, environment, load5, limit) {
   if (typeof tool === "string" && (tool.startsWith("mcp__") || MCP_RESOURCE_TOOLS.has(tool)))
     return orgRefusal(`this ${tool} call`, "an MCP tool reaches an org's or an outside service's data");
   const directory = typeof cwd === "string" ? cwd : undefined;
+  if (typeof tool === "string" && tool in EDIT_TOOLS) {
+    const given = toolInput?.[EDIT_TOOLS[tool]];
+    const file = typeof given !== "string" || given === "" ? undefined : isAbsolute5(given) ? given : directory && resolve7(directory, given);
+    const path = file ? fromCheckout(file) : undefined;
+    return path && heavy(path) ? refuse7(`${tool} call`, [path]) : undefined;
+  }
   if (typeof tool === "string" && tool in READ_TOOLS) {
     const orgs = await guardedOf(environment);
     if (!Array.isArray(orgs))
@@ -13893,9 +13914,13 @@ async function inspect6(raw, environment, load5, limit) {
   const text = command.replace(/["'\\]/g, "");
   if (!guarding && !mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text))
     return;
-  const known = knownVariables(command, environment, directory);
-  const lexed = lex(command, known);
   const named = namings(command);
+  const repo = named.blind || named.counts.has("PLAYGROUND_REPO") ? undefined : environment.PLAYGROUND_REPO;
+  const known = {
+    ...knownVariables(command, environment, directory),
+    ...repo ? { PLAYGROUND_REPO: repo } : {}
+  };
+  const lexed = lex(command, known);
   const steadyAt = steadyNames(named, lexed.commands);
   const own = named.blind ? {} : Object.fromEntries(Object.entries(environment).filter((entry) => typeof entry[1] === "string" && !named.counts.has(entry[0])));
   const env = {
