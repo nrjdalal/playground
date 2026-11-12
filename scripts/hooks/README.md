@@ -942,7 +942,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 ## no-raw-delete
 
 - A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>` (with `--discard` once its PR has merged or closed, whatever it holds), so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
-  The trash takes up to 5,000 files or 2 GB, so the refusal also names the lead's cleanup for a bigger tree and `bun install` for a `node_modules`.
+  The trash takes up to 5,000 files or 2 GB, so the refusal also names the lead's cleanup for a bigger tree and `bun install` for a `node_modules`; an ended session's whole `scratchpad/<folder>/` skips the file count and keeps the 2 GB cap.
   Inside `~/.playground`, `playground rm` clears two places and refuses every other path: the caller's own `scratch/<name>/` and `scratchpad/<name>/`, by the session name Claude Code's registry gives it, and an ended session's whole `scratchpad/<folder>/`.
   A folder counts as ended when it is a real folder no live roster row names as itself or as `<folder>-<role>`, so Ops clears a closed session's folder on a lead's word (`endedPadOf` in `packages/safe-delete/src/index.ts`).
   `scripts/hooks/no-raw-delete.ts`, run on Bash by [guards](#guards), acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:

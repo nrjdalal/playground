@@ -93,6 +93,21 @@ describe("collect: live sessions with nothing to do", () => {
     expect(prefix).toEqual([])
   })
 
+  // #1932: a checker scoring an extension item holds an item and no pr, and is still ended once its worker has gone
+  test("checker-worker-gone: listed for a row holding an item as for one holding a pr", async () => {
+    const reviewer = entry({ name: "reviewer-lust-7", sessionId: "sess-r7" })
+    for (const row of [
+      { item: "acme/script/start-up", prs: ["acme/script/start-up"] },
+      { pr: "https://github.com/o/r/pull/7", prs: ["https://github.com/o/r/pull/7"] },
+    ]) {
+      const roster = {
+        "reviewer-lust-7": { name: "reviewer-lust-7", worker: "worker-lust", ...row },
+      }
+      const gone = await collect(deps({ roster, sessions: { "reviewer-lust-7": reviewer } }))
+      expect(whys(gone)).toEqual([["checker-worker-gone (worker-lust)"]])
+    }
+  })
+
   // #1738: the row's worker names one PR's worker; an open PR of a live worker keeps the reviewer on.
   test("checker-worker-gone: kept while an open PR on its prs list has a live worker, listed when that worker is gone too", async () => {
     const OPEN = "https://github.com/o/r/pull/2130"

@@ -423,8 +423,9 @@ export function quarantine(
       `${opts.session} quarantined ${recent.length} paths in the last minute, the most one session may`,
       firstOfBurst(trash, opts.session, recent) ? "tripwire" : "refused",
     )
-  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole.
-  const cap = carve ?? LIMITS
+  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratchpad folder skips the file count, keeping the byte cap.
+  const whole = ended && join(real(dirname(abs)), basename(abs)) === ended
+  const cap = carve ?? (whole ? { ...LIMITS, files: Infinity } : LIMITS)
   const { files, size } = measure(abs, {
     limits: opts.worktree ? undefined : cap,
     skip: carve ? undefined : isRebuildable,
