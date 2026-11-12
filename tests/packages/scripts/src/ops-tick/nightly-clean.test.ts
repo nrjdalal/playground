@@ -928,8 +928,10 @@ describe("one night's run against a fixture data folder", () => {
     const ran = runs.map((r) => r.join(" "))
     expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(false)
     expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(false)
-    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).not.toContain("scratch")
-    expect(sent.find((s) => s.to === "ops")?.text ?? "").not.toContain("scratch")
+    // the branch's own forms in the log and the outbox line, since a temp folder's path can hold the bare word
+    const named = /(?:kept|archived|branch) scratch\b|archive\/scratch/
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).not.toMatch(named)
+    expect(sent.find((s) => s.to === "ops")?.text ?? "").not.toMatch(named)
   })
 
   test("a local archive tag at another head is re-pointed to the branch's head and named with both", async () => {
