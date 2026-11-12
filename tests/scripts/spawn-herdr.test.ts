@@ -121,6 +121,21 @@ describe("a brief given by its path under ~/.playground starts as its file name 
     expect(seen(r)).toEqual(seen(bare))
   })
 
+  // issue 1970: a filled brief lives in its writing session's scratchpad, which playground rm clears
+  test.each([
+    ["its name", "scratchpad/worker-x/brief-reviewer-x-1.md"],
+    ["an absolute path", "{home}/.playground/scratchpad/worker-x/brief-reviewer-x-1.md"],
+    ["a quoted ~ path", "~/.playground/scratchpad/worker-x/brief-reviewer-x-1.md"],
+  ])(
+    "a brief in a session's scratchpad, given by %s, starts with its prompt naming that path",
+    async (_, path) => {
+      const brief = "scratchpad/worker-x/brief-reviewer-x-1.md"
+      const r = await spawn(["worker", "worker-brave-otter", path], [], { BRIEF_FILE: brief })
+      expect(r.code, r.err).toBe(0)
+      expect(launchOf(r)).toContain(`Your brief is in ~/.playground/${brief}: read it`)
+    },
+  )
+
   test("a resume's --brief takes the absolute path too", async () => {
     const brief = "handoffs/restart-brief.md"
     const r = await spawn(
