@@ -15,7 +15,7 @@ Agent-fired, or named by the owner.
 | sign this Mac in, with a token you hold | `playground yard login`, the token on stdin                                             |
 | make a bot the owner asked for          | `playground yard bot add <name>`, then a `reveal` card for `playground-yard-bot-<name>` |
 | revoke a bot                            | `playground yard bot revoke <name>`                                                     |
-| answer a bot                            | `playground yard post "@<name>[bot]" "<text>"`, naming no `@login`                      |
+| answer a bot                            | `playground yard post "@<name>[bot]" "<text>"`, any name written bare                   |
 
 ## Where the token and the hub live
 
