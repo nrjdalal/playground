@@ -14,6 +14,7 @@ Agent-fired, or named by the owner.
 | answer on Yard                          | `playground yard post <channel> "<text>"`                                               |
 | sign this Mac in, with a token you hold | `playground yard login`, the token on stdin                                             |
 | make a bot the owner asked for          | `playground yard bot add <name>`, then a `reveal` card for `playground-yard-bot-<name>` |
+| let a bot read the dispatcher's log     | `playground yard bot add <name> --log`, only when the owner asks for it                 |
 | revoke a bot                            | `playground yard bot revoke <name>`                                                     |
 | answer a bot                            | `playground yard post "@<name>[bot]" "<text>"`, any name written bare                   |
 
@@ -24,7 +25,9 @@ The hub's address comes from `YARD_API_URL`, and its approve pages from `YARD_WE
 The same token opens the relay, the connection this Mac dials out to Yard so the owner can read its Dashboard at Yard's `/dashboard` ([dashboard docs](../../web/next/content/docs/dashboard.mdx)).
 A bot is a Yard user of its own, `<name>[bot]`, a login no GitHub sign-in can claim, that `playground yard bot add` makes with the owner's token.
 Its token reaches only its DM with the owner, through `GET` and `POST /api/v1/yard/channels/<dm>/messages` (`?after=<message id>` reads what is new), as plain text: every other call reads 403, its post never waits for an approval, and a revoke makes its next call read 401.
-The token goes straight into the Keychain item `playground-yard-bot-<name>`, which a `reveal` card shows the owner on a click, and Yard's Account page lists each bot with Revoke, which cuts it on Yard alone, so `bot revoke` deletes the Keychain item after it.
+A bot made with `--log` also reads the dispatcher's own log through this Mac, `GET /api/v1/yard/bot/log?after=<seq>`: Yard lets it while its Account page switch is on, this Mac answers while its login is on `yard.logReaders` with the DM it was made with, which `--log` adds it to and `bot revoke` takes it off, every secret hidden first,
+and each read leaves a line in its DM ([ADR 0025](../../.agents/adr/0025-a-bot-the-owner-allows-reads-the-dispatchers-log.md)).
+The token goes straight into the Keychain item `playground-yard-bot-<name>`, which a `reveal` card shows the owner on a click, and Yard's Account page lists each bot with Revoke, which cuts it on Yard alone and deletes its DM, so a bot made again under the name reads no log; `bot revoke` after it deletes the Keychain item and takes its login off `yard.logReaders`.
 From a browser paired in Yard's Settings, which this Mac pairs only on the owner's Approve, the owner can also send a message and answer the Inbox there, each write signed by that browser's key.
 
 ## It's working if

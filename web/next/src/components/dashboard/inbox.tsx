@@ -1435,7 +1435,7 @@ export function InboxCard({
       {buttons.includes("archive") &&
         verb(
           "Archive",
-          "out of your list, unanswered; its poster keeps waiting and is told nothing",
+          "onto the Archive shelf, as it stands; its poster is told nothing, and one that waits keeps waiting",
           <RiArchive2Line />,
           () => void onAnswer("archive"),
         )}

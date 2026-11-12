@@ -71,9 +71,9 @@ export const yardClient = (base: string, token: string, request: YardFetch = fet
     return parsed.data
   }
   return {
-    addBot: (name: string) =>
+    addBot: (name: string, { log = false }: { log?: boolean } = {}) =>
       call("/bots", z.object({ bot: botSchema, secret: z.string() }), {
-        body: { name },
+        body: { log, name },
         method: "POST",
       }),
     channels: async () =>

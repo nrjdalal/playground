@@ -6,6 +6,7 @@ import {
   asc,
   desc,
   eq,
+  gt,
   gte,
   ilike,
   inArray,
@@ -410,17 +411,12 @@ export async function readSession(db: Database, id: string, live: Map<string, Li
   }
 }
 
-// One page of a session's log, newest page first and each page in file order, holding only the kinds asked for (all when none are): before is the seq the page starts at, so paging back never skips or repeats a line however fast the session writes. A tool step sends only its first line, the summary the page shows.
-export async function readEntries(
-  db: Database,
-  id: string,
-  input: { before?: number; kinds: EntryKind[]; limit: number },
-) {
-  if (!readsLive() && !(await sessionExists(db, id))) return { entries: [], before: null }
+// A log's lines as a page shows them: a tool step's first line alone, the summary the page shows, each text clipped to SHOWN_TEXT.
+const entryRows = (db: Database) => {
   const shown = withoutAttachmentsFolder(
     sql`case when ${claudeEntry.kind} = 'tool' then split_part(${claudeEntry.text}, E'\\n', 1) else ${claudeEntry.text} end`,
   )
-  const rows = await db
+  return db
     .select({
       at: claudeEntry.at,
       kind: claudeEntry.kind,
@@ -433,6 +429,25 @@ export async function readEntries(
       uuid: claudeEntry.uuid,
     })
     .from(claudeEntry)
+}
+
+type EntryRow = Awaited<ReturnType<ReturnType<typeof entryRows>["where"]>>[number]
+
+const entryOut = ({ at, textLength, ...entry }: EntryRow) => ({
+  ...entry,
+  at: iso(at),
+  clipped: textLength > SHOWN_TEXT,
+  text: entry.kind === "human" ? typedOf(entry.text) : entry.text,
+})
+
+// One page of a session's log, newest page first and each page in file order, holding only the kinds asked for (all when none are): before is the seq the page starts at, so paging back never skips or repeats a line however fast the session writes.
+export async function readEntries(
+  db: Database,
+  id: string,
+  input: { before?: number; kinds: EntryKind[]; limit: number },
+) {
+  if (!readsLive() && !(await sessionExists(db, id))) return { entries: [], before: null }
+  const rows = await entryRows(db)
     .where(
       and(
         eq(claudeEntry.sessionId, id),
@@ -445,14 +460,22 @@ export async function readEntries(
     .limit(input.limit + 1)
   const page = rows.slice(0, input.limit).reverse()
   return {
-    entries: page.map(({ at, textLength, ...entry }) => ({
-      ...entry,
-      at: iso(at),
-      clipped: textLength > SHOWN_TEXT,
-      text: entry.kind === "human" ? typedOf(entry.text) : entry.text,
-    })),
+    entries: page.map(entryOut),
     before: rows.length > input.limit ? (page[0]?.seq ?? null) : null,
   }
+}
+
+// The page of a session's log after a seq, in file order, every kind: a bot's read of the dispatcher's log, which passes the last seq it read as after, and hasMore while lines past the page wait.
+export async function readEntriesAfter(
+  db: Database,
+  id: string,
+  input: { after: number; limit: number },
+) {
+  const rows = await entryRows(db)
+    .where(and(eq(claudeEntry.sessionId, id), reached, gt(claudeEntry.seq, input.after)))
+    .orderBy(asc(claudeEntry.seq))
+    .limit(input.limit + 1)
+  return { entries: rows.slice(0, input.limit).map(entryOut), hasMore: rows.length > input.limit }
 }
 
 // The kinds a worker's live view shows; its parser makes the same steps from a stored line as from the file.
