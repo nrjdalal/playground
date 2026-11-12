@@ -268,6 +268,7 @@ export async function calls(
       let entry: {
         agentName?: unknown
         cwd?: unknown
+        isCompactSummary?: unknown
         message?: { content?: unknown; model?: unknown }
         sessionId?: unknown
         subtype?: unknown
@@ -289,7 +290,9 @@ export async function calls(
         loaded = false
         continue
       }
-      if (entry.type === "user" && typed(entry.message?.content)) loaded = true
+      // a compaction's summary can quote a typed load, which writing-first cleared at the compaction
+      if (entry.type === "user" && entry.isCompactSummary !== true && typed(entry.message?.content))
+        loaded = true
       const model = typeof entry.message?.model === "string" ? entry.message.model : ""
       const content = Array.isArray(entry.message?.content) ? entry.message.content : []
       for (const part of content as {
