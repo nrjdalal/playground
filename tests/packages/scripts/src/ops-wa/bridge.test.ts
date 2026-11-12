@@ -437,6 +437,7 @@ const card = (
   over: Partial<Card> = {},
   preview: Partial<Card["preview"]> = {},
 ): Card => ({
+  answer: null,
   from: "builder",
   id: `id-${ref}`,
   kind: "decision",
@@ -502,6 +503,15 @@ describe("Inbox cards on WhatsApp", () => {
     expect(h.texts()).toEqual([waitingLine(2)])
     expect(await say(h, "1 #i13")).toEqual([notSent(13)])
     expect(h.answers).toEqual([])
+  })
+
+  test("a kept card counts only while it still asks: replied and put-away cards stay out of the waiting line", async () => {
+    const h = await withCards([
+      card(12, {}, { scope: undefined }),
+      card(13, { answer: { choice: "replied" } }, { scope: undefined }),
+      card(14, { answer: { snoozedUntil: "2026-11-12T00:00:00Z" } }, { scope: undefined }),
+    ])
+    expect(h.texts()).toEqual([waitingLine(1)])
   })
 
   test("no card goes before the owner has written, since ops-wa never starts a chat", async () => {

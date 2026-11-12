@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -98,7 +99,7 @@ const releasable = (lock: string, aside: string, token: string): boolean => {
 }
 
 // One write at a time across every process, the API's and the CLI's: the lock is a scratch folder made beside the root and renamed into place, so its taking is atomic and it always holds makeScratch's marker and its holder's token; a stale one is moved aside, then removed, and a release leaves a lock that holds another's token.
-export const withLock = <T>(data: string, run: () => T, wait = 30_000): T => {
+const holdLock = <T>(data: string, run: () => T, wait: number): T => {
   const lock = lockPath(data)
   const parent = dirname(lock)
   const drop = (dir: string) => {
@@ -148,6 +149,59 @@ export const withLock = <T>(data: string, run: () => T, wait = 30_000): T => {
         `extensions' lock: ${lock} was taken over as stale during this write; left as it is`,
       )
   }
+}
+
+// The root's file lock: macOS's user immutable flag on the root and everything under it, so a plain write from any process meets EPERM; a machine with no chflags (Linux) has no lock, and a root with no flag takes its writes as before.
+const chflags = () => Bun.which("chflags", { PATH: process.env.PATH ?? "" })
+export const rootLocked = (root: string): boolean =>
+  Boolean(chflags()) &&
+  existsSync(root) &&
+  Bun.spawnSync(["stat", "-f", "%Sf", root]).stdout.toString().trim().split(",").includes("uchg")
+const flagRoot = (root: string, locked: boolean): number => {
+  const start = performance.now()
+  const run = Bun.spawnSync([chflags()!, "-R", locked ? "uchg" : "nouchg", root], {
+    stderr: "pipe",
+  })
+  if (run.exitCode !== 0)
+    throw new Error(`chflags could not ${locked ? "lock" : "unlock"} ${root}: ${run.stderr}`)
+  return performance.now() - start
+}
+
+// A write under the one lock: a locked root is lifted for it and locked again after it, each lift and relock's time logged, so the ops tick's log measures it on the live root.
+export const withLock = <T>(data: string, run: () => T, wait = 30_000): T =>
+  holdLock(
+    data,
+    () => {
+      const root = extensionsDir(data)
+      if (!rootLocked(root)) return run()
+      let took = 0
+      let lifted = false
+      try {
+        took += flagRoot(root, false)
+        lifted = true
+        return run()
+      } finally {
+        took += flagRoot(root, true)
+        if (lifted)
+          console.error(`extensions' lock: lifted and relocked ${root} in ${Math.round(took)} ms`)
+      }
+    },
+    wait,
+  )
+
+// playground ext lock and unlock: the root's file lock set or cleared, under the one lock so no write is mid-way.
+export const setRootLock = (data: string, locked: boolean): void => {
+  if (!chflags())
+    throw new Error("this machine has no chflags, so the extensions root takes no lock")
+  holdLock(data, () => void flagRoot(extensionsDir(data), locked), 30_000)
+}
+
+// The ops tick's relock: true when it locked a root that stood unlocked, false where it is locked already, missing, or the machine has no chflags.
+export const relockRoot = (data: string): boolean => {
+  const root = extensionsDir(data)
+  if (!chflags() || !existsSync(root) || rootLocked(root)) return false
+  setRootLock(data, true)
+  return true
 }
 
 // A file written whole under a temp name, then renamed into place, so a hook reading it meets the old file or the new one.
@@ -244,16 +298,22 @@ export const commitExt = (
   })
 }
 
-// A scope's files made exactly these, as one commit: each written in place by rename, then every other file removed but those keep names.
+// A scope's files made exactly these, as one commit: each written in place by rename, then every other file removed but those keep names; a file written over keeps the mode of the file it replaces, and executable says which source files run, so an import never strips a stored script's bit.
 export const writeTree = (
   data: string,
   scope: string,
   files: Map<string, string | Uint8Array>,
   commit: Commit,
   keep: (path: string) => boolean = () => false,
+  executable?: (path: string) => boolean,
 ): string | undefined =>
   commitExt(data, scope, commit, (dir) => {
-    for (const [path, text] of files) writeAtomically(join(dir, path), text)
+    for (const [path, text] of files) {
+      const at = join(dir, path)
+      const ran = existsSync(at) && (statSync(at).mode & 0o111) !== 0
+      writeAtomically(at, text)
+      if (executable?.(path) || ran) chmodSync(at, 0o755)
+    }
     for (const path of filesIn(dir)) if (!files.has(path) && !keep(path)) rmSync(join(dir, path))
     pruneEmpty(dir, dir)
   })

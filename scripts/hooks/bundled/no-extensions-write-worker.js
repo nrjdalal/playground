@@ -63,6 +63,7 @@ var dataDir = (env = process.env) => dataDirOf(env);
 
 // packages/settings/src/folder.ts
 import {
+  chmodSync,
   existsSync as existsSync2,
   mkdirSync,
   readdirSync,
@@ -9955,7 +9956,7 @@ var SED_TEXT = String.raw`(?:[^/\\\n]|\\.)*/`;
 var SED_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
 var SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[=dlnNpPqQ]|s/${SED_BODY}${SED_TEXT}[giImMp0-9]*)[ \t]*`;
 var SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`);
-function sedReads(args) {
+function sedReadScripts(args) {
   const scripts = [];
   const operands = [];
   for (let k = 0;k < args.length; k++) {
@@ -10168,7 +10169,7 @@ function narrow(cmd, env) {
   if (base === "git")
     return reads(parsed, env) && !args.some(({ value }) => marked(value));
   if (SEDS.has(base))
-    return !!sedReads(args);
+    return !!sedReadScripts(args);
   if (base === "perl")
     return perlReads(parsed, env);
   if (base === "cut" || base === "date" || base === "echo" || base === "lsof")
@@ -10514,7 +10515,7 @@ async function inspect(raw, environment, unknown = false) {
     const wholeText = new Set(whole && !rootLine && ownProgram(cmd, parsed) && ![...parsed.local.keys(), ...env.vars.keys()].some((key) => TEXT_RUNS.test(key) || marked(key)) ? [
       ...ghFilters(parsed),
       ...browserCode ? [browserCode] : [],
-      ...SEDS.has(program(name)) ? sedReads(parsed.args) ?? [] : [],
+      ...SEDS.has(program(name)) ? sedReadScripts(parsed.args) ?? [] : [],
       ...textFlagValues(parsed)
     ] : []);
     const xargsOwn = xargs ? xargsOptions(cmd, first) : [];
@@ -10613,7 +10614,7 @@ async function inspect(raw, environment, unknown = false) {
         if (named)
           return (unwritten(named, cmd, here) ? refuseUnwritten : refuse)(`${verb} on ${named}`);
       }
-      if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
+      if (!(name === "tee" && !rootLine) && cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`);
       const unreadFeed = fed && remover ? argFile ? "the file its -a names" : fed.unknown || marked(fed.value) || !fedSplit ? fed.unknown ?? (fedSplit ? "a value it cannot read" : "stdin holding a quote it does not close") : undefined : undefined;
       if (unreadFeed)

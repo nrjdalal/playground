@@ -2112,6 +2112,62 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(calls).toHaveLength(1)
     })
 
+    test("a Send whose files shared took its words with them, so the poster's line closes the item and holds no words to post again (PG-1921)", async () => {
+      const posted = await filedDraft()
+      const typed: Delivery[] = []
+      const { upload } = recorder()
+      await store.answerItem(
+        db,
+        posted.id,
+        { action: "send", text: "the fix is live today" },
+        { actor, deliver: async (delivery) => (typed.push(delivery), delivered()), upload },
+      )
+      const payload = payloadOf(typed[0]?.text ?? "")
+      expect(payload).toMatchObject({ go: true, next: "close", verb: "send" })
+      expect(payload?.close).toContain(`--link "${THREAD}"`)
+      expect(payload).not.toHaveProperty("text")
+    })
+
+    test("a Send whose words hold a mention or a URL takes them with its files too, so the poster posts no second message (PG-1983)", async () => {
+      for (const words of [
+        "@Merritt the fix is live",
+        "the fix is live: https://example.com/fix",
+      ]) {
+        const posted = await filedDraft()
+        const typed: Delivery[] = []
+        const { upload } = recorder()
+        await store.answerItem(
+          db,
+          posted.id,
+          { action: "send", text: words },
+          { actor, deliver: async (delivery) => (typed.push(delivery), delivered()), upload },
+        )
+        const payload = payloadOf(typed[0]?.text ?? "")
+        expect(payload).toMatchObject({ go: true, next: "close", verb: "send" })
+        expect(payload).not.toHaveProperty("text")
+      }
+    })
+
+    test("a Send that shared no files, as a fixture stack's counts 0, still hands the poster its words", async () => {
+      const posted = await filedDraft()
+      const typed: Delivery[] = []
+      await store.answerItem(
+        db,
+        posted.id,
+        { action: "send", text: "the fix is live today" },
+        {
+          actor,
+          deliver: async (delivery) => (typed.push(delivery), delivered()),
+          upload: async () => 0,
+        },
+      )
+      expect(payloadOf(typed[0]?.text ?? "")).toMatchObject({
+        next: "carry-out",
+        text: "the fix is live today",
+        verb: "send",
+      })
+    })
+
     test("Approve of a slack decision with files uploads them too", async () => {
       const posted = await post(decision({ ...SLACK, attachments: FILES }))
       const { calls, upload } = recorder()
@@ -2169,8 +2225,48 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
               text: true,
             },
           ],
+          text: "hi",
           thread: "1700000000.000100",
         })
+      })
+
+      test("carries the owner's changed words in place of the draft's (PG-1921)", async () => {
+        const shot = await kept(PNG, "before.png", "image")
+        const posted = await post({
+          from: "ops",
+          kind: "draft",
+          preview: { attachments: [shot], link: THREAD, text: "hi", to: "@Merritt" },
+          title: "Tell Merritt",
+        })
+        await store.answerItem(db, posted.id, { action: "send", text: "hi there" }, { actor })
+        expect(await uploadSpec(db, posted.id, read)).toHaveProperty("text", "hi there")
+      })
+
+      test("carries words that hold a mention or a URL, which dm upload resolves (PG-1983)", async () => {
+        const shot = await kept(PNG, "before.png", "image")
+        for (const text of ["@Merritt hi", "hi (@merritt.lee)", "see https://example.com"]) {
+          const posted = await post({
+            from: "ops",
+            kind: "draft",
+            preview: { attachments: [shot], link: THREAD, text, to: "@Merritt" },
+            title: "Tell Merritt",
+          })
+          await store.answerItem(db, posted.id, { action: "send" }, { actor })
+          expect(await uploadSpec(db, posted.id, read)).toHaveProperty("text", text)
+        }
+        const mail = await post({
+          from: "ops",
+          kind: "draft",
+          preview: {
+            attachments: [shot],
+            link: THREAD,
+            text: "mail me at a@b.example",
+            to: "@Merritt",
+          },
+          title: "Tell Merritt",
+        })
+        await store.answerItem(db, mail.id, { action: "send" }, { actor })
+        expect(await uploadSpec(db, mail.id, read)).toHaveProperty("text", "mail me at a@b.example")
       })
 
       test("refuses an id naming no item, a channel, a thread or a path, so no caller picks the place or the file", async () => {

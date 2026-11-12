@@ -19,6 +19,7 @@ import {
   type Sent,
   type Terms,
   waitingLine,
+  waits,
 } from "./cards"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, writeOwn } from "./habits"
 import { keep } from "./media"
@@ -236,8 +237,9 @@ async function cards(io: Io & Mode, inbox: Inbox) {
     const [open, terms] = await Promise.all([inbox.open(), inbox.terms()])
     const kept: string[] = []
     for (const card of open) {
-      if (!terms || !goesOut(card, terms)) kept.push(card.id)
-      else if (!sent[card.ref]) {
+      if (!terms || !goesOut(card, terms)) {
+        if (waits(card, now)) kept.push(card.id)
+      } else if (!sent[card.ref]) {
         const { rows, text } = cardOf(card, terms)
         await io.reply(text)
         sent[card.ref] = { at: io.now(), id: card.id, rows }

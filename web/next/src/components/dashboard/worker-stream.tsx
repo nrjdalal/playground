@@ -448,14 +448,27 @@ export function PeerStep({
 
 const Step = memo(StepRow, sameStep)
 
-// a row draws again only when what it reads moved, so a board frame or a keystroke leaves the stream's rows alone
-function sameStep(a: Parameters<typeof StepRow>[0], b: Parameters<typeof StepRow>[0]) {
+// What the clock shows in a row: the day its time is read against (messageTime names the day off it), and whether the owner's newest message still offers Undo.
+const clockOf = (props: Parameters<typeof StepRow>[0]): string =>
+  `${props.now.toDateString()} ${
+    undoState({
+      marker: props.marker,
+      newest: props.newest,
+      now: props.now.getTime(),
+      sent: props.sent,
+      unsent: Boolean(props.message.metadata?.unsent),
+      waiting: props.waiting,
+    })?.kind ?? ""
+  }`
+
+// a row draws again only when what it reads moved, so a board frame, a keystroke or a clock tick that moves nothing it shows leaves the stream's rows alone
+export function sameStep(a: Parameters<typeof StepRow>[0], b: Parameters<typeof StepRow>[0]) {
   return (
     a.composer === b.composer &&
     a.marker === b.marker &&
     a.message === b.message &&
     a.newest === b.newest &&
-    a.now.getTime() === b.now.getTime() &&
+    clockOf(a) === clockOf(b) &&
     a.outbox === b.outbox &&
     a.sent === b.sent &&
     a.waiting === b.waiting &&

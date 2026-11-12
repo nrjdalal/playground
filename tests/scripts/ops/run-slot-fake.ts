@@ -1,5 +1,6 @@
 import { afterAll, expect } from "bun:test"
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -31,6 +32,18 @@ export const stop = async (p: Subprocess) => {
   p.kill("SIGKILL")
   await p.exited
 }
+
+// each machine's clock stands at NOW, so a line `ago` seconds back stays inside or outside the minute however long the looks take
+export const NOW = Math.floor(Date.now() / 1000)
+export const iso = (ago: number) =>
+  new Date((NOW - ago) * 1000).toISOString().replace(/\.\d+Z$/, "Z")
+// run-slot.runs.log's start line for a run on slot `ago` seconds back, and its end line `ended` seconds back when given
+export const ran = (ops: string, pid: number, slot: string, ago: number, ended?: number) =>
+  appendFileSync(
+    join(ops, "run-slot.runs.log"),
+    `${iso(ago)} start worker-r ${pid} ${slot} waited=0s\n` +
+      (ended === undefined ? "" : `${iso(ended)} end worker-r ${pid} rc=0 ran=${ago - ended}s\n`),
+  )
 
 // Ubuntu 26.04's default mkdir, uutils 0.10.0, reports success when another process made the folder between its own check and its mkdir (fixed in uutils 0.11.0), so two looks could each take one of run-slot.sh's mkdir locks; the image keeps GNU's as gnumkdir, which fails there as the Mac's mkdir does, so a machine's fake bin runs that one where it exists
 const GNU_MKDIR = Bun.which("gnumkdir")

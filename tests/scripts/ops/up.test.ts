@@ -389,6 +389,115 @@ test("the start line holds exec before the job", () => {
   expect(herdrLine).toContain("&& exec python3 -I ")
 })
 
+// Loads up.py and starts one herdr job whose command is argv[2], its rendered.ts argv[3] when given, recording every herdr call, then prints the calls, the marker and up.log.
+const STARTED_EXT = `${LOAD}calls = []
+up.herdr = lambda: ("/x/herdr", "")
+up.ops_panes = lambda binary: ([(4101, "ops-a")], "workspace:1")
+up.hr = lambda binary, *args: (calls.append(args), (0, {"pane": {"pane_id": 5501}}, ""))[1]
+if len(sys.argv) > 3:
+    up.RENDERED = sys.argv[3]
+job = {"name": "ops-x", "runtime": "herdr", "cwd": "~/h", "command": sys.argv[2]}
+started = up.start(job)
+log = open(os.path.join(up.OPS, "up.log")).read() if os.path.exists(os.path.join(up.OPS, "up.log")) else ""
+print(json.dumps({"started": started, "calls": [list(c) for c in calls], "marker": up.marker(job), "log": log}))
+`.replace("import importlib.util, json, sys", "import importlib.util, json, os, sys")
+
+// A data folder whose extensions root holds one scope's skill script, as an accepted revision renders it.
+const withExtension = (body: string) => {
+  const config = mkdtempSync(join(scratch, "ext-"))
+  const data = dataOf(config)
+  mkdirSync(join(data, "ops"), { recursive: true })
+  const script = join(data, "extensions", "acme", "skills", "vault", "scripts", "vault.py")
+  mkdirSync(dirname(script), { recursive: true })
+  writeFileSync(script, body)
+  return { config, data, script }
+}
+
+const startExt = (config: string, command: string, rendered?: string) => {
+  const child = Bun.spawnSync(
+    ["python3", "-I", "-c", STARTED_EXT, upPy, command, ...(rendered ? [rendered] : [])],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: dataOf(config),
+        HOME: scratch,
+        PATH: BUN_PATH,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  )
+  expect(child.stderr.toString()).toBe("")
+  return JSON.parse(child.stdout.toString()) as {
+    calls: string[][]
+    log: string
+    marker: string
+    started: boolean
+  }
+}
+
+// a jobs row names an extension script by ext:<scope>/<path>, which rendered.ts resolves at each start, so a new accepted revision reaches the job with no repoint
+test("a start runs an ext: word as the path rendered.ts gives it, at each start", () => {
+  const { config, script } = withExtension("print(1)\n")
+  const first = startExt(config, "python3 -I ext:acme/skills/vault/scripts/vault.py run")
+  expect(first.started).toBe(true)
+  const line = first.calls.find((call) => call[1] === "run")![3]!
+  expect(line).toContain(`exec python3 -I `)
+  expect(line).toContain(`ops-x python3 -I ${script} run`)
+  expect(line).not.toContain("ext:")
+  expect(first.marker).toBe("/vault/scripts/")
+  writeFileSync(script, "print(2)\n")
+  const second = startExt(config, "python3 -I ext:acme/skills/vault/scripts/vault.py run")
+  expect(second.calls.find((call) => call[1] === "run")![3]).toContain(script)
+})
+
+test("a start whose ext: word the store lacks opens no pane and logs rendered.ts's refusal", () => {
+  const { config } = withExtension("print(1)\n")
+  const out = startExt(config, "python3 -I ext:acme/skills/vault/scripts/gone.py")
+  expect(out.started).toBe(false)
+  expect(out.calls).toEqual([])
+  expect(out.log).toContain("ops-x")
+  expect(out.log).toContain("acme/skills/vault/scripts/gone.py")
+})
+
+test("a start with a plain path runs it as written", () => {
+  const { config } = withExtension("print(1)\n")
+  const out = startExt(config, "bash /x/h.sh")
+  expect(out.started).toBe(true)
+  expect(out.calls.find((call) => call[1] === "run")![3]).toContain("ops-x bash /x/h.sh")
+})
+
+// issue 1960: rendered.ts may warn on stderr, so the path an ext: word resolves to comes from its stdout alone
+test("a start whose ext: word resolves while rendered.ts warns on stderr runs the path stdout gave", () => {
+  const { config, script } = withExtension("print(1)\n")
+  const rendered = join(scratch, "warn-rendered.ts")
+  writeFileSync(
+    rendered,
+    `console.log(${JSON.stringify(script)})\nconsole.error("warn: lookup is deprecated")\n`,
+  )
+  const out = startExt(config, "python3 -I ext:acme/skills/vault/scripts/vault.py run", rendered)
+  expect(out.started).toBe(true)
+  const line = out.calls.find((call) => call[1] === "run")![3]!
+  expect(line).toContain(`ops-x python3 -I ${script} run`)
+  expect(line).not.toContain("warn:")
+})
+
+// the refusal's why keeps the reader's whole answer, its stdout and stderr both, as today
+test("a start whose ext: word refuses keeps the refusal's why from stdout and stderr both", () => {
+  const { config } = withExtension("print(1)\n")
+  const rendered = join(scratch, "refused-rendered.ts")
+  writeFileSync(
+    rendered,
+    `console.log("acme/skills/vault/scripts/gone.py")\nconsole.error("refused: no accepted revision")\nprocess.exit(1)\n`,
+  )
+  const out = startExt(config, "python3 -I ext:acme/skills/vault/scripts/gone.py run", rendered)
+  expect(out.started).toBe(false)
+  expect(out.calls).toEqual([])
+  expect(out.log).toContain("ops-x")
+  expect(out.log).toContain("acme/skills/vault/scripts/gone.py")
+  expect(out.log).toContain("refused: no accepted revision")
+})
+
 // a failed or empty lsof read changes nothing.
 test("an empty lsof read leaves every job alone", () => {
   const config = mkdtempSync(join(scratch, "deleted-empty-"))

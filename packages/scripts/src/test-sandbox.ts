@@ -113,7 +113,7 @@ if (missing.length > 0) {
   dropScratch()
   process.exit(1)
 }
-// a worktree whose node_modules came from a clone has no dist, and a test importing an unbuilt package fails on a missing module, which hides the failure it reproduces, so the packages these files import are built first
+// a worktree whose node_modules came from a clone has no dist, and a test importing an unbuilt package fails on a missing module, which hides the failure it reproduces, so the packages these files import, and every shared package whose dist is missing, are built first
 const built = await prebuildTests(paths.filter((path) => !path.startsWith("-")))
 if (built !== 0) {
   dropScratch()

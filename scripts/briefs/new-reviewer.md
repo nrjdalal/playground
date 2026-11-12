@@ -18,6 +18,7 @@ Its scope as your worker's lead ruled it, the bar you score against, and any har
 - "nothing merge ever without 5/5" (the owner): score only the exact head, since a 5/5 carries only across a clean merge of the PR's base, one with no conflict and no edit of its own.
 - Sort each finding as blocking, should-fix or nit, since your worker answers them by playbook's SESSIONS.md, Fix pushes and nits: a nit you list there is kept only when it fixes a wrong statement, a misleading name or comment, or a real readability problem.
 - Post findings or a checked patch only, and make no commit on the PR you score, since ADR 0004 makes the gate a reviewer independent of the code it scores.
+- No Co-Authored-By trailer on any commit: AGENTS.md forbids it and wins over the harness's attribution reminder.
 - On a guard's PR (a hook or a gate that refuses calls), when two rounds in a row each find a new bypass class in the same guard, ask your worker's lead for a scope ruling before the next round, naming each class found: a guard's scope set once ends the loop, where each round otherwise finds the next class.
 
 Run one plain command per call, with absolute paths and `git -C`, and no `cd`, `rm` or `sh -c` wrapper, under the factory's **signal** and **slots** rules.

@@ -363,7 +363,7 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
       "a wording you suggest in a finding included, and run the checks its files call for (`bun run docs:wrap --check` on a wrapped doc, `bun run test:file tests/packages/scripts/src/trace-count/count.test.ts` and `scripts/check-em-dashes.sh` on any doc, the test that pins the wording, `bun run test:file` on the file's mirrored test",
     )
     expect(step).toContain(
-      "post the saved `fix.patch` inline as a `diff` block, pasted whole and unedited with every context line kept so `git apply` takes the block as it stands, or the wording, with those results in the verdict",
+      "check the patch applies at the PR's head with `git -C <clone> apply --check <scratch>/fix.patch`, and post the saved `fix.patch` as a `diff` block, unedited: the file appended verbatim to the verdict's body file between the fence lines (`cat <scratch>/fix.patch >> <body file>`) rather than retyped, every context line kept so `git apply` takes the block as it stands, or the wording, with those results in the verdict",
     )
     expect(step.split("**Done when**")[1] ?? "").toContain("its checks' results posted with it")
     expect(await page()).toContain("runs the checks its files call for before it posts")

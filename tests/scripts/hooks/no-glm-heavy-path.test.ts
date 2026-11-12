@@ -958,6 +958,26 @@ describe("a GLM session's org tools", () => {
       expect(await refusal(input(command, scripts), ON_GLM, CALM)).toBeUndefined()
   })
 
+  test("a program path through the session's PLAYGROUND_REPO gets its literal path's verdict on GLM, and stays refused without it", async () => {
+    const repo = join(DIR, "pg")
+    const env = { ...ON_GLM, PLAYGROUND_REPO: repo }
+    const forms = ["$PLAYGROUND_REPO", "${PLAYGROUND_REPO}", "${PLAYGROUND_REPO:?}"]
+    for (const [program, rest, refused] of [
+      ["scripts/spawn.sh", "column reviewer reviewer-x worker-x p1 brief-reviewer.md", undefined],
+      ["packages/scripts/src/dm/cli.ts", "send x.md", "DM sender"],
+    ]) {
+      const verdict = (at: string, on: Record<string, string> = env) =>
+        refusal(input(`"${at}/${program}" ${rest}`), on, CALM)
+      const literal = await verdict(repo)
+      if (refused) expect(literal).toContain(refused)
+      else expect(literal).toBeUndefined()
+      for (const form of forms) {
+        expect(await verdict(form)).toBe(literal)
+        expect(await verdict(form, ON_GLM)).toContain("names its program")
+      }
+    }
+  })
+
   test("a policy it cannot read refuses gh, git and a fetcher on GLM, naming the fix, and passes on Claude", async () => {
     const broken = join(DIR, "broken-data")
     writeRoot(extensionsDir(broken), new Map([["policy.json", "{not json"]]))
@@ -1426,6 +1446,61 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
   })
 })
 
+// issue 1969: a GLM worker wrote a whole fix in a fenced file before its commit was refused, so the edit itself is refused at the first touch
+describe("a GLM session's edit", () => {
+  const CLAUDE = {
+    CLAUDE_CONFIG_DIR: join(DIR, "edit-config"),
+    PLAYGROUND_DATA_DIR: join(DIR, "edit-config", "playground"),
+  }
+  const edit = (tool: string, toolInput: Record<string, unknown>) =>
+    JSON.stringify({
+      cwd: REPO,
+      hook_event_name: "PreToolUse",
+      session_id: "s-none",
+      tool_input: toolInput,
+      tool_name: tool,
+    })
+  const FENCED: [string, Record<string, unknown>, string][] = [
+    [
+      "Edit",
+      { file_path: join(REPO, "web/next/src/a.ts"), new_string: "b", old_string: "a" },
+      "web/next/src/a.ts",
+    ],
+    [
+      "Write",
+      { content: "x", file_path: join(REPO, "scripts/hooks/new.ts") },
+      "scripts/hooks/new.ts",
+    ],
+    [
+      "NotebookEdit",
+      { new_source: "x", notebook_path: join(REPO, "web/next/n.ipynb") },
+      "web/next/n.ipynb",
+    ],
+  ]
+
+  test.each(FENCED)(
+    "an edit by %s to a fenced path is refused on GLM with the commit refusal's fix, and passes on Claude",
+    async (tool, toolInput, path) => {
+      const raw = edit(tool, toolInput)
+      const glm = await refusal(raw, GLM, CALM)
+      expect(glm).toContain(`refuses this ${tool} call: it touches ${path}, which is Opus work`)
+      expect(glm).toContain(
+        "Stop, report to your lead with this file list, and the lead moves the change to a Claude worker.",
+      )
+      expect(await refusal(raw, CLAUDE, CALM)).toBeUndefined()
+    },
+  )
+
+  test("a GLM edit outside the fenced paths passes", async () => {
+    for (const [tool, toolInput] of [
+      ["Edit", { file_path: join(REPO, "docs/a.md"), new_string: "b", old_string: "a" }],
+      ["Write", { content: "x", file_path: join(REPO, "web/nextx/a.ts") }],
+      ["NotebookEdit", { new_source: "x", notebook_path: join(REPO, "docs/n.ipynb") }],
+    ] as const)
+      expect(await refusal(edit(tool, toolInput), GLM, CALM)).toBeUndefined()
+  })
+})
+
 describe("its registration", () => {
   // the matcher each settings file registers the hook under, read from the file a session loads
   const matchers = async () =>
@@ -1442,9 +1517,13 @@ describe("its registration", () => {
     )
 
   // Bash reaches it through guards (tests/scripts/hooks/guards.test.ts).
-  test("both settings files send it every MCP tool and Claude Code's three MCP resource tools, and no other tool", async () => {
+  test("both settings files send it every MCP tool, Claude Code's three MCP resource tools and its four edit tools, and no other tool", async () => {
     for (const { file, matcher } of await matchers()) {
       for (const tool of [
+        "Edit",
+        "MultiEdit",
+        "NotebookEdit",
+        "Write",
         "ListMcpResourcesTool",
         "ReadMcpResourceDirTool",
         "ReadMcpResourceTool",
@@ -1454,8 +1533,8 @@ describe("its registration", () => {
         expect({ file, tool, sent: matcher.test(tool) }).toEqual({ file, tool, sent: true })
       for (const tool of [
         "Bash",
-        "Edit",
-        "Write",
+        "Read",
+        "Editx",
         "WebFetch",
         "Agent",
         "xBash",

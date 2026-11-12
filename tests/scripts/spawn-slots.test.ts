@@ -64,6 +64,31 @@ describe("the slots gate admits a new worker only when run-slot has room for its
     expect(capacityLog(r)).toEqual([expect.objectContaining({ verdict: "pass" })])
   })
 
+  // a reads-only worker reads code and never takes a run-slot lane, so a full room leaves it be (#833)
+  test("a --reads-only worker start passes a full room and its row records reads-only, while a plain one is refused (#833)", async () => {
+    const r = await start([...worker, "--reads-only"], 4, 12)
+    expect(r.code).toBe(0)
+    expect(capacityLog(r)).toEqual([
+      expect.objectContaining({
+        readings: expect.objectContaining({ reads_only: true }),
+        verdict: "pass",
+      }),
+    ])
+    const plain = await start(worker, 4, 12)
+    expect(plain.code).not.toBe(0)
+    expect(plain.err).toContain("the slots gate holds it")
+  })
+
+  test.each([
+    ["a runner", ["runner", "runner-x", "b.md"]],
+    ["a reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "b.md", "--pr", "1"]],
+  ])("--reads-only on %s start is refused as a worker's flag alone", async (_, args) => {
+    const r = await start([...args, "--reads-only"], 0, 0)
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain("--reads-only is for a worker")
+  })
+
   // run-slot's queue full, as on 6 Nov's urgent start: the free lanes lack the load units, and 8 runs wait.
   const fullQueue = slots(2, 8, 3)
   const standing = (home: string) => writeFileSync(join(home, ".playground", "priority.json"), "{}")

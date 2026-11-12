@@ -670,7 +670,7 @@ export type InboxAction = (typeof ACTIONS)[number]
 // What an answer holds: every action but Archive and Move back, which answer nothing, and Dismiss, which a waiting item records as clear.
 export type InboxChoice = Exclude<InboxAction, "archive" | "dismiss" | "unarchive">
 
-// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, listed, opened, owned and set: what the dashboard ran on an accept's, an apps change's, a grant's, an own card's and a guard setting's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, so a retry shares none twice.
+// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, listed, opened, owned and set: what the dashboard ran on an accept's, an apps change's, a grant's, an own card's and a guard setting's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, a draft's words going with them, so a retry shares none twice and its poster posts no words again.
 export type InboxAnswer = {
   accepted?: RunResult
   ackedAt?: string
@@ -1151,6 +1151,11 @@ export function answerPayload(
     case "discard":
       return { ...head, ...comment, close: read, go: false, next: "close", verb: "discard" }
     case "send":
+      // a Slack draft's words already went with its files, so the poster only closes it
+      if (answer.uploaded && wordsWithFiles(item, answer) && "link" in item.preview) {
+        const close = `${ask} ack ${tag} --link "${item.preview.link}"`
+        return { ...head, ...comment, close, go: true, next: "close", verb: "send" }
+      }
       return { ...head, ...comment, ...text, close: ack, go: true, next: "carry-out", verb: "send" }
     case "draft": {
       const converter = slack("slack.linkConverter")
@@ -1228,10 +1233,10 @@ async function tellClosed(
   return send(
     db,
     item,
-    {
+    () => ({
       relay: answerLine({ ...payload, relay: { for: item.from, why: "poster-ended" } }),
       text: answerLine(payload),
-    },
+    }),
     { ...telling, dispatcher: item.kind === "update" ? undefined : telling.dispatcher },
   )
 }
@@ -1242,17 +1247,20 @@ type Telling = Omit<Sending, "upload">
 export const answerLine = (payload: AnswerPayload): string =>
   `${ANSWER_LEAD} ${JSON.stringify(answerPayloadSchema.parse(payload))}`
 
-// Pure: the line for the poster and, once it has ended, the same line for the dispatcher with relay set, which reads the item's preview with playground ask get.
-const textsOf = (
-  item: InboxItem,
-  answer: InboxAnswer | InboxProvided,
-): { relay: string; text: string } => {
-  const payload = answerPayload(item, answer, askCli())
-  return {
-    relay: answerLine({ ...payload, relay: { for: item.from, why: "poster-ended" } }),
-    text: answerLine(payload),
+// Pure: the line for the poster and, once it has ended, the same line for the dispatcher with relay set, which reads the item's preview with playground ask get; built once send has shared any files, whose count a Slack draft's line reads (answerPayload).
+const textsOf =
+  (item: InboxItem, answer: InboxAnswer | InboxProvided) =>
+  (uploaded?: number): { relay: string; text: string } => {
+    const payload = answerPayload(
+      item,
+      uploaded === undefined || answer.choice === "provided" ? answer : { ...answer, uploaded },
+      askCli(),
+    )
+    return {
+      relay: answerLine({ ...payload, relay: { for: item.from, why: "poster-ended" } }),
+      text: answerLine(payload),
+    }
   }
-}
 
 // Pure: an answer that did not reach its poster, which asks him to retry it or dismiss it.
 export const deliveryFailed = (item: InboxItem): boolean =>
@@ -1306,10 +1314,19 @@ export function slackPlace(link: string | undefined): UploadPlace | null {
   return word === "thread" && thread && more.length === 0 ? { channel, thread } : null
 }
 
-// Pure: the files a go shares into Slack before its words reach the poster: a Slack draft's on Send, or a slack decision's on Approve or Edit, when its link names a Slack place and it has shared none yet; null for anything else, whose files stay on the card.
+// Pure: the words a Slack draft's Send posts with its files as their message, a mention or a URL in them resolved by dm upload: the owner's changed ones, else the draft's; none for any other answer.
+export function wordsWithFiles(
+  item: InboxItem,
+  answer: { choice?: string; editedText?: string },
+): string | undefined {
+  if (item.kind !== "draft" || answer.choice !== "send") return undefined
+  return answer.editedText ?? ("text" in item.preview ? item.preview.text : undefined)
+}
+
+// Pure: the files a go shares into Slack before its answer reaches the poster: a Slack draft's on Send, with its words as their message (wordsWithFiles), or a slack decision's on Approve or Edit, when its link names a Slack place and it has shared none yet; null for anything else, whose files stay on the card.
 export function filesToUpload(
   item: InboxItem,
-): { files: InboxAttachment[]; place: UploadPlace } | null {
+): { files: InboxAttachment[]; place: UploadPlace; text?: string } | null {
   const answer = item.answer
   if (!answer || !("choice" in answer) || ("uploaded" in answer && answer.uploaded !== undefined))
     return null
@@ -1323,7 +1340,9 @@ export function filesToUpload(
         (answer.choice === "approve" || answer.choice === "edit")
   if (!go || !("attachments" in preview) || !preview.attachments?.length) return null
   const place = slackPlace("link" in preview ? preview.link : undefined)
-  return place && { files: preview.attachments, place }
+  if (!place) return null
+  const text = wordsWithFiles(item, answer)
+  return { files: preview.attachments, place, ...(text && { text }) }
 }
 
 // Pure: when an open item or an update is scheduled to ask again, while that time is still ahead; null once it is awake, and on anything not scheduled.
@@ -2103,18 +2122,18 @@ type Sending = {
   wait?: (ms: number) => Promise<void>
 }
 
-// Types the answer into the posting session and records how that went; a poster that has ended hands it to the dispatcher instead. Each try goes under its own id, so one Claude Code holds (queued) is read again under it until it settles: this process's own reads, so a restart leaves it reading queued until its card offers Retry (stuckQueued).
+// Types the answer into the posting session and records how that went, its line built once any files have shared, since a Slack draft's words go with them; a poster that has ended hands it to the dispatcher instead. Each try goes under its own id, so one Claude Code holds (queued) is read again under it until it settles: this process's own reads, so a restart leaves it reading queued until its card offers Retry (stuckQueued).
 async function send(
   db: Database,
   item: InboxItem,
-  { relay, text }: { relay: string; text: string },
+  linesOf: (uploaded?: number) => { relay: string; text: string },
   { actor, deliver, dispatcher, now, upload, wait = (ms) => Bun.sleep(ms) }: Sending,
   held?: Extract<InboxDelivery, { status: "queued" }>,
 ): Promise<InboxItem> {
   // the files go first, so an upload Slack refuses fails the send with nothing typed, and Retry shares them again
   const shared = upload && filesToUpload(item)
+  let count: number | undefined
   if (shared) {
-    let count: number
     try {
       count = await upload(item)
     } catch (error) {
@@ -2124,6 +2143,7 @@ async function send(
     }
     item = (await recordUploaded(db, item.id, count)) ?? item
   }
+  const { relay, text } = linesOf(count)
   const one = (to: string, words: string) => ({ actor, id: crypto.randomUUID(), text: words, to })
   // a stuck queued answer is read again under its own id and queued time, so this try types nothing: it reads queued, delivered, lost or unconfirmed, and only a Retry after lost types it
   let sent: Delivery & { id: string } = held

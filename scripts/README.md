@@ -2,7 +2,7 @@
 
 The factory's own scripts: `spawn.sh`, which starts and resumes every factory session, `link-skills.sh`, which installs the skills, the herdr servers' ops job, a worktree's `node_modules` clone and `bun run test:skills`.
 AGENTS.md keeps one line for each, and this file holds the text that line stands for.
-It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes, and the rule for an edit script's replacements.
+It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes, the rule for an edit script's replacements, and where a factory script's orphan is ended.
 Read a section before you change its script or its tests, or when it refuses a start you did not expect.
 The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
@@ -28,7 +28,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   for a fresh worker start alone, room for its runs:
   `scripts/ops/run-slot.sh room`'s lanes, held lanes, free lanes (open and unheld while the queue's next run fits its load units by run-slot's one gate, `unit_fits`, or a medium run with no waiter, `slots.peers`' holders counted; none while the battery's or focus's hold stands, which the wait loop obeys too) and live waiters, refusing while no lane is free and a run waits in the queue,
   or when room gives no reading, so a new worker never joins a queue it has no room in,
-  while a `--priority` start passes a full queue with a priority file standing, as it passes the load gate, its row's `readings.priority` naming the file, and a reviewer, tester
+  while a `--priority` start passes a full queue with a priority file standing, as it passes the load gate, its row's `readings.priority` naming the file,
+  a `--reads-only` worker start (`spawn.sh --help`) passes it with its row's `readings.reads_only` true, since a worker that only reads runs nothing through run-slot, while the load, memory and usage gates still hold it, and a reviewer, tester
   or resume skips it and work already admitted finishes; and the launching backend's usage:
   Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, which never sits below one day's share of 14.3 points, so a week that has just reset passes its first day,
   or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone, which ops-sweep writes and renews while an account the split can pick projects under 100% at its week reset (`scripts/ops/README.md`'s Usage forecasts), or a person writes by hand, and the pass line names, a missing, empty, past or unreadable time leaving the pace on;
@@ -51,7 +52,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   Its one row reads `skipped`, naming each gate it went past with the words a refusal would print, which the load check counts as a start; every other manager start takes the gate as a worker's does.
   It also refuses while a live session already holds the name, naming its pid (Claude Code would give the new one a generated name); a `claude -p` run, whose registry file reads `entrypoint` `sdk-cli`, holds no name, and a Mac with no `~/.claude/sessions` folder (Claude Code makes it with its first session) holds none.
   It launches every session with `--dangerously-skip-permissions`, beside `scripts/factory-settings.json`'s `skipDangerousModePermissionPrompt`, and, where inscope exports its own `CLAUDE_CONFIG_DIR`, with `env -u CLAUDE_CONFIG_DIR -u INSCOPE_CCD`.
-  Each start and resume compacts in one window for every kind, GLM's included, the `context.window` setting's (400,000 tokens by default), set in the one `--settings` file it rebuilds from `scripts/factory-settings.json` on every launch,
+  Each start and resume compacts in one window for every kind, GLM's included, the `context.window` setting's (400,000 tokens by default), set in the one `--settings` file it rebuilds on every launch from `scripts/factory-settings.json`, read by its real path in spawn.sh's own checkout and never through the data folder's link,
   `~/.playground/factory-settings-<k>k.json` (`factory-settings-400k.json` by default, `factory-settings-manager-<k>k.json` for a dispatcher or a lead, and `factory-settings-sandbox-<k>k.json` for a probe),
   the same window that file gives a session spawn.sh did not start.
   A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its file is `factory-settings-sandbox-400k.json` (`factory-settings-glm-sandbox-400k.json` on GLM).
@@ -60,7 +61,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `run-slot.sh` and `spawn.sh` run inside it, each refused read on its stand-in (above, and `scripts/ops/README.md`); workers and testers join once the worker git flow writes neither `.git/config` nor `.git/hooks`, which the sandbox keeps write-denied whatever `allowWrite` says.
   The sandbox block holds: no unsandboxed retry (`allowUnsandboxedCommands` false, since bypass mode would run one with no prompt) and no unsandboxed fallback (`failIfUnavailable`);
   writes in the session's folder and Claude Code's per-user temp folder by default, and in `~/.agent-browser`, `~/.bun/install/cache`, `~/.cache/turbo`, the data folder, `~/.portless` and macOS's user temp folder (`getconf DARWIN_USER_TEMP_DIR`),
-  with every main-checkout entry denied, `.git` and every other worktree included, but the path down to the worktree the session runs in (a new top-level file stays creatable);
+  with every main-checkout entry denied, `.git` and every other worktree included, but the path down to the worktree the session runs in (a new top-level file stays creatable), and the data folder's extensions root denied, whose lists every guard reads ([no-extensions-write](./hooks/README.md#no-extensions-write));
   a typed `docker ps` alone outside the sandbox, since an exclusion's wildcard spans arguments and Docker cannot run inside it; the herdr and agent-browser sockets, local binding, and trustd for `gh`'s TLS (`enableWeakerNetworkIsolation`).
   `--account <email>` logs the session in as that Claude account: spawn.sh refuses an email that is not a plain `local@domain`,
   starts one naming this machine's own login (Claude Code's `oauthAccount.emailAddress` in `.claude.json`, matched in any case) on that login with no token, the account split skipped and its usage judged as a bare start's (playbook's SPAWN.md, --account),
@@ -198,7 +199,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A fully linked checkout skips the install.
   `playground update` installs before it moves the checkout when the target declares such a dependency, so a hook that runs its source reads new code only once its imports link (a PreToolUse guard runs its bundle, which needs none);
   this install is the fallback for a target that deletes or moves a manifest, a tree with edits or untracked files of its own, an install there that failed and put the old manifests back, or an update run by an older `update.ts`.
-- Beside the home set, it symlinks `~/.playground/factory-settings.json` to `scripts/factory-settings.json`, each brief template in `~/.playground/handoffs/` to its file in `scripts/briefs/`, `~/.playground/brief-rush.md` to `scripts/briefs/brief-rush.md`,
+- Beside the home set, it symlinks `~/.playground/factory-settings.json` to `scripts/factory-settings.json` for the readers that use the link (spawn.sh reads the checkout's file itself), each brief template in `~/.playground/handoffs/` to its file in `scripts/briefs/`, `~/.playground/brief-rush.md` to `scripts/briefs/brief-rush.md`,
   `~/.bun/bin/playground` and its old name to the `playground` command (`packages/scripts/src/playground/cli.ts`; `playground --help` lists what it does),
   and each ops script it names into `~/.playground/ops/`;
   for the rename it links `~/.playground` to the old data folder where only that exists,
@@ -217,7 +218,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   It is an APFS clone of a sibling worktree's `node_modules` with the same `bun.lock` (`~/.playground/ops/run-slot.sh <your name> -- cp -cR <sibling>/node_modules <worktree>/`, through run-slot since a clone is a heavy run: three load spikes on 13 Oct, fseventsd near 100%, came from clones),
   and once that clone succeeds, run-slot clones each workspace's own `node_modules` from the sibling with the same flags (`CLONE_WORKSPACES` in `scripts/ops/run-slot.sh`, run in the clone's own process group), so the worktree is ready for its checks with no install.
   A clone can wait before it starts, since run-slot spaces clones 180 s apart, holds one near the load brake or beside a big run (the Dashboard roll's clone, and one that has waited 10 minutes, pass a big run) and starts clone waiters oldest first, naming the hold on stderr ([ops/README.md](ops/README.md#run-slot)).
-  Neither route builds a `dist` folder or the data table metrics: `bun run test:file` and `bun run check-types:tests` build the unbuilt packages their files import, and write the metrics when missing, before they run (`prebuildTests` in `packages/scripts/src/verify/prebuild.ts`), so a fresh worktree runs either one directly.
+  Neither route builds a `dist` folder or the data table metrics: `bun run test:file` builds every shared package whose `dist` is missing beside the unbuilt packages its files import,
+  `bun run check-types:tests` builds the unbuilt packages its files import, and both write the metrics when missing before they run (`prebuildTests` in `packages/scripts/src/verify/prebuild.ts`), so a fresh worktree runs either one directly.
   Pre-push's `keeps-canary.sh` builds `@packages/config` itself when its `dist` is missing (`packages/scripts/src/pr-merge/config-dist.ts`), since `prepush.ts` imports it and a fresh worktree's first push failed on `Cannot find module '@packages/config/verdicts'` after every route.
   A build that fails refuses the push, naming `bunx turbo run build --filter=@packages/config` through run-slot as the fix.
   While the clone runs, its holder line (`run-slot-clone.holder` in the ops folder) names the sibling it reads from and the worktree it copies into, so `playground rm --worktree` refuses either one, naming the clone, until the clone ends (`clone_ends` in `scripts/ops/run-slot.sh`, `clonesOf` in `packages/scripts/src/playground/rm.ts`).
@@ -251,6 +253,13 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - In single-slot mode (`run-slot.single`) the machine holds 4 units across slots 1 and 2, so beside a big run's 3 units only a 1-unit run fits, by design, and a 2-unit waiter waits for the big to end (measured: it started 22.2 s after it arrived, when the big's 20 s hold ended, and the free slot stood idle the whole hold);
   the rule and its 7 Nov window are written in [ops/README.md](ops/README.md#run-slot).
 - A backlog drains spaced: a small run that has waited past `BACKLOG_WAIT` waits for `burst_held` as medium and big runs do, since load5 shows a draining queue's starts only about a minute later, while a fresh small run starts at once; the rule and its 7 Nov burst are in [ops/README.md](ops/README.md#run-slot).
+
+## A factory script's orphan
+
+- A factory script left running after its starter and its worktree are gone (parent pid 1) belongs to no session, so the signal rule gives it to Ops: ops-tick's nightly clean ends it by its own pid, TERM then KILL past a 5-second grace, and names each in `ops/log/nightly-clean.log` and its outbox line, with nothing to the Inbox.
+  The check lives in `packages/scripts/src/ops-tick/orphans.ts`: `orphansOf` selects a process whose parent is pid 1 and whose command names a script file of this repo (`.sh`, `.ts`, `.js`, `.py`) in a worktree under the checkout's `.claude/worktrees`, read by its whole folder name, once every worktree its command names is gone,
+  never a dependency's binary under `node_modules` such as the shared portless proxy, nor an app opened on a folder or a reader of a log, and `endOrphans` sends KILL only to a pid `ps` still lists with the same command.
+  Tests: `bun run test:file tests/packages/scripts/src/ops-tick/orphans.test.ts tests/packages/scripts/src/ops-tick/nightly-clean.test.ts`.
 
 ## bun run test:skills
 

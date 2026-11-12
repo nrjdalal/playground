@@ -353,7 +353,7 @@ export async function cleanWorktree(
 }
 
 // Whether a worktree's PR, as rm's reader returns it (its head beside its number and state, or none), is finished: merged or closed, rm's freed reading.
-export const finishedOf = (pr: Pr | null): boolean => freedOf(pr) !== undefined
+export const finishedOf = (pr: Pr | "none" | null): boolean => freedOf(pr) !== undefined
 
 // Why the cleanup's held check keeps a worktree, with rm's roster, clone and link holders and the worktree's own PR's freed state among them: null when nothing holds it. Its process check reads none, since the stack dev:stop is about to stop, and rm's saved-work checks run after it.
 export const cleanupHeld = async (
