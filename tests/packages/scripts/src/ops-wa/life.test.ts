@@ -4,6 +4,7 @@ import * as fsp from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { inboxInputSchema } from "../../../../../api/hono/src/lib/dashboard/inbox"
 import {
   BACKOFF,
   backoffMs,
@@ -288,5 +289,18 @@ describe("ops-wa's ban-safety habits", () => {
     expect(SOCKET.shouldSyncHistoryMessage()).toBe(false)
     expect(SOCKET.generateHighQualityLinkPreview).toBe(false)
     expect(KEEP_ALIVE_DAYS).toBe(12)
+  })
+})
+
+describe("the pairing card as the Inbox takes it", () => {
+  test("the pairing card's JSON passes the Inbox's input schema", () => {
+    const code = "12345678"
+    const payload = {
+      from: "ops",
+      kind: "update",
+      preview: { outcome: undefined as string | undefined, text: PAIRING },
+      title: `Link WhatsApp: code ${code.slice(0, 4)}-${code.slice(4)}`,
+    }
+    expect(inboxInputSchema.safeParse(JSON.parse(JSON.stringify(payload))).success).toBe(true)
   })
 })
