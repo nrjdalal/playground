@@ -691,7 +691,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 ## no-playground-leak
 
 - ALWAYS: Keep the factory out of every ticket, PR, commit, branch, comment, Slack message or DM, and file in a guarded org's repo: playbook's **classified** rule, since the factory is the owner's own and stays out of the org's records in any shape.
-  Every factory session is spawned with `--settings ~/.playground/factory-settings.json` (playbook's SPAWN.md, Role and settings), the file `scripts/link-skills.sh` links to `scripts/factory-settings.json`,
+  Every factory session is spawned with a `--settings` file spawn.sh builds from its own checkout's `scripts/factory-settings.json` (playbook's SPAWN.md, Role and settings),
   which runs the PreToolUse hook `scripts/hooks/no-playground-leak.ts` on Bash through [guards](#guards) and on the Linear, Slack and GitHub MCP tools wherever the session works (`.claude/settings.json` registers it too, for a session resumed without its settings in the factory's checkout).
   It refuses a write to a guarded org's surface whose text holds a factory term (a name, an old session name, which a scope's own copy adds, a path, a `<role>-<sin>` session or a `probe-<sin>` or `probe-<role>-<sin>` probe from `extensions/core/lists/playground-terms.json`,
   its sins the seven words alone so `worker-pool` and `probe-path` pass, any skill's name in the checkout's `skills/` bucket folders,

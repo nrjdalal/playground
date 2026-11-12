@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -244,16 +245,22 @@ export const commitExt = (
   })
 }
 
-// A scope's files made exactly these, as one commit: each written in place by rename, then every other file removed but those keep names.
+// A scope's files made exactly these, as one commit: each written in place by rename, then every other file removed but those keep names; a file written over keeps the mode of the file it replaces, and executable says which source files run, so an import never strips a stored script's bit.
 export const writeTree = (
   data: string,
   scope: string,
   files: Map<string, string | Uint8Array>,
   commit: Commit,
   keep: (path: string) => boolean = () => false,
+  executable?: (path: string) => boolean,
 ): string | undefined =>
   commitExt(data, scope, commit, (dir) => {
-    for (const [path, text] of files) writeAtomically(join(dir, path), text)
+    for (const [path, text] of files) {
+      const at = join(dir, path)
+      const ran = existsSync(at) && (statSync(at).mode & 0o111) !== 0
+      writeAtomically(at, text)
+      if (executable?.(path) || ran) chmodSync(at, 0o755)
+    }
     for (const path of filesIn(dir)) if (!files.has(path) && !keep(path)) rmSync(join(dir, path))
     pruneEmpty(dir, dir)
   })

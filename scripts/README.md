@@ -52,7 +52,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   Its one row reads `skipped`, naming each gate it went past with the words a refusal would print, which the load check counts as a start; every other manager start takes the gate as a worker's does.
   It also refuses while a live session already holds the name, naming its pid (Claude Code would give the new one a generated name); a `claude -p` run, whose registry file reads `entrypoint` `sdk-cli`, holds no name, and a Mac with no `~/.claude/sessions` folder (Claude Code makes it with its first session) holds none.
   It launches every session with `--dangerously-skip-permissions`, beside `scripts/factory-settings.json`'s `skipDangerousModePermissionPrompt`, and, where inscope exports its own `CLAUDE_CONFIG_DIR`, with `env -u CLAUDE_CONFIG_DIR -u INSCOPE_CCD`.
-  Each start and resume compacts in one window for every kind, GLM's included, the `context.window` setting's (400,000 tokens by default), set in the one `--settings` file it rebuilds from `scripts/factory-settings.json` on every launch,
+  Each start and resume compacts in one window for every kind, GLM's included, the `context.window` setting's (400,000 tokens by default), set in the one `--settings` file it rebuilds on every launch from `scripts/factory-settings.json`, read by its real path in spawn.sh's own checkout and never through the data folder's link,
   `~/.playground/factory-settings-<k>k.json` (`factory-settings-400k.json` by default, `factory-settings-manager-<k>k.json` for a dispatcher or a lead, and `factory-settings-sandbox-<k>k.json` for a probe),
   the same window that file gives a session spawn.sh did not start.
   A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its file is `factory-settings-sandbox-400k.json` (`factory-settings-glm-sandbox-400k.json` on GLM).
@@ -199,7 +199,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A fully linked checkout skips the install.
   `playground update` installs before it moves the checkout when the target declares such a dependency, so a hook that runs its source reads new code only once its imports link (a PreToolUse guard runs its bundle, which needs none);
   this install is the fallback for a target that deletes or moves a manifest, a tree with edits or untracked files of its own, an install there that failed and put the old manifests back, or an update run by an older `update.ts`.
-- Beside the home set, it symlinks `~/.playground/factory-settings.json` to `scripts/factory-settings.json`, each brief template in `~/.playground/handoffs/` to its file in `scripts/briefs/`, `~/.playground/brief-rush.md` to `scripts/briefs/brief-rush.md`,
+- Beside the home set, it symlinks `~/.playground/factory-settings.json` to `scripts/factory-settings.json` for the readers that use the link (spawn.sh reads the checkout's file itself), each brief template in `~/.playground/handoffs/` to its file in `scripts/briefs/`, `~/.playground/brief-rush.md` to `scripts/briefs/brief-rush.md`,
   `~/.bun/bin/playground` and its old name to the `playground` command (`packages/scripts/src/playground/cli.ts`; `playground --help` lists what it does),
   and each ops script it names into `~/.playground/ops/`;
   for the rename it links `~/.playground` to the old data folder where only that exists,

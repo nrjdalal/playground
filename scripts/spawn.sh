@@ -116,7 +116,8 @@ priority_file() {
   return 1
 }
 [[ $DATA == "$HOME"/* ]] && SHOWN="~${DATA#"$HOME"}" || SHOWN=$DATA
-SETTINGS="$DATA/factory-settings.json"
+# The factory's settings by their real path in this checkout, never through the data folder's link, which any session can repoint at settings of its own.
+SETTINGS="$REPO/scripts/factory-settings.json"
 HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
 PINS="$DATA/backends"
 RESUME_DIR="$DATA/resume"
