@@ -28,9 +28,18 @@ export const groups: Group[] = [
         `sleep 1; agent-browser --session t eval 'fetch("${ROOT}/policy.json")'`,
       ],
       [
-        "a commit by -C whose message holds a folder change, a build and an or-true",
-        `git -C ${WORK}/playground commit -q -m "fix: x" -m "a line like\ncd && make || true, then . ./env"`,
-        "home",
+        "a commit by -C to its own folder whose message holds a folder change, a build and an or-true",
+        `git -C ~/x/.claude/worktrees/y commit -q -m "fix: x" -m "a line like\ncd && make || true, then . ./env"`,
+        "process worktree",
+      ],
+      [
+        "a commit by -C to another folder whose message holds a folder change",
+        `git -C /tmp commit -q -m "fix: x" -m "a line like\ncd && make || true, then . ./env"`,
+        "process worktree",
+      ],
+      [
+        "a commit by -C into a clone in the root whose message holds a folder change",
+        `git -C ${ROOT} commit -q -m "fix: x" -m "a line like\ncd && make || true, then . ./env"`,
       ],
       [
         "a commit by -c whose message holds a folder change into the root",
@@ -47,7 +56,7 @@ export const groups: Group[] = [
     ],
   },
   {
-    folders: ["checkout", "home"],
+    folders: ["checkout", "process home"],
     guards: ["no-raw-delete"],
     rows: () => [
       [
@@ -57,12 +66,10 @@ export const groups: Group[] = [
       [
         "a browser eval with another option holding optional chaining and the nullish operator",
         `agent-browser --headed eval '${PORTAL}'`,
-        "checkout",
       ],
       [
         "a browser eval by session behind sudo holding optional chaining and the nullish operator",
         `sudo agent-browser --session t eval '${PORTAL}'`,
-        "checkout",
       ],
     ],
   },
@@ -71,7 +78,7 @@ export const groups: Group[] = [
 export const allowed: string[] = [
   "an in-place perl edit whose replacement holds a parenthesised conditional",
   "a browser eval holding the nullish operator beside another command",
-  "a commit by -C whose message holds a folder change, a build and an or-true",
+  "a commit by -C to its own folder whose message holds a folder change, a build and an or-true",
   "a read-only gh call in a loop whose jq filter holds a parenthesised alternative",
   "a browser eval by session holding optional chaining and the nullish operator",
 ]
