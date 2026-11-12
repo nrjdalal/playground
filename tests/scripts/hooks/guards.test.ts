@@ -25,6 +25,7 @@ const BASH_GUARDS = [
   "no-off-palette-label",
   "no-ours-merge",
   "no-playground-leak",
+  "no-prepare-write",
   "no-prompt-stop",
   "no-public-leak",
   "no-raw-delete",
@@ -34,6 +35,10 @@ const BASH_GUARDS = [
   "no-stash",
   "no-unslotted-run",
 ]
+
+// A check module guards.ts runs that has no process of its own, so no main block: no-playground-leak's process runs it on the MCP tools.
+const MODULES = new Set(["no-prepare-write"])
+const MAIN_GUARDS = BASH_GUARDS.filter((name) => !MODULES.has(name))
 
 // A guard's main block, the lines its own process runs.
 const mainBlock = async (name: string) => {
@@ -82,12 +87,12 @@ describe("guards.ts runs every Bash guard", () => {
     },
   )
 
-  test.each(BASH_GUARDS)("%s keeps its own main block's factory gate", async (name) => {
+  test.each(MAIN_GUARDS)("%s keeps its own main block's factory gate", async (name) => {
     const gated = (await mainBlock(name)).includes("await fromFactory(raw)")
     expect({ gated: GUARDS.find((g) => g.name === name)?.factory, name }).toEqual({ gated, name })
   })
 
-  test.each(BASH_GUARDS)("%s runs the entry its own main block calls", async (name) => {
+  test.each(MAIN_GUARDS)("%s runs the entry its own main block calls", async (name) => {
     const entry = (await mainBlock(name)).match(/await (check|guarded|refusal)\(/)?.[1]
     const source = await Bun.file(join(HOOKS, "guards.ts")).text()
     const imported = source.match(
