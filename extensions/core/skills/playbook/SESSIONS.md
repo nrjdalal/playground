@@ -163,7 +163,7 @@ playground picker <session> deny <key> "<why, and the simpler shape to run inste
 playground picker <session> allow <key> --rule <name>
 ```
 
-When a standing rule settles the answer, add `--rule <name>`, the name `playground rules` lists it under, to either form; picker refuses a name no rules file holds and presses nothing.
+When a standing rule settles the answer, add `--rule <name>`, the name `playground rules` lists it under with a hyphen for each space (`--rule local-page`), to either form; picker refuses a name no rules file holds and presses nothing.
 
 Allow presses Yes once in the session's herdr pane while its prompt shows that call, a subagent's command included; deny presses No (Escape), and the relay sends the session the reason.
 Each answer is a line in `ops/picker.log`: the time, the manager, the answer, the session, the command's first 120 characters and, with `--rule`, `under **<name>**`, which a deny's message to the session names too.
