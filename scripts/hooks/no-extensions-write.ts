@@ -1931,9 +1931,14 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           ]
         : WRITERS.has(tool)
           ? writeTargets(tool, given, gnu, posix)
-          : unreadCdWrites(tool, typed, env, !gnu || posix)
+          : []
     }
-    const loose = shapes.flatMap(operandsOf).find((word) => !placed(word, env, steady))
+    // a program on neither list is judged on its typed words alone (unreadCdWrites)
+    const unlisted =
+      !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env, !gnu || posix) : []
+    const loose = [...shapes.flatMap(operandsOf), ...unlisted].find(
+      (word) => !placed(word, env, steady),
+    )
     if (!loose) return
     const unread =
       fed && fromStdin.has(loose) && (fed.unknown || unsplit)

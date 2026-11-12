@@ -898,6 +898,16 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1173 GNU mv to the shell's folder attached to its target option in a cluster after a cd to a variable | -ft",
       "#1173 GNU mv to the shell's folder by its long target option after a cd to a variable | --target-directory",
       "#1173 GNU mv to the shell's folder by its shortened long target option after a cd to a variable | --target",
+      // xargs' -d delimiter, a character xargs splits stdin at, never a folder it writes to
+      '#1204 every option: cd "$X" && printf /.no-such-folder | xargs --del / rm -r | --del',
+      '#1204 every option: cd "$X" && printf /.no-such-folder | xargs --delimiter=/ rm -r | --delimiter',
+      '#1204 every option: cd "$X" && printf /.no-such-folder | xargs -d / rm -r | -d',
+      "#1204 rm under GNU xargs --delimiter by its gnubin path | --delimiter",
+      "#1204 rm under GNU xargs -d by its gnubin path | -d",
+      "#1204 rm under gxargs --delimiter with its value as the next word | --delimiter",
+      "#1204 rm under gxargs -d after an -E value spelled like the program | -d",
+      "#1204 rm under gxargs -d fed a relative part after a cd to a variable | -d",
+      "#1204 rm under gxargs with -d in a flag cluster, which splits stdin where the hook cannot see | -rd",
       // grep's -r, which takes no value: the folder name after it is the search's pattern
       "#1448 grep -r whose pattern names a folder in its own folder | -r",
       // cd's -P, alone or among its other options, which take no value: the folder after it is the cd's own operand
