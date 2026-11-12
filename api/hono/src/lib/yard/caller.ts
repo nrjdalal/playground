@@ -45,7 +45,11 @@ export const yardCaller = ({
     // a bot's login with no bot row, its maker gone, or on a web session, which no bot holds, is no one
     if (isBotLogin(signed.login) && !bot) throw new ApiError(401, "UNAUTHORIZED", "Unauthorized")
     if (bot && !bots)
-      throw new ApiError(403, "FORBIDDEN", "A bot's token reaches only its DM's messages")
+      throw new ApiError(
+        403,
+        "FORBIDDEN",
+        "A bot's token reaches only its DM's messages and the log",
+      )
     c.set("caller", {
       ...(bot ? { bot } : {}),
       device,
