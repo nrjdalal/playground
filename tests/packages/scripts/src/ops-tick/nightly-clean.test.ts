@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -927,8 +928,10 @@ describe("one night's run against a fixture data folder", () => {
     const ran = runs.map((r) => r.join(" "))
     expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(false)
     expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(false)
-    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).not.toContain("scratch")
-    expect(sent.find((s) => s.to === "ops")?.text ?? "").not.toContain("scratch")
+    // the branch's own forms in the log and the outbox line, since a temp folder's path can hold the bare word
+    const named = /(?:kept|archived|branch) scratch\b|archive\/scratch/
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).not.toMatch(named)
+    expect(sent.find((s) => s.to === "ops")?.text ?? "").not.toMatch(named)
   })
 
   test("a local archive tag at another head is re-pointed to the branch's head and named with both", async () => {
@@ -1177,11 +1180,13 @@ describe("other repos' worktrees", () => {
       pushed: worktreeOf(site, "pushed", true),
       rostered: worktreeOf(app, "rostered", true),
       unpushed: worktreeOf(site, "unpushed", false),
+      untracked: worktreeOf(app, "untracked", true),
     }
     mkdirSync(join(w.done, "node_modules", "x"), { recursive: true })
     writeFileSync(join(w.done, ".env.local"), "A=1\n")
     writeFileSync(join(w.dirty, "a.ts"), "changed\n")
     writeFileSync(join(w.ignored, "notes.txt"), "mine\n")
+    writeFileSync(join(w.untracked, "new.ts"), "c\n")
     writeFileSync(
       join(data, "roster.json"),
       JSON.stringify({
@@ -1239,6 +1244,7 @@ describe("other repos' worktrees", () => {
         ignored: pr("CLOSED"),
         open: pr("OPEN"),
         rostered: pr("MERGED"),
+        untracked: pr("MERGED"),
       }),
       [site]: prsOf({}),
     }
@@ -1254,7 +1260,7 @@ describe("other repos' worktrees", () => {
       trashRoots: () => ({ home: root, main, trash: join(root, "trash") }),
       turbo: join(root, "turbo"),
     } as NightDeps
-    return { ctx, data, deps, lost, main, ops, runs, sent, w }
+    return { ctx, data, deps, lost, main, ops, runs, sent, site, w }
   }
   const outbox = (sent: { text: string; to: string }[]) =>
     sent.find((s) => s.to === "ops")?.text ?? ""
@@ -1275,7 +1281,7 @@ describe("other repos' worktrees", () => {
     await nightlyClean(deps)(ctx)
     const kept: [string, string][] = [
       [w.open, "its PR is open"],
-      [w.unpushed, "it has no PR and a commit no remote holds"],
+      [w.untracked, "uncommitted work"],
       [w.dirty, "uncommitted work"],
       [w.ignored, "ignored files outside build output: notes.txt"],
       [w.held, "a live process works in it"],
@@ -1285,6 +1291,108 @@ describe("other repos' worktrees", () => {
       expect(existsSync(path)).toBe(true)
       expect(outbox(sent)).toContain(`worktree ${path} kept: ${why}`)
     }
+  })
+
+  // A commit of its own in a worktree, holding the file <name>
+  const commitIn = (path: string, name: string) => {
+    writeFileSync(join(path, name), "c\n")
+    git(path, "add", ".")
+    git(path, "commit", "-qm", name)
+  }
+  const unlanded = (path: string) =>
+    git(path, "rev-list", "HEAD", "--not", "--remotes").trim().split("\n")
+  // The archive folder of a worktree of site at its HEAD, and the commit each of its patches' From line names
+  const archiveOf = (data: string, path: string) =>
+    join(
+      data,
+      "scratchpad",
+      "archive",
+      "site",
+      `${basename(path)}-${unlanded(path)[0]!.slice(0, 7)}`,
+    )
+  const patchesIn = (dir: string) =>
+    readdirSync(dir).map((f) => /^From ([0-9a-f]+) /.exec(readFileSync(join(dir, f), "utf8"))?.[1])
+
+  // #1962
+  test("a worktree with no PR and commits no remote holds is archived by git format-patch under the data folder's scratchpad/archive, then removed with its branch kept", async () => {
+    const { ctx, data, deps, sent, site, w } = night()
+    commitIn(w.unpushed, "more.ts")
+    const shas = unlanded(w.unpushed)
+    expect(shas).toHaveLength(2)
+    const archive = archiveOf(data, w.unpushed)
+    const wip = worktreeOf(site, "wip", false)
+    writeFileSync(join(wip, "new.ts"), "c\n")
+    // the controls: an open PR's tree and a live session's, each with a commit no remote holds
+    for (const path of [w.open, w.held, w.rostered]) commitIn(path, "local.ts")
+    await nightlyClean(deps)(ctx)
+    expect(existsSync(w.unpushed)).toBe(false)
+    expect(patchesIn(archive).sort()).toEqual([...shas].sort())
+    expect(outbox(sent)).toContain(
+      `worktree ${w.unpushed} by git worktree remove, its branch unpushed kept, its 2 commits no remote holds archived at ${archive}`,
+    )
+    expect(git(site, "branch", "--list", "unpushed")).toContain("unpushed")
+    expect(existsSync(wip)).toBe(true)
+    expect(outbox(sent)).toContain(`worktree ${wip} kept: uncommitted work`)
+    expect(existsSync(archiveOf(data, wip))).toBe(false)
+    for (const [path, why] of [
+      [w.open, "its PR is open"],
+      [w.held, "a live process works in it"],
+      [w.rostered, "the roster names it"],
+    ] as const) {
+      expect(existsSync(path)).toBe(true)
+      expect(outbox(sent)).toContain(`worktree ${path} kept: ${why}`)
+    }
+    expect(readdirSync(join(data, "scratchpad", "archive", "site"))).toEqual([basename(archive)])
+    expect(existsSync(join(data, "scratchpad", "archive", "app"))).toBe(false)
+  })
+
+  // #1962
+  test("a worktree whose archive fails to write, or holds patches other than its commits no remote holds, is kept, the outbox line naming why", async () => {
+    const failed = night()
+    mkdirSync(join(failed.data, "scratchpad"), { recursive: true })
+    writeFileSync(join(failed.data, "scratchpad", "archive"), "")
+    await nightlyClean(failed.deps)(failed.ctx)
+    expect(existsSync(failed.w.unpushed)).toBe(true)
+    expect(outbox(failed.sent)).toContain(
+      `worktree ${failed.w.unpushed} kept: it has no PR and a commit no remote holds, and its archive at ${archiveOf(failed.data, failed.w.unpushed)} failed to write`,
+    )
+
+    const { ctx, data, deps, sent, site, w } = night()
+    // a merge commit, which git format-patch writes no patch for
+    const side = git(site, "commit-tree", "-p", "main", "-m", "side", "main^{tree}").trim()
+    git(w.unpushed, "merge", "-q", "--no-ff", "-m", "merge", side)
+    const merged = archiveOf(data, w.unpushed)
+    // archive folders already there, one short of the tree's commits and one of another commit, which the step reads and never writes over
+    const stale = worktreeOf(site, "stale", false)
+    commitIn(stale, "two.ts")
+    const short = archiveOf(data, stale)
+    mkdirSync(short, { recursive: true })
+    writeFileSync(
+      join(short, "0001-one.patch"),
+      `From ${unlanded(stale)[1]} Mon Sep 17 00:00:00 2001\n`,
+    )
+    const other = worktreeOf(site, "other", false)
+    const wrong = archiveOf(data, other)
+    mkdirSync(wrong, { recursive: true })
+    writeFileSync(
+      join(wrong, "0001-other.patch"),
+      `From ${"0".repeat(40)} Mon Sep 17 00:00:00 2001\n`,
+    )
+    await nightlyClean(deps)(ctx)
+    expect(existsSync(w.unpushed)).toBe(true)
+    expect(outbox(sent)).toContain(
+      `worktree ${w.unpushed} kept: it has no PR and a commit no remote holds, and its archive at ${merged} holds 2 patches, 2 of its 3 commits no remote holds`,
+    )
+    expect(existsSync(stale)).toBe(true)
+    expect(outbox(sent)).toContain(
+      `worktree ${stale} kept: it has no PR and a commit no remote holds, and its archive at ${short} holds 1 patch, 1 of its 2 commits no remote holds`,
+    )
+    expect(existsSync(other)).toBe(true)
+    expect(outbox(sent)).toContain(
+      `worktree ${other} kept: it has no PR and a commit no remote holds, and its archive at ${wrong} holds 1 patch, 0 of its 1 commit no remote holds`,
+    )
+    expect(readdirSync(short)).toEqual(["0001-one.patch"])
+    expect(readdirSync(wrong)).toEqual(["0001-other.patch"])
   })
 
   test("a worktree whose branch a roster row's branch names is kept, though no roster text holds its path", async () => {

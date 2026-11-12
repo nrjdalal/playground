@@ -565,11 +565,16 @@ function packageScripts(dir: string): Map<string, { at: string; command: string 
   }
 }
 const FOLDER_FIX = "Name the folder literally, in a call of its own, or report to your lead."
+// A program word read with each ${NAME:?message} or ${NAME-word} of a name the hook knows as its value, so `"${PLAYGROUND_REPO:?}/scripts/spawn.sh"` reads as the literal path
+const programWord = (w: Word, env: Env): Word =>
+  (w.raw && marked(w.value)
+    ? heldWord({ ...w, raw: defaulted(w.raw, env.known, () => false) }, env, NONE)
+    : undefined) ?? w
 // Why a call runs an org script: its program word is the script (each has a shebang), or a path the hook cannot place, the playground CLI's dm command, or a runner's word that resolves into an org script's folder from the folder it runs in, or names a package script whose command does, whatever the runner; a runner in a folder the hook cannot read is refused, failing closed as git's is
 function orgScript(parsed: Parsed, env: Env): { fix?: string; why: string } | undefined {
   const { args, first, name } = parsed
   if (first?.value.includes("/")) {
-    const program = pathOf(first, env)
+    const program = pathOf(programWord(first, env), env)
     if (!program)
       return {
         fix: FOLDER_FIX,
@@ -1731,10 +1736,16 @@ async function inspect(
   const guarding = Array.isArray(orgs) && orgs.length > 0
   const text = command.replace(/["'\\]/g, "")
   if (!guarding && !mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text)) return
-  const known = knownVariables(command, environment, directory)
-  const lexed = lex(command, known)
   // a variable the line sets once, at its top level, is read by its value, and so is one of the session's own the line never names
   const named = namings(command)
+  // the session's PLAYGROUND_REPO, by which a brief names spawn.sh, reads in a path as HOME does while the line never sets it
+  const repo =
+    named.blind || named.counts.has("PLAYGROUND_REPO") ? undefined : environment.PLAYGROUND_REPO
+  const known = {
+    ...knownVariables(command, environment, directory),
+    ...(repo ? { PLAYGROUND_REPO: repo } : {}),
+  }
+  const lexed = lex(command, known)
   const steadyAt = steadyNames(named, lexed.commands)
   const own = named.blind
     ? {}
