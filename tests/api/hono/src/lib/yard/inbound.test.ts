@@ -1,12 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import type { Channel, Message } from "../../../../../../packages/message/src/index"
 
 process.env.BETTER_AUTH_SECRET ||= "yard-inbound-test-secret-not-for-use-anywhere"
-const { botLine, inboundCard, pendingCard, pollWaiting, queueLine, untrusted } =
+const { botLine, inboundCard, pendingCard, pollWaiting, queueLine, timedRun, untrusted } =
   await import("../../../../../../api/hono/src/lib/yard/inbound")
 const { inboxInputSchema } = await import("../../../../../../api/hono/src/lib/dashboard/inbox")
 type Card = import("../../../../../../api/hono/src/lib/yard/inbound").Card
@@ -310,6 +310,21 @@ describe("the poll", () => {
     const failed = async () => ({ code: 1, stderr: "notify.sh: no outbox\n", stdout: "" })
     await expect(queueLine("Yard: a line", failed, "/x/checkout")).rejects.toThrow("no outbox")
     await expect(queueLine("Yard: a line", ok, null)).rejects.toThrow()
+  })
+
+  test("a notify.sh that hangs is stopped at its time limit and fails as a queue that failed, so the poll carries on", async () => {
+    const root = join(DIR, "hung-checkout")
+    mkdirSync(join(root, "scripts", "ops"), { recursive: true })
+    await Bun.write(join(root, "scripts", "ops", "notify.sh"), "sleep 30\n")
+    const started = Date.now()
+    await expect(queueLine("Yard: a line", timedRun(500), root)).rejects.toThrow("notify.sh exited")
+    expect(Date.now() - started).toBeLessThan(10_000)
+    await Bun.write(join(root, "scripts", "ops", "notify.sh"), 'echo "no outbox" >&2; exit 3\n')
+    await expect(queueLine("Yard: a line", timedRun(5_000), root)).rejects.toThrow(
+      "notify.sh exited 3: no outbox",
+    )
+    await Bun.write(join(root, "scripts", "ops", "notify.sh"), "exit 0\n")
+    await queueLine("Yard: a line", timedRun(5_000), root)
   })
 
   test("the poll's module never reaches deliver(), so a bot's words never reach a session as the owner's", async () => {
