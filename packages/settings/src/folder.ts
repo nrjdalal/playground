@@ -342,7 +342,7 @@ export type Entry = {
 const FIELD = "\x1f"
 const RECORD = "\x1e"
 
-// The commits of a scope that carry this trailer line exactly (Setting: ui.theme), newest first: what why reads.
+// The commits of a scope that carry this trailer line exactly (Setting: ui.theme), newest first, an empty one included (a score below 5 changes no file, and a pathspec would hide it): what why reads.
 export const extLog = (data: string, scope: string, trailer: [string, string]): Entry[] => {
   const dir = scopeDir(data, scope)
   if (!existsSync(dir)) return []
@@ -353,8 +353,6 @@ export const extLog = (data: string, scope: string, trailer: [string, string]): 
     "--grep",
     line,
     `--format=%H${FIELD}%aI${FIELD}%an${FIELD}%B${RECORD}`,
-    "--",
-    ".",
   ])
   if (code !== 0) return []
   return out
