@@ -15,11 +15,13 @@ It does the same when those files leave a key the apps' schemas require unset or
 ## The run
 
 `bun run test` builds `packages/*` first, because a test reaches a shared package through its `exports`, which point at `dist`, so on a fresh checkout an unbuilt package resolves to nothing.
+It builds them under `NODE_ENV=production SKIP_ENV_VALIDATION=true`, as `prebuildTests` does, since `@packages/auth`'s build validates the env, which a worktree with no `.env` leaves empty.
 Only the shared packages are built, not the apps: a test imports app code by source path and never through `dist`.
 `bun run test:file <paths>` first builds only the packages its files import whose `dist` is missing, is older than a file under its package's `src` while no stack runs in this worktree, or lacks a name they import, those reached through relative, `@/` and absolute imports into this checkout included,
 and writes the data table's metrics when missing (`prebuildTests` in `packages/scripts/src/verify/prebuild.ts`, under `NODE_ENV=production SKIP_ENV_VALIDATION=true`), so a fresh clone runs it directly.
 So a scratch test outside the checkout that imports its modules by absolute path builds what they import, while an absolute import into another clone stays unread.
 It also builds a package whose dist file a test names by path (`packages/env/dist/gaps.mjs`), when that package's `dist` folder is missing.
+A file that spawns a child process (`Bun.spawn`, `spawnSync`, `execFile`, the `$` shell), whatever the program, may start Bun on code the import scan cannot follow, a `bun -e` text, a path read at run time or a helper's binary in a variable, so test:file builds every shared package for it as it builds a package its files import, above (`tests/api/hono/src/bin/dashboard-thread.test.ts`).
 `bun run check-types:tests` does the same for the packages its files import, type-only imports included, and builds `@api/hono`'s declarations, which the web's types import.
 In the factory's main checkout each stops instead, naming your own worktree.
 It runs the files in parallel (`packages/scripts/src/test-sandbox.ts`: `bun test --parallel`, the cores less one and at most 4, the slowest first by `tests/timings.json`, on GitHub the merged one below, which `bun run test:timings` rewrites after a run), then its `SERIAL` files one at a time.
