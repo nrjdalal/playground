@@ -12,7 +12,7 @@ export type YardVariables = { caller: Caller }
 
 type Signed = { banned?: boolean | null; id: string; login?: string | null; role?: string | null }
 
-// Who may call, through a session or a bearer token: rung the lowest console rung that passes (member for Yard, user to redeem an invite, owner for invites and bots), web true where a bearer token is refused (approving, tokens, invites), since a token, an agent's, never decides for its person, and bots true on the two message routes and the log route, the only ones a bot's token reaches.
+// Who may call, through a session or a bearer token: rung the lowest console rung that passes (member for Yard, user to redeem an invite, owner for invites and bots), web true where a bearer token is refused (approving, tokens, invites), since a token, an agent's, never decides for its person, and bots true on the message routes, by a channel's id or the bot's own, and the log route, the only ones a bot's token reaches.
 export const yardCaller = ({
   bots = false,
   rung = "member",
