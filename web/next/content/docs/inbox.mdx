@@ -38,14 +38,15 @@ The Inbox is six rows, each opened or closed by a click:
 - **Inbox** holds the list and shows how many it holds, and reads gray when it is empty. It starts open.
 - **In progress** holds what you approved or sent, from the moment you answer it until the session that posted it says it is done.
 - **Later** holds what you put away until a time.
-- **Archive** holds what you archived: still unanswered, out of your list until you move it back.
+- **Archive** holds what you archived: one still unanswered, out of your list until you move it back, or one you took off Done to keep.
 - **Done** holds what is settled.
 - **Preview** opens a small browser for active development, there even when the Inbox is empty (see [Preview](#preview)). It starts closed.
 
 Each row but Preview shows how many it holds; a row reads gray while it is empty, and Done reads gray once you have read all of it, though it still opens.
 An empty row ends in a small circle, and a row with something in it in an arrow that points down while it is open.
 An item is the same card on every row.
-An archived one offers **Later**, **Move back**, which puts it back at the top of the list to answer again, and **Dismiss**.
+An archived one offers **Later**, **Move back**, which puts it back at the top of the list to answer again, and **Dismiss**; one you answered before you archived it offers **Move back**, which returns it to In progress or Done as its answer stands, and **Dismiss**.
+A card on Done offers **Archive** and **Dismiss** until you dismiss it.
 The check on the Done row marks everything in Done read, and goes once it is all read.
 A row's heading stays at the top while you scroll through it.
 
@@ -168,14 +169,14 @@ A card with no Retry offers Dismiss.
 
 Every card has the buttons its state takes, beside its own answers:
 
-| Button    | On                                                          | Moves the card                          | The session that posted it                                                     |
-| --------- | ----------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
-| ✓ Seen    | anything in the list you have not read                      | nowhere; it is marked read              | hears nothing                                                                  |
-| ✓✓ Done   | an update, or a card you have answered                      | to Done                                 | for an update, hears it is done; otherwise nothing                             |
-| Later     | a decision, draft or update in the list, or an archived one | out of the list until the time you pick | hears nothing                                                                  |
-| Archive   | a decision, draft or update in the list                     | to Archive, unanswered                  | hears nothing, and keeps waiting                                               |
-| Move back | an archived card, or one dismissed while it waited          | back to the top of the list             | hears nothing                                                                  |
-| Dismiss   | every card, until it is dismissed                           | to Done, marked dismissed               | while it waits on you, hears that you set it aside; otherwise hears to drop it |
+| Button    | On                                                                                | Moves the card                                                         | The session that posted it                                                     |
+| --------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| ✓ Seen    | anything in the list you have not read                                            | nowhere; it is marked read                                             | hears nothing                                                                  |
+| ✓✓ Done   | an update, or a card you have answered                                            | to Done                                                                | for an update, hears it is done; otherwise nothing                             |
+| Later     | a decision, draft or update in the list, or an archived one you have not answered | out of the list until the time you pick                                | hears nothing                                                                  |
+| Archive   | a decision, draft or update in the list, or a card on Done you have not dismissed | to Archive                                                             | hears nothing; what waits keeps waiting                                        |
+| Move back | an archived card, or one dismissed while it waited                                | back to the top of the list, or an answered one to In progress or Done | hears nothing                                                                  |
+| Dismiss   | every card, until it is dismissed                                                 | to Done, marked dismissed                                              | while it waits on you, hears that you set it aside; otherwise hears to drop it |
 
 **Later**, the zzz button, offers times, each shown with its day and time in your time zone (`clock.ownerZone`), or Pick a time… for a day and time of your own.
 The item moves to Later and leaves the count until then, then comes back as new.
