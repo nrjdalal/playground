@@ -8934,7 +8934,6 @@ var prCreate = (args) => {
 };
 var pushes = (args) => gitCommand(args).sub?.value === "push";
 var REF_MUTATION = /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/;
-var GRAPHQL_TEXT = /"""[\s\S]*?"""|"(?:[^"\\\n\r]|\\.)*"|#[^\n\r]*/g;
 var REF_ENDPOINT = /^repos\/[^/]+\/[^/]+\/(?:contents\/.+|git\/refs(?:\/.+)?|merges|pulls|pulls\/\d+\/(?:merge|update-branch))$/;
 async function apiWrite(rest, cmd, env, xargs) {
   const request = await ghApi(rest, cmd, env, xargs);
@@ -8943,7 +8942,7 @@ async function apiWrite(rest, cmd, env, xargs) {
   const { endpoint, fields, inputs, method } = request;
   const path = endpoint.value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "").split("?")[0];
   if (path === "graphql" || path === "api/graphql")
-    return fields.filter((f) => f.key === "query").some((f) => unreadable(f.text) || REF_MUTATION.test(f.text.value.replace(GRAPHQL_TEXT, ""))) || inputs.some((d) => unreadable(d) || REF_MUTATION.test(d.value));
+    return [...fields.filter((f) => f.key === "query").map((f) => f.text), ...inputs].some((d) => unreadable(d) || REF_MUTATION.test(d.value));
   if (method === "GET" || method === "HEAD")
     return false;
   if (unreadable(endpoint))
