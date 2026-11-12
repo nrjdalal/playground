@@ -14,12 +14,46 @@ const REPO = join(import.meta.dir, "..", "..", "..", "..", "..", "..")
 
 type Step = { at: string; params?: Record<string, string>; size?: number }
 
-// Slack's HTTP, stubbed: each getUploadURLExternal hands back its own URL and file id, and every step lands in one log, so the order reads whole.
-const stub = ({ complete = true, putStatus = 200 } = {}) => {
+type Member = {
+  deleted?: boolean
+  id: string
+  name: string
+  profile: { display_name: string; real_name: string }
+}
+
+// Made-up workspace members, as users.list hands them back.
+const MEMBERS: Member[] = [
+  {
+    id: "U0MADEUP01",
+    name: "merritt.lee",
+    profile: { display_name: "Merritt", real_name: "Merritt Lee" },
+  },
+  { id: "U0MADEUP02", name: "alex", profile: { display_name: "Alex", real_name: "Alex One" } },
+  { id: "U0MADEUP03", name: "alex.two", profile: { display_name: "alex", real_name: "Alex Two" } },
+  {
+    deleted: true,
+    id: "U0MADEUP04",
+    name: "ida",
+    profile: { display_name: "Ida", real_name: "Ida Gone" },
+  },
+  { id: "U0MADEUP05", name: "jose", profile: { display_name: "José", real_name: "José Ruiz" } },
+]
+
+// Slack's HTTP, stubbed: each getUploadURLExternal hands back its own URL and file id, users.list hands back the members a page at a time, and every step lands in one log, so the order reads whole.
+const stub = ({ complete = true, members = MEMBERS, page = 100, putStatus = 200 } = {}) => {
   const steps: Step[] = []
   let n = 0
   const slack = async (method: string, params: Record<string, string>) => {
     steps.push({ at: method, params })
+    if (method === "users.list") {
+      const from = Number(params.cursor ?? 0)
+      const next = from + page < members.length ? String(from + page) : ""
+      return {
+        members: members.slice(from, from + page),
+        ok: true,
+        response_metadata: { next_cursor: next },
+      }
+    }
     if (method === "files.getUploadURLExternal") {
       n += 1
       return { file_id: `F0MADEUP0${n}`, ok: true, upload_url: `https://files.example/upload/${n}` }
@@ -209,6 +243,91 @@ describe("dm upload (PG-649)", () => {
         }),
       ).rejects.toThrow("notes.txt: a term the channel may not see")
       expect(steps).toEqual([])
+    })
+
+    const sharing = (text: string, opts?: Parameters<typeof stub>[0]) => {
+      const { put, slack, steps } = stub(opts)
+      const shared = share("item-1", {
+        check: async () => undefined,
+        put,
+        read: async () => ({ ...SPEC, text }),
+        slack,
+      })
+      return { shared, steps }
+    }
+
+    test("words holding a mention and a URL post with the files as one message: the mention as its user's token, the URL as a link labelled without its scheme (PG-1983)", async () => {
+      const { shared, steps } = sharing("@Merritt the fix is live: https://example.com/fix.")
+      expect(await shared).toBe(2)
+      const completes = steps.filter((step) => step.at === "files.completeUploadExternal")
+      expect(completes.map((step) => step.params?.initial_comment)).toEqual([
+        "<@U0MADEUP01> the fix is live: <https://example.com/fix|example.com/fix>.",
+      ])
+      expect(steps.map((step) => step.at)).not.toContain("chat.postMessage")
+    })
+
+    test("a mention matches a member's username, display name or real name, in any case, past a page of users.list (PG-1983)", async () => {
+      const { shared, steps } = sharing("cc @MERRITT.LEE, (@merritt)", { page: 1 })
+      await shared
+      expect(steps.at(-1)?.params?.initial_comment).toBe("cc <@U0MADEUP01>, (<@U0MADEUP01>)")
+      expect(steps.filter((step) => step.at === "users.list").map((s) => s.params?.cursor)).toEqual(
+        [undefined, "1", "2", "3", "4"],
+      )
+    })
+
+    test("a name that matches no member, a removed one alone, or two, fails the share naming it, before any file reaches Slack (PG-1983)", async () => {
+      for (const [text, reason] of [
+        ["@nobody hi", "@nobody matches no Slack user: only a person can be tagged"],
+        ["@here hi", "@here matches no Slack user: only a person can be tagged"],
+        ["@Ida hi", "@Ida matches no Slack user"],
+        ["@alex hi", "@alex matches 2 Slack users"],
+      ] as const) {
+        const { shared, steps } = sharing(text)
+        await expect(shared).rejects.toThrow(reason)
+        expect(steps.map((step) => step.at)).not.toContain("files.getUploadURLExternal")
+      }
+    })
+
+    test("a code span, a fenced block and a Slack link already in the words stay exactly as written, and a name past ASCII reads whole (PG-1983)", async () => {
+      const fenced = "run\n```\nnpm i @types/node\nhttps://example.com/b\n```"
+      for (const [text, comment] of [
+        ["see `https://example.com/a` now", "see `https://example.com/a` now"],
+        ["install `@types/node` first", "install `@types/node` first"],
+        [fenced, fenced],
+        [
+          "@Merritt see <https://example.com|the doc>",
+          "<@U0MADEUP01> see <https://example.com|the doc>",
+        ],
+        ["@José hi", "<@U0MADEUP05> hi"],
+      ] as const) {
+        const { shared, steps } = sharing(text)
+        await shared
+        expect(steps.at(-1)?.params?.initial_comment).toBe(comment)
+      }
+    })
+
+    test("a URL inside Slack's bold, italic, strike or brackets leaves the closing mark outside its link (PG-1983)", async () => {
+      for (const [open, close] of [
+        ["*", "*"],
+        ["_", "_"],
+        ["~", "~"],
+        ["[", "]"],
+      ]) {
+        const { shared, steps } = sharing(`see ${open}https://example.com/a${close} now`)
+        await shared
+        expect(steps.at(-1)?.params?.initial_comment).toBe(
+          `see ${open}<https://example.com/a|example.com/a>${close} now`,
+        )
+      }
+    })
+
+    test("words with no mention look no member up, and an email or a mention inside a URL stays as written (PG-1983)", async () => {
+      const { shared, steps } = sharing("mail a@b.example or see https://example.com/@alex")
+      await shared
+      expect(steps.map((step) => step.at)).not.toContain("users.list")
+      expect(steps.at(-1)?.params?.initial_comment).toBe(
+        "mail a@b.example or see <https://example.com/@alex|example.com/@alex>",
+      )
     })
   })
 

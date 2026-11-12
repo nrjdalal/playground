@@ -1314,17 +1314,13 @@ export function slackPlace(link: string | undefined): UploadPlace | null {
   return word === "thread" && thread && more.length === 0 ? { channel, thread } : null
 }
 
-// A mention (@name) or a URL in a draft's words: the poster posts those words after the files, resolving each mention and sending each link as a chip, which a file's message cannot carry.
-const POSTER_WORDS = /(?<![\w.])@\w|https?:\/\//i
-
-// Pure: the words a Slack draft's Send posts with its files as their message: the owner's changed ones, else the draft's; none for any other answer, and none for words holding a mention or a URL (POSTER_WORDS).
+// Pure: the words a Slack draft's Send posts with its files as their message, a mention or a URL in them resolved by dm upload: the owner's changed ones, else the draft's; none for any other answer.
 export function wordsWithFiles(
   item: InboxItem,
   answer: { choice?: string; editedText?: string },
 ): string | undefined {
   if (item.kind !== "draft" || answer.choice !== "send") return undefined
-  const words = answer.editedText ?? ("text" in item.preview ? item.preview.text : undefined)
-  return words && !POSTER_WORDS.test(words) ? words : undefined
+  return answer.editedText ?? ("text" in item.preview ? item.preview.text : undefined)
 }
 
 // Pure: the files a go shares into Slack before its answer reaches the poster: a Slack draft's on Send, with its words as their message (wordsWithFiles), or a slack decision's on Approve or Edit, when its link names a Slack place and it has shared none yet; null for anything else, whose files stay on the card.

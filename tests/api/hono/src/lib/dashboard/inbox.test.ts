@@ -2128,7 +2128,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(payload).not.toHaveProperty("text")
     })
 
-    test("a Send whose words hold a mention or a URL shares its files with no message, and the poster still posts the words (PG-1921)", async () => {
+    test("a Send whose words hold a mention or a URL takes them with its files too, so the poster posts no second message (PG-1983)", async () => {
       for (const words of [
         "@Merritt the fix is live",
         "the fix is live: https://example.com/fix",
@@ -2142,11 +2142,9 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           { action: "send", text: words },
           { actor, deliver: async (delivery) => (typed.push(delivery), delivered()), upload },
         )
-        expect(payloadOf(typed[0]?.text ?? "")).toMatchObject({
-          next: "carry-out",
-          text: words,
-          verb: "send",
-        })
+        const payload = payloadOf(typed[0]?.text ?? "")
+        expect(payload).toMatchObject({ go: true, next: "close", verb: "send" })
+        expect(payload).not.toHaveProperty("text")
       }
     })
 
@@ -2244,7 +2242,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         expect(await uploadSpec(db, posted.id, read)).toHaveProperty("text", "hi there")
       })
 
-      test("carries no words that hold a mention or a URL, which the poster posts after the files (PG-1921)", async () => {
+      test("carries words that hold a mention or a URL, which dm upload resolves (PG-1983)", async () => {
         const shot = await kept(PNG, "before.png", "image")
         for (const text of ["@Merritt hi", "hi (@merritt.lee)", "see https://example.com"]) {
           const posted = await post({
@@ -2254,7 +2252,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
             title: "Tell Merritt",
           })
           await store.answerItem(db, posted.id, { action: "send" }, { actor })
-          expect(await uploadSpec(db, posted.id, read)).not.toHaveProperty("text")
+          expect(await uploadSpec(db, posted.id, read)).toHaveProperty("text", text)
         }
         const mail = await post({
           from: "ops",
