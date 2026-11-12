@@ -220,6 +220,21 @@ describe("a scope's layouts", () => {
       "made-up-triage: no comparator board: core has triage, and the scope's scripts/parity-replay/compare.ts names no board",
     ])
   })
+
+  test("a compare.ts with no comparators export names no comparator, so the missing one is said plainly", async () => {
+    const partial = join(scratch, "extensions", "partial")
+    mkdirSync(join(partial, "scripts/parity-replay"), { recursive: true })
+    writeFileSync(
+      join(partial, "scripts/parity-replay/compare.ts"),
+      "export const boardSignature = (report: string) => report\n",
+    )
+    expect(Object.keys(await comparators(partial))).toEqual(["triage"])
+    expect(
+      await problems(partial, "made-up-triage", { ...TRIAGE, compare: "board" }, MAP),
+    ).toContain(
+      "made-up-triage: no comparator board: core has triage, and the scope's scripts/parity-replay/compare.ts names no board",
+    )
+  })
 })
 
 describe("runSide", () => {

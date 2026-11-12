@@ -117,7 +117,7 @@ export type Comparator = {
 export const comparators = async (scope: string): Promise<Record<string, Comparator>> => {
   const file = join(scope, LAYOUTS, "compare.ts")
   const own = existsSync(file)
-    ? ((await import(file)).comparators as Record<string, (report: string) => string>)
+    ? (((await import(file)).comparators ?? {}) as Record<string, (report: string) => string>)
     : {}
   return {
     ...Object.fromEntries(
