@@ -75,14 +75,70 @@ export function unnamedDocs(body: string, files: string[]): string[] {
   )
 }
 
-// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line, its Evidence naming each changed doc in files (AGENTS.md's Shipping a Playground PR, step 1).
-export function bodyRefusal(body: string, files: string[] = []): string | null {
+// Pure: whether a body's Evidence holds a line that opens with A/B:, as a bullet, in bold or as plain text, outside a code fence: the PR's measured comparison, A and B against the bar, or No runtime metric and the check that stands in.
+export function abLine(body: string): boolean {
+  let fenced = false
+  return evidenceOf(body)
+    .split(/\r?\n/)
+    .some((line) => {
+      if (/^\s*(?:```|~~~)/.test(line)) fenced = !fenced
+      return !fenced && /^\s*(?:[-*+]\s+)?(?:\*\*|__)?A\/B(?::(?:\*\*|__)?|(?:\*\*|__):)/.test(line)
+    })
+}
+
+// Pure: the pr template's own placeholders, each <...> inside the first markdown fence of its SKILL.md (extensions/core/skills/pr/SKILL.md), read from the file so the gate holds no copy.
+export function templatePlaceholders(skill: string): string[] {
+  const fence = /^```markdown\n([\s\S]*?)^```$/m.exec(skill)?.[1] ?? ""
+  return [...new Set(fence.match(/<[^<>\n]+>/g) ?? [])]
+}
+
+// Pure: a body's text outside code fences and inline code, where a placeholder would be read as prose.
+function proseOf(body: string): string {
+  let fenced = false
+  return body
+    .split(/\r?\n/)
+    .filter((line) => {
+      if (/^\s*(?:```|~~~)/.test(line)) {
+        fenced = !fenced
+        return false
+      }
+      return !fenced
+    })
+    .join("\n")
+    .replace(/(`+)[^`\n]*?\1/g, " ")
+}
+
+const BARE_TOKEN = /(?<![\w-])[A-Z][A-Z0-9]*_[A-Z0-9_]*[A-Z0-9](?![\w-])/g
+
+// Pure: each bare all-caps token with an underscore in a text that is already prose, once.
+const tokensIn = (prose: string): string[] => [...new Set(prose.match(BARE_TOKEN) ?? [])]
+
+// Pure: each bare all-caps token with an underscore in a body's prose (SUITE_LINE), once, the shape a fill token left unfilled takes.
+export const bareTokens = (body: string): string[] => tokensIn(proseOf(body))
+
+// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line, its Evidence holding an A/B line, its prose holding no unfilled placeholder (the template's own, or a bare all-caps token in unfound, which no file at the head holds outside the gate's own folders), and its Evidence naming each changed doc in files (AGENTS.md's Shipping a Playground PR, step 1).
+export function bodyRefusal(
+  body: string,
+  files: string[] = [],
+  { placeholders = [], unfound = [] }: { placeholders?: string[]; unfound?: string[] } = {},
+): string | null {
   const label = tldrLabel(body)
   if (label) {
     return `its body's TL;DR holds a line labelled "${label}:", which the pr skill's template (extensions/core/skills/pr/SKILL.md) leaves out; delete that line`
   }
   if (!templateBody(body)) {
     return "its body needs the PR template: a TL;DR of 2 sentences or more, the pr skill's Summary, Evidence and Merge Danger, then Links (extensions/core/skills/pr/SKILL.md)"
+  }
+  if (!abLine(body)) {
+    return "its body's Evidence holds no A/B line: open one with `A/B:` and give A and B against the bar (`A/B: <metric>, A canary <value>, B branch <value>, n=<N>`), or `A/B: No runtime metric` and the check that stands in"
+  }
+  const prose = proseOf(body)
+  const unfilled = [
+    ...placeholders.filter((placeholder) => prose.includes(placeholder)),
+    ...tokensIn(prose).filter((token) => unfound.includes(token)),
+  ]
+  if (unfilled.length > 0) {
+    return `its body holds ${unfilled.length === 1 ? "an unfilled placeholder" : `${unfilled.length} unfilled placeholders`}: ${unfilled.join(", ")}; fill each in, or put a real identifier in inline code (a <...> of the pr template, extensions/core/skills/pr/SKILL.md, or a bare all-caps token no file at the head holds)`
   }
   const unnamed = unnamedDocs(body, files)
   if (unnamed.length === 0) return null

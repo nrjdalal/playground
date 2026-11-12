@@ -27,6 +27,7 @@ import {
 } from "../../../../../../api/hono/src/lib/usage/report"
 import { readUsage } from "../../../../../../api/hono/src/lib/usage/window"
 import { setSessionNames } from "../../../../../../packages/config/src/kinds"
+import { testContainerName } from "../../../../../container"
 import { onLiveDashboard } from "../../../../../dashboard-fixture"
 import { liveReads } from "../../../../../live-reads"
 import { SEEDED_NAMES } from "../../../../../session-names"
@@ -523,6 +524,8 @@ describe.skipIf(!dockerUp())("the report's reads", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("usage-report"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",

@@ -193,7 +193,7 @@ export async function forecast(
   return { canary, conflicts: dropped, order }
 }
 
-// The owner's open PRs whose every pr:merge gate passes at their head, in merge-queue order, a draft that passes but for ready included, and why each other one is held.
+// The owner's open PRs whose every pr:merge gate passes at their head, in merge-queue order, a draft that passes but for ready included, and why each other one is held: a PR whose facts cannot be read (a failed fetch, a pr template the head cannot show) is held with that error, so one such PR never ends the pass.
 export async function gatedOf(
   run: Run,
   name: string,
@@ -204,7 +204,16 @@ export async function gatedOf(
   const held: { n: number; why: string }[] = []
   const order: Candidate[] = []
   for (const n of sortByQueue(await openPrs(run, name, true), await readQueue(queue))) {
-    const read = await facts(run, name, n)
+    let read: PrFacts
+    try {
+      read = await facts(run, name, n)
+    } catch (error) {
+      held.push({
+        n,
+        why: `not gated: facts unreadable (${(error as Error).message})`,
+      })
+      continue
+    }
     const failed = withReadyDraft(read, gatesOf(read, options), MARKED).filter((gate) => !gate.ok)
     if (failed.length === 0) order.push({ facts: read, n })
     else

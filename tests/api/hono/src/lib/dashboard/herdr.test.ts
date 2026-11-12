@@ -1,10 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
   answerKeys,
+  bringsBack,
+  codexLaunches,
   FIXTURE_SOCKET,
   HerdrDown,
   herdrEvents,
@@ -24,6 +34,7 @@ import {
   readScreen,
   readServer,
   request,
+  restoring,
   RESUBSCRIBE,
   showsAsk,
   typeKeys,
@@ -315,6 +326,72 @@ describe("readServer and herdrRecords", () => {
       session_id: SESSION,
     })
     expect(herdrRecords([read], null, "t")[0]).toMatchObject({ session_id: SESSION })
+  })
+
+  test("a Codex pane holds the session its launch record names, live with no Claude registry file (#1794)", () => {
+    const THREAD = "0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b"
+    const pane = (label: string, argv: string[]): ServerRead => ({
+      panes: [
+        {
+          ...paneSchema.parse({ ...PANE, agent: null, agent_session: null, label }),
+          processes: [{ argv, cwd: "/tmp/leads", pid: 5151 }],
+        },
+      ],
+      server: "playground",
+      workspaces: [],
+    })
+    const codex = new Map([["dispatcher", THREAD]])
+    const running = pane("dispatcher", ["/opt/codex/bin/codex", "--dangerously-bypass-hook-trust"])
+    const [record, ...rest] = herdrRecords([running], registered([]), "t", codex)
+    expect(rest).toEqual([])
+    expect(record).toMatchObject({
+      agent: "codex",
+      pid: 5151,
+      session_id: THREAD,
+      surface_id: "herdr:playground:w1:p1",
+      transcript_path: "",
+    })
+    expect(liveRecords({ sessions: [record] }, null).sessions).toHaveLength(1)
+    // the pane's codex has exited to its shell, or the label has no Codex launch record
+    expect(herdrRecords([pane("dispatcher", ["/bin/zsh"])], registered([]), "t", codex)).toEqual([])
+    expect(herdrRecords([running], registered([]), "t")).toEqual([])
+    expect(herdrRecords([pane("builder", ["codex"])], registered([]), "t", codex)).toEqual([])
+    // npm's launcher runs under node; a word naming codex elsewhere in the argv, a shell's argument, holds nothing
+    const launcher = pane("dispatcher", ["node", "/x/node_modules/.bin/codex", "resume"])
+    expect(herdrRecords([launcher], registered([]), "t", codex)).toHaveLength(1)
+    const shell = pane("dispatcher", ["/bin/zsh", "-c", "/opt/codex/bin/codex"])
+    expect(herdrRecords([shell], registered([]), "t", codex)).toEqual([])
+    expect(
+      herdrRecords([pane("dispatcher", ["less", "codex"])], registered([]), "t", codex),
+    ).toEqual([])
+  })
+
+  test("the Codex launch records are the sessions whose pin names codex, with their resume record's thread", () => {
+    const data = mkdtempSync(join(tmpdir(), "codex-launch-"))
+    cleanups.push(() => rmSync(data, { force: true, recursive: true }))
+    mkdirSync(join(data, "backends"))
+    mkdirSync(join(data, "resume"))
+    const THREAD = "0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2b"
+    const record = (name: string, pin: string, thread = THREAD, folder = "/x/leads") => {
+      writeFileSync(join(data, "backends", name), `${pin}\n`)
+      writeFileSync(
+        join(data, "resume", `${name}.sh`),
+        `#!/bin/bash\n# server: playground\nexec /x/scripts/spawn.sh resume ${name} ${folder} ${thread}\n`,
+      )
+    }
+    record("dispatcher", "codex openai")
+    // spawn.sh writes the exec line with %q, so a folder holding a space reads as one word with its space escaped
+    record("dispatcher-b", "codex openai", THREAD, "/x/my\\ leads")
+    record("builder", "claude-code claude")
+    record("planner", "codex openai", "not-a-thread")
+    writeFileSync(join(data, "backends", "ops"), "codex openai\n")
+    expect(codexLaunches(data)).toEqual(
+      new Map([
+        ["dispatcher", THREAD],
+        ["dispatcher-b", THREAD],
+      ]),
+    )
+    expect(codexLaunches(join(data, "none"))).toEqual(new Map())
   })
 
   test("a board that reads no herdr server, or not every one, keeps the others' change times", () => {
@@ -1011,7 +1088,7 @@ describe.skipIf(!existsSync(HERDR))("herdr's schema", () => {
   })
 })
 
-// Every herdr call in the dashboard goes through herdr.ts, and only deliver.ts sends a message.
+// Every herdr call in the dashboard goes through herdr.ts, and only deliver.ts sends a message, beside the idle compact's `/compact` (ADR 0020).
 const API = join(import.meta.dir, "../../../../../../api/hono/src")
 const sources = () =>
   [...new Bun.Glob("**/*.ts").scanSync({ cwd: API })].map((file) => ({
@@ -1032,7 +1109,7 @@ describe("herdr's boundary", () => {
   })
 
   // prompt() or pressEnter() named from any path to herdr (`@/lib/dashboard/herdr`, `./herdr`, `../dashboard/herdr`), imported or re-exported, and the whole module taken (a namespace import, `export *`, `import()`), which reaches both too
-  test("only deliver.ts imports herdr's prompt and pressEnter", () => {
+  test("only deliver.ts and idle-compact.ts import herdr's prompt and pressEnter", () => {
     const from = String.raw`\s*from\s*["'][^"']*\/herdr["']`
     const reaches = new RegExp(
       [
@@ -1045,8 +1122,9 @@ describe("herdr's boundary", () => {
     expect(
       sources()
         .filter(({ text }) => reaches.test(text))
-        .map((s) => s.file),
-    ).toEqual(["lib/dashboard/deliver.ts"])
+        .map((s) => s.file)
+        .sort(),
+    ).toEqual(["lib/dashboard/deliver.ts", "lib/dashboard/idle-compact.ts"])
     for (const form of [
       'import { prompt } from "../dashboard/herdr"',
       'export { prompt } from "@/lib/dashboard/herdr"',
@@ -1103,7 +1181,7 @@ const repoFiles = async (keep: (path: string) => boolean): Promise<Record<string
   return files
 }
 
-// Text typed into a pane lands as a user turn and reads as the owner's, and nothing may speak for the owner, so only herdr.ts's writes type, for the owner's own clicks; sessions talk through SendMessage. A cmux command that types is held here while cmux can still be installed, and a script's key into a herdr pane further below, to run.py's Escape and `playground picker`.
+// Text typed into a pane lands as a user turn and reads as the owner's, and nothing may speak for the owner, so only herdr.ts's writes type, for the owner's own acts and the idle compact's `/compact` the owner approved (ADR 0020); sessions talk through SendMessage. A cmux command that types is held here while cmux can still be installed, and a script's key into a herdr pane further below, to run.py's Escape and `playground picker`.
 const PANE_TYPING = [
   /(?:^|[^\w-])[$"'{]*[\w./~-]*cmux\b[}"']?(?:\s+--?[\w-]+(?:=\S+)?)*\s+send(?:-key)?\s+(?!(?:or|and)\b)[^\s`]/i,
   /["']cmux["']\s*,\s*["']send(?:-key)?["']/i,
@@ -1147,13 +1225,13 @@ describe("typing into a pane", () => {
   })
 })
 
-// herdr's pane writes, the one way the dashboard types into a pane: herdr.ts alone names them, and of those that type, prompt() and pressEnter() reach only deliver.ts (the owner's composer, the Linear app's row actions and the owner's inbox answers) and typeKeys() only feed.ts, whose answerHerdr() serves the herdr answer route, POST /api/v1/workers/:sessionId/feed/:requestId, the owner's own Submit on a prompt's card, since an answer from the card is the owner's own Submit.
+// herdr's pane writes, the one way the dashboard types into a pane: herdr.ts alone names them, and of those that type, prompt() and pressEnter() reach only deliver.ts (the owner's composer, the Linear app's row actions and the owner's inbox answers), with prompt() also reaching idle-compact.ts, the one ops pass the owner approved (ADR 0020), and typeKeys() only feed.ts, whose answerHerdr() serves the herdr answer route, POST /api/v1/workers/:sessionId/feed/:requestId, the owner's own Submit on a prompt's card, since an answer from the card is the owner's own Submit.
 const HERDR_TS = "api/hono/src/lib/dashboard/herdr.ts"
 const HERDR_WRITES =
   /["'`](?:agent\.(?:prompt|send_keys)|pane\.(?:send_input|send_keys|send_text))["'`]/
 const HERDR_TYPERS: Record<string, string[]> = {
   pressEnter: ["api/hono/src/lib/dashboard/deliver.ts"],
-  prompt: ["api/hono/src/lib/dashboard/deliver.ts"],
+  prompt: ["api/hono/src/lib/dashboard/deliver.ts", "api/hono/src/lib/dashboard/idle-compact.ts"],
   typeKeys: ["api/hono/src/lib/dashboard/feed.ts"],
 }
 
@@ -1200,10 +1278,10 @@ describe("herdr's pane writes", () => {
     ).toEqual([])
   })
 
-  test("prompt() and pressEnter() reach only deliver.ts, and typeKeys() only feed.ts's herdr answer route", async () => {
+  test("prompt() reaches only deliver.ts and idle-compact.ts, pressEnter() only deliver.ts, and typeKeys() only feed.ts's herdr answer route", async () => {
     const files = await sourceFiles()
     for (const [name, allowed] of Object.entries(HERDR_TYPERS)) {
-      expect([name, herdrTypers(files, name)]).toEqual([name, allowed])
+      expect([name, herdrTypers(files, name).sort()]).toEqual([name, allowed])
     }
   })
 
@@ -1244,5 +1322,121 @@ describe("a script's key into a pane or answer to a prompt", () => {
       "packages/scripts/src/playground/picker.ts",
       "scripts/ops/unstick/run.py",
     ])
+  })
+})
+
+// #1682: ops-herdr keeps <server>.restore beside the server's socket from its start until no session its restore owes waits on a gate or focus, and writes each restore's lines to <server>.restore.log, so the home reads whether this restore can still bring the dispatcher back.
+describe("bringsBack", () => {
+  const at = Date.parse("2026-11-10T18:14:47Z")
+  const minute = 60_000
+  const ran = (log: string, logAt = at + minute) =>
+    bringsBack({ dispatcher: "dispatcher", log, logAt, now: logAt + 1000, owedAt: at })
+
+  test("before the restore's first run since the owe, for up to 5 minutes, so a start or restore that never runs gives Start back", () => {
+    const owed = { dispatcher: "dispatcher", log: "", logAt: null, owedAt: at }
+    expect(bringsBack({ ...owed, now: at + 4 * minute })).toBe(true)
+    expect(bringsBack({ ...owed, now: at + 6 * minute })).toBe(false)
+    const older = { ...owed, log: "restored dispatcher\n", logAt: at - minute }
+    expect(bringsBack({ ...older, now: at + minute })).toBe(true)
+    expect(bringsBack({ ...older, now: at + 6 * minute })).toBe(false)
+  })
+
+  test("while the dispatcher waits, or for 2 minutes after it was restored, as its pane comes up", () => {
+    expect(
+      ran("waiting dispatcher: focus holds it\nwaiting a-worker: the load gate holds it\n"),
+    ).toBe(true)
+    expect(ran("restored dispatcher\nwaiting a-worker: the load gate holds it\n")).toBe(true)
+    const restored = {
+      dispatcher: "dispatcher",
+      log: "restored dispatcher\n",
+      logAt: at,
+      owedAt: at,
+    }
+    expect(bringsBack({ ...restored, now: at + 3 * minute })).toBe(false)
+  })
+
+  test("never once the run failed the dispatcher, skipped it, or held no line for it, whatever else still waits", () => {
+    const wait = "waiting a-worker: the load gate holds it\n"
+    expect(ran(`not restored dispatcher: herdr refused\n${wait}`)).toBe(false)
+    expect(ran(`skipped dispatcher: its roster row reads ended\n${wait}`)).toBe(false)
+    expect(ran(wait)).toBe(false)
+    expect(ran("waiting dispatcher-2: focus holds it\n")).toBe(false)
+  })
+
+  test("a run that named no session, such as another restore's lock, counts as not run yet", () => {
+    const locked = {
+      dispatcher: "dispatcher",
+      log: "restore: another restore runs\n",
+      logAt: at + minute,
+      owedAt: at,
+    }
+    expect(bringsBack({ ...locked, now: at + 2 * minute })).toBe(true)
+    expect(bringsBack({ ...locked, now: at + 6 * minute })).toBe(false)
+  })
+})
+
+describe("restoring", () => {
+  test("reads each owing server's newest restore log for the dispatcher's line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "restoring-"))
+    cleanups.push(() => rmSync(dir, { force: true, recursive: true }))
+    const servers = [
+      { name: "playground", socket: join(dir, "playground.sock") },
+      { name: "playground-probes", socket: join(dir, "playground-probes.sock") },
+    ]
+    const now = Date.now()
+    const at = (path: string, ms: number) => utimesSync(path, ms / 1000, ms / 1000)
+    const read = () => restoring({ dispatcher: "dispatcher", now, servers })
+    expect(read()).toBe(false)
+    const owed = join(dir, "playground.restore")
+    writeFileSync(owed, "x\n")
+    at(owed, now - 60_000)
+    expect(read()).toBe(true)
+    const log = join(dir, "playground.restore.log")
+    writeFileSync(
+      log,
+      "not restored dispatcher: herdr refused\nwaiting a-worker: the load gate holds it\n",
+    )
+    at(log, now - 30_000)
+    expect(read()).toBe(false)
+    writeFileSync(log, "waiting dispatcher: focus holds it\n")
+    at(log, now - 30_000)
+    expect(read()).toBe(true)
+    rmSync(owed)
+    expect(read()).toBe(false)
+    // probes never holds the dispatcher: once its restore has run, its owe says nothing of it
+    const probes = join(dir, "playground-probes.restore")
+    writeFileSync(probes, "x\n")
+    at(probes, now - 60_000)
+    writeFileSync(
+      join(dir, "playground-probes.restore.log"),
+      "waiting a-probe: the load gate holds it\n",
+    )
+    at(join(dir, "playground-probes.restore.log"), now - 30_000)
+    expect(read()).toBe(false)
+  })
+
+  test("a fixture stack reads it from the fixture's herdr.json, and a stack that reads no machine never restores", () => {
+    const dir = mkdtempSync(join(tmpdir(), "restoring-fixture-"))
+    cleanups.push(() => rmSync(dir, { force: true, recursive: true }))
+    const fixture = [{ name: "playground", socket: FIXTURE_SOCKET }]
+    const read = (servers: typeof fixture) =>
+      restoring({ dispatcher: "dispatcher", fixtureDir: dir, servers })
+    writeFileSync(
+      join(dir, "herdr.json"),
+      JSON.stringify({ panes: [], prompts: {}, screens: {}, workspaces: [] }),
+    )
+    expect(read(fixture)).toBe(false)
+    writeFileSync(
+      join(dir, "herdr.json"),
+      JSON.stringify({
+        panes: [],
+        prompts: {},
+        restoring: "2026-11-10T18:14:47Z",
+        screens: {},
+        workspaces: [],
+      }),
+    )
+    expect(read(fixture)).toBe(true)
+    expect(read([])).toBe(false)
   })
 })

@@ -51,7 +51,7 @@ export const TYPING_LAG_SCRIPT = `(() => {
   window.WebSocket = class extends Native {
     constructor(...args) {
       super(...args)
-      if (!String(args[0]).includes("/dashboard/ws")) return
+      if (!String(args[0]).includes("/api/v1/ws")) return
       sockets.push(this)
       // Registered before the page's own listeners, so each real workers frame reaches the page widened too: a board that flipped between its own sessions and the widened ones would read as sessions coming and going on every frame, which a live board does not do.
       this.addEventListener("message", (event) => {
@@ -141,7 +141,7 @@ export const TYPING_LAG_SCRIPT = `(() => {
 // One long turn past the stream's 400-entry cap, each tool call answered, as a live session's are: an unanswered call spins, and hundreds of spinners would time the fixture rather than the dashboard.
 const PAST_CALLS = 400
 
-const finishedTurn = (tag: string, base: number, of: { cwd: string; sessionId: string }) => {
+export const finishedTurn = (tag: string, base: number, of: { cwd: string; sessionId: string }) => {
   const line = (at: number, type: string, message: object, origin?: object) =>
     JSON.stringify({
       cwd: of.cwd,
@@ -172,10 +172,10 @@ const finishedTurn = (tag: string, base: number, of: { cwd: string; sessionId: s
 }
 
 type Session = { name: string; role: string; sessionId: string }
-type Board = { names: string[]; sessions: Session[] }
+export type Board = { names: string[]; sessions: Session[] }
 
 // A session's transcript in the fixture's scratch copy, so its lines reach every board as entries frames, as a working session's do: Playground's own, or a peer's.
-const transcriptOf = async (fixture: string, ids: Set<string>): Promise<string | null> => {
+export const transcriptOf = async (fixture: string, ids: Set<string>): Promise<string | null> => {
   for await (const name of new Bun.Glob("claude/projects/*/*.jsonl").scan(fixture)) {
     if (
       ids.has(
@@ -191,21 +191,21 @@ const transcriptOf = async (fixture: string, ids: Set<string>): Promise<string |
 }
 
 // Playground's own session is the primary dispatcher, the first the board names, whose chat /dashboard opens; a peer is any session that is not a dispatcher.
-const idsOf = ({ names, sessions }: Board, own: boolean) =>
+export const idsOf = ({ names, sessions }: Board, own: boolean) =>
   new Set(
     sessions
       .filter((s) => (own ? s.name === names[0] : s.role !== "dispatcher"))
       .map((s) => s.sessionId),
   )
 
-const sessionOf = (path: string) =>
+export const sessionOf = (path: string) =>
   path
     .split("/")
     .pop()!
     .replace(/\.jsonl$/, "")
 
 // An assistant line in the session's transcript; one that ends its turn carries stop_reason end_turn, as Claude Code records a turn's last step.
-const step = (path: string, text: string, ends = false) =>
+export const step = (path: string, text: string, ends = false) =>
   appendFile(
     path,
     `${JSON.stringify({

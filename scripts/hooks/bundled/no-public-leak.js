@@ -45,8 +45,15 @@ applyEnvAliases();
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
-import { join, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
+import { isAbsolute, join, resolve } from "path";
+var dataDirOf = (env, home = env.HOME || homedir()) => {
+  const named = env.PLAYGROUND_DATA_DIR;
+  if (!named)
+    return join(home, ".playground");
+  if (!isAbsolute(named))
+    throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
+  return resolve(named);
+};
 var dataDir = (env = process.env) => dataDirOf(env);
 
 // packages/scripts/src/release-notes/notes.ts
@@ -2920,9 +2927,6 @@ function handlePipeResult(left, next, ctx) {
   }
   return next._zod.run({ value: left.value, issues: left.issues }, ctx);
 }
-var $ZodPreprocess = /* @__PURE__ */ $constructor("$ZodPreprocess", (inst, def) => {
-  $ZodPipe.init(inst, def);
-});
 var $ZodReadonly = /* @__PURE__ */ $constructor("$ZodReadonly", (inst, def) => {
   $ZodType.init(inst, def);
   defineLazyInternal(inst, "propValues", (zod) => zod.def.innerType._zod.propValues);
@@ -5313,9 +5317,6 @@ var ZodEmail = /* @__PURE__ */ $constructor("ZodEmail", (inst, def) => {
   $ZodEmail.init(inst, def);
   ZodStringFormat.init(inst, def);
 });
-function email2(params) {
-  return _email(ZodEmail, params);
-}
 var ZodGUID = /* @__PURE__ */ $constructor("ZodGUID", (inst, def) => {
   $ZodGUID.init(inst, def);
   ZodStringFormat.init(inst, def);
@@ -5564,14 +5565,6 @@ var ZodObject = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
     return required(ZodNonOptional, this, args[0]);
   }
 });
-function object(shape, params) {
-  const def = {
-    type: "object",
-    shape: shape ?? {},
-    ...normalizeParams(params)
-  };
-  return new ZodObject(def);
-}
 function strictObject(shape, params) {
   return new ZodObject({
     type: "object",
@@ -5844,10 +5837,6 @@ function pipe(in_, out) {
     out
   });
 }
-var ZodPreprocess = /* @__PURE__ */ $constructor("ZodPreprocess", (inst, def) => {
-  ZodPipe.init(inst, def);
-  $ZodPreprocess.init(inst, def);
-});
 var ZodReadonly = /* @__PURE__ */ $constructor("ZodReadonly", (inst, def) => {
   $ZodReadonly.init(inst, def);
   ZodType.init(inst, def);
@@ -5870,13 +5859,6 @@ function refine(fn, _params = {}) {
 }
 function superRefine(fn, params) {
   return _superRefine(fn, params);
-}
-function preprocess(fn, schema) {
-  return new ZodPreprocess({
-    type: "pipe",
-    in: transform(fn),
-    out: schema
-  });
 }
 // packages/settings/src/rendered.ts
 import { existsSync, readFileSync } from "fs";
@@ -5957,15 +5939,16 @@ var extOrderSchema = array(extScopeSchema).refine((names) => new Set(names).size
 var extLinksSchema = record(extScopeSchema, array(extLinkSchema));
 
 // packages/settings/src/accounts.ts
-var email3 = string2().email();
+var email2 = string2().email();
 var label = string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a label of lowercase letters, digits, dots, dashes and underscores");
 var claudeAccount = strictObject({
-  email: email3,
+  email: email2,
   ends: string2().datetime({ offset: true }).nullable().optional(),
   endsFirst: boolean2().optional(),
   label: label.optional(),
   nearLimit: boolean2().optional(),
   own: boolean2().optional(),
+  parkedUntil: string2().datetime({ offset: true }).optional(),
   provider: literal("claude").optional(),
   renews: number2().int().min(1).max(31).nullable().optional(),
   weekReset: strictObject({ hour: number2().min(0).lt(24), weekday: number2().int().min(0).max(6) }).optional()
@@ -5983,7 +5966,7 @@ var accountSettings = defineSettings({
   },
   "usage.accounts": {
     default: [],
-    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
+    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), the time until which no new session starts on it (parkedUntil), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
     schema: array(account).refine((rows) => new Set(rows.map((row) => `${providerOf(row)}:${accountKey(row)}`)).size === rows.length, "each account is listed once")
   },
   "usage.keychainService": {
@@ -5994,7 +5977,7 @@ var accountSettings = defineSettings({
   "usage.switchAccount": {
     default: "",
     description: "The account whose full week the ops tick tells the dispatchers and leads about, so the factory moves off it; empty for none.",
-    schema: union([email3, literal("")])
+    schema: union([email2, literal("")])
   }
 });
 // packages/settings/src/channel.ts
@@ -6018,7 +6001,7 @@ var contentFields = {
   value: union([array(unknown()), record(string2(), unknown())]).nullable()
 };
 // packages/settings/src/ext.ts
-var BUNDLED_EXTENSIONS = ["slack"];
+var BUNDLED_EXTENSIONS = ["slack", "whatsapp"];
 var extSettings = defineSettings({
   "ext.bundled": {
     default: [],
@@ -6041,15 +6024,86 @@ var extSettings = defineSettings({
     schema: record(extScopeSchema, string2().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, "a repository as owner/name"))
   }
 });
+// packages/config/src/kinds.ts
+var ROSTER_KINDS = [
+  "assistant",
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "orchestrator",
+  "planner",
+  "probe",
+  "researcher",
+  "reviewer",
+  "runner",
+  "tester",
+  "worker"
+];
+var isRosterKind = (value) => ROSTER_KINDS.includes(value);
+var FACTORY_ROLE_OF_KIND = {
+  assistant: "lead",
+  builder: "lead",
+  dispatcher: "dispatcher",
+  ops: "lead",
+  optimizer: "lead",
+  orchestrator: "lead",
+  planner: "lead",
+  probe: "probe",
+  researcher: "worker",
+  reviewer: "reviewer",
+  runner: "runner",
+  tester: "tester",
+  worker: "worker"
+};
+var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
+var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
+var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
+var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
+var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
+var DEFAULT_SESSION_NAMES = {
+  aliases: {},
+  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
+};
+var NAMES = Symbol.for("playground.sessionNames");
+var held = globalThis;
+var setSessionNames = (next) => {
+  held[NAMES] = next;
+};
+var getSessionNames = () => held[NAMES] ?? DEFAULT_SESSION_NAMES;
+var namedKinds = () => {
+  const { aliases, names } = getSessionNames();
+  return new Map([
+    ...Object.entries(names).map(([kind, name]) => [name, kind]),
+    [`${names.dispatcher}-2`, "dispatcher"],
+    ...Object.entries(aliases),
+    ["optimizer", "optimizer"]
+  ]);
+};
+var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
+function roleOfName(name) {
+  const kind = placedKindOfName(name);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+var SEATLESS = new Set(["ended", "parked"]);
+
 // packages/safe-delete/src/index.ts
 var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
+var PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/;
 var CARVE_OUTS = {
   "dashboard-supervisor": {
     bytes: 256 * 1024 ** 2,
     files: 4000,
     folder: "ops/dashboard/builds"
   },
-  jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" }
+  jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" },
+  "jobs-installed": {
+    bytes: 64 * 1024,
+    files: 1,
+    folder: "Library/LaunchAgents",
+    home: true,
+    name: PLAYGROUND_AGENT
+  }
 };
 
 // packages/settings/src/folder.ts
@@ -6059,13 +6113,7 @@ var STALE_MS = 5 * 60000;
 var ATTACHMENT_LIMIT = 50 * 1024 * 1024;
 
 // packages/settings/src/jobs.ts
-var withoutNeedsCmux = (row) => {
-  if (!row || typeof row !== "object" || !("needsCmux" in row))
-    return row;
-  const { needsCmux, ...rest } = row;
-  return needsCmux === true && rest.runtime === undefined ? { ...rest, runtime: "herdr" } : rest;
-};
-var jobFields = strictObject({
+var jobSchema = strictObject({
   callsModel: boolean2(),
   command: string2().min(1).optional(),
   config: record(string2(), unknown()).optional(),
@@ -6079,15 +6127,20 @@ var jobFields = strictObject({
   neverPause: boolean2().optional(),
   pausedFor: string2().optional(),
   program: array(string2().min(1)).min(1).optional(),
-  runtime: preprocess((runtime) => runtime === "cmux" || runtime === "auto" ? "herdr" : runtime, _enum(["herdr"])).optional(),
+  runtime: _enum(["herdr"]).optional(),
   schedule: union([
     strictObject({ always: literal(true) }),
     strictObject({ every: number2().int().positive() })
   ]),
   stop: string2().min(1).optional()
 });
-var jobSchema = preprocess(withoutNeedsCmux, jobFields);
-var jobRowSchema = preprocess(withoutNeedsCmux, jobFields.partial());
+var fromStored = (row) => {
+  if (!row || typeof row !== "object" || Array.isArray(row))
+    return row;
+  const kept = Object.fromEntries(Object.entries(row).filter(([key]) => Object.hasOwn(jobSchema.shape, key)));
+  return kept.runtime === undefined ? kept : { ...kept, runtime: "herdr" };
+};
+var jobRowSchema = jobSchema.partial();
 var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
 var terminal = (name, command, job) => ({
   callsModel: false,
@@ -6133,12 +6186,8 @@ var JOBS = {
     description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
     schedule: { every: 86400 }
   }),
-  "ops-firefighting-start": terminal("ops-firefighting-start", `${bunJob("ops-firefighting-start")} --data {data}`, {
-    description: "Starts a firefighting worker for each open ticket no session holds, Urgent first, and holds focus for an Urgent one's.",
-    schedule: { every: 60 }
-  }),
   "ops-flow": launchd("ops-flow", {
-    description: "Tells the leads when a ready PR's checks stall or a run slot is held too long.",
+    description: "Tells the leads when a session holds a run slot over 15 minutes, or a model slot over 120.",
     schedule: { every: 60 }
   }),
   "ops-herdr": launchd("ops-herdr", {
@@ -6180,10 +6229,6 @@ var JOBS = {
     description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
     schedule: { every: 60 }
   }),
-  "ops-ticket-card": terminal("ops-ticket-card", bunJob("ops-ticket-card"), {
-    description: "Keeps one Inbox card of the day's watched tickets, edited in place on every change.",
-    schedule: { every: 60 }
-  }),
   "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
     description: "Reads every live session's screen and clears a factory session stuck on a prompt.",
     neverPause: true,
@@ -6194,6 +6239,10 @@ var JOBS = {
     enabled: true,
     neverPause: true,
     schedule: { every: 300 }
+  }),
+  "ops-wa": terminal("ops-wa", `${bunJob("ops-wa")} --data {data}`, {
+    description: "Holds the WhatsApp link on the spare number: hands each owner message to the dispatcher, sends its replies, and drops every other message.",
+    schedule: { always: true }
   }),
   "ops-zai-usage": launchd("ops-zai-usage", {
     description: "Reads the GLM plan's credits into zai-usage.json, which the spawn gate reads.",
@@ -6208,7 +6257,8 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     default: job,
     description: `The ${name} ops job: ${job.description}`,
     merge: true,
-    schema: jobRowSchema
+    schema: jobRowSchema,
+    stored: fromStored
   }
 ])));
 var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
@@ -6222,59 +6272,13 @@ var factorySettings = defineSettings({
   },
   "factory.publicRepo": {
     default: "",
-    description: "The public repository, or a list of them: no-public-leak refuses a write to one that holds private text, and the trace ratchet reads past each one's own name.",
+    description: "The public repository, or a list of them, the checkout's origin when unset: no-public-leak refuses a write to one that holds private text, and the trace ratchet reads past each one's own name.",
     schema: union([repo, array(repo)])
   },
   "factory.repo": {
     default: "",
     description: "The repository the factory's pull requests land in, the checkout's origin when unset: pr:merge needs GitGuardian's check there, Checks reads its PRs, and the roster links a bare PR number into it.",
     schema: repo
-  }
-});
-// packages/settings/src/firefighting.ts
-var firefightingSettings = defineSettings({
-  "firefighting.start.account": {
-    default: "",
-    description: "The Claude account a firefighting worker logs in as (spawn.sh's --account), an email whose token the Keychain keeps; empty starts it on spawn.sh's own pick.",
-    schema: union([literal(""), email2()])
-  },
-  "firefighting.start.brief": {
-    default: "brief-ff-ticket-template.md",
-    description: "The standing brief under the data folder that ops-firefighting-start fills for each ticket, its {TICKET} and {NAME} replaced by the ticket's ID and the new worker's name.",
-    schema: string2().regex(/^[A-Za-z0-9._-]+\.md$/, "a brief's file name under the data folder")
-  },
-  "firefighting.start.consultFrom": {
-    default: "",
-    description: 'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts nothing and tells the dispatcher "consult <id>" once per ticket, so the owner decides; empty never consults.',
-    schema: union([literal(""), string2().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM in UTC")])
-  },
-  "firefighting.start.daysOff": {
-    default: [],
-    description: "The UTC dates (YYYY-MM-DD) ops-firefighting-start starts nothing on, as a day off; empty starts on every day.",
-    schema: array(string2().regex(/^\d{4}-\d{2}-\d{2}$/, "a YYYY-MM-DD date"))
-  },
-  "firefighting.start.freshMinutes": {
-    default: 10,
-    description: "How many minutes old firefighting.json's lines may be (its lastTry, else its file time) for a start; older ones are a closed window's or a stopped relay's, so the job starts nothing and tells the Builder once.",
-    schema: number2().int().min(1).max(120)
-  },
-  "firefighting.start.hours": {
-    default: "",
-    description: "The UTC window ops-firefighting-start starts in, HH:MM-HH:MM (one past midnight wraps); outside it the job starts nothing and tells the Builder once; empty starts at any time.",
-    schema: union([
-      literal(""),
-      string2().regex(/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/, "HH:MM-HH:MM in UTC")
-    ])
-  },
-  "firefighting.start.in": {
-    default: "",
-    description: "The folder a firefighting worker opens in (spawn.sh's --in), an absolute path; empty starts none, and the job tells the Builder this key is unset.",
-    schema: union([literal(""), string2().regex(/^\/.+/, "an absolute path")])
-  },
-  "firefighting.start.prefixes": {
-    default: [],
-    description: "The ticket keys the job starts for (MADE for MADE-1), each a tracker team's key; empty starts none.",
-    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "a ticket key, upper case"))
   }
 });
 // packages/settings/src/gates.ts
@@ -6286,7 +6290,7 @@ var gateSettings = defineSettings({
   },
   "gates.glmSwapinsMax": {
     default: 100,
-    description: "The swap-ins a second a GLM session starts under.",
+    description: "The swap-ins a second a GLM session, and a fresh Claude worker, starts under.",
     schema: number2().int().positive()
   },
   "gates.memoryFreeMin": {
@@ -6308,6 +6312,22 @@ var gateSettings = defineSettings({
     default: 300,
     description: "The seconds a start counts toward the load gate, since the load average lags a session's start.",
     schema: number2().int().positive()
+  }
+});
+// packages/settings/src/harnesses.ts
+var HARNESSES = [
+  { backends: ["claude", "glm"], id: "claude-code" },
+  { backends: ["openai"], id: "codex" }
+];
+var GLM_MODEL = "glm";
+
+// packages/settings/src/harness-alpha.ts
+var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
+var harnessSettings = defineSettings({
+  "harness.alpha": {
+    default: "claude-code",
+    description: "The harness the first dispatcher starts on: claude-code or codex. First run's pick and Settings' Switch write it, and the Dashboard's Start runs spawn.sh --harness with it.",
+    schema: _enum(HARNESS_IDS)
   }
 });
 // packages/settings/src/models.ts
@@ -6358,6 +6378,11 @@ var ownerSettings = defineSettings({
     default: [],
     description: "The owner's first name and handles as chat writes them, lowercase: the inbox gate refuses a manager's stop on a line that addresses one of them and asks for an action, and never reads @<handle> as an agent.",
     schema: array(string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a name or handle, lowercase"))
+  },
+  "owner.voice": {
+    default: "",
+    description: "The voice a draft or a slack decision speaks in as the owner: singular has bun run ask refuse one that says we, us, our, ours or ourselves; empty checks none.",
+    schema: _enum(["", "singular"])
   }
 });
 // packages/settings/src/paths.ts
@@ -6373,12 +6398,12 @@ var percent = number2().int().min(1).max(100);
 var ruleSettings = defineSettings({
   "battery.alert": {
     default: 5,
-    description: "The battery percent, while the Mac discharges, at which the battery check posts its red alert.",
+    description: "The battery percent, while the charge falls on battery or on a charger losing to the load, at which the battery check posts its red alert and the heavy runs wait in run-slot.",
     schema: percent
   },
   "battery.ask": {
     default: 10,
-    description: "The battery percent, while the Mac discharges, at which the battery check posts its orange ask.",
+    description: "The battery percent, while the Mac discharges on battery, at which the battery check posts its orange ask.",
     schema: percent
   },
   "clock.ownerZone": {
@@ -6391,7 +6416,7 @@ var ruleSettings = defineSettings({
       } catch {
         return false;
       }
-    }, "an IANA time zone, such as UTC or Asia/Kolkata")
+    }, "an IANA time zone, such as UTC or America/New_York")
   },
   "context.window": {
     default: 400000,
@@ -6445,16 +6470,27 @@ var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var BRIEF_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 var sessionTemplate = strictObject({
   account: string2().email().optional(),
-  backend: _enum(["claude", "glm"]),
   brief: string2().regex(BRIEF_NAME, "a brief is a file name, with no /").refine((brief) => !brief.includes(".."), "a brief is a file name, with no .."),
   effort: _enum(EFFORTS).optional(),
+  harness: literal("claude-code"),
   id: name,
   kind: _enum(TEMPLATE_KINDS),
   label: string2().min(1).max(40),
   model: string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id").optional()
-}).refine((t) => t.backend === "claude" || t.account === undefined && t.effort === undefined && t.model === undefined, {
-  message: "a GLM template runs on models.glm and its first GLM row, so it takes no account, effort or model"
+}).refine((t) => t.model !== GLM_MODEL || t.account === undefined && t.effort === undefined, {
+  message: "a GLM template runs on models.glm and its first GLM row, so it takes no account or effort"
 });
+var storedTemplates = (value) => Array.isArray(value) ? value.map((row) => {
+  if (typeof row !== "object" || row === null || !("backend" in row) || "harness" in row)
+    return row;
+  const { backend, ...rest } = row;
+  const { model, ...modelless } = rest;
+  if (backend === "glm")
+    return { ...rest, harness: "claude-code", model: GLM_MODEL };
+  if (backend !== "claude")
+    return { ...rest, backend, harness: "claude-code" };
+  return { ...model === GLM_MODEL ? modelless : rest, harness: "claude-code" };
+}) : value;
 var sessionTemplates = array(sessionTemplate).refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "each id is listed once");
 var unknownAccounts = (templates, accounts) => {
   const known = new Set(accountsOf(accounts, "claude").map(accountKey));
@@ -6480,36 +6516,38 @@ var sessionSettings = defineSettings({
     against: (templates, read) => unknownAccounts(templates, read("usage.accounts")),
     default: [
       {
-        backend: "claude",
         brief: "assistant.md",
+        harness: "claude-code",
         id: "assistant",
         kind: "assistant",
         label: "Assistant"
       },
       {
-        backend: "claude",
         brief: "orchestrator.md",
+        harness: "claude-code",
         id: "orchestrator",
         kind: "orchestrator",
         label: "Orchestrator"
       },
       {
-        backend: "claude",
         brief: "dispatcher-2.md",
+        harness: "claude-code",
         id: "second-dispatcher-claude",
         kind: "dispatcher",
         label: "Second dispatcher on Claude"
       },
       {
-        backend: "glm",
         brief: "dispatcher-2.md",
+        harness: "claude-code",
         id: "second-dispatcher-glm",
         kind: "dispatcher",
-        label: "Second dispatcher on GLM"
+        label: "Second dispatcher on GLM",
+        model: GLM_MODEL
       }
     ],
-    description: "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, backend, model, effort, account (a Claude row of usage.accounts) and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
-    schema: sessionTemplates
+    description: "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, harness, model (a Claude id, or glm), effort, account (a Claude row of usage.accounts) and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
+    schema: sessionTemplates,
+    stored: storedTemplates
   }
 });
 // packages/settings/src/slack.ts
@@ -6563,76 +6601,49 @@ var slotSettings = defineSettings({
     schema: array(string2().regex(/^\/.+/, "an absolute path"))
   }
 });
-// packages/settings/src/ticket-card.ts
-var file = string2();
-var hhmm = string2().regex(/^(?:[01]\d|2[0-4]):[0-5]\d$/, "a UTC time, HH:MM");
-var ticketCardSettings = defineSettings({
-  "ticketCard.approvals": {
-    default: 2,
-    description: "The approvals a ticket's pull request waits for, which the card counts toward.",
-    schema: number2().int().positive()
-  },
-  "ticketCard.deployedStates": {
-    default: [],
-    description: "The tracker states, by name, that mark a ticket deployed, its last step; a line closed on any other state reads closed, and with none set every closed line does.",
-    schema: array(string2().min(1))
-  },
-  "ticketCard.diaryDir": {
-    default: "diary",
-    description: "The folder, absolute or in the data folder, where the card's job appends each step it first sees to that day's <YYYY-MM-DD>-steps.md.",
-    schema: string2().min(1)
-  },
-  "ticketCard.linesFile": {
+// packages/settings/src/whatsapp.ts
+var e1642 = string2().regex(/^(?:\+[1-9]\d{7,14})?$/, "a phone number is + and 8 to 15 digits, as +15550100001");
+var whatsappSettings = defineSettings({
+  "wa.device": {
     default: "",
-    description: "The file of the day's watched tickets the card reads, a JSON object whose lines record holds each ticket's line and whose clock record names the tickets the card shows; none until set, so the job keeps no card.",
-    schema: file
+    description: "The spare number ops-wa links to as a device, in E.164: its pairing code is for this number. Never the owner's own number; ops-wa does not run until it is set.",
+    masked: true,
+    schema: e1642
   },
-  "ticketCard.linkBase": {
+  "wa.owner": {
     default: "",
-    description: "The URL a ticket's id is appended to for its link on the card; none until set, so the card links pull requests alone.",
-    schema: union([literal(""), string2().url()])
-  },
-  "ticketCard.prefixes": {
-    default: [],
-    description: "The ticket id prefixes the card shows; none means every prefix.",
-    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "an uppercase ticket prefix"))
-  },
-  "ticketCard.reopenedFile": {
-    default: "",
-    description: "The file whose reopened record maps a ticket's id to when it was seen reopened, which the card marks; none until set.",
-    schema: file
-  },
-  "ticketCard.skipsFile": {
-    default: "",
-    description: "The sent record whose <kind>-skip:<ticket>:<area> keys mark a ticket skipped for an area, which the card shows so; none until set.",
-    schema: file
-  },
-  "ticketCard.title": {
-    default: "Tickets today",
-    description: "The card's title.",
-    schema: string2().min(1)
-  },
-  "ticketCard.verdictsFile": {
-    default: "",
-    description: "The file mapping a ticket's id to its triage verdict, { at, kind }, which the card shows as its cause found; none until set.",
-    schema: file
-  },
-  "ticketCard.window": {
-    default: { days: [0, 1, 2, 3, 4, 5, 6], end: "24:00", start: "00:00" },
-    description: "The UTC hours on the weekdays (0 is Sunday) the card's job writes in; outside them it writes nothing.",
-    schema: object({ days: array(number2().int().min(0).max(6)), end: hhmm, start: hhmm })
+    description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages and sends only to it; ops-wa does not run until it is set.",
+    masked: true,
+    schema: e1642
   }
 });
+// packages/scripts/src/playground/setting.ts
+import { resolve as resolve2 } from "path";
+var CHECKOUT = resolve2(__CHECKOUT + "/packages/scripts/src/playground", "../../../..");
+var origins = new Map;
+var originRepo = (checkout = CHECKOUT) => {
+  if (!origins.has(checkout)) {
+    const run = Bun.spawnSync(["git", "-C", checkout, "remote", "get-url", "origin"], {
+      stderr: "ignore"
+    });
+    const url = run.stdout.toString().trim();
+    const slug = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(url)?.[1] ?? "";
+    origins.set(checkout, slug.toLowerCase());
+  }
+  return origins.get(checkout);
+};
+if (false)
+  ;
+
 // packages/scripts/src/trace-count/kinds.ts
-var TODAY_PUBLIC = ["nrjdalal/playground", "nrjdalal/playground-yard"];
-var reposOf = (settings) => {
+var reposOf = (settings, checkout) => {
   const archive = factorySettings.get(settings, "factory.archiveRepo").toLowerCase();
   const archiveOwner = archive ? [archive.split("/")[0]] : [];
   const set = [factorySettings.get(settings, "factory.publicRepo")].flat().filter(Boolean);
   return {
     archive,
     owner: [...new Set([...ownerSettings.get(settings, "owner.names"), ...archiveOwner])],
-    public: set.length ? set.map((repo) => repo.toLowerCase()) : TODAY_PUBLIC
+    public: set.length ? set.map((repo) => repo.toLowerCase()) : [originRepo(checkout)].filter(Boolean)
   };
 };
 var UNSET_REPOS = reposOf({ schemaVersion: 1, values: {} });
@@ -6650,16 +6661,16 @@ var isPublicList = (value) => typeof value === "object" && value !== null && !Ar
 });
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var anyOf = (items, tail = "") => items.length ? new RegExp(`(?<![a-z\\d])(?:${items.map(escape).join("|")})${tail}(?![a-z\\d])`, "gi") : undefined;
-var ownerWord = (name, archive) => {
+var ownerWord = (name) => {
   const cased = [...name].map((c) => /[a-z]/i.test(c) ? `[${c.toLowerCase()}${c.toUpperCase()}]` : escape(c));
-  return `(?<![a-zA-Z\\d])(?<![\\w.+-]@[\\w.-]*)${cased.join("")}(?![a-zA-Z\\d])(?![\\w.+-]*@)(?!/${escape(archive.split("/")[1] ?? "")}(?![\\w.-]))`;
+  return `(?<![a-zA-Z\\d])(?<![\\w.+-]@[\\w.-]*)${cased.join("")}(?![a-zA-Z\\d])(?!/[\\w-])(?![\\w.+-]*@)`;
 };
 var ownerName = (repos) => {
   if (!repos.owner.length)
     return;
   const MONTH = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*";
   return new RegExp([
-    ...repos.owner.map((name) => ownerWord(name, repos.archive)),
+    ...repos.owner.map(ownerWord),
     `\\b[Tt]he owner(?:,[^:"\\n]{0,40})?:\\s*["\u201C]`,
     "\\b[Tt]he owner (?:said|wrote)\\b",
     `\\b[A-Z][a-z]+, \\d{1,2} ${MONTH}\\b[^"\\n]{0,30}: *["\u201C]`
@@ -6721,7 +6732,7 @@ async function loadList(guard, path, valid, empty, environment = process.env) {
 }
 
 // scripts/hooks/no-playground-leak.ts
-import { existsSync as existsSync3, readdirSync, readFileSync as readFileSync2, statSync } from "fs";
+import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
 import { basename as basename2, join as join5 } from "path";
 
 // scripts/hooks/github.ts
@@ -6759,39 +6770,130 @@ function remotes(cwd) {
   });
 }
 
-// scripts/hooks/shell.ts
+// scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
-import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
+import { join as join3 } from "path";
+var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
+var names;
+function loadNames(environment = process.env) {
+  names ??= (async () => {
+    try {
+      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
+        env: { ...process.env, ...environment },
+        stderr: "ignore",
+        stdout: "pipe"
+      });
+      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
+`);
+      if (await read.exited === 0)
+        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
+    } catch {}
+  })();
+  return names;
+}
+async function registryName(sessionId, environment = process.env) {
+  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir2(), ".claude"), "sessions");
+  for await (const file of new Bun.Glob("*.json").scan(dir)) {
+    try {
+      const entry = await Bun.file(join3(dir, file)).json();
+      if (entry.sessionId === sessionId && typeof entry.name === "string")
+        return entry.name;
+    } catch {}
+  }
+}
+async function codexName(sessionId, environment = process.env) {
+  if (!environment.CODEX_HOME)
+    return;
+  let name;
+  try {
+    const index = await Bun.file(join3(environment.CODEX_HOME, "session_index.jsonl")).text();
+    for (const line of index.split(`
+`)) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.id === sessionId && typeof entry.thread_name === "string")
+          name = entry.thread_name;
+      } catch {}
+    }
+  } catch {}
+  return name;
+}
+async function rosterKind(name, environment = process.env) {
+  const path = join3(dataDirOf(environment), "roster.json");
+  try {
+    const roster = await Bun.file(path).json();
+    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
+    return isRosterKind(kind) ? kind : undefined;
+  } catch {
+    return;
+  }
+}
+async function rosterRole(name, environment = process.env) {
+  const kind = await rosterKind(name, environment);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+async function sessionRole(environment, sessionId) {
+  if (environment.PLAYGROUND_ROLE)
+    return environment.PLAYGROUND_ROLE;
+  if (typeof sessionId !== "string")
+    return "";
+  try {
+    const name = await registryName(sessionId, environment) ?? await codexName(sessionId, environment) ?? "";
+    const role = name && await rosterRole(name, environment);
+    if (role)
+      return role;
+    await loadNames(environment);
+    return roleOfName(name);
+  } catch {
+    return "";
+  }
+}
+async function fromFactory(raw, environment = process.env) {
+  return await sessionRole(environment, sessionOf(raw)) !== "";
+}
+function sessionOf(raw) {
+  try {
+    return JSON.parse(raw).session_id;
+  } catch {
+    return;
+  }
+}
+
+// scripts/hooks/shell.ts
+import { AsyncLocalStorage } from "async_hooks";
+import { realpathSync, statSync } from "fs";
+import { homedir as homedir3 } from "os";
+import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve3 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var NOT_RUN = "The refusal stopped this whole Bash call, so none of its commands ran: once it is fixed, run again each one you still need.";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
-var deadline;
+var deadlines = new AsyncLocalStorage;
 function pastDeadline() {
+  const deadline = deadlines.getStore();
   if (deadline !== undefined && performance.now() > deadline)
     throw new RangeError("past the hook's time");
 }
 var steps = 0;
 function tick() {
-  if (++steps % 1024 !== 0 || deadline === undefined)
-    return;
-  if (performance.now() > deadline)
-    throw new RangeError("past the hook's time");
+  if (++steps % 1024 === 0)
+    pastDeadline();
 }
 function lexScript(value, env) {
-  if (deadline !== undefined && value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return lex(value, env.known);
 }
 function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
-  if (deadline !== undefined && script.length + count * value.length > MAX_SCRIPT)
+  if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
-var held = (text) => text.value.length > MAX_BYTES ? unknown2(LARGE) : text;
+var held2 = (text) => text.value.length > MAX_BYTES ? unknown2(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
 var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
@@ -7287,7 +7389,7 @@ var merge2 = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join3 = (parts, separator = "") => {
+var join4 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -7514,6 +7616,8 @@ function walk(lx, scope, nested, inherit) {
       if (after === "&&")
         done.chained = true;
       done.chain = lx.token;
+      if (lx.orRun)
+        done.orRun = true;
       const last = lx.commands[lx.commands.length - 1]?.words;
       const compound = !!done.group && last?.length === 1 && OPENS.has(reserved[0] ?? "") && !HELD.has(reserved[0] ?? "");
       if (reserved.some((w) => HELD.has(w)) || compound)
@@ -7546,8 +7650,10 @@ function walk(lx, scope, nested, inherit) {
         done.atLeastOnce = true;
       depth = Math.max(0, depth + opened - closed);
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0));
-      if (depth === 0 && FREES.has(op))
+      if (depth === 0 && FREES.has(op)) {
         lx.token = freshToken();
+        lx.orRun = op === "||";
+      }
       after = op;
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted)
@@ -7670,6 +7776,23 @@ function heredocs(lx, pending, nested) {
     const body = lines.map((line) => `${line}
 `).join("");
     doc.redirect.body = doc.quoted ? { value: body } : expandHeredoc(body);
+    if (!doc.quoted)
+      textCommands(lx, body);
+  }
+}
+function textCommands(lx, text) {
+  const sub = { ...lx, i: 0, src: text };
+  while (sub.i < text.length) {
+    tick();
+    const c = text[sub.i];
+    if (c === "\\")
+      sub.i += 2;
+    else if (c === "$")
+      dollar(sub, true);
+    else if (c === "`")
+      backtick(sub);
+    else
+      sub.i++;
   }
 }
 function expandHeredoc(body) {
@@ -7721,7 +7844,7 @@ function word(lx) {
       if (marked(text.value))
         out.splits = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
-      out.value += homedir2();
+      out.value += homedir3();
       lx.i++;
     } else {
       if (c === UNKNOWN || c === READ)
@@ -7758,7 +7881,7 @@ function double(lx) {
       lx.i += 2;
     } else if (c === "$" || c === "`") {
       const from = lx.i;
-      const text = c === "$" ? dollar(lx) : backtick(lx);
+      const text = c === "$" ? dollar(lx, true) : backtick(lx);
       merge2(out, text);
       if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
         out.splits = true;
@@ -7779,14 +7902,15 @@ function ansi(lx) {
   lx.i = i + 1;
   return { value: decode2(raw) };
 }
-function dollar(lx) {
+function dollar(lx, plain = false) {
   tick();
   const { src } = lx;
+  const readText = plain ? textCommands : inner;
   const next = src[lx.i + 1] ?? "";
   const variable = (name) => name !== undefined && lx.known[name] !== undefined ? { value: lx.known[name], variable: name } : { ...unknown2("a shell variable"), variable: name };
   if (src.startsWith("$((", lx.i)) {
-    const end = balanced(src, lx.i + 1, "(", ")");
-    inner(lx, src.slice(lx.i + 3, end - 2));
+    const end = balanced(src, lx.i + 1, "(", ")", plain);
+    readText(lx, src.slice(lx.i + 3, end - 2));
     lx.i = end;
     return unknown2("an arithmetic expansion");
   }
@@ -7797,9 +7921,9 @@ function dollar(lx) {
     return substituted(lx.commands.slice(from), lx.known);
   }
   if (next === "{") {
-    const end = balanced(src, lx.i + 1, "{", "}");
+    const end = balanced(src, lx.i + 1, "{", "}", plain);
     const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1];
-    inner(lx, src.slice(lx.i + 2, end - 1));
+    readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
   }
@@ -7835,14 +7959,14 @@ function inner(lx, src) {
       sub.i++;
   }
 }
-function balanced(src, from, open, close) {
+function balanced(src, from, open, close, plain = false) {
   let depth = 0;
   for (let i = from;i < src.length; i++) {
     tick();
     const c = src[i];
     if (c === "\\")
       i++;
-    else if (c === "'") {
+    else if (c === "'" && !plain) {
       const end = src.indexOf("'", i + 1);
       i = end === -1 ? src.length : end;
     } else if (c === open)
@@ -8057,6 +8181,7 @@ async function runAll(lexed, env, visit, builtins) {
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
+  orElse(cmd, env);
   unchain(cmd, env);
   if (cmd.opaque) {
     env.cwdAnywhere = true;
@@ -8215,11 +8340,15 @@ function again(lexed, cmd, parsed) {
 async function nested(cmd, env, body) {
   const chain = env.cwdChain;
   const token = env.cwdChainToken;
+  const lineOr = env.cwdOr;
   env.cwdChain = [];
   env.cwdChainToken = undefined;
+  env.cwdOr = undefined;
   try {
     return await body();
   } finally {
+    const scriptOr = env.cwdOr;
+    env.cwdOr = scriptOr && scriptOr.orChain === undefined ? { ...scriptOr, cdChain: cmd.chain, scope: cmd.scope } : lineOr;
     const left = [...new Set([...chain ?? [], ...env.cwdChain ?? []])];
     env.cwdChain = keep(left, env);
     env.cwdChainToken = left.length > 0 ? chain?.length ? token : cmd.chain : undefined;
@@ -8252,8 +8381,9 @@ var tildeSign = (name, dir, env) => (name === "cd" || name === "pushd") && env.o
 async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
-    return homedir2();
-  const typed = dir.value === "-" ? undefined : await folder2(pathOf(dir, env));
+    return homedir3();
+  const lexical = dir.value === "-" ? undefined : pathOf(dir, env);
+  const typed = await folder2(lexical && physicalCd(args) ? kernelPath(dir, env.cwd, lexical) : lexical);
   const sign = typed ? undefined : tildeSign(name, dir, env);
   const base = sign && (sign === "-" ? env.old?.dir : env.cwd);
   return base ? await folder2(base + dir.value.slice(2)) : typed;
@@ -8261,18 +8391,19 @@ async function cdTarget(name, args, env) {
 async function folder2(path) {
   if (!path)
     return;
-  return await isFolder(path) ? path : undefined;
+  return isFolder(path) ? path : undefined;
 }
 function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
   const [dir] = dirs;
   if (!dir) {
-    return name === "cd" ? { paths: [homedir2()], unread: false } : { back: true, paths: [homedir2()], unread: true };
+    return name === "cd" ? { paths: [homedir3()], unread: false } : { back: true, paths: [homedir3()], unread: true };
   }
   if (dir.value === "-")
     return { back: true, paths: [], unread: true };
   const paths = new Set;
   const many = manyTimes(cmd, parsed);
+  const physical = physicalCd(parsed.args);
   let unread = dirs.length > 1;
   for (const typed of dirs.length > 1 ? dirs : [dir]) {
     const word = env.hold?.(typed, cmd, env) ?? typed;
@@ -8285,14 +8416,23 @@ function cdTargets(name, cmd, parsed, env, from) {
         unread = true;
         continue;
       }
-      paths.add(path);
+      const landed = physical ? kernelPath(word, base, path) : path;
+      paths.add(landed);
       if (many && word.value.split("/").includes("..")) {
-        for (const up of ancestors(path))
+        for (const up of ancestors(landed))
           paths.add(up);
       }
     }
   }
   return { back: dirs.length > 1, paths: [...paths], unread };
+}
+var physicalCd = (args) => args.some((a) => /^-[^-]/.test(a.value) && a.value.includes("P"));
+function kernelPath(word, base, lexical) {
+  try {
+    return realpathSync.native(isAbsolute2(word.value) ? word.value : `${base}/${word.value}`);
+  } catch {
+    return lexical;
+  }
 }
 function tildeMove(move, name, parsed, env, from, back) {
   const dir = parsed.args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
@@ -8331,10 +8471,11 @@ async function chdirTo(name, cmd, parsed, env) {
     return;
   }
   const chained = cmd.chained && !negated(cmd);
-  if (sureToRun(cmd, parsed) && !unread && paths.length === 1 && (chained || await isFolder(paths[0]))) {
+  if (sureToRun(cmd, parsed) && !unread && paths.length === 1 && (chained || isFolder(paths[0]))) {
     env.cwdSure = paths[0];
     env.cwdMaybe = [];
     env.cwdUnread = false;
+    env.cwdOr = chained ? undefined : { before: from, cdChain: cmd.chain, scope: cmd.scope };
     if (env.old)
       env.oldFrom = bases;
     if (chained) {
@@ -8344,11 +8485,44 @@ async function chdirTo(name, cmd, parsed, env) {
     return;
   }
   env.cwdSure = undefined;
-  const behind = onceOrMore(cmd, parsed) && !unread && !move.back && paths.length > 0 && (chained || (await Promise.all(paths.map(isFolder))).every(Boolean));
+  env.cwdOr = undefined;
+  const behind = onceOrMore(cmd, parsed) && !unread && !move.back && paths.length > 0 && (chained || paths.every(isFolder));
   env.cwdMaybe = keep([...new Set([...move.back ? back : behind ? [] : from, ...paths])], env);
   env.cwdUnread = env.cwdUnread || unread || from.length === 0 && paths.length === 0;
 }
 var negated = (cmd) => markers(cmd.words).filter((word) => word === "!").length % 2 === 1;
+var EXITS = new Set(["exit"]);
+function orElse(cmd, env) {
+  const or = env.cwdOr;
+  if (!or)
+    return;
+  if (cmd.chain === or.orChain) {
+    if (or.exits && cmd.detached)
+      env.cwdOr = { ...or, exits: false };
+    return;
+  }
+  if (cmd.chain === or.cdChain) {
+    if (!or.joined)
+      env.cwdOr = { ...or, joined: true };
+    return;
+  }
+  if (or.orChain === undefined && cmd.orRun) {
+    env.cwdOr = {
+      ...or,
+      exits: EXITS.has(parse3(cmd).name) && !cmd.detached && cmd.scope === or.scope,
+      landed: { maybe: env.cwdMaybe ?? [], sure: env.cwdSure },
+      orChain: cmd.chain
+    };
+    env.cwdMaybe = keep([...new Set([...startFolders(env), ...or.before])], env);
+    env.cwdSure = undefined;
+    return;
+  }
+  if ((or.joined || or.exits) && or.landed) {
+    env.cwdMaybe = or.landed.maybe;
+    env.cwdSure = or.landed.sure;
+  }
+  env.cwdOr = undefined;
+}
 function unchain(cmd, env) {
   if (!env.cwdChain?.length || cmd.chain === env.cwdChainToken)
     return;
@@ -8368,9 +8542,9 @@ function keep(folders, env) {
   env.cwdUnread = true;
   return folders.slice(0, MAX_FOLDERS);
 }
-async function isFolder(path) {
+function isFolder(path) {
   try {
-    return (await Bun.file(path).stat()).isDirectory();
+    return statSync(path).isDirectory();
   } catch {
     return false;
   }
@@ -8415,12 +8589,12 @@ var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
   const scripts = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown2("a script file")];
-  if (deadline !== undefined && scripts.some((s) => s.unknown === LARGE))
+  if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;
 }
 async function outputs(cmds, env) {
-  return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -8431,7 +8605,7 @@ async function record2(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown2(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held(r.op === ">>" ? join3([await existing(path, env), out]) : out));
+    env.files.set(path, held2(r.op === ">>" ? join4([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -8440,7 +8614,7 @@ async function record2(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held(append ? join3([await existing(path, env), input]) : input));
+      env.files.set(path, held2(append ? join4([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -8469,7 +8643,7 @@ async function outputOf(cmd, env) {
         return unknown2(LARGE);
       parts.push(part);
     }
-    return join3(parts);
+    return join4(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -8511,13 +8685,13 @@ async function stdinOf(cmd, env) {
   tick();
   const input = cmd.redirects.findLast((r) => !r.bodyFed && ownFeed(r));
   if (!input)
-    return held(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown2("stdin the hook cannot see"));
-  return held(await redirectText(input, env, false));
+    return held2(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown2("stdin the hook cannot see"));
+  return held2(await redirectText(input, env, false));
 }
 async function scriptStdin(cmd, env) {
   const own = await stdinOf(cmd, env);
   tick();
-  const fed = held(await stdinText(cmd, env));
+  const fed = held2(await stdinText(cmd, env));
   return fed.value === own.value && fed.unknown === own.unknown ? [own] : [own, fed];
 }
 var ownFeed = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
@@ -8590,9 +8764,9 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
-  if (isAbsolute(text.value))
+  if (isAbsolute2(text.value))
     return text.value;
-  return env.cwd ? resolve2(env.cwd, text.value) : undefined;
+  return env.cwd ? resolve3(env.cwd, text.value) : undefined;
 }
 async function readFile(path) {
   const file = Bun.file(path);
@@ -8744,6 +8918,13 @@ function knownVariables(command, environment, cwd) {
   }
   return known;
 }
+
+// scripts/hooks/no-prepare-write.ts
+var WRITES = [
+  [/github/i, new Set(["create_pull_request"])],
+  [/linear/i, new Set(["save_comment", "save_issue"])],
+  [/slack/i, new Set(["chat_post_message"])]
+];
 
 // scripts/hooks/read-only.ts
 var READ_FILE = { count: true, operands: true, values: ["-c", "-n"] };
@@ -8908,160 +9089,15 @@ function readOnly(raw) {
   }
 }
 
-// scripts/hooks/role.ts
-import { homedir as homedir3 } from "os";
-import { join as join4 } from "path";
-
-// packages/config/src/kinds.ts
-var ROSTER_KINDS = [
-  "assistant",
-  "builder",
-  "dispatcher",
-  "ops",
-  "optimizer",
-  "orchestrator",
-  "planner",
-  "probe",
-  "researcher",
-  "reviewer",
-  "runner",
-  "tester",
-  "worker"
-];
-var isRosterKind = (value) => ROSTER_KINDS.includes(value);
-var FACTORY_ROLE_OF_KIND = {
-  assistant: "lead",
-  builder: "lead",
-  dispatcher: "dispatcher",
-  ops: "lead",
-  optimizer: "lead",
-  orchestrator: "lead",
-  planner: "lead",
-  probe: "probe",
-  researcher: "worker",
-  reviewer: "reviewer",
-  runner: "runner",
-  tester: "tester",
-  worker: "worker"
-};
-var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
-var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
-var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
-var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
-var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
-var DEFAULT_SESSION_NAMES = {
-  aliases: {},
-  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
-};
-var NAMES = Symbol.for("playground.sessionNames");
-var held2 = globalThis;
-var setSessionNames = (next) => {
-  held2[NAMES] = next;
-};
-var getSessionNames = () => held2[NAMES] ?? DEFAULT_SESSION_NAMES;
-var namedKinds = () => {
-  const { aliases, names } = getSessionNames();
-  return new Map([
-    ...Object.entries(names).map(([kind, name]) => [name, kind]),
-    [`${names.dispatcher}-2`, "dispatcher"],
-    ...Object.entries(aliases),
-    ["optimizer", "optimizer"]
-  ]);
-};
-var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
-function roleOfName(name) {
-  const kind = placedKindOfName(name);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
-}
-var SEATLESS = new Set(["ended", "parked"]);
-
-// scripts/hooks/role.ts
-var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
-var names;
-function loadNames(environment = process.env) {
-  names ??= (async () => {
-    try {
-      const setting = join4(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
-      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
-        env: { ...process.env, ...environment },
-        stderr: "ignore",
-        stdout: "pipe"
-      });
-      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
-`);
-      if (await read.exited === 0)
-        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
-    } catch {}
-  })();
-  return names;
-}
-async function registryName(sessionId, environment = process.env) {
-  const dir = join4(environment.CLAUDE_CONFIG_DIR || join4(homedir3(), ".claude"), "sessions");
-  for await (const file of new Bun.Glob("*.json").scan(dir)) {
-    try {
-      const entry = await Bun.file(join4(dir, file)).json();
-      if (entry.sessionId === sessionId && typeof entry.name === "string")
-        return entry.name;
-    } catch {}
-  }
-}
-async function rosterKind(name, environment = process.env) {
-  const path = join4(dataDirOf(environment), "roster.json");
-  try {
-    const roster = await Bun.file(path).json();
-    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
-    return isRosterKind(kind) ? kind : undefined;
-  } catch {
-    return;
-  }
-}
-async function rosterRole(name, environment = process.env) {
-  const kind = await rosterKind(name, environment);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
-}
-async function sessionRole(environment, sessionId) {
-  if (environment.PLAYGROUND_ROLE)
-    return environment.PLAYGROUND_ROLE;
-  if (typeof sessionId !== "string")
-    return "";
-  try {
-    const name = await registryName(sessionId, environment) ?? "";
-    const role = name && await rosterRole(name, environment);
-    if (role)
-      return role;
-    await loadNames(environment);
-    return roleOfName(name);
-  } catch {
-    return "";
-  }
-}
-async function fromFactory(raw, environment = process.env) {
-  return await sessionRole(environment, sessionOf(raw)) !== "";
-}
-function sessionOf(raw) {
-  try {
-    return JSON.parse(raw).session_id;
-  } catch {
-    return;
-  }
-}
-
 // scripts/hooks/no-playground-leak.ts
-var EMPTY_TERMS = {
-  aliases: [],
-  everyday: [],
-  names: [],
-  paths: [],
-  probe: "probe",
-  sessions: { roles: [], sins: [] }
-};
-var terms = EMPTY_TERMS;
-var CLEARED = {};
 var CHAT_TOOL = /^chat_(?:me_message|post_ephemeral|post_message|schedule_message|update)$/;
 var POST_KEYS = { channel: "channel", text: "text" };
 var CONNECTOR_TOOL = "slack_send_message";
 var CONNECTOR_KEYS = { channel: "channel_id", text: "message" };
-var signed = () => Object.keys(CLEARED).filter((c) => CLEARED[c].signature);
+var signed = () => {
+  const { cleared } = state();
+  return Object.keys(cleared).filter((c) => cleared[c].signature);
+};
 var OTHER_DESTINATION = /channel|conversation/i;
 var RICH = ["attachments", "blocks", "markdown_text"];
 var isJson = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -9113,49 +9149,7 @@ function chipsSigned(blocks, signature) {
   return opensLine && text.split(`
 `).at(-1)?.trim() === signature.replace(/^_(.*)_$/, "$1");
 }
-var escape2 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-var HANDLE = /^[a-z\d][\w.-]{1,63}$/i;
-var MAX_ROSTER_BYTES = 1048576;
-var CHECKOUT = join5(__CHECKOUT + "/scripts/hooks", "..", "..");
-function rosterNames(environment) {
-  const path = join5(dataDirOf(environment), "roster.json");
-  try {
-    if (statSync(path).size > MAX_ROSTER_BYTES)
-      return [];
-    const agents = JSON.parse(readFileSync2(path, "utf8"))?.agents;
-    if (!Array.isArray(agents))
-      return [];
-    return agents.flatMap((a) => {
-      const name = a?.name;
-      return typeof name === "string" && notEveryday(name) ? [name] : [];
-    });
-  } catch {
-    return [];
-  }
-}
-var notEveryday = (name) => HANDLE.test(name) && !terms.everyday.some((w) => w.toLowerCase() === name.toLowerCase());
-function skillNames(checkout = CHECKOUT) {
-  const ours = join5(checkout, "skills", "playground");
-  try {
-    return readdirSync(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync3(join5(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
-  } catch {
-    return [];
-  }
-}
-function pattern(environment, checkout = CHECKOUT) {
-  const sources = [
-    ...[...terms.names, ...terms.aliases, ...rosterNames(environment), ...skillNames(checkout)].map((n) => escape2(n).replace(/ /g, "[\\s_-]+") + (n.endsWith("_") ? "[a-z\\d_]*" : "")),
-    ...terms.paths.map(escape2),
-    ...terms.sessions.sins.length ? [
-      `${escape2(terms.probe)}-(?:(?:${terms.sessions.roles.join("|")})-)?(?:${terms.sessions.sins.join("|")})`,
-      `(?:${terms.sessions.roles.join("|")})-(?:${terms.sessions.sins.join("|")})`
-    ] : []
-  ];
-  if (!sources.length)
-    return /(?!)/;
-  return new RegExp(`(?<![a-z\\d])(?:${sources.join("|")})(?![a-z\\d])`, "i");
-}
-var TERM = pattern({});
+var CHECKOUT2 = join5(__CHECKOUT + "/scripts/hooks", "..", "..");
 var REPHRASE = "Say it without the term: name the work, not who did it or how it is run.";
 var READABLE = `Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md, or -F /abs/msg.md for a commit). ${NOT_RUN}`;
 var MCP_READABLE = "Pass the input as an object whose fields are strings.";
@@ -9307,10 +9301,6 @@ var GIT_CONFIG_PATH = /(?:^|\/)\.git(?:\/|$)|\.gitconfig|(?:^|\/)git\/config$/;
 var CONFIG_WRITE = /^--(?:add|edit|remove-section|rename-section|replace-all|unset|unset-all)$|^-e$/;
 var CONFIG_READ = /^--(?:get|get-all|get-color|get-colorbool|get-regexp|get-urlmatch|list)$|^-l$/;
 var CONFIG_TAKES = new Set(["--blob", "--default", "-f", "--file", "--type"]);
-var changed = false;
-var moved = false;
-var movedBefore = false;
-var startCwd;
 var builtins;
 var MCP_TOOL = /^mcp__(.+?)__(.+)$/;
 var READ_TOOL = /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$/;
@@ -9318,10 +9308,10 @@ var INNER = new Set(["curl", "gh", "git"]);
 var MAYBE = /curl|gh|git/i;
 var MAYBE_ANY = /alias|curl|gh|git|repo|send-pack|subtree/i;
 var WRITE_CALL = /\b(?:curl|gh|git)\b|github|linear|slack/i;
-var leakPolicy = (orgs) => ({
+var leakPolicy = (orgs, term = /(?!)/) => ({
   find: (text) => {
-    const term = TERM.exec(visible(text))?.[0];
-    return term ? { detail: `"${term}", a factory term`, fix: REPHRASE } : undefined;
+    const found = term.exec(visible(text))?.[0];
+    return found ? { detail: `"${found}", a factory term`, fix: REPHRASE } : undefined;
   },
   git: true,
   guard: "no-playground-leak",
@@ -9331,36 +9321,44 @@ var leakPolicy = (orgs) => ({
   what: "a factory term",
   why: "the factory is private, so nothing about it, its skills or its sessions goes into anything a guarded org sees, in any shape."
 });
-var policy = leakPolicy(new Set);
+var calls = new AsyncLocalStorage2;
+var IDLE = {
+  changed: false,
+  cleared: {},
+  moved: false,
+  movedBefore: false,
+  policy: leakPolicy(new Set)
+};
+var state = () => calls.getStore() ?? IDLE;
 var lower = (text) => text[0].toLowerCase() + text.slice(1);
 function refuse(what, target, detail, fix) {
-  return `${policy.guard} hook refused ${what} to ${target.label}: ${detail}. ${policy.why} ${fix}`;
+  return `${state().policy.guard} hook refused ${what} to ${target.label}: ${detail}. ${state().policy.why} ${fix}`;
 }
 function refuseAny(what, target, fix = NOT_RUN) {
-  return target.where === "guarded" ? refuse(what, target, `it writes to ${policy.place}`, fix) : refuse(what, target, `the hook cannot tell whether it writes to ${policy.place}`, PLACE_FIX);
+  return target.where === "guarded" ? refuse(what, target, `it writes to ${state().policy.place}`, fix) : refuse(what, target, `the hook cannot tell whether it writes to ${state().policy.place}`, PLACE_FIX);
 }
 async function judge(what, target, texts, env, extras = []) {
   if (target.where === "other")
     return;
-  if (policy.anyWrite && !target.byText)
+  if (state().policy.anyWrite && !target.byText)
     return refuseAny(what, target);
   const resolved = await Promise.all(texts.map((t) => resolveText(t, env)));
   const seen = (await Promise.all(extras.map((t) => resolveText(t, env)))).filter((t) => !t.unknown);
-  const hit = [...resolved, ...seen].map((t) => policy.find(t.value)).find(Boolean);
+  const hit = [...resolved, ...seen].map((t) => state().policy.find(t.value)).find(Boolean);
   if (target.where === "unknown") {
     if (!hit)
       return;
-    return refuse(what, target, `the hook cannot tell whether it writes to ${policy.place}, and its text holds ${hit.detail}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(hit.fix)} ${NOT_RUN}`);
+    return refuse(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${hit.detail}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(hit.fix)} ${NOT_RUN}`);
   }
   if (hit)
     return refuse(what, target, `its text holds ${hit.detail}`, hit.fix);
   const hidden = resolved.find((t) => t.unknown);
   if (hidden) {
-    return refuse(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${policy.what}`, READABLE);
+    return refuse(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`, READABLE);
   }
 }
 function decide(candidates) {
-  const ours = candidates.find((c) => c && policy.guarded(c));
+  const ours = candidates.find((c) => c && state().policy.guarded(c));
   if (ours)
     return { label: `${ours.owner}/${ours.repo}`, where: "guarded" };
   if (candidates.length === 0 || candidates.some((c) => !c)) {
@@ -9371,27 +9369,27 @@ function decide(candidates) {
 var XARGS_INPUT = { quoted: false, unknown: "xargs's input", value: UNKNOWN };
 var leak = async (cmd, parsed, env) => {
   const { first, name, xargs } = parsed;
-  if (policy.anyWrite)
+  if (state().policy.anyWrite)
     pastDeadline();
-  const appended = policy.anyWrite && xargs && xargs.replace === undefined;
+  const appended = state().policy.anyWrite && xargs && xargs.replace === undefined;
   const args = appended && parsed.args.at(-1) !== XARGS_INPUT ? [...parsed.args, XARGS_INPUT] : parsed.args;
-  if (policy.anyWrite && changesState(cmd, parsed))
-    changed = true;
-  if (policy.anyWrite) {
-    movedBefore = moved;
+  if (state().policy.anyWrite && changesState(cmd, parsed))
+    state().changed = true;
+  if (state().policy.anyWrite) {
+    state().movedBefore = state().moved;
     if (MOVERS.has(name) || first?.unknown)
-      moved = true;
+      state().moved = true;
   }
   const head = args[0]?.value ?? "";
-  const group = GH_GROUPS.has(head) || policy.anyWrite && (head === "alias" || head === "repo");
+  const group = GH_GROUPS.has(head) || state().policy.anyWrite && (head === "alias" || head === "repo");
   if (name === "gh" || first?.unknown && group) {
     const verdict = await gh(args, cmd, env, parsed.local, xargs);
-    if (verdict || name === "gh" || !policy.anyWrite)
+    if (verdict || name === "gh" || !state().policy.anyWrite)
       return verdict;
   }
-  const pusher = policy.anyWrite && (head === "send-pack" || head === "subtree");
+  const pusher = state().policy.anyWrite && (head === "send-pack" || head === "subtree");
   if (name === "git" || first?.unknown && (head === "commit" || head === "push" || pusher))
-    return policy.git ? git(args, cmd, env, parsed.local) : undefined;
+    return state().policy.git ? git(args, cmd, env, parsed.local) : undefined;
   if (name === "curl")
     return curl(args, cmd, env, xargs);
   if (PRINTERS.has(name))
@@ -9443,13 +9441,13 @@ function changesState(cmd, { args, name }) {
   return [...args, ...targets].some((w) => GIT_CONFIG_PATH.test(w.value));
 }
 var MOVERS = new Set(["gh", "git"]);
-var implicit = (env, local) => policy.anyWrite && changed ? [undefined] : implicitRepos(env, local);
+var implicit = (env, local) => state().policy.anyWrite && state().changed ? [undefined] : implicitRepos(env, local);
 async function gh(args, cmd, env, local, xargs) {
   const { head, repos, rest } = ghCommand(args);
   if (head[0] === "api")
     return api2(rest, cmd, env, local, xargs);
   const key = head.join(" ");
-  if (policy.anyWrite) {
+  if (state().policy.anyWrite) {
     if (key === "alias import" || key === "alias set") {
       return refuse(`gh ${key}`, decide([]), "an alias can run any gh write under a name the hook does not read", `Run the gh command itself, in a call of its own. ${NOT_RUN}`);
     }
@@ -9464,7 +9462,7 @@ async function gh(args, cmd, env, local, xargs) {
     if (takes)
       return repoWrite(key, rest, repos, env, local, xargs, takes);
   }
-  const found = GH_WRITES.get(key) ?? (policy.anyWrite ? ANY_GH_WRITES.get(key) : undefined);
+  const found = GH_WRITES.get(key) ?? (state().policy.anyWrite ? ANY_GH_WRITES.get(key) : undefined);
   if (!found)
     return;
   const { flags, positionals } = parseFlags(rest, found.takes);
@@ -9491,7 +9489,7 @@ async function gh(args, cmd, env, local, xargs) {
     if (fromXargs(p, xargs))
       return [undefined];
     if (p === XARGS_INPUT || p.unknown || p.reads?.length || p.value.includes(UNKNOWN))
-      return policy.anyWrite ? [] : [undefined];
+      return state().policy.anyWrite ? [] : [undefined];
     return PR_URL.test(p.value) ? [repoOf(p)] : [];
   });
   const named = [...flagged, ...urls];
@@ -9510,7 +9508,7 @@ async function gh(args, cmd, env, local, xargs) {
 function destination(what, owner, name, fix) {
   if (owner === undefined || name === undefined)
     return refuseAny(what, decide([undefined]));
-  if (!policy.guarded({ owner, repo: name }))
+  if (!state().policy.guarded({ owner, repo: name }))
     return;
   const label = owner === "*" ? `a repository named ${name}` : `${owner}/${name}`;
   return refuseAny(what, { label, where: "guarded" }, fix);
@@ -9553,7 +9551,7 @@ function unplaced(what, source, env) {
   const lost = source.length === 0 && !env.cwd;
   if (!lost && source.every(Boolean))
     return;
-  if (policy.anyWrite && changed)
+  if (state().policy.anyWrite && state().changed)
     return refuse(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
   return refuse(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
 }
@@ -9577,12 +9575,12 @@ async function api2(args, cmd, env, local, xargs) {
   const request = await ghApi(args, cmd, env, xargs);
   if (!request || ["GET", "HEAD"].includes(request.method))
     return;
-  if (policy.anyWrite && xargs && !xargs.replace) {
+  if (state().policy.anyWrite && xargs && !xargs.replace) {
     const method = args.some((a) => /^(?:-[A-Za-z]*X|--method)/.test(a.value));
     if (!method && request.fields.length === 1 && request.inputs.length === 0)
       return;
   }
-  if (request.method === "DELETE" && !policy.anyWrite)
+  if (request.method === "DELETE" && !state().policy.anyWrite)
     return;
   const { endpoint, fields, inputs } = request;
   const posted = (f) => endpoint.value === "graphql" || f.key.includes(UNKNOWN) || TEXT_FIELD.test(f.key);
@@ -9604,23 +9602,23 @@ async function api2(args, cmd, env, local, xargs) {
   if (host)
     return judge(`gh api ${host.label}`, host, texts, env, extras);
   const typed = value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "");
-  const path = policy.anyWrite ? dotless(typed) : typed;
+  const path = state().policy.anyWrite ? dotless(typed) : typed;
   const repo = /^repos\/([^/]+)\/([^/]+)/.exec(path);
   const org = /^orgs\/([^/]+)/.exec(path);
   const what = `gh api ${path.split("?")[0]}`;
-  if (policy.anyWrite) {
+  if (state().policy.anyWrite) {
     const refused = await apiDestination(what, request, path, env);
     if (refused)
       return refused;
   }
-  if (policy.anyWrite && repo && conversation(path.slice(repo[0].length)))
+  if (state().policy.anyWrite && repo && conversation(path.slice(repo[0].length)))
     return;
-  if (policy.anyWrite && path.startsWith("repositories/"))
+  if (state().policy.anyWrite && path.startsWith("repositories/"))
     return judge(what, { label: "a repository named only by its id", where: "unknown" }, [], env);
   let candidates;
   if (fromXargs(endpoint, xargs))
     candidates = [undefined];
-  else if (policy.anyWrite && repo && (PLACEHOLDER.test(repo[1]) || PLACEHOLDER.test(repo[2])))
+  else if (state().policy.anyWrite && repo && (PLACEHOLDER.test(repo[1]) || PLACEHOLDER.test(repo[2])))
     candidates = implicit(env, local).map((r) => r && {
       owner: PLACEHOLDER.test(repo[1]) ? r.owner : repo[1],
       repo: PLACEHOLDER.test(repo[2]) ? r.repo : repo[2]
@@ -9702,7 +9700,7 @@ var hostOf = (url) => /^[a-z][a-z\d+.-]*:\/\/(?:[^/?#@]*@)?([^/?#:]+)/i.exec(url
 var slackHost = (host) => host === "slack.com" || !!host?.endsWith(".slack.com");
 function hostTarget(url) {
   const host = hostOf(url);
-  if (!host || !policy.hosts)
+  if (!host || !state().policy.hosts)
     return;
   if (host === "linear.app" || host.endsWith(".linear.app"))
     return { label: "Linear", where: "guarded" };
@@ -9712,14 +9710,14 @@ function hostTarget(url) {
 async function curl(args, cmd, env, xargs) {
   const { flags, positionals } = parseFlags(args, CURL_TAKES);
   const urls = curlUrls(flags, positionals);
-  const globs = policy.anyWrite === true && !flags.some((f) => f.name === "-g" || f.name === "--globoff");
-  if (policy.anyWrite) {
+  const globs = state().policy.anyWrite === true && !flags.some((f) => f.name === "-g" || f.name === "--globoff");
+  if (state().policy.anyWrite) {
     const redirect = args.some((a, i) => /^--(?:connect-to|request-target|resolve)(?:=|$)/.test(a.value) || (a.value === "-H" || a.value === "--header") && /^\s*host\s*:/i.test(args[i + 1]?.value ?? "") || /^(?:-H|--header=)\s*host\s*:/i.test(a.value));
     if (redirect && args.some((a) => /github/i.test(a.value)))
       return judge("curl", { label: "a host the call redirects to", where: "unknown" }, [], env);
   }
   const targets = urls.map((u) => {
-    if (u.unknown === XARGS_INPUT.unknown || policy.anyWrite && fromXargs(u, xargs))
+    if (u.unknown === XARGS_INPUT.unknown || state().policy.anyWrite && fromXargs(u, xargs))
       return u.unknown || curlWrites(flags) ? { label: "a URL xargs supplies from its input", where: "unknown" } : { label: "", where: "other" };
     const value = visible(u.value);
     if (u.unknown || u.reads?.length || value.includes(UNKNOWN) || fromXargs(u, xargs))
@@ -9728,7 +9726,7 @@ async function curl(args, cmd, env, xargs) {
     const host = hostTarget(url);
     if (host)
       return host;
-    if (policy.anyWrite)
+    if (state().policy.anyWrite)
       return curlTarget(url, globs);
     if (/^https?:\/\/api\.github\.com(?::\d+)?\/graphql(?:[/?#]|$)/i.test(url))
       return {
@@ -9754,7 +9752,7 @@ async function curl(args, cmd, env, xargs) {
     const read = await Promise.all([...urls, ...data].map((t) => resolveText(t, env)));
     const id = signed().find((c) => read.some((t) => t.value.includes(c)));
     if (id) {
-      return `no-playground-leak hook refused curl to ${CLEARED[id].name}: post there through the Slack MCP chat tools, which check that its last line is ${CLEARED[id].signature}.`;
+      return `no-playground-leak hook refused curl to ${state().cleared[id].name}: post there through the Slack MCP chat tools, which check that its last line is ${state().cleared[id].signature}.`;
     }
   }
   if (xargs && !xargs.replace)
@@ -9809,9 +9807,9 @@ function clearedPost(what, input, at, signedOnly) {
     return;
   const channel = input[at.channel];
   const text = input[at.text];
-  if (typeof channel !== "string" || !Object.hasOwn(CLEARED, channel))
+  if (typeof channel !== "string" || !Object.hasOwn(state().cleared, channel))
     return;
-  const { name, signature } = CLEARED[channel];
+  const { name, signature } = state().cleared[channel];
   if (!signature)
     return signedOnly ? undefined : "";
   const signed = typeof text === "string" && text.trimEnd().split(`
@@ -9874,7 +9872,7 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
   const rest = args.slice(k + 1);
   const here = { ...env, cwd: dir };
   const maybeAlias = anyAlias || aliasSet && !!sub && marked(sub);
-  if (!policy.anyWrite && sub && (maybeAlias || aliases.has(sub.toLowerCase())) && !builtin(sub)) {
+  if (!state().policy.anyWrite && sub && (maybeAlias || aliases.has(sub.toLowerCase())) && !builtin(sub)) {
     const value = aliases.get(sub.toLowerCase());
     const words = value === undefined || value.trim().startsWith("!") ? undefined : splitCmdline(value);
     const head = words?.[0]?.value;
@@ -9882,7 +9880,7 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
       return refuse("git", decide([]), `its alias ${sub}, set with -c or --config-env, runs a command, holds a value the hook cannot read, or names another alias`, `Write the git command out in full in place of the alias, then run it again. ${NOT_RUN}`);
     return git([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1);
   }
-  if (policy.anyWrite) {
+  if (state().policy.anyWrite) {
     const cannot = (detail) => refuse("git", decide([]), detail, PLACE_FIX);
     if (aliasSet)
       return cannot("it sets a git alias with -c or --config-env, which can run a push under a name the hook does not read");
@@ -9891,7 +9889,7 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     if (sub && !["commit", "push", "send-pack", "subtree"].includes(sub) && !builtin(sub)) {
       if (carried)
         return cannot(`it runs ${sub}, which -c, --config-env, --git-dir or a GIT_ variable may define as an alias`);
-      if (changed)
+      if (state().changed)
         return cannot(`it runs ${sub}, which an earlier command in the call may define as an alias`);
       const alias = gitText(dir ?? "/", ["config", "--get", `alias.${sub}`], `alias ${sub}`);
       if (!alias.unknown) {
@@ -9917,7 +9915,7 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     return push(rest, here, checkout);
   if (dir && checkout.length === 0)
     return;
-  if (policy.anyWrite) {
+  if (state().policy.anyWrite) {
     const target = decide(dir ? checkout : [undefined]);
     return target.where === "guarded" ? judge("git commit", target, [], env) : undefined;
   }
@@ -9982,7 +9980,7 @@ function placeUrl(url) {
     return remoteRepo(url);
 }
 function pushTarget(remote, dir) {
-  if (changed || !dir || remote && (remote.unknown || remote.reads?.length || marked(remote.value)))
+  if (state().changed || !dir || remote && (remote.unknown || remote.reads?.length || marked(remote.value)))
     return decide([undefined]);
   const lines = (args) => {
     const text = gitText(dir, args, "a remote");
@@ -10001,7 +9999,7 @@ function pushTarget(remote, dir) {
   if (!remote) {
     const names = lines(["remote"]);
     const branch = lines(["symbolic-ref", "--short", "HEAD"])?.[0];
-    const name = movedBefore || dir !== startCwd ? ".*" : branch?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const name = state().movedBefore || dir !== state().startCwd ? ".*" : branch?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const current = name ? `|branch\\.${name}\\.(pushremote|remote)` : "";
     const keys = lines(["config", "--get-regexp", `^(remote\\.pushdefault${current})$`]);
     const picked = (keys ?? []).map((line) => line.slice(line.indexOf(" ") + 1)).filter((value) => value !== "" && value !== "." && !names?.includes(value));
@@ -10014,7 +10012,7 @@ function pushTarget(remote, dir) {
 }
 async function push(rest, env, checkout, takes = PUSH_TAKES) {
   const { flags, positionals } = parseFlags(rest, takes);
-  if (policy.anyWrite) {
+  if (state().policy.anyWrite) {
     const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value;
     return judge("git push", pushTarget(remote, env.cwd), [], env);
   }
@@ -10073,7 +10071,7 @@ function gatedPost(tool, server, name, input) {
   const connector = name === CONNECTOR_TOOL;
   const posting = CHAT_TOOL.test(name) || connector;
   const what = tool.replace(/^mcp__/, "");
-  for (const gate of policy.gates ?? []) {
+  for (const gate of state().policy.gates ?? []) {
     if ("broken" in gate) {
       if (/slack/i.test(server))
         return brokenGate(what, gate);
@@ -10090,7 +10088,7 @@ function gatedPost(tool, server, name, input) {
 var brokenGate = (what, gate) => `no-playground-leak hook refused ${what}: the ${gate.org} extension's slack.gatedSends does not read (${gate.broken}), so the hook cannot tell which Slack writes its gate covers. Tell your lead: it is set in that extension's settings as {"path": "<its send path>", "selfDm": "D\u2026", "servers": ["<MCP server>"]}, or "" for no gate; then run the call again.`;
 var SLACK_READ_METHOD = /^(?:auth\.test|search\.[a-z]+|(?:[a-z]+\.)+(?:history|info|list|replies|unreads|get[A-Za-z]*|lookup[A-Za-z]*))$/;
 function gatedCurl(urls) {
-  const gates = policy.gates ?? [];
+  const gates = state().policy.gates ?? [];
   if (!gates.length)
     return;
   const writes = urls.some((u) => {
@@ -10124,7 +10122,7 @@ function mcp(tool, input) {
   if (gated)
     return gated;
   const surface = /linear/i.test(server) ? "Linear" : /slack/i.test(server) ? "Slack" : /github/i.test(server) ? "GitHub" : undefined;
-  if (!surface || READ_TOOL.test(name) || surface !== "GitHub" && !policy.hosts)
+  if (!surface || READ_TOOL.test(name) || surface !== "GitHub" && !state().policy.hosts)
     return;
   const what = tool.replace(/^mcp__/, "");
   let target = { label: surface, where: "guarded" };
@@ -10136,7 +10134,7 @@ function mcp(tool, input) {
     if (verdict !== undefined)
       return verdict || undefined;
   }
-  if (surface === "GitHub" && policy.anyWrite && name === "create_repository") {
+  if (surface === "GitHub" && state().policy.anyWrite && name === "create_repository") {
     const owner = input.organization ?? "*";
     const named = input.name;
     return destination(what, typeof owner === "string" ? owner : undefined, typeof named === "string" ? named : undefined, "");
@@ -10149,38 +10147,36 @@ function mcp(tool, input) {
       return refuse(what, { label: "GitHub", where: "unknown" }, "its owner is not text the hook can read", MCP_READABLE);
     }
     const repo = { owner, repo: typeof input.repo === "string" ? input.repo : "*" };
-    if (!policy.guarded(repo))
+    if (!state().policy.guarded(repo))
       return;
     target = { label: `${repo.owner}/${repo.repo}`, where: "guarded" };
-    if (policy.anyWrite)
+    if (state().policy.anyWrite)
       return CONVERSATION_TOOL.test(name) ? undefined : refuseAny(what, target, "");
   }
-  const hit = strings(input).map(policy.find).find(Boolean);
+  const hit = strings(input).map(state().policy.find).find(Boolean);
   if (hit)
     return refuse(what, target, `its text holds ${hit.detail}`, hit.fix);
 }
 function candidate(command) {
-  const maybe = policy.anyWrite ? MAYBE_ANY : MAYBE;
+  const maybe = state().policy.anyWrite ? MAYBE_ANY : MAYBE;
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""));
 }
 var refusedList = (raw, refusal) => WRITE_CALL.test(subjectOf(raw)) && !readOnly(raw) ? refusal : undefined;
-async function inspectAs(given, raw, environment) {
-  policy = given;
-  changed = false;
-  moved = false;
-  movedBefore = false;
-  startCwd = undefined;
-  try {
-    return await inspect(raw, environment);
-  } catch (error) {
-    const subject = subjectOf(raw);
-    const writes = WRITE_CALL.test(subject) || policy.anyWrite && candidate(subject);
-    if (!writes || !policy.anyWrite && !policy.find(subject))
-      return;
-    if (policy.anyWrite)
-      return `${policy.guard} hook refused this call: it could not read it (${error}), so it cannot tell whether it is ${policy.what}. Split it into plain commands and run them again.`;
-    return `${policy.guard} hook could not read this call (${error}), which may carry ${policy.what} to ${policy.place}, so it refuses it. Split it into plain commands and run them again.`;
-  }
+async function inspectAs(given, raw, environment, cleared = {}) {
+  const call = { changed: false, cleared, moved: false, movedBefore: false, policy: given };
+  return await calls.run(call, async () => {
+    try {
+      return await inspect(raw, environment);
+    } catch (error) {
+      const subject = subjectOf(raw);
+      const writes = WRITE_CALL.test(subject) || given.anyWrite && candidate(subject);
+      if (!writes || !given.anyWrite && !given.find(subject))
+        return;
+      if (given.anyWrite)
+        return `${given.guard} hook refused this call: it could not read it (${error}), so it cannot tell whether it is ${given.what}. Split it into plain commands and run them again.`;
+      return `${given.guard} hook could not read this call (${error}), which may carry ${given.what} to ${given.place}, so it refuses it. Split it into plain commands and run them again.`;
+    }
+  });
 }
 function subjectOf(raw) {
   try {
@@ -10200,10 +10196,10 @@ async function inspect(raw, environment) {
     payload = undefined;
   }
   if (typeof payload !== "object" || payload === null) {
-    return WRITE_CALL.test(raw) && policy.find(raw) ? `${policy.guard} hook could not parse its input, which may carry ${policy.what} to ${policy.place}, so it refuses the call.` : undefined;
+    return WRITE_CALL.test(raw) && state().policy.find(raw) ? `${state().policy.guard} hook could not parse its input, which may carry ${state().policy.what} to ${state().policy.place}, so it refuses the call.` : undefined;
   }
   const { cwd, tool_input: toolInput, tool_name: tool } = payload;
-  startCwd = typeof cwd === "string" ? cwd : undefined;
+  state().startCwd = typeof cwd === "string" ? cwd : undefined;
   const input = typeof toolInput === "object" && toolInput !== null ? toolInput : undefined;
   if (tool === "Bash") {
     const command = input?.command;
@@ -10269,7 +10265,7 @@ function finder(list, repos, owner) {
     return found && SAID[found[0]];
   };
 }
-var policy2 = (list, repos, owner) => ({
+var policy = (list, repos, owner) => ({
   find: finder(list, repos, owner),
   git: false,
   guard: "no-public-leak",
@@ -10294,7 +10290,7 @@ async function check(raw, environment = process.env) {
   const read = await readPolicy(dataDir(environment));
   if (read.refusal !== undefined)
     return refusedList(raw, `no-public-leak hook refused this call: ${read.refusal}, then run the call again.`);
-  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
+  return inspectAs(policy(loaded.list ?? EMPTY_LIST, reposOf(read.settings), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
 }
 if (import.meta.main) {
   const raw = await Bun.stdin.text();
@@ -10305,5 +10301,6 @@ if (import.meta.main) {
   }
 }
 export {
+  SAID,
   check
 };

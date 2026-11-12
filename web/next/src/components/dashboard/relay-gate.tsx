@@ -3,6 +3,7 @@
 import type { RelayStatus } from "@api/hono"
 import { RELAY_PREFIX } from "@packages/message"
 import { useQuery } from "@tanstack/react-query"
+import Link from "next/link"
 import { useEffect, useState } from "react"
 
 import { unwrap } from "@/lib/api/client"
@@ -27,7 +28,7 @@ async function readRelayStatus(): Promise<RelayStatus> {
   return data
 }
 
-// The hosted build's dashboard draws only while the owner's Mac holds the relay; otherwise its one line says since when the Mac is offline, and nothing else. A tab that comes back reads the status again at once, and an offline answer counts only once a second read confirms it.
+// The hosted build's dashboard draws only while the owner's Mac holds the relay; otherwise its one line says since when the Mac is offline, with a link to Yard's own pages, whose channels read with no Mac. A tab that comes back reads the status again at once, and an offline answer counts only once a second read confirms it.
 export function RelayGate({ children }: { children: React.ReactNode }) {
   const [visibleAt, setVisibleAt] = useState(0)
   const { data, dataUpdatedAt, error, errorUpdatedAt, refetch } = useQuery({
@@ -54,7 +55,12 @@ export function RelayGate({ children }: { children: React.ReactNode }) {
   if (view === "wait") return null
   return (
     <main className="flex min-h-svh items-center justify-center p-6">
-      <p className="text-muted-foreground text-sm">{view.line}</p>
+      <p className="text-muted-foreground text-sm">
+        {view.line} ·{" "}
+        <Link className="underline" href="/yard">
+          Open Yard
+        </Link>
+      </p>
     </main>
   )
 }

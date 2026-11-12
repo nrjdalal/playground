@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, machine } from "./run-slot-fake"
+import { SCRIPT, machine, runSlot } from "./run-slot-fake"
 
 // a check waits on its looks' exits, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -24,7 +24,7 @@ const held = (m: Machine, age: number) => {
 }
 // starts one look, as a waiter's poll does
 const start = (m: Machine) =>
-  Bun.spawn(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env(), stderr: "pipe" })
+  runSlot(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env(), stderr: "pipe", ops: m.ops })
 // what one look printed: how many of run-slot to run-slot-4 are held or open, and its stderr
 const read = async (p: ReturnType<typeof start>) => {
   await p.exited

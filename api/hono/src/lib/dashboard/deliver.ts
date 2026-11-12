@@ -80,10 +80,9 @@ export const deliveryEvent = (
         ),
       }
 
-// Why a delivery did not happen, or has not yet. CMUX_FAILED, INPUT_NOT_EMPTY, NOT_FOUND and ON_PICKER come before anything is typed (CMUX_FAILED includes a send herdr refused before sending anything, tried twice here), so they can succeed on a retry once the session or herdr changes, but for an INPUT_NOT_EMPTY marked `pasted`, whose message sits unsent in the box for its retry to press Enter on; AMBIGUOUS, COMMAND, EMPTY and TOO_LONG cannot until the text or the names change. INTERRUPTED means typing began and did not finish, or a held message left the screen with a transcript that cannot be read back to when it was queued: some or all of the message may be in the session's input or already sent, so it is never retried unseen. QUEUED means Claude Code holds a herdr session's message, in its box while it compacts or in its queue while it works, and takes it on its own: a retry under the same id types nothing and reads it again, and LOST is that retry finding it neither on the screen nor in the transcript QUEUED_MS after it was queued, so Retry sends it again.
+// Why a delivery did not happen, or has not yet. INPUT_NOT_EMPTY, NOT_FOUND, ON_PICKER and SESSIONS_FAILED come before anything is typed (SESSIONS_FAILED includes a send herdr refused before sending anything, tried twice here), so they can succeed on a retry once the session or herdr changes, but for an INPUT_NOT_EMPTY marked `pasted`, whose message sits unsent in the box for its retry to press Enter on; AMBIGUOUS, COMMAND, EMPTY and TOO_LONG cannot until the text or the names change. INTERRUPTED means typing began and did not finish, or a held message left the screen with a transcript that cannot be read back to when it was queued: some or all of the message may be in the session's input or already sent, so it is never retried unseen. QUEUED means Claude Code holds a herdr session's message, in its box while it compacts or in its queue while it works, and takes it on its own: a retry under the same id types nothing and reads it again, and LOST is that retry finding it neither on the screen nor in the transcript QUEUED_MS after it was queued, so Retry sends it again.
 export const DELIVERY_FAILURES = [
   "AMBIGUOUS",
-  "CMUX_FAILED",
   "COMMAND",
   "EMPTY",
   "INPUT_NOT_EMPTY",
@@ -92,6 +91,7 @@ export const DELIVERY_FAILURES = [
   "NOT_FOUND",
   "ON_PICKER",
   "QUEUED",
+  "SESSIONS_FAILED",
   "TOO_LONG",
 ] as const
 
@@ -100,15 +100,15 @@ export type DeliveryFailure = (typeof DELIVERY_FAILURES)[number]
 // How a route reports each refusal: its HTTP status and the API's error code, with the reason's own code under `delivery`.
 export const FAILURE_STATUS: Record<DeliveryFailure, [ContentfulStatusCode, ErrorCode]> = {
   AMBIGUOUS: [409, "CONFLICT"],
-  CMUX_FAILED: [502, "CMUX_FAILED"],
   COMMAND: [400, "VALIDATION_ERROR"],
   EMPTY: [400, "VALIDATION_ERROR"],
   INPUT_NOT_EMPTY: [409, "CONFLICT"],
-  INTERRUPTED: [502, "CMUX_FAILED"],
+  INTERRUPTED: [502, "SESSIONS_FAILED"],
   LOST: [409, "CONFLICT"],
   NOT_FOUND: [404, "NOT_FOUND"],
   ON_PICKER: [409, "CONFLICT"],
   QUEUED: [409, "CONFLICT"],
+  SESSIONS_FAILED: [502, "SESSIONS_FAILED"],
   TOO_LONG: [400, "VALIDATION_ERROR"],
 }
 
@@ -495,13 +495,13 @@ async function target(to: string, read: () => Promise<Live>): Promise<Refusal | 
     try {
       live = await read()
     } catch (error) {
-      return refused("CMUX_FAILED", `Could not read the sessions: ${messageOf(error)}`)
+      return refused("SESSIONS_FAILED", `Could not read the sessions: ${messageOf(error)}`)
     }
     found = reached(live.workers, to)
   } while (!found.count && live.partial && ++tries < 2)
   if (!found.count && live.partial) {
     return refused(
-      "CMUX_FAILED",
+      "SESSIONS_FAILED",
       `The sessions read was cut short (a herdr server or pane did not answer whole), so ${to} was not found; nothing was typed.`,
     )
   }
@@ -562,7 +562,7 @@ export async function deliver(
         screen = await deps.readScreen(surface)
       } catch (error) {
         return refused(
-          "CMUX_FAILED",
+          "SESSIONS_FAILED",
           `Could not read ${worker.name}'s terminal: ${messageOf(error)}`,
         )
       }
@@ -871,7 +871,7 @@ export async function deliver(
       }
       return { at: deps.now().toISOString(), ok: true, sessionId: worker.sessionId }
     }
-    // A message can get lost: a first send herdr refused before sending anything typed nothing, so deliver tries it once more at once and then the outbox retries it, on its own schedule for CMUX_FAILED, so it reaches the red bubble only after both; each such try is logged with the failure's own words. A send that may have landed is never retried here and is not logged (INTERRUPTED).
+    // A message can get lost: a first send herdr refused before sending anything typed nothing, so deliver tries it once more at once and then the outbox retries it, on its own schedule for SESSIONS_FAILED, so it reaches the red bubble only after both; each such try is logged with the failure's own words. A send that may have landed is never retried here and is not logged (INTERRUPTED).
     let refusedBeforeTyping = ""
     for (const i of [0, 1]) {
       const result = await attempt()
@@ -885,6 +885,6 @@ export async function deliver(
         `Dashboard message to ${worker.name} not sent (try ${i + 1} of 2): herdr failed before anything was typed: ${result.message}${i === 0 ? "; trying again" : ""}`,
       )
     }
-    return refused("CMUX_FAILED", `The message did not go through: ${refusedBeforeTyping}`)
+    return refused("SESSIONS_FAILED", `The message did not go through: ${refusedBeforeTyping}`)
   })
 }

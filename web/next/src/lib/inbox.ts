@@ -12,7 +12,7 @@ import { useQuery } from "@tanstack/react-query"
 import { agentLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { isProbe } from "@/lib/dashboard"
-import { needsYouAnchor } from "@/lib/needs-you"
+import { needsYouAnchor, type TargetSource } from "@/lib/needs-you"
 import type { ShownState } from "@/lib/status-icons"
 import { fullTime } from "@/lib/time"
 
@@ -143,11 +143,11 @@ export const sendFailed = (item: InboxItem): boolean =>
 
 // The failures Retry is offered after, the API's RETRY_CODES restated since the web imports its types alone (a test holds the two equal): nothing was typed, so a retry cannot type the answer twice.
 export const RETRY_CODES = [
-  "CMUX_FAILED",
   "INPUT_NOT_EMPTY",
   "LOST",
   "NOT_FOUND",
   "ON_PICKER",
+  "SESSIONS_FAILED",
   "UPLOAD_FAILED",
 ] as const
 
@@ -864,6 +864,19 @@ export const inboxPosters = (items: readonly InboxItem[]): Set<string> =>
 export const inboxTarget = (anchor: string, items: readonly InboxItem[]): boolean => {
   const prefix = needsYouAnchor("")
   return anchor.startsWith(prefix) && items.some((item) => item.id === anchor.slice(prefix.length))
+}
+
+// Pure: the shut shelf an asked-for card waits on, opened for a click alone; null for none.
+export const shelfToOpen = (
+  anchor: string,
+  source: TargetSource,
+  shelves: readonly (readonly [Shelf, unknown, readonly InboxItem[]])[],
+  open: readonly string[],
+): Shelf | null => {
+  const shelf = shelves.find(([, , list]) =>
+    list.some((item) => needsYouAnchor(item.id) === anchor),
+  )?.[0]
+  return source === "click" && shelf && !open.includes(shelf) ? shelf : null
 }
 
 // Pure: a decision's rows as its card shows them (choicesOf), or null for a secret and any other item.

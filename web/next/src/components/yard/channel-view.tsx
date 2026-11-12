@@ -7,8 +7,10 @@ import { cn } from "cn"
 import Link from "next/link"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 
+import { STREAM_ROW } from "@/components/dashboard/chat-scroll"
 import { sendsOnEnter } from "@/components/dashboard/composer"
 import { Hint } from "@/components/hint"
+import { PageShell } from "@/components/shell/page-shell"
 import { TranscriptMessage } from "@/components/transcript-message"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import {
@@ -17,6 +19,14 @@ import {
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group"
+import { MessageFooter } from "@/components/ui/message"
+import {
+  MessageScroller,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { CenterSpinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
@@ -27,22 +37,33 @@ import {
   approveHref,
   canPost,
   channelTitle,
+  isMine,
   messagesKey,
   upsertMessage,
   type YardChannel,
   type YardMessage,
+  type YardShell,
 } from "@/lib/yard"
-import { CHANNELS_KEY, useYardChannels, useYardMessages, yardApi } from "@/lib/yard-api"
+import { CHANNELS_KEY, useYardChannels, useYardMe, useYardMessages, yardApi } from "@/lib/yard-api"
 
 type Kind = (typeof MESSAGE_KINDS)[number]
 
 const SEND_HINT = "Enter to send, Shift+Enter for a new line"
 
 // A channel or DM in the chat pane: every message is untrusted data, shown through the transcript renderer (links shown, opened only on a click, images from elsewhere left unloaded) behind its from line and kind tag.
-export function ChannelView({ id, role }: { id: string; role: string | null | undefined }) {
+export function ChannelView({
+  id,
+  role,
+  shell,
+}: {
+  id: string
+  role: string | null | undefined
+  shell: YardShell
+}) {
   const { data: channels, isPending } = useYardChannels()
   const channel = channels?.find((row) => row.id === id)
   const { data: messages } = useYardMessages(id)
+  const { data: me } = useYardMe()
   const client = useQueryClient()
   const count = messages?.length
   // Marks the channel read once its messages show, and again as more arrive, while the tab is in view, and again on its return, so a mention that lands while you are away stays unread; a failed mark leaves the badge, read again next time.
@@ -71,29 +92,42 @@ export function ChannelView({ id, role }: { id: string; role: string | null | un
       </Empty>
     )
   const now = new Date()
+  // the chat's page box, rows and composer place (dashboard-view.tsx, worker-stream.tsx, composer.tsx; the design skill's Chat layout): the same gutter, 16px between rows, 36px under the last, the composer under the stream with 8px below it
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <header className="border-b px-4 py-3">
+    <PageShell size="full" className="flex h-full flex-col py-0 sm:py-0 md:px-7">
+      <header className="border-b py-3">
         <h1 className="text-sm font-medium">{channelTitle(channel)}</h1>
         {channel.topic && <p className="text-muted-foreground text-xs">{channel.topic}</p>}
       </header>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
-        {messages?.length === 0 && (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>No messages yet</EmptyTitle>
-              <EmptyDescription>Messages stay for {RETENTION_DAYS} days.</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        )}
-        {messages?.map((message) => (
-          <YardMessageView key={message.id} message={message} now={now}>
-            <Status message={message} />
-          </YardMessageView>
-        ))}
-      </div>
-      {/* on a hosted phone the shell's floating Menu sits 64 to 96px up the right edge (SidebarFloatingTrigger), so the composer rests 8px above it; the dashboard draws no such button */}
-      <div className={cn("px-4 pb-4", config.hosted && "max-md:pb-26")}>
+      {/* opens at the newest message and follows a new one only while the reader is at the end; each row at its real height (STREAM_ROW), so the stock 10rem guess for a row off screen never moves the view */}
+      <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+        <MessageScroller className="-mx-1 min-h-0 w-auto flex-1">
+          <MessageScrollerViewport
+            aria-label={`${channelTitle(channel)}'s messages`}
+            className="px-1"
+          >
+            <MessageScrollerContent className="gap-4 pt-3 pb-9">
+              {messages?.length === 0 && (
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyTitle>No messages yet</EmptyTitle>
+                    <EmptyDescription>Messages stay for {RETENTION_DAYS} days.</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
+              {messages?.map((message) => (
+                <MessageScrollerItem key={message.id} className={STREAM_ROW} messageId={message.id}>
+                  <YardMessageView message={message} mine={isMine(message, me)} now={now}>
+                    <Status message={message} />
+                  </YardMessageView>
+                </MessageScrollerItem>
+              ))}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+        </MessageScroller>
+      </MessageScrollerProvider>
+      {/* on a phone Yard's own shell's floating Menu sits 64 to 96px up the right edge (SidebarFloatingTrigger), so the composer rests 8px above it; the dashboard's tab bar holds its Menu instead */}
+      <div className={cn("mb-2", shell === "yard" && "max-md:mb-26")}>
         {canPost(channel, role) ? (
           <YardComposer channel={channel} />
         ) : (
@@ -102,18 +136,20 @@ export function ChannelView({ id, role }: { id: string; role: string | null | un
           </p>
         )}
       </div>
-    </div>
+    </PageShell>
   )
 }
 
-// One Yard message as the channel and the approve page show it: untrusted text read as written, behind its from line, its links under it, then what the page adds.
+// One Yard message as the channel and the approve page show it: untrusted text read as written, behind its from line, its links under it, then what the page adds; your own (mine) sits on the right in a bubble, as yours does in the chat.
 export function YardMessageView({
   children,
   message,
+  mine = false,
   now,
 }: {
   children?: ReactNode
   message: YardMessage
+  mine?: boolean
   now: Date
 }) {
   return (
@@ -122,11 +158,21 @@ export function YardMessageView({
       now={now}
       plain
       text={message.text}
-      variant="muted"
+      variant={mine ? "default" : "muted"}
       who={<FromLine message={message} />}
     >
-      <MessageLinks links={message.links} />
-      {children}
+      {/* under your own bubble they end on the right, snug as the chat's footer sits under yours */}
+      {mine ? (
+        <MessageFooter className="flex-col items-end">
+          <MessageLinks links={message.links} />
+          {children}
+        </MessageFooter>
+      ) : (
+        <>
+          <MessageLinks links={message.links} />
+          {children}
+        </>
+      )}
     </TranscriptMessage>
   )
 }

@@ -24,7 +24,13 @@ describe("a resume names the manager the roster holds, else the one its start re
       { name: "oldold-worker", role: "worker", kind: "worker", status: "working" },
     ]
     const r = await spawn(
-      ["resume", name, root, id],
+      [
+        "resume",
+        name,
+        root,
+        id,
+        ...(kind === "reviewer" || kind === "tester" ? ["--pr", "1"] : []),
+      ],
       [],
       { ROSTER_JSON: JSON.stringify({ agents }) },
       undefined,

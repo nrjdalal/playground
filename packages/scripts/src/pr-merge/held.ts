@@ -15,6 +15,9 @@ export const FREEZE_LAPSE_MS = 4 * 60 * 60_000
 // How a freeze's own `"*"` line ends, after its version: a `"*"` line that ends otherwise is one Ops wrote by hand, which never lapses, even beside a time an earlier freeze left.
 const FROZEN = " ships: canary is frozen until its tag lands"
 
+// Pure: the `"*"` line a freeze for version writes, which ship:merge reads back.
+export const freezeLine = (version: string): string => `${version}${FROZEN}`
+
 // Pure: whether a `"*"` line is the ship flow's own, the one startFreeze writes.
 const frozen = (line: unknown): boolean => typeof line === "string" && line.endsWith(FROZEN)
 
@@ -140,7 +143,7 @@ export async function startFreeze(
   if (Object.hasOwn(file.held, "*") && !frozen(own) && !focused(own)) {
     return { kept: true, line: typeof own === "string" && own.trim() ? own : "no reason given" }
   }
-  const reason = `${version}${FROZEN}`
+  const reason = freezeLine(version)
   const since = typeof file.since === "object" && file.since !== null ? file.since : {}
   await writeFile(path, {
     ...withoutStar(file, "until"),

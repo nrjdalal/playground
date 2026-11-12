@@ -13,10 +13,12 @@ A fresh install has every job off but two: `jobs.opsDashboard`, the Dashboard's 
 
 ## Turn a job on
 
-Settings > Jobs on the Dashboard lists every job with what it does, when it runs, whether it is on and whether your settings set it.
-Its switch saves the job's `enabled` field alone at your login's scope, with a reason, over any other field your scope's value holds.
+Settings > Jobs on the Dashboard lists every job, an org's own beside Playground's, with what it does, when it runs, whether it is on and whether your settings or an org's set it.
+Its switch saves the job's `enabled` field alone at the job's scope, your login's for Playground's job and its org's for an org's own, with a reason, over any other field your scope's value holds.
 
-A session cannot write a job's setting (the `no-extensions-write` hook refuses `playground settings set` and `reset` of every `jobs.<name>`, and `settings import-jobs` but its `--dry-run`), so it asks you with an Inbox guard decision: for a registry job its value is `{"enabled": true}` or `{"enabled": false}` alone, and for an org's own job it is the whole row ([below](#an-orgs-own-job)); your Approve writes it the same way ([Inbox](/docs/inbox)).
+A session cannot write a job's setting (the `no-extensions-write` hook refuses `playground settings set` and `reset` of every `jobs.<name>`, and `settings import-jobs` but its `--dry-run`), so it asks you with an Inbox guard decision whose value is `{"enabled": true}` or `{"enabled": false}` alone, or a new `{"config": {...}}` alone, or for an org's own job its whole row ([below](#an-orgs-own-job)); your Approve writes it the same way, an `enabled` or a `config` over the row its scope holds ([Inbox](/docs/inbox)).
+The one exception is how often a job runs: the Ops lead may set a job's row whose only change from the row your scope stores is `schedule.every`, its interval, where the job already runs on one and no other scope stores a row for it.
+It does so with the `playground settings set` call alone on its line, since a variable set beside it could move the write to another scope.
 
 From your own terminal, set your scope's value, which replaces any value it held, with a reason:
 
@@ -27,16 +29,25 @@ playground settings set jobs.opsSweep '{"enabled": true}' --reason "<why>" [--sc
 Your login's value wins over your org's, as for every setting, so a job you turn on or off holds whatever your org set; a field your value leaves out reads Playground's, not your org's.
 Moving a schedule or pausing a job with `pausedFor` is the same kind of write, naming that field.
 
+## Change a job's config
+
+A job with a `config`, the settings of its own it reads on each pass, shows a card under its row in Settings > Jobs: the config as JSON in a box you edit, and Save, which writes the new object at the job's scope at once, over the rest of the value there.
+Playground checks only that it is a JSON object; the job checks each field itself, and when it refuses one it writes why as `configRefused` in its heartbeat, which the card shows in red under the box until a beat holds none.
+
 ## How a change reaches the runner
 
 At the top of every pass, the ops runner (`scripts/ops/up.py`) renders the jobs from your extensions into `<data>/ops/jobs.json` and writes a plist for each launchd job that is on into `<data>/ops/launch-agents`.
 A machine with no extensions keeps its own `jobs.json`.
-A plist whose job is now off moves to the trash under the `jobs` carve-out ([CLI](/docs/cli)); one the trash refuses stays, and the runner writes why to `<data>/ops/up.log`.
+A plist whose job is now off moves to the trash under the `jobs` carve-out ([CLI](/docs/cli)), and its installed copy under `jobs-installed`, as below; one the trash refuses stays, and the runner writes why to `<data>/ops/up.log`.
 When that render cannot be trusted, the runner keeps the last `jobs.json` and writes why to `<data>/ops/up.log`.
 A job the registry does not know, such as one of your own scripts, stays in `jobs.json` as it is, unless an org's own job of its name ([below](#an-orgs-own-job)) replaces it.
 Each `script` item an org holds as a folder is installed into `<data>/ops/<key>/` in the same pass, beside the state its job keeps there, which the render never touches.
+The folder's `.revision` names the accepted revision that last wrote it, and a job running from the folder restarts onto a new one at its next idle moment, never in the middle of a pass, logging the revision it picked up; a job that runs a skill's script from the extensions folder restarts the same way on accepted revisions of that skill or of any other its scripts import.
 
-launchd reads `~/Library/LaunchAgents`, not `<data>/ops/launch-agents`: at the switch to settings, each rendered plist is copied into `~/Library/LaunchAgents` and loaded with one `launchctl bootstrap` per plist, by its own label, in place of the plists kept by hand.
+launchd reads `~/Library/LaunchAgents`, not `<data>/ops/launch-agents`, so the same pass installs each launchd job you turn on: while launchd has not loaded it, its rendered plist is copied into `~/Library/LaunchAgents` when none is there and loaded with `launchctl bootstrap`, tried again on the next pass when launchd refuses, and a plist already there stays as it is.
+Only Playground's own labels (`com.playground.*`) are installed or removed, so no other app's agent is touched.
+A launchd job you turn off has its plist in `~/Library/LaunchAgents` moved to the trash under the `jobs-installed` carve-out, beside the `jobs` one above, and is unloaded with `launchctl bootout` while launchd still holds it, tried again on the next pass when launchd refuses.
+A launchd job still down after 3 passes in a row is told to Ops once, and again only after it has run healthy in between.
 
 ## Bring an existing jobs.json in
 
@@ -70,7 +81,9 @@ An org runs a job of its own, one the registry does not know, by shipping its sc
 - the script as `<org>/scripts/<key>/`, which each pass installs into `<data>/ops/<key>/`;
 - the row as `jobs.<camelName>` in `<org>/settings.json`, with every field a job has: `callsModel`, `command`, `description`, `enabled`, `heartbeat` and `schedule`, and `cwd` and `config` when it needs them.
 
-You place the row, turn the job on or off and change its `config` with `playground settings set jobs.<camelName> '<row>' --scope <org> --reason "<why>"`, or by approving a guard decision that carries the row, and take it out with `playground settings reset jobs.<camelName> --scope <org>`.
+Its `description`, which every row needs, is the line the Dashboard shows for what the job does, since core names no org's job.
+
+You place the row, turn the job on or off and change its `config` with `playground settings set jobs.<camelName> '<row>' --scope <org> --reason "<why>"`, or by approving a guard decision that carries the row, or its `enabled` or `config` alone over the row the org holds; Settings > Jobs' switch and config card change the job in place, and take it out with `playground settings reset jobs.<camelName> --scope <org>`.
 The write checks the row as the render reads it (below), against the script folders that org's extensions hold at the time, and refuses it at your login's scope or when another org already adds the job.
 
 ```json
@@ -95,6 +108,7 @@ The render takes the row only when it runs in a terminal, stays in its org's own
 
 Any other row is refused: one off that shape, one naming `launchd` or `program`, a second org's row for a job the first adds (scopes in A to Z order), and a row for such a job at your login's scope.
 Each refusal is a `jobs: refused <scope> <key>: <why>` line in `<data>/ops/up.log`, and its job does not run; the rest of the render is written as usual.
+Settings > Jobs lists an org's row in the shape of a job, an object whose heartbeat is its own name, before these checks, so a row they refuse still shows its switch, and its write is refused with the reason.
 The job's `jobs.json` row names its org in `org`, so when its row is later refused or removed, the job stays listed as paused and the runner stops it, until a row of its name renders again.
 A pass that cannot read the orgs at all keeps each org's job as the last `jobs.json` had it, and says so in `up.log`.
 

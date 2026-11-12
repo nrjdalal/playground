@@ -29,8 +29,12 @@ const channel = (over: Partial<YardChannel> = {}): YardChannel => ({
   ...over,
 })
 
-const render = (rows: YardChannel[]) =>
-  renderToStaticMarkup(createElement(SidebarProvider, null, createElement(YardRows, { rows })))
+const render = (rows: YardChannel[], shell: "dashboard" | "yard" = "dashboard") =>
+  renderToStaticMarkup(
+    createElement(SidebarProvider, null, createElement(YardRows, { rows, shell })),
+  )
+
+const hrefs = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map(([, href]) => href)
 
 // a row's words, its icon's markup and its tooltip's attributes left out
 const words = (html: string) =>
@@ -53,5 +57,14 @@ describe("Yard's sidebar rows", () => {
       peer: { id: "u2", image: null, login: "octocat", name: "Octo Cat" },
     })
     expect(words(render([dm]))).toEqual(["octocat"])
+  })
+
+  // whatever the build, so the owner's hosted dashboard keeps its sessions beside a channel
+  test("a row in the dashboard's sidebar opens the channel in the dashboard", () => {
+    expect(hrefs(render([channel()], "dashboard"))).toEqual(["/dashboard/yard/c1"])
+  })
+
+  test("a row in Yard's own sidebar opens the channel in Yard's shell", () => {
+    expect(hrefs(render([channel()], "yard"))).toEqual(["/yard/c/c1"])
   })
 })

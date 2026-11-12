@@ -12,6 +12,7 @@
 set -m   # each background child gets its own process group, so stopping one never touches this script
 D=$(cd "$(dirname "$0")" && pwd)
 # The data folder, as packages/env/src/data-dir.ts resolves it: PLAYGROUND_DATA_DIR, else ~/.playground
+case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "supervisor.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 DATA=${PLAYGROUND_DATA_DIR:-$HOME/.playground}
 S=$DATA/ops/dashboard; mkdir -p "$S"
 WT=$PWD

@@ -9,6 +9,7 @@ import {
   RELAY_HEARTBEAT_MS,
   RELAY_MAX_AGE_MS,
   RELAY_PREFIX,
+  RELAY_REPLACED_CLOSE,
   RELAY_SILENT_MS,
   relayAllowed,
   relayPairSchema,
@@ -257,7 +258,7 @@ export type RelaySocket = {
     type: "close" | "message" | "open",
     listener: (event: { code?: number; data?: unknown; reason?: string }) => void,
   ) => void
-  close: () => void
+  close: (code?: number, reason?: string) => void
   readyState: number
   send: (data: string) => void
 }
@@ -336,9 +337,14 @@ export function startRelay(deps: RelayDeps): () => void {
       let heard = Date.now()
       let recycle: ReturnType<typeof setTimeout> | null = null
       let connecting: ReturnType<typeof setTimeout> | null = null
+      // a retired socket closes as replaced while its successor is open, so the hub lets it go with nothing on the bus, and with no code once that one has died, so the hub asks the bus for the Mac as before
+      const letGo = () =>
+        socket !== opened && socket?.readyState === WebSocket.OPEN
+          ? opened.close(RELAY_REPLACED_CLOSE, "replaced")
+          : opened.close()
       sockets.set(opened, () => {
         retiring.add(opened)
-        if (answering === 0) opened.close()
+        if (answering === 0) letGo()
       })
       const end = (why: string) => {
         if (ended) return
@@ -393,7 +399,7 @@ export function startRelay(deps: RelayDeps): () => void {
           // whichever socket is open takes the answer, so a read in flight across a recycle still reaches the hub
           const out = [opened, socket].find((one) => one?.readyState === WebSocket.OPEN)
           if (answer && out) out.send(JSON.stringify(answer))
-          if (--answering === 0 && retiring.has(opened)) opened.close()
+          if (--answering === 0 && retiring.has(opened)) letGo()
         })
       })
       // the hub closes a socket it refuses with 4000 + the status and its reason (refusedUpgradeCloses in lib/server.ts)

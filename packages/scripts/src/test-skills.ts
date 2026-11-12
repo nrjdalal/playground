@@ -21,7 +21,15 @@ const steps: [string, string[]][] = [
   ["skills-ref validate", ["bun", "packages/scripts/src/skills-ref/cli.ts"]],
   ["links", py("test_links.py")],
   ["setup check", py("test_setup_check.py")],
-  ["code-review-loop", py("test_code_review_loop.py")],
+  [
+    "code-review-loop",
+    [
+      "bun",
+      "run",
+      "test:file",
+      "tests/extensions/core/skills/code-review-loop/scripts/state.test.ts",
+    ],
+  ],
   ["loopback postgres and redis", py("test_loopback_postgres.py")],
   ["container volumes", py("test_docker_rm_volumes.py")],
   ["kill by name", py("test_kill_by_name.py")],

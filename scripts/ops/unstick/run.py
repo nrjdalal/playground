@@ -8,8 +8,8 @@ usage-limit dialog, a permission prompt, a picker (AskUserQuestion, plan approva
 resume record names, else the machine's own login, says it has room (and was written in the last 15 minutes: room());
 it checks 5s later that the dialog cleared and no limit line before its reset
 still shows. Nothing else is ever answered (no permission prompt is cancelled; the managers handle
-it"): a limit dialog with no room goes to the builder and the dispatcher, a probe's to its spawner (limit_targets), and every other
-block to the session's manager (alert_to), each through the outbox at first sight and every 10 minutes while it waits, naming the session, the dialog and how long it has waited, unless the session's own session-state hook
+it"): a limit dialog with no room sends a probe's block to its spawner alone (limit_targets), since the capped account's own line names every session on it to the builder and ops once a reset (capped_alert), and every other
+block goes to the session's manager (alert_to), each through the outbox at first sight and every 10 minutes while it waits, naming the session, the dialog and how long it has waited, unless the session's own session-state hook
 recorded it as stuck or failed (hook_owned), since that hook has told the manager already and ops-session-resume escalates it. During an account move (move.json in its state folder names the
 dispatcher running it and an `until`), the per-session limit alerts wait and that dispatcher gets one summary line every 10 minutes.
 A stall alarm tells the builder (it was dispatcher) when the
@@ -20,7 +20,7 @@ import calendar, datetime, fcntl, glob, json, os, re, shutil, subprocess, sys, t
 
 # Code beside beat.py and notify.sh in the repo's scripts/ops; LW, OPS and HERE are in the data folder, $PLAYGROUND_DATA_DIR, else ~/.playground.
 CODE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LW = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
+LW = (os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path"))
 OPS = os.path.join(LW, "ops")
 HERE = os.path.join(OPS, "unstick")
 # read budget (dispatcher, 13 Oct, after the terminal app reached 155% CPU with ~50 sessions): a pass every 120s (planner), under the Dashboard's 3-minute
@@ -225,8 +225,8 @@ def move_summary(blocks):
 
 
 def limit_targets(name, transcript):
-    """Who hears of a session at its usage limit: the builder and the dispatcher, but a probe's spawner alone."""
-    return [alert_to(name, transcript)] if kind_of(name) == "probe" else ["builder", "dispatcher"]
+    """Who hears of a session at its usage limit: a probe's spawner alone, since the capped account's own line names every session on it to the builder and ops once a reset (issue 1457)."""
+    return [alert_to(name, transcript)] if kind_of(name) == "probe" else []
 
 
 def most_room(skip):
@@ -245,8 +245,8 @@ def most_room(skip):
 
 
 def limit_alert(name, line, transcript=None):
-    """A session at its usage limit goes to the builder and dispatcher once a block, naming the account with the most room, since the owner
-    does not slow down at a limit, a probe's to its spawner. The script takes no option on the dialog: a key other than Escape is not its to press (**voice**)."""
+    """A session at its usage limit goes to its spawner when it is a probe; the capped account's own line (capped_alert) names every session
+    on it to the builder and ops once a reset, since the owner does not slow down at a limit. The script takes no option on the dialog: a key other than Escape is not its to press (**voice**)."""
     target = most_room(session_account(name))
     move = f"Most room: {target[0]} (week {target[1]:g}%)" if target else "No account in usage.json's accounts has room"
     msg = f"{name} is at its usage limit and is not continuing: {line}. {move}; decide its next step now (another account through spawn.sh close, then spawn.sh resume --account, a reviewer or tester adding --pr with the PRs its roster row lists, read before the close)."
@@ -611,9 +611,17 @@ def dialog_room(name, lines):
     return has_room, why
 
 
-# autoMemoryEnabled is false and the memory folders were archived (8 Oct): any file under ~/.claude/projects/*/memory/ other than the one-line
-# MEMORY.md pointer is new memory a session wrote anyway; name it, its originSessionId and that session's name (builder, 9 Oct)
+# A file under ~/.claude/projects/*/memory/ other than the one-line MEMORY.md pointer and a note of a session the roster marks memory=on (ADR 0022) is memory a session wrote anyway: name it, its originSessionId and that session's name.
 POINTER = "Learnings live in the playground repo; see AGENTS.md."
+
+
+def memory_on():
+    """The roster names whose row the memory trial put on (spawn.sh's memory=on); empty when the roster does not read."""
+    try:
+        agents = json.load(open(os.path.join(LW, "roster.json"))).get("agents") or []
+        return {a["name"] for a in agents if isinstance(a, dict) and isinstance(a.get("name"), str) and a.get("memory") == "on"}
+    except (AttributeError, OSError, ValueError):
+        return set()
 
 
 def memory_files():
@@ -626,6 +634,7 @@ def memory_files():
             names[d.get("sessionId")] = d.get("name")
         except (OSError, ValueError):
             pass
+    trial = memory_on()
     found = []
     for path in _glob.glob(os.path.join(cfg, "projects", "*", "memory", "*")):
         if not os.path.isfile(path):
@@ -638,6 +647,8 @@ def memory_files():
             continue
         m = re.search(r"originSessionId:\s*([0-9a-f-]{36})", text)
         sid = m.group(1) if m else None
+        if sid and names.get(sid) in trial:
+            continue
         rel = os.path.relpath(path, os.path.join(cfg, "projects"))
         found.append({"at": now(), "kind": "memory-file", "line": f"{rel} (originSessionId {sid or 'unknown'})", "name": names.get(sid) or (sid[:8] if sid else "unknown session"),
                       "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(os.path.getmtime(path)))})
@@ -861,21 +872,22 @@ def slot_idle_alerts(state, now_t):
     return out
 
 
-# At 98% weekly usage every process shuts down and is backed up, and the owner's end-of-day post is drafted. Once a week per account, the line goes to dispatcher, the builder and ops through the relay, and only for
-# an account a live session runs on (22 Oct: it went for the machine's own login at 98% while every session ran on other accounts)
-SHUTDOWN_AT = 98
-SHUTDOWN_SENT = os.path.join(HERE, "shutdown-98.json")
+# A capped or ending account moves, it does not shut anything down: the owner's rule is to use a week to 100%, never to shut down at 98%.
+# Once a reset per capped account, one line names every live session on it and the account with the most room, to the builder and ops;
+# an account that ends within a day with room left sends ops one line per plan end, so its weeks are spent, not dropped (issue 1457).
+CAPPED_SENT = os.path.join(HERE, "capped-sent.json")
+ENDING_SENT = os.path.join(HERE, "ending-sent.json")
 RECORD_ACCOUNT = (re.compile(r"^# account: (\S+)", re.M), re.compile(r"--account (\S+)"))
 
 
 def session_account(name):
     """The account the named session runs on: the account line of its spawn.sh resume record, a login the usage gate picked included,
     else the record's --account, "glm" for a session spawn.sh pinned to
-    GLM (its backends/<name>), which no usage file reads, else the machine's own login: usage.json's storedLogin, else usage.json's
+    GLM (its backends/<name>, "glm" or "claude-code glm", packages/settings' readPin), which no usage file reads, else the machine's own login: usage.json's storedLogin, else usage.json's
     account."""
     try:
         with open(os.path.join(LW, "backends", name)) as f:
-            if f.read().strip() == "glm":
+            if f.read().split() in (["glm"], ["claude-code", "glm"]):
                 return "glm"
     except OSError:
         pass
@@ -917,10 +929,12 @@ def readings():
     return found
 
 
-def shutdown_alert(names):
-    """The 98% line for each account one of the named live sessions runs on. Its once-a-week key is the reset to the hour, which falls on the
-    hour, since usage.json's resets_at wobbles by a second (1793026800 and 1793026799 sent the line twice), or the ISO week for a
-    reading with no reset."""
+def capped_alert(names, limited=None):
+    """One line per capped account a named live session runs on, to the builder and ops once a reset, naming every session on the account
+    and the account with the most room, since the owner's rule is to use a week to 100%, not to shut anything down: the sessions move by
+    spawn.sh close, then spawn.sh resume --account. limited holds the accounts the usage limit holds live; its key is the reset to the hour,
+    which falls on the hour, since usage.json's resets_at wobbles by a second (1793026800 and 1793026799 sent the line twice), or the ISO
+    week for a reading with no reset."""
     weeks = {}
     for acct, u in readings().items():
         try:
@@ -929,27 +943,75 @@ def shutdown_alert(names):
         except (KeyError, TypeError, ValueError):
             continue
     try:
-        sent = json.load(open(SHUTDOWN_SENT)).get("keys") or {}
+        sent = json.load(open(CAPPED_SENT)).get("keys") or {}
     except (OSError, ValueError, AttributeError):
         sent = {}
+    limited = limited or set()
+    by_acct = {}
+    for name in names:
+        by_acct.setdefault(session_account(name), []).append(name)
     alerts = []
-    for acct in sorted({session_account(name) for name in names} & weeks.keys()):
+    for acct in sorted(a for a in by_acct if a in weeks and (weeks[a][0] >= 100 or a in limited)):
         pct, reset = weeks[acct]
-        if pct < SHUTDOWN_AT:
-            continue
         timed = isinstance(reset, (int, float))
         key = round(reset / 3600) if timed else time.strftime("%G-W%V", time.gmtime())
         when = time.strftime("%a %d %b %H:%MZ", time.gmtime(reset)) if timed else "unknown"
-        line = f"SHUTDOWN 98%: {acct}'s week is at {pct:.0f}% (resets {when}). At 98% weekly usage, shut down and back up every process and whatever is happening, and draft the owner's end-of-day post."
+        target = most_room(acct)
+        move = f"Most room: {target[0]} (week {target[1]:g}%)" if target else "No account in usage.json's accounts has room"
+        line = f"CAP 100%: {acct}'s week is at {pct:.0f}% (resets {when}); on it: {', '.join(sorted(by_acct[acct]))}. {move}; move them with spawn.sh close, then spawn.sh resume --account."
         if sent.get(acct) != key:
-            for to in ("dispatcher", "builder", "ops"):
+            for to in ("builder", "ops"):
                 notify(line, to=to)
             sent[acct] = key
-            with open(SHUTDOWN_SENT + ".tmp", "w") as f:
+            with open(CAPPED_SENT + ".tmp", "w") as f:
                 json.dump({"at": now(), "keys": sent}, f)
-            os.replace(SHUTDOWN_SENT + ".tmp", SHUTDOWN_SENT)
+            os.replace(CAPPED_SENT + ".tmp", CAPPED_SENT)
             log(line)
-        alerts.append({"at": now(), "kind": "shutdown-98", "line": line, "name": acct, "since": now()})
+        alerts.append({"at": now(), "kind": "capped", "line": line, "name": acct, "since": now()})
+    return alerts
+
+
+def ending_alert():
+    """One line per plan end to ops for each Claude account that ends within a day with its week under 100, naming the account, its end and
+    the points left, so the weeks the factory paid for are spent, not dropped; its sent key is the row's ends value, so a new end sends
+    again (issue 1457)."""
+    rows = setting("usage.accounts")
+    if not isinstance(rows, list):
+        return []
+    weeks = {}
+    for acct, u in readings().items():
+        try:
+            weeks[acct] = float(u["rate_limits"]["seven_day"]["used_percentage"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    try:
+        sent = json.load(open(ENDING_SENT)).get("keys") or {}
+    except (OSError, ValueError, AttributeError):
+        sent = {}
+    alerts = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("provider", "claude") != "claude":
+            continue
+        acct, ends = row.get("email"), row.get("ends")
+        if not (isinstance(acct, str) and isinstance(ends, str)):
+            continue
+        try:
+            t = datetime.datetime.fromisoformat(ends).timestamp()
+        except ValueError:
+            continue
+        pct = weeks.get(acct)
+        if t - time.time() >= 86_400 or pct is None or pct >= 100:
+            continue
+        key = ends
+        line = f"ENDING: {acct}'s plan ends {time.strftime('%a %d %b %H:%MZ', time.gmtime(t))} with {100 - pct:g} points left; spend them (a week's use does not carry over)."
+        if sent.get(acct) != key:
+            notify(line, to="ops")
+            sent[acct] = key
+            with open(ENDING_SENT + ".tmp", "w") as f:
+                json.dump({"at": now(), "keys": sent}, f)
+            os.replace(ENDING_SENT + ".tmp", ENDING_SENT)
+            log(line)
+        alerts.append({"at": now(), "kind": "ending", "line": line, "name": acct, "since": now()})
     return alerts
 
 
@@ -989,7 +1051,7 @@ def cycle(state):
                                "since": prev.get("since", now_t), "alerted": prev.get("alerted", 0), "surface": s["surface_id"], "workspace": s["workspace_id"]}
                 if not blocks[key]["alerted"] and not held_for_move("usage-limit-stuck", mover):
                     blocks[key]["alerted"] = now_t
-                    limit_alert(name, blocks[key]["line"], s.get("transcript_path"))
+                    notify(f"{name} is blocked on a usage-limit-stuck prompt: {blocks[key]['line']}", to=alert_to(name, s.get("transcript_path")))
             continue
         key = f"{s['surface_id']}:{kind}"
         prev = state["blocks"].get(key, {})
@@ -1056,9 +1118,16 @@ def cycle(state):
     if st:
         alerts.append({"at": now(), "kind": "stall", "line": st, "name": "merge queue", "since": now()})
     try:
-        alerts += shutdown_alert([name_of(s) for s in live])
+        alerts += capped_alert(
+            [name_of(s) for s in live],
+            limited={b.get("account") for b in blocks.values() if b["kind"] == "usage-limit"} - {None},
+        )
     except Exception as e:
-        log(f"shutdown-98 check failed: {type(e).__name__}: {e}")
+        log(f"capped account check failed: {type(e).__name__}: {e}")
+    try:
+        alerts += ending_alert()
+    except Exception as e:
+        log(f"ending account check failed: {type(e).__name__}: {e}")
     try:
         alerts += api_stop_alerts(state, api_found, now_t)
     except Exception as e:
@@ -1082,9 +1151,11 @@ def cycle(state):
         stuck = slot_stuck(state, now_t)
         if stuck:
             alerts.append(stuck)
-            if not state["slot_free"].get("told"):
-                state["slot_free"]["told"] = True
-                subprocess.run([os.path.join(CODE, "notify.sh"), "unstick", stuck["line"]], env=os.environ | {"NOTIFY_TO": "builder"}, capture_output=True, timeout=30)
+            # one send per line kind in an episode, the no-fit and could-take lines each once, a kind change sending again; a hold's line is listed alone, since the hold stands on purpose (issue 1842)
+            told = state["slot_free"].setdefault("told_cases", [])
+            if stuck["case"] != "hold" and stuck["case"] not in told:
+                told.append(stuck["case"])
+                notify(stuck["line"], to="builder")
     except Exception as e:
         log(f"slot-stuck check failed: {type(e).__name__}: {e}")
     # ops-sweep's PR stalls (idle 30 minutes or 4 verdicts at one sub-5 score, not held), while its file is fresh (written within 15 minutes)
@@ -1177,11 +1248,40 @@ def slot_stuck(state, now_t):
         return None
     if now_t - sf["since"] < 120:
         return None
-    can = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "can-take", "run-slot", head], env=env, capture_output=True, timeout=30)
+    can = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "can-take", "run-slot", head], env=env, capture_output=True, text=True, timeout=30)
+    # issue 1842: a standing battery or focus hold closes can-take on purpose, so the line names that hold, not a stall
+    hold = re.search(r"^run-slot\.sh: held by run-slot\.(battery|focus for (\S+))$", can.stderr, re.M)
+    if can.returncode != 0 and hold:
+        why = "the battery's red mark (run-slot.battery)" if hold.group(2) is None else f"{hold.group(2)}'s focus (run-slot.focus)"
+        line = f"run-slot free for {int(now_t - sf['since'])}s while {first[2]} (pid {first[1]}) heads the queue, held by {why}, a hold, not a stall"
+        return {"at": now(), "kind": "slot-stuck", "case": "hold", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
     if can.returncode != 0:
-        return None
+        # issue 1416: the units rule beside a free slot is as designed, so the alert only names it: the slot, the head's units, each holder's
+        try:
+            t = open(os.path.join(OPS, "run-slot.waiters", head)).read().split()
+            units = t[2] if len(t) > 2 and t[2] in ("1", "2", "3") else ""
+        except OSError:
+            units = ""
+        holds = []
+        for f in sorted(os.listdir(OPS)):
+            if not (f.startswith("run-slot") and f.endswith(".holder")):
+                continue
+            if not os.path.isdir(os.path.join(OPS, f[: -len(".holder")])):
+                continue
+            try:
+                u = open(os.path.join(OPS, f)).read().split(" ", 4)[3].strip()
+            except (OSError, IndexError, ValueError):
+                continue
+            if u in ("1", "2", "3"):
+                holds.append(f"{f[: -len('.holder')]} holds {u} unit{'s' if u != '1' else ''}")
+        line = (
+            f"run-slot free for {int(now_t - sf['since'])}s while {first[2]} (pid {first[1]}) heads the queue, "
+            + (f"its {units} units fit no open slot" if units else "its units fit no open slot")
+            + (f", {', '.join(holds)}" if holds else ", no units held")
+        )
+        return {"at": now(), "kind": "slot-stuck", "case": "no-fit", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
     line = f"run-slot free for {int(now_t - sf['since'])}s while {first[2]} (pid {first[1]}) heads the queue, could take it and takes nothing"
-    return {"at": now(), "kind": "slot-stuck", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
+    return {"at": now(), "kind": "slot-stuck", "case": "could-take", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
 
 
 # whether run-slot.runs.log shows run-slot taken at or after since, a sample of the window that found it held between this job's own reads, 2 minutes apart

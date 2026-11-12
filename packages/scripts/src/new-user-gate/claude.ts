@@ -3,6 +3,8 @@
 import { appendFileSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 
+import { dataDirOf } from "@packages/env/data-dir"
+
 export type Launch = { model: string; name: string; prompt: string; sessionId: string }
 
 // Claude Code's flags that take a value, so a value is never read as the prompt.
@@ -87,7 +89,7 @@ const main = async () => {
   const env = process.env
   const home = env.HOME ?? ""
   const claude = env.CLAUDE_CONFIG_DIR || join(home, ".claude")
-  const data = env.PLAYGROUND_DATA_DIR || join(home, ".playground")
+  const data = dataDirOf(env, home)
   const repo = env.PLAYGROUND_REPO ?? process.cwd()
   const role = env.PLAYGROUND_ROLE ?? ""
   const cwd = process.cwd()

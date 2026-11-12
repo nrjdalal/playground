@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { inboxInputSchema } from "../../api/hono/src/lib/dashboard/inbox"
 import { dataDir } from "../../packages/env/src/data-dir"
 import { UNSET_REPOS } from "../../packages/scripts/src/trace-count/kinds"
+import { GUARDS } from "../../scripts/hooks/guards"
 import { mainCheckout } from "../../scripts/hooks/no-main-checkout"
 import {
   askInbox,
@@ -51,12 +52,15 @@ const PATHS: Paths = {
   BARE: NONE,
   CLI_DIR: NONE,
   DATA: NONE,
+  FOREIGN_TREE: NONE,
+  FOREIGN_TREE_IN_MAIN: NONE,
   HOME: NONE,
   LINK: NONE,
   LIST: NONE,
   MAIN: NONE,
   ROOT: NONE,
   SCOPE: NONE,
+  TREE_LINK: NONE,
   WORDS: NONE,
   WORK: NONE,
 }
@@ -69,8 +73,10 @@ const OWN_ROWS: Record<string, string[]> = {
   "no-main-checkout": [`touch ${join(MAIN, "made-up-file")}`],
   "no-off-palette-label": [`gh label create made-up --color 123456`],
   "no-ours-merge": ["git merge -s ours origin/canary"],
+  "no-prepare-write": ["gh pr create --fill"],
   "no-prompt-stop": ["rmdir $HOME/$s"],
   "no-public-leak": [`gh pr comment 1 --repo ${UNSET_REPOS.public[0]} --body "$X"`],
+  "no-raw-wa": [`cat ${join(dataDir(), "whatsapp", "made-up.json")}`],
   "no-unslotted-run": ["bun run test"],
 }
 
@@ -88,11 +94,27 @@ git(GLM_REPO, "commit", "-q", "--allow-empty", "-m", "base")
 mkdirSync(join(GLM_REPO, "web", "next", "src"), { recursive: true })
 writeFileSync(join(GLM_REPO, "web", "next", "src", "x.ts"), "x\n")
 git(GLM_REPO, "add", ".")
+// A registry and roster that mark the launcher's session prepare-only, for no-prepare-write's case to run under.
+const PREPARE = join(SCRATCH, "prepare")
+mkdirSync(join(PREPARE, "sessions"), { recursive: true })
+mkdirSync(join(PREPARE, "playground"))
+writeFileSync(
+  join(PREPARE, "sessions", "0.json"),
+  JSON.stringify({ name: "worker-made-up-1", sessionId: "s-shell-pane-test" }),
+)
+writeFileSync(
+  join(PREPARE, "playground", "roster.json"),
+  JSON.stringify({ agents: [{ mode: "prepare", name: "worker-made-up-1" }] }),
+)
 // The folder a guard's case runs in, where it is not the worktree.
 const CWDS: Record<string, string> = { "no-glm-heavy-path": GLM_REPO }
 // The environment a guard's case runs in beyond the session's role, set on the process, since run calls each check() with its own defaults.
 const ENVS: Record<string, Record<string, string>> = {
   "no-extension-repo-write": { PLAYGROUND_DATA_DIR: SYNCED },
+  "no-prepare-write": {
+    CLAUDE_CONFIG_DIR: PREPARE,
+    PLAYGROUND_DATA_DIR: join(PREPARE, "playground"),
+  },
 }
 
 // Runs `body` with `vars` set on the process, an undefined one unset, then puts each back.
@@ -237,14 +259,19 @@ const rowsFor = (guard: string): string[] => [
 const REGISTERED = await bashGuards(CHECKOUT)
 
 describe("run screens the command through every registered Bash guard before it types", () => {
-  test("the guards come from the factory settings' Bash matchers", () => {
-    expect(REGISTERED).toContain("no-raw-spawn")
-    expect(REGISTERED).toContain("no-unslotted-run")
-    expect(REGISTERED).not.toContain("writing-first")
-    expect(REGISTERED).not.toContain("no-bare-slack-link")
+  test("the guards come from the factory settings' Bash matchers: guards alone, which runs every Bash guard", () => {
+    expect(REGISTERED).toEqual(["guards"])
   })
 
-  test.each(REGISTERED.map((guard) => [guard]))(
+  test("guards, registered as the factory registers it, refuses through run, and nothing is typed", async () => {
+    const { calls, herdr } = stubHerdr()
+    const message = await refusal(run("w1:p1", "git stash", herdr, repoOf("guards")))
+    expect(message).toContain("no-stash hook ")
+    expect(typed(calls)).toEqual([])
+  })
+
+  // each guard guards runs, registered alone, refuses one of its rows through run
+  test.each(GUARDS.map(({ name }) => [name]))(
     "%s refuses one of its rows through run, and nothing is typed",
     async (guard) => {
       const repo = repoOf(guard)

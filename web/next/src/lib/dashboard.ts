@@ -319,6 +319,7 @@ export const STATUS_RANK: Record<SortState, number> = {
   working: 1,
   paused: 2,
   idle: 2,
+  unknown: 2,
   down: 3,
 }
 
@@ -450,6 +451,7 @@ export const oneLine = (text: string, max = 80): string => {
 export const LIGHT_LABELS: Record<Worker["light"], string> = {
   idle: "Idle",
   "needs-you": "Waiting on you",
+  unknown: "State unknown",
   working: "Working",
 }
 
@@ -522,7 +524,10 @@ export const pickWorker = (
     : (dispatcherOf(workers, primary)?.sessionId ?? null)
 
 // Pure: the live session a transcript link to a worker's view names, by the ?worker= in it; null for any other link.
-export const viewWorker = (href: string, workers: Worker[]): Worker | null => {
+export const viewWorker = <T extends Pick<Worker, "sessionId">>(
+  href: string,
+  workers: T[],
+): T | null => {
   let id: string | null
   try {
     id = new URL(href).searchParams.get("worker")
@@ -552,6 +557,7 @@ export function useDashboardSocket(enabled: boolean) {
   const [activity, setActivity] = useState<SessionActivity | null>(null)
   const watcher = useRef(createWatch())
   const [approvals, setApprovals] = useState(false)
+  const [restoring, setRestoring] = useState(false)
   const [dispatcher, setDispatcher] = useState<string | null>(null)
   const [dispatchers, setDispatchers] = useState<readonly string[] | null>(null)
   const [problem, setProblem] = useState<DashboardProblem | null>(null)
@@ -575,6 +581,7 @@ export function useDashboardSocket(enabled: boolean) {
         // each frame is parsed afresh, so a session it left as it was keeps its object and a frame that moved nothing keeps the board, and nothing reading them draws again
         setWorkers((shown) => replaceEqualDeep(shown, frame.workers))
         setApprovals(frame.approvals)
+        setRestoring(frame.restoring)
         setDispatcher(frame.dispatcher)
         setSessionNames(frame.names)
         setDispatcherOrder(frame.dispatchers)
@@ -665,6 +672,7 @@ export function useDashboardSocket(enabled: boolean) {
     dispatchers,
     generation,
     problem,
+    restoring,
     subscribe,
     watch,
     workers,

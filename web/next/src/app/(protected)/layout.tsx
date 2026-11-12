@@ -16,6 +16,7 @@ import { DashboardFooter } from "@/components/dashboard/sidebar"
 import { TabDot } from "@/components/dashboard/tab-dot"
 import { FirstRun, SignInKept } from "@/components/first-run/first-run"
 import { SidebarShell } from "@/components/shell/sidebar-shell"
+import { YardLive } from "@/components/yard/yard-live"
 import { auth } from "@/lib/auth"
 import { sessionOrUnavailable, UNAVAILABLE } from "@/lib/auth/session"
 import { config } from "@/lib/config"
@@ -90,6 +91,8 @@ export default async function Layout({ children }: { children: React.ReactNode }
     <DashboardProvider allowed={reachesConsole(session.user, "owner")}>
       <TabDot />
       <SignInKept />
+      {/* the hosted build pushes Yard's channel counts down its socket rather than polling them (channelsEvery), so the dashboard holds the socket there as Yard's own shell does */}
+      {config.hosted && <YardLive />}
       <SidebarShell
         badge={badge}
         mark={<DashboardMark />}

@@ -17,7 +17,7 @@ Agent-fired, or named by the owner.
 ## Where the token and the hub live
 
 The token lives in the macOS Keychain under `playground-yard`, as the signed-in user, so the local Dashboard and the command read the same one and no browser ever holds it.
-The hub's address comes from `YARD_API_URL`, and its approve pages from `YARD_WEB_URL`, in the environment or the factory checkout's `.env`; with none set, Yard stays off on this Mac.
+The hub's address comes from `YARD_API_URL`, and its approve pages from `YARD_WEB_URL`, in the environment or the live dashboard checkout's `.env`, the checkout `live.branch` names; with none set, Yard stays off on this Mac.
 The same token opens the relay, the connection this Mac dials out to Yard so the owner can read its Dashboard at Yard's `/dashboard` ([dashboard docs](../../web/next/content/docs/dashboard.mdx)).
 From a browser paired in Yard's Settings, which this Mac pairs only on the owner's Approve, the owner can also send a message and answer the Inbox there, each write signed by that browser's key.
 

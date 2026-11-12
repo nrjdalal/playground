@@ -1,6 +1,7 @@
 // Run by yard.test.ts as `bun -e` in api/hono, so the hosted build's env loads fresh: serves the hosted app, holds a fake Mac on the relay's socket and prints one JSON line of what each request answered.
 const { default: shape } = await import(process.env.YARD_HOSTED!)
 const { sessionCookie } = await import("@/lib/sign-in")
+const { RELAY_REPLACED_CLOSE } = await import("@/lib/relay/protocol")
 const server = Bun.serve(shape)
 const relay = `http://127.0.0.1:${server.port}/api/v1/yard/relay`
 const web = process.env.HONO_WEB_URL!
@@ -166,6 +167,19 @@ const after = (
   await (await fetch(`${relay}/status`, { headers: { ...owner, origin: web } })).json()
 ).data
 out.statusAfter = { online: after.online, since: typeof after.since }
+// a socket the Mac closes as replaced goes from this instance alone, so no instance learns a since, as the bus-free gone above did
+const next = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/yard/relay/socket`, {
+  headers: { authorization: `Bearer ${process.env.OWNER_TOKEN}` },
+} as never)
+await new Promise((done) => (next.onopen = done))
+await new Promise((done) => {
+  next.onclose = done
+  next.close(RELAY_REPLACED_CLOSE, "replaced")
+})
+await Bun.sleep(100)
+out.statusReplaced = (
+  await (await fetch(`${relay}/status`, { headers: { ...owner, origin: web } })).json()
+).data
 console.log(JSON.stringify(out))
 process.exit(0)
 

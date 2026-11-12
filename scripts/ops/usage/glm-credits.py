@@ -7,7 +7,7 @@ import subprocess
 import sys
 import urllib.request
 
-sys.path.insert(0, os.path.expanduser("~/.playground/ops"))  # beat.py beside it in the state folder by name, as account-watch.py reaches it
+sys.path.insert(0, os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path")), "ops"))  # beat.py beside it in the state folder by name, as account-watch.py reaches it
 from beat import setting  # noqa: E402
 
 URL = "https://api.z.ai/api/monitor/usage/quota/limit"

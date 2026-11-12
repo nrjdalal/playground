@@ -428,15 +428,15 @@ export const feedAnswerSchema = z.discriminatedUnion("kind", [
 
 const FEED_FAILURE_STATUS: Record<FeedFailure, [ContentfulStatusCode, ErrorCode]> = {
   BUSY: [409, "CONFLICT"],
-  CMUX_FAILED: [502, "CMUX_FAILED"],
   DISABLED: [403, "FORBIDDEN"],
   FORBIDDEN: [403, "FORBIDDEN"],
-  INTERRUPTED: [502, "CMUX_FAILED"],
+  INTERRUPTED: [502, "SESSIONS_FAILED"],
   INVALID: [400, "VALIDATION_ERROR"],
   NOT_FOUND: [404, "NOT_FOUND"],
   NOT_PENDING: [409, "CONFLICT"],
+  SESSIONS_FAILED: [502, "SESSIONS_FAILED"],
   TERMINAL_ONLY: [403, "FORBIDDEN"],
-  UNCONFIRMED: [502, "CMUX_FAILED"],
+  UNCONFIRMED: [502, "SESSIONS_FAILED"],
 }
 
 // The answer route's work once the request is through its guards: the answer (which judges who may give it), its refusal turned into the API's error envelope with the reason's code under `feed`.
@@ -563,7 +563,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "The ops jobs that run as scripts with no Claude session, A to Z: one for each `ops/ops-*.json` heartbeat in the data folder (`report.json` and `alerts.log` beside them are not jobs), so a new job shows with no code change: what each does (null for a job the API does not describe), its status (`running`; `waiting` with the reason after `waiting: ` in its last result, when it has nothing to read yet; `failing` with its last result; `down` when its file is malformed, its loop has exited, its process is gone or it has not beaten for three cycles, with the reason), its last beat, and `paused`: true for a job `ops/jobs.json` marks disabled, which the sidebar leaves out and the System page lists as Paused. A job jobs.json expects to run with no heartbeat file is `down`. Beside those, `callsModel` and `model`, the marks jobs.json gives each job: the sidebar shows a model label, or AI, on a job marked callsModel. Read-only.",
+        "The ops jobs that run as scripts with no Claude session, A to Z: one for each `ops/ops-*.json` heartbeat in the data folder and each job `ops/jobs.json` lists, with or without the `ops-` prefix (`report.json`, `alerts.log` and any other file no row names are not jobs), so a new job shows with no code change: what each does (core's line for a registry job, else its own `jobs.json` description, else the generic `NO_DESCRIPTION` line), its status (`running`; `waiting` with the reason after `waiting: ` in its last result, when it has nothing to read yet; `failing` with its last result; `down` when its file is malformed, its loop has exited, its process is gone or it has not beaten for three cycles, with the reason), its last beat, and `paused`: true for a job `ops/jobs.json` marks disabled, which the sidebar leaves out and the System page lists as Paused. A job jobs.json expects to run with no heartbeat file is `down`. Beside those, `callsModel` and `model`, the marks jobs.json gives each job: the sidebar shows a model label, or AI, on a job marked callsModel. Read-only.",
       responses: { 200: { description: "OK" }, ...authErrorResponses },
     }),
     async (c) => c.json({ data: await readOps() }),
@@ -837,7 +837,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     "/messages",
     describeRoute({
       tags: ["Dashboard"],
-      description: `Send a message to a live session as the owner, and record it in the console's activity. Phase 2a sends to each dispatcher (${DISPATCHERS.join(" and ")}) and to the session the roster seats as the assistant, typed into its terminal as if the owner typed it, and to ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, whose message goes on its input rather than into a terminal; a message to any other session is refused as FORBIDDEN before anything is sent. \`attachments\` names up to ${MAX_ATTACHMENTS} uploaded files by id; each one's absolute path follows the words on an "Attached:" line, for the session to Read. \`id\`, the composer's own for the message, makes a retry safe: a message already recorded under it is answered as delivered, not typed again. \`queuedAt\`, with an \`id\`, is the time an earlier try's QUEUED refusal gave under \`queuedAt\` (when the message was pasted), so an API that restarted since reads the message again rather than typing it twice. A refusal names its reason in \`delivery\`: CMUX_FAILED, COMMAND, EMPTY, INPUT_NOT_EMPTY (nothing typed, or, for a message with an \`id\` to a herdr session, its paste left unsent in the box, which its retry presses Enter on and, for a new thread, names under \`threadId\`), INTERRUPTED (typing began and did not finish, or a QUEUED message left the screen with a transcript that cannot be read back to when it was queued, so whether it went is not known and it is never retried unseen), LOST (a QUEUED message that neither the session's screen nor its transcript, read back to when it was queued, shows 10 minutes after it was queued, which a retry sends again), NOT_FOUND, ON_PICKER, QUEUED (Claude Code holds the message, in its box while it compacts or in its queue while it works, and takes it once free: a retry under the same \`id\` types nothing and reads it again, answering it delivered once its transcript shows it) or TOO_LONG; an attachment that is gone is a 404 naming it under \`attachment\` (GONE) and \`id\`. A message naming an inbox item (\`re #iN\`) records the reply on it once sent, which takes it off the Inbox square's count while it stays in his list until its poster closes it. \`threadId\`, for the primary dispatcher alone, puts that thread's marker (\`[thread:<id>] \`) before the words, which routes the message to the thread once ingest brings it; a thread that does not exist is a 404 before anything is sent. \`newThread: true\`, in place of \`threadId\`, opens a thread titled from the message's first line and sends the message as its first, naming it under \`threadId\`.`,
+      description: `Send a message to a live session as the owner, and record it in the console's activity. Phase 2a sends to each dispatcher (${DISPATCHERS.join(" and ")}) and to the session the roster seats as the assistant, typed into its terminal as if the owner typed it, and to ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, whose message goes on its input rather than into a terminal; a message to any other session is refused as FORBIDDEN before anything is sent. \`attachments\` names up to ${MAX_ATTACHMENTS} uploaded files by id; each one's absolute path follows the words on an "Attached:" line, for the session to Read. \`id\`, the composer's own for the message, makes a retry safe: a message already recorded under it is answered as delivered, not typed again. \`queuedAt\`, with an \`id\`, is the time an earlier try's QUEUED refusal gave under \`queuedAt\` (when the message was pasted), so an API that restarted since reads the message again rather than typing it twice. A refusal names its reason in \`delivery\`: COMMAND, EMPTY, INPUT_NOT_EMPTY (nothing typed, or, for a message with an \`id\` to a herdr session, its paste left unsent in the box, which its retry presses Enter on and, for a new thread, names under \`threadId\`), INTERRUPTED (typing began and did not finish, or a QUEUED message left the screen with a transcript that cannot be read back to when it was queued, so whether it went is not known and it is never retried unseen), LOST (a QUEUED message that neither the session's screen nor its transcript, read back to when it was queued, shows 10 minutes after it was queued, which a retry sends again), NOT_FOUND, ON_PICKER, QUEUED (Claude Code holds the message, in its box while it compacts or in its queue while it works, and takes it once free: a retry under the same \`id\` types nothing and reads it again, answering it delivered once its transcript shows it), SESSIONS_FAILED or TOO_LONG; an attachment that is gone is a 404 naming it under \`attachment\` (GONE) and \`id\`. A message naming an inbox item (\`re #iN\`) records the reply on it once sent, which takes it off the Inbox square's count while it stays in his list until its poster closes it. \`threadId\`, for the primary dispatcher alone, puts that thread's marker (\`[thread:<id>] \`) before the words, which routes the message to the thread once ingest brings it; a thread that does not exist is a 404 before anything is sent. \`newThread: true\`, in place of \`threadId\`, opens a thread titled from the message's first line and sends the message as its first, naming it under \`threadId\`.`,
       responses: {
         200: {
           description: "Sent and recorded",
@@ -864,8 +864,8 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
           "The session cannot take it now: it waits on a picker (ON_PICKER), its input holds something (INPUT_NOT_EMPTY), Claude Code has the message or takes it once free (QUEUED), or a held message was lost (LOST)",
         ),
         502: errorResponse(
-          "CMUX_FAILED",
-          "the sessions could not be read, or the send was refused before anything was typed and again on a second try (CMUX_FAILED, which the outbox retries), or typing began and did not finish (INTERRUPTED), which reads Delivered once its transcript shows it",
+          "SESSIONS_FAILED",
+          "the sessions could not be read, or the send was refused before anything was typed and again on a second try (SESSIONS_FAILED, which the outbox retries), or typing began and did not finish (INTERRUPTED), which reads Delivered once its transcript shows it",
         ),
       },
     }),
@@ -886,7 +886,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Answer a prompt a live session waits on, as the owner would in its terminal: a picker its herdr pane shows, answered by keys, or for the session the dashboard hosts on the Agent SDK, one its canUseTool callback holds. A picker's questions (each by option labels, or the person's own words), a permission request (once or deny, never always), or a plan (manual, which starts it with edits still asking, or deny with an optional note). Permission and plan answers go only while PLAYGROUND_APPROVALS_ENABLED is on. A herdr session's picker is typed only while its pane shows the question the card shows (answerHerdr() in feed.ts), and its permission or plan is answered in its terminal alone; a hosted session's answer goes straight to its callback. The answer is recorded in the console's activity without its words. A refusal names its reason in `feed`: BUSY, CMUX_FAILED, DISABLED, FORBIDDEN, INTERRUPTED (keys went into a herdr session's pane, yet its picker still shows or changed partway), INVALID, NOT_FOUND, NOT_PENDING, TERMINAL_ONLY (a herdr session's permission or plan) or UNCONFIRMED (the keys went, but the pane could not be read to see them land).",
+        "Answer a prompt a live session waits on, as the owner would in its terminal: a picker its herdr pane shows, answered by keys, or for the session the dashboard hosts on the Agent SDK, one its canUseTool callback holds. A picker's questions (each by option labels, or the person's own words), a permission request (once or deny, never always), or a plan (manual, which starts it with edits still asking, or deny with an optional note). Permission and plan answers go only while PLAYGROUND_APPROVALS_ENABLED is on. A herdr session's picker is typed only while its pane shows the question the card shows (answerHerdr() in feed.ts), and its permission or plan is answered in its terminal alone; a hosted session's answer goes straight to its callback. The answer is recorded in the console's activity without its words. A refusal names its reason in `feed`: BUSY, DISABLED, FORBIDDEN, INTERRUPTED (keys went into a herdr session's pane, yet its picker still shows or changed partway), INVALID, NOT_FOUND, NOT_PENDING, SESSIONS_FAILED, TERMINAL_ONLY (a herdr session's permission or plan) or UNCONFIRMED (the keys went, but the pane could not be read to see them land).",
       responses: {
         200: {
           description:
@@ -906,8 +906,8 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
           "The prompt no longer waits (NOT_PENDING), or it is being answered already (BUSY)",
         ),
         502: errorResponse(
-          "CMUX_FAILED",
-          "The session's pane could not be read (CMUX_FAILED), keys went yet the prompt still shows (INTERRUPTED), or they went and could not be seen to land (UNCONFIRMED): look at the session",
+          "SESSIONS_FAILED",
+          "The session's pane could not be read (SESSIONS_FAILED), keys went yet the prompt still shows (INTERRUPTED), or they went and could not be seen to land (UNCONFIRMED): look at the session",
         ),
       },
     }),
@@ -1024,7 +1024,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Restart a live session whose Claude login expired, with no terminal step: spawn.sh closes the pane it opened and resumes the same conversation in its folder, a reviewer or tester naming the PRs its roster row lists (`--pr`: its prs, else its pr), on `account` (a Claude account added in Settings > Accounts, with its token kept) or, with none, on this Mac's own login. A fixture stack runs nothing and clears the session's login block. A refusal names its reason: NOT_FOUND for no such live session or no such kept account, CONFLICT for a reviewer or tester whose row names no PR, refused before the close since spawn.sh would refuse its resume, ERROR for spawn.sh's own words.",
+        "Restart a live session whose Claude login expired, with no terminal step: spawn.sh closes the pane it opened and resumes the same conversation in its folder, a reviewer or tester naming the PRs its roster row lists (`--pr`: its prs, else its pr), on `account` (a Claude account added in Settings > Accounts, with its token kept) or, with none, on this Mac's own login. A fixture stack runs nothing and clears the session's login block. A refusal names its reason: NOT_FOUND for no such live session or no such kept account, CONFLICT for a reviewer or tester whose row names no pull request, refused before the close since spawn.sh would refuse its resume, ERROR for spawn.sh's own words.",
       responses: {
         200: {
           description: "Restarted: the session runs again on the account named",
@@ -1044,7 +1044,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ...notFoundErrorResponses,
         409: errorResponse(
           "CONFLICT",
-          "A reviewer or tester whose roster row names no PR, so its resume after the close would be refused",
+          "A reviewer or tester whose roster row names no pull request, so its resume after the close would be refused",
         ),
         502: errorResponse("ERROR", "spawn.sh refused or failed, its reason passed through"),
       },
@@ -1080,7 +1080,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         throw new ApiError(
           409,
           "CONFLICT",
-          `${worker.name} is a reviewer or tester whose roster row names no PR, so spawn.sh would refuse its resume after the close: name the PR it serves with roster.ts set ${worker.name} prs=<url>, then restart it`,
+          `${worker.name} is a reviewer or tester whose roster row names no pull request, so spawn.sh would refuse its resume after the close: name the PR it serves with roster.ts set ${worker.name} prs=<pull url>, then restart it`,
         )
       const restarted = await restartSession({
         account,

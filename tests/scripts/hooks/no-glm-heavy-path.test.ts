@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -272,6 +272,87 @@ describe("a GLM session's push", () => {
     git(REPO, "merge", "-q", "-s", "ours", "-m", "keep ours", "ui")
     expect(await bash("git push")).toContain("web/next/src/a.ts")
     git(REPO, "reset", "-q", "--hard", "origin/canary")
+  })
+})
+
+// a GLM branch brings canary in after both sides changed spawn.sh: git merges the file by itself, so the result differs from each side yet holds no change of the GLM session's
+describe("bringing canary in", () => {
+  const lines = (edit: Record<number, string> = {}) =>
+    Array.from({ length: 8 }, (_, i) => `${edit[i] ?? i}\n`).join("")
+  // a pushed feat branch whose commit changed spawn.sh's first line, a canary that changed its last, and docs/a.md changed on both, so it conflicts
+  const behind = async (name: string) => {
+    const dir = join(DIR, name)
+    const put = (path: string, text: string) => Bun.write(join(dir, path), text)
+    git(DIR, "init", "-q", "--bare", "-b", "canary", `${dir}.git`)
+    git(DIR, "clone", "-q", `${dir}.git`, dir)
+    await put("docs/a.md", "base\n")
+    await put("scripts/spawn.sh", lines())
+    git(dir, "add", ".")
+    git(dir, "commit", "-q", "-m", "base")
+    git(dir, "push", "-q", "origin", "HEAD:canary")
+    git(dir, "checkout", "-q", "-b", "feat")
+    await put("docs/a.md", "feat\n")
+    await put("scripts/spawn.sh", lines({ 0: "feat" }))
+    git(dir, "commit", "-q", "-am", "feat")
+    git(dir, "push", "-q", "origin", "feat")
+    git(dir, "checkout", "-q", "canary")
+    await put("docs/a.md", "canary\n")
+    await put("scripts/spawn.sh", lines({ 7: "canary" }))
+    git(dir, "commit", "-q", "-am", "canary")
+    git(dir, "push", "-q", "origin", "canary")
+    git(dir, "checkout", "-q", "feat")
+    // git stops on docs/a.md's conflict, which the session resolves
+    const stop = async (...args: string[]) => {
+      const proc = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+        cwd: dir,
+        env: GIT_ENV,
+        stderr: "ignore",
+        stdin: "ignore",
+        stdout: "ignore",
+      })
+      expect(proc.exitCode).not.toBe(0)
+      await put("docs/a.md", "both\n")
+      git(dir, "add", "docs/a.md")
+    }
+    const handEdit = async () => {
+      await put("scripts/spawn.sh", lines({ 0: "feat", 3: "a hand edit", 7: "canary" }))
+      git(dir, "add", "scripts/spawn.sh")
+    }
+    return { dir, handEdit, stop }
+  }
+
+  test("a merge whose only fenced change comes from canary passes", async () => {
+    const { dir, stop } = await behind("bring-merge")
+    await stop("merge", "-q", "origin/canary")
+    expect(await bash("git commit --no-edit", dir)).toBeUndefined()
+    git(dir, "commit", "-q", "--no-edit")
+    expect(await bash("git push origin feat", dir)).toBeUndefined()
+  })
+
+  test("a merge whose resolution edits a fenced file is refused", async () => {
+    const { dir, handEdit, stop } = await behind("bring-merge-edit")
+    await stop("merge", "-q", "origin/canary")
+    await handEdit()
+    expect(await bash("git commit --no-edit", dir)).toContain("scripts/spawn.sh")
+    git(dir, "commit", "-q", "--no-edit")
+    expect(await bash("git push origin feat", dir)).toContain("scripts/spawn.sh")
+  })
+
+  test("a rebase whose only fenced change comes from canary passes", async () => {
+    const { dir, stop } = await behind("bring-rebase")
+    await stop("rebase", "-q", "origin/canary")
+    git(dir, "-c", "core.editor=true", "rebase", "--continue")
+    expect(await bash("git push --force-with-lease origin feat", dir)).toBeUndefined()
+    expect(await bash("git push -f", dir)).toBeUndefined()
+  })
+
+  test("a rebase whose resolution edits a fenced file is refused", async () => {
+    const { dir, handEdit, stop } = await behind("bring-rebase-edit")
+    await stop("rebase", "-q", "origin/canary")
+    await handEdit()
+    git(dir, "-c", "core.editor=true", "rebase", "--continue")
+    expect(await bash("git push --force-with-lease origin feat", dir)).toContain("scripts/spawn.sh")
+    expect(await bash("git push -f", dir)).toContain("scripts/spawn.sh")
   })
 })
 
@@ -675,14 +756,26 @@ describe("which sessions it acts for", () => {
       join(CONFIG, "sessions", "102.json"),
       JSON.stringify({ name: "worker-claude-pin", sessionId: "s-claude" }),
     )
+    await Bun.write(
+      join(CONFIG, "sessions", "103.json"),
+      JSON.stringify({ name: "worker-harness-glm-pin", sessionId: "s-harness-glm" }),
+    )
+    await Bun.write(
+      join(CONFIG, "sessions", "104.json"),
+      JSON.stringify({ name: "worker-harness-claude-pin", sessionId: "s-harness-claude" }),
+    )
     await pin("worker-glm-pin", "glm")
     await pin("worker-claude-pin", "claude")
+    await pin("worker-harness-glm-pin", "claude-code glm")
+    await pin("worker-harness-claude-pin", "claude-code claude")
   })
 
   test.each([
     { label: "GLM's base URL", env: { ...env, ...GLM }, session: "s-none", want: true },
     { label: "a glm pin with no base URL", env, session: "s-glm", want: true },
     { label: "a claude pin", env, session: "s-claude", want: false },
+    { label: "a claude-code glm pin", env, session: "s-harness-glm", want: true },
+    { label: "a claude-code claude pin", env, session: "s-harness-claude", want: false },
     { label: "no pin and no base URL", env, session: "s-none", want: false },
     {
       label: "a base URL that only holds z.ai in its path",
@@ -988,6 +1081,205 @@ describe("a GLM session's org tools", () => {
   })
 })
 
+describe("a GLM session's reads of an org's checkout and its database calls", () => {
+  // a data folder whose ext.links guards the made-up org acme-blue, its checkout, a checkout whose remotes git cannot read, and a folder in no checkout
+  const DATA = storeWith(
+    join(DIR, "read-data"),
+    {},
+    { "ext.links": { "made-up-org": ["acme-blue"] } },
+  )
+  const ORG = join(DIR, "read-org-repo")
+  const BROKEN = join(DIR, "read-broken-repo")
+  const LOOSE = join(DIR, "read-loose")
+  const ON_GLM = { ...GLM, PLAYGROUND_DATA_DIR: DATA }
+  const ON_CLAUDE = { PLAYGROUND_DATA_DIR: DATA }
+  beforeAll(() => {
+    git(DIR, "init", "-q", ORG)
+    git(ORG, "remote", "add", "origin", "https://github.com/acme-blue/demo.git")
+    mkdirSync(join(BROKEN, ".git"), { recursive: true })
+    mkdirSync(LOOSE)
+  })
+  const call = (name: string, toolInput: Record<string, unknown>, cwd = REPO) =>
+    JSON.stringify({
+      cwd,
+      hook_event_name: "PreToolUse",
+      session_id: "s-none",
+      tool_input: toolInput,
+      tool_name: name,
+    })
+  const both = async (raw: string) => ({
+    claude: await refusal(raw, ON_CLAUDE, CALM),
+    glm: await refusal(raw, ON_GLM, CALM),
+  })
+
+  test("each read tool and a shell read of an org's checkout are refused on GLM, naming the org and the glm rule, and pass on Claude", async () => {
+    for (const raw of [
+      call("Read", { file_path: join(ORG, "README.md") }),
+      call("Grep", { path: ORG, pattern: "token" }),
+      call("Glob", { path: join(ORG, "src"), pattern: "**/*.ts" }),
+      call("Grep", { pattern: "token" }, ORG),
+      input(`cat ${join(ORG, "README.md")}`),
+      input("cd ../read-org-repo && ls"),
+      input("head README.md", ORG),
+    ]) {
+      const { claude, glm } = await both(raw)
+      expect(claude).toBeUndefined()
+      expect(glm).toContain("acme-blue/demo")
+      expect(glm).toContain("glm rule")
+      expect(glm).toContain("report to your lead")
+    }
+  })
+
+  test("a shell read naming an org's checkout by a bare word, and a call in one the hook cannot parse, are refused on GLM", async () => {
+    for (const raw of [
+      input("rg token read-org-repo", DIR),
+      input("ls read-org-repo", DIR),
+      input(`cat README.md "`, ORG),
+    ]) {
+      const { claude, glm } = await both(raw)
+      expect(claude).toBeUndefined()
+      expect(glm).toContain("acme-blue/demo")
+      expect(glm).toContain("glm rule")
+    }
+  })
+
+  test("a read outside any guarded checkout passes on GLM: its own checkout, a folder in no checkout, and a checkout whose remotes git cannot read", async () => {
+    for (const raw of [
+      call("Read", { file_path: join(REPO, "README.md") }),
+      call("Grep", { pattern: "token" }),
+      call("Read", { file_path: join(LOOSE, "notes.md") }),
+      call("Glob", { path: LOOSE, pattern: "*" }),
+      call("Read", { file_path: join(BROKEN, "README.md") }),
+      input(`cat ${join(LOOSE, "notes.md")}`),
+      input(`cat ${join(BROKEN, "README.md")}`),
+    ])
+      expect(await refusal(raw, ON_GLM, CALM)).toBeUndefined()
+  })
+
+  test("a database client or URL aimed off this machine is refused on GLM, naming the host and the glm rule, and passes on Claude", async () => {
+    for (const [command, names] of [
+      ["psql -h db.example.com -U app app", "db.example.com"],
+      ["psql postgres://app@db.example.com:5432/app", "db.example.com"],
+      [`psql "host=db.example.com dbname=app"`, "db.example.com"],
+      ["PGHOST=db.example.com psql app", "db.example.com"],
+      ["pg_dump --host=db.example.com app", "db.example.com"],
+      ["mysql -hdb.example.com app", "db.example.com"],
+      ["mongosh mongodb+srv://app@cluster.example.net/app", "cluster.example.net"],
+      ["redis-cli -h cache.example.com", "cache.example.com"],
+      ["bun run seed.ts postgres://app@db.example.com/app", "db.example.com"],
+      ["psql $DATABASE_URL", "cannot read"],
+    ]) {
+      const { claude, glm } = await both(input(command))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain(names)
+      expect(glm).toContain("glm rule")
+      expect(glm).toContain("report to your lead")
+    }
+  })
+
+  test("a read of an org's checkout through what the shell opens is refused on GLM: a redirect, a substitution, a glob, ~+ and a link", async () => {
+    writeFileSync(join(ORG, "README.md"), "demo\n")
+    symlinkSync(join("..", "read-org-repo", "README.md"), join(REPO, "org-link.md"))
+    for (const raw of [
+      input("cat < ../read-org-repo/README.md"),
+      input('while read l; do echo "$l"; done < ../read-org-repo/README.md'),
+      input('echo "$(< ../read-org-repo/README.md)"'),
+      input("echo ../read-org-repo/README.md | xargs cat"),
+      input("cat ../read-org-rep*/README.md"),
+      input("ls ~+/../read-org-repo"),
+      input("cat org-link.md"),
+      input("sort -o out.txt ../read-org-repo/README.md"),
+      input("echo x > ../read-org-repo/notes.md"),
+    ]) {
+      const { claude, glm } = await both(raw)
+      expect(claude).toBeUndefined()
+      expect(glm).toContain("acme-blue/demo")
+      expect(glm).toContain("glm rule")
+    }
+  })
+
+  test("a shell read that opens nothing in a guarded checkout passes on GLM: its own files by a redirect, a glob of its docs or ~+, and echo's plain words inside the checkout", async () => {
+    for (const raw of [
+      input("cat < README.md"),
+      input("cat docs/*.md"),
+      input("ls ~+/src"),
+      input('echo "$(< README.md)"'),
+      input("echo hi there", ORG),
+      input("printf '%s\\n' done", ORG),
+      input("cat ../read-loos*/notes.md"),
+    ])
+      expect(await refusal(raw, ON_GLM, CALM)).toBeUndefined()
+  })
+
+  test("a database client reading a host past its first is refused on GLM: hostaddr, a later host, a URL's host list and parameters, a service, MYSQL_HOST, a positional mongo host, a pg_ program, pgcli and docker", async () => {
+    for (const [command, names] of [
+      ["PGHOSTADDR=10.0.0.5 psql app", "10.0.0.5"],
+      [`psql "hostaddr=10.0.0.5 dbname=app"`, "10.0.0.5"],
+      [`psql "host=127.0.0.1 dbname=app host=db.example.com"`, "db.example.com"],
+      ["psql postgresql://app@127.0.0.1:1,db.example.com/app", "db.example.com"],
+      [`psql "postgresql:///app?host=db.example.com"`, "db.example.com"],
+      ["psql service=prod", "cannot tell"],
+      ["PGSERVICE=prod psql", "cannot tell"],
+      ["MYSQL_HOST=db.example.com mysql app", "db.example.com"],
+      ["mongosh db.example.com:27017/app", "db.example.com"],
+      ["pg_basebackup -h db.example.com -D out", "db.example.com"],
+      ["pgcli -h db.example.com app", "db.example.com"],
+      ["docker exec x psql -h db.example.com app", "db.example.com"],
+      ["docker run --rm postgres psql -h db.example.com", "db.example.com"],
+      ["docker exec -e PGHOST=db.example.com x psql app", "db.example.com"],
+      ["docker compose exec db psql -h db.example.com app", "db.example.com"],
+    ]) {
+      const { claude, glm } = await both(input(command))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain(names)
+      expect(glm).toContain("glm rule")
+    }
+  })
+
+  test("a database client aimed off this machine is refused on GLM under a policy that guards no org", async () => {
+    const open = storeWith(join(DIR, "no-org-data"), {}, {})
+    for (const command of [
+      "psql -h db.example.com app",
+      "pg_basebackup -h db.example.com -D out",
+      "pgcli -h db.example.com app",
+      "pgbench -h db.example.com app",
+      "mycli -h db.example.com app",
+      "mysqldump -h db.example.com app",
+      "mongo --host db.example.com",
+      "mongosh --host db.example.com",
+      "redis-cli -h db.example.com",
+    ]) {
+      const reason = await refusal(input(command), { ...GLM, PLAYGROUND_DATA_DIR: open }, CALM)
+      expect(reason).toContain("db.example.com")
+      expect(reason).toContain("glm rule")
+    }
+  })
+
+  test("a database client on this machine passes on GLM", async () => {
+    for (const command of [
+      "psql -h 127.0.0.1 -U postgres app",
+      "psql -h localhost app",
+      "psql app",
+      "psql postgres://postgres@127.0.0.1:55432/app",
+      "psql postgresql://postgres@[::1]/app",
+      "redis-cli",
+      "redis-cli -h 127.0.0.1 ping",
+      "docker exec playground-x-db psql -U postgres -c 'select 1'",
+      "docker exec x psql -h 127.0.0.1 app",
+      "echo postgres://app@db.example.com/app",
+      "mongosh -h",
+      "mongosh app",
+      "mongosh ./scripts/seed.js",
+      "mongosh localhost:27017/app",
+      "psql postgresql://app@%2Fvar%2Frun/app",
+      `psql "host=127.0.0.1 hostaddr=127.0.0.1 dbname=app"`,
+      "psql postgresql://app@127.0.0.1:5432,localhost/app",
+      `psql "postgresql:///app?host=/tmp"`,
+    ])
+      expect(await refusal(input(command), ON_GLM, CALM)).toBeUndefined()
+  })
+})
+
 describe("its registration", () => {
   // the matcher each settings file registers the hook under, read from the file a session loads
   const matchers = async () =>
@@ -1003,10 +1295,10 @@ describe("its registration", () => {
       }),
     )
 
-  test("both settings files send it every Bash call, every MCP tool and Claude Code's three MCP resource tools, and no other tool", async () => {
+  // Bash reaches it through guards (tests/scripts/hooks/guards.test.ts).
+  test("both settings files send it every MCP tool and Claude Code's three MCP resource tools, and no other tool", async () => {
     for (const { file, matcher } of await matchers()) {
       for (const tool of [
-        "Bash",
         "ListMcpResourcesTool",
         "ReadMcpResourceDirTool",
         "ReadMcpResourceTool",
@@ -1015,6 +1307,7 @@ describe("its registration", () => {
       ])
         expect({ file, tool, sent: matcher.test(tool) }).toEqual({ file, tool, sent: true })
       for (const tool of [
+        "Bash",
         "Edit",
         "Write",
         "WebFetch",

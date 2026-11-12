@@ -5,7 +5,7 @@ import type { RosterKind } from "@packages/config/kinds"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 
-import { labelParts, labelText, setRosterKinds } from "@/lib/agent-label"
+import { labelParts, labelText, setRosterKinds, type LabelFacts } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import {
   agentGroup,
@@ -125,7 +125,14 @@ export const doingOf = (agent: Agent, dispatcher: boolean): string =>
 // How a status reads at a glance: quiet for what is stopped, parked or merely idle, else the text's own; the state's colour is its icon's, never the words'.
 export type StatusTone = "muted" | "normal"
 
-const QUIET: ReadonlySet<ShownState> = new Set(["down", "ended", "idle", "parked", "usage-limit"])
+const QUIET: ReadonlySet<ShownState> = new Set([
+  "down",
+  "ended",
+  "idle",
+  "parked",
+  "unknown",
+  "usage-limit",
+])
 
 // An open decision or draft a live session posted to Playground's Inbox and depends on: since no factory session blocks on the owner (playbook's ask rule), this is how one shows it waits, linked to the item.
 export type InboxWait = { id: string; ref: number } | null
@@ -170,7 +177,7 @@ export function factsOf(
   // a runner's job runs as a background task while its session idles, so it reads Working (the plan: "Runners use Working while their job runs, Stuck and Down")
   const runs =
     agent.role === "runner" && (live.worker?.tasks ?? []).some((task) => task.state === "running")
-  const light = held === "idle" && runs ? "working" : held
+  const light = (held === "idle" || held === "unknown") && runs ? "working" : held
   // No progress reads the session's own work alone: a quiet runner whose job runs is not hung
   const active = light === held ? (live.worker?.lastActiveAt ?? null) : null
   return {
@@ -245,13 +252,34 @@ export function statusOf(
   return { text, tone }
 }
 
-// The board as last read, for a part of the page that only names agents (a stream's recipients): it reads whatever the page holds and fetches only when nothing has been read yet, leaving re-reads to useAgents.
-export const useAgentsBoard = () =>
+export type AgentsBoard = Awaited<ReturnType<typeof fetchAgents>>
+
+// A reader's own slice of the board, which React Query draws again only when that slice changes (its structural sharing keeps an unchanged slice's object across reads): the peer addresses alone, or with them what a label needs of every agent, so a stream's hundreds of names hold still through a read that moved only a session's activity.
+export const socketsOf = (board: AgentsBoard) => board.sockets
+export const labelBoard = (board: AgentsBoard) => ({
+  agents: board.agents.map(
+    ({ branchTicket, kind, name, pr, task, ticket, title, worker }): LabelFacts => ({
+      branchTicket,
+      kind,
+      name,
+      pr: pr && { number: pr.number },
+      task,
+      ticket,
+      title,
+      worker,
+    }),
+  ),
+  sockets: board.sockets,
+})
+
+// The board as last read, for a part of the page that only names agents (a stream's recipients): it reads whatever the page holds and fetches only when nothing has been read yet, leaving re-reads to useAgents; select narrows what it reads to the slice it draws.
+export const useAgentsBoard = <T = AgentsBoard>(select?: (board: AgentsBoard) => T) =>
   useQuery({
     queryKey: AGENTS_QUERY_KEY,
     queryFn: fetchAgents,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
+    select,
   })
 
 // The Orchestrators rows' dragged order, written whole, or forgotten so A to Z by title returns.
@@ -507,6 +535,7 @@ export const SHOWN_RANK: Record<ShownState, number> = {
   ready: 7,
   parked: 8,
   "usage-limit": 9,
+  unknown: 9,
   idle: 9,
   done: 10,
   merged: 11,

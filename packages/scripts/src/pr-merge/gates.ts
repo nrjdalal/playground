@@ -12,6 +12,7 @@ export type { GateName, Verdict } from "@packages/config/verdicts"
 export type Check = {
   conclusion?: string | null
   context?: string
+  detailsUrl?: string
   name?: string
   startedAt?: string
   state?: string
@@ -25,6 +26,12 @@ export type Gate = { detail: string; name: string; ok: boolean }
 
 // GitHub's jobs every head runs (.github/workflows), by their check names: pr:merge needs each one's newest run on the head finished and passed.
 export const REQUIRED_CHECKS = ["Audit, Lint, and Build", "test"]
+
+// The workflow each required check's job runs in, so a run that finished without that job reads apart from one GitHub has yet to start.
+const REQUIRED_WORKFLOWS: Record<string, string> = {
+  "Audit, Lint, and Build": "auto-check-build",
+  test: "auto-test",
+}
 
 export type PrFacts = {
   // How many commits canary has that the head lacks: 0 is up to date, NaN when gh's answer did not read as a count.
@@ -52,7 +59,13 @@ export type PrFacts = {
   // The PR's number.
   n: number
   owner: string
+  // Each PR the body says it is stacked on (parentsOf) with its GitHub state, or why the state did not read; set wherever the body is read, [] for none.
+  parents?: { n: number; state: string }[]
+  // The pr template's own placeholders, read at the head, which the body gate refuses in the body's prose; left out in a test, which skips that check.
+  placeholders?: string[]
   state: string
+  // The body's bare all-caps tokens that no file at the head holds outside the gate's own folders (unfoundTokens), which the body gate refuses; left out in a test, which skips that check.
+  unfound?: string[]
 }
 
 export const BASE = "canary"
@@ -111,6 +124,18 @@ export function newestRuns(checks: Check[]): Check[] {
   return [...newest.values()]
 }
 
+// Pure: the run id of a required check's workflow once every job it ran passed, its check still missing: GitHub ended the run without creating the job, and a rerun brings it; null while a job is unfinished or red, or none ran. The largest id is the newest run's, since a second run on the head with fewer shards leaves the first run's extra shard listed.
+function endedRun(checks: Check[], name: string): string | null {
+  const jobs = checks.filter((check) => check.workflowName === REQUIRED_WORKFLOWS[name])
+  const done = (check: Check) =>
+    check.status?.toUpperCase() === "COMPLETED" && PASSED.has(check.conclusion?.toUpperCase() ?? "")
+  if (!jobs.length || !jobs.every(done)) return null
+  const run = Math.max(
+    ...jobs.map((job) => Number(/\/actions\/runs\/(\d+)\//.exec(job.detailsUrl ?? "")?.[1] ?? 0)),
+  )
+  return run > 0 ? String(run) : null
+}
+
 // Pure: the head's GitHub checks as one gate: every check's newest run finished and passed, each required name among them. gitGuardian refuses a head with no GitGuardian check.
 export function ciGate(
   all: Check[],
@@ -118,6 +143,15 @@ export function ciGate(
 ): Gate {
   const checks = newestRuns(all)
   const missing = required.filter((name) => !checks.some((check) => check.name === name))
+  for (const name of missing) {
+    const run = endedRun(checks, name)
+    if (run)
+      return {
+        detail: `no ${name} check on the head, though every job of its ${REQUIRED_WORKFLOWS[name]} run passed: GitHub ended that run without creating it; rerun it with \`gh run rerun ${run}\``,
+        name: "ci",
+        ok: false,
+      }
+  }
   if (missing.length > 0)
     return {
       detail: `no ${missing.join(" or ")} check on the head yet: GitHub runs it on every push`,
@@ -226,6 +260,44 @@ export const withReadyDraft = (facts: PrFacts, gates: Gate[], detail: string): G
     ? gates.map((gate) => (gate.name === "ready" ? { ...gate, detail, ok: true } : gate))
     : gates
 
+// Pure: the PRs a body says it is stacked on, each `Stacked on #N` (playbook DISPATCH.md's stack line) in any case, a list of them on one line (`#N and #M`, `#N, #M`) included, once each, in order.
+export const parentsOf = (body: string): number[] => [
+  ...new Set(
+    [...body.matchAll(/\bstacked on (#\d+(?:(?:\s*(?:,|&|\band\b)\s*|\s+)#\d+)*)/gi)].flatMap(
+      (match) => [...(match[1] ?? "").matchAll(/#(\d+)/g)].map((number) => Number(number[1])),
+    ),
+  ),
+]
+
+// Pure: the parent gate, since a review scores a stacked PR's own lines alone and its squash would land an unmerged parent's: every parent the body names must read MERGED in facts.parents; a parent open, closed unmerged or never read refuses, and a body naming none meets no gate.
+function parentGate(facts: PrFacts): Gate | undefined {
+  const declared = parentsOf(facts.body ?? "")
+  if (declared.length === 0) return undefined
+  const parents = declared.map((n) => ({
+    n,
+    state: facts.parents?.find((parent) => parent.n === n)?.state ?? "never read",
+  }))
+  const why = parents.flatMap(({ n, state }) =>
+    state === "MERGED"
+      ? []
+      : state === "OPEN"
+        ? [`stacked on #${n}, still open: merge #${n} first`]
+        : state === "CLOSED"
+          ? [
+              `stacked on #${n}, closed without merging: once its lines land another way, remove the \`Stacked on #${n}\` line from the body (no push)`,
+            ]
+          : [
+              `stacked on #${n}, whose state could not be read (${state}); if #${n} is not a PR, reword the \`Stacked on\` line`,
+            ],
+  )
+  if (why.length > 0) return { detail: why.join("; "), name: "parent", ok: false }
+  return {
+    detail: `stacked on ${declared.map((n) => `#${n}`).join(", ")}, merged`,
+    name: "parent",
+    ok: true,
+  }
+}
+
 // Pure: the newest review on the head.
 function reviewGate(facts: PrFacts): Gate {
   const review = verdictsAt(facts).get("review")
@@ -269,12 +341,16 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
       name: "base",
       ok: facts.base === BASE,
     },
-    upToDate(facts),
-    keepsCanary(facts.lost),
   ]
+  const parent = parentGate(facts)
+  if (parent) gates.push(parent)
+  gates.push(upToDate(facts), keepsCanary(facts.lost))
   gates.push(ciGate(facts.checks, { gitGuardian, required: REQUIRED_CHECKS }))
   if (facts.body !== undefined) {
-    const why = bodyRefusal(facts.body, facts.files)
+    const why = bodyRefusal(facts.body, facts.files, {
+      placeholders: facts.placeholders,
+      unfound: facts.unfound,
+    })
     gates.push(
       why
         ? { detail: `${why}; fix the body (no push)`, name: "body", ok: false }

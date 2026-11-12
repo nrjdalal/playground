@@ -21,6 +21,7 @@ import {
   startOf,
   type Live,
 } from "../../../../../../api/hono/src/lib/sessions/read"
+import { testContainerName } from "../../../../../container"
 import { onLiveDashboard } from "../../../../../dashboard-fixture"
 import { liveReads } from "../../../../../live-reads"
 
@@ -97,6 +98,8 @@ describe.skipIf(!dockerUp())("reading sessions back", () => {
       "run",
       "-d",
       "--rm",
+      "--name",
+      testContainerName("sessions-read"),
       "-e",
       `POSTGRES_PASSWORD=${PASSWORD}`,
       "-p",

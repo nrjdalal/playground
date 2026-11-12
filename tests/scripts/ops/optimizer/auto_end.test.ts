@@ -3,13 +3,16 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import type { RmDeps } from "../../../../packages/scripts/src/playground/rm"
 import {
   type CleanupDeps,
   cleanWorktree,
+  cleanupHeld,
   containersFor,
   type EndDeps,
   endMerged,
   endOne,
+  finishedOf,
   sweep,
   type Target,
   unsavedLive,
@@ -68,6 +71,14 @@ const input = (over: Partial<CollectInput> = {}): CollectInput => ({
   sessions: {},
   workerPrs: async () => [],
   ...over,
+})
+
+// PG-1419: rm's reader returns a PR (its head beside its number and state) or none, and the cleanup's finished reads rm's freed off it
+test("finishedOf reads rm's reader shape, a PR beside its head, number and state or none: merged and closed are done, open and none are not", () => {
+  expect(finishedOf({ head: "h", number: 7, state: "MERGED" })).toBe(true)
+  expect(finishedOf({ head: "h", number: 7, state: "CLOSED" })).toBe(true)
+  expect(finishedOf({ head: "h", number: 7, state: "OPEN" })).toBe(false)
+  expect(finishedOf(null)).toBe(false)
 })
 
 describe("sweep: ops-tick ends what the detector flags", () => {
@@ -215,6 +226,124 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     )
     expect(closed).toEqual(["r2kq9m-reviewer"])
     expect(lines.map((l) => l.to)).toEqual(["ops"])
+  })
+
+  // #1762: a lead closed the worker's PR unmerged and had it rebuild from canary; the older merged PR on its row must not end it, and its lead must hear.
+  test("a worker whose PR that closed last closed unmerged is kept, and its lead is asked to reassign or end it", async () => {
+    const { closed, deps, reported } = fakes()
+    const older: PrState = { ...MERGED, mergedAt: "2026-11-01T00:10:00Z" }
+    const unmerged: PrState = {
+      closedAt: "2026-11-01T03:00:00Z",
+      head: "cl0sed11",
+      ref: "pg-2111-z",
+      state: "closed",
+      verdicts: [],
+    }
+    const lines = await sweep(
+      input({
+        prState: async (url) => (url === URL ? older : url === NEXT ? unmerged : null),
+        roster: { "v4tql8-worker": { kind: "worker", name: "v4tql8-worker", pr: NEXT } },
+        sessions: { "v4tql8-worker": live("v4tql8-worker") },
+        workerPrs: async (name) => (name === "v4tql8-worker" ? [URL, NEXT] : []),
+      }),
+      deps,
+    )
+    expect([closed, reported]).toEqual([[], []])
+    expect(lines).toEqual([
+      {
+        text: "Kept v4tql8-worker: worker-pr-closed (closed #2111); reassign it or end it",
+        to: "builder",
+      },
+    ])
+  })
+
+  test("a worker whose PR that closed last merged is ended, and the line names it, reading merged", async () => {
+    const { deps, reported } = fakes()
+    const older: PrState = {
+      closedAt: "2026-11-01T00:10:00Z",
+      head: "cl0sed11",
+      ref: "pg-2110-z",
+      state: "closed",
+      verdicts: [],
+    }
+    const newer: PrState = { ...MERGED, mergedAt: "2026-11-01T03:00:00Z" }
+    const lines = await sweep(
+      input({
+        prState: async (url) => (url === URL ? older : url === NEXT ? newer : null),
+        roster: { "s9bkr5-worker": { kind: "worker", name: "s9bkr5-worker", pr: NEXT } },
+        sessions: { "s9bkr5-worker": live("s9bkr5-worker") },
+        workerPrs: async (name) => (name === "s9bkr5-worker" ? [URL, NEXT] : []),
+      }),
+      deps,
+    )
+    expect(reported).toEqual([
+      ["s9bkr5-worker", "ended automatically: worker-prs-done (merged), #2111 merged as daaac8e"],
+    ])
+    expect(lines).toEqual([
+      {
+        text: "Ended s9bkr5-worker: worker-prs-done (merged), #2111 merged as daaac8e",
+        to: "builder",
+      },
+    ])
+  })
+
+  // #1748 runs live after the next ship: the sweep holds the checker too, not only the detector's list
+  test("a checker whose own worker is gone stays while an open PR on its list has a live worker", async () => {
+    const { closed, deps } = fakes()
+    const lines = await sweep(
+      input({
+        prState: async (url) =>
+          url === NEXT ? { head: "0pen0001", state: "open", verdicts: [] } : null,
+        roster: {
+          "j4wnc7-reviewer": {
+            kind: "reviewer",
+            name: "j4wnc7-reviewer",
+            prs: [NEXT],
+            worker: "g0new0rk-worker",
+          },
+          "c6xhn2-worker": { kind: "worker", name: "c6xhn2-worker" },
+        },
+        sessions: {
+          "c6xhn2-worker": live("c6xhn2-worker"),
+          "j4wnc7-reviewer": live("j4wnc7-reviewer"),
+        },
+        workerPrs: async (name) => (name === "c6xhn2-worker" ? [NEXT] : []),
+      }),
+      deps,
+    )
+    expect([closed, lines]).toEqual([[], []])
+  })
+
+  // GitHub closes a PR's issue a beat after its merge, so the issue never counts as the last close
+  test("a merged PR beside the issue it closes, closed a beat later, still ends the worker as merged", async () => {
+    const { closed, deps, reported } = fakes()
+    const ISSUE = "https://github.com/o/r/issues/2112"
+    const lines = await sweep(
+      input({
+        prState: async (url) =>
+          url === NEXT
+            ? { ...MERGED, mergedAt: "2026-11-01T03:00:00Z" }
+            : url === ISSUE
+              ? { closedAt: "2026-11-01T03:00:01Z", head: "", state: "closed", verdicts: [] }
+              : null,
+        roster: {
+          "n8vtrw-worker": { kind: "worker", name: "n8vtrw-worker", pr: NEXT, prs: [NEXT, ISSUE] },
+        },
+        sessions: { "n8vtrw-worker": live("n8vtrw-worker") },
+        workerPrs: async (name) => (name === "n8vtrw-worker" ? [NEXT] : []),
+      }),
+      deps,
+    )
+    expect(closed).toEqual(["n8vtrw-worker"])
+    expect(reported).toEqual([
+      ["n8vtrw-worker", "ended automatically: worker-prs-done (merged), #2111 merged as daaac8e"],
+    ])
+    expect(lines).toEqual([
+      {
+        text: "Ended n8vtrw-worker: worker-prs-done (merged), #2111 merged as daaac8e",
+        to: "builder",
+      },
+    ])
   })
 })
 
@@ -914,6 +1043,62 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(calls).toEqual([])
     expect(existsSync(theirs.wt)).toBe(false)
     expect(branches(theirs.main)).not.toContain("PG-1-thing")
+  })
+
+  // PG-1419: the cleanup's held check carries the worktree's own PR freed, so a merged PR's worktree goes under a stale working row naming its branch, and one with commits past the merged head stays, its commit named
+  test("a stale working row naming the branch no longer keeps a merged PR's worktree, and one with a commit past the merged head stays, its commit named", async () => {
+    const url = "https://github.com/o/r/pull/1"
+    const rmOf = (data: string, main: string, prHead: string): RmDeps => ({
+      caller: async () => undefined,
+      clones: () => [],
+      data,
+      decision: async () => null,
+      home: data,
+      main,
+      merged: () => null,
+      notify: () => {},
+      places: () => [],
+      prState: async () => ({ head: prHead, number: 1, state: "MERGED" }),
+      procs: () => [],
+      session: async () => "t",
+    })
+    const { main, root, wt } = machine()
+    recorded(wt)
+    const full = (rev: string) =>
+      Bun.spawnSync(["git", "-C", wt, "rev-parse", rev]).stdout.toString().trim()
+    writeFileSync(
+      join(root, "roster.json"),
+      JSON.stringify({
+        agents: [{ branch: "PG-1-thing", name: "abc123-worker", status: "working" }],
+      }),
+    )
+    const route = fakes(main, [], undefined, {
+      held: (path, pr) => cleanupHeld(path, pr, rmOf(root, main, full("HEAD"))),
+    })
+    expect(await cleanWorktree(wt, "r ended", route.deps, { pr: url })).toContain(`removed ${wt}`)
+
+    const over = machine()
+    const overShort = (rev: string) =>
+      Bun.spawnSync(["git", "-C", over.wt, "rev-parse", "--short", rev]).stdout.toString().trim()
+    const overFull = (rev: string) =>
+      Bun.spawnSync(["git", "-C", over.wt, "rev-parse", rev]).stdout.toString().trim()
+    writeFileSync(join(over.wt, "b.txt"), "b\n")
+    run(over.wt, "git", "add", "b.txt")
+    run(over.wt, "git", "commit", "-qm", "b")
+    writeFileSync(
+      join(over.root, "roster.json"),
+      JSON.stringify({
+        agents: [{ branch: "PG-1-thing", name: "abc123-worker", status: "working" }],
+      }),
+    )
+    const stalled = fakes(over.main, [], undefined, {
+      finished: async () => true,
+      held: (path, pr) => cleanupHeld(path, pr, rmOf(over.root, over.main, overFull("HEAD~1"))),
+    })
+    expect(await cleanWorktree(over.wt, "r ended", stalled.deps, { pr: url })).toBe(
+      `kept ${over.wt}: ${over.wt} is held by abc123-worker, which the roster lists as working, and its commits past merged PR #1's head stay: ${overShort("HEAD")}`,
+    )
+    expect(existsSync(over.wt)).toBe(true)
   })
 
   test("the container names are the worktree's own, whole, and never the live dashboard's or first run's", () => {

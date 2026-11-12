@@ -15,6 +15,9 @@ export const RELAY_TIMEOUT_MS = 25_000
 export const RELAY_HEARTBEAT_MS = 15_000
 export const RELAY_SILENT_MS = 45_000
 
+// The code this Mac closes a socket with once its next one holds the relay, so the hub lets it go with nothing on the bus: the ping and gone a close sends otherwise are still in flight when Vercel freezes the instance, and fail at its next thaw; outside the 4400 to 4599 a refused upgrade closes with.
+export const RELAY_REPLACED_CLOSE = 4100
+
 // The dashboard's reads the relay carries, A to Z, every one a GET: no first-run or onboarding route (requireThisMachine is the only guard on the passwordless sign-in), no write, and no route on the never-from-Yard list. A write never goes here: it takes RELAY_WRITES, checked with the paired key by requireSignedWrite in mac.ts.
 export const RELAY_GETS = [
   "/api/health",

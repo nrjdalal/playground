@@ -54,6 +54,9 @@ rg -n "SOME_ENV_VAR" packages/env                     # where an env var is decl
 ls .agents/skills                                     # every task skill available
 ```
 
+A rev held in a variable takes braces before `:path`, since zsh reads the letter after `$REV:` as a modifier: `$REV:src/index.ts` stops the line with `bad substitution`, and `$REV:api/...`, `$REV:tests/...` or `$REV:hono/...` run on a silently rewritten rev (`:a`, `:t`, `:h`; measured, while bash reads the same text fine): write `git show ${REV}:src/index.ts`.
+A shell profile may hold an alias on a short name, so a helper function of the same name fails to define (`defining function based on alias`, measured); give a helper function a longer name.
+
 ## Then
 
 Load the task skill that fits; `dev` runs and restarts the stack, and concept docs live under `/docs`.

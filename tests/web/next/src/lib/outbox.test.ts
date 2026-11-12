@@ -388,10 +388,10 @@ describe("refusals", () => {
     })
   })
 
-  // A draft that stays while cmux's read fails now and then would otherwise restart the count each time and never give up.
+  // A draft that stays while the sessions read fails now and then would otherwise restart the count each time and never give up.
   test("other reasons share one count, so two that take turns still run out", () => {
     let message = { attempts: 0, code: null as string | null, id: "a", unreached: 0 }
-    const codes = ["INPUT_NOT_EMPTY", "CMUX_FAILED"]
+    const codes = ["INPUT_NOT_EMPTY", "SESSIONS_FAILED"]
     let last: ReturnType<typeof onRefusal> | null = null
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       const code = codes[i % 2]!
@@ -453,14 +453,14 @@ describe("refusals", () => {
     }
   })
 
-  // A message that waited long on a draft or a busy cmux still gets the whole window when the dashboard restarts.
+  // A message that waited long on a draft or a busy terminal still gets the whole window when the dashboard restarts.
   test("no answer counts its own tries, whatever waited before it", () => {
     const sent = { attempts: 8, code: "INPUT_NOT_EMPTY", id: "a", unreached: 0 }
     const action = onRefusal(sent, { code: "NETWORK_ERROR", message: "x" }, "dispatcher", 0)
     expect(action).toMatchObject({ attempts: 8, retryAt: 2000, type: "wait", unreached: 1 })
     const other = onRefusal(
       { attempts: 9, code: "NETWORK_ERROR", id: "a", unreached: 1 },
-      { code: "CMUX_FAILED", message: "x" },
+      { code: "SESSIONS_FAILED", message: "x" },
       "dispatcher",
       0,
     )
@@ -576,12 +576,12 @@ describe("refusals", () => {
 
   // A retry says why after its dot, or shows no dot.
   test.each([
-    ["CMUX_FAILED", false, "retry 3 · the terminal did not answer"],
     ["INPUT_NOT_EMPTY", false, "retry 3 · waiting for Alpha's input to clear"],
     ["NETWORK_ERROR", false, "retry 3 · the server did not answer"],
     ["NOT_FOUND", false, "retry 3 · Alpha is not live"],
     ["ON_PICKER", false, "retry 3 · Alpha is on a prompt"],
     ["ON_PICKER", true, "retry 3 · Alpha is at its usage limit"],
+    ["SESSIONS_FAILED", false, "retry 3 · the terminal did not answer"],
     ["TOO_MANY_REQUESTS", false, "retry 3 · too many messages this minute"],
     ["UNKNOWN_ERROR", false, "retry 3 · the server did not answer"],
     ["SOMETHING_NEW", false, "retry 3"],
@@ -912,18 +912,51 @@ describe("statusLine", () => {
   })
 })
 
-// One mark at a time, in one fixed slot so nothing shifts: a loader alone until the session's transcript holds the message, then one tick.
-test("statusMark draws a loader until the message is delivered, then one tick", () => {
-  expect(statusMark(message("a", { state: "queued" }))).toBe("sending")
-  expect(statusMark(message("a", { code: "QUEUED", state: "queued" }))).toBe("sending")
-  expect(statusMark(message("a", { state: "sending" }))).toBe("sending")
-  expect(statusMark(message("a", { state: "typed" }))).toBe("sending")
-  expect(statusMark(message("a", { state: "delivered" }))).toBe("delivered")
-  expect(statusMark(message("a", { state: "failed" }))).toBe("failed")
-  // its line has landed while its try still runs: delivered, as the bubble it now shows on is
-  for (const state of ["queued", "sending"] as const) {
-    expect(statusMark(message("a", { code: "QUEUED", entryId: "e1", state }))).toBe("delivered")
-  }
+// One mark at a time, in one fixed slot so nothing shifts: a loader until the session has the message, one tick once typed into it, a double tick once its transcript holds it.
+describe("statusMark", () => {
+  test("a loader while it waits here or its request is out", () => {
+    expect(statusMark(message("a", { state: "queued" }))).toBe("sending")
+    expect(statusMark(message("a", { code: "ON_PICKER", state: "queued" }))).toBe("sending")
+    expect(statusMark(message("a", { state: "sending" }))).toBe("sending")
+  })
+
+  test("sending turns to one tick once typed, then a double tick once delivered", () => {
+    let list = outboxReducer([message("a")], { id: "a", type: "sending" })
+    expect(statusMark(list[0]!)).toBe("sending")
+    list = outboxReducer(list, { at: T0, id: "a", sessionId: "s1", type: "typed" })
+    expect(statusMark(list[0]!)).toBe("typed")
+    list = outboxReducer(list, { at: T0, entryId: "e1", id: "a", type: "delivered" })
+    expect(statusMark(list[0]!)).toBe("delivered")
+  })
+
+  test("a message Claude Code holds stays on one tick until its transcript holds it", () => {
+    expect(statusMark(message("a", { code: "QUEUED", state: "queued" }))).toBe("typed")
+    expect(statusMark(message("a", { code: "QUEUED", state: "sending" }))).toBe("typed")
+    // read again every QUEUED_POLL_MS, its words stay the held ones beside its tick, never Sending
+    const opts = { busy: true, label: "dispatcher", next: true }
+    let list = outboxReducer([message("a")], { id: "a", type: "sending" })
+    const held = {
+      code: "QUEUED",
+      message: "dispatcher has the message or takes it once it is free",
+    }
+    list = outboxReducer(list, onRefusal(list[0]!, held, "dispatcher", 0))
+    const words = statusLine(list[0]!, opts)
+    expect(words).toContain("has it, or takes it once free")
+    list = outboxReducer(list, { id: "a", type: "sending" })
+    expect(list[0]).toMatchObject({ code: "QUEUED", state: "sending" })
+    expect(statusMark(list[0]!)).toBe("typed")
+    expect(statusLine(list[0]!, opts)).toBe(words)
+    // its line has landed while its try still runs: delivered, as the bubble it now shows on is
+    for (const state of ["queued", "sending"] as const) {
+      expect(statusMark(message("a", { code: "QUEUED", entryId: "e1", state }))).toBe("delivered")
+    }
+  })
+
+  test("a failed send shows the red mark", () => {
+    let list = outboxReducer([message("a")], { id: "a", type: "sending" })
+    list = outboxReducer(list, { code: "TOO_LONG", id: "a", reason: "too long", type: "fail" })
+    expect(statusMark(list[0]!)).toBe("failed")
+  })
 })
 
 // Claude Code wrote a held message's line while the outbox waited to read it again, and the chat drew that line and the pending bubble both for up to QUEUED_POLL_MS: the owner saw the message twice, then one went.
@@ -944,7 +977,7 @@ test("a message Claude Code holds lands the moment its line is read, so it shows
   ).toEqual([])
 })
 
-// Claude Code holds a message typed while it compacts, or sent while it works, and takes it once free, so the bubble reads queued with a quiet mark and nothing to undo or retry, then delivered
+// Claude Code holds a message typed while it compacts, or sent while it works, and takes it once free, so the bubble reads queued with one tick and nothing to undo or retry, then delivered
 describe("a message Claude Code holds", () => {
   const QUEUED = {
     code: "QUEUED",
@@ -960,7 +993,7 @@ describe("a message Claude Code holds", () => {
     list = outboxReducer(list, wait)
     const held = list[0]!
     expect(held).toMatchObject({ code: "QUEUED", state: "queued" })
-    expect(statusMark(held)).toBe("sending")
+    expect(statusMark(held)).toBe("typed")
     for (const busy of [false, true]) {
       expect(pendingAction(held, { busy, held: true })).toBeNull()
     }
@@ -1004,10 +1037,10 @@ describe("a message Claude Code holds", () => {
     expect(list[0]).toMatchObject({ code: "NETWORK_ERROR", queuedAt: T1, state: "queued" })
     // an answered refusal after it keeps it too, waiting or failed, so a later retry still reads the message again
     for (const code of [
-      "CMUX_FAILED",
       "INPUT_NOT_EMPTY",
       "NOT_FOUND",
       "ON_PICKER",
+      "SESSIONS_FAILED",
       "TOO_MANY_REQUESTS",
     ]) {
       list = outboxReducer(list, { id: "a", type: "sending" })

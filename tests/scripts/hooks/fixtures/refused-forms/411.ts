@@ -531,3 +531,9 @@ export const groups: Group[] = [
     ],
   },
 ]
+
+// #1455: a quiet commit's message is text git never runs, so one naming a gated call runs
+export const allowed: string[] = [
+  "a gated message under git in capitals",
+  "a gated message under Git",
+]

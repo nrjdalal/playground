@@ -10,12 +10,10 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 import {
   bytesOf,
-  branchLink,
-  decisionOf,
   discardable,
   nightlyClean,
   type NightDeps,
@@ -23,11 +21,14 @@ import {
   type Prs,
   pruneTurbo,
   readPrs,
+  rootsOf,
   staleBranches,
   staleContainers,
   staleVolumes,
   staleWorktrees,
+  trashIdOf,
   trashSince,
+  workIn,
   worktreesIn,
 } from "../../../../../packages/scripts/src/ops-tick/nightly-clean"
 import { BEATS, type Context } from "../../../../../packages/scripts/src/ops-tick/tick"
@@ -101,7 +102,23 @@ describe("worktrees", () => {
     ])
   })
 
-  test("a kept line goes to the decision list only for work the owner's Approve may drop", () => {
+  // A reviewer reuses a free review clone by moving it to review-<n> before it checks out PR n, since a detached clone's PR is read from its folder's name alone.
+  test("a reused clone moved to review-<n> stays while PR n is open, and goes once PR n merges", () => {
+    const moved = worktreesIn(`worktree ${at("review-20")}\nHEAD h\ndetached`, main)
+    expect(staleWorktrees(moved, prsOf({}, { 19: pr("MERGED"), 20: pr("OPEN") }))).toEqual([])
+    expect(
+      staleWorktrees(moved, prsOf({}, { 19: pr("MERGED"), 20: pr("MERGED") })).map((w) => w.path),
+    ).toEqual([at("review-20")])
+  })
+
+  test("a reused clone left at its old, merged number goes, though it serves an open PR", () => {
+    const unmoved = worktreesIn(`worktree ${at("review-19")}\nHEAD h\ndetached`, main)
+    expect(
+      staleWorktrees(unmoved, prsOf({}, { 19: pr("MERGED"), 20: pr("OPEN") })).map((w) => w.path),
+    ).toEqual([at("review-19")])
+  })
+
+  test("a kept line is trashed under the standing approval only for work it may drop", () => {
     expect(discardable("kept /w: uncommitted work")).toBe(true)
     expect(discardable("kept /w: unpushed commits")).toBe(true)
     expect(discardable("kept /w: could not count its unpushed commits")).toBe(false)
@@ -117,7 +134,7 @@ describe("worktrees", () => {
   })
 })
 
-test("branches: merged ones and a done PR's still at its head go, the rest are asked or kept", () => {
+test("branches: merged ones and a done PR's still at its head go, the rest are archived or kept", () => {
   const plan = staleBranches({
     checkedOut: new Set(["PG-6-out"]),
     keep: new Set(["canary", "main", "live/dashboard"]),
@@ -147,7 +164,7 @@ test("branches: merged ones and a done PR's still at its head go, the rest are a
     ],
   })
   expect(plan).toEqual({
-    decide: ["PG-3-ahead", "scratch"],
+    archive: ["PG-3-ahead", "scratch"],
     local: ["PG-1-merged", "PG-2-squashed"],
     remote: ["PG-7-remote"],
   })
@@ -172,12 +189,12 @@ test("containers: an exited worktree container whose folder is gone goes; the li
     live,
   )
   expect(plan).toEqual({
-    decide: ["someone-else", "playground-dashboard-db-big"],
+    keep: ["someone-else", "playground-dashboard-db-big"],
     remove: ["playground-pg-9-db", "playground-pg-9-redis"],
   })
 })
 
-test("volumes no container uses that hold over 1 GB are asked, and an unreadable df asks none", () => {
+test("volumes no container uses that hold over 1 GB are named as kept, and an unreadable df names none", () => {
   const df = JSON.stringify({
     Volumes: [
       { Links: "0", Name: "big-unused", Size: "2.5GB" },
@@ -224,6 +241,14 @@ test("the trash count adds each purge line's batches after the last run", () => 
   expect(trashSince("", 0)).toBe(0)
 })
 
+test("the trash id reads from playground rm's own line alone, and it is the one --restore takes", () => {
+  const out =
+    "Moved to the trash as 20261108T030000Z-shell/1 (3 files); playground rm --restore 20261108T030000Z-shell/1 brings it back"
+  expect(trashIdOf(out)).toBe("20261108T030000Z-shell/1")
+  expect(trashIdOf("kept /w: held by a session")).toBeUndefined()
+  expect(trashIdOf("11111111-2222-3333-4444-555555555555")).toBeUndefined()
+})
+
 describe("the turbo cache", () => {
   test("a 3-day-old entry goes, a 1-day-old entry and a folder stay", async () => {
     const cache = join(scratch(), "turbo")
@@ -252,70 +277,12 @@ describe("the turbo cache", () => {
   })
 })
 
-test("the decision's why links each target's PR or compare, and its state keeps no link", () => {
-  const { item, targets } = decisionOf("ops", [
-    {
-      kind: "worktree",
-      link: "https://github.com/acme/app/pull/12",
-      name: "/m/.claude/worktrees/pg-2",
-    },
-    { kind: "branch", link: "https://github.com/acme/app/compare/scratch", name: "scratch" },
-    { kind: "container", name: "big-db" },
-  ])
-  expect((item as { preview: { why: string } }).preview.why).toEndWith(
-    "\n\n- worktree `pg-2`: [#12](https://github.com/acme/app/pull/12)\n- branch `scratch`: [compare](https://github.com/acme/app/compare/scratch)",
-  )
-  expect(targets).toEqual([
-    { kind: "worktree", name: "/m/.claude/worktrees/pg-2" },
-    { kind: "branch", name: "scratch" },
-    { kind: "container", name: "big-db" },
-  ])
-  const linked = Array.from({ length: 60 }, (_, i) => ({
-    kind: "branch" as const,
-    link: `https://github.com/acme/app/compare/a-long-branch-name-${i}`,
-    name: `a-long-branch-name-${i}`,
-  }))
-  expect(
-    (decisionOf("ops", linked).item as { preview: { why: string } }).preview.why.length,
-  ).toBeLessThanOrEqual(3900)
-})
-
-test("a branch on the decision list links its PR, else its compare once pushed, else nothing", () => {
-  const prs = {
-    ...prsOf({ "PG-3-ahead": pr("CLOSED", "h3", 3) }),
-    repo: "https://github.com/acme/app",
-  }
-  const pushed = new Set(["PG-3-ahead", "no-pr"])
-  expect(branchLink("PG-3-ahead", prs, pushed)).toBe("https://github.com/acme/app/pull/3")
-  expect(branchLink("no-pr", prs, pushed)).toBe("https://github.com/acme/app/compare/no-pr")
-  expect(branchLink("scratch", prs, pushed)).toBeUndefined()
-  expect(branchLink("no-pr", prsOf({}), pushed)).toBeUndefined()
-})
-
-test("the decision names each target whole, and holds no more than fits", () => {
-  const { item, targets } = decisionOf("ops", [
-    { kind: "worktree", name: "/m/.claude/worktrees/pg-2" },
-    { kind: "branch", name: "scratch" },
-  ])
-  expect(targets.length).toBe(2)
-  expect(JSON.stringify(item)).toContain("worktree `/m/.claude/worktrees/pg-2`")
-  expect(item).toMatchObject({ kind: "decision", preview: { type: "delete" } })
-  const many = Array.from({ length: 200 }, (_, i) => ({
-    kind: "worktree" as const,
-    name: `/m/.claude/worktrees/a-long-worktree-name-${i}`,
-  }))
-  const capped = decisionOf("ops", many)
-  expect((capped.item as { preview: { why: string } }).preview.why).not.toContain("](")
-  expect(capped.targets.length).toBeLessThan(200)
-  expect((capped.item as { preview: { what: string } }).preview.what.length).toBeLessThan(4000)
-})
-
 describe("one night's run against a fixture data folder", () => {
   const ID = "11111111-2222-3333-4444-555555555555"
   const OLD = "99999999-2222-3333-4444-555555555555"
   // A data folder with ops and a roster, a main checkout with worktrees pg-1 (merged, held by a live session), pg-2 (merged, dirty) and pg-3 (open), each command's output by a word of its argv.
   const night = (
-    outputs: Record<string, string> = {},
+    outputs: Answers = {},
     state?: (wt: (name: string) => string) => object,
     grow = 0.6,
     finished: CleanupDeps["finished"] = async () => false,
@@ -347,15 +314,22 @@ describe("one night's run against a fixture data folder", () => {
       "for-each-ref refs/heads": "main m\nPG-9-done h9",
       "for-each-ref refs/remotes/origin": "HEAD x\nPG-8-gone r8",
       "worktree list": porcelain,
+      // playground rm's trash move, whose printed id playground rm --restore takes
+      "--reason nightly-clean":
+        "Moved to the trash as 20261108T030000Z-shell/1 (3 files); playground rm --restore 20261108T030000Z-shell/1 brings it back",
       ...outputs,
     }
     const { inputs, run, runs } = fakeRun(all)
+    const sent: { text: string; to: string }[] = []
     const ctx: Context = {
       now: new Date("2026-11-05T03:00:00Z"),
       ops,
       repo: main,
       run,
-      send: async () => true,
+      send: async (to, text) => {
+        sent.push({ text, to })
+        return true
+      },
     }
     const cleanup: CleanupDeps = {
       containers: async () => [],
@@ -382,47 +356,746 @@ describe("one night's run against a fixture data folder", () => {
     const deps: NightDeps = {
       cleanup: async () => cleanup,
       free: () => (free += grow * 1024 ** 3),
-      prs: async () =>
-        prsOf({
+      live: async () => [],
+      now: () => Date.now(),
+      prs: async () => ({
+        ...prsOf({
           "PG-1-a": pr("MERGED"),
           "PG-2-b": pr("MERGED", "h1", 2),
           "PG-3-c": pr("OPEN"),
           "PG-8-gone": pr("MERGED", "r8"),
         }),
+        repo: "https://github.com/acme/app",
+      }),
+      roots: async () => [],
+      sleep: async () => {},
+      trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
     }
-    return { ctx, deps, inputs, ops, runs, wt }
+    return { ctx, deps, inputs, ops, runs, sent, wt }
   }
 
-  test("a live session's worktree stays, a dirty one goes to the decision list, the gone worktree's container goes, and the log line is written", async () => {
+  // #1515 items 3 to 5: one fixture container per kept class, two orphans, and an unused volume over 1 GB
+  const leftovers = (more: Answers = {}): Answers => ({
+    "docker ps": [
+      "playground-gone-db\texited\t10B",
+      "playground-gone-redis\texited\t10B",
+      "playground-dashboard-db\trunning\t10B",
+      "playground-dashboard-db-sY08\texited\t10B",
+      "playground-vibe-pg-9-ab12cd34-db\texited\t10B",
+      "playground-pg-1-db\texited\t10B",
+      "playground-lost-db\trunning\t10B",
+      "someone-else\texited\t2GB",
+    ].join("\n"),
+    "docker system df": JSON.stringify({
+      Volumes: [{ Links: "0", Name: "big-unused", Size: "2.5GB" }],
+    }),
+    ...more,
+  })
+
+  test("the two orphans go with -fv and are named, every other container and the volume stay, the ones over 1 GB named, and no decision is asked", async () => {
+    const { ctx, deps, inputs, ops, runs, sent } = night(leftovers())
+    await nightlyClean(deps)(ctx)
+    const removals = runs
+      .filter((r) => r[0] === "docker" && (r[1] === "rm" || r[1] === "volume"))
+      .map((r) => r.join(" "))
+    expect(removals).toEqual([
+      "docker rm -fv playground-gone-db",
+      "docker rm -fv playground-gone-redis",
+    ])
+    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    const line = sent.find((s) => s.to === "ops")?.text ?? ""
+    for (const text of [log, line]) {
+      expect(text).toContain("container playground-gone-db")
+      expect(text).toContain("container playground-gone-redis")
+      expect(text).toContain("container someone-else kept: over 1 GB, no rule removes it")
+      expect(text).toContain("volume big-unused kept: unused and over 1 GB, no rule removes it")
+    }
+    expect(line).not.toContain("playground-dashboard-db")
+    expect(line).not.toContain("playground-lost-db")
+  })
+
+  test("a container removal that fails is named as kept", async () => {
+    const { ctx, deps, ops, sent } = night(
+      leftovers({
+        "docker rm -fv playground-gone-db": { code: 1, err: "Error response from daemon\n" },
+      }),
+    )
+    await nightlyClean(deps)(ctx)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    const line = sent.find((s) => s.to === "ops")?.text ?? ""
+    for (const text of [log, line]) {
+      expect(text).toContain("container playground-gone-db kept: its removal failed")
+      expect(text).toContain("container playground-gone-redis")
+    }
+  })
+
+  test("a state file an older run left with a decision and denied keys loads, and nothing reads or asks them", async () => {
+    const { ctx, deps, inputs, ops, runs } = night(leftovers(), () => ({
+      at: "2026-11-04T03:00:00.000Z",
+      decision: { id: OLD, targets: [{ kind: "container", name: "someone-else" }] },
+      denied: ["volume big-unused"],
+    }))
+    await nightlyClean(deps)(ctx)
+    expect(runs.some((r) => r.includes("ask") && r.includes(OLD))).toBe(false)
+    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))).toEqual({
+      at: "2026-11-05T03:00:00.000Z",
+    })
+  })
+
+  test("a live session's worktree stays, the gone worktree's container goes, and the log line is written", async () => {
     const { ctx, deps, inputs, ops, runs, wt } = night()
     await nightlyClean(deps)(ctx)
     const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
     expect(log).toStartWith("2026-11-05T03:00:00Z free 100.6 GB, now ")
     expect(log).toContain(`kept ${wt("pg-1")}: ${wt("pg-1")} is held by k3m9px-worker`)
-    expect(log).toContain(`kept ${wt("pg-2")}: uncommitted work`)
     expect(log).not.toContain(wt("pg-3"))
-    expect(log).toContain(`decision ${ID}: 1 targets`)
     expect(runs.map((r) => r.join(" "))).toContain("docker rm -fv playground-gone-db")
     expect(runs.map((r) => r.join(" "))).toContain(`git -C ${ctx.repo} branch -D PG-9-done`)
     expect(runs.map((r) => r.join(" "))).toContain(
       `git -C ${ctx.repo} push -q origin --delete PG-8-gone`,
     )
-    expect(log).toContain("branches: deleted 1 local, 1 remote; 0 to decide")
+    expect(log).toContain("branches: deleted 1 local, 1 remote; none to archive")
     expect(runs.map((r) => r.join(" "))).not.toContain("docker rm -fv playground-dashboard-db")
-    const [decision, update] = inputs.map((i) => JSON.parse(i))
-    expect(decision.preview.what).toBe(`- worktree \`${wt("pg-2")}\``)
-    expect(decision.preview.why).toEndWith(
-      "\n\n- worktree `pg-2`: [#2](https://github.com/acme/app/pull/2)",
-    )
-    expect(update).toMatchObject({
-      kind: "update",
-      preview: { outcome: "finding", text: expect.stringContaining("](/dashboard/system)") },
-    })
+    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
     expect(JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))).toEqual({
       at: "2026-11-05T03:00:00.000Z",
-      decision: { id: ID, targets: [{ kind: "worktree", name: wt("pg-2") }] },
     })
+  })
+
+  // #1515
+  test("a stale unmerged worktree goes through playground rm with no decision, and its trash id is logged", async () => {
+    const { ctx, deps, inputs, ops, runs, sent, wt } = night()
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran).toContain(
+      `bun --no-env-file ${join(ctx.repo, "packages", "scripts", "src", "playground", "cli.ts")} rm --worktree ${wt("pg-2")} --discard --reason nightly-clean`,
+    )
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain(
+      `trashed ${wt("pg-2")} as 20261108T030000Z-shell/1, restorable with playground rm --restore 20261108T030000Z-shell/1`,
+    )
+    expect(log).not.toContain(`decision ${ID}`)
+    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain(
+      `worktree ${wt("pg-2")} as trash 20261108T030000Z-shell/1 (playground rm --restore 20261108T030000Z-shell/1)`,
+    )
+  })
+
+  // issue 1554: rm refuses the 4th trash move in a minute ("quarantined 3 paths in the last minute, the most one session may"), and the beat counted that refusal as done, so 7 of 10 stale worktrees stayed behind with no line naming them for the next run; the beat paces under the cap, waiting out the minute on the injected sleep, under a total-wait bound, and names anything the bound leaves
+  test("the beat finishes its stale worktrees under rm's 3-a-minute cap", async () => {
+    const root = scratch()
+    const data = join(root, "data")
+    const ops = join(data, "ops")
+    const main = join(root, "main")
+    const names = Array.from({ length: 10 }, (_, i) => `pg-${i + 1}`)
+    for (const name of names)
+      mkdirSync(join(main, ".claude", "worktrees", name), { recursive: true })
+    mkdirSync(join(ops, "log"), { recursive: true })
+    writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
+    const wt = (name: string) => join(main, ".claude", "worktrees", name)
+    const porcelain = [
+      `worktree ${main}\nHEAD a\nbranch refs/heads/main`,
+      ...names.map(
+        (name, i) =>
+          `worktree ${wt(name)}\nHEAD ${"abcdefghij"[i]}\nbranch refs/heads/PG-${i + 1}-x`,
+      ),
+    ].join("\n\n")
+    const answers: Answers = {
+      "docker ps": "playground-dashboard-db\trunning\t10B",
+      "docker system df": JSON.stringify({ Volumes: [] }),
+      "for-each-ref refs/heads": [...names.map((_, i) => `PG-${i + 1}-x h${i + 1}`), "main m"].join(
+        "\n",
+      ),
+      "for-each-ref refs/remotes/origin": "HEAD x",
+      "branch --merged": names.map((_, i) => `PG-${i + 1}-x`).join("\n"),
+      "worktree list": porcelain,
+      "--reason nightly-clean":
+        "Moved to the trash as 20261108T030000Z-shell/1 (3 files); playground rm --restore 20261108T030000Z-shell/1 brings it back",
+    }
+    const base = fakeRun(answers)
+    const accepted: number[] = []
+    let refusals = 0
+    let t = 0
+    const waits: number[] = []
+    const run: Context["run"] = async (argv, timeoutMs, stdin) => {
+      if (argv.join(" ").includes("rm --worktree")) {
+        if (accepted.filter((at) => t - at < 60_000).length >= 3) {
+          refusals++
+          return {
+            code: 1,
+            out: "nightly-clean quarantined 3 paths in the last minute, the most one session may\n",
+          }
+        }
+        accepted.push(t)
+      }
+      return base.run(argv, timeoutMs, stdin)
+    }
+    const sleep = async (ms: number) => {
+      waits.push(ms)
+      t += ms
+    }
+    const sent: { text: string; to: string }[] = []
+    const ctx: Context = {
+      now: new Date("2026-11-05T03:00:00Z"),
+      ops,
+      repo: main,
+      run,
+      send: async (to, text) => {
+        sent.push({ text, to })
+        return true
+      },
+    }
+    const deps: NightDeps = {
+      cleanup: async () => ({
+        containers: async () => [],
+        devStop: async () => ({ ok: true, out: "" }),
+        finished: async () => false,
+        git: async (dir, args) =>
+          args[0] === "rev-parse"
+            ? `${dir}/.git\n${main}/.git`
+            : args[0] === "status"
+              ? " M wip.ts"
+              : "",
+        held: async () => null,
+        live,
+        liveBranch: "live/dashboard",
+        main,
+        removeContainer: async () => true,
+        rm: async () => ({ ok: true, out: "" }),
+      }),
+      free: () => 100 * 1024 ** 3,
+      live: async () => [],
+      now: () => t,
+      prs: async () => ({
+        ...prsOf(
+          Object.fromEntries(
+            names.map((_, i) => [`PG-${i + 1}-x`, pr("MERGED", `h${i + 1}`, i + 1)]),
+          ),
+        ),
+        repo: "https://github.com/acme/app",
+      }),
+      roots: async () => [],
+      sleep,
+      trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
+      turbo: join(root, "turbo"),
+    }
+    await nightlyClean(deps)(ctx)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log.match(/trashed /g)).toHaveLength(10)
+    expect(refusals).toBe(0)
+    expect(waits).toEqual([60_000, 60_000, 60_000])
+    expect(log).not.toContain("its trash move failed")
+    expect(log).not.toMatch(/left .*? for the next run/)
+    expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(600_000)
+  })
+
+  // #1710: cleanWorktree moves a saved worktree through rm itself, so its moves count toward the cap too
+  test("the beat paces cleanWorktree's own moves under rm's cap, so no try is refused", async () => {
+    const root = scratch()
+    const data = join(root, "data")
+    const ops = join(data, "ops")
+    const main = join(root, "main")
+    const names = Array.from({ length: 10 }, (_, i) => `pg-${i + 1}`)
+    for (const name of names)
+      mkdirSync(join(main, ".claude", "worktrees", name), { recursive: true })
+    mkdirSync(join(ops, "log"), { recursive: true })
+    writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
+    const wt = (name: string) => join(main, ".claude", "worktrees", name)
+    const porcelain = [
+      `worktree ${main}\nHEAD a\nbranch refs/heads/main`,
+      ...names.map(
+        (name, i) => `worktree ${wt(name)}\nHEAD h${i + 1}\nbranch refs/heads/PG-${i + 1}-x`,
+      ),
+    ].join("\n\n")
+    const { run } = fakeRun({
+      "docker ps": "playground-dashboard-db\trunning\t10B",
+      "docker system df": JSON.stringify({ Volumes: [] }),
+      "for-each-ref refs/heads": "main m",
+      "for-each-ref refs/remotes/origin": "HEAD x",
+      "worktree list": porcelain,
+    })
+    let t = 0
+    const accepted: number[] = []
+    let refusals = 0
+    const waits: number[] = []
+    const ctx: Context = {
+      now: new Date("2026-11-05T03:00:00Z"),
+      ops,
+      repo: main,
+      run,
+      send: async () => true,
+    }
+    const deps: NightDeps = {
+      cleanup: async () => ({
+        containers: async () => [],
+        devStop: async () => ({ ok: true, out: "" }),
+        finished: async () => true,
+        git: async (dir, args) =>
+          args[0] === "rev-parse" ? `${dir}/.git\n${main}/.git` : args[0] === "rev-list" ? "0" : "",
+        held: async () => null,
+        live,
+        liveBranch: "live/dashboard",
+        main,
+        removeContainer: async () => true,
+        rm: async () => {
+          if (accepted.filter((at) => t - at < 60_000).length >= 3) {
+            refusals++
+            return {
+              ok: false,
+              out: "playground: shell quarantined 3 paths in the last minute, the most one session may",
+            }
+          }
+          accepted.push(t)
+          return { ok: true, out: "" }
+        },
+      }),
+      free: () => 100 * 1024 ** 3,
+      live: async () => [],
+      now: () => t,
+      prs: async () => ({
+        ...prsOf(
+          Object.fromEntries(
+            names.map((_, i) => [`PG-${i + 1}-x`, pr("MERGED", `h${i + 1}`, i + 1)]),
+          ),
+        ),
+        repo: "https://github.com/acme/app",
+      }),
+      roots: async () => [],
+      sleep: async (ms) => {
+        waits.push(ms)
+        t += ms
+      },
+      trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
+      turbo: join(root, "turbo"),
+    }
+    await nightlyClean(deps)(ctx)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(refusals).toBe(0)
+    expect(log.match(/removed \/[^;]*pg-\d+/g)).toHaveLength(10)
+    expect(waits).toEqual([60_000, 60_000, 60_000])
+    expect(log).not.toContain("quarantined")
+  })
+
+  // the bound: with rm refusing forever, the beat still ends inside its 10-minute wait budget, and each worktree it leaves is named for the next run
+  test("the beat ends within its wait bound when rm refuses every move, naming each one left", async () => {
+    const root = scratch()
+    const data = join(root, "data")
+    const ops = join(data, "ops")
+    const main = join(root, "main")
+    const names = Array.from({ length: 10 }, (_, i) => `pg-${i + 1}`)
+    for (const name of names)
+      mkdirSync(join(main, ".claude", "worktrees", name), { recursive: true })
+    mkdirSync(join(ops, "log"), { recursive: true })
+    writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
+    const wt = (name: string) => join(main, ".claude", "worktrees", name)
+    const porcelain = [
+      `worktree ${main}\nHEAD a\nbranch refs/heads/main`,
+      ...names.map(
+        (name, i) =>
+          `worktree ${wt(name)}\nHEAD ${"abcdefghij"[i]}\nbranch refs/heads/PG-${i + 1}-x`,
+      ),
+    ].join("\n\n")
+    const answers: Answers = {
+      "docker ps": "playground-dashboard-db\trunning\t10B",
+      "docker system df": JSON.stringify({ Volumes: [] }),
+      "for-each-ref refs/heads": [...names.map((_, i) => `PG-${i + 1}-x h${i + 1}`), "main m"].join(
+        "\n",
+      ),
+      "for-each-ref refs/remotes/origin": "HEAD x",
+      "branch --merged": names.map((_, i) => `PG-${i + 1}-x`).join("\n"),
+      "worktree list": porcelain,
+      "--reason nightly-clean": {
+        code: 1,
+        err: "nightly-clean quarantined 3 paths in the last minute, the most one session may\n",
+      },
+    }
+    const { run } = fakeRun(answers)
+    const waits: number[] = []
+    const sleep = async (ms: number) => {
+      waits.push(ms)
+    }
+    const ctx: Context = {
+      now: new Date("2026-11-05T03:00:00Z"),
+      ops,
+      repo: main,
+      run,
+      send: async () => true,
+    }
+    const deps: NightDeps = {
+      cleanup: async () => ({
+        containers: async () => [],
+        devStop: async () => ({ ok: true, out: "" }),
+        finished: async () => false,
+        git: async (dir, args) =>
+          args[0] === "rev-parse"
+            ? `${dir}/.git\n${main}/.git`
+            : args[0] === "status"
+              ? " M wip.ts"
+              : "",
+        held: async () => null,
+        live,
+        liveBranch: "live/dashboard",
+        main,
+        removeContainer: async () => true,
+        rm: async () => ({ ok: true, out: "" }),
+      }),
+      free: () => 100 * 1024 ** 3,
+      live: async () => [],
+      now: () => 0,
+      prs: async () => ({
+        ...prsOf(
+          Object.fromEntries(
+            names.map((_, i) => [`PG-${i + 1}-x`, pr("MERGED", `h${i + 1}`, i + 1)]),
+          ),
+        ),
+        repo: "https://github.com/acme/app",
+      }),
+      roots: async () => [],
+      sleep,
+      trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
+      turbo: join(root, "turbo"),
+    }
+    await nightlyClean(deps)(ctx)
+    expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(600_000)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log.match(/left .*? for the next run/g)).toHaveLength(10)
+    expect(log).not.toContain("trashed ")
+  })
+
+  // the bound on the pace itself: with 40 stale worktrees the pre-call pauses would spend 780s, so the bound stops them at 600s and each worktree past it is named for the next run without rm being called
+  test("the pace itself ends at the bound, naming the rest for the next run without calling rm", async () => {
+    const root = scratch()
+    const data = join(root, "data")
+    const ops = join(data, "ops")
+    const main = join(root, "main")
+    const names = Array.from({ length: 40 }, (_, i) => `pg-${i + 1}`)
+    for (const name of names)
+      mkdirSync(join(main, ".claude", "worktrees", name), { recursive: true })
+    mkdirSync(join(ops, "log"), { recursive: true })
+    writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
+    const wt = (name: string) => join(main, ".claude", "worktrees", name)
+    const porcelain = [
+      `worktree ${main}\nHEAD a\nbranch refs/heads/main`,
+      ...names.map(
+        (name, i) =>
+          `worktree ${wt(name)}\nHEAD ${"abcdefghijklmnopqrstuvwxyz0123"[i]}\nbranch refs/heads/PG-${i + 1}-x`,
+      ),
+    ].join("\n\n")
+    const answers: Answers = {
+      "docker ps": "playground-dashboard-db\trunning\t10B",
+      "docker system df": JSON.stringify({ Volumes: [] }),
+      "for-each-ref refs/heads": [...names.map((_, i) => `PG-${i + 1}-x h${i + 1}`), "main m"].join(
+        "\n",
+      ),
+      "for-each-ref refs/remotes/origin": "HEAD x",
+      "branch --merged": names.map((_, i) => `PG-${i + 1}-x`).join("\n"),
+      "worktree list": porcelain,
+      "--reason nightly-clean":
+        "Moved to the trash as 20261108T030000Z-shell/1 (3 files); playground rm --restore 20261108T030000Z-shell/1 brings it back",
+    }
+    const base = fakeRun(answers)
+    const rmCalls: string[] = []
+    let t = 0
+    const waits: number[] = []
+    const run: Context["run"] = async (argv, timeoutMs, stdin) => {
+      const line = argv.join(" ")
+      if (line.includes("rm --worktree")) rmCalls.push(line.split(" ").at(-4) ?? "")
+      return base.run(argv, timeoutMs, stdin)
+    }
+    const sleep = async (ms: number) => {
+      waits.push(ms)
+      t += ms
+    }
+    const ctx: Context = {
+      now: new Date("2026-11-05T03:00:00Z"),
+      ops,
+      repo: main,
+      run,
+      send: async () => true,
+    }
+    const deps: NightDeps = {
+      cleanup: async () => ({
+        containers: async () => [],
+        devStop: async () => ({ ok: true, out: "" }),
+        finished: async () => false,
+        git: async (dir, args) =>
+          args[0] === "rev-parse"
+            ? `${dir}/.git\n${main}/.git`
+            : args[0] === "status"
+              ? " M wip.ts"
+              : "",
+        held: async () => null,
+        live,
+        liveBranch: "live/dashboard",
+        main,
+        removeContainer: async () => true,
+        rm: async () => ({ ok: true, out: "" }),
+      }),
+      free: () => 100 * 1024 ** 3,
+      live: async () => [],
+      now: () => t,
+      prs: async () => ({
+        ...prsOf(
+          Object.fromEntries(
+            names.map((_, i) => [`PG-${i + 1}-x`, pr("MERGED", `h${i + 1}`, i + 1)]),
+          ),
+        ),
+        repo: "https://github.com/acme/app",
+      }),
+      roots: async () => [],
+      sleep,
+      trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
+      turbo: join(root, "turbo"),
+    }
+    await nightlyClean(deps)(ctx)
+    expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(600_000)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log.match(/trashed /g)).toHaveLength(33)
+    expect(log.match(/left .*? for the next run/g)).toHaveLength(7)
+    for (const name of names.slice(33))
+      expect(rmCalls.some((called) => called.endsWith(wt(name)))).toBe(false)
+  })
+
+  // #1515
+  test("an unmerged branch on origin is archived as a tag before any delete, then deleted on origin and locally, and no ask new names a decision", async () => {
+    const { ctx, deps, inputs, ops, runs, sent } = night({
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+      "for-each-ref refs/remotes/origin": "HEAD x\nPG-8-gone r8\nscratch s",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    const tag = ran.findIndex((r) => r.includes("git/refs") && r.includes("archive/scratch"))
+    const push = ran.findIndex((r) => r.includes("--delete scratch"))
+    const local = ran.findIndex((r) => r.endsWith("branch -D scratch"))
+    expect(tag).toBeGreaterThanOrEqual(0)
+    expect(push).toBeGreaterThan(tag)
+    expect(local).toBeGreaterThan(tag)
+    expect(ran[tag]).toContain("repos/acme/app/git/refs")
+    expect(ran[tag]).toContain("ref=refs/tags/archive/scratch")
+    expect(ran[tag]).toContain("-f sha=s")
+    expect(inputs.map((i) => JSON.parse(i).kind)).not.toContain("decision")
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("archived scratch as archive/scratch at s, deleted on origin and locally")
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain("branch scratch as tag archive/scratch at s")
+  })
+
+  // #1710: a branch never pushed has a head GitHub does not hold, which the refs API refuses
+  const unknown = { code: 1, err: "gh: Object does not exist (HTTP 422)" }
+  test.each([
+    ["a head GitHub does not hold stays, with a local archive tag alone", unknown, false],
+    ["a pushed head is still archived on origin, then deleted", {}, true],
+  ])("%s", async (_, answer, archived) => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "git/refs": answer,
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(
+      ran.some((r) => r.includes("git/refs") && r.includes("ref=refs/tags/archive/scratch")),
+    ).toBe(true)
+    expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(!archived)
+    expect(ran.some((r) => r.includes("push") && r.includes("archive/scratch"))).toBe(false)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(archived)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    const line = sent.find((s) => s.to === "ops")?.text ?? ""
+    if (archived) {
+      expect(log).toContain("archived scratch as archive/scratch at s, deleted locally")
+      expect(line).toContain("branch scratch as tag archive/scratch at s")
+    } else {
+      expect(log).toContain(
+        "kept scratch: its head s is not on GitHub, so it is tagged archive/scratch locally alone",
+      )
+      expect(line).toContain(
+        "branch scratch kept: its head s is not on GitHub, so it is tagged archive/scratch locally alone",
+      )
+    }
+  })
+
+  test("a head GitHub does not hold, already tagged locally at that head, is named on no later night", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "git/refs": unknown,
+      "refs/tags/archive/scratch": "s",
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(false)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(false)
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).not.toContain("scratch")
+    expect(sent.find((s) => s.to === "ops")?.text ?? "").not.toContain("scratch")
+  })
+
+  test("a local archive tag at another head is re-pointed to the branch's head and named with both", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "git/refs": unknown,
+      "refs/tags/archive/scratch": "older",
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(true)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("kept scratch: its local archive/scratch tag held older, now holds s")
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain(
+      "branch scratch kept: its local archive/scratch tag held older, now holds s",
+    )
+  })
+
+  test("a re-point whose old head is no ancestor of the new one keeps the old head at its own tag", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "git/refs": unknown,
+      "refs/tags/archive/scratch": "older",
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+      "merge-base --is-ancestor": { code: 1, err: "" },
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.endsWith("tag archive/scratch-older older"))).toBe(true)
+    expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(true)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain(
+      "kept scratch: its local archive/scratch tag held older, now holds s, the old head kept at archive/scratch-older",
+    )
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain("the old head kept at archive/scratch-older")
+  })
+
+  test("a rescue whose tag fails leaves the old tag where it is, skips the re-point, and names the failure", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "git/refs": unknown,
+      "refs/tags/archive/scratch": "older",
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+      "merge-base --is-ancestor": { code: 1, err: "" },
+      "tag archive/scratch-older": { code: 1, err: "fatal: tag archive/scratch-older failed\n" },
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.endsWith("tag -f archive/scratch s"))).toBe(false)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(false)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain(
+      "kept scratch: its local archive/scratch tag held older, and keeping it at archive/scratch-older failed: fatal: tag archive/scratch-older failed",
+    )
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain("branch scratch kept: its local archive/scratch tag held older")
+  })
+
+  // #1515
+  test("a tag that fails keeps the branch, on origin and locally, and names it in the log", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+      "for-each-ref refs/remotes/origin": "HEAD x\nPG-8-gone r8\nscratch s",
+      "git/refs": { code: 1, err: "gh: Reference already exists" },
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.includes("archive/scratch"))).toBe(true)
+    expect(ran.some((r) => r.includes("--delete scratch"))).toBe(false)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(false)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain(
+      "kept scratch: its archive/scratch tag failed: gh: Reference already exists",
+    )
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain("branch scratch kept: its archive/scratch tag failed")
+  })
+
+  // #1515
+  test("a branch whose origin head is not the local head the tag would hold stays whole, named with both shas", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+      "for-each-ref refs/remotes/origin": "HEAD x\nPG-8-gone r8\nscratch s-newer",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.includes("archive/scratch"))).toBe(false)
+    expect(ran.some((r) => r.includes("--delete scratch"))).toBe(false)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(false)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("kept scratch: origin's head is s-newer, not the local head s")
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain("branch scratch kept: origin's head is s-newer")
+  })
+
+  // #1515
+  test("a tag already at the tagged head holds it, so the deletes go on", async () => {
+    const { ctx, deps, inputs, ops, runs } = night({
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+      "for-each-ref refs/remotes/origin": "HEAD x\nPG-8-gone r8\nscratch s",
+      "git/refs": { code: 1, err: "gh: Reference already exists" },
+      "ls-remote": "s\trefs/tags/archive/scratch",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.includes("--delete scratch"))).toBe(true)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(true)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("archived scratch as archive/scratch at s, deleted on origin and locally")
+    expect(inputs.map((i) => JSON.parse(i).kind)).not.toContain("decision")
+  })
+
+  // #1515
+  test("a failed origin delete keeps the branch for the next night's retry, its tag holding the head", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+      "for-each-ref refs/remotes/origin": "HEAD x\nPG-8-gone r8\nscratch s",
+      "--delete scratch": { code: 1, err: "remote rejected" },
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.includes("archive/scratch"))).toBe(true)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(false)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain(
+      "kept scratch: its origin delete failed, its archive/scratch tag holds the head",
+    )
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain("branch scratch kept: its origin delete failed")
+  })
+
+  // #1515
+  test("an unmerged branch with no origin copy is tagged and deleted locally alone", async () => {
+    const { ctx, deps, inputs, ops, runs, sent } = night({
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.includes("--delete scratch"))).toBe(false)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(true)
+    expect(
+      ran.some((r) => r.includes("ref=refs/tags/archive/scratch") && r.includes("-f sha=s")),
+    ).toBe(true)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("archived scratch as archive/scratch at s, deleted locally")
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain("branch scratch as tag archive/scratch at s")
+    expect(inputs.map((i) => JSON.parse(i).kind)).not.toContain("decision")
+  })
+
+  // #1515
+  test("a failed trash move keeps the worktree, named in the log and the outbox line", async () => {
+    const { ctx, deps, inputs, ops, runs, sent, wt } = night({
+      "--reason nightly-clean": { code: 1, err: "playground: the roster cannot be read" },
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.includes(`rm --worktree ${wt("pg-2")}`))).toBe(true)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain(
+      `kept ${wt("pg-2")}: its trash move failed: playground: the roster cannot be read`,
+    )
+    expect(log).not.toContain(`trashed ${wt("pg-2")}`)
+    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain(`worktree ${wt("pg-2")} kept: its trash move failed`)
+    expect(line?.text).toContain("removed 1, kept 1: container playground-gone-db; ")
   })
 
   // PG-1165
@@ -440,67 +1113,320 @@ describe("one night's run against a fixture data folder", () => {
   })
 
   test("a night that frees under 1 GB posts no update", async () => {
-    const { ctx, deps, inputs } = night({}, undefined, 0.01)
+    const { ctx, deps, inputs } = night(leftovers(), undefined, 0.01)
     await nightlyClean(deps)(ctx)
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["decision"])
+    expect(inputs).toEqual([])
   })
+})
 
-  test("last night's open decision is settled into the new one", async () => {
-    const { ctx, deps, runs } = night({ "ask get": JSON.stringify({ status: "open" }) }, () => ({
-      decision: { id: OLD, targets: [] },
-    }))
-    await nightlyClean(deps)(ctx)
-    expect(runs.map((r) => r.slice(5).join(" "))).toContain(
-      `ask settle ${OLD} --note Carried into the next night's decision, ${ID}`,
+// #1778: the stale worktrees of every other repo the factory works in, each a real git checkout under a fake code root and org folder, PRs, lsof and the roster faked
+describe("other repos' worktrees", () => {
+  const git = (cwd: string, ...args: string[]) => {
+    const proc = Bun.spawnSync(
+      ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", cwd, ...args],
+      { stderr: "pipe", stdout: "pipe" },
     )
-  })
+    if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${proc.stderr.toString()}`)
+    return proc.stdout.toString()
+  }
+  // A checkout at <dir> with a bare origin beside it, one pushed commit on main, and a .gitignore for build output and *.txt
+  const repoAt = (dir: string) => {
+    mkdirSync(dir, { recursive: true })
+    git(dirname(dir), "init", "-q", "--bare", `${basename(dir)}-origin.git`)
+    git(dir, "init", "-q", "-b", "main")
+    writeFileSync(join(dir, ".gitignore"), "node_modules/\n.env*\n*.txt\n")
+    writeFileSync(join(dir, "a.ts"), "a\n")
+    git(dir, "add", ".")
+    git(dir, "commit", "-qm", "one")
+    git(dir, "remote", "add", "origin", join(dirname(dir), `${basename(dir)}-origin.git`))
+    git(dir, "push", "-q", "origin", "main")
+    return dir
+  }
+  // A worktree of repo at .claude/worktrees/<name> on branch <name>, with a commit of its own that is pushed or not
+  const worktreeOf = (repo: string, name: string, pushed: boolean) => {
+    const path = join(repo, ".claude", "worktrees", name)
+    git(repo, "worktree", "add", "-q", path, "-b", name)
+    writeFileSync(join(path, `${name}.ts`), "b\n")
+    git(path, "add", ".")
+    git(path, "commit", "-qm", name)
+    if (pushed) git(path, "push", "-q", "origin", name)
+    return path
+  }
 
-  test("last night's approved decision is carried out and acked; a denied one's targets are not asked again", async () => {
-    const approved = night({ "ask get": JSON.stringify({ status: "approved" }) }, (wt) => ({
-      decision: {
-        id: OLD,
-        targets: [
-          { kind: "branch", name: "PG-7-old" },
-          { kind: "container", name: "playground-x-db" },
-          { kind: "volume", name: "big-unused" },
-          { kind: "worktree", name: wt("pg-2") },
+  const night = (answers: Record<string, string> = {}) => {
+    const root = scratch()
+    const data = join(root, "data")
+    const ops = join(data, "ops")
+    mkdirSync(join(ops, "log"), { recursive: true })
+    const code = join(root, "code")
+    const orgs = join(root, "home", "acme")
+    const main = join(code, "playground")
+    mkdirSync(join(main, ".git"), { recursive: true })
+    mkdirSync(join(main, ".claude", "worktrees", "own"), { recursive: true })
+    const app = repoAt(join(code, "app"))
+    const site = repoAt(join(orgs, "site"))
+    const lost = repoAt(join(root, "elsewhere", "lost"))
+    const w = {
+      branched: worktreeOf(app, "branched", true),
+      done: worktreeOf(app, "done", true),
+      dirty: worktreeOf(app, "dirty", true),
+      held: worktreeOf(app, "held", true),
+      ignored: worktreeOf(app, "ignored", true),
+      lost: worktreeOf(lost, "lost", true),
+      open: worktreeOf(app, "open", true),
+      pushed: worktreeOf(site, "pushed", true),
+      rostered: worktreeOf(app, "rostered", true),
+      unpushed: worktreeOf(site, "unpushed", false),
+    }
+    mkdirSync(join(w.done, "node_modules", "x"), { recursive: true })
+    writeFileSync(join(w.done, ".env.local"), "A=1\n")
+    writeFileSync(join(w.dirty, "a.ts"), "changed\n")
+    writeFileSync(join(w.ignored, "notes.txt"), "mine\n")
+    writeFileSync(
+      join(data, "roster.json"),
+      JSON.stringify({
+        agents: [
+          { name: "abc123-worker", worktree: w.rostered },
+          { name: "def456-worker", branch: "branched" },
         ],
-      },
-    }))
-    await nightlyClean(approved.deps)(approved.ctx)
-    const ran = approved.runs.map((r) => r.join(" "))
-    const repo = approved.ctx.repo
-    expect(ran).toContain(`git -C ${repo} branch -D PG-7-old`)
-    expect(ran).toContain("docker rm -fv playground-x-db")
-    expect(ran).toContain("docker volume rm big-unused")
-    expect(ran).toContain(
-      `bun --no-env-file ${join(repo, "packages", "scripts", "src", "playground", "cli.ts")} rm --worktree ${approved.wt("pg-2")} --discard --decision ${OLD} --reason nightly-clean, approved`,
+      }),
     )
-    expect(ran.some((r) => r.includes(`ask ack ${OLD} --no-link`))).toBe(true)
-    const denied = night({ "ask get": JSON.stringify({ status: "denied" }) }, (wt) => ({
-      decision: { id: OLD, targets: [{ kind: "worktree", name: wt("pg-2") }] },
-    }))
-    await nightlyClean(denied.deps)(denied.ctx)
-    const asked = denied.runs.map((r) => r.join(" "))
-    expect(asked).toContain(`bun run --silent --cwd ${denied.ctx.repo} ask get ${OLD} --ack`)
-    expect(denied.inputs.some((i) => JSON.parse(i).kind === "decision")).toBe(false)
-    const kept = JSON.parse(readFileSync(join(denied.ops, "tick", "nightly-clean.json"), "utf8"))
-    expect(kept.denied).toEqual([`worktree ${denied.wt("pg-2")}`])
-    expect(kept.decision).toBeUndefined()
+    const fake = fakeRun({
+      "docker ps": "",
+      "docker system df": JSON.stringify({ Volumes: [] }),
+      lsof: `p1\nfcwd\nn${root}\np2\nfcwd\nn${join(w.held, "src")}\n`,
+      "worktree list": `worktree ${main}\nHEAD a\nbranch refs/heads/main`,
+      ...answers,
+    })
+    // git runs for real in every scratch checkout but Playground's own, whose reads the fakes answer as the other rows do
+    const runs: string[][] = []
+    const run: Context["run"] = async (argv, timeoutMs, stdin) => {
+      runs.push(argv)
+      if (argv[0] !== "git" || argv[1] !== "-C" || !argv[2]!.startsWith(root) || argv[2] === main)
+        return fake.run(argv, timeoutMs, stdin)
+      const proc = Bun.spawnSync(argv, { stderr: "pipe", stdout: "pipe" })
+      return { code: proc.exitCode, out: proc.stdout.toString() + proc.stderr.toString() }
+    }
+    const sent: { text: string; to: string }[] = []
+    const ctx: Context = {
+      now: new Date("2026-11-11T03:00:00Z"),
+      ops,
+      repo: main,
+      run,
+      send: async (to, text) => {
+        sent.push({ text, to })
+        return true
+      },
+    }
+    const cleanup: CleanupDeps = {
+      containers: async () => [],
+      devStop: async () => ({ ok: true, out: "" }),
+      finished: async () => false,
+      git: async () => "",
+      held: async () => null,
+      live,
+      liveBranch: "live/dashboard",
+      main,
+      removeContainer: async () => true,
+      rm: async () => ({ ok: true, out: "" }),
+    }
+    const prsByRepo: Record<string, Prs> = {
+      [app]: prsOf({
+        branched: pr("MERGED"),
+        dirty: pr("MERGED"),
+        done: pr("MERGED"),
+        held: pr("MERGED"),
+        ignored: pr("CLOSED"),
+        open: pr("OPEN"),
+        rostered: pr("MERGED"),
+      }),
+      [site]: prsOf({}),
+    }
+    const deps = {
+      cleanup: async () => cleanup,
+      free: () => 100 * 1024 ** 3,
+      now: () => Date.now(),
+      prs: async (_ctx: Context, _branches: string[], _numbers: number[], dir?: string) =>
+        (dir && prsByRepo[dir]) || prsOf({}),
+      live: async () => [],
+      roots: async () => [code, orgs],
+      sleep: async () => {},
+      trashRoots: () => ({ home: root, main, trash: join(root, "trash") }),
+      turbo: join(root, "turbo"),
+    } as NightDeps
+    return { ctx, data, deps, lost, main, ops, runs, sent, w }
+  }
+  const outbox = (sent: { text: string; to: string }[]) =>
+    sent.find((s) => s.to === "ops")?.text ?? ""
+
+  test("a worktree that passes all three tests is removed by git worktree remove, its branch kept", async () => {
+    const { ctx, deps, runs, sent, w } = night()
+    await nightlyClean(deps)(ctx)
+    for (const path of [w.done, w.pushed]) {
+      expect(existsSync(path)).toBe(false)
+      expect(outbox(sent)).toContain(`worktree ${path} by git worktree remove`)
+    }
+    expect(git(dirname(dirname(dirname(w.done))), "branch", "--list", "done")).toContain("done")
+    expect(runs.some((r) => r.includes("--force"))).toBe(false)
   })
 
-  test("a dismissed decision is closed, and its targets still standing are asked again", async () => {
-    const { ctx, deps, inputs, ops, runs, wt } = night(
-      { "ask get": JSON.stringify({ status: "cleared" }) },
-      (wt) => ({ decision: { id: OLD, targets: [{ kind: "worktree", name: wt("pg-2") }] } }),
-    )
+  test("a worktree that fails a test is kept, its reason in the outbox line", async () => {
+    const { ctx, deps, sent, w } = night()
     await nightlyClean(deps)(ctx)
-    expect(runs.map((r) => r.join(" "))).toContain(
-      `bun run --silent --cwd ${ctx.repo} ask get ${OLD} --ack`,
-    )
-    const decision = inputs.map((i) => JSON.parse(i)).find((i) => i.kind === "decision")
-    expect(decision.preview.what).toBe(`- worktree \`${wt("pg-2")}\``)
-    const kept = JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))
-    expect(kept.denied).toBeUndefined()
+    const kept: [string, string][] = [
+      [w.open, "its PR is open"],
+      [w.unpushed, "it has no PR and a commit no remote holds"],
+      [w.dirty, "uncommitted work"],
+      [w.ignored, "ignored files outside build output: notes.txt"],
+      [w.held, "a live process works in it"],
+      [w.rostered, "the roster names it"],
+    ]
+    for (const [path, why] of kept) {
+      expect(existsSync(path)).toBe(true)
+      expect(outbox(sent)).toContain(`worktree ${path} kept: ${why}`)
+    }
   })
+
+  test("a worktree whose branch a roster row's branch names is kept, though no roster text holds its path", async () => {
+    const { ctx, deps, sent, w } = night()
+    await nightlyClean(deps)(ctx)
+    expect(existsSync(w.branched)).toBe(true)
+    expect(outbox(sent)).toContain(`worktree ${w.branched} kept: the roster names it`)
+  })
+
+  test("an lsof the step cannot read names the step's early exit and removes nothing", async () => {
+    const { ctx, deps, ops, w } = night({ lsof: "" })
+    await nightlyClean(deps)(ctx)
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toContain(
+      "other repos: lsof unreadable, none removed",
+    )
+    expect(existsSync(w.done)).toBe(true)
+    expect(existsSync(w.pushed)).toBe(true)
+  })
+
+  test("a roster the step cannot read names the step's early exit and removes nothing", async () => {
+    const { ctx, data, deps, ops, w } = night()
+    writeFileSync(join(data, "roster.json"), "not json")
+    await nightlyClean(deps)(ctx)
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toContain(
+      "other repos: the roster unreadable, none removed",
+    )
+    expect(existsSync(w.done)).toBe(true)
+    expect(existsSync(w.pushed)).toBe(true)
+  })
+
+  test("PRs the step cannot read name the repo's early exit and keep its worktrees", async () => {
+    const { ctx, deps, ops, w } = night()
+    deps.prs = async () => null
+    await nightlyClean(deps)(ctx)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("GitHub unreadable, none read")
+    expect(existsSync(w.done)).toBe(true)
+    expect(existsSync(w.pushed)).toBe(true)
+  })
+
+  test("a repo outside the code root and the org folders is never read", async () => {
+    const { ctx, deps, lost, runs, sent, w } = night()
+    await nightlyClean(deps)(ctx)
+    expect(existsSync(w.lost)).toBe(true)
+    expect(runs.some((r) => r.some((a) => a.startsWith(lost)))).toBe(false)
+    expect(outbox(sent)).not.toContain(lost)
+  })
+
+  test("Playground's own checkout is never read by the new step", async () => {
+    const { ctx, deps, main, runs } = night()
+    await nightlyClean(deps)(ctx)
+    expect(existsSync(join(main, ".claude", "worktrees", "own"))).toBe(true)
+    expect(runs.some((r) => r.some((a) => a.startsWith(join(main, ".claude"))))).toBe(false)
+    expect(runs.some((r) => r.includes("remove") && r.includes(main))).toBe(false)
+  })
+})
+
+test("a worktree's work: a change or untracked file, else an ignored path outside build output", () => {
+  expect(
+    workIn("!! node_modules/\n!! web/next/.next/\n!! .env.local\n!! __pycache__/\n"),
+  ).toBeUndefined()
+  expect(workIn(" M a.ts\n!! node_modules/\n")).toBe("uncommitted work")
+  expect(workIn("?? new.ts\n")).toBe("uncommitted work")
+  expect(workIn("!! dist/\n!! notes.txt\n!! keys/\n")).toBe(
+    "ignored files outside build output: notes.txt, keys",
+  )
+})
+
+test("the folders other repos are read in: the code root, else the checkout's folder, and ~/<org> for each org ext.links guards", () => {
+  const settings = (values: Record<string, unknown>) => ({ schemaVersion: 1 as const, values })
+  expect(rootsOf(settings({}), "/code/playground", "/home/me")).toEqual(["/code"])
+  expect(
+    rootsOf(
+      settings({ "ext.links": { acme: ["acme", "*"] }, "paths.codeRoot": "/srv/src" }),
+      "/code/playground",
+      "/home/me",
+    ),
+  ).toEqual(["/srv/src", "/home/me/acme"])
+})
+
+// #1778's add: a gone session's scratch folder in the data folder, through safe-delete's quarantine with that session's own-scratch route, no carve-out
+test("a scratch folder no live session and no roster row but an ended one names goes to the trash; a live session's and a working row's stay", async () => {
+  const root = scratch()
+  const home = join(root, "home")
+  const data = join(home, ".playground")
+  const ops = join(data, "ops")
+  const main = join(root, "main")
+  mkdirSync(join(ops, "log"), { recursive: true })
+  mkdirSync(join(data, "trash"), { recursive: true })
+  mkdirSync(main, { recursive: true })
+  const pad = (name: string) => {
+    const path = join(data, "scratch", name)
+    mkdirSync(path, { recursive: true })
+    writeFileSync(join(path, "notes.md"), "x\n")
+    return path
+  }
+  const gone = pad("qq1zzz-1700")
+  const alive = pad("aa2bbb-1701")
+  const rostered = pad("cc3ddd")
+  const ended = pad("ee4fff-1702")
+  writeFileSync(
+    join(data, "roster.json"),
+    JSON.stringify({
+      agents: [
+        { name: "cc3ddd-worker", status: "working" },
+        { name: "ee4fff-worker", status: "ended" },
+      ],
+    }),
+  )
+  const { run } = fakeRun({
+    "docker ps": "",
+    "docker system df": JSON.stringify({ Volumes: [] }),
+  })
+  const sent: { text: string; to: string }[] = []
+  const ctx: Context = {
+    now: new Date("2026-11-11T03:00:00Z"),
+    ops,
+    repo: main,
+    run,
+    send: async (to, text) => {
+      sent.push({ text, to })
+      return true
+    },
+  }
+  const deps = {
+    cleanup: async () => null,
+    free: () => 100 * 1024 ** 3,
+    live: async () => ["aa2bbb-worker"],
+    now: () => Date.now(),
+    prs: async () => prsOf({}),
+    roots: async () => [],
+    sleep: async () => {},
+    trashRoots: () => ({ home, main, trash: join(data, "trash") }),
+    turbo: join(root, "turbo"),
+  } as NightDeps
+  await nightlyClean(deps)(ctx)
+  expect(existsSync(gone)).toBe(false)
+  expect(existsSync(ended)).toBe(false)
+  expect(existsSync(alive)).toBe(true)
+  expect(existsSync(rostered)).toBe(true)
+  const line = sent.find((s) => s.to === "ops")?.text ?? ""
+  expect(line).toMatch(new RegExp(`scratch ${gone} as trash \\d{8}T\\d{6}Z-qq1zzz-1700/1 `))
+  expect(line).not.toContain(alive)
+  expect(line).not.toContain(rostered)
 })

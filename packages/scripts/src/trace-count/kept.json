@@ -9,7 +9,7 @@
   {
     "hits": 1,
     "kind": "issueRefs",
-    "line": "- Labs is the spec for behaviour and the Product team answers its product questions, as triage-and-implement's Labs line holds -> #714",
+    "line": "- An org's ticket skill names its spec for behaviour and who answers its product questions -> #714",
     "path": ".agents/decisions.md",
     "reason": "switch step 8: a link to an issue the issue re-file moves; that commit puts the new number in and drops this entry"
   },
@@ -19,6 +19,13 @@
     "line": "- Slack links go in messages as link chips in their full shape, never bare URLs; the `no-bare-slack-link` hook refuses a bare one -> #761",
     "path": ".agents/decisions.md",
     "reason": "switch step 8: a link to an issue the issue re-file moves; that commit puts the new number in and drops this entry"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "> The main product is [ZeroSDK](https://github.com/nrjdalal/zerosdk), which comes later in 2027.",
+    "path": "README.md",
+    "reason": "the README's warning the owner asked for, linking ZeroSDK's public repository"
   },
   {
     "hits": 2,

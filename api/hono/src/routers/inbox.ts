@@ -199,7 +199,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         ...forbiddenErrorResponses,
         ...notFoundErrorResponses,
         502: errorResponse(
-          "CMUX_FAILED",
+          "SESSIONS_FAILED",
           "The comment reached no session: neither its poster nor, once the poster has ended, the dispatcher took it, with why; nothing is recorded",
         ),
       },
@@ -214,7 +214,8 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         reveal: readFromKeychain(),
       })
       if (!result.ok) {
-        if (result.code === "UNDELIVERED") throw new ApiError(502, "CMUX_FAILED", result.message)
+        if (result.code === "UNDELIVERED")
+          throw new ApiError(502, "SESSIONS_FAILED", result.message)
         throw new ApiError(STATUS[result.code], result.code, result.message)
       }
       return c.json({ data: result.item })

@@ -12,6 +12,7 @@ export type Guard =
   | "no-kill-by-name"
   | "no-linear-ticket"
   | "no-main-checkout"
+  | "no-outside-pr-code"
   | "no-playground-leak"
   | "no-public-leak"
   | "no-raw-delete"
@@ -31,23 +32,37 @@ export type Folder =
   | "glm repo"
   | "home"
   | "main checkout"
+  | "main checkout subfolder"
+  | "outside clone"
+  | "outside clone subfolder"
+  | "outside clone subfolder with bunfig"
+  | "outside clone under a bunfig"
+  | "outside clone with an env file"
+  | "plain clone"
   | "process data folder"
   | "process home"
   | "process tmp"
   | "process worktree"
+  | "scratch folder"
   | "tmp"
+  | "unknown folder"
   | "worktree"
 
 export type Paths = {
   BARE: string
   CLI_DIR: string
   DATA: string
+  // worktrees another repository lists: one outside the main checkout, one placed under its .claude/worktrees
+  FOREIGN_TREE: string
+  FOREIGN_TREE_IN_MAIN: string
   HOME: string
   LINK: string
   LIST: string
   MAIN: string
   ROOT: string
   SCOPE: string
+  // a link inside the main checkout's worktree that names a folder of the main checkout
+  TREE_LINK: string
   WORDS: string
   WORK: string
 }

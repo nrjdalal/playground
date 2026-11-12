@@ -76,6 +76,14 @@ describe("the local Yard routes", () => {
     expect(tokens).toEqual(["yard_mac"])
   })
 
+  test("name who the token signs in as, so the channel knows its own posts", async () => {
+    expect(await setUp().yard.me()).toEqual({ login: "owner", owner: true })
+    expect(await refusal(setUp({ token: null }).yard.me())).toEqual([
+      404,
+      "Yard has no token on this Mac: sign in with playground yard login",
+    ])
+  })
+
   test("a post returns what Yard answered, a held one included, which the poll cards", async () => {
     const held = setUp({ post: async () => posted("pending") })
     expect((await held.yard.post("c1", { kind: "steps", text: "run it" })).message.status).toBe(
