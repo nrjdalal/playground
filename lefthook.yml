@@ -140,12 +140,15 @@ pre-commit:
 
 commit-msg:
   commands:
-    commitlint:
-      run: bunx commitlint --edit {1}
     co-authored-by:
-      # AGENTS.md's Commits rule; commitlint's trailer-exists matches case-sensitively, so it would miss Co-Authored-By
-      run: "if grep -iq '^co-authored-by:' {1}; then echo 'AGENTS.md: no Co-authored-by trailer, in any case' >&2; exit 1; fi"
+      # AGENTS.md's Commits rule: drops the trailer, in any case, and says so, so a commit that carries one goes through on its first try
+      priority: 1
+      run: bun --no-env-file packages/scripts/src/commit-trailer.ts {1}
+    commitlint:
+      priority: 2
+      run: bunx commitlint --edit {1}
     pg-scope:
+      priority: 2
       # a (PG-<n>) scope names the branch's own PG-<n>- item, since a commit made on another item's branch conflicts there later
       run: bun packages/scripts/src/commit-scope.ts {1}
 
@@ -166,6 +169,10 @@ pre-push:
       run: "bun --no-env-file packages/scripts/src/hooks-bundle.ts --check --merged origin/canary # {files}"
   # the jobs that read the pushed refs on stdin run from .lefthook/pre-push/, since lefthook skips every pre-push command while the checked-out branch has nothing new against its upstream, and runs a script on every push
   scripts:
+    # a pushed commit no remote holds yet whose message holds a Co-authored-by trailer, since a commit made with --no-verify skips commit-msg
+    "commit-trailer.sh":
+      runner: bash
+      use_stdin: true
     # what each pushed ref sends, so a commit made with hooks off is refused before it reaches the remote
     "conflict-markers.sh":
       runner: bash

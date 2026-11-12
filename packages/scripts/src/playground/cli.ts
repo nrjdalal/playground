@@ -124,7 +124,7 @@ const stepFailed = async (argv: string[], first: "stderr" | "stdout"): Promise<s
     : last(first === "stdout" ? stdout : stderr) || last(second) || `${argv.at(-1)} exited ${code}`
 }
 
-// The files install's linking step puts in the state folder that a dispatcher's start reads: spawn.sh builds every session's settings from factory-settings.json, and the sessions it starts run heavy work through run-slot.sh and brief their workers from the templates.
+// The files install's linking step puts in the state folder that a dispatcher's start needs: the hosted session reads factory-settings.json, and the sessions it starts run heavy work through run-slot.sh and brief their workers from the templates.
 const LINKED = ["factory-settings.json", "handoffs/new-worker.md", "ops/run-slot.sh"]
 
 // playground dispatcher's setup, which install and the bare start give a machine and Start <dispatcher> on a fresh install has not: install's linking step when a file it links is missing, the pinned herdr installed as install.sh installs it, which downloads nothing when the copy is already pinned, then one pass of ops-herdr's start, which writes the pin and config and brings the servers up, since spawn.sh starts none; null once each is in place, else the line that says why not.

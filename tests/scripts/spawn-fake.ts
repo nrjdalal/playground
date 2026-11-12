@@ -132,16 +132,10 @@ export let homes = 0
 // A brief's text, which must never reach herdr's argv, the roster or the output.
 export const BRIEF_TEXT = "secret-handoff-text"
 export type Session = { name?: string; pid: number; procStart?: string; raw?: string }
-// The factory's settings as link-skills.sh links them, which every launch rebuilds into its own file with the factory's one compact window.
-export const FACTORY_SETTINGS = {
-  autoCompactWindow: 400000,
-  autoMemoryEnabled: false,
-  env: { KEEP: "1" },
-  hooks: {
-    PreToolUse: [{ hooks: [{ command: "no-env-dump", type: "command" }], matcher: "Bash" }],
-  },
-  skipDangerousModePermissionPrompt: true,
-}
+// The factory's settings, which spawn.sh reads from its own checkout's scripts/ folder and every launch rebuilds into its own file with the factory's one compact window.
+export const FACTORY_SETTINGS = JSON.parse(
+  readFileSync(join(root, "scripts", "factory-settings.json"), "utf8"),
+)
 
 // Healthy usage readings, one per backend, which a test replaces with raw JSON of its own to opt a refusal in.
 export const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
@@ -257,12 +251,10 @@ export async function spawn(
     // A machine with extensions has the login ext init wrote, which the skill resolver reads first.
     writeFileSync(loginPath(join(home, ".playground")), "tester\n")
   }
-  if (!env.NO_FACTORY_SETTINGS) {
-    writeFileSync(
-      join(home, ".playground", "factory-settings.json"),
-      JSON.stringify(FACTORY_SETTINGS),
-    )
-  }
+  // A case's copy of spawn.sh in a scratch checkout reads the settings beside it, which NO_FACTORY_SETTINGS leaves off.
+  const source = join(dirname(path), "factory-settings.json")
+  if (!env.NO_FACTORY_SETTINGS && path !== script && !existsSync(source))
+    writeFileSync(source, JSON.stringify(FACTORY_SETTINGS))
   // The gate reads both backends' usage, so every test starts from healthy files and opts a refusal in;
   // a fixture of "absent" leaves the file off, as it is on a machine the meter has not reached.
   const acme = join(home, ".playground")
