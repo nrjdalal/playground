@@ -27,7 +27,7 @@ A bot is a Yard user of its own, `<name>[bot]`, a login no GitHub sign-in can cl
 Its token reaches only its DM with the owner, through `GET` and `POST /api/v1/yard/channels/<dm>/messages` (`?after=<message id>` reads what is new), as plain text: every other call reads 403, its post never waits for an approval, and a revoke makes its next call read 401.
 A bot made with `--log` also reads the dispatcher's own log through this Mac, `GET /api/v1/yard/bot/log?after=<seq>`: Yard lets it while its Account page switch is on, this Mac answers while its login is on `yard.logReaders`, which `--log` adds it to and `bot revoke` takes it off, every secret hidden first,
 and each read leaves a line in its DM ([ADR 0025](../../.agents/adr/0025-a-bot-the-owner-allows-reads-the-dispatchers-log.md)).
-The token goes straight into the Keychain item `playground-yard-bot-<name>`, which a `reveal` card shows the owner on a click, and Yard's Account page lists each bot with Revoke, which cuts it on Yard alone, so `bot revoke` deletes the Keychain item after it.
+The token goes straight into the Keychain item `playground-yard-bot-<name>`, which a `reveal` card shows the owner on a click, and Yard's Account page lists each bot with Revoke, which cuts it on Yard alone, so `bot revoke` after it deletes the Keychain item and takes its login off `yard.logReaders`.
 From a browser paired in Yard's Settings, which this Mac pairs only on the owner's Approve, the owner can also send a message and answer the Inbox there, each write signed by that browser's key.
 
 ## It's working if
