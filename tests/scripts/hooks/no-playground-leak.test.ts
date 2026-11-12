@@ -1020,6 +1020,16 @@ describe("a pull request opened from a pushed branch is judged on its own text (
     },
   )
 
+  test("gh pr create --head from a checkout whose unpushed commit holds a term reads no commits, since it pushes none", async () => {
+    expect(await bash(create("Fix export", "clean.md"), dirs.leaky)).toBeUndefined()
+    expect(
+      await bash(
+        `gh pr create ${LW} --title "Fix export" --body-file ${file("clean.md")}`,
+        dirs.leaky,
+      ),
+    ).toContain('"worker-envy"')
+  })
+
   test("gh pr create with no --head, outside a checkout, stays refused for the commits it may push", async () => {
     const reason = await bash(
       `gh pr create ${LW} --title "Fix export" --body-file ${file("clean.md")}`,
