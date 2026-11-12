@@ -2856,6 +2856,46 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(await listed(posted.id)).toMatchObject({ archived: false, snoozed: false })
     })
 
+    test("an update marked Done archives onto the Archive shelf, archivedAt set and dismissedAt cleared (PG-1909)", async () => {
+      const posted = await update()
+      await store.dismissItems(db, [posted.id])
+      const archived = await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      if (!archived.ok) throw new Error(archived.message)
+      expect(archived.item.answer).toEqual({ archivedAt: expect.any(String) })
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+    })
+
+    test("an answered card marked Done archives onto the Archive shelf alone, out of In progress, and its poster's close keeps it there (PG-1909)", async () => {
+      const posted = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, posted.id, { action: "deny" }, { actor })
+      await store.dismissItems(db, [posted.id])
+      const archived = await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      if (!archived.ok) throw new Error(archived.message)
+      expect(archived.item.status).toBe("denied")
+      expect(archived.item.answer).toMatchObject({ archivedAt: expect.any(String), choice: "deny" })
+      expect(archived.item.answer).not.toHaveProperty("dismissedAt")
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+      expect((await store.ackItem(db, posted.id)).ok).toBe(true)
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+      const back = await store.answerItem(db, posted.id, { action: "unarchive" }, { actor })
+      expect(back.ok && back.item.answer).not.toHaveProperty("archivedAt")
+      expect(await listed(posted.id)).toMatchObject({ archived: false })
+    })
+
+    test("an item the owner dismissed still refuses Archive (PG-1909)", async () => {
+      const dismissedUpdate = await update()
+      await store.answerItem(db, dismissedUpdate.id, { action: "dismiss" }, { actor })
+      const dismissedAnswer = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, dismissedAnswer.id, { action: "deny" }, { actor })
+      await store.answerItem(db, dismissedAnswer.id, { action: "dismiss" }, { actor })
+      for (const { id } of [dismissedUpdate, dismissedAnswer]) {
+        expect(await store.answerItem(db, id, { action: "archive" }, { actor })).toMatchObject({
+          code: "CONFLICT",
+          ok: false,
+        })
+      }
+    })
+
     test("Dismiss on a waiting decision, draft or secret sets it aside as clear did, telling its poster so, and sends it to Done marked dismissed", async () => {
       const draft = await post({
         from: "dispatcher",
