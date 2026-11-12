@@ -52,6 +52,7 @@ describe("ext:merge's gates", () => {
   test.each<[string, Partial<ExtFacts>, string]>([
     ["a repository the hook does not guard", { guarded: false }, "extension"],
     ["a closed PR", { state: "CLOSED" }, "open"],
+    ["a PR another account opened", { author: "mallory" }, "author"],
     ["a draft", { draft: true }, "ready"],
     ["a base other than the default", { base: "dev" }, "base"],
     ["a head in a fork", { crossRepo: true }, "head"],

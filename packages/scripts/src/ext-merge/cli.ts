@@ -17,7 +17,9 @@ the one way a session's branch reaches the default there, and refuses unless eve
 at that head:
 
   extension    no-extension-repo-write guards the repository
-  open, ready  the PR is open and not a draft
+  open         the PR is open
+  author       the signed-in account, which every session pushes as, opened it
+  ready        the PR is not a draft
   base         it merges into the repository's default branch
   head         its head is a branch of the same repository
   review       ## ReviewBot · round <n>: 5/5 at <sha7>, at the head, from the signed-in account

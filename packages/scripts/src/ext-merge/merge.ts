@@ -75,7 +75,7 @@ export async function factsOf(
     reviewers: reviewersOf(agents, view.url),
     state: view.state,
     viewer,
-    workflows: atHead + onDefault,
+    workflows: Math.max(atHead, onDefault),
   }
 }
 

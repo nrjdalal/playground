@@ -22,7 +22,7 @@ export type ExtFacts = {
   state: string
   // The GitHub account every session posts as, whose comments alone carry a verdict.
   viewer: string
-  // The workflow files at the head and on the default branch.
+  // The workflow files at the head or on the default branch, whichever holds more.
   workflows: number
 }
 
@@ -38,7 +38,7 @@ export function reviewersOf(agents: Agent[], url: string): string[] {
     .map((a) => a.name as string)
 }
 
-// Pure: the checks gate: every check at the head finished and passed; a head with none passes only when the repository has no workflow file, since one whose workflows have not reported yet is still pending.
+// Pure: the checks gate: every check at the head finished and passed; a head with none passes only when the repository has no workflow file, since one whose workflows have not reported yet is still pending. Once one check has reported, the rest are not matched to the workflow files on purpose, since a workflow that never runs on a pull request would hold the PR for good.
 function checksGate(facts: ExtFacts): Gate {
   if (facts.checks.length > 0) return ciGate(facts.checks)
   return facts.workflows === 0
@@ -70,6 +70,14 @@ export function gatesOf(facts: ExtFacts): Gate[] {
       detail: facts.state === "OPEN" ? "open" : `the PR is ${facts.state.toLowerCase()}`,
       name: "open",
       ok: facts.state === "OPEN",
+    },
+    {
+      detail:
+        facts.author.toLowerCase() === facts.viewer.toLowerCase()
+          ? `by ${facts.author}`
+          : `opened by ${facts.author}, not ${facts.viewer}, the account every session pushes as`,
+      name: "author",
+      ok: facts.author.toLowerCase() === facts.viewer.toLowerCase(),
     },
     {
       detail: facts.draft ? "a draft: mark it ready with gh pr ready" : "ready",
