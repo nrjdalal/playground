@@ -48,7 +48,7 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
 - Each finding of a round below 5/5 sits on its line in Files changed as well as in the verdict, while a 5/5's nits sit in the verdict alone, and the threads still open are exactly the findings still open.
 - A push gets its round within a few minutes, announced or not.
 - Round 1 of a PR that adds a member to a kind (a status, a type, a choice, a button) files every list still naming the kind's old members as one finding, found by one grep for each list's wording, so later rounds spend no turn on lists outside the diff.
-- Round 1 also greps the agent-facing and web docs for each term whose meaning the diff changes, and files every doc still describing the old meaning as one finding, each by `file:line`, so later rounds spend no turn finding them one at a time.
+- Round 1 also greps the whole repo, code and command help text included, for each term whose meaning the diff changes, and files every doc still describing the old meaning as one finding, each by `file:line`, so later rounds spend no turn finding them one at a time.
   When the PR moves text out of a file, it greps the old file's name over the whole repo, code comments included, since pointers to the old file can sit anywhere.
 - A reviewer reuses its newest free review clone, one whose PR has merged or closed and that no live reviewer holds, moving it to `review-<n>` before it checks out PR n, since the nightly clean reads a detached clone's PR from its folder's name; it makes a fresh clone, about 115k files, only when none is free.
   Once it moves a clone, it sends the session it reports to the old and new paths, so the cleanup that clone's last PR handed it to drops the old one.
