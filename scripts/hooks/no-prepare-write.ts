@@ -1,4 +1,4 @@
-// A check for a prepare-only session (its roster row reads mode=prepare, which an org's start job sets at a prepare-only start): it refuses the writes that would reach the org before the session claims its ticket, a tracker issue save (an assign or a state change), a tracker comment, a chat post, a new pull request (`gh pr create` or the GitHub tool), a `git push`, and the `gh api` and GitHub tool writes that open a pull request or move a branch (README's closed list), and lets them run once the mode clears at the claim. guards.ts runs it on Bash and no-playground-leak's process on the MCP tools, so it has no main block of its own. It fails open, since the session's brief is the first bar: a read that fails lets the call run and writes a line to the data folder's ops/no-prepare-write.log.
+// A check for a prepare-only session (its roster row reads mode=prepare, which an org's start job sets at a prepare-only start): it refuses the writes that would reach the org before the session claims its ticket, a tracker issue save (an assign or a state change), a tracker comment, a chat post, a new pull request (`gh pr create` or the GitHub tool), a `git push`, and the `gh api` and GitHub tool writes that open or merge a pull request, write a file or move a branch (README's closed list), and lets them run once the mode clears at the claim. guards.ts runs it on Bash and no-playground-leak's process on the MCP tools, so it has no main block of its own. It fails open, since the session's brief is the first bar: a read that fails lets the call run and writes a line to the data folder's ops/no-prepare-write.log.
 import "../../packages/env/src/aliases"
 import { appendFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
@@ -34,7 +34,9 @@ const WRITES: [RegExp, Set<string>][] = [
       "create_or_update_file",
       "create_pull_request",
       "delete_file",
+      "merge_pull_request",
       "push_files",
+      "update_pull_request_branch",
     ]),
   ],
   [/linear/i, new Set(["save_comment", "save_issue"])],
@@ -73,10 +75,11 @@ const pushes = (args: Word[]): boolean => {
   return args[k]?.value === "push"
 }
 
-// The GraphQL mutations that open a pull request or move a ref, and the REST endpoints a write method does the same at.
+// The GraphQL mutations that open or merge a pull request or move a ref, and the REST endpoints a write method does the same at.
 const REF_MUTATION =
-  /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|updateRef|updateRefs)\b/
-const REF_ENDPOINT = /^repos\/[^/]+\/[^/]+\/(?:pulls|git\/refs(?:\/.+)?)$/
+  /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/
+const REF_ENDPOINT =
+  /^repos\/[^/]+\/[^/]+\/(?:contents\/.+|git\/refs(?:\/.+)?|merges|pulls|pulls\/\d+\/(?:merge|update-branch))$/
 
 // Whether a gh api call opens a pull request or moves a ref: a graphql query naming such a mutation or one it cannot read, a write method to such an endpoint, or a write method to an endpoint it cannot read.
 async function apiWrite(
@@ -88,17 +91,17 @@ async function apiWrite(
   const request = await ghApi(rest, cmd, env, xargs)
   if (!request) return false
   const { endpoint, fields, inputs, method } = request
-  if (endpoint.value === "graphql")
-    return [...fields.filter((f) => f.key === "query").map((f) => f.text), ...inputs].some(
-      (d) => unreadable(d) || REF_MUTATION.test(d.value),
-    )
-  if (method === "GET" || method === "HEAD") return false
-  if (unreadable(endpoint)) return true
   const path = endpoint.value
     .replace(/^https?:\/\/[^/]+/i, "")
     .replace(/^\/+/, "")
     .replace(/^api\/v3\//, "")
     .split("?")[0]!
+  if (path === "graphql" || path === "api/graphql")
+    return [...fields.filter((f) => f.key === "query").map((f) => f.text), ...inputs].some(
+      (d) => unreadable(d) || REF_MUTATION.test(d.value),
+    )
+  if (method === "GET" || method === "HEAD") return false
+  if (unreadable(endpoint)) return true
   return REF_ENDPOINT.test(path)
 }
 

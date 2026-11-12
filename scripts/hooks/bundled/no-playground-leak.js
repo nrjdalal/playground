@@ -7956,7 +7956,9 @@ var WRITES = [
       "create_or_update_file",
       "create_pull_request",
       "delete_file",
-      "push_files"
+      "merge_pull_request",
+      "push_files",
+      "update_pull_request_branch"
     ])
   ],
   [/linear/i, new Set(["save_comment", "save_issue"])],
@@ -7986,20 +7988,20 @@ var pushes = (args) => {
       k++;
   return args[k]?.value === "push";
 };
-var REF_MUTATION = /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|updateRef|updateRefs)\b/;
-var REF_ENDPOINT = /^repos\/[^/]+\/[^/]+\/(?:pulls|git\/refs(?:\/.+)?)$/;
+var REF_MUTATION = /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/;
+var REF_ENDPOINT = /^repos\/[^/]+\/[^/]+\/(?:contents\/.+|git\/refs(?:\/.+)?|merges|pulls|pulls\/\d+\/(?:merge|update-branch))$/;
 async function apiWrite(rest, cmd, env, xargs) {
   const request = await ghApi(rest, cmd, env, xargs);
   if (!request)
     return false;
   const { endpoint, fields, inputs, method } = request;
-  if (endpoint.value === "graphql")
+  const path = endpoint.value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "").split("?")[0];
+  if (path === "graphql" || path === "api/graphql")
     return [...fields.filter((f) => f.key === "query").map((f) => f.text), ...inputs].some((d) => unreadable(d) || REF_MUTATION.test(d.value));
   if (method === "GET" || method === "HEAD")
     return false;
   if (unreadable(endpoint))
     return true;
-  const path = endpoint.value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "").split("?")[0];
   return REF_ENDPOINT.test(path);
 }
 var ghWrite = async (args, cmd, env, xargs) => {

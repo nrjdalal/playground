@@ -7974,7 +7974,9 @@ var WRITES = [
       "create_or_update_file",
       "create_pull_request",
       "delete_file",
-      "push_files"
+      "merge_pull_request",
+      "push_files",
+      "update_pull_request_branch"
     ])
   ],
   [/linear/i, new Set(["save_comment", "save_issue"])],
