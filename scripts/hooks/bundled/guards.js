@@ -12601,26 +12601,55 @@ function globbed(value, cwd) {
   }
   return out;
 }
-function opened(cmd, parsed, env) {
-  const { args, name } = parsed;
+var pureFilled = (raw, cwd) => raw.replace(/\$\(\s*pwd(?:\s+-[LP])?\s*\)|`\s*pwd(?:\s+-[LP])?\s*`/g, (m) => cwd ?? m).replace(/\$\(\s*echo\s+([^$`()'"\\|;&<>]*?)\s*\)/g, (_, words) => words);
+async function readable(w, env, steady, own) {
+  if (w.reads?.length && !w.unknown) {
+    const text = await resolveText(w, env);
+    return text.unknown || marked(text.value) ? undefined : { ...w, reads: undefined, value: text.value };
+  }
+  if (!w.raw)
+    return;
+  return heldWord({ ...w, raw: pureFilled(w.raw, env.cwd) }, { ...env, known: { ...own, ...env.known } }, steady);
+}
+async function opened(cmd, parsed, env, steady, own) {
+  const { args, name, xargs } = parsed;
   const plain = READS_NOTHING.has(name);
-  const places = plain ? [] : [env.cwd];
-  const open = (w, argument) => {
-    for (const read of w.reads ?? [])
-      if (!read.unknown && !marked(read.value))
-        places.push(pathOf(read, env));
-    if (unreadValue(w) || plain && argument && !PATH_LIKE.test(w.value))
+  const out = { places: [] };
+  const blind = (why) => {
+    out.unread ??= why;
+  };
+  if (!plain && env.cwd)
+    out.places.push(env.cwd);
+  else if (!plain && (env.cwdUnread || env.cwdAnywhere))
+    blind("the folder a cd on the line left it in");
+  const open = async (w, argument) => {
+    for (const read of w.reads ?? []) {
+      const path = read.unknown || marked(read.value) ? undefined : pathOf(read, env);
+      if (path)
+        out.places.push(path);
+      else
+        blind(`a file a substitution reads by ${read.unknown ?? "a value it cannot expand"}`);
+    }
+    if (fromXargs(w, xargs))
+      return blind(`the word xargs fills in place of ${xargs?.replace}`);
+    const word = unreadValue(w) ? await readable(w, env, steady, own) : w;
+    if (!word)
+      return plain ? undefined : blind(w.unknown ?? "a value it cannot expand");
+    if (plain && argument && !PATH_LIKE.test(word.value))
       return;
-    places.push(pathOf(w, env));
-    if (w.glob)
-      places.push(...globbed(w.value, env.cwd));
+    const path = pathOf(word, env);
+    if (!path)
+      return;
+    out.places.push(path);
+    if (word.glob)
+      out.places.push(...globbed(word.value, env.cwd));
   };
   for (const a of args)
-    open(a, true);
+    await open(a, true);
   for (const r of cmd.redirects)
     if (namesFile(r))
-      open(r.target, false);
-  return places;
+      await open(r.target, false);
+  return out;
 }
 var DB_CLIENTS = new Set([
   "mongo",
@@ -12786,7 +12815,9 @@ function orgCall(parsed, env, dir, sub, orgs) {
       return orgRefusal(`this ${name} call`, `it reaches ${hit}, a guarded org's repository`);
   }
 }
-var visitor = (load5, limit, orgs, roots) => {
+var UNHELD = { own: {}, steadyAt: () => NONE2 };
+var PATH_FIX = "Name the path literally, in a call of its own, or report to your lead.";
+var visitor = (load5, limit, orgs, roots, held = UNHELD) => {
   const busy = load5 > limit;
   let earlier = "none";
   const forced = [];
@@ -12796,19 +12827,24 @@ var visitor = (load5, limit, orgs, roots) => {
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
     const { args, name } = parsed;
-    if (Array.isArray(orgs) && orgs.length > 0)
-      for (const place of opened(cmd, parsed, env)) {
+    let blind;
+    if (Array.isArray(orgs) && orgs.length > 0) {
+      const { places, unread } = await opened(cmd, parsed, env, held.steadyAt(cmd), held.own);
+      for (const place of places) {
         const repo = checkoutOf(place, orgs, roots);
         if (repo)
           return checkoutRefusal(`this ${name} call`, repo);
       }
+      if (unread)
+        blind = orgRefusal(`this ${name} call`, `it opens ${unread}, a path the hook cannot read, which may be in an org's checkout`, PATH_FIX);
+    }
     const reads = branchReads;
     branchReads = [];
     const busyRun = busy ? installOrClone(name, args) : undefined;
     if (busyRun)
       return loaded(busyRun, load5, limit);
     if (PURE.has(name) && !writes2(cmd))
-      return;
+      return blind;
     const before = earlier;
     const isGit = name === "git";
     let dir = env.cwd;
@@ -12824,7 +12860,7 @@ var visitor = (load5, limit, orgs, roots) => {
         break;
     }
     const sub = isGit ? args[k]?.value : undefined;
-    const org = orgCall(parsed, env, dir, sub, orgs) ?? dbCall(parsed, env);
+    const org = orgCall(parsed, env, dir, sub, orgs) ?? dbCall(parsed, env) ?? blind;
     if (org)
       return org;
     if (isGit && !writes2(cmd) && BRANCH_READS.has(args.slice(k).map((a) => a.value).join(" "))) {
@@ -12875,17 +12911,24 @@ async function inspect5(raw, environment, load5, limit) {
   const text = command.replace(/["'\\]/g, "");
   if (!guarding && !mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text))
     return;
+  const known = knownVariables(command, environment, directory);
+  const lexed = lex(command, known);
+  const named = namings(command);
+  const steadyAt = steadyNames(named, lexed.commands);
+  const own = named.blind ? {} : Object.fromEntries(Object.entries(environment).filter((entry) => typeof entry[1] === "string" && !named.counts.has(entry[0])));
   const env = {
     cwd: directory,
+    cwdSure: directory,
     files: new Map,
-    known: knownVariables(command, environment, directory),
-    old: { dir: directory },
+    hold: (word, cmd, here) => heldWord(word, here, steadyAt(cmd)),
+    known,
+    old: {},
     process: environment,
     vars: new Map
   };
   const home = guarding ? checkoutOf(directory, orgs, roots) : undefined;
   try {
-    return await run(lex(command, env.known), env, visitor(load5, limit, orgs, roots));
+    return await run(lexed, env, visitor(load5, limit, orgs, roots, { own, steadyAt }));
   } catch (error) {
     if (home)
       return checkoutRefusal("this call, which the hook could not read,", home);

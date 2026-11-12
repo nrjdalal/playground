@@ -16,6 +16,7 @@ import {
   type Command,
   type Env,
   examine,
+  fromXargs,
   GIT_TAKES,
   knownVariables,
   lex,
@@ -25,6 +26,7 @@ import {
   pathOf,
   program,
   pythonModule,
+  resolveText,
   run,
   slotWords,
   UV_TAKES,
@@ -34,6 +36,7 @@ import {
   type Visit,
   type Word,
 } from "./shell"
+import { heldWord, namings, NONE, type Steady, steadyNames } from "./steady"
 
 type Environment = Record<string, string | undefined>
 
@@ -907,21 +910,62 @@ function globbed(value: string, cwd: string | undefined): string[] {
   }
   return out
 }
-// The paths a command opens: its folder, each argument, each file a redirect names, each file a substitution in a word reads ($(< f), $(cat f)) and each match of a glob or a brace, a word the hook cannot read giving none; a command that reads nothing gives no folder and only a path-like argument
-function opened(cmd: Command, parsed: Parsed, env: Env): (string | undefined)[] {
-  const { args, name } = parsed
-  const plain = READS_NOTHING.has(name)
-  const places: (string | undefined)[] = plain ? [] : [env.cwd]
-  const open = (w: Word, argument: boolean) => {
-    for (const read of w.reads ?? [])
-      if (!read.unknown && !marked(read.value)) places.push(pathOf(read, env))
-    if (unreadValue(w) || (plain && argument && !PATH_LIKE.test(w.value))) return
-    places.push(pathOf(w, env))
-    if (w.glob) places.push(...globbed(w.value, env.cwd))
+// A substitution of a pure command put as its output in a raw word: pwd as the folder the command runs in, echo as its literal words
+const pureFilled = (raw: string, cwd: string | undefined) =>
+  raw
+    .replace(/\$\(\s*pwd(?:\s+-[LP])?\s*\)|`\s*pwd(?:\s+-[LP])?\s*`/g, (m) => cwd ?? m)
+    .replace(/\$\(\s*echo\s+([^$`()'"\\|;&<>]*?)\s*\)/g, (_, words: string) => words)
+// A word the lexer could not read, read with what the hook holds: its file reads filled in, else lexed again with a pure substitution's output, the line's steady variables and the session's own; undefined while it still holds a value the hook cannot read
+async function readable(w: Word, env: Env, steady: Steady, own: Record<string, string>) {
+  if (w.reads?.length && !w.unknown) {
+    const text = await resolveText(w, env)
+    return text.unknown || marked(text.value)
+      ? undefined
+      : { ...w, reads: undefined, value: text.value }
   }
-  for (const a of args) open(a, true)
-  for (const r of cmd.redirects) if (namesFile(r)) open(r.target as Word, false)
-  return places
+  if (!w.raw) return undefined
+  return heldWord(
+    { ...w, raw: pureFilled(w.raw, env.cwd) },
+    { ...env, known: { ...own, ...env.known } },
+    steady,
+  )
+}
+// The paths a command opens (its folder, each argument, each file a redirect names, each file a substitution in a word reads ($(< f), $(cat f)) and each match of a glob or a brace), and the first path it opens that the hook cannot read: a value it cannot expand, xargs's -I word, a file a substitution reads by such a value, or the folder a cd it cannot follow left it in; a command that reads nothing gives no folder and only a path-like argument, its other words text
+type Opened = { places: string[]; unread?: string }
+async function opened(
+  cmd: Command,
+  parsed: Parsed,
+  env: Env,
+  steady: Steady,
+  own: Record<string, string>,
+): Promise<Opened> {
+  const { args, name, xargs } = parsed
+  const plain = READS_NOTHING.has(name)
+  const out: Opened = { places: [] }
+  const blind = (why: string) => {
+    out.unread ??= why
+  }
+  if (!plain && env.cwd) out.places.push(env.cwd)
+  else if (!plain && (env.cwdUnread || env.cwdAnywhere))
+    blind("the folder a cd on the line left it in")
+  const open = async (w: Word, argument: boolean) => {
+    for (const read of w.reads ?? []) {
+      const path = read.unknown || marked(read.value) ? undefined : pathOf(read, env)
+      if (path) out.places.push(path)
+      else blind(`a file a substitution reads by ${read.unknown ?? "a value it cannot expand"}`)
+    }
+    if (fromXargs(w, xargs)) return blind(`the word xargs fills in place of ${xargs?.replace}`)
+    const word = unreadValue(w) ? await readable(w, env, steady, own) : w
+    if (!word) return plain ? undefined : blind(w.unknown ?? "a value it cannot expand")
+    if (plain && argument && !PATH_LIKE.test(word.value)) return
+    const path = pathOf(word, env)
+    if (!path) return
+    out.places.push(path)
+    if (word.glob) out.places.push(...globbed(word.value, env.cwd))
+  }
+  for (const a of args) await open(a, true)
+  for (const r of cmd.redirects) if (namesFile(r)) await open(r.target as Word, false)
+  return out
 }
 
 // The database clients the glm rule reads: psql, pgbench, pgcli and every pg_ program read PGHOST, PGHOSTADDR and PGSERVICE; mycli, mysql and mysqldump read MYSQL_HOST; mongo and mongosh take a positional host; redis-cli takes -h
@@ -1137,7 +1181,11 @@ function orgCall(
 }
 
 // A visitor for one call, tracking what ran before each command: cd, export and assignments are not visited, so they never chain.
-const visitor = (load5: number, limit: number, orgs: Orgs, roots: Roots): Visit => {
+// The line's reading the checkout rule takes past the words: each command's steady variables, and the session's own variables the line never names
+type Held = { own: Record<string, string>; steadyAt: (cmd: Command) => Steady }
+const UNHELD: Held = { own: {}, steadyAt: () => NONE }
+const PATH_FIX = "Name the path literally, in a call of its own, or report to your lead."
+const visitor = (load5: number, limit: number, orgs: Orgs, roots: Roots, held = UNHELD): Visit => {
   const busy = load5 > limit
   let earlier: "none" | "staging" | "other" = "none"
   const forced: string[] = []
@@ -1147,16 +1195,26 @@ const visitor = (load5: number, limit: number, orgs: Orgs, roots: Roots): Visit 
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, name } = parsed
-    if (Array.isArray(orgs) && orgs.length > 0)
-      for (const place of opened(cmd, parsed, env)) {
+    // a path the hook cannot read refuses after the org rules, whose own fix names the value to spell out
+    let blind: string | undefined
+    if (Array.isArray(orgs) && orgs.length > 0) {
+      const { places, unread } = await opened(cmd, parsed, env, held.steadyAt(cmd), held.own)
+      for (const place of places) {
         const repo = checkoutOf(place, orgs, roots)
         if (repo) return checkoutRefusal(`this ${name} call`, repo)
       }
+      if (unread)
+        blind = orgRefusal(
+          `this ${name} call`,
+          `it opens ${unread}, a path the hook cannot read, which may be in an org's checkout`,
+          PATH_FIX,
+        )
+    }
     const reads = branchReads
     branchReads = []
     const busyRun = busy ? installOrClone(name, args) : undefined
     if (busyRun) return loaded(busyRun, load5, limit)
-    if (PURE.has(name) && !writes(cmd)) return
+    if (PURE.has(name) && !writes(cmd)) return blind
     const before = earlier
     const isGit = name === "git"
     let dir = env.cwd
@@ -1170,7 +1228,7 @@ const visitor = (load5: number, limit: number, orgs: Orgs, roots: Roots): Visit 
       else if (!v.startsWith("-")) break
     }
     const sub = isGit ? args[k]?.value : undefined
-    const org = orgCall(parsed, env, dir, sub, orgs) ?? dbCall(parsed, env)
+    const org = orgCall(parsed, env, dir, sub, orgs) ?? dbCall(parsed, env) ?? blind
     if (org) return org
     if (
       isGit &&
@@ -1244,17 +1302,34 @@ async function inspect(
   const guarding = Array.isArray(orgs) && orgs.length > 0
   const text = command.replace(/["'\\]/g, "")
   if (!guarding && !mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text)) return
+  const known = knownVariables(command, environment, directory)
+  const lexed = lex(command, known)
+  // a variable the line sets once, at its top level, is read by its value, and so is one of the session's own the line never names
+  const named = namings(command)
+  const steadyAt = steadyNames(named, lexed.commands)
+  const own = named.blind
+    ? {}
+    : Object.fromEntries(
+        Object.entries(environment).filter(
+          (entry): entry is [string, string] =>
+            typeof entry[1] === "string" && !named.counts.has(entry[0]),
+        ),
+      )
   const env: Env = {
     cwd: directory,
+    // the line starts in the folder the tool names, which the payload itself proves
+    cwdSure: directory,
     files: new Map(),
-    known: knownVariables(command, environment, directory),
-    old: { dir: directory },
+    hold: (word, cmd, here) => heldWord(word, here, steadyAt(cmd)),
+    known,
+    // the folder the shell last left, which ~- names, is one no call records, so it reads as unknown until a cd on the line
+    old: {},
     process: environment,
     vars: new Map(),
   }
   const home = guarding ? checkoutOf(directory, orgs, roots) : undefined
   try {
-    return await run(lex(command, env.known), env, visitor(load5, limit, orgs, roots))
+    return await run(lexed, env, visitor(load5, limit, orgs, roots, { own, steadyAt }))
   } catch (error) {
     if (home) return checkoutRefusal("this call, which the hook could not read,", home)
     throw error
