@@ -331,10 +331,10 @@ const after = (word: Word, cut: number): Word => ({
 
 // The shell's own folder, which a program that writes there by no operand (tar extracting, curl -O) names after an unread cd, so the hook can place it no more than the cd
 const SHELL_FOLDER: Word = { quoted: false, value: "." }
-// The long option of `long` a word names, by its full name or any prefix past two letters, as getopt_long reads a unique one; an ambiguous prefix names one of them, so the reading stays fail-closed
+// The long option of `long` a word names, by its full name or any prefix of one letter or more, as getopt_long reads a unique one; an ambiguous prefix names one of them, so the reading stays fail-closed
 const longOf = (name: string, long: string[]): string | undefined =>
   long.find((l) => l === name) ??
-  (name.length > 3 ? long.find((l) => l.startsWith(name)) : undefined)
+  (name.length > 2 ? long.find((l) => l.startsWith(name)) : undefined)
 // A program's words past its options, each option's value skipped: a short letter in `takes` takes the rest of its cluster or the next word, as does a long option in `long` with no = of its own
 function operandsPast(args: Word[], takes: string, long: string[]): Word[] {
   const out: Word[] = []
@@ -374,10 +374,12 @@ function optionValues(args: Word[], short: string, takes: string, long: string[]
   }
   return out
 }
-// tar's short options that take a value, and its long ones that do, so a value word that looks like -C reads as that value
+// tar's short options that take a value, and both tars' long ones that do, so a value word that looks like -C reads as that value; bsdtar's --cd is its -C
 const TAR_TAKES = "bCfFgHIKLNTVX"
 const TAR_LONG_TAKES = [
+  "--block-size",
   "--blocking-factor",
+  "--cd",
   "--directory",
   "--exclude",
   "--exclude-from",
@@ -385,20 +387,36 @@ const TAR_LONG_TAKES = [
   "--file",
   "--files-from",
   "--format",
+  "--gid",
+  "--gname",
   "--group",
+  "--include",
+  "--index-file",
   "--label",
+  "--listed-incremental",
   "--mode",
   "--mtime",
   "--newer",
+  "--newer-mtime",
+  "--newer-mtime-than",
+  "--newer-than",
+  "--older",
+  "--older-mtime",
+  "--older-mtime-than",
+  "--older-than",
+  "--options",
   "--owner",
+  "--passphrase",
   "--record-size",
   "--strip-components",
   "--suffix",
   "--to-command",
   "--transform",
+  "--uid",
+  "--uname",
   "--use-compress-program",
 ]
-// Where tar extracting writes: each -C or --directory folder, read past the values tar's other options take, an old-style first word's letters taking the words after it in turn, or the shell's own folder when it names none; nothing when it does not extract
+// Where tar extracting writes: each -C, --directory or --cd folder, read past the values tar's other options take, an old-style first word's letters taking the words after it in turn, or the shell's own folder when it names none; nothing when it does not extract
 function tarWrites(args: Word[]): Word[] {
   const into: Word[] = []
   let extracts = false
@@ -422,7 +440,7 @@ function tarWrites(args: Word[]): Word[] {
       const takes = longOf(name, TAR_LONG_TAKES)
       if (!takes) continue
       const value = eq !== -1 ? after(args[k], eq + 1) : args[++k]
-      if (takes === "--directory" && value) into.push(value)
+      if ((takes === "--directory" || takes === "--cd") && value) into.push(value)
     } else if (/^-./.test(v))
       for (let j = 1; j < v.length; j++) {
         if (v[j] === "x") extracts = true
@@ -457,8 +475,8 @@ const CURL_WRITES = [
 function unreadCdWrites(tool: string, args: Word[], env: Env, getopt: boolean): Word[] {
   if (tool === "sed" || tool === "perl") return inPlace(tool, args)
   if (tool === "chmod") {
-    // macOS chmod stops its options at its first operand, the mode, so every later word is a file, a dashed one too
-    const at = args.findIndex((w) => !/^-./.test(w.value))
+    // macOS chmod stops its options at its first operand, the mode, a dash-led one (-w) too, so every later word is a file, a dashed one too
+    const at = args.findIndex((w) => !/^-./.test(w.value) || /^-[gorstuwXx]/.test(w.value))
     const files = getopt ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", [])
     return MODE.test(files[0]?.value ?? "") ? files.slice(1) : files
   }

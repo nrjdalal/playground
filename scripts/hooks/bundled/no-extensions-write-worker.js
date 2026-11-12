@@ -9388,7 +9388,7 @@ var after = (word, cut) => ({
   value: word.value.slice(cut)
 });
 var SHELL_FOLDER = { quoted: false, value: "." };
-var longOf = (name, long) => long.find((l) => l === name) ?? (name.length > 3 ? long.find((l) => l.startsWith(name)) : undefined);
+var longOf = (name, long) => long.find((l) => l === name) ?? (name.length > 2 ? long.find((l) => l.startsWith(name)) : undefined);
 function operandsPast(args, takes, long) {
   const out = [];
   for (let k = 0;k < args.length; k++) {
@@ -9434,7 +9434,9 @@ function optionValues(args, short, takes, long) {
 }
 var TAR_TAKES = "bCfFgHIKLNTVX";
 var TAR_LONG_TAKES = [
+  "--block-size",
   "--blocking-factor",
+  "--cd",
   "--directory",
   "--exclude",
   "--exclude-from",
@@ -9442,17 +9444,33 @@ var TAR_LONG_TAKES = [
   "--file",
   "--files-from",
   "--format",
+  "--gid",
+  "--gname",
   "--group",
+  "--include",
+  "--index-file",
   "--label",
+  "--listed-incremental",
   "--mode",
   "--mtime",
   "--newer",
+  "--newer-mtime",
+  "--newer-mtime-than",
+  "--newer-than",
+  "--older",
+  "--older-mtime",
+  "--older-mtime-than",
+  "--older-than",
+  "--options",
   "--owner",
+  "--passphrase",
   "--record-size",
   "--strip-components",
   "--suffix",
   "--to-command",
   "--transform",
+  "--uid",
+  "--uname",
   "--use-compress-program"
 ];
 function tarWrites(args) {
@@ -9483,7 +9501,7 @@ function tarWrites(args) {
       if (!takes)
         continue;
       const value = eq !== -1 ? after(args[k], eq + 1) : args[++k];
-      if (takes === "--directory" && value)
+      if ((takes === "--directory" || takes === "--cd") && value)
         into.push(value);
     } else if (/^-./.test(v))
       for (let j = 1;j < v.length; j++) {
@@ -9520,7 +9538,7 @@ function unreadCdWrites(tool, args, env, getopt) {
   if (tool === "sed" || tool === "perl")
     return inPlace(tool, args);
   if (tool === "chmod") {
-    const at = args.findIndex((w) => !/^-./.test(w.value));
+    const at = args.findIndex((w) => !/^-./.test(w.value) || /^-[gorstuwXx]/.test(w.value));
     const files = getopt ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", []);
     return MODE.test(files[0]?.value ?? "") ? files.slice(1) : files;
   }
