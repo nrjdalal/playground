@@ -52,7 +52,7 @@ Run each row as `bun <main checkout>/scripts/roster.ts <row>` (`$PLAYGROUND_REPO
   A call that names a non-empty `hold` on a row it leaves off `parked` is refused, naming `status=parked`.
 - `pr` holds the PR's full URL, since the dashboard and code-review-loop's recovery scan read no other form.
   A bare number (`1561`, or the same with a leading `#`) is expanded to `https://github.com/<repo>/pull/<n>`, `<repo>` being the same call's `repo=`, else the entry's, else `factory.repo`; any other value is refused.
-- `item` is the extension item a checker scores now, `<scope>/<kind>/<key>` as `playground ext` names it, which `assign`'s `item=` sets on a reviewer or tester alone, refusing any other shape with the one it takes.
+- `item` is the extension item `assign`'s `item=` last gave a checker, `<scope>/<kind>/<key>` as `playground ext` names it, set on a reviewer or tester alone, refusing any other shape with the one it takes; spawn.sh's restart and a `prs-=` keep it as it stands, so `prs` holds what the checker still serves.
 - `prs` lists every PR a checker serves, its `pr` among them: each a PR URL, a bare number expanded as `pr`'s is, an issue's URL for a PR not yet opened, or an extension item as `<scope>/<kind>/<key>`; `prs=<url>,<url>` sets it, and the last `prs-=` drops the key.
 - `eta` is the UTC time a worker last told its lead it expects its chore done (the **eta** rule).
   `set`, `report` and `assign` refuse any `eta=` that is not a future `YYYY-MM-DDTHH:MM:SSZ` time, naming the recipe (`date -u` plus the estimate), and an empty `eta=` clears it.
