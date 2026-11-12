@@ -24,6 +24,7 @@ import {
   CORE,
   extChain,
   extLinksSchema,
+  guardedOrgs,
   loginOf,
   markerPath,
   readPolicyOrDefaults,
@@ -185,6 +186,8 @@ export type OrgsIo = {
   claude: (args: string[]) => { code: number; out: string } | undefined
   data: string
   err: (line: string) => void
+  // The home folder, where each org ext.links guards keeps its own folder, named for it, that its workers open in.
+  home: string
   // The login whose scope a session reads first; it throws, naming ext init, when none is set.
   login: () => string
   origin: (repo: string) => string
@@ -192,6 +195,12 @@ export type OrgsIo = {
   // Claude Code's personal skills folder, where a skill would take a bare name over every plugin's.
   personal: string
 }
+
+// The org whose own folder in the home folder holds dir, for a folder with no GitHub origin, such as that org folder itself, where its workers open; ext.links guards the orgs it reads, and a value its schema refuses reads as none.
+const orgFolderOf = (home: string, dir: string, values: Record<string, unknown>) =>
+  guardedOrgs({ "ext.links": extLinksSchema.safeParse(values["ext.links"]).data }).find((org) =>
+    pathsOf(dir).some((path) => pathsOf(join(home, org)).some((root) => within(path, root))),
+  )
 
 // What a session in repo, or in a repo of org, resolves to (the home set with neither): ext.order and ext.links from the extensions' policy (their defaults until a first setting writes it), each skill from the first scope that has it, each bundled extension ext.bundled turns on read after the installed extensions and before core; a root ext init stopped in, holding no scope's folder yet, resolves with no login; a refusal when the policy does not parse, or when scopes are there and no login names whose they are.
 export const resolveFor = async (
@@ -213,7 +222,11 @@ export const resolveFor = async (
     )
     if (scopes.length) return { refusal: (error as Error).message }
   }
-  const owner = org?.toLowerCase() ?? (repo ? ownerOf(io.origin(repo)) : undefined)
+  const owner =
+    org?.toLowerCase() ??
+    (repo
+      ? (ownerOf(io.origin(repo)) ?? orgFolderOf(io.home, repo, policy.settings.values))
+      : undefined)
   const plan = planFor(owner, policy.settings.values, login)
   const resolved = resolveSkills(plan, (scope) =>
     scope === CORE
@@ -381,6 +394,7 @@ export const orgsIo = (checkout: string, data: string): OrgsIo => ({
   },
   data,
   err: console.error,
+  home: homedir(),
   login: () => loginOf(data),
   origin: (repo) =>
     Bun.spawnSync(["git", "-C", repo, "remote", "get-url", "origin"]).stdout.toString().trim(),
