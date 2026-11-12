@@ -508,7 +508,8 @@ export const importFrom = (
       continue
     }
     const fetched =
-      existsSync(join(from, ".git")) && extGit(into, ["fetch", "-q", from, "HEAD"]).code === 0
+      existsSync(join(from, ".git")) &&
+      withLock(data, () => extGit(into, ["fetch", "-q", from, "HEAD"]).code === 0)
     const forward =
       fetched && extGit(into, ["merge-base", "--is-ancestor", "HEAD", "FETCH_HEAD"]).code === 0
     const stat = fetched

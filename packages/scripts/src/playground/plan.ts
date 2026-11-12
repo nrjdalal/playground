@@ -80,8 +80,8 @@ playground settings import-jobs <jobs.json> [--launch-agents <dir>] [--scope <sc
                       once, at the switch: each ops job jobs.json lists becomes its jobs.<name> setting (your login's scope by default), a launchd job's program read from its plist; a job the registry does not know stays in jobs.json
 playground ext which <skill> [--repo <dir>]
                       print the folder of the copy of <skill> a session in <dir> loads, from whichever scope holds it
-playground ext init [--yes | --dry-run] | add <name> [<owner/name>] [--yes] | order | link | unlink | remove | sync [<scope>] | list | show | put | why | diff | search | export <dir> | import <dir> [--dry-run] | import --from-tree <dir> | import-scripts <ops-dir> <job>... --org <org> | score | accept | reject | check-modes
-                      make (on your yes, typed or --yes) or reuse your private repo and clone your login's folder from it, sync each scope with its repo now, read the extensions, put an item's next revision from a file, a folder or stdin with its reason and attachments as one commit in its scope, search them, export or import every scope as a folder of clones, seed the guards' lists from a folder of list files, bring each job folder in as an org's script once at the switch, score, accept or reject a proposal, and list once the stored scripts that lost their executable bit
+playground ext init [--yes | --dry-run] | add <name> [<owner/name>] [--yes] | order | link | unlink | lock | unlock | remove | sync [<scope>] | list | show | put | why | diff | search | export <dir> | import <dir> [--dry-run] | import --from-tree <dir> | import-scripts <ops-dir> <job>... --org <org> | score | accept | reject | check-modes
+                      make (on your yes, typed or --yes) or reuse your private repo and clone your login's folder from it, sync each scope with its repo now, read the extensions, put an item's next revision from a file, a folder or stdin with its reason and attachments as one commit in its scope, search them, export or import every scope as a folder of clones, seed the guards' lists from a folder of list files, bring each job folder in as an org's script once at the switch, score, accept or reject a proposal, list once the stored scripts that lost their executable bit, and set or clear the extensions folder's file lock, which every write here lifts for itself
 playground migrate --archive <checkout> --pre-squash <sha> --org <org> [--old <rev>] [--dry-run]
                       once, at the switch: move the old data folder in ~/.claude to ~/.playground, seed your login's settings and the release owners' list from the archive checkout (its canary, or --old, and the pre-squash head), bring the hand-made skills into the org's scope unless its clone holds them, then, with the Dashboard's job stopped, make each move the migration table at the pre-squash head lists: renamed and dropped jobs, archived stale copies, moved state files, and renamed variables in your profiles and LaunchAgents, and last runs playground herdr pin; a value already set is left
 playground uninstall [--purge]
@@ -142,6 +142,7 @@ export const WORDS: Record<string, number | "rest"> = {
   "ext init": 0,
   "ext link": 2,
   "ext list": 0,
+  "ext lock": 0,
   "ext order": "rest",
   "ext put": 4,
   "ext reject": 4,
@@ -151,6 +152,7 @@ export const WORDS: Record<string, number | "rest"> = {
   "ext show": 3,
   "ext sync": 1,
   "ext unlink": 2,
+  "ext unlock": 0,
   "ext which": 1,
   "ext why": 3,
   focus: 0,
