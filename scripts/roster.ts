@@ -165,7 +165,7 @@ function apply(entry: Agent, pairs: [string, string][], factoryRepo: string): vo
       else delete entry.prs
       continue
     }
-    // item= names the extension item a checker scores now: it joins prs as pr= would take one, and the row holds no pr
+    // item= names the extension item a checker is given to score: it joins prs as pr= would take one, and the row holds no pr
     if (k === "item" && raw !== "") {
       if (!itemRef(raw)) throw itemShape(raw)
       if (!isChecker(entry))

@@ -583,6 +583,10 @@ test(
   () => {
     const { dir, log, run } = clone()
     try {
+      for (const path of ["api/hono/dist", "packages/two/dist", "packages/three/dist"]) {
+        mkdirSync(join(dir, path), { recursive: true })
+        writeFileSync(join(dir, path, "index.mjs"), "export {}\n")
+      }
       const pkg = join(dir, "packages/one")
       mkdirSync(join(pkg, "dist"))
       mkdirSync(join(pkg, "src"))
@@ -643,15 +647,17 @@ test(
 )
 
 test(
-  "test:file in a cloned worktree builds only the packages its files import, under the flags a worktree with no .env needs, and then nothing",
+  "test:file in a cloned worktree builds every dist missing beside what its files import, under the flags a worktree with no .env needs, and then nothing",
   () => {
     const { dir, log, run } = clone()
     try {
       const first = run(["tests/one.test.ts"])
-      expect(first.stderr).toContain("test:file: building what @packages/one needs")
+      expect(first.stderr).toContain(
+        "test:file: building what @packages/one, api/hono/dist, packages/three/dist, packages/two/dist needs",
+      )
       expect(first.exitCode).toBe(0)
       expect(log()).toBe(
-        "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
+        "run build --filter=@packages/one --filter=@api/hono --filter=@packages/three --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
       )
       expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
       expect(log().split("\n").filter(Boolean)).toHaveLength(1)
@@ -660,6 +666,70 @@ test(
     }
   },
   within(2),
+)
+
+// issue 1964: a test's child process may import a package no reached source names, so test:file builds every shared package whose dist is missing, whatever its files import
+test(
+  "test:file builds every shared package whose dist is missing, so a child process's import the test file does not import resolves, and then nothing",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      writeFileSync(
+        join(dir, "tests/child.test.ts"),
+        `import { spawn as launch } from "node:child_process"\nexport const child = () =>\n  launch(process.execPath, ["-e", "import('@packages/three').then(() => process.exit(0), () => process.exit(1))"])\n`,
+      )
+      symlinkSync(join(dir, "packages/three"), join(dir, "node_modules/@packages/three"))
+      const first = run(["tests/child.test.ts"])
+      expect(first.exitCode).toBe(0)
+      expect(log()).toBe(
+        "run build --filter=@api/hono --filter=@packages/one --filter=@packages/three --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
+      )
+      const child = bounded(
+        "the spawned child",
+        [
+          process.execPath,
+          "-e",
+          `import("@packages/three").then(() => process.exit(0), () => process.exit(1))`,
+        ],
+        { cwd: dir },
+      )
+      expect(child.exitCode).toBe(0)
+      expect(run(["tests/child.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toHaveLength(1)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(3),
+)
+
+// a package whose dist is present is not rebuilt: a clone with every dist there starts with no build, for a file that imports a package too
+test(
+  "test:file in a cloned worktree whose every dist is present builds nothing, for a file that imports a package too",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      for (const [path, code] of [
+        ["api/hono/dist", "export {}\n"],
+        ["packages/one/dist", "export const one = 1\n"],
+        ["packages/three/dist", "export {}\n"],
+        ["packages/two/dist", "export {}\n"],
+      ] as const) {
+        mkdirSync(join(dir, path), { recursive: true })
+        writeFileSync(join(dir, path, "index.mjs"), code)
+      }
+      writeFileSync(
+        join(dir, "tests/uses-one.test.ts"),
+        'import { one } from "@packages/one"\nexport const o = one\n',
+      )
+      symlinkSync(join(dir, "packages/one"), join(dir, "node_modules/@packages/one"))
+      expect(run(["tests/uses-one.test.ts"]).exitCode).toBe(0)
+      expect(log()).toBe("")
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(1),
 )
 
 test(
@@ -709,18 +779,20 @@ test(
     try {
       expect(run(["tests/one.test.ts", "tests/two.test.ts"]).exitCode).toBe(0)
       expect(log()).toBe(
-        "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
+        "run build --filter=@packages/one --filter=@api/hono --filter=@packages/three --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
       )
+      for (const path of ["packages/three/dist", "packages/two/dist"])
+        rmSync(join(dir, path), { recursive: true, force: true })
       const types = run(["--types", "tests/one.test.ts", "tests/two.test.ts"])
       expect(types.stderr).toContain("check-types:tests: building what @packages/two needs")
       expect(types.exitCode).toBe(0)
       expect(log().split("\n").filter(Boolean)).toEqual([
-        "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
+        "run build --filter=@packages/one --filter=@api/hono --filter=@packages/three --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
         "run build --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
       ])
       expect(run(["--types", "tests/one.test.ts", "tests/two.test.ts"]).exitCode).toBe(0)
       expect(log().split("\n").filter(Boolean)).toHaveLength(2)
-      expect(log()).not.toContain("@packages/three")
+      expect(existsSync(join(dir, "packages/three/dist"))).toBe(false)
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
@@ -735,16 +807,16 @@ test(
     const { dir, log, run } = clone()
     try {
       expect(run(["tests/plan.test.ts"]).exitCode).toBe(0)
-      expect(log()).toBe("")
+      rmSync(join(dir, "api/hono/dist"), { recursive: true, force: true })
       const types = run(["--types", "tests/plan.test.ts"])
       expect(types.stderr).toContain("check-types:tests: building what @api/hono needs")
       expect(types.exitCode).toBe(0)
-      expect(log()).toBe(
-        "run build --filter=@api/hono --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
+      expect(log().split("\n").filter(Boolean)[1]).toBe(
+        "run build --filter=@api/hono --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
       )
       expect(existsSync(join(dir, "api/hono/dist/index.d.mts"))).toBe(true)
       expect(run(["--types", "tests/plan.test.ts"]).exitCode).toBe(0)
-      expect(log().split("\n").filter(Boolean)).toHaveLength(1)
+      expect(log().split("\n").filter(Boolean)).toHaveLength(2)
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
@@ -762,7 +834,7 @@ test(
       expect(first.stderr).toContain("test:file: building what packages/three/dist/index.mjs")
       expect(first.exitCode).toBe(0)
       expect(log()).toBe(
-        "run build --filter=@packages/three --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
+        "run build --filter=@packages/three --filter=@api/hono --filter=@packages/one --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
       )
       expect(run(["tests/path.test.ts"]).exitCode).toBe(0)
       expect(log().split("\n").filter(Boolean)).toHaveLength(1)
@@ -778,6 +850,15 @@ test(
   () => {
     const { dir, log, run } = clone()
     try {
+      for (const path of [
+        "api/hono/dist",
+        "packages/one/dist",
+        "packages/three/dist",
+        "packages/two/dist",
+      ]) {
+        mkdirSync(join(dir, path), { recursive: true })
+        writeFileSync(join(dir, path, "index.mjs"), "export {}\n")
+      }
       expect(run(["tests/table.test.ts"]).exitCode).toBe(0)
       expect(log()).toBe("metrics\n")
       expect(existsSync(join(dir, ".generated/data-table-metrics.json"))).toBe(true)
