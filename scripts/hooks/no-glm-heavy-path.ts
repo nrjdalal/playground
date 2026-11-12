@@ -1617,7 +1617,15 @@ const visitor = (load5: number, limit: number, orgs: Orgs, roots: Roots, held = 
   const visit: Visit = async (cmd, parsed, env) => {
     const slot = slotWords(parsed)
     if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
+      return slot.length === 0
+        ? undefined
+        : examine(
+            { ...cmd, words: slot },
+            // run-slot.sh runs its words in a process of its own, so a cd among them moves no folder for the commands after it
+            { ...env, files: new Map(env.files), vars: new Map(env.vars) },
+            visit,
+            false,
+          )
     const { args, name } = parsed
     // a path the hook cannot read refuses after the org rules, whose own fix names the value to spell out
     let blind: string | undefined
