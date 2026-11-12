@@ -10509,10 +10509,13 @@ async function inspect(raw, environment, unknown = false) {
     const xargsOwn = xargs ? xargsOptions(cmd, first) : [];
     const delimiter = xargsOwn.some((word) => XARGS_DELIMITER.test(word));
     const argFile = xargsOwn.some((word) => XARGS_ARG_FILE.test(word));
-    const argFileUnread = argFile && (!reads(parsed, env) || !!cmd.stdin || cmd.redirects.some((r) => r.op.startsWith("<")));
-    const fed = !xargs ? undefined : argFile ? unknown2("the file its -a names") : await stdinOf(cmd, env);
+    const argWord = argFile ? { quoted: false, value: UNKNOWN } : undefined;
+    const fed = xargs ? await stdinOf(cmd, env) : undefined;
     const fedSplit = !fed || fed.unknown ? undefined : delimiter || xargsOwn.some((word) => XARGS_NUL.test(word)) ? fed.value.split(/\s+/).filter(Boolean) : xargsWords(fed.value);
-    const stdinWords = !fed ? [] : fedSplit ? fedSplit.map((value) => ({ quoted: false, value })) : [{ quoted: false, value: UNKNOWN }];
+    const stdinWords = [
+      ...!fed ? [] : fedSplit ? fedSplit.map((value) => ({ quoted: false, value })) : [{ quoted: false, value: UNKNOWN }],
+      ...argWord ? [argWord] : []
+    ];
     const calls = reader ? [] : cliCalls(parsed, env);
     const write = calls.map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords], tuning)).find(Boolean) ?? (calls.some((words) => scoreAsOther(words, cmd, parsed, env)) ? SCORE_AS_OTHER : undefined);
     if (write)
@@ -10601,8 +10604,9 @@ async function inspect(raw, environment, unknown = false) {
       }
       if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`);
-      if (fed && (remover || argFileUnread) && (fed.unknown || marked(fed.value) || !fedSplit))
-        return refuse(`${verb} under xargs fed by ${fed.unknown ?? (fedSplit ? "a value it cannot read" : "stdin holding a quote it does not close")}, a value the hook does not hold; write the paths literally in the call`);
+      const unreadFeed = fed && remover ? argFile ? "the file its -a names" : fed.unknown || marked(fed.value) || !fedSplit ? fed.unknown ?? (fedSplit ? "a value it cannot read" : "stdin holding a quote it does not close") : undefined : undefined;
+      if (unreadFeed)
+        return refuse(`${verb} under xargs fed by ${unreadFeed}, a value the hook does not hold; write the paths literally in the call`);
       if (fed) {
         const named = !fed.unknown && [...fed.value.split(/\s+/), ...fedSplit ?? []].filter(Boolean).map((value) => names({ quoted: false, value }, here, remover)).find(Boolean);
         if (named)
@@ -10612,14 +10616,17 @@ async function inspect(raw, environment, unknown = false) {
     if (!env.cwdUnread)
       return;
     const unsplit = fed && !fed.unknown && (marked(fed.value) || delimiter || !fedSplit);
-    const fedWords = unsplit ? [{ quoted: false, value: UNKNOWN }] : stdinWords;
+    const fedWords = unsplit ? [{ quoted: false, value: UNKNOWN }, ...argWord ? [argWord] : []] : stdinWords;
     const replace = xargs?.replace;
     const fromStdin = new Set(fedWords);
+    const fromArgFile = new Set(argWord ? [argWord] : []);
     const inPlace = (word) => args.map((arg) => {
       if (!replace || !arg.value.includes(replace))
         return arg;
       const put = { ...arg, value: arg.value.replaceAll(replace, word.value) };
       fromStdin.add(put);
+      if (fromArgFile.has(word))
+        fromArgFile.add(put);
       return put;
     });
     const shapes = [
@@ -10651,7 +10658,7 @@ async function inspect(raw, environment, unknown = false) {
     const loose = [...shapes.flatMap(operandsOf), ...unlisted].find((word) => !placed(word, env, steady));
     if (!loose)
       return;
-    const unread = fed && fromStdin.has(loose) && (fed.unknown || unsplit) ? fed.unknown ?? (delimiter ? "stdin split on its -d delimiter" : fedSplit ? "stdin holding a part it cannot read" : "stdin holding a quote it does not close") : undefined;
+    const unread = fromArgFile.has(loose) ? "the file its -a names" : fed && fromStdin.has(loose) && (fed.unknown || unsplit) ? fed.unknown ?? (delimiter ? "stdin split on its -d delimiter" : fedSplit ? "stdin holding a part it cannot read" : "stdin holding a quote it does not close") : undefined;
     return refuse(afterUnreadCd(unread ? `${verb} under xargs on the words it reads from ${unread}` : `${verb} on ${shown(loose)}`));
   };
   const named = namings(command);

@@ -45,7 +45,6 @@ import {
   stdinShell,
   type Text,
   tick,
-  unknown as unknownText,
   UNKNOWN,
   unreadWord,
   varsSince,
@@ -1675,17 +1674,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     )
     const xargsOwn = xargs ? xargsOptions(cmd, first) : []
     const delimiter = xargsOwn.some((word) => XARGS_DELIMITER.test(word))
-    // GNU xargs' -a reads its words from a file in place of stdin
+    // GNU xargs' -a reads its words from a file in place of stdin; a word read as -a may be another option's value, so stdin is still judged as xargs' words, and the file adds a word the hook cannot read (argWord)
     const argFile = xargsOwn.some((word) => XARGS_ARG_FILE.test(word))
-    // a word read as -a may be another option's value, so stdin may still be xargs' words: under one, any program but a reader, and a reader fed stdin, is refused as a remover is
-    const argFileUnread =
-      argFile &&
-      (!reads(parsed, env) || !!cmd.stdin || cmd.redirects.some((r) => r.op.startsWith("<")))
-    const fed = !xargs
-      ? undefined
-      : argFile
-        ? unknownText("the file its -a names")
-        : await stdinOf(cmd, env)
+    const argWord: Word | undefined = argFile ? { quoted: false, value: UNKNOWN } : undefined
+    const fed = xargs ? await stdinOf(cmd, env) : undefined
     // xargs' own words: under -0 or -d its quotes and backslashes stay, else xargsWords reads them
     const fedSplit =
       !fed || fed.unknown
@@ -1693,11 +1685,14 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         : delimiter || xargsOwn.some((word) => XARGS_NUL.test(word))
           ? fed.value.split(/\s+/).filter(Boolean)
           : xargsWords(fed.value)
-    const stdinWords: Word[] = !fed
-      ? []
-      : fedSplit
-        ? fedSplit.map((value) => ({ quoted: false, value }))
-        : [{ quoted: false, value: UNKNOWN }]
+    const stdinWords: Word[] = [
+      ...(!fed
+        ? []
+        : fedSplit
+          ? fedSplit.map((value) => ({ quoted: false, value }))
+          : [{ quoted: false, value: UNKNOWN }]),
+      ...(argWord ? [argWord] : []),
+    ]
     const calls = reader ? [] : cliCalls(parsed, env)
     const write =
       calls
@@ -1842,9 +1837,18 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
       if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`)
-      if (fed && (remover || argFileUnread) && (fed.unknown || marked(fed.value) || !fedSplit))
+      const unreadFeed =
+        fed && remover
+          ? argFile
+            ? "the file its -a names"
+            : fed.unknown || marked(fed.value) || !fedSplit
+              ? (fed.unknown ??
+                (fedSplit ? "a value it cannot read" : "stdin holding a quote it does not close"))
+              : undefined
+          : undefined
+      if (unreadFeed)
         return refuse(
-          `${verb} under xargs fed by ${fed.unknown ?? (fedSplit ? "a value it cannot read" : "stdin holding a quote it does not close")}, a value the hook does not hold; write the paths literally in the call`,
+          `${verb} under xargs fed by ${unreadFeed}, a value the hook does not hold; write the paths literally in the call`,
         )
       if (fed) {
         // each word as written and as xargs reads it, so a quote or backslash xargs drops hides no root path
@@ -1861,15 +1865,19 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (!env.cwdUnread) return
     // stdin xargs splits where the hook cannot see (a NUL, a part it cannot read, GNU's -d delimiter, a quote left open) is read as one value it cannot read
     const unsplit = fed && !fed.unknown && (marked(fed.value) || delimiter || !fedSplit)
-    const fedWords: Word[] = unsplit ? [{ quoted: false, value: UNKNOWN }] : stdinWords
+    const fedWords: Word[] = unsplit
+      ? [{ quoted: false, value: UNKNOWN }, ...(argWord ? [argWord] : [])]
+      : stdinWords
     const replace = xargs?.replace
     const fromStdin = new Set<Word>(fedWords)
+    const fromArgFile = new Set<Word>(argWord ? [argWord] : [])
     // xargs puts each stdin word in place of its -I or -J string
     const inPlace = (word: Word) =>
       args.map((arg) => {
         if (!replace || !arg.value.includes(replace)) return arg
         const put = { ...arg, value: arg.value.replaceAll(replace, word.value) }
         fromStdin.add(put)
+        if (fromArgFile.has(word)) fromArgFile.add(put)
         return put
       })
     // the call as typed, then each call xargs may build: its stdin words appended to one call or split over several (-n, -L, -s, its own size cap), so each word may end a call of its own, or put in place of its -I or -J string
@@ -1941,8 +1949,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       (word) => !placed(word, env, steady),
     )
     if (!loose) return
-    const unread =
-      fed && fromStdin.has(loose) && (fed.unknown || unsplit)
+    const unread = fromArgFile.has(loose)
+      ? "the file its -a names"
+      : fed && fromStdin.has(loose) && (fed.unknown || unsplit)
         ? (fed.unknown ??
           (delimiter
             ? "stdin split on its -d delimiter"

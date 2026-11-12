@@ -396,7 +396,7 @@ export const groups: Group[] = [
       ],
     ],
   },
-  // a word read as xargs' -a, another option's value included, leaves its stdin unread, so a writer, or a reader fed stdin, under one is refused as a remover is
+  // a word read as xargs' -a, another option's value included, leaves xargs' stdin judged for the root as typed, and after a cd the hook cannot read its file's words are words it cannot read
   {
     folders: ["checkout", "home"],
     guards: ["no-extensions-write"],
@@ -434,7 +434,10 @@ export const groups: Group[] = [
         "touch under a real xargs -a, its stdin naming the root",
         `echo ~/.playground/extensions/.no-such-file | xargs -a /dev/null touch`,
       ],
-      ["touch under xargs -a, whose words the hook cannot read", "xargs -a /tmp/list touch"],
+      [
+        "touch under xargs -a after a cd to a variable, whose words the hook cannot read",
+        `cd "$X"; xargs -a /tmp/list touch`,
+      ],
     ],
   },
   // printf's %b, a width or a precision piped into a shell, which the hooks judging a piped script read through printf's own rendering

@@ -1949,6 +1949,12 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "a reader under xargs -a reading an absolute list after a cd to a variable",
       `cd "$X" && xargs -a /tmp/list wc -l`,
     ],
+    ["a writer under xargs -a with no cd, as canary reads it", "xargs -a /tmp/list touch"],
+    [
+      "a test run under xargs -a with no cd, as canary reads it",
+      "xargs -a /tmp/touched.txt bun run --cwd /tmp/tree test:file > /tmp/t.log 2>&1",
+    ],
+    ["a writer under xargs -E with absolute words and no cd", "echo /tmp/x | xargs -E -a touch"],
     // xargs' options that leave where its words land alone, each with absolute words after a cd to a variable
     ...[
       "-0",
