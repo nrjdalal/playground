@@ -72,8 +72,8 @@ const pushes = (args: Word[]): boolean => gitCommand(args).sub?.value === "push"
 // The GraphQL mutations that open or merge a pull request or move a ref, and the REST endpoints a write method does the same at.
 const REF_MUTATION =
   /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/
-// A GraphQL document's strings and comments, which name no mutation it runs.
-const GRAPHQL_TEXT = /"""[\s\S]*?"""|"(?:[^"\\\n]|\\.)*"|#[^\n]*/g
+// A GraphQL document's strings and comments, which name no mutation it runs; a line, and so a comment, ends at a carriage return too.
+const GRAPHQL_TEXT = /"""[\s\S]*?"""|"(?:[^"\\\n\r]|\\.)*"|#[^\n\r]*/g
 const REF_ENDPOINT =
   /^repos\/[^/]+\/[^/]+\/(?:contents\/.+|git\/refs(?:\/.+)?|merges|pulls|pulls\/\d+\/(?:merge|update-branch))$/
 
@@ -93,8 +93,12 @@ async function apiWrite(
     .replace(/^api\/v3\//, "")
     .split("?")[0]!
   if (path === "graphql" || path === "api/graphql")
-    return [...fields.filter((f) => f.key === "query").map((f) => f.text), ...inputs].some(
-      (d) => unreadable(d) || REF_MUTATION.test(d.value.replace(GRAPHQL_TEXT, "")),
+    return (
+      fields
+        .filter((f) => f.key === "query")
+        .some(
+          (f) => unreadable(f.text) || REF_MUTATION.test(f.text.value.replace(GRAPHQL_TEXT, "")),
+        ) || inputs.some((d) => unreadable(d) || REF_MUTATION.test(d.value))
     )
   if (method === "GET" || method === "HEAD") return false
   if (unreadable(endpoint)) return true
