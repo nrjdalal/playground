@@ -287,6 +287,8 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
         otherPost: 403,
         otherRead: 403,
         read: 403,
+        relayStatus: 403,
+        relayWrite: 403,
         tokens: 403,
         waiting: 403,
       },
