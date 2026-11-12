@@ -23,7 +23,7 @@ The hub's address comes from `YARD_API_URL`, and its approve pages from `YARD_WE
 The same token opens the relay, the connection this Mac dials out to Yard so the owner can read its Dashboard at Yard's `/dashboard` ([dashboard docs](../../web/next/content/docs/dashboard.mdx)).
 A bot is a Yard user of its own, `<name>[bot]`, a login no GitHub sign-in can claim, that `playground yard bot add` makes with the owner's token.
 Its token reaches only its DM with the owner, through `GET` and `POST /api/v1/yard/channels/<dm>/messages` (`?after=<message id>` reads what is new), as plain text: every other call reads 403, its post never waits for an approval, and a revoke makes its next call read 401.
-The token goes straight into the Keychain item `playground-yard-bot-<name>`, which a `reveal` card shows the owner on a click, and Yard's Account page lists each bot with Revoke.
+The token goes straight into the Keychain item `playground-yard-bot-<name>`, which a `reveal` card shows the owner on a click, and Yard's Account page lists each bot with Revoke, which cuts it on Yard alone, so `bot revoke` deletes the Keychain item after it.
 From a browser paired in Yard's Settings, which this Mac pairs only on the owner's Approve, the owner can also send a message and answer the Inbox there, each write signed by that browser's key.
 
 ## It's working if
