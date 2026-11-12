@@ -9590,9 +9590,9 @@ function unplaced(what, source, env) {
 }
 function prCreate(rest, env) {
   const values = rest.map((w) => w.value);
-  const texts = commitTexts(env.cwd, ["HEAD", "--not", "--remotes"], "the commits it may push", ", which it may push");
+  const texts = [];
   if (!values.some((v) => /^(?:-H|--head)(?:=|$)/.test(v)))
-    texts.push(withPlace(branch(env.cwd), "the branch it opens from"));
+    texts.push(...commitTexts(env.cwd, ["HEAD", "--not", "--remotes"], "the commits it may push", ", which it may push"), withPlace(branch(env.cwd), "the branch it opens from"));
   if (values.some((v) => v === "-f" || v.startsWith("--fill"))) {
     const at = values.findIndex((v) => /^(?:-B|--base)(?:=|$)/.test(v));
     const base = at === -1 ? "HEAD" : values[at].includes("=") ? values[at].split("=")[1] : values[at + 1];

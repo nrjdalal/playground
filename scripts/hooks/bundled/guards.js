@@ -8739,7 +8739,7 @@ var WRITES = [
   [/linear/i, new Set(["save_comment", "save_issue"])],
   [/slack/i, new Set(["chat_post_message"])]
 ];
-var refuse2 = (what) => `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post and no pull request. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`;
+var refuse2 = (what) => `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post, no push and no pull request. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`;
 var log = (environment, entry) => {
   try {
     const dir = join8(dataDirOf(environment), "ops");
@@ -8756,19 +8756,33 @@ var prCreate = (args) => {
   const { head } = ghCommand(args);
   return head[0] === "pr" && head[1] === "create";
 };
+var pushes = (args) => {
+  let k = 0;
+  for (;k < args.length && args[k].value.startsWith("-"); k++)
+    if (GIT_TAKES.has(args[k].value))
+      k++;
+  return args[k]?.value === "push";
+};
 var visit2 = async (_cmd, { args, name }) => {
   if (name === "gh")
     return prCreate(args) ? "gh pr create" : undefined;
+  if (name === "git")
+    return pushes(args) ? "git push" : undefined;
   if (PRINTERS.has(name))
     return;
-  const nested = args.findIndex((a) => program(a.value) === "gh");
-  return nested !== -1 && prCreate(args.slice(nested + 1)) ? "gh pr create" : undefined;
+  const nested = args.findIndex((a) => program(a.value) === "gh" || program(a.value) === "git");
+  if (nested === -1)
+    return;
+  const rest = args.slice(nested + 1);
+  if (program(args[nested].value) === "git")
+    return pushes(rest) ? "git push" : undefined;
+  return prCreate(rest) ? "gh pr create" : undefined;
 };
 async function writeOf(tool, input, cwd, environment) {
   if (mcpWrite(tool))
     return `the tool ${tool}`;
   const command = input?.command;
-  if (tool !== "Bash" || typeof command !== "string" || !/gh/.test(command))
+  if (tool !== "Bash" || typeof command !== "string" || !/gh|git/.test(command))
     return;
   const directory = typeof cwd === "string" ? cwd : undefined;
   const env = {
@@ -9518,9 +9532,9 @@ function unplaced(what, source, env) {
 }
 function prCreate2(rest, env) {
   const values = rest.map((w) => w.value);
-  const texts = commitTexts(env.cwd, ["HEAD", "--not", "--remotes"], "the commits it may push", ", which it may push");
+  const texts = [];
   if (!values.some((v) => /^(?:-H|--head)(?:=|$)/.test(v)))
-    texts.push(withPlace(branch(env.cwd), "the branch it opens from"));
+    texts.push(...commitTexts(env.cwd, ["HEAD", "--not", "--remotes"], "the commits it may push", ", which it may push"), withPlace(branch(env.cwd), "the branch it opens from"));
   if (values.some((v) => v === "-f" || v.startsWith("--fill"))) {
     const at = values.findIndex((v) => /^(?:-B|--base)(?:=|$)/.test(v));
     const base = at === -1 ? "HEAD" : values[at].includes("=") ? values[at].split("=")[1] : values[at + 1];
@@ -12012,11 +12026,11 @@ function inner2(cmd, parsed) {
   const { inline, operand } = shellOperand(args, name);
   return inline && operand !== undefined ? lex(operand.value).commands : [];
 }
-function pushes(cmd) {
+function pushes2(cmd) {
   const parsed = parse(cmd);
   const commands = inner2(cmd, parsed);
   if (commands)
-    return commands.some(pushes);
+    return commands.some(pushes2);
   const { args, name } = parsed;
   if (name !== "git")
     return false;
@@ -12102,7 +12116,7 @@ function judgeCommand(cmd, guarded) {
     return `no-false-green hook refuses bun ${flag}: bun then misreads the subcommand (run prints its usage and exits 0, test runs package.json's test script with the paths appended in place of the tests), so its exit says nothing about the tests. Join the value with = (--opt=value) or put the option after the subcommand: bun --cwd=<dir> run test:file <files>, or bun run --cwd <dir> <script>.`;
   if (!guarded && cmd.stdin && runsTests(cmd.stdin))
     return `no-false-green hook refuses a test run piped into ${name || "a command group"} with no pipefail: a pipeline's exit status is its last command's, so a failing run reads 0. Drop the pipe (the Bash tool keeps long output), or set pipefail inside the script that holds the pipe (set -o pipefail; first, inside the quotes of a bash -c script) so the test's own exit status comes through.`;
-  if (!guarded && cmd.stdin && pushes(cmd.stdin))
+  if (!guarded && cmd.stdin && pushes2(cmd.stdin))
     return `no-false-green hook refuses a git push piped into ${name || "a command group"} with no pipefail: a pipeline's exit status is its last command's, so a failed push reads 0. Push bare (the Bash tool keeps its output), then check it with git ls-remote origin refs/heads/<branch>, which prints the local head's sha once the push has landed.`;
 }
 async function inspect4(raw, shell) {

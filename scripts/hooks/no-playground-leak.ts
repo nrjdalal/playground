@@ -764,17 +764,20 @@ function unplaced(what: string, source: (Repo | undefined)[], env: Env): string 
   )
 }
 
-// What `gh pr create` publishes beyond its flags: the branch it opens from and the commits it may push, and with --fill the messages it reads.
+// What `gh pr create` publishes beyond its flags: with no --head, the branch it opens from and the commits it may push (with --head it opens from that branch, already pushed, and pushes nothing), and with --fill the messages it reads.
 function prCreate(rest: Word[], env: Env): Placed[] {
   const values = rest.map((w) => w.value)
-  const texts = commitTexts(
-    env.cwd,
-    ["HEAD", "--not", "--remotes"],
-    "the commits it may push",
-    ", which it may push",
-  )
+  const texts: Placed[] = []
   if (!values.some((v) => /^(?:-H|--head)(?:=|$)/.test(v)))
-    texts.push(withPlace(branch(env.cwd), "the branch it opens from"))
+    texts.push(
+      ...commitTexts(
+        env.cwd,
+        ["HEAD", "--not", "--remotes"],
+        "the commits it may push",
+        ", which it may push",
+      ),
+      withPlace(branch(env.cwd), "the branch it opens from"),
+    )
   if (values.some((v) => v === "-f" || v.startsWith("--fill"))) {
     const at = values.findIndex((v) => /^(?:-B|--base)(?:=|$)/.test(v))
     const base =
