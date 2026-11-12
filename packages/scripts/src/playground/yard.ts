@@ -1,13 +1,20 @@
-import { approvePath, type Channel, MESSAGE_KINDS } from "@packages/message"
+import { approvePath, botNameSchema, type Channel, MESSAGE_KINDS } from "@packages/message"
 
 import { type YardClient, YardError, yardClient } from "../../../../api/hono/src/lib/yard/client"
-import { type Keychain, keychain } from "../../../../api/hono/src/lib/yard/keychain"
+import {
+  botKeychain,
+  botService,
+  type Keychain,
+  keychain,
+} from "../../../../api/hono/src/lib/yard/keychain"
 import { dashboardCheckout } from "./probe"
 
 // playground yard: this Mac's Yard from the terminal, with the token the Keychain keeps, the same token and hosted Yard the local Dashboard reads.
 
 export type YardIo = {
   api: string | undefined
+  // a bot's own Keychain item, playground-yard-bot-<name>
+  botKeychain: (name: string) => Keychain
   client: (base: string, token: string) => YardClient
   err: (line: string) => void
   keychain: Keychain
@@ -18,7 +25,7 @@ export type YardIo = {
 }
 
 const USAGE =
-  "usage: playground yard login | logout | channels | read <channel> | post <channel> <text> [--kind <kind>]"
+  "usage: playground yard login | logout | channels | read <channel> | post <channel> <text> [--kind <kind>] | bot add <name> | bot revoke <name>"
 
 // A channel by its id, its name with or without #, or a DM by @login.
 const find = (channels: Channel[], name: string): Channel | undefined =>
@@ -59,6 +66,7 @@ export async function runYard(words: string[], io: YardIo): Promise<number> {
       return 1
     }
     const client = io.client(api, token)
+    if (verb === "bot") return await bot(rest, client, io)
     if (verb === "channels") {
       for (const c of await client.channels())
         io.out(`${label(c)}\t${c.unread} unread\t${c.mentions} mentions\t${c.id}`)
@@ -117,6 +125,46 @@ export async function runYard(words: string[], io: YardIo): Promise<number> {
   return 2
 }
 
+// bot add makes a bot on Yard and writes its token straight to its own Keychain item, printing only the item's name, so the token never reaches a terminal, a log or a chat; bot revoke cuts it on Yard and deletes the item.
+async function bot(words: string[], client: YardClient, io: YardIo): Promise<number> {
+  const [action, name] = words
+  if (
+    words.length !== 2 ||
+    (action !== "add" && action !== "revoke") ||
+    !botNameSchema.safeParse(name).success
+  ) {
+    io.err(USAGE)
+    return 2
+  }
+  const item = io.botKeychain(name!)
+  if (action === "add") {
+    const { bot, secret } = await client.addBot(name!)
+    try {
+      await item.write(secret)
+    } catch (error) {
+      // a bot whose token no Keychain keeps could never be handed on, so it goes at once
+      await client.revokeBot(name!).catch(() => {})
+      throw error
+    }
+    io.out(
+      `Made @${bot.login}, its DM ${bot.dm}; its token is in the Keychain item ${botService(name!)}`,
+    )
+    io.out(
+      `Next: a reveal card for ${botService(name!)}, so the owner copies the token into the bot`,
+    )
+    return 0
+  }
+  try {
+    await client.revokeBot(name!)
+  } catch (error) {
+    // revoked on Yard's web already: the Keychain item still goes
+    if (!(error instanceof YardError && error.status === 404)) throw error
+  }
+  await item.remove()
+  io.out(`Revoked the bot ${name} on Yard and deleted the Keychain item ${botService(name!)}`)
+  return 0
+}
+
 // YARD_API_URL and YARD_WEB_URL from the environment, else from the live dashboard checkout's .env, the checkout live.branch names, as the local API reads its settings. The main checkout keeps no .env, so the checkout the command runs from is never read.
 const setting = async (name: string, live: string | null): Promise<string | undefined> => {
   if (process.env[name]) return process.env[name]
@@ -136,6 +184,7 @@ export const yardIo = async (repo: string, readSecret: YardIo["readSecret"]): Pr
   const live = dashboardCheckout(repo)
   return {
     api: await setting("YARD_API_URL", live),
+    botKeychain: (name) => botKeychain(name),
     client: yardClient,
     err: console.error,
     keychain: keychain(),
