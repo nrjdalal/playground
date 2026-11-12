@@ -28,7 +28,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   for a fresh worker start alone, room for its runs:
   `scripts/ops/run-slot.sh room`'s lanes, held lanes, free lanes (open and unheld while the queue's next run fits its load units by run-slot's one gate, `unit_fits`, or a medium run with no waiter, `slots.peers`' holders counted; none while the battery's or focus's hold stands, which the wait loop obeys too) and live waiters, refusing while no lane is free and a run waits in the queue,
   or when room gives no reading, so a new worker never joins a queue it has no room in,
-  while a `--priority` start passes a full queue with a priority file standing, as it passes the load gate, its row's `readings.priority` naming the file, and a reviewer, tester
+  while a `--priority` start passes a full queue with a priority file standing, as it passes the load gate, its row's `readings.priority` naming the file,
+  a `--reads-only` worker start (`spawn.sh --help`) passes it with its row's `readings.reads_only` true, since a worker that only reads runs nothing through run-slot, while the load, memory and usage gates still hold it, and a reviewer, tester
   or resume skips it and work already admitted finishes; and the launching backend's usage:
   Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, which never sits below one day's share of 14.3 points, so a week that has just reset passes its first day,
   or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone, which ops-sweep writes and renews while an account the split can pick projects under 100% at its week reset (`scripts/ops/README.md`'s Usage forecasts), or a person writes by hand, and the pass line names, a missing, empty, past or unreadable time leaving the pace on;
