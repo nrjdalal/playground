@@ -408,18 +408,11 @@ describe.skipIf(!dockerUp())("the thread store", () => {
     const dir = join(mkdtempSync(join(tmpdir(), "threads-start-")), "fixture")
     const saved = process.env.PLAYGROUND_FIXTURE_DIR
     process.env.PLAYGROUND_FIXTURE_DIR = dir
-    const start = (
-      store as unknown as {
-        seedFixtureThreadsAtStart?: (
-          database: Parameters<typeof store.seedFixtureThreads>[0],
-        ) => Promise<number>
-      }
-    ).seedFixtureThreadsAtStart
     const lines: string[] = []
     const said = console.error
     console.error = (line: unknown) => lines.push(String(line))
     try {
-      expect(await start?.(db)).toBe(7)
+      expect(await store.seedFixtureThreadsAtStart(db)).toBe(7)
       expect(lines).toEqual(["fixture: 7 made-up threads seeded at start"])
     } finally {
       console.error = said
@@ -434,18 +427,11 @@ describe.skipIf(!dockerUp())("the thread store", () => {
     const dir = join(mkdtempSync(join(tmpdir(), "threads-start-full-")), "fixture")
     const saved = process.env.PLAYGROUND_FIXTURE_DIR
     process.env.PLAYGROUND_FIXTURE_DIR = dir
-    const start = (
-      store as unknown as {
-        seedFixtureThreadsAtStart?: (
-          database: Parameters<typeof store.seedFixtureThreads>[0],
-        ) => Promise<number>
-      }
-    ).seedFixtureThreadsAtStart
     const lines: string[] = []
     const said = console.error
     console.error = (line: unknown) => lines.push(String(line))
     try {
-      expect(await start?.(db)).toBe(0)
+      expect(await store.seedFixtureThreadsAtStart(db)).toBe(0)
       expect(lines).toEqual([])
       const [{ value }] = await admin`select count(*)::int as value from thread`
       expect(value).toBe(1)
@@ -468,15 +454,8 @@ describe.skipIf(!dockerUp())("the thread store", () => {
     ) as typeof db
     const saved = process.env.PLAYGROUND_LIVE_READS
     process.env.PLAYGROUND_LIVE_READS = "true"
-    const start = (
-      store as unknown as {
-        seedFixtureThreadsAtStart?: (
-          database: Parameters<typeof store.seedFixtureThreads>[0],
-        ) => Promise<number>
-      }
-    ).seedFixtureThreadsAtStart
     try {
-      expect(await start?.(untouchable)).toBe(0)
+      expect(await store.seedFixtureThreadsAtStart(untouchable)).toBe(0)
     } finally {
       if (saved === undefined) delete process.env.PLAYGROUND_LIVE_READS
       else process.env.PLAYGROUND_LIVE_READS = saved

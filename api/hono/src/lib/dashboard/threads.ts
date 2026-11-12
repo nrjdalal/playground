@@ -160,6 +160,17 @@ export async function seedFixtureThreads(
   return threads.length
 }
 
+// A fresh fixture stack's threads from its first load: an empty thread table takes the fixture's threads and says so on one line; a full table and any other source write nothing, so a restart never replays them and made-up rows never reach the live dashboard's database.
+export async function seedFixtureThreadsAtStart(db: Database): Promise<number> {
+  const source = currentSource()
+  if (source.kind !== "fixture") return 0
+  const [row] = await db.select({ value: count() }).from(thread)
+  if ((row?.value ?? 0) > 0) return 0
+  const threads = await seedFixtureThreads(db, source)
+  if (threads > 0) console.error(`fixture: ${threads} made-up threads seeded at start`)
+  return threads
+}
+
 // what a person, a peer or a launch prompt said, as read.ts's FIRST_ASK reads a message, so the session's own reply that opens with the same words is passed over
 const MESSAGE_KINDS = ["human", "peer", "prompt"]
 

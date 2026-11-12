@@ -13,6 +13,7 @@ import { keepSweeping } from "@/lib/dashboard/attachments"
 import { readsLive } from "@/lib/dashboard/fixture"
 import { getItem } from "@/lib/dashboard/inbox"
 import { startSdkProbe } from "@/lib/dashboard/sdk"
+import { seedFixtureThreadsAtStart } from "@/lib/dashboard/threads"
 import { globalErrorResponses } from "@/lib/error"
 import { DB_TIMEOUT_MS, healthData } from "@/lib/health"
 import { startRelay } from "@/lib/relay/mac"
@@ -293,6 +294,13 @@ startSdkProbe()
 
 // Yard's mentions of the owner into the Inbox, once a minute, when YARD_API_URL names a hosted Yard.
 startYardPoll(db, yardClient)
+
+// A fresh fixture stack's threads page from its first load: an empty thread table takes the fixture's threads at start, one line saying so; a full table and any other source write nothing.
+seedFixtureThreadsAtStart(db).catch((error: unknown) =>
+  console.error(
+    `fixture: seeding the made-up threads failed: ${error instanceof Error ? error.message : error}`,
+  ),
+)
 
 // The relay to the hosted Yard, on a stack that reads this Mac alone, never a fixture's: with YARD_API_URL set and the Keychain token, the owner's browser on Yard reads this dashboard through one socket this API dials out, and sends the writes its paired key signs, each run here as the one local owner.
 if (env.YARD_API_URL && readsLive()) {
