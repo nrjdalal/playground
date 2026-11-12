@@ -277,6 +277,49 @@ test("04q the plan is plan.json's lane items, a malformed lane skipped; a missin
   }
 })
 
+const numbered = [
+  { id: "num-165", pr: 165, worker: "worker-greed" },
+  { id: "num-166", pr: 166, worker: "reviewer-old" },
+  { id: "url-167", pr: "https://github.com/acme/archive/pull/167", worker: "worker-other" },
+]
+
+test("04r a plan row whose pr is a number names the factory repo's PR alone", () => {
+  const saved = process.env.PLAYGROUND_FACTORY_REPO
+  try {
+    process.env.PLAYGROUND_FACTORY_REPO = "acme/archive"
+    expect(
+      state.holderTag(roster, {}, "acme/archive", 165, undefined, undefined, numbered),
+    ).toEqual(["worker-greed", false])
+    expect(
+      state.holderTag(roster, {}, "acme/archive", 166, undefined, undefined, numbered),
+    ).toEqual(["no agent; parked in plan.json", false])
+  } finally {
+    saved === undefined
+      ? delete process.env.PLAYGROUND_FACTORY_REPO
+      : (process.env.PLAYGROUND_FACTORY_REPO = saved)
+  }
+})
+
+test("04s a number row matches the factory repo alone, and a URL row still matches", () => {
+  const saved = process.env.PLAYGROUND_FACTORY_REPO
+  try {
+    process.env.PLAYGROUND_FACTORY_REPO = "acme/archive"
+    expect(
+      state.holderTag(roster, {}, "someone/else", 165, undefined, undefined, numbered),
+    ).toEqual(["no agent, in no plan: lost", true])
+    expect(
+      state.holderTag(roster, {}, "acme/archive", 167, undefined, undefined, numbered),
+    ).toEqual(["worker-other", false])
+    expect(
+      state.holderTag(roster, {}, "acme/archive", 168, undefined, undefined, numbered),
+    ).toEqual(["no agent, in no plan: lost", true])
+  } finally {
+    saved === undefined
+      ? delete process.env.PLAYGROUND_FACTORY_REPO
+      : (process.env.PLAYGROUND_FACTORY_REPO = saved)
+  }
+})
+
 const threads = [
   {
     id: "T1",

@@ -767,10 +767,13 @@ const realOf = (path: string, physical = false) => {
 // Each row and path flag that keeps its single spelling, with why: the row moves folders (cd, pushd, popd), or the flag names no folder; the pinned list below shows a row that stops being spelt
 const UNSPELT = new Set<string>()
 
+// cd, pushd or popd as a word of its own, so a folder name that holds one (PG-1-unread-cd-writers, x.cd) moves nothing
+const movesFolders = (call: string) => /(?<![\w.-])(?:cd|pushd|popd)(?=[\s;&|)]|$)/.test(call)
+
 // Each other spelling of one path flag's folder in a case's call: its other joins, the folder relative from the case's own folder, a ./ hop, an <x>/../<x> hop and a link made in a scratch folder, each kept only where it names the folder the row's does, by its real path.
 function spellingsOf(call: Call, cwd: string, id: string): { spelling: string; text: string }[] {
   if (typeof call !== "string" || !isAbsolute(cwd)) return []
-  const moves = /\b(?:cd|pushd|popd)\b/.test(call)
+  const moves = movesFolders(call)
   const found: { spelling: string; text: string }[] = []
   for (const pathFlag of PATH_FLAGS)
     for (const m of call.matchAll(flagIn(pathFlag))) {
@@ -928,6 +931,20 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#533 a removal echoed to sudo's shell, its chdir value a path attached in the cluster | -sD",
       "#716 a recursive delete echoed to sudo's shell in a quoted env's split string after an abbreviated chdir | --ch",
     ])
+  })
+
+  test("a row moves folders by its own cd, pushd or popd, never by a folder name that holds one", () => {
+    const under = (folder: string) =>
+      Object.fromEntries(Object.entries(PATHS).map(([k, v]) => [k, join(folder, v)])) as Paths
+    const read = (folder: string) =>
+      REFUSED_FORMS.flatMap(({ rows, source }) =>
+        rows(under(folder)).flatMap(([what, call]) =>
+          typeof call === "string" ? [`${source} ${what}: ${movesFolders(call)}`] : [],
+        ),
+      )
+    const plain = read("/tmp/x/PG-1-unread-writers")
+    expect(plain.filter((row) => row.endsWith(": true")).length).toBeGreaterThan(0)
+    expect(read("/tmp/x/PG-1-unread-cd-writers")).toEqual(plain)
   })
 
   test("each path flag is listed once, and each is spelt again on some row", () => {

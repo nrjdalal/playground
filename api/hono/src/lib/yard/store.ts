@@ -26,9 +26,9 @@ import { HELD_KINDS, heldBecause, mentionsOf } from "@/lib/yard/tier"
 
 type YardChannel = typeof yardChannel.$inferSelect
 
-// Who is calling: a member signed in on the web, or one of their tokens, whose name is the device a post carries; bot names the member who made a bot's token's user (yard_bot).
+// Who is calling: a member signed in on the web, or one of their tokens, whose name is the device a post carries; bot names the member who made a bot's token's user (yard_bot), and whether the owner lets it read the dispatcher's log.
 export type Caller = {
-  bot?: { madeBy: string }
+  bot?: { madeBy: string; readsLog?: boolean }
   device: string
   id: string
   login: string
@@ -297,7 +297,7 @@ const shownAt = sql<string>`date_trunc('milliseconds', coalesce(${yardMessage.de
 
 export type Waiting = { held: boolean; message: Message; shownAt: string }
 
-// What waits on the caller past a mark, which the local Playground cards in its Inbox, oldest first by when it showed, then by id: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, and their own posts held for their approval; the mark is a time and, from the second read on, the last item's id, so rows in that item's millisecond still wait; each list reads at most limit rows, and when one comes back full both stop at the earlier full list's last row, so the next mark skips no row either list left out.
+// What waits on the caller past a mark, which the local Playground cards in its Inbox, oldest first by when it showed, then by id: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, every message a bot they made sends, which reaches only its DM with them, but the line each read of the log posts (kind log, which no bot posts itself), and their own posts held for their approval; the mark is a time and, from the second read on, the last item's id, so rows in that item's millisecond still wait; each list reads at most limit rows, and when one comes back full both stop at the earlier full list's last row, so the next mark skips no row either list left out.
 export const waiting = async (
   db: Database,
   caller: Caller,
@@ -321,7 +321,10 @@ export const waiting = async (
         sql`${yardMessage.userId} is distinct from ${caller.id}`,
         past,
         sql`${shownAt} > ${yardMember.joinedAt}`,
-        sql`${yardMessage.text} ~* ${mentionPattern(caller.login)}`,
+        or(
+          sql`${yardMessage.text} ~* ${mentionPattern(caller.login)}`,
+          sql`${yardMessage.kind} <> 'log' and exists (select 1 from ${yardBot} where ${yardBot.userId} = ${yardMessage.userId} and ${yardBot.madeBy} = ${caller.id})`,
+        ),
         live(),
       ),
     )
@@ -533,7 +536,7 @@ export const tokenOwner = async (db: Database, value: string) => {
   if (!row) return null
   await db.update(yardToken).set({ lastUsedAt: new Date() }).where(eq(yardToken.id, row.tokenId))
   return {
-    bot: row.bot ? { madeBy: row.bot.madeBy } : null,
+    bot: row.bot ? { madeBy: row.bot.madeBy, readsLog: row.bot.readsLog } : null,
     device: row.name,
     user: row.user,
   }
@@ -575,8 +578,13 @@ export const bots = async (db: Database, caller: Caller) => {
   return rows.map((row) => botOut(row, dms.find((dm) => dm.name === dmName(row.id, caller.id))?.id))
 }
 
-// A bot the owner makes: its own user, on the member rung with a login no GitHub sign-in can claim (botLogin), its DM with its maker, and its one token, whose secret is returned this once and kept only as its hash.
-export const createBot = async (db: Database, caller: Caller, name: string) => {
+// A bot the owner makes: its own user, on the member rung with a login no GitHub sign-in can claim (botLogin), its DM with its maker, its one token, whose secret is returned this once and kept only as its hash, and with log, the owner's leave to read the dispatcher's log.
+export const createBot = async (
+  db: Database,
+  caller: Caller,
+  name: string,
+  { log = false }: { log?: boolean } = {},
+) => {
   botNameSchema.parse(name)
   await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR)
   const id = crypto.randomUUID()
@@ -594,7 +602,10 @@ export const createBot = async (db: Database, caller: Caller, name: string) => {
         role: "member",
         roleSetAt: now,
       })
-      const [bot] = await tx.insert(yardBot).values({ madeBy: caller.id, userId: id }).returning()
+      const [bot] = await tx
+        .insert(yardBot)
+        .values({ madeBy: caller.id, readsLog: log, userId: id })
+        .returning()
       await tx.insert(yardToken).values({ hash: hashOf(value), name: BOT_DEVICE, userId: id })
       await tx.insert(yardChannel).values({ id: dm, kind: "dm", name: dmName(id, caller.id) })
       await tx
@@ -631,6 +642,60 @@ export const revokeBot = async (db: Database, caller: Caller, name: string) => {
     return gone
   })
   return botOut(row, dm?.id)
+}
+
+// The Account page's log switch: whether a bot the caller made may read the dispatcher's log, from its next read.
+export const setReadsLog = async (
+  db: Database,
+  caller: Caller,
+  name: string,
+  readsLog: boolean,
+) => {
+  const [found] = await db
+    .select({ id: user.id })
+    .from(yardBot)
+    .innerJoin(user, eq(user.id, yardBot.userId))
+    .where(and(eq(yardBot.madeBy, caller.id), eq(user.login, botLogin(name))))
+  if (!found) throw notFound("Bot")
+  await db.update(yardBot).set({ readsLog }).where(eq(yardBot.userId, found.id))
+  return (await bots(db, caller)).find((bot) => bot.name === name)!
+}
+
+// A bot's read of the log reaches its maker's Mac: the maker's login, which the Mac checks against its own token's, and the bot's DM, where the read's line goes.
+export const logReadOf = async (db: Database, caller: Caller & { bot: { madeBy: string } }) => {
+  const [maker] = await db
+    .select({ login: user.login })
+    .from(user)
+    .where(eq(user.id, caller.bot.madeBy))
+  const [dm] = await db
+    .select({ id: yardChannel.id })
+    .from(yardChannel)
+    .where(eq(yardChannel.name, dmName(caller.id, caller.bot.madeBy)))
+  if (!maker?.login || !dm) throw notFound("Bot")
+  return { dm: dm.id, login: maker.login }
+}
+
+// The line a read of the log leaves in the bot's DM, as the bot's, kind log, so its maker sees each read and the Inbox cards none (waiting).
+export const logLine = async (
+  db: Database,
+  caller: Caller,
+  dm: string,
+  text: string,
+): Promise<Message> => {
+  const [row] = await db
+    .insert(yardMessage)
+    .values({
+      at: new Date(),
+      channelId: dm,
+      device: caller.device,
+      kind: "log",
+      login: caller.login,
+      status: "sent",
+      text,
+      userId: caller.id,
+    })
+    .returning()
+  return toMessage(row!)
 }
 
 const inviteOut = (row: typeof yardInvite.$inferSelect, requestedBy: string | null) => ({
