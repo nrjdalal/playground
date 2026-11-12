@@ -149,7 +149,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       return c.json({ data: { login, owner } })
     },
   )
-  // what the local Playground cards in its Inbox: mentions, a thread's replies included, which a channel's page of top-level messages leaves out, your bots' messages and your own held posts
+  // what the local Playground cards in its Inbox (mentions, a thread's replies included, which a channel's page of top-level messages leaves out, and your own held posts) or tells its dispatcher (your bots' messages)
   .get(
     "/waiting",
     doc(
