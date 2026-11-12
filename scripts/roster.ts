@@ -390,7 +390,7 @@ function checkRetask(
   const restart = entry.status === "ended" && given("prs")
   if (
     assign
-      ? entry.pr && (given("pr") || given("item")) !== given("worker")
+      ? (entry.pr || entry.item) && (given("pr") || given("item")) !== given("worker")
       : (moved("pr") && !restart) || moved("worker") || given("item")
   )
     throw new Refusal(
