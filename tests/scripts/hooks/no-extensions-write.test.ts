@@ -1791,6 +1791,18 @@ describe("text no program runs as a shell line stays text on a line read whole",
     ["a plain browser eval", "agent-browser eval 'document.title'"],
     ["a gh read", "gh api x --jq .sha"],
     ["a plain commit", 'git commit -q -m "a b"'],
+    [
+      "a read-only sed's address range beside another call (PG-1931)",
+      `bun x.ts; sed -n '/^if (import.meta.main)/,/^}/p' ${WORK}/f`,
+    ],
+    [
+      "a playground call whose reason holds a regex (PG-1931)",
+      `playground ext score login x 5 --reason "matches /^(\\d+)(?: (\\S+) \\S+)?/ now"`,
+    ],
+    [
+      "a reason attached by =, holding a regex (PG-1931)",
+      `playground ext score login x 5 --reason="/^(\\d+)(?: (\\S+))?/ x"`,
+    ],
   ])("%s runs", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })
@@ -1798,6 +1810,20 @@ describe("text no program runs as a shell line stays text on a line read whole",
   test.each([
     ["an in-place perl edit of a file in the root", `perl -pi -e 's/a/b/' ${LIST}`],
     ["a browser eval whose output a shell runs", `sleep 1; agent-browser eval 'a ?? 1' | sh`],
+    [
+      "an in-place sed of a file in the root beside another call",
+      `bun x.ts; sed -i '' 's/a/b/' ${LIST}`,
+    ],
+    [
+      "a sed w command writing into the root beside another call",
+      `bun x.ts; sed -n 'w ${LIST}' ${WORK}/f`,
+    ],
+    ["a read-only sed's file in the root beside another call", `bun x.ts; sed -n '/(a)/p' ${LIST}`],
+    [
+      "a read-only sed's glob in the root beside another call",
+      `bun x.ts; sed -n '/(a)/p' ${ROOT}/*/x.md`,
+    ],
+    ["a reason that names the root", `playground ext score login x 5 --reason "see ${LIST}"`],
   ])("%s is still refused", async (_, command) => {
     expect(await bash(command)).toContain("no-extensions-write hook ")
   })
