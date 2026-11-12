@@ -55,6 +55,69 @@ describe("playground alerts-wait (PG-2184)", () => {
     )
   })
 
+  // PG-1933: a job's line addressed to a session, such as the firefighting heads-up's to the Builder, reached it only at Ops' next sweep
+  const job = (job: string, to: string, text: string, at = "2026-10-26T05:40:00Z") =>
+    `${JSON.stringify({ at, job, text, to })}\n`
+  const within = (wait: Promise<string>) =>
+    Promise.race([wait, Bun.sleep(500).then(() => "still waiting")])
+
+  test("wakes on a job's outbox line addressed to the session, a heads-up, prints it and exits", async () => {
+    const outbox = join(dir, "headsup")
+    const file = join(outbox, "ops-firefighting-headsup.jsonl")
+    await Bun.write(file, job("firefighting-headsup", "builder", "HEADS-UP old"))
+    const waiting = alertsWait("builder", outbox, 5, BEGAN)
+    await Bun.sleep(30)
+    appendFileSync(file, job("firefighting-headsup", "builder", "HEADS-UP MADE-1 raised"))
+    expect(await within(waiting)).toBe("2026-10-26T05:40:00Z HEADS-UP MADE-1 raised")
+    expect(await Bun.file(waiterPidPath(outbox, "builder")).exists()).toBe(false)
+  })
+
+  test("a printed line is delivered, so the next wait goes past it, and a line addressed to another session waits for that session", async () => {
+    const outbox = join(dir, "delivered")
+    const file = join(outbox, "ops-firefighting-headsup.jsonl")
+    await Bun.write(join(outbox, "alerts-wait", "builder"), "{}")
+    await Bun.write(join(outbox, "alerts-wait", "ops"), "{}")
+    await Bun.write(
+      file,
+      job("firefighting-headsup", "ops", "HEADS-UP for ops") +
+        job("firefighting-headsup", "builder", "HEADS-UP first") +
+        job("firefighting-headsup", "builder", "HEADS-UP second"),
+    )
+    expect(await within(alertsWait("builder", outbox, 5, BEGAN))).toBe(
+      "2026-10-26T05:40:00Z HEADS-UP first",
+    )
+    expect(await within(alertsWait("builder", outbox, 5, BEGAN))).toBe(
+      "2026-10-26T05:40:00Z HEADS-UP second",
+    )
+    expect(await within(alertsWait("builder", outbox, 5, BEGAN))).toBe("still waiting")
+    expect(await within(alertsWait("ops", outbox, 5, BEGAN))).toBe(
+      "2026-10-26T05:40:00Z HEADS-UP for ops",
+    )
+    expect(await Bun.file(join(outbox, "cursor.json")).exists()).toBe(false)
+  })
+
+  test("a stuck alert goes ahead of a job's line, and a cursor from before, one bare number, keeps its stuck-alert offset", async () => {
+    const outbox = join(dir, "legacy")
+    const alerts = join(outbox, "ops-stuck-alert.jsonl")
+    const seen = line("builder", "already printed")
+    await Bun.write(alerts, seen + line("builder", "x-worker is stuck"))
+    await Bun.write(
+      join(outbox, "ops-firefighting-headsup.jsonl"),
+      job("firefighting-headsup", "builder", "HEADS-UP before the wait"),
+    )
+    await Bun.write(join(outbox, "alerts-wait", "builder"), String(Buffer.byteLength(seen)))
+    expect(await within(alertsWait("builder", outbox, 5, BEGAN))).toBe(
+      "2026-10-26T05:40:00Z x-worker is stuck",
+    )
+    appendFileSync(
+      join(outbox, "ops-firefighting-headsup.jsonl"),
+      job("firefighting-headsup", "builder", "HEADS-UP after"),
+    )
+    expect(await within(alertsWait("builder", outbox, 5, BEGAN))).toBe(
+      "2026-10-26T05:40:00Z HEADS-UP after",
+    )
+  })
+
   test("waits for an outbox file that does not exist yet", async () => {
     const outbox = join(dir, "fresh")
     const waiting = alertsWait("ops", outbox, 5, BEGAN)
