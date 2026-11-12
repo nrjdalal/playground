@@ -567,6 +567,35 @@ describe("a replay of a mark-reading hook", () => {
     for (const call of await calls(projects, since)) expect(call).not.toHaveProperty("loaded")
   })
 
+  test("a compaction's summary that quotes a typed load is no load, since writing-first clears the mark at the compaction", async () => {
+    const projects = join(DIR, "summary-projects")
+    mkdirSync(join(projects, "p"), { recursive: true })
+    const summary = JSON.stringify({
+      isCompactSummary: true,
+      message: {
+        content: "Summary: earlier the session ran <command-name>/writing-for-agents</command-name>.",
+        role: "user",
+      },
+      sessionId: "s1",
+      type: "user",
+    })
+    writeFileSync(
+      join(projects, "p", "s1.jsonl"),
+      [
+        typedLine("<command-name>/writing-for-agents</command-name>", "s1"),
+        bashLine("echo a", "s1"),
+        compactLine("s1"),
+        summary,
+        bashLine("echo b", "s1"),
+      ].join("\n"),
+    )
+    const list = await calls(projects, Date.now() - 3600_000, true)
+    expect(list.map(({ command, loaded }) => [command, loaded]).toSorted()).toEqual([
+      ["echo a", true],
+      ["echo b", false],
+    ])
+  })
+
   // a factory checkout (its .git and core's playbook), a config with writing-for-agents installed, and one transcript that writes AGENTS.md before a load, after it and after a compaction
   const writingFixture = (name: string) => {
     const own = join(DIR, `${name}-config`)
