@@ -760,6 +760,18 @@ describe("item= on a checker (#1932)", () => {
     expect(set.err).toContain("roster.ts assign k3v9q2-reviewer")
     expect(set.roster?.agents).toEqual(agents)
   })
+
+  test("assign without worker= is refused on a row holding an item, as on one holding a pr, and writes nothing", async () => {
+    const onItem: Agent = { ...checker, item: REF, prs: [REF], worker: "b4n8tz-worker" }
+    delete onItem.pr
+    const agents = [live, onItem]
+    for (const pair of [`item=acme/script/other`, `pr=${pull(9)}`]) {
+      const r = await run(configWith(agents), ["assign", "k3v9q2-reviewer", "Review: s", "t", pair])
+      expect(r.code).toBe(1)
+      expect(r.err).toContain("roster.ts assign k3v9q2-reviewer")
+      expect(r.roster?.agents).toEqual(agents)
+    }
+  })
 })
 
 describe("prs (#706)", () => {
