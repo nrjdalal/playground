@@ -42,6 +42,7 @@ export const extGit = (
   dir: string,
   args: string[],
   env: Record<string, string> = {},
+  opts: { raw?: boolean } = {},
 ): { code: number; err: string; out: string } => {
   const clean = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
@@ -63,13 +64,24 @@ export const extGit = (
   return {
     code: run.exitCode,
     err: run.stderr.toString().trim(),
-    out: run.stdout.toString().trim(),
+    out: opts.raw ? run.stdout.toString() : run.stdout.toString().trim(),
   }
 }
 
 // extGit's output, or an error naming what failed.
 export const mustGit = (dir: string, args: string[], env: Record<string, string> = {}): string => {
   const run = extGit(dir, args, env)
+  if (run.code !== 0) throw new Error(`git ${args[0]} in ${dir}: ${run.err}`)
+  return run.out
+}
+
+// mustGit's output as git wrote it, a file's bytes whole with its final newline, where the trimmed shape would drop it.
+export const mustGitRaw = (
+  dir: string,
+  args: string[],
+  env: Record<string, string> = {},
+): string => {
+  const run = extGit(dir, args, env, { raw: true })
   if (run.code !== 0) throw new Error(`git ${args[0]} in ${dir}: ${run.err}`)
   return run.out
 }
