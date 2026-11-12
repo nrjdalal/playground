@@ -396,6 +396,10 @@
       "use": "The count of changes this viewer has not read, which the aside's Changelog square reads on every page rather than one page; 404 while CHANGELOG_ENABLED is false."
     },
     {
+      "route": "GET /api/v1/dashboard/dispatcher/log",
+      "use": "A page of the live dispatcher's own log after a seq, which this Mac answers through the relay for a bot on yard.logReaders alone (BOT_GETS), redacted before it leaves, so a bot the owner lets read the log reads it from Yard."
+    },
+    {
       "route": "GET /api/v1/ext/items",
       "use": "Every item each scope holds, by scope, kind and key, accepted or proposed, the same list `playground ext list --scope <scope>` or `--kind <kind>` reads from the folders, while a bare `playground ext list` names the extensions themselves."
     },

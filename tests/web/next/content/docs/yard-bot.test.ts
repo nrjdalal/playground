@@ -10,6 +10,7 @@ const read = (path: string) => Bun.file(join(ROOT, path)).text()
 const page = await read("web/next/content/docs/yard-bot.mdx")
 const router = await read("api/hono/src/routers/yard.ts")
 const store = await read("api/hono/src/lib/yard/store.ts")
+const dispatcher = await read("api/hono/src/routers/dispatcher.ts")
 
 const PREFIX = "/api/v1/yard"
 
@@ -28,23 +29,34 @@ const messagesQuery = router.slice(router.indexOf('"/channels/:id/messages"'))
 const pageMax = /limit: z\.coerce\.number\(\)\.int\(\)\.min\(\d+\)\.max\((\d+)\)/.exec(
   messagesQuery,
 )![1]!
-const STATUSES = ["201", "400", "401", "403", "404", "429"]
+// the log route's page, the size the Mac answers it in
+const logPage = /LOG_PAGE = (\d+)/.exec(dispatcher)?.[1] ?? "none"
+// the log's first cursor, the lowest after the Mac's route takes
+const logStart =
+  /after: z\.coerce\.number\(\)\.int\(\)\.min\((\d+)\)/.exec(dispatcher)?.[1] ?? "none"
+const STATUSES = ["201", "400", "401", "403", "404", "429", "503"]
 const held = [
   String(MAX_TEXT),
   String(RETENTION_DAYS),
   ...[...postLimits.matchAll(/(\d+)/g)].map((m) => m[1]!),
   pageSize,
   pageMax,
+  logPage,
+  logStart,
   ...STATUSES,
 ]
 
-test("every route the bot guide names is one yard.ts mounts, and it names both of the DM's message routes", () => {
+test("every route the bot guide names is one yard.ts mounts, and it names both of the DM's message routes and the log route", () => {
   const named = [
     ...page.matchAll(/\b(GET|POST|DELETE) \$YARD_HOST(\/api\/v1\/yard\/[^\s?`]+)/g),
   ].map(([, method, path]) => `${method} ${path!.replace("$YARD_DM_ID", ":id")}`)
   expect(named.filter((route) => !routes.has(route))).toEqual([])
   expect(new Set(named)).toEqual(
-    new Set([`GET ${PREFIX}/channels/:id/messages`, `POST ${PREFIX}/channels/:id/messages`]),
+    new Set([
+      `GET ${PREFIX}/bot/log`,
+      `GET ${PREFIX}/channels/:id/messages`,
+      `POST ${PREFIX}/channels/:id/messages`,
+    ]),
   )
   expect(page.match(/\/api\/v1\/yard/g)).toHaveLength(named.length)
 })
@@ -58,6 +70,7 @@ test("every number the bot guide names is one the code holds, and it names each 
     ...postLimits.match(/\d+/g)!,
     pageSize,
     pageMax,
+    logPage,
   ])
     expect(numbers).toContain(n)
   for (const status of ["401", "403", "429"]) expect(page).toContain(`- ${status}: `)
@@ -77,4 +90,11 @@ test("the bot guide names its three settings with no value, in plain markdown wi
   expect(page).not.toMatch(/https?:\/\//)
   expect(page).not.toMatch(/^(import|export) /m)
   expect(page).not.toMatch(/<[A-Z]/)
+})
+
+test("the bot guide pages the log by its after cursor, the last seq it read (#1888)", () => {
+  const section = page.slice(page.indexOf("## Read the dispatcher's log"))
+  expect(section).toContain("GET $YARD_HOST/api/v1/yard/bot/log?after=")
+  for (const word of ["`after`", "`seq`", "`hasMore`", "`session`", "[hidden]", "- 503: "])
+    expect(section).toContain(word)
 })

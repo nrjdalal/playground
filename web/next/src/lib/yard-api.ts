@@ -41,7 +41,7 @@ async function yard<T>(path: string, init?: { body?: unknown; method?: string })
   return data as T
 }
 
-// A bot the owner made with `playground yard bot add`: its login, <name>[bot], and the id of its DM with the owner.
+// A bot the owner made with `playground yard bot add`: its login, <name>[bot], the id of its DM with the owner, and whether it may read the dispatcher's log.
 export type YardBot = {
   createdAt: string
   dm: string
@@ -108,6 +108,8 @@ export const yardApi = {
     yard<{ bot: YardBot }>(`/bots/${segment(name)}`, { method: "DELETE" }),
   revokeToken: (id: string) =>
     yard<{ token: YardToken }>(`/tokens/${segment(id)}`, { method: "DELETE" }),
+  setReadsLog: (name: string, readsLog: boolean) =>
+    yard<{ bot: YardBot }>(`/bots/${segment(name)}`, { body: { readsLog }, method: "PATCH" }),
   tokens: () => yard<{ tokens: YardToken[] }>("/tokens"),
 }
 

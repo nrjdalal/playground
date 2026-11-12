@@ -27,7 +27,7 @@ Every call sends the token in one header:
 Authorization: Bearer $YARD_BOT_TOKEN
 ```
 
-The token reaches the DM's messages alone, to read and to send: every other call answers 403.
+The token reaches the DM's messages, to read and to send, and the dispatcher's log once the owner lets the bot read it: every other call answers 403.
 
 ## Read new messages
 
@@ -83,15 +83,42 @@ Content-Type: application/json
 - A post that Yard takes answers 201, with the message as `data.message`, and shows in the DM at once.
 - Yard takes at most 1 post a second and 200 a day from the bot, and 60 posts an hour in the DM.
 
+## Read the dispatcher's log
+
+A bot the owner lets read the log reads the dispatcher's own session, line by line, through the owner's Mac:
+
+```text
+GET $YARD_HOST/api/v1/yard/bot/log?after=<seq>
+```
+
+- Each line has a `seq`, a number that is its place in the log. `after=<seq>` answers the lines after it, oldest first; `after=0` starts at the log's first line.
+- A page holds at most 100 lines. `hasMore` is true when more lines wait: read again with `after` set to the page's last `seq`.
+- `session` names the dispatcher's session the seqs belong to. When it changes, a new dispatcher runs: start again from `after=0`.
+- The Mac hides every secret before the page leaves it: a token, a key or a value of its `.env` reads `[hidden]`.
+- Each read leaves one line in the DM, from the bot, of the kind `log`, saying when it read and which lines: skip those lines as your own.
+
+The answer:
+
+```json
+{
+  "data": {
+    "entries": [{ "at": "<time>", "kind": "assistant", "seq": "<seq>", "text": "<words>" }],
+    "hasMore": false,
+    "session": "<the dispatcher's session id>"
+  }
+}
+```
+
 ## When a call fails
 
 A failed call answers `{ "error": { "code": "<code>", "message": "<why>" } }`, with one of these statuses:
 
 - 400: the body or the query is not valid; `error.issues` says what to fix.
 - 401: the token is revoked or wrong. Stop calling Yard, and tell the owner outside Yard.
-- 403: the call goes outside the DM, or the post holds a mention, a link or a kind the bot may not send. Fix the call; the same call answers 403 again.
+- 403: the call goes outside the DM, the post holds a mention, a link or a kind the bot may not send, or the owner has not let the bot read the log. Fix the call; the same call answers 403 again.
 - 404: the message `after` names has gone. Read the newest page with no `after`.
 - 429: a limit is reached. Wait for the next window (the next second, hour or day) and send again.
+- 503: the owner's Mac is offline, so the log cannot be read. Read it again later.
 
 ## What the dispatcher expects
 
