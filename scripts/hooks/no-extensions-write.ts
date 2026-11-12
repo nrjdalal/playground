@@ -1260,13 +1260,14 @@ function rooted(commands: Command[]): boolean {
   )
 }
 
-// A git commit the hook reads as text: git as its own program (ownProgram), its sub commit, no shell variable set, no git option ahead of commit that changes what git runs or where (-c, -C, --config-env, --exec-path, --git-dir, --work-tree) but a -C naming the folder the shell is surely in, which moves git nowhere, and every spaced word a quoted message it holds (after -m, a flag cluster ending in m, --message, or --message=), since commit runs no word it is given.
+// a -C word naming, as one literal absolute path, the folder every place the shell may be in resolves to
 const ownFolder = (word: Word | undefined, env: Env) =>
   !!word &&
   literal(word) &&
   word.value.startsWith("/") &&
   env.cwdSure !== undefined &&
   places(env).every(({ cwd }) => cwd === resolve(word.value))
+// A git commit the hook reads as text: git as its own program (ownProgram), its sub commit, no shell variable set, no git option ahead of commit that changes what git runs or where (-c, -C, --config-env, --exec-path, --git-dir, --work-tree) but a -C naming the folder the shell is surely in, which moves git nowhere, and every spaced word a quoted message it holds (after -m, a flag cluster ending in m, --message, or --message=), since commit runs no word it is given.
 function quietCommit(cmd: Command, parsed: Parsed, env: Env): boolean {
   const { args, local, name } = parsed
   if (name !== "git" || local.size > 0 || !ownProgram(cmd, parsed)) return false
@@ -1383,13 +1384,13 @@ function shellRunnerArgs(text: string): string[] {
   return out
 }
 
-// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own, and the command string a shell-running call in it is given; `vars` is the scope's variables set since their lines were last read.
+// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own, and the command string a shell-running call in it is given; `vars` is the scope's variables set since their lines were last read, and `plain` the words a line read whole keeps as text (wholeText).
 function runsOf(
   parsed: Parsed,
   vars: Text[],
   whole: boolean,
   rootLine: boolean,
-  text: Set<Word>,
+  plain: Set<Word>,
 ): string[] {
   const { args, first, local } = parsed
   const values = [...local.values(), ...vars].flatMap((text) => {
@@ -1397,7 +1398,7 @@ function runsOf(
     return text.unknown ? [] : [text.value]
   })
   for (const word of whole ? (first ? [first, ...args] : args) : [])
-    for (const piece of text.has(word) ? [] : texts(word)) {
+    for (const piece of plain.has(word) ? [] : texts(word)) {
       values.push(piece.value.replace(/^!/, ""))
       // printf and echo -e print a \n as a line break, which a root shell runs as one
       if (rootLine) values.push(...piece.value.split("\\n"))

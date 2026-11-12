@@ -10286,14 +10286,14 @@ function shellRunnerArgs(text) {
   }
   return out;
 }
-function runsOf(parsed, vars, whole, rootLine, text) {
+function runsOf(parsed, vars, whole, rootLine, plain) {
   const { args, first, local } = parsed;
   const values = [...local.values(), ...vars].flatMap((text) => {
     tick();
     return text.unknown ? [] : [text.value];
   });
   for (const word of whole ? first ? [first, ...args] : args : [])
-    for (const piece of text.has(word) ? [] : texts(word)) {
+    for (const piece of plain.has(word) ? [] : texts(word)) {
       values.push(piece.value.replace(/^!/, ""));
       if (rootLine)
         values.push(...piece.value.split("\\n"));
