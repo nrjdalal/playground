@@ -216,6 +216,8 @@ function casePatterns(commands: Command[]): Set<Command> {
 const GLOB = /[*?[{(]/
 // Variables that make git or a pager run a program, or point git at a config file that can, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/
+// the variables that make a program run another, gh's (GH_EDITOR, GH_PAGER) and agent-browser's own among them, so a line setting one keeps a jq filter's and an eval script's canary reading
+const TEXT_RUNS = new RegExp(`${RUNS.source}|^(?:AGENT_BROWSER_[A-Z0-9_]+|BROWSER|GH_[A-Z0-9_]+)$`)
 // git's variables that only name an author or a committer, text git never runs
 const GIT_TEXT = /^GIT_(?:AUTHOR|COMMITTER)_/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
@@ -1002,6 +1004,39 @@ function sedInPlace(cmd: Command, parsed: Parsed): Set<Word> | undefined {
   return new Set(read)
 }
 
+// An in-place perl edit read call by call as an in-place sed is: perl as its own program with no PERL variable set, its options l, n, p and w clustered with a bare i (`-pi`), each -e script a literal word PERL_SCRIPT holds, and each file a literal PERL_FILE; its scripts are the words it returns, text perl reads as its program
+function perlInPlace(cmd: Command, parsed: Parsed, env: Env): Set<Word> | undefined {
+  const { args, local, name } = parsed
+  if (program(name) !== "perl" || !ownProgram(cmd, parsed)) return undefined
+  if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL"))) return undefined
+  const scripts: Word[] = []
+  let inPlace = false
+  let k = 0
+  for (; k < args.length && args[k].value.startsWith("-") && args[k].value !== "-"; k++) {
+    const { value } = args[k]
+    if (value === "--") {
+      k++
+      break
+    }
+    if (!PERL_IN_PLACE.test(value)) return undefined
+    if (value.endsWith("i")) inPlace = true
+    if (value.endsWith("e")) {
+      if (!args[k + 1]) return undefined
+      scripts.push(args[++k])
+    }
+  }
+  const files = args.slice(k)
+  if (!inPlace || scripts.length === 0 || files.length === 0) return undefined
+  if (!scripts.every((w) => literal(w) && PERL_SCRIPT.test(w.value))) return undefined
+  if (!files.every((w) => literal(w) && PERL_FILE.test(w.value))) return undefined
+  return new Set(scripts)
+}
+// an in-place perl edit's option clusters of l, n, p and w: one ending in i, which takes the rest of its cluster as a backup suffix and so ends it bare (`-pi`), or one whose last letter is e, whose script is the next word
+const PERL_IN_PLACE = /^-[lnpw]*[ei]?$/
+// Each word an in-place sed or perl edit reads as its script, or undefined for any other call
+const inPlaceScripts = (cmd: Command, parsed: Parsed, env: Env) =>
+  sedInPlace(cmd, parsed) ?? perlInPlace(cmd, parsed, env)
+
 // perl's options that run no other code and write nothing: a, l, n, p and w clustered, the last of them may be e or E, whose script is the next word; -d, -i, -I, -m, -M, -s, -x and the rest are off it
 const PERL_FLAG = /^-[alnpw]*[eE]?$/
 // a regex with no variable, no array and no code block (`(?{`, `(??{`, `(*{`), its $ only an anchor
@@ -1182,16 +1217,25 @@ function rooted(commands: Command[]): boolean {
   )
 }
 
-// A git commit the hook reads as text: git as its own program (ownProgram), its sub commit, no shell variable set, no git option ahead of commit that changes what git runs or where (-c, -C, --config-env, --exec-path, --git-dir, --work-tree), and every spaced word a quoted message it holds (after -m, a flag cluster ending in m, --message, or --message=), since commit runs no word it is given.
+// A git commit the hook reads as text: git as its own program (ownProgram), its sub commit, no shell variable set, no git option ahead of commit that changes what git runs or where (-c, -C, --config-env, --exec-path, --git-dir, --work-tree) but a -C naming the folder the shell is surely in, which moves git nowhere, and every spaced word a quoted message it holds (after -m, a flag cluster ending in m, --message, or --message=), since commit runs no word it is given.
+const ownFolder = (word: Word | undefined, env: Env) =>
+  !!word &&
+  literal(word) &&
+  word.value.startsWith("/") &&
+  env.cwdSure !== undefined &&
+  places(env).every(({ cwd }) => cwd === resolve(word.value))
 function quietCommit(cmd: Command, parsed: Parsed, env: Env): boolean {
   const { args, local, name } = parsed
   if (name !== "git" || local.size > 0 || !ownProgram(cmd, parsed)) return false
   const { rest, sub } = gitCall(args, env)
   if (sub !== "commit") return false
-  const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value)
+  const before = args.slice(0, args.length - rest.length - 1)
   if (
     before.some(
-      (w) => w === "-c" || w === "-C" || /^--(?:config-env|exec-path|git-dir|work-tree)/.test(w),
+      ({ value }, k) =>
+        value === "-c" ||
+        /^--(?:config-env|exec-path|git-dir|work-tree)/.test(value) ||
+        (value === "-C" && !ownFolder(before[k + 1], env)),
     )
   )
     return false
@@ -1219,7 +1263,7 @@ function wholeLine(commands: Command[], env: Env, readsOnly = false): boolean {
     if (edited && base === "date") return true
     if (!readsOnly && quietRun(cmd, parsed, env)) return false
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
-    return writes || !(narrow(cmd, env) || (!readsOnly && sedInPlace(cmd, parsed)))
+    return writes || !(narrow(cmd, env) || (!readsOnly && inPlaceScripts(cmd, parsed, env)))
   })
 }
 
@@ -1232,7 +1276,7 @@ function quietRun(cmd: Command, parsed: Parsed, env: Env): boolean {
 
 // Whether a call edits a file on a line read call by call: a quiet commit or an in-place sed, each judged by what it writes
 const edits = (cmd: Command, parsed: Parsed, env: Env) =>
-  quietRun(cmd, parsed, env) || sedInPlace(cmd, parsed) !== undefined
+  quietRun(cmd, parsed, env) || inPlaceScripts(cmd, parsed, env) !== undefined
 
 // Calls whose string argument a shell runs: exec and execSync in a program that names child_process, and execFile, execFileSync, spawn and spawnSync in a program that names `shell` other than as a key whose whole value is a literal `false` (true, a shell's path, a value read at run time or an expression that starts with `false` all run one). A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
 const IMPLICIT_SHELL = new Set(["exec", "execSync"])
@@ -1297,18 +1341,24 @@ function shellRunnerArgs(text: string): string[] {
 }
 
 // Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own, and the command string a shell-running call in it is given; `vars` is the scope's variables set since their lines were last read.
-function runsOf(parsed: Parsed, vars: Text[], whole: boolean, rootLine: boolean): string[] {
+function runsOf(
+  parsed: Parsed,
+  vars: Text[],
+  whole: boolean,
+  rootLine: boolean,
+  text: Set<Word>,
+): string[] {
   const { args, first, local } = parsed
   const values = [...local.values(), ...vars].flatMap((text) => {
     tick()
     return text.unknown ? [] : [text.value]
   })
   for (const word of whole ? (first ? [first, ...args] : args) : [])
-    for (const text of texts(word)) {
-      values.push(text.value.replace(/^!/, ""))
+    for (const piece of text.has(word) ? [] : texts(word)) {
+      values.push(piece.value.replace(/^!/, ""))
       // printf and echo -e print a \n as a line break, which a root shell runs as one
-      if (rootLine) values.push(...text.value.split("\\n"))
-      values.push(...shellRunnerArgs(text.value))
+      if (rootLine) values.push(...piece.value.split("\\n"))
+      values.push(...shellRunnerArgs(piece.value))
     }
   values.push(...programLines(parsed, rootLine))
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
@@ -1567,6 +1617,18 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env)
+    // on a line read whole with no root shell and no variable set that makes a program run another (TEXT_RUNS), a read-only gh call's jq filter and agent-browser's eval script stay text, as on a line read call by call, since neither program runs them as a shell line
+    const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined
+    const wholeText = new Set<Word>(
+      whole &&
+        !rootLine &&
+        ownProgram(cmd, parsed) &&
+        ![...parsed.local.keys(), ...env.vars.keys()].some(
+          (key) => TEXT_RUNS.test(key) || marked(key),
+        )
+        ? [...ghFilters(parsed), ...(browserCode ? [browserCode] : [])]
+        : [],
+    )
     const fed = xargs ? await stdinOf(cmd, env) : undefined
     const stdinWords: Word[] = !fed
       ? []
@@ -1610,11 +1672,16 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       evaluated && !evaluated.glob && !marked(evaluated.value)
         ? maskRegexes(evaluated.value, (body) => guarded(body, env))
         : undefined
-    const own = (word: Word): Word =>
-      word === evaluated && masked !== undefined ? { ...word, value: masked } : word
+    const shownEval =
+      evaluated && masked !== undefined ? { ...evaluated, value: masked } : undefined
+    const own = (word: Word): Word => (word === evaluated && shownEval ? shownEval : word)
+    const shownText = new Set([...wholeText].map(own))
     for (const raw of reader
       ? []
-      : [...script, ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine)]) {
+      : [
+          ...script,
+          ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine, shownText),
+        ]) {
       const line =
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
@@ -1630,7 +1697,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     }
     // a quiet commit's message is text git never runs, a gated call it names included, and an in-place sed's script is text sed reads as a program of its own
     const quiet = !whole && quietCommit(cmd, parsed, env)
-    const sedScripts = whole ? undefined : sedInPlace(cmd, parsed)
+    const sedScripts = whole ? undefined : inPlaceScripts(cmd, parsed, env)
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
@@ -1647,8 +1714,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         `${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`,
       )
     const steady = steadyAt(cmd)
-    // on a line read call by call, a read-only gh call's jq filter is text, never a path
-    const filters = whole ? new Set<Word>() : ghFilters(parsed)
+    // a read-only gh call's jq filter is text, never a path, and on a line read whole so is each word wholeText keeps as text
+    const filters = whole ? shownText : ghFilters(parsed)
     // each folder the shell may be in, so a program a cd the reader cannot be sure of would run inside the root, or a path of its own that lands there, is judged in every one
     for (const here of places(env)) {
       if (inRoot(here.cwd)) return refuse(`${verb} run inside ${root}`)
@@ -1703,7 +1770,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       for (const word of [first, ...args].map(
         (word) => heldWord(own(word), here, steady) ?? own(word),
       )) {
-        // a quiet commit's message, an in-place sed's script and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
+        // a quiet commit's message, an in-place sed's or perl's script, a gh filter and a browser eval's script on a line read whole are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
         const text =
           (quiet && /\s/.test(word.value)) ||
           !!sedScripts?.has(word) ||
