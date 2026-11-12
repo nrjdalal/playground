@@ -210,7 +210,7 @@ test("an unmarked lock left behind goes aside once stale, and stays there with i
   utimesSync(lock, old, old)
   const said = spyOn(console, "error").mockImplementation(() => {})
   try {
-    expect(withLock(data("unmarked"), () => "ran", 1_000)).toBe("ran")
+    expect(withLock(data("unmarked"), () => "ran", { wait: 1_000 })).toBe("ran")
     const left = readdirSync(dirname(lock)).filter((name) => name.startsWith(basename(lock)))
     expect(left).toHaveLength(1)
     expect(left[0]).toStartWith(`${basename(lock)}.stale-`)
