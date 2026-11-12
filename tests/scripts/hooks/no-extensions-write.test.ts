@@ -1768,6 +1768,64 @@ describe("a quoted argument is read as a command line only where a program runs 
   )
 })
 
+// #1887: a perl edit's script, a browser eval's script, a commit message and a jq filter are text no shell runs, so each runs from the home on a line read whole, beside the same programs' ordinary calls, which ran before too
+describe("text no program runs as a shell line stays text on a line read whole", () => {
+  test.each([
+    [
+      "an in-place perl edit holding a parenthesised conditional",
+      `perl -pi -e 's/\\(a \\? b\\)/(a ? c : "")/' ${WORK}/f`,
+    ],
+    ["an in-place perl edit by -i and -pe", `perl -i -pe 's/(a)/b/' ${WORK}/f`],
+    ["a browser eval holding ?? beside a sleep", "sleep 1; agent-browser eval 'a?.b ?? 1'"],
+    [
+      "a browser eval by session beside a sleep",
+      "sleep 1; agent-browser --session t eval 'a ?? 1'",
+    ],
+    ["a jq alternative in a loop", `for p in 1 2; do gh api x --jq '"\\(.a)/\\(.b // "-")"'; done`],
+    [
+      "a jq alternative beside an assignment",
+      `h=$(gh api x --jq .sha); gh api x --jq '(.b // "-")'`,
+    ],
+    ["a perl reader", `perl -ne 'print if /a/' ${WORK}/f`],
+    ["an in-place sed", `sed -i '' 's/a/b/' ${WORK}/f`],
+    ["a plain browser eval", "agent-browser eval 'document.title'"],
+    ["a gh read", "gh api x --jq .sha"],
+    ["a plain commit", 'git commit -q -m "a b"'],
+  ])("%s runs", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    ["an in-place perl edit of a file in the root", `perl -pi -e 's/a/b/' ${LIST}`],
+    ["a browser eval whose output a shell runs", `sleep 1; agent-browser eval 'a ?? 1' | sh`],
+  ])("%s is still refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook ")
+  })
+
+  // a commit's message holds a bare cd, which the shell reads as a cd to the process's home, so these run from a worktree under it
+  const tree = join(homedir(), "x", ".claude", "worktrees", "y")
+  const fromTree = (command: string) =>
+    check(JSON.stringify({ cwd: tree, tool_input: { command }, tool_name: "Bash" }), {
+      HOME: homedir(),
+    })
+  const message = '-m "x" -m "y\ncd && make || true, then . ./env"'
+  test("a commit by -C to the folder the shell is in, its message holding a cd line, runs", async () => {
+    expect(await fromTree(`git -C ${tree} commit -q ${message}`)).toBeUndefined()
+    expect(await fromTree(`git -C ~/x/.claude/worktrees/y commit -q ${message}`)).toBeUndefined()
+  })
+  test.each([
+    ["another folder", `git -C /tmp commit -q ${message}`],
+    ["a relative folder", `git -C y commit -q ${message}`],
+    ["the folder by a variable", `git -C "$PWD" commit -q ${message}`],
+    ["the folder with -c beside it", `git -c x.y=z -C ${tree} commit -q ${message}`],
+  ])(
+    "a commit by -C to %s, its message holding a cd line, is still refused",
+    async (_, command) => {
+      expect(await fromTree(command)).toContain("no-extensions-write hook ")
+    },
+  )
+})
+
 describe("a read of the root, and writes elsewhere, run", () => {
   test.each([
     ["cat of a list", `cat ${LIST}`],

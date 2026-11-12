@@ -11843,6 +11843,8 @@ var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"]);
 var RSYNC_FLAGS = new Set(["backup", "partial"]);
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
+var RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/;
+var TEXT_RUNS = new RegExp(`${RUNS.source}|^(?:AGENT_BROWSER_[A-Z0-9_]+|BROWSER|GH_[A-Z0-9_]+)$`);
 var CLI = join12("packages", "scripts", "src", "playground", "cli.ts");
 var varsRun = new WeakMap;
 var GH_READS = new Set([
@@ -15319,7 +15321,11 @@ var DATA = new Set([
   "sed"
 ]);
 var isData = (name) => DATA.has(name) || /^python[\d.]*$/.test(name);
-var scriptStaysText = (cmd, args, browserOnly) => browserOnly.has(cmd) && args[0]?.value === "eval";
+var scriptStaysText = (cmd, args, browserOnly) => browserOnly.has(cmd) && browserEval(args);
+var browserEval = (args) => {
+  const at = args[0]?.value === "--session" ? 2 : args[0]?.value.startsWith("--session=") ? 1 : 0;
+  return args[at]?.value === "eval";
+};
 var STARTERS = new Set(["screen", "tmux"]);
 var RM = new Set(["grm", "rm"]);
 var DEL = new Set(["del", "del-cli"]);
@@ -15359,7 +15365,7 @@ function packageOf(name, args) {
 }
 var READERS3 = new Set([...PRINTERS, "egrep", "fgrep", "grep", "rg"]);
 var APPENDS = new Set(["gxargs", "parallel"]);
-var RUNS = {
+var RUNS2 = {
   fd: new Set(["--exec", "--exec-batch", "-X", "-x"]),
   find: new Set(["-exec", "-execdir", "-ok", "-okdir"]),
   gfind: new Set(["-exec", "-execdir", "-ok", "-okdir"])
@@ -15527,7 +15533,7 @@ async function inspect13(raw, environment) {
       return refuse12("chflags", "it lifts the flags that keep a file from deletion");
     if (name === "chmod" && args.some((a) => /^-[A-Za-z]*[aN]/.test(a.value)))
       return refuse12("chmod -a or -N", "it strips the access entries that keep a file from deletion");
-    const runs = Object.hasOwn(RUNS, name) ? RUNS[name] : undefined;
+    const runs = Object.hasOwn(RUNS2, name) ? RUNS2[name] : undefined;
     if (runs) {
       if (args.some((a) => a.value === "-delete"))
         return refuse12(`${name} -delete`);
