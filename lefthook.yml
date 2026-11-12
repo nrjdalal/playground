@@ -139,8 +139,6 @@ pre-commit:
       run: bun --no-env-file packages/scripts/src/data-table-metrics.ts && bun --no-env-file packages/scripts/src/commit-slot.ts bun run check-types:tests
 
 commit-msg:
-  # piped, so the steps after co-authored-by read the message it wrote
-  piped: true
   commands:
     co-authored-by:
       # AGENTS.md's Commits rule: drops the trailer, in any case, and says so, so a commit that carries one goes through on its first try
