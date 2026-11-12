@@ -9547,7 +9547,7 @@ function unreadCdWrites(tool, args, env, getopt) {
       ...operandsPast(words, "", ["--pathspec-from-file"]),
       ...listed ? [SHELL_FOLDER] : []
     ];
-    return cwd === undefined ? specs : specs.map((w) => w.value.startsWith("/") ? w : { ...w, value: join5(cwd, w.value) });
+    return cwd === undefined ? specs : specs.map((w) => w.value.startsWith("/") ? w : { ...w, value: join7(cwd, w.value) });
   }
   if (tool === "mktemp") {
     if (args.some((a) => a.value === "--tmpdir"))
