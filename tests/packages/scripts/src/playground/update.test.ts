@@ -132,6 +132,39 @@ describe("runUpdate", () => {
     expect(quietSaid.some((l) => l.includes("skills changed"))).toBe(false)
   })
 
+  test("a shown step's done line carries its seconds", async () => {
+    const said: string[] = []
+    expect(
+      await runUpdate(
+        repo,
+        fakeRun().run,
+        async () => 0,
+        (l) => said.push(l),
+      ),
+    ).toBe(0)
+    expect(said.some((line) => /^playground update: link-skills done in \d+ s$/.test(line))).toBe(
+      true,
+    )
+  })
+
+  test("a failed shown step's line keeps its fix text and carries its seconds too", async () => {
+    const said: string[] = []
+    const { run } = fakeRun({ "--no-env-file": { code: 1 } })
+    expect(
+      await runUpdate(
+        repo,
+        run,
+        async () => 0,
+        (l) => said.push(l),
+      ),
+    ).toBe(1)
+    expect(
+      /^playground update: ops-restart failed in \d+ s; fix it and run playground update again$/.test(
+        said.at(-1) ?? "",
+      ),
+    ).toBe(true)
+  })
+
   test("a changed lockfile and package install and build before the restart", async () => {
     const { calls, run } = fakeRun({ diff: { out: "bun.lock\npackages/db/src/index.ts\n" } })
     expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
