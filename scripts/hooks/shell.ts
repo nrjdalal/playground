@@ -231,6 +231,7 @@ type Options = { flags: Set<string>; values: Set<string> }
 // run-slot.sh's CHAIN_WRAPPER_OPTIONS mirrors these lists, which a test holds equal, so its chain reader reads past the same options
 export const WRAPPERS = new Map<string, Options>(
   Object.entries({
+    "-": ["", ""],
     builtin: ["", ""],
     busybox: ["", ""],
     caffeinate: ["-d -i -m -s -u", "-t -w"],
