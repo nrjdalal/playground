@@ -58,16 +58,16 @@ const by = async () =>
     )?.agents,
     "ops",
   )
-// An update's outcome, one of the Inbox's OUTCOMES (api/hono/src/lib/dashboard/inbox.ts), spelled here since the scripts package cannot type-pull that file; the life test pins the words against the real schema.
-type Outcome = "alert" | "decision" | "finding" | "merged" | "shipped"
+// The two outcomes ops-wa posts, both of the Inbox's OUTCOMES (api/hono/src/lib/dashboard/inbox.ts): a pairing code or a problem is an alert, the reminder a finding; spelled here since the scripts package cannot type-pull that file, and the life test pins the words against the real schema.
+type Outcome = "alert" | "finding"
 type UpdateCard = {
   from: string
   kind: "update"
   preview: { outcome: Outcome; text: string }
   title: string
 }
-// One ask new for a card, answered by the card's id, or why the Inbox refused it: a non-zero exit, or an exit that prints no id.
-const postCard = async (card: UpdateCard): Promise<string | undefined> => {
+// One ask new for a card, answered by the card's id, or why the Inbox refused it: a non-zero exit, or an exit that prints no id. A refusal raises one alert naming the card and the reason; only the refusal alert's own refusal is logged, so a refusal never loops.
+const postCard = async (card: UpdateCard, refusalAlert = false): Promise<string | undefined> => {
   const posted = await ask(["new"], JSON.stringify(card))
   const id = posted.out
     .split("\n")
@@ -75,17 +75,19 @@ const postCard = async (card: UpdateCard): Promise<string | undefined> => {
     ?.trim()
   if (posted.code === 0 && id !== undefined) return id
   const why = posted.code === 0 ? "ask printed no id" : lastLine(posted.out)
-  if (card.preview.outcome === "alert") {
-    console.error(`ops-wa: the Inbox refused an alert: ${why}`)
+  if (refusalAlert) {
+    console.error(`ops-wa: the Inbox refused the refusal's alert for "${card.title}": ${why}`)
     return undefined
   }
-  const alert = await postCard({
-    from: card.from,
-    kind: "update",
-    preview: { outcome: "alert", text: `The Inbox refused the card "${card.title}": ${why}` },
-    title: "ops-wa: the Inbox refused a card",
-  })
-  if (alert === undefined) console.error(`ops-wa: the refusal's alert was refused too: ${why}`)
+  await postCard(
+    {
+      from: card.from,
+      kind: "update",
+      preview: { outcome: "alert", text: `The Inbox refused the card "${card.title}": ${why}` },
+      title: "ops-wa: the Inbox refused a card",
+    },
+    true,
+  )
   return undefined
 }
 const post = async (title: string, text: string, outcome: Outcome): Promise<string | undefined> =>
