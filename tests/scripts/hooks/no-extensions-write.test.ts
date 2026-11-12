@@ -2046,6 +2046,7 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["sort's one-letter --output to an absolute file", `cd "$X"; sort --o /tmp/p /tmp/a`],
     ["macOS chmod's dash-led mode of an absolute file", `cd "$X"; chmod -w /tmp/p`],
     ["curl sending a cookie", `cd "$X"; curl --cookie a=b https://example.com`],
+    ["curl with an attached -X value", `cd "$X"; curl -XPOST https://example.com`],
     ["macOS mktemp -t beside an absolute template", `cd "$X"; mktemp -t x /tmp/scratch/y.XXXX`],
     ["curl's --trace to an absolute file", `cd "$X"; curl --trace /tmp/t https://example.com`],
     [
