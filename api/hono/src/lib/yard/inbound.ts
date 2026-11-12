@@ -5,6 +5,7 @@ import type { Database } from "@packages/db"
 import { env } from "@packages/env/api-hono"
 import { approvePath, type Channel, isBotLogin, type Message } from "@packages/message"
 
+import { type Run } from "@/lib/dashboard/dispatcher-start"
 import { postItem } from "@/lib/dashboard/inbox"
 import { dataDir } from "@/lib/sessions/paths"
 import type { YardClient } from "@/lib/yard/client"
@@ -60,6 +61,14 @@ export const inboundCard = (message: Message, channel: Channel, login: string): 
   }
 }
 
+export const botLine = (_message: Message, _channel: Channel): string => ""
+
+export const queueLine = async (
+  _line: string,
+  _run?: Run,
+  _root?: string | null,
+): Promise<void> => {}
+
 // The Inbox card for the owner's own post that Yard holds pending, from this Mac's sidebar, its terminal or any of their devices: its Approve opens Yard's approve page in the browser, since a token never approves.
 export const pendingCard = (message: Message, channel: Channel, web: string | undefined): Card => ({
   from: YARD_FROM,
@@ -95,9 +104,15 @@ const saveMark = async (file: string, mark: Mark) => {
 }
 
 // Cards what waits on the owner since the last mark, oldest first by when it showed: each mention, a thread's reply or an approved held post included, each message from a bot of theirs, and each post of theirs Yard holds. It saves the mark after each card, so a failed post retries from the first one not carded. The first run only sets the mark.
+// Where the poll sends what it finds: an Inbox card, or one line queued for the dispatcher.
+export type Outlets = {
+  post: (card: Card) => Promise<void>
+  tell: (line: string) => Promise<void>
+}
+
 export async function pollWaiting(
   client: YardClient,
-  post: (card: Card) => Promise<void>,
+  { post }: Outlets,
   web: string | undefined,
   file = marksFile(),
   now = new Date(),
@@ -142,7 +157,11 @@ export function startYardPoll(
     try {
       const token = await keychain().read()
       if (token)
-        await pollWaiting(client(api, token), (card) => postCard(db, card), env.YARD_WEB_URL)
+        await pollWaiting(
+          client(api, token),
+          { post: (card) => postCard(db, card), tell: async () => {} },
+          env.YARD_WEB_URL,
+        )
     } catch (error) {
       console.error("[yard] poll failed", error)
     } finally {
