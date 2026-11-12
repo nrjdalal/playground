@@ -221,7 +221,7 @@ playground ext accept <scope> <kind> <key> <sha> --reason "<why>"
 playground ext reject <scope> <kind> <key> <sha> --reason "<why>"
 ```
 
-- Read a proposal before you judge it with `playground ext show <scope> <kind> <key> --rev <sha>`, the sha `playground ext why` lists: it prints the files that revision holds and the state the item reads that revision as now, `proposed`, `accepted` or `rejected` (a proposal that an accept moved out of `proposed/` reads `accepted`), and a reject's sha prints the proposal it removed.
+- Read a proposal before you judge it with `playground ext show <scope> <kind> <key> --rev <sha>`, the sha `playground ext why` lists: it prints the files that revision holds and the state that revision was written in, `proposed`, `accepted` or `rejected`, but `accepted` for a proposal that an accept has since moved out of `proposed/`, and a reject's sha prints the proposal it removed.
   `playground ext show` without `--rev` gives the item's state now.
 - A score below 5 is recorded as a commit of its own and leaves the proposal for a later revision or another score; a 5 accepts it (`judgeItem` in `packages/settings/src/items.ts`), so no `accept` card follows it.
 - A proposal is scored by another session, or by you: a score from the proposal's own author is refused.
