@@ -253,6 +253,7 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
   a worker whose PRs are all merged or closed and whose PR that closed last merged, an issue's URL among them never counting, while one whose last closed unmerged is kept as `worker-pr-closed` and its lead asked to reassign or end it,
   and a reviewer idle 30+ minutes whose every head carries its verdict.
   A session's PRs are its roster `pr` and `prs` list, its open branch PRs, its worker's, and every PR its own or its worker's transcript links, so one still open keeps it.
+- On both paths a worker whose status reads `shell` (a background task of its chore still running, such as a tidy after its merge) stays until that task ends, while a checker in `shell` ends by the rules above.
 - Each end runs `spawn.sh close <name>`, then `roster.ts report <name> "ended automatically: <why>" status=ended`, the merged sha in the why, and sends its lead one line: its roster `lead`, else its worker's.
 - Then it cleans each worktree the session used, one at a time (`cleanWorktree`), and the lead's line names what went and what stayed, with why; a reviewer ended idle keeps its worktrees for its resume.
   A Playground worktree in `.claude/worktrees/` with uncommitted work, unpushed commits or work not on canary stays until `playground rm` confirms its PR has merged or closed (its own PR, by its branch or its exact head), then goes through `playground rm --worktree <path> --discard` whatever it holds, with no Inbox decision; another repo's such worktree stays.

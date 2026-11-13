@@ -471,6 +471,31 @@ describe("endMerged: right after a merge", () => {
     expect(lines).toHaveLength(3)
   })
 
+  test("a worker in shell, its background task still running, stays; its reviewer in shell is ended", async () => {
+    const { closed, deps } = fakes()
+    await endMerged(
+      URL,
+      "daaac8e0000",
+      input({
+        roster: {
+          "b4t5xn-reviewer": {
+            kind: "reviewer",
+            name: "b4t5xn-reviewer",
+            pr: URL,
+            worker: "b4t5xn-worker",
+          },
+          "b4t5xn-worker": { kind: "worker", name: "b4t5xn-worker", pr: URL },
+        },
+        sessions: {
+          "b4t5xn-reviewer": live("b4t5xn-reviewer", { status: "shell" }),
+          "b4t5xn-worker": live("b4t5xn-worker", { status: "shell" }),
+        },
+      }),
+      deps,
+    )
+    expect(closed).toEqual(["b4t5xn-reviewer"])
+  })
+
   test("a worker with a next task, and the checkers of a worker on its next PR, stay", async () => {
     const { closed, deps } = fakes()
     await endMerged(
