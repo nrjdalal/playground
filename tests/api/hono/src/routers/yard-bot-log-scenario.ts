@@ -32,7 +32,9 @@ const call = async (
 const status = async (...args: Parameters<typeof call>) => (await call(...args)).status
 
 const out: Record<string, unknown> = {}
-const scout = await call("/bots", owner, { log: true, name: "scout" })
+// a token's add asks for the log and is refused, so the grant is the owner's browser's alone, as the switch is
+out.tokenLog = await status("/bots", owner, { log: true, name: "scout" })
+const scout = await call("/bots", browser, { log: true, name: "scout" })
 const quiet = await call("/bots", owner, { name: "quiet" })
 out.add = [scout.status, scout.body?.data?.bot?.readsLog, quiet.body?.data?.bot?.readsLog]
 const scoutBot = as(scout.body?.data?.secret ?? "yard_none")
@@ -116,7 +118,7 @@ out.revoke = await status("/bots/scout", owner, undefined, "DELETE")
 out.afterRevoke = await status("/bot/log", scoutBot)
 
 // a bot made again under the revoked name, with the Mac's list left as it was: Yard lets it, and the Mac refuses it, since its DM is a new one
-const again = await call("/bots", owner, { log: true, name: "scout" })
+const again = await call("/bots", browser, { log: true, name: "scout" })
 out.remade = [
   again.status,
   again.body?.data?.bot?.dm !== dm,
