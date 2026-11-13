@@ -76,4 +76,11 @@ describe("a hook's confirmation prompt", () => {
     )
     expect(promptKey(screen, waiting(LONG))).toBeNull()
   })
+
+  test("a question with no rule and no dashed rule above it is no prompt", () => {
+    const screen = [SHORT, " Do you want to proceed?", " ❯ 1. Yes", "   2. No"].join("\n")
+    expect(refusalOf("k3m9px-worker", screen, waiting(SHORT), callKey({ command: SHORT }))).toBe(
+      "k3m9px-worker's pane shows no permission prompt; nothing was pressed",
+    )
+  })
 })
