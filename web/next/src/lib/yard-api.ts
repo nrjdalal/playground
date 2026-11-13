@@ -79,8 +79,11 @@ export const yardApi = {
     yard<{ invite: YardInvite }>(`/invites/${segment(id)}/approve`, { method: "POST" }),
   bots: () => yard<{ bots: YardBot[] }>("/bots"),
   channels: () => yard<{ channels: YardChannel[] }>("/channels"),
-  createToken: (name: string) =>
-    yard<{ token: YardToken & { secret: string } }>("/tokens", { body: { name }, method: "POST" }),
+  createToken: (name: string, relay = false) =>
+    yard<{ token: YardToken & { secret: string } }>("/tokens", {
+      body: { name, relay },
+      method: "POST",
+    }),
   deny: (id: string) =>
     yard<{ message: YardMessage }>(`/messages/${segment(id)}/deny`, { method: "POST" }),
   denyInvite: (id: string) =>

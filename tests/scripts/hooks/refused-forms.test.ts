@@ -27,6 +27,7 @@ import { check as linearTicket } from "../../../scripts/hooks/no-linear-ticket"
 import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
 import { check as outsidePrCode, live } from "../../../scripts/hooks/no-outside-pr-code"
 import { check as playgroundLeak } from "../../../scripts/hooks/no-playground-leak"
+import { check as protectedPush } from "../../../scripts/hooks/no-protected-push"
 import { check as publicLeak } from "../../../scripts/hooks/no-public-leak"
 import { check as rawDelete } from "../../../scripts/hooks/no-raw-delete"
 import { check as rawSpawn } from "../../../scripts/hooks/no-raw-spawn"
@@ -157,6 +158,8 @@ storeWith(
 // A data folder whose extensions root lacks no-public-leak's list, which core never ships, so its rows pin the writes that refusal still refuses.
 const LISTLESS = storeWith(join(SCRATCH, "listless"), {})
 const OWNED = storeWith(join(SCRATCH, "owned"), { "release-owners.json": '["qmarsh"]' })
+// A data folder whose factory.repo is the made-up acme-labs/demo, the checkout folder's origin.
+const FACTORY = storeWith(join(SCRATCH, "factory"), {}, { "factory.repo": "acme-labs/demo" })
 const DESKTOP = storeWith(join(SCRATCH, "desktop"), { "desktop-owner-apps.json": '["Slack"]' })
 // A data folder whose scope acme syncs with the made-up extension repo quillco/acme-skills.
 const SYNCED = storeWith(
@@ -207,6 +210,7 @@ const CHECK_NAMES = [
   "linearTicket",
   "mainCheckout",
   "playgroundLeak",
+  "protectedPush",
   "publicLeak",
   "rawDelete",
   "rawSpawn",
@@ -225,6 +229,7 @@ const SOURCE: Checks = {
   linearTicket,
   mainCheckout,
   playgroundLeak,
+  protectedPush,
   publicLeak,
   rawDelete,
   rawSpawn,
@@ -243,6 +248,7 @@ const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
   linearTicket: "no-linear-ticket",
   mainCheckout: "no-main-checkout",
   playgroundLeak: "no-playground-leak",
+  protectedPush: "no-protected-push",
   publicLeak: "no-public-leak",
   rawDelete: "no-raw-delete",
   rawSpawn: "no-raw-spawn",
@@ -459,6 +465,10 @@ const guardsOf = (
         undefined,
         LISTS,
       ),
+  },
+  "no-protected-push": {
+    folders: { checkout: [OTHER, HOME] },
+    run: (raw) => c.protectedPush(raw, { PLAYGROUND_DATA_DIR: FACTORY, PLAYGROUND_ROLE: "worker" }),
   },
   "no-public-leak": {
     folders: { checkout: [CHECKOUT, HOME], home: [HOME, HOME] },

@@ -221,7 +221,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
   Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
-  no-prepare-write and no-protected-push, checks with no process of their own, run behind `fromFactory` through their `check`.
+  no-prepare-write and no-protected-push, checks with no process of their own, run behind `fromFactory` through their `check`, and [no-playground-leak](#no-playground-leak)'s process runs both on the GitHub tools.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
@@ -503,10 +503,11 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   `ext score` on a line where any command clears or sets `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` or `PLAYGROUND_ROLE` (an assignment or `+=` to one, one exported earlier, or env with `-u` or `--unset` naming one, `-i` alone or in a cluster, `--ignore-environment` or `-`), a shell the line runs or pipes into included,
   and `ext score` spelled with quotes or backslashes that shell removes (`s""core`, `'score'`), since a score's author is read from them;
   `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
-  and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names`, `slack.gatedSends` and `usage.keychainService`, and of every ops job's `jobs.<name>`,
+  and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names`, `slack.gatedSends`, `usage.keychainService` and `yard.logReaders`, the bots this Mac answers a read of the dispatcher's log for,
+  and of every ops job's `jobs.<name>`,
   and `settings import-jobs` but its `--dry-run`, which writes a `jobs.<name>` for each job its file lists,
   whose refusal names the Inbox guard decision whose Approve writes it.
-  A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
+  A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, to spawn.sh's `paths.codeRoot` and to `yard.logReaders`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
   Two of them only tune a number, so the Ops lead sets them as it sets spawn.sh's `gates.*`, on a line that holds the `playground` call alone.
   The Ops lead is `opsLead` in `role.ts`: the lead role, whose name in Claude Code's registry has the roster's `ops` kind.
   It sets `glm.readOnlyLoad5` to a positive number.
@@ -991,8 +992,18 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 - It refuses a push it cannot read wherever it may land in the factory's repository: an option outside its list (`--all`, `--mirror`, `--prune`, an abbreviation), a glob or the matching refspec, a ref, remote or folder built at run time, a push of the checked-out branch after an earlier command in the call that may switch it,
   a configured push refspec or `push.default=matching`, a pushInsteadOf rule over the remote, `-c`, `--config-env`, `--git-dir`, `--work-tree` or a `GIT_DIR` or `GIT_CONFIG` variable, refs from `xargs`, `git send-pack`, `git subtree push`, and an alias whose text names a push.
 - Two pushes to `main` stay outside it: ops-ext-sync's `HEAD:main` push lands in an extension repository, and `ensure-remote-branches.ts` runs as lefthook's pre-push step, never as a session's Bash call.
-- It is a check with no process of its own, which [guards](#guards) runs, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
-  It fails closed only on a call that names a push.
+- It refuses the other routes onto either branch of the factory's repository too, past any wrapper but `echo` and `printf`, each with a repository or folder it cannot read counted as the factory's:
+  - `gh pr merge`, the repository read from a pull request URL, else the last `-R`, else `GH_REPO` and the checkout's remotes; its `--help` runs.
+    The Builder alone passes, in the one form `packages/scripts/src/pr-merge/README.md` gives a hand merge, `gh pr merge <n> --squash --body-file <file> --match-head-commit <head>` (`-s` for `--squash` too), from a session whose role is `lead` (its launch's `PLAYGROUND_ROLE`, else its roster row) and whose registry name has the roster's kind `builder` (`builderLead` in `role.ts`).
+    A call whose text names `PLAYGROUND_ROLE` in any form, or runs `source` or `.`, loses that pass, an inline `--body` included, so the body goes by file.
+  - `gh api` with a write method to `repos/<owner>/<repo>/` (`{owner}/{repo}` read as gh fills it) then `git/refs` with a `ref` of either branch, `git/refs/<ref>` of either branch, `contents/<path>` with a `branch` of either or none (the default, `canary`), `merges` with a `base` of either, or `pulls/<n>/merge`, each field from `-f`, `-F` or `--input`'s JSON, the endpoint in any spelling;
+    a write to an endpoint built at run time is refused, and the ship step's tag (`git/refs` with `ref=refs/tags/<tag>`) runs.
+  - `gh api graphql` whose query names one of no-prepare-write's merge and ref mutations (`REF_MOVE`, the [no-prepare-write](#no-prepare-write) list but `createPullRequest`), or whose query it cannot read, on any repository, since a node id names none; a mutation's reason names `bun run pr:merge <n>` and `git push` as the routes.
+  - A query or an endpoint it cannot read is refused with the form that runs: the query file's path or the endpoint spelled out literally, or the query inline in single quotes, which a read, a thread reply or a resolve takes.
+  - The GitHub tools' `create_or_update_file`, `delete_file` and `push_files` on either branch or none, and `merge_pull_request` for every session, the Builder included.
+    Every other `gh` call, a write to another branch or repository and a read run.
+- It is a check with no process of its own, which [guards](#guards) runs on Bash and [no-playground-leak](#no-playground-leak)'s process on the GitHub tools, so it goes live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
+  It fails closed only on a call that names a push or another route it reads (a merge, a ref, a file write, GraphQL); a subcommand built at run time (`git "$S" origin main`) is read as a push and refused where it may land.
   Its tests are `bun run test:file tests/scripts/hooks/no-protected-push.test.ts`.
 
 ## no-raw-delete

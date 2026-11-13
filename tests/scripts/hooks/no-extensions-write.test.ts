@@ -2599,6 +2599,13 @@ describe("the gated keys are every key the guards read", () => {
     expect(await read("scripts/spawn.sh")).toContain("setting_text paths.codeRoot")
     expect(GUARD_KEYS.has("paths.codeRoot")).toBe(true)
   })
+
+  test("yard.logReaders, the bots this Mac answers a read of the dispatcher's log for, is gated (#2032)", async () => {
+    expect(GUARD_KEYS.has("yard.logReaders")).toBe(true)
+    expect(
+      await bash(`playground settings set yard.logReaders '{"x[bot]":"dm"}' --reason r`),
+    ).toContain("no-extensions-write hook refuses")
+  })
 })
 
 // PG-1090: the Inbox's guard decision takes the keys GUARD_SETTING_KEYS names, so the two lists are one, and a session's own write of each stays refused.

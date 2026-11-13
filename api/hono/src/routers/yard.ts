@@ -97,8 +97,10 @@ const web = yardCaller({ web: true })
 const owner = yardCaller({ rung: "owner", web: true })
 // the message routes, by a channel's id or a bot's own, and the log route, the only ones a bot's token reaches, the message routes only in its DM with its maker
 const memberOrBot = yardCaller({ bots: true })
-// the owner's session or the owner's own token, since `playground yard bot add` makes a bot from the Mac: the one token route that makes a credential, safe as the bot it makes reaches only its DM with the owner
+// the owner's session or the owner's own token, since `playground yard bot add` makes a bot from the Mac: the one token route that makes a credential, safe as the bot it makes reaches only its DM with the owner, and its log grant is the browser's alone
 const botMaker = yardCaller({ rung: "owner" })
+// who a token is, which the owner's relay token reaches too, so the Mac learns the login its relay answers as
+const whoAmI = yardCaller({ relay: true })
 
 // A post's body, the same on a channel's route and a bot's own
 const postBody = z.object({
@@ -139,12 +141,12 @@ const fanOut = async (caller: store.Caller, message: z.infer<typeof messageSchem
 
 // Yard's routes, which only the hosted build mounts (hosted.ts), each on the member rung or the narrower one it names.
 export const yardRouter = new Hono<{ Variables: YardVariables }>()
-  // the relay to the owner's own Mac: its socket, opened with the owner's token, and the owner's browser's dashboard reads
+  // the relay to the owner's own Mac: its socket, opened with the owner's relay token, and the owner's browser's dashboard reads
   .route(
     "/relay",
     relayRouter({
       hub,
-      mac: yardCaller({ rung: "owner" }),
+      mac: yardCaller({ relay: true, rung: "owner" }),
       owner,
       upgrade: upgradeWebSocket,
       webOrigin,
@@ -157,7 +159,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       "Who you are on Yard: your login, and whether you are its owner",
       z.object({ login: z.string(), owner: z.boolean() }),
     ),
-    member,
+    whoAmI,
     (c) => {
       const { login, owner } = c.get("caller")
       return c.json({ data: { login, owner } })
@@ -342,18 +344,18 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   .post(
     "/tokens",
     doc(
-      "Makes a token; its secret is shown this once",
+      "Makes a token; its secret is shown this once. With relay, the owner's relay token, yard_relay_, which opens the relay's socket and /me alone, and which no other token opens",
       z.object({ token: tokenSchema.extend({ secret: z.string() }) }),
       [validationErrorResponses, conflictErrorResponses],
       201,
     ),
     web,
-    valid("json", z.object({ name: tokenNameSchema })),
-    async (c) =>
-      c.json(
-        { data: { token: await store.createToken(db, c.get("caller"), c.req.valid("json").name) } },
-        201,
-      ),
+    valid("json", z.object({ name: tokenNameSchema, relay: z.boolean().optional() })),
+    async (c) => {
+      const { name, relay } = c.req.valid("json")
+      const make = relay ? store.createRelayToken : store.createToken
+      return c.json({ data: { token: await make(db, c.get("caller"), name) } }, 201)
+    },
   )
   .delete(
     "/tokens/:id",
@@ -373,7 +375,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   .post(
     "/bots",
     doc(
-      "Makes a bot: its own login, <name>[bot], its DM with you and its token, whose secret is shown this once",
+      "Makes a bot: its own login, <name>[bot], its DM with you and its token, whose secret is shown this once; with log, its leave to read the dispatcher's log, from your signed-in browser alone, as the log switch is",
       z.object({ bot: botSchema, secret: z.string() }),
       [validationErrorResponses, conflictErrorResponses],
       201,
@@ -382,6 +384,8 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
     valid("json", z.object({ log: z.boolean().optional(), name: botNameSchema })),
     async (c) => {
       const { log, name } = c.req.valid("json")
+      if (log && c.get("caller").via !== "web")
+        throw new ApiError(403, "FORBIDDEN", "Only a signed-in browser may let a bot read the log")
       return c.json({ data: await store.createBot(db, c.get("caller"), name, { log }) }, 201)
     },
   )
