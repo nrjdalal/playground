@@ -161,8 +161,6 @@ type AnswerDeps = {
   audit?: Pick<AuditLog, "append">
   cookie: () => Promise<string>
   dispatch: (request: Request) => Promise<Response>
-  // the live checkout's .env values, hidden in a bot's read; the API's own checkout's by default
-  envValues?: () => readonly string[]
   keys?: Pick<KeyStore, "offer" | "paired">
   // the kind of the Inbox card a key names (an id, or the `#iN` a message names), or null with none; a relayed write reaching a card is refused without it
   kindOf?: (key: string) => Promise<string | null>
@@ -170,6 +168,8 @@ type AnswerDeps = {
   now?: Date
   // yard.logReaders, each bot's login to its DM, the only ones whose read this Mac answers; none by default
   readers?: () => Readonly<Record<string, string>>
+  // the values hidden in a bot's read, the live checkout's .env and the factory's own Keychain items (keychainValues); the API's own checkout's .env by default
+  secretValues?: () => readonly string[]
   seen: SeenIds
   // the ids of the writes this Mac took, kept on disk across a restart
   writeIds?: Pick<WriteIdStore, "claim">
@@ -207,12 +207,12 @@ export async function answerRelay(
     audit = remoteAudit,
     cookie,
     dispatch,
-    envValues = checkoutEnvValues,
     keys = remoteKeys,
     kindOf,
     login,
     now = new Date(),
     readers = () => ({}),
+    secretValues = checkoutEnvValues,
     seen,
     writeIds = remoteWriteIds,
   }: AnswerDeps,
@@ -271,7 +271,7 @@ export async function answerRelay(
       )
       const answer = await framed(read.id, response)
       const said = Buffer.from(answer.body, "base64").toString()
-      return { ...answer, body: Buffer.from(redact(said, envValues())).toString("base64") }
+      return { ...answer, body: Buffer.from(redact(said, secretValues())).toString("base64") }
     } catch (error) {
       console.error("[relay] a bot's read failed", error)
       return json(read.id, 500, "INTERNAL_SERVER_ERROR", "This Mac could not read it")
@@ -327,8 +327,10 @@ type RelayDeps = {
   // yard.logReaders, each bot's login to its DM
   readers?: () => Readonly<Record<string, string>>
   recycleMs?: number
+  // the values hidden in a bot's read; the API's own checkout's .env by default
+  secretValues?: () => readonly string[]
   silentMs?: number
-  // the relay token from its own Keychain item, or null with none
+  // the Mac's Yard token from the Keychain, or null with none
   token: () => Promise<string | null>
 }
 
@@ -336,7 +338,7 @@ type RelayDeps = {
 const webSocket = (url: URL, token: string): RelaySocket =>
   new WebSocket(url, { headers: { authorization: `Bearer ${token}` } } as never)
 
-// Holds the relay while the API runs: one outbound socket to the hub, opened with the owner's relay token, answering each read and sending a heartbeat every RELAY_HEARTBEAT_MS, replaced before Vercel's cap, and opened again after any drop, a socket not open within CONNECT_MS, or once the hub has been silent for RELAY_SILENT_MS, each connect and each end said in a `[relay]` line.
+// Holds the relay while the API runs: one outbound socket to the hub, opened with the owner's relay-on token, answering each read and sending a heartbeat every RELAY_HEARTBEAT_MS, replaced before Vercel's cap, and opened again after any drop, a socket not open within CONNECT_MS, or once the hub has been silent for RELAY_SILENT_MS, each connect and each end said in a `[relay]` line.
 export function startRelay(deps: RelayDeps): () => void {
   const {
     connect = webSocket,
