@@ -63,7 +63,7 @@ set -euo pipefail
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
 #   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
-#   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, and holds outbound hosts to the ones a worker's loop needs; its roster row records sandbox=on, which a resume keeps and a start without it clears
+#   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, holds outbound hosts to the ones a worker's loop needs, and a worker or reviewer with no --in starts in a detached worktree made for it (review-<n> for this checkout's PR n, else <name>), whose folder, git entry and the main checkout's FETCH_HEAD, objects, refs and logs it writes, canary's, main's and live.branch's refs left shut; its roster row records sandbox=on, which a resume keeps and a start without it clears
 #   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate; the load, memory and usage gates still hold it
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words, and on a worker's, reviewer's or tester's Claude start while usage.accounts lists a Claude row, which the refusal lists in order: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
@@ -1644,14 +1644,33 @@ CLOSED=
 MANAGER=
 case "$ROLE" in dispatcher | lead) MANAGER=manager- ;; esac
 BUILT="$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k.json"
+# The closed sandbox's file holds the session's own worktree, so each session builds its own, and a later start never rewrites the file a live one runs on.
+[ -n "$CLOSED" ] && BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k-$NAME.json"
 # A --memory launch builds a file of its own, so the shared one every other session reads keeps the factory's memory off.
 [ -n "$MEMORY_DIR" ] && BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k-memory-$NAME.json"
+# A fresh --sandbox worker or reviewer with no --in starts in a worktree of its own, made here outside the sandbox, since Claude Code's sandbox keeps the repository's .git/worktrees read-only but for the folder a session starts in (SPAWN.md, --sandbox).
+# A reviewer of this checkout's own PR takes code-review-loop's review-<n> clone, which nightly-clean removes once the PR closes; any other session a folder by its own name.
+TREE=
+if [ -n "$SANDBOX_ARG" ] && [ -z "$IN_DIR" ] && [[ $ROLE =~ ^(worker|reviewer)$ ]]; then
+  leaf=$NAME first=${PR_ARG%%,*}
+  origin=$(git -C "$MAIN" remote get-url origin 2>/dev/null) || origin=
+  [[ $origin =~ github\.com[:/]([^/]+/[^/]+)$ ]] && origin=${BASH_REMATCH[1]%.git} || origin=
+  if [[ $first =~ ^#?([1-9][0-9]*)$ ]] || { [ -n "$origin" ] && [[ $first =~ ^https://github\.com/$origin/pull/([1-9][0-9]*)$ ]]; }; then leaf=review-${BASH_REMATCH[1]}; fi
+  TREE="$MAIN/.claude/worktrees/$leaf"
+  if [ ! -e "$TREE" ]; then
+    made=$(git -C "$MAIN" worktree add -q --detach "$TREE" 2>&1) || refuse "git worktree add $TREE failed, so $NAME has no worktree to start in: ${made%%$'\n'*}"
+  fi
+  DIR=$(cd -P "$TREE" && pwd -P)
+fi
+# The live dashboard's branch, live.branch, which a closed session's refs stay shut to beside canary and main; its default when the setting reads empty, so the deny never drops.
+LIVE=
+[ -n "$CLOSED" ] && { LIVE=$(setting_text live.branch); LIVE=${LIVE:-live/dashboard}; }
 # The folder the session runs in, as the launch below moves to it.
 OWN=${DIR:-$REPO}
-[ "$MODE" = column ] && OWN=$REPO
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" "$MANAGER" "$CLOSED" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+[ "$MODE" = column ] && [ -z "$TREE" ] && OWN=$REPO
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" "$MANAGER" "$CLOSED" "$LIVE" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
-src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager, closed = sys.argv[1:14]
+src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager, closed, live = sys.argv[1:15]
 settings = json.load(open(src))
 settings["autoCompactWindow"] = int(window)
 if manager:
@@ -1664,11 +1683,26 @@ if backend == "glm":
 if sandbox:
     # The sandbox lets a session write its own folder, the main checkout or a worktree in it; a deny wins over that, so every entry of the main checkout is denied, .git and every other worktree included, but the path down to a worktree the session runs in.
     own = os.path.realpath(own)
+    git = os.path.join(main, ".git")
+    # The closed sandbox lets a session fetch, commit and push in the worktree it runs in: that worktree and its .git/worktrees entry, and what git writes in the common dir.
+    work = set()
+    if closed:
+        work = {os.path.join(git, entry) for entry in ("FETCH_HEAD", "logs", "objects", "refs")}
+        link = os.path.join(own, ".git")
+        if os.path.isfile(link):
+            entry = os.path.realpath(os.path.join(own, open(link).read().split("gitdir:", 1)[-1].strip()))
+            if entry.startswith(os.path.join(git, "worktrees") + os.sep):
+                work |= {own, entry}
+    kept = work | {own}
     def denied(folder):
-        paths = [os.path.join(folder, name) for name in sorted(os.listdir(folder))]
-        return [d for p in paths if p != own for d in (denied(p) if own.startswith(p + os.sep) else [p])]
+        paths = [os.path.join(folder, entry) for entry in sorted(os.listdir(folder))]
+        return [d for p in paths if p not in kept for d in (denied(p) if any(k.startswith(p + os.sep) for k in kept) else [p])]
     # The extensions root, the data folder's extensions folder, which every guard reads its lists from, is denied too, so a sandboxed session writes the rest of the data folder alone.
     deny = denied(main) + [os.path.join(data, "extensions")]
+    # The branches the main checkout, the merge flow and the live dashboard follow stay shut inside the refs and logs a closed session writes, and so does packed-refs, which git makes only when it packs.
+    if closed:
+        shut = [os.path.join(git, *parts, branch) for parts in (("refs", "heads"), ("logs", "refs", "heads")) for branch in ("canary", "main", live)] + [os.path.join(git, "packed-refs")]
+        deny += [path for path in shut if path not in deny]
     home = os.path.expanduser("~")
     settings["sandbox"] = {
         # Bypass mode would run the unsandboxed retry with no prompt, and a sandbox that cannot start would run every command unsandboxed.
@@ -1680,7 +1714,7 @@ if sandbox:
         "excludedCommands": ["docker ps", "docker ps *"],
         "failIfUnavailable": True,
         "filesystem": {
-            "allowWrite": sorted({data, os.path.join(home, ".agent-browser"), os.path.join(home, ".bun", "install", "cache"), os.path.join(home, ".cache", "turbo"), os.path.join(home, ".portless")} | ({temp.rstrip("/")} if temp else set())),
+            "allowWrite": sorted({data, os.path.join(home, ".agent-browser"), os.path.join(home, ".bun", "install", "cache"), os.path.join(home, ".cache", "turbo"), os.path.join(home, ".portless")} | ({temp.rstrip("/")} if temp else set()) | work),
             "denyWrite": deny,
         },
         "network": {"allowLocalBinding": True, "allowUnixSockets": sorted({herdr, os.path.join(home, ".agent-browser")})},
@@ -1810,7 +1844,7 @@ LAUNCH_FILE="$LAUNCH_DIR/$NAME.sh"
 HEAD_LINES=
 if [ "$RUNTIME" = herdr ]; then
   CWD=${DIR:-}
-  [ "$MODE" = column ] && CWD=$REPO
+  [ "$MODE" = column ] && [ -z "$TREE" ] && CWD=$REPO
   mkdir -p "$RESUME_DIR" && chmod 700 "$RESUME_DIR" || refuse "it cannot prepare $RESUME_DIR"
   # A pane herdr restored keeps the folder it had, so the launch moves to the session's own; a resume stamps each run in <name>.ran, so you can see when a restore ran it.
   HEAD_LINES="cd $(printf %q "$CWD") || exit 1"$'\n'

@@ -65,7 +65,7 @@ A session already running stays where it is until its next restart.
 
 ## Launch, model and effort
 
-spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions` (a probe's file is `factory-settings-sandbox-400k.json`, a `--sandbox` start's `factory-settings-sandbox-closed-400k.json`, a dispatcher's or a lead's `factory-settings-manager-400k.json`):
+spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions` (a probe's file is `factory-settings-sandbox-400k.json`, a `--sandbox` start's its own `factory-settings-sandbox-closed-400k-<name>.json`, a dispatcher's or a lead's `factory-settings-manager-400k.json`):
 every session starts at high effort, and another effort comes with spawn.sh's `--effort` at a start or a resume, by whoever playbook's chain names ([SKILL.md](SKILL.md#chain)) and brief-rush's model rule;
 every session runs on `models.default` (Opus) unless it starts with `--model` naming another of `models.claude` (Fable, Sonnet or Haiku by default; spawn.sh refuses any other id, `--model` beside `--backend glm`, and any but `models.checker` (Opus) for a reviewer or tester, whose verdict gates a merge, and records none of them,
 so a resume takes `--model` afresh and one without it runs on Opus) or with `--backend glm` (below) (Opus at extra-high effort for research and everything else, never Sonnet), and every subagent a session starts runs on Sonnet unless it names a model,
@@ -202,8 +202,13 @@ A resumed session, a checker included, runs in the worktree or clone it ran in: 
 
 ## --sandbox
 
-`--sandbox`, with a worker's or probe's start or a reviewer's or probe's column, starts the session in the closed sandbox, `factory-settings-sandbox-closed-400k.json` (`factory-settings-glm-sandbox-closed-400k.json` on GLM).
+`--sandbox`, with a worker's or probe's start or a reviewer's or probe's column, starts the session in the closed sandbox, a file of its own, `factory-settings-sandbox-closed-400k-<name>.json` (`factory-settings-glm-sandbox-closed-400k-<name>.json` on GLM), since its allow list names the session.
 That is a probe's sandbox that also closes loopback, Keychain reads, and reads and writes of the data folder's secret files to its shell commands, holds outbound hosts to GitHub's and the npm registry, and commits unsigned (scripts/README.md, spawn.sh).
+A session works in the worktree it starts in, since Claude Code's own sandbox rule (2.1.323) reads "The repository's `.git/worktrees` is read-only in the sandbox, apart from this session's own worktrees", so `git worktree add` inside it fails and no allow in the settings file opens it.
+So a fresh worker or reviewer start with no `--in` runs in a detached worktree spawn.sh makes before launch, outside the sandbox: a reviewer of the checkout's own PR in `.claude/worktrees/review-<n>`, the clone code-review-loop reuses, and any other in `.claude/worktrees/<name>`; a probe starts where it does today.
+In it a worker makes its branch with `git fetch origin canary`, then `git switch -c <branch> --no-track origin/canary`, since the worktree starts on the main checkout's `HEAD` and a branch that tracks `origin/canary` writes the shut `.git/config`, and a reviewer takes the PR's head with `git fetch origin pull/<n>/head` and `git checkout --detach FETCH_HEAD`.
+It writes that worktree, its `.git/worktrees` entry, and the main checkout's `.git/FETCH_HEAD`, `objects`, `refs` and `logs`; every other session's worktree, the `canary`, `main` and `live.branch` (the live dashboard's, `live/dashboard` by default) refs and their logs, `packed-refs`, `config`, `hooks`, `HEAD`, `index` and the rest of the checkout stay shut.
+It pushes with `git push origin HEAD:<branch>`, since `-u` writes the shut `.git/config`.
 It fits a worker with no stack: inside it nothing listens on loopback or reaches a stack, so a tester, which drives one, stays off it, and spawn.sh refuses it for every other role and mode.
 Its roster row records `sandbox=on`, which a resume and `spawn.sh restore` keep, and a start without the flag under the same name clears.
 A start from inside it leaves the `--account` and GLM key check to the new pane's shell, which runs outside the sandbox and stops on a missing item before claude runs.
