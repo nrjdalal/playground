@@ -631,7 +631,7 @@ const linkHolder = (at: string, roots: Roots, places: string[]): string | null =
   return `${at} is linked into by ${links.sort().slice(0, 3).join(", ")}${more}: repoint or remove each link first`
 }
 
-// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session, running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree given an archive folder, archiveUnlanded has archived each of its commits no remote holds.
+// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit origin/canary holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree given an archive folder, archiveUnlanded has archived each of its commits no remote holds.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   const repo = worktreeRepo(at, roots)
@@ -680,6 +680,17 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
         : undefined
     const byPr = pr !== undefined && new RegExp(`(^|\\D)${pr}(\\D|$)`).test(where)
     if (!byBranch && !byPr && !byName && !byId) continue
+    // a clean detached checkout at a commit origin/canary holds is a reader of canary, not the row's work, so a live row holds it no more
+    if (
+      !branch.length &&
+      !git("status", "--porcelain").out &&
+      git("merge-base", "--is-ancestor", "HEAD", "origin/canary").ok
+    ) {
+      holders.note?.(
+        `${at} sits clean, detached, at a commit origin/canary holds, so ${agent.name}'s roster row (${agent.status}) holds it no more`,
+      )
+      continue
+    }
     // a finished PR frees its worktree from a row that names it by its branch or by that PR's own number alone, so a row naming another PR, or the session by name or id, still holds it; commits past the freed PR's head keep the hold, named with them, so --discard cannot take unmerged work
     const freed = holders.freed
     const ownRow =
