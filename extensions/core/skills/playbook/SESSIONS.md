@@ -29,7 +29,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A column start names its spawner's pane as `$HERDR_PANE_ID`, which herdr sets in every pane's shell.
    A worker that only reads (research, a fetch, an investigation) starts with `--reads-only`, which passes a full run-slot room at the slots gate ([SPAWN.md](SPAWN.md#capacity-gate)) while the load, memory and usage gates still hold it, and its brief bars every run-slot run (a build, a suite, a type check, an install), since its start took no room.
    Read [SPAWN.md](SPAWN.md) for the command of the mode you start (a worker, a runner, a checker's or probe's column, a manager) and for each flag you pass,
-   and before you act on a refusal: it holds the capacity gate, the launch line with its model and effort, the resume, `--account`, `--backend glm`, `--runtime herdr` with `spawn.sh restore`, `--check`, and the role and settings every launch carries.
+   and before you act on a refusal: it holds the capacity gate, the launch line with its model and effort, the resume, `--account`, `--backend glm`, `--runtime herdr` with `spawn.sh restore`, `--check`, `--sandbox`, and the role and settings every launch carries.
    Done when spawn.sh has printed herdr's `herdr pane <id> workspace <id>` line for the session, or a refusal you have acted on by its gate's section in SPAWN.md.
 
 3. Brief it with `SendMessage` once `ListAgents` lists the name, writing the brief with writing-for-agents loaded (SKILL.md's **writing** rule).
@@ -253,6 +253,7 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
   a worker whose PRs are all merged or closed and whose PR that closed last merged, an issue's URL among them never counting, while one whose last closed unmerged is kept as `worker-pr-closed` and its lead asked to reassign or end it,
   and a reviewer idle 30+ minutes whose every head carries its verdict.
   A session's PRs are its roster `pr` and `prs` list, its open branch PRs, its worker's, and every PR its own or its worker's transcript links, so one still open keeps it.
+- On both paths a worker whose status reads `shell` (a background task of its chore still running, such as a tidy after its merge) stays until that task ends, while a checker in `shell` ends by the rules above.
 - Each end runs `spawn.sh close <name>`, then `roster.ts report <name> "ended automatically: <why>" status=ended`, the merged sha in the why, and sends its lead one line: its roster `lead`, else its worker's.
 - Then it cleans each worktree the session used, one at a time (`cleanWorktree`), and the lead's line names what went and what stayed, with why; a reviewer ended idle keeps its worktrees for its resume.
   A Playground worktree in `.claude/worktrees/` with uncommitted work, unpushed commits or work not on canary stays until `playground rm` confirms its PR has merged or closed (its own PR, by its branch or its exact head), then goes through `playground rm --worktree <path> --discard` whatever it holds, with no Inbox decision; another repo's such worktree stays.

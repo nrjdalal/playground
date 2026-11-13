@@ -288,6 +288,7 @@ const KNOWN_KEYS: readonly string[] = [
   "reportsTo",
   "repo",
   "role",
+  "sandbox",
   "schedule",
   "size",
   "slot",

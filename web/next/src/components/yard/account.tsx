@@ -19,7 +19,7 @@ import { toast } from "@/components/ui/toast"
 import { inviteRequests } from "@/lib/yard"
 import { BOTS_KEY, INVITES_KEY, TOKENS_KEY, yardApi } from "@/lib/yard-api"
 
-// Account and tokens: each token is a device's way to post without a browser, named for that device (never "web"), its secret shown once; the owner's relay token, which the switch makes, opens the Mac's relay alone. A member asks the owner to let someone in here, and the owner sees those requests and the bots `playground yard bot add` made.
+// Account and tokens: each token is a device's way to post without a browser, named for that device (never "web"), its secret shown once: with its Relay switch on it reads and posts, and the owner's holds the Mac's relay; with it off it reads alone. A member asks the owner to let someone in here, and the owner sees those requests and the bots `playground yard bot add` made.
 export function Account({ role }: { role: string | null | undefined }) {
   const client = useQueryClient()
   const { data: tokens } = useQuery({
@@ -88,20 +88,20 @@ export function Account({ role }: { role: string | null | undefined }) {
                 )
               }}
             </form.Field>
-            {roleAtLeast(role, "owner") && (
-              <form.Field name="relay">
-                {(field) => (
-                  <label className="flex items-center gap-2 text-xs">
-                    <Switch
-                      checked={field.state.value}
-                      onCheckedChange={(checked) => field.handleChange(checked)}
-                      size="sm"
-                    />
-                    Relay token: opens your Mac&apos;s relay alone
-                  </label>
-                )}
-              </form.Field>
-            )}
+            <form.Field name="relay">
+              {(field) => (
+                <label className="flex items-center gap-2 text-xs">
+                  <Switch
+                    checked={field.state.value}
+                    onCheckedChange={(checked) => field.handleChange(checked)}
+                    size="sm"
+                  />
+                  {roleAtLeast(role, "owner")
+                    ? "Relay: posts and connects your Mac. Off: read-only"
+                    : "Relay: posts. Off: read-only"}
+                </label>
+              )}
+            </form.Field>
           </FieldGroup>
         </form>
         {secret && (
@@ -160,7 +160,7 @@ const None = ({ children }: { children: string }) => (
   </Empty>
 )
 
-// The bots the owner made from the Mac, each with its log switch, which lets it read the dispatcher's log through the Mac (off until `bot add --log` or the switch turns it on, and read only while the Mac lists it too), and Revoke, which cuts its token and its DM at once.
+// The bots the owner made from the Mac, each with its log switch, which lets it read the dispatcher's log through the Mac (off until the switch turns it on, and read only while the Mac lists it too), and Revoke, which cuts its token and its DM at once.
 function Bots() {
   const client = useQueryClient()
   const { data: bots } = useQuery({
