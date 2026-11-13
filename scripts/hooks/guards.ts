@@ -9,6 +9,7 @@ import { refusal as glmHeavyPath } from "./no-glm-heavy-path"
 import { check as headlessLogin } from "./no-headless-login"
 import { check as killByName } from "./no-kill-by-name"
 import { check as linearTicket } from "./no-linear-ticket"
+import { check as liveSignIn } from "./no-live-sign-in"
 import { check as macWebBuild } from "./no-mac-web-build"
 import { check as mainCheckout } from "./no-main-checkout"
 import { check as offPaletteLabel } from "./no-off-palette-label"
@@ -50,6 +51,7 @@ export const GUARDS: readonly Guard[] = [
   { factory: false, name: "no-headless-login", run: (raw, env) => headlessLogin(raw, env) },
   { factory: true, name: "no-kill-by-name", run: (raw) => killByName(raw) },
   { factory: false, name: "no-linear-ticket", run: (raw, env) => linearTicket(raw, env) },
+  { factory: true, name: "no-live-sign-in", run: (raw, env) => liveSignIn(raw, env) },
   { factory: true, name: "no-mac-web-build", run: (raw, env) => macWebBuild(raw, env) },
   { factory: true, name: "no-main-checkout", run: (raw, env) => mainCheckout(raw, env) },
   { factory: false, name: "no-off-palette-label", run: (raw) => offPaletteLabel(raw) },
