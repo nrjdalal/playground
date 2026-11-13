@@ -221,7 +221,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
   Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
-  no-prepare-write, a check with no process of its own, runs behind `fromFactory` through its `check`.
+  no-prepare-write and no-protected-push, checks with no process of their own, run behind `fromFactory` through their `check`.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
@@ -717,7 +717,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Only a parsed `-H` or `--head` flag counts, the last one given, as gh keeps it, and only when its value is a non-empty literal: one empty, only whitespace, unreadable, or holding `$`, a backtick, a glob character or a quote reads as no `--head`, so the commits and the branch are read as before.
   The same pull request opened through `gh api repos/<owner>/<repo>/pulls -X POST` is judged on its `-F title=@<file>` and `-F body=@<file>` alike.
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, taking the word after each option it lists as that option's value, as git does (`--attr-source <tree>` and `--config-env <key>=<variable>` among them), so `git --attr-source HEAD push` reads as a push and `git -C log push` as a push from `log`.
-  `GIT_TAKES` is the one list every git-reading hook steps over (no-glm-heavy-path, no-main-checkout, no-playground-leak, no-stash, no-unslotted-run, no-false-green, no-ours-merge, no-prepare-write and no-raw-delete through no-stash's `gitCommand`, and no-extensions-write through no-main-checkout's `gitCall`), and no-extension-repo-write reads git the same way.
+  `GIT_TAKES` is the one list every git-reading hook steps over (no-glm-heavy-path, no-main-checkout, no-playground-leak, no-stash, no-unslotted-run, no-false-green, no-ours-merge, no-prepare-write, no-protected-push and no-raw-delete through no-stash's `gitCommand`, and no-extensions-write through no-main-checkout's `gitCall`), and no-extension-repo-write reads git the same way.
   Outside `anyWrite`, it follows a `-c alias.<name>=<value>` whose value is literal git words, reading that value as the subcommand, so `git -c alias.p=push p …` is judged as the push and `git -c alias.l=log l` runs;
   it refuses a `!` alias, an alias whose value or name it cannot read (a variable, a `--config-env` value), an alias that names another alias, and a subcommand it cannot read after one.
   A same-user session can still get past it, for example through a git alias set in a config file it does not read.
@@ -971,6 +971,20 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It also refuses an `rm` or an `rmdir` of a name directly in `/` (`/scratchpad_*`, `/x`), which the session moves into its scratchpad, removing a folder there with `playground rm <literal path>`, an `rmdir` into `$TMPDIR` too, since no-raw-delete refuses an `rm` of a `$TMPDIR` path.
   A name a level deeper (`/usr/x`) and a redirect into `/` run, as they do in Claude Code.
   It fails open on a call it cannot read.
+
+## no-protected-push
+
+- `main` and `canary` of the factory's repository move only through GitHub's merge: `canary` through `bun run pr:merge <n>` or merge-on-ready, `main` through the release skill's `ship:merge`, each a bun script whose merge runs no `git push` a Bash call shows.
+  `scripts/hooks/no-protected-push.ts`, run on Bash by [guards](#guards) for a factory session, refuses a `git push` that writes either branch there, naming those two routes and the work branch's own push (`git push` bare from it, or `git push origin HEAD:<branch>`).
+  The factory's repository is `factory.repo`, else the main checkout's origin (`factoryRepo` in `packages/scripts/src/playground/setting.ts`).
+- It reads each branch a push writes: a refspec's destination (`main`, `HEAD:canary`, `refs/heads/main`, a force push, a delete, in any case), and for a push naming no refspec the checked-out branch with the branch it tracks, read before the call runs.
+  A push lands in the factory's repository through a remote of the checkout whose push URL names it (every remote when the push names none, since `pushRemote` and `pushDefault` may pick any), or through a URL naming it.
+- It refuses a push it cannot read wherever it may land in the factory's repository: an option outside its list (`--all`, `--mirror`, `--prune`, an abbreviation), a glob or the matching refspec, a ref, remote or folder built at run time, a push of the checked-out branch after an earlier command in the call that may switch it,
+  a configured push refspec or `push.default=matching`, a pushInsteadOf rule over the remote, `-c`, `--config-env`, `--git-dir`, `--work-tree` or a `GIT_DIR` or `GIT_CONFIG` variable, refs from `xargs`, `git send-pack`, `git subtree push`, and an alias whose text names a push.
+- Two pushes to `main` stay outside it: ops-ext-sync's `HEAD:main` push lands in an extension repository, and `ensure-remote-branches.ts` runs as lefthook's pre-push step, never as a session's Bash call.
+- It is a check with no process of its own, which [guards](#guards) runs, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
+  It fails closed only on a call that names a push.
+  Its tests are `bun run test:file tests/scripts/hooks/no-protected-push.test.ts`.
 
 ## no-raw-delete
 

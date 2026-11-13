@@ -16,6 +16,7 @@ import { check as oursMerge } from "./no-ours-merge"
 import { check as playgroundLeak } from "./no-playground-leak"
 import { check as prepareWrite } from "./no-prepare-write"
 import { check as promptStop } from "./no-prompt-stop"
+import { check as protectedPush } from "./no-protected-push"
 import { check as publicLeak } from "./no-public-leak"
 import { check as rawDelete } from "./no-raw-delete"
 import { check as rawSpawn } from "./no-raw-spawn"
@@ -56,6 +57,7 @@ export const GUARDS: readonly Guard[] = [
   { factory: true, name: "no-playground-leak", run: (raw, env) => playgroundLeak(raw, env) },
   { factory: true, name: "no-prepare-write", run: (raw, env) => prepareWrite(raw, env) },
   { factory: true, name: "no-prompt-stop", run: (raw) => promptStop(raw) },
+  { factory: true, name: "no-protected-push", run: (raw, env) => protectedPush(raw, env) },
   { factory: true, name: "no-public-leak", run: (raw, env) => publicLeak(raw, env) },
   { factory: false, name: "no-raw-delete", run: (raw, env) => rawDelete(raw, env) },
   { factory: true, name: "no-raw-spawn", run: (raw, env) => rawSpawn(raw, env) },
