@@ -221,7 +221,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
   Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
-  no-prepare-write, a check with no process of its own, runs behind `fromFactory` through its `check`.
+  no-prepare-write and no-protected-push, checks with no process of their own, run behind `fromFactory` through their `check`.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
@@ -717,7 +717,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Only a parsed `-H` or `--head` flag counts, the last one given, as gh keeps it, and only when its value is a non-empty literal: one empty, only whitespace, unreadable, or holding `$`, a backtick, a glob character or a quote reads as no `--head`, so the commits and the branch are read as before.
   The same pull request opened through `gh api repos/<owner>/<repo>/pulls -X POST` is judged on its `-F title=@<file>` and `-F body=@<file>` alike.
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, taking the word after each option it lists as that option's value, as git does (`--attr-source <tree>` and `--config-env <key>=<variable>` among them), so `git --attr-source HEAD push` reads as a push and `git -C log push` as a push from `log`.
-  `GIT_TAKES` is the one list every git-reading hook steps over (no-glm-heavy-path, no-main-checkout, no-playground-leak, no-stash, no-unslotted-run, no-false-green, no-ours-merge, no-prepare-write and no-raw-delete through no-stash's `gitCommand`, and no-extensions-write through no-main-checkout's `gitCall`), and no-extension-repo-write reads git the same way.
+  `GIT_TAKES` is the one list every git-reading hook steps over (no-glm-heavy-path, no-main-checkout, no-playground-leak, no-stash, no-unslotted-run, no-false-green, no-ours-merge, no-prepare-write, no-protected-push and no-raw-delete through no-stash's `gitCommand`, and no-extensions-write through no-main-checkout's `gitCall`), and no-extension-repo-write reads git the same way.
   Outside `anyWrite`, it follows a `-c alias.<name>=<value>` whose value is literal git words, reading that value as the subcommand, so `git -c alias.p=push p …` is judged as the push and `git -c alias.l=log l` runs;
   it refuses a `!` alias, an alias whose value or name it cannot read (a variable, a `--config-env` value), an alias that names another alias, and a subcommand it cannot read after one.
   A same-user session can still get past it, for example through a git alias set in a config file it does not read.
