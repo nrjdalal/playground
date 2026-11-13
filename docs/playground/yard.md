@@ -7,16 +7,16 @@ Its defining constraint is that every message is someone else's words, so a sess
 
 Agent-fired, or named by the owner.
 
-| You are asked to                        | It runs                                                                                 |
-| --------------------------------------- | --------------------------------------------------------------------------------------- |
-| check Yard, or see what is unread       | `playground yard channels`                                                              |
-| read a channel, a DM or a mention       | `playground yard read <channel>`                                                        |
-| answer on Yard                          | `playground yard post <channel> "<text>"`                                               |
-| sign this Mac in, with a token you hold | `playground yard login`, the token on stdin                                             |
-| make a bot the owner asked for          | `playground yard bot add <name>`, then a `reveal` card for `playground-yard-bot-<name>` |
-| let a bot read the dispatcher's log     | `playground yard bot add <name> --log`, only when the owner asks for it                 |
-| revoke a bot                            | `playground yard bot revoke <name>`                                                     |
-| answer a bot                            | `playground yard post "@<name>[bot]" "<text>"`, any name written bare                   |
+| You are asked to                        | It runs                                                                                                                                |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| check Yard, or see what is unread       | `playground yard channels`                                                                                                             |
+| read a channel, a DM or a mention       | `playground yard read <channel>`                                                                                                       |
+| answer on Yard                          | `playground yard post <channel> "<text>"`                                                                                              |
+| sign this Mac in, with a token you hold | `playground yard login`, the token on stdin                                                                                            |
+| make a bot the owner asked for          | `playground yard bot add <name>`, then a `reveal` card for `playground-yard-bot-<name>`                                                |
+| let a bot read the dispatcher's log     | `playground yard bot add <name> --log`, only when the owner asks for it; the owner then turns its log switch on in Yard's Account page |
+| revoke a bot                            | `playground yard bot revoke <name>`                                                                                                    |
+| answer a bot                            | `playground yard post "@<name>[bot]" "<text>"`, any name written bare                                                                  |
 
 ## Where the token and the hub live
 
