@@ -1018,6 +1018,11 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It fails open on a call it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-raw-wa.test.ts`.
   [guards](#guards) runs it on Bash, and both settings files register it for Edit, Glob, Grep, MultiEdit, NotebookEdit, Read and Write, after its script reached `main` by the order in [Registered in both settings files](#registered-in-both-settings-files).
   ops-wa pairs a device only while that registration stands (`unguarded()` in `packages/scripts/src/ops-wa/life.ts`), so no auth state exists for a session to reach without it.
+- A factory session queues no line as an owner-word job, ops-wa or ops-dm-watch: the relay leads each line with `[ops-<job>]` from its queue file's name (`packages/scripts/src/ops-outbox/drain.ts`), and a line led by either tag reads as the owner's own words (the `whatsapp` and `slack` skills).
+  no-raw-wa refuses a `notify.sh` call whose job is `wa` or `dm-watch`, or a word it cannot read, run as the program or as a shell's script (`bash notify.sh wa …`), and a call that reaches either job's queue file in the data folder's `ops/outbox/` (`ops-wa.jsonl`, `ops-dm-watch.jsonl`), as typed, through its links, by a glob that may match it, and on Read, Write, Edit, MultiEdit and NotebookEdit.
+  Its text net refuses a call whose text names either form, whatever reads it; `notify.sh` itself refuses a job outside lower-case letters, digits and hyphens, so a job word names its own queue alone.
+  Every other job's `notify.sh` call runs, as does a read of the outbox folder (`ls`, `grep -r`) and every other queue file.
+  Its refusal names the way through: `notify.sh <your job> <text>` under the session's own job, or `SendMessage` to its manager.
 
 ## no-release-comment
 
