@@ -472,5 +472,6 @@ export function startRelay(deps: RelayDeps): (() => void) & { renew: () => void 
     if (timer) clearTimeout(timer)
     for (const one of [...sockets.keys()]) one.close()
   }
-  return Object.assign(stop, { renew: () => {} })
+  // renew opens the next socket now, as the recycle does, on the token the Keychain holds now: after a swap (rotate.ts), so the relay moves to the new token with no gap
+  return Object.assign(stop, { renew: () => void open() })
 }

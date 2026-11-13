@@ -205,9 +205,15 @@ describe("startRotation, the Mac's schedule", () => {
       const { deps, state, working } = world(RELAY)
       state.failSave = true
       const alerts: string[] = []
+      // whether the Mac held a working token, pending, as each alert went out; the Keychain takes the save again after the first
+      const held: boolean[] = []
       const stop = startRotation({
         ...deps,
-        alert: async (text) => void alerts.push(text),
+        alert: async (text) => {
+          alerts.push(text)
+          held.push(working() && state.pending !== null)
+          state.failSave = false
+        },
         checkMs: 10,
         now: () => Date.parse("2026-11-13T00:00:00Z"),
         stamp: join(dir, "yard-rotated.json"),
@@ -216,8 +222,7 @@ describe("startRotation, the Mac's schedule", () => {
         await until("the alert", () => alerts.length === 1)
         expect(alerts[0]).toMatch(/could not swap its Yard token/)
         expect(alerts[0]).not.toMatch(SHAPE)
-        expect(working()).toBe(true)
-        state.failSave = false
+        expect(held).toEqual([true])
         await until("the pending token kept", () => state.pending === null)
         expect(state.live.has(state.main!)).toBe(true)
         expect(alerts).toHaveLength(1)

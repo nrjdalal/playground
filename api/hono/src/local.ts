@@ -1,3 +1,5 @@
+import { join } from "node:path"
+
 import { site } from "@packages/config/site"
 import { db } from "@packages/db"
 import { getBuildVersion } from "@packages/env"
@@ -24,7 +26,8 @@ import { dataDir } from "@/lib/sessions/paths"
 import { sessionCookie } from "@/lib/sign-in"
 import { yardClient } from "@/lib/yard/client"
 import { startYardPoll } from "@/lib/yard/inbound"
-import { keychain } from "@/lib/yard/keychain"
+import { keychain, pendingKeychain } from "@/lib/yard/keychain"
+import { outboxAlert, startRotation } from "@/lib/yard/rotate"
 import { requireFeature } from "@/middlewares"
 import {
   accountsRouter,
@@ -324,7 +327,7 @@ if (env.YARD_API_URL && readsLive()) {
     const read = readPolicyOrDefaults(dataDir())
     return read.refusal === undefined ? yardSettings.get(read.settings, "yard.logReaders") : {}
   }
-  void keychainValues(Object.keys(readers())).then((kept) =>
+  const relay = keychainValues(Object.keys(readers())).then((kept) =>
     startRelay({
       api,
       cookie,
@@ -347,6 +350,15 @@ if (env.YARD_API_URL && readsLive()) {
       token: () => keychain().read(),
     }),
   )
+  // the Mac's swap of its own token once a day, with no step from the owner, which moves the relay to the new one; a failed swap tells Ops alone
+  startRotation({
+    alert: outboxAlert(dataDir()),
+    client: (token) => yardClient(api, token),
+    keychain: keychain(),
+    pending: pendingKeychain(),
+    renew: () => void relay.then((held) => held.renew()),
+    stamp: join(dataDir(), "yard-rotated.json"),
+  })
 }
 
 mountOldPaths(routes, {
