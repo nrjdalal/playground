@@ -97,7 +97,7 @@ export function Account({ role }: { role: string | null | undefined }) {
                       onCheckedChange={(checked) => field.handleChange(checked)}
                       size="sm"
                     />
-                    A relay token, which opens your Mac&apos;s relay and nothing else
+                    Relay token: opens your Mac&apos;s relay alone
                   </label>
                 )}
               </form.Field>
