@@ -43,6 +43,13 @@ const closedOf = (home: string, data = join(home, ".playground")) => ({
   },
 })
 
+// gpg needs writes to ~/.gnupg, which the closed sandbox keeps shut since gpg-agent runs the programs its config there names outside the sandbox, so a closed session's commits go unsigned through git's env config.
+const UNSIGNED = {
+  GIT_CONFIG_COUNT: "1",
+  GIT_CONFIG_KEY_0: "commit.gpgsign",
+  GIT_CONFIG_VALUE_0: "false",
+}
+
 describe("--sandbox starts a worker, a reviewer or a probe in the closed sandbox", () => {
   const id = "b8f48a29-2ab2-4dc3-b37f-5a0525fe5c38"
   const closed = "factory-settings-sandbox-closed-400k.json"
@@ -65,6 +72,7 @@ describe("--sandbox starts a worker, a reviewer or a probe in the closed sandbox
       ...FACTORY_SETTINGS,
       autoCompactWindow: 400000,
       enabledPlugins: { "ws-home@ws": false },
+      env: { ...FACTORY_SETTINGS.env, ...UNSIGNED },
       sandbox: closedOf(r.home),
     })
     expect(r.roster).toContain("sandbox=on")
@@ -125,7 +133,7 @@ describe("--sandbox starts a worker, a reviewer or a probe in the closed sandbox
     expect(r.code, r.err).toBe(0)
     const built = builtOf(r, "factory-settings-glm-sandbox-closed-400k.json")
     expect(built.sandbox).toEqual(closedOf(r.home))
-    expect(built.env.CLAUDE_CODE_ENABLE_TELEMETRY).toBe("0")
+    expect(built.env).toMatchObject({ ...UNSIGNED, CLAUDE_CODE_ENABLE_TELEMETRY: "0" })
   })
 
   test("a worker on a scratch data folder has that folder's secret files closed", async () => {
