@@ -99,8 +99,6 @@ const owner = yardCaller({ rung: "owner", web: true })
 const memberOrBot = yardCaller({ bots: true })
 // the owner's session or the owner's own token, since `playground yard bot add` makes a bot from the Mac: the one token route that makes a credential, safe as the bot it makes reaches only its DM with the owner
 const botMaker = yardCaller({ rung: "owner" })
-// who a token is, which the owner's relay token reaches too, so the Mac learns the login its relay answers as
-const whoAmI = yardCaller({ relay: true })
 
 // A post's body, the same on a channel's route and a bot's own
 const postBody = z.object({
@@ -141,12 +139,12 @@ const fanOut = async (caller: store.Caller, message: z.infer<typeof messageSchem
 
 // Yard's routes, which only the hosted build mounts (hosted.ts), each on the member rung or the narrower one it names.
 export const yardRouter = new Hono<{ Variables: YardVariables }>()
-  // the relay to the owner's own Mac: its socket, opened with the owner's relay token, and the owner's browser's dashboard reads
+  // the relay to the owner's own Mac: its socket, opened with the owner's relay-on token, and the owner's browser's dashboard reads
   .route(
     "/relay",
     relayRouter({
       hub,
-      mac: yardCaller({ relay: true, rung: "owner" }),
+      mac: yardCaller({ rung: "owner" }),
       owner,
       upgrade: upgradeWebSocket,
       webOrigin,
@@ -159,7 +157,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       "Who you are on Yard: your login, and whether you are its owner",
       z.object({ login: z.string(), owner: z.boolean() }),
     ),
-    whoAmI,
+    member,
     (c) => {
       const { login, owner } = c.get("caller")
       return c.json({ data: { login, owner } })
@@ -344,7 +342,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   .post(
     "/tokens",
     doc(
-      "Makes a token; its secret is shown this once. With relay, the owner's relay token, yard_relay_, which opens the relay's socket and /me alone, and which no other token opens",
+      "Makes a token; its secret is shown this once. With relay, a relay-on token, yard_relay_, which reads and posts, and the owner's holds the relay; without, a token that reads alone",
       z.object({ token: tokenSchema.extend({ secret: z.string() }) }),
       [validationErrorResponses, conflictErrorResponses],
       201,
