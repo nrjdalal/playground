@@ -5,8 +5,8 @@ import { join } from "node:path"
 process.env.BETTER_AUTH_SECRET ||= "inbox-router-test-secret-not-for-use-anywhere"
 const { inboxRouter } = await import("../../../../../api/hono/src/routers/inbox")
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
-const { refuseAgent, refuseAgentOffFixture } =
-  await import("../../../../../api/hono/src/middlewares/dashboard")
+const { refuseAgent } = await import("../../../../../api/hono/src/middlewares/dashboard")
+const { refuseAgentOffFixture } = await import("../../../../../api/hono/src/middlewares/agent")
 const { site } = await import("../../../../../packages/config/src/site")
 
 // Validated, the setting is a list; with validation skipped, as in CI, it is the raw comma-separated string.

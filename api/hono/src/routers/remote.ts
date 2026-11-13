@@ -13,13 +13,8 @@ import {
 } from "@/lib/error"
 import { auditLineSchema, remoteAudit } from "@/lib/relay/audit"
 import { type PairedKey, remoteKeys as keys } from "@/lib/relay/key"
-import {
-  authMiddleware,
-  guardWrites,
-  refuseAgentOffFixture,
-  requireConsoleRole,
-  requireLoopback,
-} from "@/middlewares"
+import { authMiddleware, guardWrites, requireConsoleRole, requireLoopback } from "@/middlewares"
+import { refuseAgentOffFixture } from "@/middlewares/agent"
 
 const pairedSchema = z.object({ fingerprint: z.string(), login: z.string(), pairedAt: z.string() })
 

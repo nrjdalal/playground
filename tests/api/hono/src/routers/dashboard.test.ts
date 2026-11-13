@@ -44,7 +44,7 @@ const { changeHostedMode, SDK_PROBE, SdkHost } =
 const { DELIVERY_FAILURES } = await import("../../../../../api/hono/src/lib/dashboard/deliver")
 const { Hono } = await import("../../../../../api/hono/node_modules/hono")
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
-const { refuseAgentOffFixture } = await import("../../../../../api/hono/src/middlewares/dashboard")
+const { refuseAgentOffFixture } = await import("../../../../../api/hono/src/middlewares/agent")
 
 const PNG = Uint8Array.from(
   Buffer.from(

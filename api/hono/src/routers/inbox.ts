@@ -43,11 +43,11 @@ import {
   authMiddleware,
   guardWrites,
   refuseAgent,
-  refuseAgentOffFixture,
   requireConsoleRole,
   requireLoopback,
   requireTrustedOrigin,
 } from "@/middlewares"
+import { refuseAgentOffFixture } from "@/middlewares/agent"
 import { serveAttachment } from "@/routers/dashboard"
 
 const STATUS = { CONFLICT: 409, NOT_FOUND: 404, VALIDATION_ERROR: 400 } as const

@@ -120,10 +120,10 @@ import {
   authMiddleware,
   createRateLimiter,
   guardWrites,
-  refuseAgentOffFixture,
   requireConsoleRole,
   requireTrustedOrigin,
 } from "@/middlewares"
+import { refuseAgentOffFixture } from "@/middlewares/agent"
 
 // A person types a handful of messages a minute; this stops a stuck client or a loop from flooding a session's input.
 export const messageLimiter = createRateLimiter({

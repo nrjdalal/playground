@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
 import type { DashboardSource } from "../../../../../api/hono/src/lib/dashboard/fixture"
-import { agentRefusal } from "../../../../../api/hono/src/middlewares/dashboard"
+import { agentRefusal } from "../../../../../api/hono/src/middlewares/agent"
 import { site } from "../../../../../packages/config/src/site"
 
 const SOURCES: Record<string, DashboardSource> = {

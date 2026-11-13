@@ -69,6 +69,7 @@ const PATHS: Paths = {
 const OWN_ROWS: Record<string, string[]> = {
   "no-false-green": ["bun run test | grep pass"],
   "no-linear-ticket": [`cp /dev/null ${join(dataDir(), "ticket-approvals")}/`],
+  "no-live-sign-in": ["curl -X POST https://api.playground.localhost/api/v1/onboard/sign-in"],
   "no-mac-web-build": ["docker compose build web"],
   "no-main-checkout": [`touch ${join(MAIN, "made-up-file")}`],
   "no-off-palette-label": [`gh label create made-up --color 123456`],

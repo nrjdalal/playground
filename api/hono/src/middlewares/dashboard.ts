@@ -4,7 +4,6 @@ import { env } from "@packages/env/api-hono"
 import { getConnInfo } from "hono/bun"
 import { createMiddleware } from "hono/factory"
 
-import { currentSource, type DashboardSource } from "@/lib/dashboard/fixture"
 import { ApiError } from "@/lib/error"
 import { isRelayed } from "@/lib/relay/relayed"
 
@@ -55,26 +54,7 @@ export const refuseAgent = createMiddleware<{ Variables: Session }>(async (c, ne
   await next()
 })
 
-const READS = new Set(["GET", "HEAD", "OPTIONS"])
-
-// The agent sign-in holds the owner rung, so a write that acts as the owner (an Inbox answer, a message, a key's pairing, the dispatcher's start and switch) refuses its account after the rung on every source but a fixture, where testers drive those flows on made-up data; a source added later refuses too.
-export const agentRefusal = (source: () => DashboardSource) =>
-  createMiddleware<{ Variables: Session }>(async (c, next) => {
-    if (
-      !READS.has(c.req.method) &&
-      c.get("user")?.email === site.agent.email &&
-      source().kind !== "fixture"
-    ) {
-      throw new ApiError(
-        403,
-        "FORBIDDEN",
-        "Off a fixture stack, a write that acts as the owner is the owner's own click alone",
-      )
-    }
-    await next()
-  })
-
-export const refuseAgentOffFixture = agentRefusal(currentSource)
+export const READS = new Set(["GET", "HEAD", "OPTIONS"])
 
 // A write types into sessions that bypass permission prompts, so before anything else it must come from the dashboard's own web origin, which a form or fetch on another localhost port cannot claim, over a loopback connection. Mounted on "/*" by method in every owner-rung router, so a write added later is guarded with no change here; a GET is never guarded, so a GET must never write.
 export const guardWrites = createMiddleware(async (c, next) => {

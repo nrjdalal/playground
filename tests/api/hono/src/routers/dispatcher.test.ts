@@ -6,7 +6,7 @@ const { dispatcherRouter } = await import("../../../../../api/hono/src/routers/d
 const { dispatcherSwitch } =
   await import("../../../../../api/hono/src/lib/dashboard/dispatcher-switch")
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
-const { refuseAgentOffFixture } = await import("../../../../../api/hono/src/middlewares/dashboard")
+const { refuseAgentOffFixture } = await import("../../../../../api/hono/src/middlewares/agent")
 
 const origins: unknown = env.HONO_TRUSTED_ORIGINS
 const TRUSTED = Array.isArray(origins) ? String(origins[0]) : String(origins).split(",")[0]!.trim()
