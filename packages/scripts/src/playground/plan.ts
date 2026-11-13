@@ -86,8 +86,8 @@ playground migrate --archive <checkout> --pre-squash <sha> --org <org> [--old <r
                       once, at the switch: move the old data folder in ~/.claude to ~/.playground, seed your login's settings and the release owners' list from the archive checkout (its canary, or --old, and the pre-squash head), bring the hand-made skills into the org's scope unless its clone holds them, then, with the Dashboard's job stopped, make each move the migration table at the pre-squash head lists: renamed and dropped jobs, archived stale copies, moved state files, and renamed variables in your profiles and LaunchAgents, and last runs playground herdr pin; a value already set is left
 playground uninstall [--purge]
                       remove the LaunchAgents that run from this checkout or the data folder, stop the Dashboard's stack and remove every link into this checkout; --purge also removes the Dashboard's database and moves the data folder aside to <data folder>-purged-<UTC time>, after asking
-playground add [--kind worker|runner] [<name>] [--title "<title>"] [--brief <file>] [--model <id>] [--backend glm|claude]
-                      start a worker (or a runner) through spawn.sh, under the name given or one bun run name picks, on handoffs/new-worker.md by default; a worker needs --title, a plain title of up to 40 characters, and a runner takes its name and no --title
+playground add [--kind worker|runner] [<name>] [--title "<title>"] [--brief <file>] [--model <id>] [--backend glm|claude] [--account <email>]
+                      start a worker (or a runner) through spawn.sh, under the name given or one bun run name picks, on handoffs/new-worker.md by default; a worker needs --title, a plain title of up to 40 characters, and a runner takes its name and no --title; --account names the Claude login, which a worker needs while usage.accounts lists a Claude account
 playground add --dispatcher --backend glm
                       start a second dispatcher on GLM
 playground alerts-wait <name>
@@ -295,7 +295,11 @@ export const addCommand = (
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
     if (arg === "--dispatcher") dispatcher = true
-    else if (["--backend", "--brief", "--kind", "--manager", "--model", "--title"].includes(arg)) {
+    else if (
+      ["--account", "--backend", "--brief", "--kind", "--manager", "--model", "--title"].includes(
+        arg,
+      )
+    ) {
       const value = args[++i]
       if (value === undefined) return { error: `${arg} needs a value` }
       if (arg === "--manager") manager = value
@@ -312,7 +316,12 @@ export const addCommand = (
   const backend = options["--backend"]
   if (backend !== undefined && !BACKENDS.includes(backend))
     return { error: `--backend takes claude or glm, not ${backend}` }
-  const passed = [...(model ? ["--model", model] : []), ...(backend ? ["--backend", backend] : [])]
+  const account = options["--account"]
+  const passed = [
+    ...(model ? ["--model", model] : []),
+    ...(backend ? ["--backend", backend] : []),
+    ...(account ? ["--account", account] : []),
+  ]
 
   const kind = options["--kind"]
   const title = options["--title"]

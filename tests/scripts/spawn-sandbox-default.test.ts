@@ -19,7 +19,7 @@ describe("a worker or reviewer starts in the closed sandbox by default", () => {
     ["a worker", worker],
     ["a reviewer", reviewer],
   ])("%s with no flag takes the closed sandbox, and its row records it", async (_, args) => {
-    const r = await spawn(args, [])
+    const r = await spawn(args, [], { SANDBOX_DEFAULT: "1" })
     expect(r.code, r.err).toBe(0)
     expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, closed)} `)
     expect(r.roster).toContain("sandbox=on")

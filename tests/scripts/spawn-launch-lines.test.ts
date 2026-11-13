@@ -79,7 +79,7 @@ describe("spawn.sh's launch lines stay byte for byte the same", () => {
     const r = await spawn(
       c.args,
       [],
-      {},
+      { SANDBOX_DEFAULT: "1" },
       undefined,
       c.pin ? { name: c.name, backend: c.pin } : undefined,
     )
