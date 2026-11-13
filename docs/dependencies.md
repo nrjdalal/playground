@@ -72,7 +72,7 @@ Every audit gate fails on a moderate advisory or worse. An advisory that no upda
 ### `minimatch` ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249))
 
 - **Advisory:** moderate: denial of service through glob-part amplification in a crafted pattern. Affects `minimatch >=7.0.0 <11.0.1`; patched in `11.0.1`.
-- **Why an ignore:** the tree's `minimatch@10.2.6` comes only through `@ts-morph/common`, at `0.29.0` under `ts-morph@28.0.0` (the latest) and `0.27.0` under `shadcn@4.23.0`'s `ts-morph ^26`; both declare `minimatch ^10.0.1`, so the fix is a major away and an override would cross it under them.
+- **Why an ignore:** the tree's `minimatch@10.2.6` comes only through `@ts-morph/common`, at `0.29.0` under `ts-morph@28.0.0` (the latest) and `0.27.0` under `shadcn@4.22.1`'s `ts-morph ^26` (`4.23.0`, the latest, declares the same); both declare `minimatch ^10.0.1`, so the fix is a major away and an override would cross it under them.
 - **Risk:** negligible. `ts-morph` runs only in dev tooling: `packages/scripts/src/shadcn-customize.ts` and the `shadcn` CLI behind `bun run shadcn:update`, each on the repo's own fixed globs, never a pattern from untrusted input.
 - **Exit criteria:** drop the ignore once a `@ts-morph/common` past `0.29.0` (reached by `ts-morph` past `28.0.0`, and by a `shadcn` past `4.23.0`, whose `ts-morph ^26` holds `0.27.0`) declares a `minimatch` range that resolves `>=11.0.1`, or the tree resolves no `minimatch` below it.
 

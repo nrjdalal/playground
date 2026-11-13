@@ -18,7 +18,7 @@ The first two run through `packages/scripts/src/audit.ts`, which tries again whe
   It stays strict because only a direct push reaches it: `bun run pr:merge` lands a PR through GitHub's API, which runs no hook.
   In the Playground repo a factory session's direct push to `canary` is refused before it starts (`no-protected-push`, [scripts/hooks/README.md](../../../scripts/hooks/README.md#no-protected-push)), so only the owner's own push reaches it there.
 
-`docs/dependencies.md` is the canonical record of every active override, and it stays in place even when there are none.
+`docs/dependencies.md` is the canonical record of every active override and ignore, and it stays in place even when there are none.
 
 ## Update every package to latest
 
