@@ -61,11 +61,9 @@ describe("the Mac's Yard token in the Keychain", () => {
     const { calls, inputs, store } = fake({})
     await store.write("yard_new-Token_1")
     await store.write(RELAY_TOKEN)
-    expect(calls).toEqual([
-      ["security", "-i"],
-      ["security", "-i"],
-    ])
-    expect(inputs).toEqual([
+    const del = ["security", "delete-generic-password", "-s", OLD_RELAY, "-a", "owner"]
+    expect(calls).toEqual([["security", "-i"], del, ["security", "-i"], del])
+    expect(inputs.filter(Boolean)).toEqual([
       `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "owner" -w "yard_new-Token_1"\n`,
       `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "owner" -w "${RELAY_TOKEN}"\n`,
     ])
@@ -92,6 +90,13 @@ describe("the Mac's Yard token in the Keychain", () => {
     const { items, store } = fake({ [OLD_RELAY]: RELAY_TOKEN }, true)
     expect(await store.read()).toBe(RELAY_TOKEN)
     expect(items).toEqual({ [OLD_RELAY]: RELAY_TOKEN })
+  })
+
+  test("a write deletes the old item after it, so the next read keeps the new token", async () => {
+    const { items, store } = fake({ [OLD_RELAY]: RELAY_TOKEN })
+    await store.write("yard_new-Token_1")
+    expect(items).toEqual({ [KEYCHAIN_SERVICE]: "yard_new-Token_1" })
+    expect(await store.read()).toBe("yard_new-Token_1")
   })
 
   test("a logout removes the old item too, so the next read finds no token", async () => {

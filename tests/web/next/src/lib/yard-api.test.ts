@@ -45,7 +45,7 @@ describe("an invite request's page", () => {
 })
 
 describe("a new token", () => {
-  test("asks for a read-only token by default, and for a relay-on one when its switch is on", async () => {
+  test("asks for a read-only token by default, and for a relay-on token when its Relay switch is on", async () => {
     answer("open")
     await yardApi.createToken("phone")
     await yardApi.createToken("mac-relay", true)

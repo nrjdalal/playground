@@ -12,7 +12,7 @@ export type { Run }
 // The item an earlier build kept the relay token in, apart from the Yard token; a read moves its token into the one item.
 const OLD_RELAY_SERVICE = "playground-yard-relay"
 
-// The one Yard token: a read first moves a token from the old relay item into this one, over whatever it held, and deletes the old item, keeping it when the Keychain refuses the move; a remove deletes both, so a logout stays signed out.
+// The one Yard token: a read first moves a token from the old relay item into this one, over whatever it held, and deletes the old item, keeping it when the Keychain refuses the move; a write deletes the old item after it, so a later read never moves an old token over a new one; a remove deletes both, so a logout stays signed out.
 export const keychain = (run?: Run, account = userInfo().username): KeychainItem => {
   const item = keychainItem("yard", { account, run })
   const old = keychainItem(OLD_RELAY_SERVICE, { account, run })
@@ -31,6 +31,10 @@ export const keychain = (run?: Run, account = userInfo().username): KeychainItem
     },
     remove: async () => {
       await item.remove()
+      await old.remove()
+    },
+    write: async (value) => {
+      await item.write(value)
       await old.remove()
     },
   }
