@@ -159,7 +159,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
     ])
   })
 
-  test("the relay carries the owner's reads, pair request and signed writes to a Mac on its socket and back, and refuses a member, a wrong Origin, an unsigned write and the first-run routes", async () => {
+  test("the relay carries the owner's reads, pair request and signed writes to a Mac holding it with the relay token the owner's browser mints, and refuses a member, the owner's person token, a wrong Origin, an unsigned write and the first-run routes", async () => {
     await sql`insert into "user" (id, name, email, login, role) values ('ow', 'ow', ${["ow", "example.com"].join("@")}, 'ow', 'owner')`
     await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update("yard_ow").digest("hex")}, ${"mac"}, 'ow')`
     const run = child(await Bun.file(RELAY).text(), {
@@ -176,12 +176,15 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       macSocket: "open",
       member: 403,
       memberSocket: 4403,
+      mint: [201, true],
+      mintMember: 403,
       offline: 503,
       onboard: 403,
       pair: [202, { fingerprint: "a0a2 32c2 f194 a535" }],
       pairMember: 403,
       pairNoOrigin: 403,
       pairNotAKey: 400,
+      personSocket: 4403,
       pairs: [
         {
           key: {
@@ -195,6 +198,8 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
         },
       ],
       read: [200, { data: ["w1"] }, "no-store", "inline", "default-src 'none'; sandbox", "nosniff"],
+      relayElsewhere: 403,
+      relayMe: 200,
       requests: [{ login: "ow", method: "GET", path: "/api/v1/workers?x=1" }],
       status: { online: true, since: null },
       statusAfter: { online: false, since: "string" },
@@ -311,10 +316,14 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
   test("a bot the owner lets read the log from the browser reads a page through the owner's Mac, a line in its DM says so and cards nothing, and every other caller is refused, a token's grant included (#1888, #2032)", async () => {
     await sql`insert into "user" (id, name, email, login, role) values ('lo', 'lo', ${["lo", "example.com"].join("@")}, 'lo', 'owner')`
     await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update("yard_lo").digest("hex")}, ${"mac"}, 'lo')`
+    // a made-up relay token in the shape Yard mints one, which the Mac holds the relay with
+    const relay = `yard_relay_${"lo".repeat(16)}`
+    await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update(relay).digest("hex")}, ${"mac-relay"}, 'lo')`
     const run = child(await Bun.file(BOT_LOG).text(), {
       OWNER_ID: "lo",
       OWNER_TOKEN: "yard_lo",
       POSTGRES_URL: url,
+      RELAY_TOKEN: relay,
     })
     expect(run.err).not.toContain("error:")
     const out = JSON.parse(last(run.out))
