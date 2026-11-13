@@ -970,6 +970,20 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A name a level deeper (`/usr/x`) and a redirect into `/` run, as they do in Claude Code.
   It fails open on a call it cannot read.
 
+## no-protected-push
+
+- `main` and `canary` of the factory's repository move only through GitHub's merge: `canary` through `bun run pr:merge <n>` or merge-on-ready, `main` through the release skill's `ship:merge`, each a bun script whose merge runs no `git push` a Bash call shows.
+  `scripts/hooks/no-protected-push.ts`, run on Bash by [guards](#guards) for a factory session, refuses a `git push` that writes either branch there, naming those two routes and the work branch's own push (`git push` bare from it, or `git push origin HEAD:<branch>`).
+  The factory's repository is `factory.repo`, else the main checkout's origin (`factoryRepo` in `packages/scripts/src/playground/setting.ts`).
+- It reads each branch a push writes: a refspec's destination (`main`, `HEAD:canary`, `refs/heads/main`, a force push, a delete, in any case), and for a push naming no refspec the checked-out branch with the branch it tracks, read before the call runs.
+  A push lands in the factory's repository through a remote of the checkout whose push URL names it (every remote when the push names none, since `pushRemote` and `pushDefault` may pick any), or through a URL naming it.
+- It refuses a push it cannot read wherever it may land in the factory's repository: an option outside its list (`--all`, `--mirror`, `--prune`, an abbreviation), a glob or the matching refspec, a ref, remote or folder built at run time, a push of the checked-out branch after an earlier command in the call that may switch it,
+  a configured push refspec or `push.default=matching`, a pushInsteadOf rule over the remote, `-c`, `--config-env`, `--git-dir`, `--work-tree` or a `GIT_DIR` or `GIT_CONFIG` variable, refs from `xargs`, `git send-pack`, `git subtree push`, and an alias whose text names a push.
+- Two pushes to `main` stay outside it: ops-ext-sync's `HEAD:main` push lands in an extension repository, and `ensure-remote-branches.ts` runs as lefthook's pre-push step, never as a session's Bash call.
+- It is a check with no process of its own, which [guards](#guards) runs, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
+  It fails closed only on a call that names a push.
+  Its tests are `bun run test:file tests/scripts/hooks/no-protected-push.test.ts`.
+
 ## no-raw-delete
 
 - A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>` (with `--discard` once its PR has merged or closed, whatever it holds), so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
