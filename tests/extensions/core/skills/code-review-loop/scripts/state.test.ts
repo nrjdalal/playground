@@ -548,6 +548,7 @@ const checksThrough = async (
   pulls: (string | state.Called)[],
   checkRuns: (string | state.Called)[],
   now = 1000000,
+  names: string[] = [],
 ): Promise<[string, number[], string[]]> => {
   const naps: number[] = []
   const paths: string[] = []
@@ -581,7 +582,7 @@ const checksThrough = async (
       }
       process.stderr.write = () => true
       try {
-        await state.cmdChecks("acme/archive", "160", HEAD.slice(0, 7))
+        await state.cmdChecks("acme/archive", "160", HEAD.slice(0, 7), ...names)
       } finally {
         console.log = realLog
         process.stderr.write = realWrite
@@ -717,6 +718,31 @@ test("05y checks: v0.0.82's ship pin holds while a red shard keeps Audit, Lint, 
   )
   expect(green).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
   expect(greenNaps).toEqual([])
+})
+
+test("05aa checks: the gate names given after the sha are the ones it waits on, and none given keeps the gate's own (#2058)", async () => {
+  const other = [run("Build", "success"), run("Lint", "failure"), run(AUDIT, null)]
+  const [out, naps] = await checksThrough([still], [runs(...other)], 1000000, ["Build", "Lint"])
+  expect(out).toBe("CHECK success Build\nCHECK failure Lint")
+  expect(naps).toEqual([])
+  const [plain, plainNaps] = await checksThrough(
+    [still],
+    [
+      runs(...other, run("test", "success")),
+      runs(...other, run(AUDIT, "success", 2), run("test", "success")),
+    ],
+  )
+  expect(plain).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+  expect(plainNaps).toEqual([300])
+})
+
+test("05ab checks takes gate names after the sha on its command line, and still refuses one missing the sha (#2058)", () => {
+  const named = runCli(["checks", "acme/archive", "160", "not-a-sha", "Build", "Lint"])
+  expect(named.code).not.toBe(0)
+  expect(named.stderr.trim()).toBe("not a commit SHA: not-a-sha")
+  const short = runCli(["checks", "acme/archive", "160"])
+  expect(short.code).not.toBe(0)
+  expect(short.stderr).toContain("state.ts checks <owner/repo> <n> <sha>")
 })
 
 test("05v the checks it waits on are the gate's own (#1410)", () => {
