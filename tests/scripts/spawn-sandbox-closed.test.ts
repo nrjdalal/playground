@@ -7,7 +7,7 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import {
   bin,
@@ -28,8 +28,24 @@ const settingsOf = (r: { home: string }, file: string) => join(r.home, ".playgro
 const builtOf = (r: { home: string }, file: string) =>
   JSON.parse(readFileSync(settingsOf(r, file), "utf8"))
 
-// --sandbox starts a worker, a reviewer or a probe in the closed sandbox: the probe's block, with loopback, the Keychain and the data folder's secret files closed to its shell commands, and outbound hosts held to the list a worker's loop needs.
-const closedOf = (home: string, data = join(home, ".playground")) => ({
+// The main checkout spawn.sh resolves, git's common dir less .git, and the folder a session started from this checkout runs in, with its .git/worktrees entry when it is a linked worktree.
+const gitOf = (...args: string[]) =>
+  Bun.spawnSync(["git", "-C", root, "rev-parse", "--path-format=absolute", ...args])
+    .stdout.toString()
+    .trim()
+const main = dirname(gitOf("--git-common-dir"))
+const linked =
+  gitOf("--git-dir") === join(main, ".git") ? [] : [realpathSync(root), gitOf("--git-dir")]
+// What a closed session named name writes in the main checkout: its own worktree and .git/worktrees entry, the worktree it runs in, and FETCH_HEAD, logs, objects and refs (#2052).
+const workOf = (name: string) => [
+  join(main, ".claude", "worktrees", name),
+  join(main, ".git", "worktrees", name),
+  ...["FETCH_HEAD", "logs", "objects", "refs"].map((entry) => join(main, ".git", entry)),
+  ...linked,
+]
+
+// --sandbox starts a worker, a reviewer or a probe in the closed sandbox: the probe's block, with loopback, the Keychain and the data folder's secret files closed to its shell commands, outbound hosts held to the list a worker's loop needs, and its own worktree writable.
+const closedOf = (home: string, name: string, data = join(home, ".playground")) => ({
   allowUnsandboxedCommands: false,
   enabled: true,
   enableWeakerNetworkIsolation: true,
@@ -43,6 +59,7 @@ const closedOf = (home: string, data = join(home, ".playground")) => ({
       join(home, ".cache", "turbo"),
       join(home, ".portless"),
       ...(temp ? [temp.replace(/\/$/, "")] : []),
+      ...workOf(name),
     ].sort(),
     denyRead: [
       join(home, "Library", "Keychains"),
@@ -71,17 +88,24 @@ const UNSIGNED = {
 
 describe("--sandbox starts a worker, a reviewer or a probe in the closed sandbox", () => {
   const id = "b8f48a29-2ab2-4dc3-b37f-5a0525fe5c38"
-  const closed = "factory-settings-sandbox-closed-400k.json"
+  // Each session builds a file of its own, since the file names its own worktree.
+  const closedFile = (name: string) => `factory-settings-sandbox-closed-400k-${name}.json`
 
   test.each([
-    ["a worker", ["worker", "worker-brave-otter", "b.md", "--sandbox"]],
+    ["a worker", "worker-brave-otter", ["worker", "worker-brave-otter", "b.md", "--sandbox"]],
     [
       "a reviewer's column",
+      "reviewer-x",
       ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1", "--sandbox"],
     ],
-    ["a probe", ["--sandbox", "probe", "probe-x", "ops", "p.md"]],
-    ["a probe's column", ["column", "probe", "probe-x", "ops", "w1:p2", "p.md", "--sandbox"]],
-  ])("%s starts on the closed sandbox's file, and its row records it", async (_, args) => {
+    ["a probe", "probe-x", ["--sandbox", "probe", "probe-x", "ops", "p.md"]],
+    [
+      "a probe's column",
+      "probe-x",
+      ["column", "probe", "probe-x", "ops", "w1:p2", "p.md", "--sandbox"],
+    ],
+  ])("%s starts on the closed sandbox's file, and its row records it", async (_, name, args) => {
+    const closed = closedFile(name)
     const r = await spawn(args, [])
     expect(r.code, r.err).toBe(0)
     expect(launchAfterRm(r)).toContain(
@@ -92,7 +116,7 @@ describe("--sandbox starts a worker, a reviewer or a probe in the closed sandbox
       autoCompactWindow: 400000,
       enabledPlugins: { "ws-home@ws": false },
       env: { ...FACTORY_SETTINGS.env, ...UNSIGNED },
-      sandbox: closedOf(r.home),
+      sandbox: closedOf(r.home, name),
     })
     expect(r.roster).toContain("sandbox=on")
     expect(existsSync(settingsOf(r, "factory-settings-400k.json"))).toBe(false)
@@ -155,8 +179,8 @@ describe("--sandbox starts a worker, a reviewer or a probe in the closed sandbox
       { name, backend: "claude" },
     )
     expect(r.code, r.err).toBe(0)
-    expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, closed)} `)
-    expect(builtOf(r, closed).sandbox).toEqual(closedOf(r.home))
+    expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, closedFile(name))} `)
+    expect(builtOf(r, closedFile(name)).sandbox).toEqual(closedOf(r.home, name))
     expect(r.roster).toContain("sandbox=on")
   })
 
@@ -166,8 +190,8 @@ describe("--sandbox starts a worker, a reviewer or a probe in the closed sandbox
       [],
     )
     expect(r.code, r.err).toBe(0)
-    const built = builtOf(r, "factory-settings-glm-sandbox-closed-400k.json")
-    expect(built.sandbox).toEqual(closedOf(r.home))
+    const built = builtOf(r, "factory-settings-glm-sandbox-closed-400k-worker-brave-otter.json")
+    expect(built.sandbox).toEqual(closedOf(r.home, "worker-brave-otter"))
     expect(built.env).toMatchObject({ ...UNSIGNED, CLAUDE_CODE_ENABLE_TELEMETRY: "0" })
   })
 
@@ -177,8 +201,8 @@ describe("--sandbox starts a worker, a reviewer or a probe in the closed sandbox
     })
     expect(r.code, r.err).toBe(0)
     const data = join(r.home, "scratch-data")
-    const built = JSON.parse(readFileSync(join(data, closed), "utf8"))
-    expect(built.sandbox).toEqual(closedOf(r.home, data))
+    const built = JSON.parse(readFileSync(join(data, closedFile("worker-brave-otter")), "utf8"))
+    expect(built.sandbox).toEqual(closedOf(r.home, "worker-brave-otter", data))
   })
 })
 
@@ -295,7 +319,8 @@ describe("the closed sandbox lets a session work in its own worktree", () => {
   test("two starts write two files, each holding its own session's worktree alone", async () => {
     const { main, spawnSh } = checkout()
     const env = { PLAYGROUND_REPO: main }
-    const start = ["b.md", "--reads-only", "--sandbox"]
+    // the memory trial alternates a worker's arm, and its arm on names a file of its own, so both starts keep it off
+    const start = ["b.md", "--memory", "off", "--reads-only", "--sandbox"]
     const first = (home: string) => {
       const run = Bun.spawnSync(
         ["bash", spawnSh, "--title", "Plain test work", "worker", "worker-other", ...start],
