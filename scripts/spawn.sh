@@ -63,7 +63,7 @@ set -euo pipefail
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
 #   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
-#   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, and holds outbound hosts to the ones a worker's loop needs; its roster row records sandbox=on, which a resume keeps
+#   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, and holds outbound hosts to the ones a worker's loop needs; its roster row records sandbox=on, which a resume keeps and a start without it clears
 #   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate; the load, memory and usage gates still hold it
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
@@ -1672,7 +1672,9 @@ if sandbox:
     }
     if closed:
         # Claude Code's sandbox opens loopback whole or not at all (allowLocalBinding gives every localhost port), and portless's proxy serves the live API's name on the same port as every other stack's, so loopback closes whole; a strict list keeps outbound hosts to the ones a worker's loop reads, since bypass mode lets any other pass. The Keychain's login items are files the client reads itself, so a read deny on its folder refuses them.
-        settings["sandbox"]["filesystem"]["denyRead"] = sorted([os.path.join(home, "Library", "Keychains")] + [os.path.join(data, name) for name in ("dumps", "remote-key.json", "whatsapp")])
+        secrets = [os.path.join(data, name) for name in ("dumps", "remote-key.json", "whatsapp")]
+        settings["sandbox"]["filesystem"]["denyRead"] = sorted([os.path.join(home, "Library", "Keychains")] + secrets)
+        settings["sandbox"]["filesystem"]["denyWrite"] = deny + secrets
         settings["sandbox"]["network"] = {
             "allowedDomains": ["api.github.com", "github.com", "registry.npmjs.org"],
             "allowUnixSockets": settings["sandbox"]["network"]["allowUnixSockets"],
@@ -1979,7 +1981,12 @@ PY
   [ -z "$TITLE_ARG" ] || set -- "$@" "title=$TITLE_ARG"
   [ "${held:1:1}" = 1 ] || set -- "$@" "task=$TASK"
   set -- "$@" "memory=$MEMORY"
-  [ -z "$CLOSED" ] || set -- "$@" sandbox=on
+  # A start without the flag clears a row's sandbox=on, so a later resume or restore keeps the settings this start took.
+  if [ -n "$CLOSED" ]; then
+    set -- "$@" sandbox=on
+  elif [ "$MODE" != resume ] && [ "$(roster_field "$NAME" sandbox)" = on ]; then
+    set -- "$@" sandbox=
+  fi
   [ -z "${ARM:-}" ] || { mkdir -p "$DATA/memory" && printf '%s\n' "$MEMORY" > "$ARM"; } || echo "spawn.sh: $NAME $WHEN, but the memory trial's turn could not be written to $ARM" >&2
   said=
   if ! roster "$@"; then
