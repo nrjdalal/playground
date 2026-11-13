@@ -53,3 +53,8 @@ export const redact = (body: string, values: readonly string[]): string => {
     return hideIn(body, values)
   }
 }
+
+export const keychainValues = async (
+  _bots: readonly string[],
+  _read?: (item: string) => Promise<string | null>,
+): Promise<string[]> => []
