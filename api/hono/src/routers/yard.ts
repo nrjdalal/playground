@@ -97,7 +97,7 @@ const web = yardCaller({ web: true })
 const owner = yardCaller({ rung: "owner", web: true })
 // the message routes, by a channel's id or a bot's own, and the log route, the only ones a bot's token reaches, the message routes only in its DM with its maker
 const memberOrBot = yardCaller({ bots: true })
-// the owner's session or the owner's own token, since `playground yard bot add` makes a bot from the Mac: the one token route that makes a credential, safe as the bot it makes reaches only its DM with the owner
+// the owner's session or the owner's own token, since `playground yard bot add` makes a bot from the Mac: the one token route that makes a credential, safe as the bot it makes reaches only its DM with the owner, and its log grant is the browser's alone
 const botMaker = yardCaller({ rung: "owner" })
 
 // A post's body, the same on a channel's route and a bot's own
@@ -373,7 +373,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   .post(
     "/bots",
     doc(
-      "Makes a bot: its own login, <name>[bot], its DM with you and its token, whose secret is shown this once",
+      "Makes a bot: its own login, <name>[bot], its DM with you and its token, whose secret is shown this once; with log, its leave to read the dispatcher's log, from your signed-in browser alone, as the log switch is",
       z.object({ bot: botSchema, secret: z.string() }),
       [validationErrorResponses, conflictErrorResponses],
       201,
@@ -382,6 +382,8 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
     valid("json", z.object({ log: z.boolean().optional(), name: botNameSchema })),
     async (c) => {
       const { log, name } = c.req.valid("json")
+      if (log && c.get("caller").via !== "web")
+        throw new ApiError(403, "FORBIDDEN", "Only a signed-in browser may let a bot read the log")
       return c.json({ data: await store.createBot(db, c.get("caller"), name, { log }) }, 201)
     },
   )

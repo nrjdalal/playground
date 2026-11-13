@@ -176,7 +176,9 @@ describe("playground yard", () => {
     expect(await runYard(["bot", "add", "grok", "--log"], io)).toBe(0)
     expect(calls.at(-1)).toEqual(["addBot", "grok"])
     expect(readers).toEqual(["+grok[bot] dm-bot"])
-    expect(lines.join("\n")).toContain("log switch on Yard's Account page")
+    expect(lines.join("\n")).toContain(
+      "once the owner turns its log switch on in Yard's Account page",
+    )
     expect(await runYard(["bot", "revoke", "grok"], io)).toBe(0)
     expect(readers).toEqual(["+grok[bot] dm-bot", "-grok[bot]"])
     const plain = setUp()

@@ -12151,7 +12151,8 @@ var GUARD_KEYS = new Set([
   "sessions.aliases",
   "sessions.names",
   "slack.gatedSends",
-  "usage.keychainService"
+  "usage.keychainService",
+  "yard.logReaders"
 ]);
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);

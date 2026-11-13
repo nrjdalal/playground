@@ -16,6 +16,7 @@ import {
   keychain,
 } from "../../../../api/hono/src/lib/yard/keychain"
 import { dashboardCheckout } from "./probe"
+import { terminalIo } from "./store"
 
 // playground yard: this Mac's Yard from the terminal, with the token the Keychain keeps, the same token and hosted Yard the local Dashboard reads.
 
@@ -138,7 +139,7 @@ export async function runYard(words: string[], io: YardIo): Promise<number> {
   return 2
 }
 
-// bot add makes a bot on Yard and writes its token straight to its own Keychain item, printing only the item's name, so the token never reaches a terminal, a log or a chat; with --log it also lets the bot read the dispatcher's log, on Yard and on this Mac's yard.logReaders; bot revoke cuts it on Yard, takes it off the list and deletes the item.
+// bot add makes a bot on Yard and writes its token straight to its own Keychain item, printing only the item's name, so the token never reaches a terminal, a log or a chat; with --log it also puts the bot on this Mac's yard.logReaders, and Yard lets it read the dispatcher's log once the owner turns its switch on from the browser; bot revoke cuts it on Yard, takes it off the list and deletes the item.
 async function bot(words: string[], client: YardClient, io: YardIo): Promise<number> {
   const [action, name, flag] = words
   const log = flag === "--log"
@@ -152,7 +153,7 @@ async function bot(words: string[], client: YardClient, io: YardIo): Promise<num
   }
   const item = io.botKeychain(name!)
   if (action === "add") {
-    const { bot, secret } = await client.addBot(name!, { log })
+    const { bot, secret } = await client.addBot(name!)
     try {
       await item.write(secret)
       if (log) await io.logReaders.add(bot.login, bot.dm)
@@ -165,7 +166,9 @@ async function bot(words: string[], client: YardClient, io: YardIo): Promise<num
       `Made @${bot.login}, its DM ${bot.dm}; its token is in the Keychain item ${botService(name!)}`,
     )
     if (log)
-      io.out(`@${bot.login} reads the dispatcher's log through this Mac, every secret hidden`)
+      io.out(
+        `@${bot.login} reads the dispatcher's log through this Mac, every secret hidden, once the owner turns its log switch on in Yard's Account page`,
+      )
     io.out(
       `Next: a reveal card for ${botService(name!)}, so the owner copies the token into the bot`,
     )
@@ -198,8 +201,8 @@ const setting = async (name: string, live: string | null): Promise<string | unde
   )
 }
 
-// yard.logReaders at the login's scope, one commit per change: a login set to its bot's DM, or taken off when it is there.
-const logReaders = (data: string): YardIo["logReaders"] => {
+// yard.logReaders at the login's scope, one commit per change: a login set to its bot's DM, or taken off when it is there, written as the command line by the calling session, never as the owner.
+const logReaders = (data: string, author: string): YardIo["logReaders"] => {
   const change = async (login: string, dm: string | null) => {
     const read = readPolicyOrDefaults(data)
     if (read.refusal !== undefined) throw new Error(read.refusal)
@@ -215,7 +218,7 @@ const logReaders = (data: string): YardIo["logReaders"] => {
       },
       {
         actor: "cli",
-        author: "owner",
+        author,
         inboxRef: null,
         reason: `playground yard bot ${dm === null ? "revoke" : "add --log"} ${login}`,
       },
@@ -229,16 +232,17 @@ export const yardIo = async (
   repo: string,
   readSecret: YardIo["readSecret"],
   data = dataDir(),
-  _env: Record<string, string | undefined> = process.env,
+  env: Record<string, string | undefined> = process.env,
 ): Promise<YardIo> => {
   const live = dashboardCheckout(repo)
+  const caller = await terminalIo(env)
   return {
     api: await setting("YARD_API_URL", live),
     botKeychain: (name) => botKeychain(name),
     client: yardClient,
     err: console.error,
     keychain: keychain(),
-    logReaders: logReaders(data),
+    logReaders: logReaders(data, caller.name ?? caller.role ?? "cli"),
     out: console.log,
     readSecret,
     web: await setting("YARD_WEB_URL", live),

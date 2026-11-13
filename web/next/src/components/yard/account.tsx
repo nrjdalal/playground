@@ -146,7 +146,7 @@ const None = ({ children }: { children: string }) => (
   </Empty>
 )
 
-// The bots the owner made from the Mac, each with its log switch, which lets it read the dispatcher's log through the Mac (off until `bot add --log` or the switch turns it on, and read only while the Mac lists it too), and Revoke, which cuts its token and its DM at once.
+// The bots the owner made from the Mac, each with its log switch, which lets it read the dispatcher's log through the Mac (off until the switch turns it on, and read only while the Mac lists it too), and Revoke, which cuts its token and its DM at once.
 function Bots() {
   const client = useQueryClient()
   const { data: bots } = useQuery({

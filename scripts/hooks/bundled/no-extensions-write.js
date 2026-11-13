@@ -9713,7 +9713,8 @@ var GUARD_KEYS = new Set([
   "sessions.aliases",
   "sessions.names",
   "slack.gatedSends",
-  "usage.keychainService"
+  "usage.keychainService",
+  "yard.logReaders"
 ]);
 var JOB_PREFIX = "jobs.";
 var NO_TUNING = () => false;
