@@ -500,8 +500,12 @@ export const cmdPr = async (repo: string, n: string): Promise<void> => {
   const ours = (t: Json): boolean => t.ours && mine(t.by)
   console.log(`${label}: ${threads.length}, ${threads.filter(ours).length} of them ours`)
   for (const t of threads) {
-    const replied = mine(t.last) ? "author replied" : `untrusted ${t.last} replied`
-    const who = ours(t) ? (t.replied ? `ours, ${replied}` : "ours") : "someone else's"
+    const replied = !mine(t.last)
+      ? `, untrusted ${t.last} replied`
+      : t.replied
+        ? ", author replied"
+        : ""
+    const who = ours(t) ? `ours${replied}` : "someone else's"
     const from = mine(t.by) ? "" : `, untrusted ${t.by}`
     console.log(
       `  ${t.id} ${t.where} (${who}${from}${t.unknown ? ", resolution unknown" : ""}): ${t.first}`,
