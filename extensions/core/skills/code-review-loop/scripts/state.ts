@@ -219,6 +219,7 @@ export const openThreads = (threads: Json[]): Json[] => {
       by: (opener.nodes[0] as Json)?.author?.login ?? "?",
       first: firstLine(opener.nodes[0]!.body),
       id: t.id,
+      last: (notes.at(-1) as Json)?.author?.login ?? "?",
       ours,
       replied:
         ours && notes.length > 0 && !((notes.at(-1) as Json).body || "").includes("ReviewBot"),
@@ -495,10 +496,12 @@ export const cmdPr = async (repo: string, n: string): Promise<void> => {
   const threads = openThreads(pr.reviewThreads.nodes as Json[])
   const unknown = threads.some((t) => t.unknown)
   const label = unknown ? "threads, resolution unknown" : "open threads"
-  console.log(`${label}: ${threads.length}, ${threads.filter((t) => t.ours).length} of them ours`)
   const mine = (who: string): boolean => who.toLowerCase() === me.toLowerCase()
+  const ours = (t: Json): boolean => t.ours && mine(t.by)
+  console.log(`${label}: ${threads.length}, ${threads.filter(ours).length} of them ours`)
   for (const t of threads) {
-    const who = t.ours ? (t.replied ? "ours, author replied" : "ours") : "someone else's"
+    const replied = mine(t.last) ? "author replied" : `untrusted ${t.last} replied`
+    const who = ours(t) ? (t.replied ? `ours, ${replied}` : "ours") : "someone else's"
     const from = mine(t.by) ? "" : `, untrusted ${t.by}`
     console.log(
       `  ${t.id} ${t.where} (${who}${from}${t.unknown ? ", resolution unknown" : ""}): ${t.first}`,
