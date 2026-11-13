@@ -229,6 +229,7 @@ export const yardIo = async (
   repo: string,
   readSecret: YardIo["readSecret"],
   data = dataDir(),
+  _env: Record<string, string | undefined> = process.env,
 ): Promise<YardIo> => {
   const live = dashboardCheckout(repo)
   return {
