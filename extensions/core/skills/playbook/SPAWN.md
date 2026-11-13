@@ -9,14 +9,14 @@ Read the section for the mode you start and for each flag you pass, and the sect
   spawn.sh names each with `roster.ts who builder` and `who ops` ([ROSTER.md](ROSTER.md)), each seat's live holder, else its `sessions.names` name, so a manager respawned under a new name takes its new workers at once:
 
   ```bash
-  "${PLAYGROUND_REPO:?}/scripts/spawn.sh" worker <name> <brief> --title "<title>" [--reports-to <session>]
+  "${PLAYGROUND_REPO:?}/scripts/spawn.sh" worker <name> <brief> --title "<title>" --account <email> [--reports-to <session>]
   "${PLAYGROUND_REPO:?}/scripts/spawn.sh" runner <name> <brief>
   ```
 
 - **A checker or probe** opens as a column in its spawner's herdr workspace, to the right of the newest member's pane (the worker for its reviewer, the reviewer for its tester), run from its spawner's session, which it reports to:
 
   ```bash
-  "${PLAYGROUND_REPO:?}/scripts/spawn.sh" column <reviewer|tester|probe> <name> <reports-to> <the newest member's herdr pane id> <brief>
+  "${PLAYGROUND_REPO:?}/scripts/spawn.sh" column <reviewer|tester|probe> <name> <reports-to> <the newest member's herdr pane id> <brief> --account <email>
   ```
 
   A reviewer or tester adds `--pr <pull url>`, the pull request it serves, or `--pr <scope>/<kind>/<key>`, the extension item it scores, so open the PR as a draft before its checkers ([scripts/README.md](../../../../scripts/README.md#spawnsh) holds the refusal and the row it writes).
@@ -112,13 +112,15 @@ On a Mac whose inscope exports a workspace's own `CLAUDE_CONFIG_DIR` (its `insco
 ## --account
 
 `--account <email>`, with any mode and anywhere among its words, has the session log in as that Claude account: the lead names it to pin a login (`spawn.sh resume dispatcher <dir> <session-id> --account <email>`, `spawn.sh worker <name> <brief> --title "<title>" --in <dir> --account <email>`), and a running session never switches accounts by itself.
+A worker's, reviewer's or tester's Claude start names its login by full email: while `usage.accounts` lists a Claude row, spawn.sh refuses one with no `--account`, listing those rows in their order, a parked one with its `parkedUntil`, since the account split below ranks logins by week left per hour and cannot follow which login takes which work.
+A fresh install lists no Claude row, so its bare start stays on the machine's own login; a runner, probe, manager, resume or restore starts bare as below, a probe's `--account` being optional.
 spawn.sh refuses, before it opens a pane, an email that is not a plain `local@domain`, and one with no item in the Keychain under `usage.keychainService`, checking only that the item exists.
 An `--account` naming the machine's own login (`oauthAccount.emailAddress` in Claude Code's `.claude.json`, under `$CLAUDE_CONFIG_DIR` else in `~`, matched in any case) starts on it as a bare start that stays there does, with no token and the account split skipped, so a lead steers a start onto the own login by naming it:
 its usage is judged by that login's own reading alone (`usage.json`, or `ops/usage/stored-login.json` while `usage.json` reads the factory account), refused, naming the reading, whenever a bare start would count that login as over the gate (a `stored-login.json` missing, stale or naming another account among them), and the resume record keeps the `--account`.
 It also refuses an `--account` whose `usage.accounts` row sets `parkedUntil` to a later time, naming `parkedUntil`.
 It also refuses an `--account` whose week a reading names at 100% (`usage.json`, `ops/usage/stored-login.json` or a `usage-<name>.json`, until its `resets_at`, or `usage.json`'s `accounts` map, until its `weekReset`), naming the account and its reading, and, for the map's reading, the account with the most room, in any mode, a resume included.
 The launch then starts with `CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -s <usage.keychainService> -a <email> -w)"` as text, so the new pane's own shell reads the token into the session's environment and it never reaches herdr's argv, spawn.sh's output, the roster or a log; a read that comes back empty stops the pane there, before claude runs, naming the save-it-again command.
-With no `--account`, spawn.sh picks among the machine's own login (the one in `.claude.json`'s `oauthAccount`, judged by `usage.json`, or by `ops/usage/stored-login.json` while `usage.json` reads the factory account, which then counts as another login), each other login with a `usage-<name>.json`, and each account login-flip probes with a reading in `login-flip.json`'s `seen`,
+A bare start the rule above passes picks among the machine's own login (the one in `.claude.json`'s `oauthAccount`, judged by `usage.json`, or by `ops/usage/stored-login.json` while `usage.json` reads the factory account, which then counts as another login), each other login with a `usage-<name>.json`, and each account login-flip probes with a reading in `login-flip.json`'s `seen`,
 keeping those that pass the usage gate, a login whose `usage.accounts` row sets `parkedUntil` to a later time counting as over it.
 It takes the one next in the account split: `ops/usage/login-flip.json`'s `split.shares`, each account's week left per hour to its week reset or, for an ending account, 2 hours before its end, whichever comes first, a fifth of that for an account whose row sets `own` while that deadline is over a day away, none for a parked one, read under 30 minutes old (two of the ops tick's 15-minute beats).
 The pick is a smooth weighted round robin: each start adds every passing login's share to its credit in `ops/usage/split-picks.json`, takes the highest, and takes the shares' sum off it.

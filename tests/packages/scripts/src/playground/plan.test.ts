@@ -215,6 +215,22 @@ describe("addCommand", () => {
     })
   })
 
+  // spawn.sh refuses a worker with no --account while usage.accounts lists a Claude row, so add passes the one it is given.
+  test("passes --account to spawn.sh as given", () => {
+    expect(
+      addCommand(["--account", "blue@example.com", "worker-brave-otter"], all, pick, MODELS),
+    ).toEqual({
+      argv: [
+        "worker",
+        "worker-brave-otter",
+        "handoffs/new-worker.md",
+        "--account",
+        "blue@example.com",
+      ],
+      started: "Started worker-brave-otter",
+    })
+  })
+
   test("--kind runner starts a runner, its name picked for that kind", () => {
     expect(addCommand(["--kind", "runner", "--brief", "b-x.md"], all, pick, MODELS)).toEqual({
       argv: ["runner", "runner-brave-otter", "b-x.md"],
@@ -309,6 +325,7 @@ describe("addCommand", () => {
     [["--kind", "researcher"], "--kind takes worker or runner, not researcher"],
     [["--dispatcher", "--kind", "runner"], "--dispatcher takes --backend alone"],
     [["--dispatcher", "--title", "Plain work"], "--dispatcher takes --backend alone"],
+    [["--dispatcher", "--account", "zai"], "--dispatcher takes --backend alone"],
     [
       ["--dispatcher"],
       "a second dispatcher runs on --backend glm, since on Claude it needs a second account",

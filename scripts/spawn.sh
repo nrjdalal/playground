@@ -66,7 +66,7 @@ set -euo pipefail
 #   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, and holds outbound hosts to the ones a worker's loop needs; its roster row records sandbox=on, which a resume keeps and a start without it clears
 #   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate; the load, memory and usage gates still hold it
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
-#   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
+#   --account <email>  with any mode but restore or close, anywhere among its words, and on a worker's, reviewer's or tester's Claude start while usage.accounts lists a Claude row, which the refusal lists in order: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
 #   --harness codex    with the first dispatcher's manager start or its resume alone, on a scratch data folder (PLAYGROUND_DATA_DIR naming one) until phase 3 lifts that, and no --backend, --account, --model or --effort: the session runs in Codex (the codex on PATH), its CODEX_HOME the data folder's codex/, whose config.toml, hooks.json (the factory's guards and the beat) and app-server-daemon/settings.json each launch writes; its hooks always run trusted (--dangerously-bypass-hook-trust), and it fails closed: a session whose SessionStart hook writes no beat within 60 seconds has its pane closed and the start refused, with no new pin, record or roster row (a resume keeps its earlier ones), and a pane herdr will not close is named for you to close; a Codex start also stops when PowerShell is installed (a pwsh or powershell on PATH, or /usr/local/bin/pwsh), which the beat names. The beat names its thread, which takes the session's name through codex app-server's thread/name/set.
@@ -1336,6 +1336,21 @@ case "$MODE" in
   *) NAME=${MODE:-session}; usage ;;
 esac
 [ -z "$SANDBOX_ARG" ] || [[ $ROLE =~ ^(worker|reviewer|probe)$ ]] || usage "$SANDBOX_ONLY, not a $ROLE's"
+# A worker or checker names its login while usage.accounts lists a Claude row, since the account split ranks logins by week left per hour and cannot follow which login takes which work; a fresh install lists none, so its bare start stays on this machine's own login.
+if [ -z "$ACCOUNT" ] && [ "$MODE" != resume ] && [ "$BACKEND" != glm ] && [[ $ROLE =~ ^(worker|reviewer|tester)$ ]]; then
+  ORDER=$(python3 -I -c 'import datetime as dt, json, sys
+now = dt.datetime.now(dt.timezone.utc)
+def named(row):
+    until = row.get("parkedUntil")
+    try:
+        parked = isinstance(until, str) and dt.datetime.fromisoformat(until.replace("Z", "+00:00")) > now
+    except ValueError:
+        parked = False
+    return row["email"] + (" (parked until " + until + ")" if parked else "")
+rows = [r for r in json.loads(sys.argv[1]) if isinstance(r, dict) and r.get("provider", "claude") == "claude" and isinstance(r.get("email"), str)]
+print(", ".join(named(r) for r in rows))' "${USAGE_ACCOUNTS:-[]}") || refuse "it cannot read usage.accounts to check that a $ROLE names its login"
+  [ -z "$ORDER" ] || refuse "a $ROLE names its login with --account <email>, since the account split cannot follow which login takes which work: usage.accounts lists $ORDER"
+fi
 word "$NAME" || refuse "a name is lowercase words joined by hyphens"
 # A new name gives its kind, since a reader of the name alone would show and place it as another; a lead or manager may take its kind from the roster instead, and a resume keeps the name it has.
 NAMED=$(kind_of_name "$NAME")
