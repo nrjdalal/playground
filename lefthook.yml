@@ -156,8 +156,8 @@ commit-msg:
 pre-push:
   commands:
     audit:
-      # GHSA-vfj7-8cjw-p6xm: braces has no patched release, and only dev tooling (shadcn, globby) reaches it
-      run: bun audit --audit-level high --ignore GHSA-vfj7-8cjw-p6xm
+      # GHSA-67mh-4wv8-2f99 (esbuild) and GHSA-g3hv-75wg-m249 (minimatch): only dev tooling reaches them, and each parent's latest still pins the old range
+      run: bun audit --audit-level moderate --ignore GHSA-67mh-4wv8-2f99 --ignore GHSA-g3hv-75wg-m249
       only:
         - ref: canary
     ensure-branches:
