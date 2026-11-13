@@ -8951,6 +8951,85 @@ var WRITES2 = [
   [/linear/i, new Set(["save_comment", "save_issue"])],
   [/slack/i, new Set(["chat_post_message"])]
 ];
+var REF_MOVE = /\b(?:createCommitOnBranch|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/;
+var REF_MUTATION = new RegExp(`${REF_MOVE.source}|\\bcreatePullRequest\\b`);
+
+// scripts/hooks/no-protected-push.ts
+var PROTECTED = new Set(["canary", "main"]);
+var PUSH_TAKES = new Set([
+  "--exec",
+  "-o",
+  "--push-option",
+  "--receive-pack",
+  "--recurse-submodules",
+  "--repo"
+]);
+var PLAIN2 = new Set([
+  "--atomic",
+  "--dry-run",
+  "--exec",
+  "--follow-tags",
+  "--force",
+  "--force-if-includes",
+  "--force-with-lease",
+  "--ipv4",
+  "--ipv6",
+  "--no-atomic",
+  "--no-follow-tags",
+  "--no-force-if-includes",
+  "--no-force-with-lease",
+  "--no-progress",
+  "--no-signed",
+  "--no-thin",
+  "--no-verify",
+  "--porcelain",
+  "--progress",
+  "--push-option",
+  "--quiet",
+  "--receive-pack",
+  "--recurse-submodules",
+  "--repo",
+  "--set-upstream",
+  "--signed",
+  "--thin",
+  "--verbose",
+  "--verify",
+  "-4",
+  "-6",
+  "-f",
+  "-n",
+  "-o",
+  "-q",
+  "-u",
+  "-v"
+]);
+var KEEPS_HEAD = new Set(["cat", "date", "echo", "printf", "pwd", "true"]);
+var GIT_KEEPS_HEAD = new Set([
+  "add",
+  "commit",
+  "diff",
+  "fetch",
+  "log",
+  "ls-remote",
+  "push",
+  "rev-parse",
+  "show",
+  "status"
+]);
+var FILE_TOOLS = new Set(["create_or_update_file", "delete_file", "push_files"]);
+var MERGE_TAKES = new Set([
+  "-A",
+  "--author-email",
+  "-b",
+  "--body",
+  "-F",
+  "--body-file",
+  "--match-head-commit",
+  "-R",
+  "--repo",
+  "-t",
+  "--subject"
+]);
 
 // scripts/hooks/read-only.ts
 var READ_FILE = { count: true, operands: true, values: ["-c", "-n"] };
@@ -9282,7 +9361,7 @@ var COMMIT_TAKES = new Set([
   "--template",
   "--trailer"
 ]);
-var PUSH_TAKES = new Set(["--exec", "-o", "--push-option", "--receive-pack", "--repo"]);
+var PUSH_TAKES2 = new Set(["--exec", "-o", "--push-option", "--receive-pack", "--repo"]);
 var REPO_WRITES = new Map([
   ["repo archive", []],
   ["repo delete", []],
@@ -9973,7 +10052,7 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     if (sub === "push" || sub === "send-pack" || subtree) {
       if (carried)
         return refuse("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
-      return subtree ? push(rest.slice(1), here, [], SUBTREE_TAKES) : push(rest, here, [], PUSH_TAKES, sub === "push");
+      return subtree ? push(rest.slice(1), here, [], SUBTREE_TAKES) : push(rest, here, [], PUSH_TAKES2, sub === "push");
     }
   }
   if (sub !== "commit" && sub !== "push")
@@ -10142,7 +10221,7 @@ function branchHead(dir) {
   }
   return !defaults.has(name);
 }
-async function push(rest, env, checkout, takes = PUSH_TAKES, plain = false) {
+async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
   const { flags, positionals } = parseFlags(rest, takes);
   if (state().policy.anyWrite) {
     const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value;

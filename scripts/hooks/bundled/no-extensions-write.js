@@ -6296,17 +6296,18 @@ async function registryName(sessionId, environment = process.env) {
     } catch {}
   }
 }
-async function opsLead(raw, environment = process.env) {
+async function leadOf(raw, kind, environment) {
   try {
     const session = sessionOf(raw);
     if (typeof session !== "string" || await sessionRole(environment, session) !== "lead")
       return false;
     const name = await registryName(session, environment);
-    return name !== undefined && await rosterKind(name, environment) === "ops";
+    return name !== undefined && await rosterKind(name, environment) === kind;
   } catch {
     return false;
   }
 }
+var opsLead = (raw, environment = process.env) => leadOf(raw, "ops", environment);
 async function codexName(sessionId, environment = process.env) {
   if (!environment.CODEX_HOME)
     return;
