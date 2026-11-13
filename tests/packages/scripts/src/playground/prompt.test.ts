@@ -29,14 +29,16 @@ const hookPrompt = (command: string) =>
   ].join("\n")
 // What `herdr pane read --source visible` returns: the pane's last rows alone, 24 of them as a manager's pane showed on 13 Nov.
 const visible = (screen: string, rows = 24) => screen.split("\n").slice(-rows).join("\n")
-const waiting = (...commands: string[]) =>
-  commands
-    .map((command, i) =>
-      JSON.stringify({
-        message: { content: [{ id: `t${i}`, input: { command }, name: "Bash", type: "tool_use" }] },
+// A transcript whose calls all wait on their result: a Bash command by its text, any other tool as [name, input].
+const waiting = (...calls: (string | [string, Record<string, unknown>])[]) =>
+  calls
+    .map((call, i) => {
+      const [name, input] = typeof call === "string" ? ["Bash", { command: call }] : call
+      return JSON.stringify({
+        message: { content: [{ id: `t${i}`, input, name, type: "tool_use" }] },
         type: "assistant",
-      }),
-    )
+      })
+    })
     .join("\n")
 const SHORT = "echo made-up > /tmp/made-up/note.txt"
 const LONG = [
@@ -67,6 +69,26 @@ describe("a hook's confirmation prompt", () => {
       "k3m9px-worker's prompt is not for the call with key " +
         `${callKey({ command: SHORT })}; nothing was pressed`,
     )
+  })
+
+  test("a long command's cut prompt is not a waiting Write's whose file name it shows", () => {
+    const command = `${LONG}\nwc -l /tmp/made-up/notes.md`
+    const write = { content: "made-up", file_path: "/tmp/made-up/notes.md" }
+    const screen = visible(hookPrompt(command))
+    expect(
+      refusalOf("k3m9px-worker", screen, waiting(command, ["Write", write]), callKey(write)),
+    ).toBe(
+      `k3m9px-worker's prompt is not for the call with key ${callKey(write)}; nothing was pressed`,
+    )
+  })
+
+  test("a long command's cut prompt may be a waiting parent's or another command's with the same last rows", () => {
+    const screen = visible(hookPrompt(LONG))
+    const parent: [string, Record<string, unknown>] = ["Agent", { prompt: "Made-up notes" }]
+    for (const other of [parent, LONG.replace("notes.md", "other.md")])
+      expect(
+        refusalOf("k3m9px-worker", screen, waiting(other, LONG), callKey({ command: LONG })),
+      ).toContain("k3m9px-worker's prompt may be another waiting call's")
   })
 
   test("a screen with no prompt still gets no key", () => {
