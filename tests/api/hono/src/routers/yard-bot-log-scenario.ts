@@ -43,7 +43,7 @@ out.offline = await status("/bot/log", scoutBot)
 // the owner's Mac, which answers each frame as this Mac's own relay does, its yard.logReaders binding scout's login to the DM scout was made with, and its log route a made-up page of two entries
 const frames: Record<string, unknown>[] = []
 const mac = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/yard/relay/socket`, {
-  headers: { authorization: `Bearer ${process.env.RELAY_TOKEN}` },
+  headers: { authorization: `Bearer ${process.env.OWNER_TOKEN}` },
 } as never)
 const page = {
   data: {
