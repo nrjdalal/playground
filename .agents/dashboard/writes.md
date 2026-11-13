@@ -14,6 +14,7 @@
   the message,
   the update message, a sent row action, the prompt's answer, the mode, the model or effort, the Vibeground's start or stop, its hand-back message to the dispatcher, the template's session start, the templates' list and the managers' order.
   A secret ask's Submit and a reveal card's Show and Copy also refuse the agent sign-in's account after the owner rung (`refuseAgent`), since that account holds the owner rung, so only the owner's own click moves a Keychain value (asks.md).
+  An Inbox answer, the composer's send, the Remote section's Approve and Revoke and the dispatcher's Start and Switch refuse that account too, after the owner rung (`refuseAgentOffFixture`), on every source but a fixture one (`currentSource()` in `api/hono/src/lib/dashboard/fixture.ts`), where testers drive them on made-up data.
   A thread view's opening (asks.md's Threads) and a sidebar thread's menu's Mark as read or unread, Pin or Unpin, Archive and Rename's Save are the confirmation for the thread's change.
   Behind portless the API's peer is always the proxy on loopback, so in portless LAN mode a LAN client passes `requireLoopback` and only the owner session stops it; keep LAN mode off while the dashboard runs.
   Under `PLAYGROUND_HOSTED=1` Yard's writes take the `member` rung, or the one their route names, with no `requireLoopback`, and a browser's write `requireTrustedOrigin`, while a `yard_` token's write takes none, since a token carries no cookie a page could send (stack.md's hosted rule).
