@@ -38,7 +38,7 @@ const BASH_GUARDS = [
   "no-unslotted-run",
 ]
 
-// A check module guards.ts runs that has no process of its own, so no main block: no-playground-leak's process runs no-prepare-write on the MCP tools, and no-protected-push guards Bash alone.
+// A check module guards.ts runs that has no process of its own, so no main block: no-playground-leak's process runs no-prepare-write and no-protected-push on the MCP tools.
 const MODULES = new Set(["no-prepare-write", "no-protected-push"])
 const MAIN_GUARDS = BASH_GUARDS.filter((name) => !MODULES.has(name))
 

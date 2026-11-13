@@ -1,12 +1,18 @@
-// A check for the factory's sessions, run on Bash by guards.ts alone, so it has no main block of its own: refuses a git push that writes main or canary of the factory's repository (factory.repo, else the main checkout's origin), since canary takes a pull request only through pr:merge or merge-on-ready and main moves only through the ship step's ship:merge, both of which merge through GitHub and run no git push of their own. A push it cannot read (a ref, a remote or a folder built at run time, an option it does not know, a branch an earlier command in the call may switch) is refused when it may land there; any other push passes.
+// A check for the factory's sessions, run on Bash by guards.ts and on the GitHub tools by no-playground-leak's process, so it has no main block of its own: refuses a git push, a hand-run gh pr merge (the Builder's one form aside), a gh api or GitHub tool write, and a GraphQL merge or ref move (on any repository) that writes main or canary of the factory's repository (factory.repo, else the main checkout's origin), since canary takes a pull request only through pr:merge or merge-on-ready and main moves only through the ship step's ship:merge, both of which merge through GitHub and run no git push of their own. A push it cannot read (a ref, a remote or a folder built at run time, an option it does not know, a branch an earlier command in the call may switch) is refused when it may land there; any other push passes.
 import "../../packages/env/src/aliases"
 import { dataDir } from "../../packages/env/src/data-dir"
 import { factoryRepo } from "../../packages/scripts/src/playground/setting"
 import { readPolicyOrDefaults } from "../../packages/settings/src/rendered"
-import { remoteRepo } from "./github"
+import { implicitRepos, remoteRepo, type Repo, repoOf } from "./github"
+import { REF_MOVE } from "./no-prepare-write"
 import { gitCommand } from "./no-stash"
+import { builderLead } from "./role"
 import {
+  type ApiRequest,
+  type Command,
   type Env,
+  ghApi,
+  ghCommand,
   GIT_TAKES,
   knownVariables,
   lex,
@@ -18,6 +24,7 @@ import {
   PRINTERS,
   program,
   run,
+  type Text,
   unreadable,
   type Visit,
   type Word,
@@ -301,6 +308,188 @@ function judge(
 const refuse = (what: string, where: true | string) =>
   `no-protected-push hook refuses this git push: ${what}, ${where === true ? "in the factory's repository" : `and ${where}`}, so it may write main or canary there. ${ROUTE} ${FIX}`
 
+const MCP_TOOL = /^mcp__(.+?)__(.+)$/
+// The GitHub tools that write a file onto the branch they name, the repository's default branch (canary) when they name none.
+const FILE_TOOLS = new Set(["create_or_update_file", "delete_file", "push_files"])
+// The options of gh pr merge that take a value, attached or as the next word.
+const MERGE_TAKES = new Set([
+  "-A",
+  "--author-email",
+  "-b",
+  "--body",
+  "-F",
+  "--body-file",
+  "--match-head-commit",
+  "-R",
+  "--repo",
+  "-t",
+  "--subject",
+])
+const MERGE_FIX = "Land it with bun run pr:merge <n>, or let merge-on-ready land it."
+const BUILDER_FORM =
+  "The Builder alone merges by hand, as gh pr merge <n> --squash --body-file <file> --match-head-commit <head> in a call that names no role variable and sources no file, the body passed by file since its text counts as the call's."
+// The words a refusal of a call the hook cannot read gives: the form that runs, which a thread reply, a resolve or a read takes.
+const UNREAD_FIX =
+  "Spell the query file's path or the endpoint out literally, with no shell variable or substitution, or put the query inline in single quotes, and a read, a thread reply or a resolve runs."
+
+const named = (repo: Repo | undefined, factory: string): boolean =>
+  !!repo && `${repo.owner}/${repo.repo}`.toLowerCase() === factory
+// Whether any repository a call may act on is the factory's, or one it cannot place (undefined), or the factory's repository does not read.
+const mayBe = (repos: (Repo | undefined)[], factory: string): boolean =>
+  !factory || repos.some((repo) => repo === undefined || named(repo, factory))
+const GH_DEFAULT = (env: Env, local: Map<string, Text>): (Repo | undefined)[] =>
+  env.cwd || local.has("GH_REPO") || env.vars.has("GH_REPO") || env.process.GH_REPO
+    ? implicitRepos(env, local)
+    : [undefined]
+
+// A GitHub tool's write onto main or canary of the factory's repository, or any pull request merge there.
+function judgeTool(tool: string, input: Record<string, unknown>, factory: string) {
+  const [, server, name] = MCP_TOOL.exec(tool) ?? []
+  if (!server || !name || !/github/i.test(server)) return
+  if (name !== "merge_pull_request" && !FILE_TOOLS.has(name)) return
+  const { branch, owner, repo } = input
+  const repos = [
+    typeof owner === "string" && typeof repo === "string" ? { owner, repo } : undefined,
+  ]
+  if (!mayBe(repos, factory)) return
+  const place = factory || "the factory's repository"
+  if (name === "merge_pull_request")
+    return `no-protected-push hook refuses ${tool}: it merges a pull request of ${place}, whose base is main or canary. ${ROUTE} ${MERGE_FIX}`
+  if (typeof branch === "string" && branch !== "") {
+    const target = branchOf(branch)
+    if (target === undefined || !PROTECTED.has(target)) return
+  }
+  const what = typeof branch === "string" && branch !== "" ? branch : "the default branch, canary"
+  return `no-protected-push hook refuses ${tool}: it writes ${what} of ${place}. ${ROUTE} ${FIX}`
+}
+
+// Whether a command may set the role variable a merge's pass reads, or source a file that may: the pass then goes, since the hook reads the role from its own launch.
+const namesRole = (command: string): boolean =>
+  /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command)
+
+// A gh pr merge on the factory's repository, which only the Builder runs by hand, in the one form pr:merge's README names.
+async function judgeMerge(
+  rest: Word[],
+  repos: Word[],
+  parsed: Parsed,
+  env: Env,
+  factory: string,
+  builder: () => Promise<boolean>,
+  command: string,
+): Promise<string | undefined> {
+  const { flags, positionals } = parseFlags(rest, MERGE_TAKES)
+  if (flags.some((f) => f.name === "--help" || f.name === "-h")) return
+  const given = [
+    ...repos,
+    ...flags
+      .filter((f) => (f.name === "-R" || f.name === "--repo") && f.value)
+      .map((f) => f.value!),
+  ]
+  const [target] = positionals
+  const url =
+    target && !unreadable(target)
+      ? /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\//i.exec(target.value)
+      : null
+  const candidates: (Repo | undefined)[] = url
+    ? [{ owner: url[1]!, repo: url[2]! }]
+    : given.length > 0
+      ? [repoOf(given.at(-1)!)]
+      : GH_DEFAULT(env, parsed.local)
+  if (target && unreadable(target)) candidates.push(undefined)
+  if (!mayBe(candidates, factory)) return
+  const head = flags.findLast((f) => f.name === "--match-head-commit")?.value
+  const squash = flags.some((f) => f.name === "--squash" || f.name === "-s")
+  const pinned = !!head && !unreadable(head) && /^[0-9a-f]{7,40}$/i.test(head.value)
+  if (squash && pinned && !namesRole(command) && (await builder())) return
+  return `no-protected-push hook refuses this gh pr merge: it merges a pull request of ${factory || "the factory's repository"}, whose base is main or canary. ${ROUTE} ${MERGE_FIX} ${BUILDER_FORM}`
+}
+
+// A field a gh api call sends, from its -f/-F fields, else its --input's JSON; unknown when the input does not read, undefined when it sends none.
+function fieldOf(request: ApiRequest, key: string): Text | undefined {
+  const field = request.fields.findLast((f) => f.key === key)
+  if (field) return field.text
+  for (const input of request.inputs) {
+    if (unreadable(input)) return { unknown: "an --input the hook cannot read", value: "" }
+    try {
+      const value = (JSON.parse(input.value) as Record<string, unknown>)[key]
+      if (typeof value === "string") return { value }
+      if (value !== undefined) return { unknown: `a ${key} that is no string`, value: "" }
+    } catch {
+      return { unknown: "an --input that is no JSON object", value: "" }
+    }
+  }
+}
+
+// What a REST write does to main or canary of a repository, or undefined when it moves neither.
+function restWrite(tail: string, request: ApiRequest): string | undefined {
+  if (/^pulls\/[^/]+\/merge$/.test(tail))
+    return "it merges a pull request, whose base is main or canary"
+  const protectedBy = (key: string, absent?: string) => {
+    const text = fieldOf(request, key)
+    if (!text) return absent
+    if (unreadable(text)) return `its ${key} is built at run time`
+    const target = branchOf(text.value)
+    return target !== undefined && PROTECTED.has(target) ? `it writes ${target}` : undefined
+  }
+  if (tail === "git/refs") return protectedBy("ref")
+  const ref = /^git\/refs\/(.+)$/.exec(tail)?.[1]
+  if (ref !== undefined) {
+    const target = branchOf(ref)
+    return target !== undefined && PROTECTED.has(target) ? `it writes ${target}` : undefined
+  }
+  if (/^contents\/./.test(tail))
+    return protectedBy("branch", "it names no branch, so it writes the default branch, canary")
+  if (tail === "merges") return protectedBy("base")
+}
+
+// A gh api write that moves main or canary of the factory's repository, or a GraphQL mutation that merges or moves a ref anywhere, since a node id names no repository.
+async function judgeApi(
+  rest: Word[],
+  cmd: Command,
+  parsed: Parsed,
+  env: Env,
+  factory: string,
+): Promise<string | undefined> {
+  const request = await ghApi(rest, cmd, env, parsed.xargs)
+  if (!request) return
+  const { endpoint, method } = request
+  const path = decodeURIComponent(
+    endpoint.value
+      .replace(/^https?:\/\/[^/]+/i, "")
+      .replace(/^\/+/, "")
+      .replace(/^api\/v3\//, "")
+      .split("?")[0]!,
+  ).replace(/\/+$/, "")
+  if (path === "graphql" || path === "api/graphql") {
+    // the query field, xargs' appended words, and an --input's JSON, each of which may carry the mutation
+    const texts = [
+      ...request.fields.filter((f) => f.key === "query" || f.key === "body").map((f) => f.text),
+      ...request.inputs,
+    ]
+    const blind = texts.some(unreadable)
+    const mutation = texts.map((t) => REF_MOVE.exec(t.value)?.[0]).find(Boolean)
+    if (mutation)
+      return `no-protected-push hook refuses this gh api graphql call: it runs ${mutation}, which merges a pull request or moves a branch, and a node id names no repository, so the hook cannot tell it from a write to main or canary. Merge through gh pr merge's own route, bun run pr:merge <n>, and move a branch with git push.`
+    if (!blind) return
+    return `no-protected-push hook refuses this gh api graphql call: it sends a query the hook cannot read, which may merge a pull request or move a branch. ${UNREAD_FIX}`
+  }
+  if (method === "GET" || method === "HEAD") return
+  const place = factory || "the factory's repository"
+  if (unreadable(endpoint))
+    return `no-protected-push hook refuses this gh api ${method} call: its endpoint is built at run time, so it may write main or canary of ${place}. ${UNREAD_FIX}`
+  const m = /^repos\/([^/]+)\/([^/]+)\/(.+)$/.exec(path)
+  if (!m) return
+  const repos =
+    m[1] === "{owner}" || m[2] === "{repo}"
+      ? GH_DEFAULT(env, parsed.local)
+      : [{ owner: m[1]!, repo: m[2]! }]
+  if (!mayBe(repos, factory)) return
+  const what = restWrite(m[3]!, request)
+  if (!what) return
+  const fix = /^pulls\/[^/]+\/merge$/.test(m[3]!) ? MERGE_FIX : FIX
+  return `no-protected-push hook refuses this gh api ${method} call: ${what} of ${place}. ${ROUTE} ${fix}`
+}
+
 const isPush = (args: Word[]) => gitCommand(args).sub?.value === "push"
 
 async function inspect(raw: string, environment: Environment): Promise<string | undefined> {
@@ -312,11 +501,18 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
   }
   if (typeof payload !== "object" || payload === null) return
   const { cwd, tool_input: input, tool_name: tool } = payload as Record<string, unknown>
+  const factoryOf = () => {
+    const read = readPolicyOrDefaults(dataDir(environment))
+    return read.refusal === undefined ? factoryRepo(read.settings) : ""
+  }
+  if (typeof tool === "string" && MCP_TOOL.test(tool))
+    return judgeTool(tool, (input ?? {}) as Record<string, unknown>, factoryOf())
   if (tool !== "Bash") return
   const command = (input as { command?: unknown } | null)?.command
-  if (typeof command !== "string" || !/git|push|\$|`/i.test(command.replace(/[\\'"]/g, ""))) return
-  const read = readPolicyOrDefaults(dataDir(environment))
-  const factory = read.refusal === undefined ? factoryRepo(read.settings) : ""
+  if (typeof command !== "string" || !/git|push|\bgh\b|\$|`/i.test(command.replace(/[\\'"]/g, "")))
+    return
+  const factory = factoryOf()
+  const builder = () => builderLead(raw, environment)
   const directory = typeof cwd === "string" ? cwd : undefined
   const env: Env = {
     cwd: directory,
@@ -329,8 +525,30 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
   }
   // Whether every command before this one leaves the checked-out branch as it was.
   let settled = true
-  const visit: Visit = async (_cmd, parsed, at) => {
+  const visit: Visit = async (cmd, parsed, at) => {
     const { args, first, name } = parsed
+    let ghArgs: Word[] | undefined
+    if (name === "gh") ghArgs = args
+    else if (!PRINTERS.has(name)) {
+      // gh behind a wrapper the reader does not know
+      const nested = args.findIndex((a) => program(a.value) === "gh")
+      if (nested !== -1) ghArgs = args.slice(nested + 1)
+    }
+    if (ghArgs) {
+      const { head, repos, rest } = ghCommand(ghArgs)
+      const folders = places(at)
+      if (at.cwdUnread || at.cwdAnywhere)
+        folders.push({ ...at, cwd: undefined, cwdSure: undefined })
+      for (const place of folders) {
+        const verdict =
+          head[0] === "pr" && head[1] === "merge"
+            ? await judgeMerge(rest, repos, parsed, place, factory, builder, command)
+            : head[0] === "api"
+              ? await judgeApi(rest, cmd, parsed, place, factory)
+              : undefined
+        if (verdict) return verdict
+      }
+    }
     let gitArgs: Word[] | undefined
     if (name === "git") gitArgs = args
     else if (first && (first.unknown || marked(first.value)) && isPush(args)) gitArgs = args
@@ -357,7 +575,7 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
   return run(lex(command, env.known), env, visit)
 }
 
-// Fails closed only on a call that names a push: an error on any other call lets it run, so a parser bug cannot block every Bash command.
+// Fails closed only on a call that names a push or another route it reads (a merge, a ref, a file write, GraphQL): an error on any other call lets it run, so a parser bug cannot block every Bash command.
 export async function check(
   raw: string,
   environment: Environment = process.env,
@@ -365,7 +583,7 @@ export async function check(
   try {
     return await inspect(raw, environment)
   } catch (error) {
-    if (!/push/i.test(raw)) return
-    return `no-protected-push hook could not read this call (${error}), which names a push, so it refuses it. ${FIX}`
+    if (!/push|merge|refs|contents|graphql|_file/i.test(raw)) return
+    return `no-protected-push hook could not read this call (${error}), which names a route onto main or canary, so it refuses it. ${FIX}`
   }
 }
