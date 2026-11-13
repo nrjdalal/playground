@@ -65,7 +65,7 @@ A session already running stays where it is until its next restart.
 
 ## Launch, model and effort
 
-spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions` (a probe's file is `factory-settings-sandbox-400k.json`, a dispatcher's or a lead's `factory-settings-manager-400k.json`):
+spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions` (a probe's file is `factory-settings-sandbox-400k.json`, a `--sandbox` start's `factory-settings-sandbox-closed-400k.json`, a dispatcher's or a lead's `factory-settings-manager-400k.json`):
 every session starts at high effort, and another effort comes with spawn.sh's `--effort` at a start or a resume, by whoever playbook's chain names ([SKILL.md](SKILL.md#chain)) and brief-rush's model rule;
 every session runs on `models.default` (Opus) unless it starts with `--model` naming another of `models.claude` (Fable, Sonnet or Haiku by default; spawn.sh refuses any other id, `--model` beside `--backend glm`, and any but `models.checker` (Opus) for a reviewer or tester, whose verdict gates a merge, and records none of them,
 so a resume takes `--model` afresh and one without it runs on Opus) or with `--backend glm` (below) (Opus at extra-high effort for research and everything else, never Sonnet), and every subagent a session starts runs on Sonnet unless it names a model,
@@ -189,6 +189,14 @@ A session gets exactly one `--settings`, since Claude Code keeps only the last o
 Every launch merges its compact window (**context**): spawn.sh rebuilds that file on each launch into `factory-settings-400k.json` for a worker, a runner or a checker, `factory-settings-glm-400k.json` on GLM, so a resume keeps the same window.
 A dispatcher or a lead takes `factory-settings-manager-400k.json` (`factory-settings-glm-manager-400k.json` on GLM), the same file plus a deny of the Agent and Workflow tools, which its memory-trial file carries too (**workers**, scripts/README.md).
 A probe takes `factory-settings-sandbox-400k.json` (`factory-settings-glm-sandbox-400k.json` on GLM), the same file plus Claude Code's sandbox around its shell commands (scripts/README.md, spawn.sh).
+
+## --sandbox
+
+`--sandbox`, with a worker's or probe's start or a reviewer's or probe's column, starts the session in the closed sandbox, `factory-settings-sandbox-closed-400k.json` (`factory-settings-glm-sandbox-closed-400k.json` on GLM).
+That is a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files to its shell commands, holds outbound hosts to GitHub's and the npm registry, and commits unsigned (scripts/README.md, spawn.sh).
+It fits a worker with no stack: inside it nothing listens on loopback or reaches a stack, so a tester, which drives one, stays off it, and spawn.sh refuses it for every other role and mode.
+Its roster row records `sandbox=on`, which a resume and `spawn.sh restore` keep.
+A start from inside it leaves the `--account` and GLM key check to the new pane's shell, which runs outside the sandbox and stops on a missing item before claude runs.
 herdr's own resume is off (`resume_agents_on_restore = false` in ops-herdr's `config.toml`), since it would bring a session back without `--settings` or the role, as a bare `claude --resume` by hand does.
 A session resumed that way gets its hooks from its folder alone: Claude Code loads `.claude/settings.json` from the session's own folder, and in a checkout whose settings carry the same hooks they load from there and read the role from the session's name, but anywhere else (a work-org checkout, an older checkout, a subfolder) nothing does,
 so a factory session resumed without its settings where its own folder's `.claude/settings.json` lacks them is respawned from its handoff through spawn.sh, never left running as resumed.
