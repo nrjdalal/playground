@@ -29,7 +29,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A column start names its spawner's pane as `$HERDR_PANE_ID`, which herdr sets in every pane's shell.
    A worker that only reads (research, a fetch, an investigation) starts with `--reads-only`, which passes a full run-slot room at the slots gate ([SPAWN.md](SPAWN.md#capacity-gate)) while the load, memory and usage gates still hold it, and its brief bars every run-slot run (a build, a suite, a type check, an install), since its start took no room.
    Read [SPAWN.md](SPAWN.md) for the command of the mode you start (a worker, a runner, a checker's or probe's column, a manager) and for each flag you pass,
-   and before you act on a refusal: it holds the capacity gate, the launch line with its model and effort, the resume, `--account`, `--backend glm`, `--runtime herdr` with `spawn.sh restore`, `--check`, `--sandbox` and `--no-sandbox`, and the role and settings every launch carries.
+   and before you act on a refusal: it holds the capacity gate, the launch line with its model and effort, the resume, `--account`, `--backend glm`, `--runtime herdr` with `spawn.sh restore`, `--check`, `--sandbox`, and the role and settings every launch carries.
    Done when spawn.sh has printed herdr's `herdr pane <id> workspace <id>` line for the session, or a refusal you have acted on by its gate's section in SPAWN.md.
 
 3. Brief it with `SendMessage` once `ListAgents` lists the name, writing the brief with writing-for-agents loaded (SKILL.md's **writing** rule).

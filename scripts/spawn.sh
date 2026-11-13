@@ -63,8 +63,7 @@ set -euo pipefail
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
 #   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
-#   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, and holds outbound hosts to the ones a worker's loop needs; a worker's or reviewer's start takes it with no flag; its roster row records sandbox=on, which a resume keeps and a start outside it clears
-#   --no-sandbox       with worker or a reviewer's column alone, anywhere among its words: the session starts outside the closed sandbox, for a start that runs a stack or needs loopback
+#   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, and holds outbound hosts to the ones a worker's loop needs; its roster row records sandbox=on, which a resume keeps and a start without it clears
 #   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate; the load, memory and usage gates still hold it
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words, and on a worker's, reviewer's or tester's Claude start while usage.accounts lists a Claude row, which the refusal lists in order: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
@@ -828,7 +827,7 @@ PY
   esac
 }
 
-# --account, --backend, --harness, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check, --priority, --reads-only, --sandbox and --no-sandbox may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --harness, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check, --priority, --reads-only and --sandbox may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -864,7 +863,6 @@ CHECK=
 PRIORITY=
 READS_ONLY=
 SANDBOX_ARG=
-NO_SANDBOX=
 NAME_PROJECT=
 SIZE=
 RUNTIME=
@@ -947,9 +945,6 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = --sandbox ]; then
     SANDBOX_ARG=1
     shift
-  elif [ "$1" = --no-sandbox ]; then
-    NO_SANDBOX=1
-    shift
   elif [ "$1" = --brief ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RESUME_BRIEF" ] || usage
     case "$2" in --*) usage "--brief needs a value; \"$2\" starts with --" ;; esac
@@ -1003,9 +998,6 @@ MODE=${1:-}
 [ -z "$READS_ONLY" ] || [ "$MODE" = worker ] || usage "--reads-only is for a worker, not ${MODE:-no mode}"
 SANDBOX_ONLY="--sandbox is for a worker's, a reviewer's or a probe's start"
 [ -z "$SANDBOX_ARG" ] || [[ $MODE =~ ^(worker|column|probe)$ ]] || usage "$SANDBOX_ONLY, not a ${MODE:-session}'s"
-NO_SANDBOX_ONLY="--no-sandbox is for a worker's or a reviewer's start"
-[ -z "$NO_SANDBOX" ] || [[ $MODE =~ ^(worker|column)$ ]] || usage "$NO_SANDBOX_ONLY, not a ${MODE:-session}'s"
-[ -z "$SANDBOX_ARG" ] || [ -z "$NO_SANDBOX" ] || usage "--sandbox and --no-sandbox go one at a time"
 [ -z "$PR_ARG" ] || [[ $MODE =~ ^(column|resume)$ ]] || usage "--pr is for a reviewer's or tester's column or resume, not ${MODE:-no mode}"
 [ -z "$TITLE_ARG" ] || [[ $MODE =~ ^(worker|column|resume)$ ]] || usage "--title is for a worker or a reviewer's or tester's column, not ${MODE:-no mode}"
 # herdr 0.9.5 keeps a resume command only from a source that holds the pane through report-agent, and then shows that source's state in place of its own (measured: a 14s turn read idle throughout), so restore reruns the sessions spawn.sh itself listed, with ops-herdr's resume_agents_on_restore off. Each goes through resume, so the gate and the live-name check judge it, and a live one is left as it is.
@@ -1344,9 +1336,6 @@ case "$MODE" in
   *) NAME=${MODE:-session}; usage ;;
 esac
 [ -z "$SANDBOX_ARG" ] || [[ $ROLE =~ ^(worker|reviewer|probe)$ ]] || usage "$SANDBOX_ONLY, not a $ROLE's"
-[ -z "$NO_SANDBOX" ] || [[ $ROLE =~ ^(worker|reviewer)$ ]] || usage "$NO_SANDBOX_ONLY, not a $ROLE's"
-# A worker or reviewer starts in the closed sandbox unless --no-sandbox, for a start that runs a stack or needs loopback; a tester drives a stack, so it stays off it.
-[ "$MODE" != resume ] && [ -z "$NO_SANDBOX" ] && [[ $ROLE =~ ^(worker|reviewer)$ ]] && SANDBOX_ARG=1
 # A worker or checker names its login while usage.accounts lists a Claude row, since the account split ranks logins by week left per hour and cannot follow which login takes which work; a fresh install lists none, so its bare start stays on this machine's own login.
 if [ -z "$ACCOUNT" ] && [ "$MODE" != resume ] && [ "$BACKEND" != glm ] && [[ $ROLE =~ ^(worker|reviewer|tester)$ ]]; then
   ORDER=$(python3 -I -c 'import datetime as dt, json, sys
@@ -1648,7 +1637,7 @@ TAG=
 # A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own.
 SANDBOX=
 [ "$ROLE" = probe ] && SANDBOX=sandbox-
-# --sandbox, a worker's or reviewer's start without --no-sandbox, or a resumed row that records it, takes the closed sandbox in a file of its own: a probe's, with loopback, the Keychain and the data folder's secret files closed too (scripts/README.md, spawn.sh).
+# --sandbox, or a resumed row that records it, takes the closed sandbox in a file of its own: a probe's, with loopback, the Keychain and the data folder's secret files closed too (scripts/README.md, spawn.sh).
 CLOSED=
 { [ -n "$SANDBOX_ARG" ] || { [ "$MODE" = resume ] && [ "$(roster_field "$NAME" sandbox)" = on ]; }; } && CLOSED=1 SANDBOX=sandbox-closed-
 # A manager hands every build, read or research to a worker session (playbook's **workers**), so its file of its own denies the Agent and Workflow tools, which a bare deny takes out of its tools; every other session keeps both, a reviewer's code-review sub-agents among them.
@@ -2007,7 +1996,7 @@ PY
   [ -z "$TITLE_ARG" ] || set -- "$@" "title=$TITLE_ARG"
   [ "${held:1:1}" = 1 ] || set -- "$@" "task=$TASK"
   set -- "$@" "memory=$MEMORY"
-  # A start outside the closed sandbox clears a row's sandbox=on, so a later resume or restore keeps the settings this start took.
+  # A start without the flag clears a row's sandbox=on, so a later resume or restore keeps the settings this start took.
   if [ -n "$CLOSED" ]; then
     set -- "$@" sandbox=on
   elif [ "$MODE" != resume ] && [ "$(roster_field "$NAME" sandbox)" = on ]; then

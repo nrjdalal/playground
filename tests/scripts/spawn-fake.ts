@@ -330,13 +330,7 @@ export async function spawn(
     mode?.startsWith("worker") || (mode === "column" && ["reviewer", "tester"].includes(name ?? ""))
   const title =
     titled && !args.includes("--title") && !env.NO_TITLE ? ["--title", "Plain test work"] : []
-  // a worker or reviewer starts in the closed sandbox by default (spawn-sandbox-default.test.ts), so each case opts out unless it names --sandbox or --no-sandbox, or SANDBOX_DEFAULT leaves the default on.
-  const boxed = mode?.startsWith("worker") || (mode === "column" && name === "reviewer")
-  const plain =
-    boxed && !args.includes("--sandbox") && !args.includes("--no-sandbox") && !env.SANDBOX_DEFAULT
-      ? ["--no-sandbox"]
-      : []
-  const proc = Bun.spawn(["bash", path, ...title, ...plain, ...args], {
+  const proc = Bun.spawn(["bash", path, ...title, ...args], {
     env: {
       FAKE_LSTART: LSTART,
       HOME: home,
