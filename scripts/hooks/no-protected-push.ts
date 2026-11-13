@@ -327,7 +327,10 @@ const MERGE_TAKES = new Set([
 ])
 const MERGE_FIX = "Land it with bun run pr:merge <n>, or let merge-on-ready land it."
 const BUILDER_FORM =
-  "The Builder alone merges by hand, as gh pr merge <n> --squash --match-head-commit <head> in a call that names no role variable and sources no file."
+  "The Builder alone merges by hand, as gh pr merge <n> --squash --body-file <file> --match-head-commit <head> in a call that names no role variable and sources no file, the body passed by file since its text counts as the call's."
+// The words a refusal of a call the hook cannot read gives: the form that runs, which a thread reply, a resolve or a read takes.
+const UNREAD_FIX =
+  "Spell the query file's path or the endpoint out literally, with no shell variable or substitution, or put the query inline in single quotes, and a read, a thread reply or a resolve runs."
 
 const named = (repo: Repo | undefined, factory: string): boolean =>
   !!repo && `${repo.owner}/${repo.repo}`.toLowerCase() === factory
@@ -419,6 +422,8 @@ function fieldOf(request: ApiRequest, key: string): Text | undefined {
 
 // What a REST write does to main or canary of a repository, or undefined when it moves neither.
 function restWrite(tail: string, request: ApiRequest): string | undefined {
+  if (/^pulls\/[^/]+\/merge$/.test(tail))
+    return "it merges a pull request, whose base is main or canary"
   const protectedBy = (key: string, absent?: string) => {
     const text = fieldOf(request, key)
     if (!text) return absent
@@ -435,8 +440,6 @@ function restWrite(tail: string, request: ApiRequest): string | undefined {
   if (/^contents\/./.test(tail))
     return protectedBy("branch", "it names no branch, so it writes the default branch, canary")
   if (tail === "merges") return protectedBy("base")
-  if (/^pulls\/[^/]+\/merge$/.test(tail))
-    return "it merges a pull request, whose base is main or canary"
 }
 
 // A gh api write that moves main or canary of the factory's repository, or a GraphQL mutation that merges or moves a ref anywhere, since a node id names no repository.
@@ -465,15 +468,15 @@ async function judgeApi(
     ]
     const blind = texts.some(unreadable)
     const mutation = texts.map((t) => REF_MOVE.exec(t.value)?.[0]).find(Boolean)
-    if (!blind && !mutation) return
-    return `no-protected-push hook refuses this gh api graphql call: ${mutation ? `it runs ${mutation}` : "it sends a query the hook cannot read"}, which merges a pull request or moves a branch, and a node id names no repository, so the hook cannot tell it from a write to main or canary. Merge through gh pr merge's own route, bun run pr:merge <n>, and move a branch with git push.`
+    if (mutation)
+      return `no-protected-push hook refuses this gh api graphql call: it runs ${mutation}, which merges a pull request or moves a branch, and a node id names no repository, so the hook cannot tell it from a write to main or canary. Merge through gh pr merge's own route, bun run pr:merge <n>, and move a branch with git push.`
+    if (!blind) return
+    return `no-protected-push hook refuses this gh api graphql call: it sends a query the hook cannot read, which may merge a pull request or move a branch. ${UNREAD_FIX}`
   }
   if (method === "GET" || method === "HEAD") return
   const place = factory || "the factory's repository"
   if (unreadable(endpoint))
-    return mayBe([undefined], factory)
-      ? `no-protected-push hook refuses this gh api ${method} call: its endpoint is built at run time, so it may write main or canary of ${place}. ${ROUTE} ${FIX}`
-      : undefined
+    return `no-protected-push hook refuses this gh api ${method} call: its endpoint is built at run time, so it may write main or canary of ${place}. ${UNREAD_FIX}`
   const m = /^repos\/([^/]+)\/([^/]+)\/(.+)$/.exec(path)
   if (!m) return
   const repos =
@@ -483,7 +486,8 @@ async function judgeApi(
   if (!mayBe(repos, factory)) return
   const what = restWrite(m[3]!, request)
   if (!what) return
-  return `no-protected-push hook refuses this gh api ${method} call: ${what} of ${place}. ${ROUTE} ${what.includes("merges") ? MERGE_FIX : FIX}`
+  const fix = /^pulls\/[^/]+\/merge$/.test(m[3]!) ? MERGE_FIX : FIX
+  return `no-protected-push hook refuses this gh api ${method} call: ${what} of ${place}. ${ROUTE} ${fix}`
 }
 
 const isPush = (args: Word[]) => gitCommand(args).sub?.value === "push"

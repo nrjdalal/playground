@@ -272,6 +272,11 @@ beforeAll(async () => {
       JSON.stringify({ name, sessionId: session }),
     )
   await Bun.write(
+    join(scratch, "resolve.graphql"),
+    'mutation { resolveReviewThread(input: {threadId: "x"}) { clientMutationId } }',
+  )
+  await Bun.write(join(scratch, "body.md"), "Red against the source; names PLAYGROUND_ROLE.\n")
+  await Bun.write(
     join(scratch, "merge.graphql"),
     'mutation { mergePullRequest(input: {pullRequestId: "x"}) { clientMutationId } }',
   )
@@ -355,6 +360,48 @@ describe("a hand-run gh pr merge on the factory's repository", () => {
     ["an echo", "echo gh pr merge 5", "app"],
   ])("runs for a worker %s", async (_, command, dir) => {
     expect(await as("worker", command, dirs[dir])).toBeUndefined()
+  })
+})
+
+// pr:merge's README gives the Builder's hand merge its body by file, since an inline body's text counts as the call's
+describe("the Builder's hand merge takes its body by file", () => {
+  test("a --body-file passes, whatever the file holds", async () => {
+    const command = `gh pr merge 5 --squash --body-file ${scratch}/body.md --match-head-commit 0123abc`
+    expect(await as("builder", command)).toBeUndefined()
+  })
+
+  test("an inline --body naming the role variable or source loses the pass, and the reason names --body-file", async () => {
+    for (const body of [
+      "red against the source and the bundle",
+      "names PLAYGROUND_ROLE in no form",
+    ]) {
+      const reason = await as(
+        "builder",
+        `gh pr merge 5 --squash --body "${body}" --match-head-commit 0123abc`,
+      )
+      expect(reason).toContain("--body-file <file>")
+    }
+  })
+})
+
+describe("a call the hook cannot read is refused with the form that runs", () => {
+  test.each([
+    ["a query built at run time", 'gh api graphql -f query="$Q"'],
+    ["a query file through a variable", "S=/x; gh api graphql -F query=@$S/resolve.graphql"],
+    [
+      "an endpoint built at run time",
+      'gh api "repos/made-up/app/pulls/5/comments/$ID/replies" -f body=x',
+    ],
+  ])("%s", async (_, command) => {
+    const reason = await as("worker", command)
+    expect(reason).toContain("no-protected-push hook refuses")
+    expect(reason).toContain("Spell the query file's path or the endpoint out literally")
+  })
+
+  test("a resolve from a query file spelled out literally runs", async () => {
+    expect(
+      await as("worker", `gh api graphql -F query=@${scratch}/resolve.graphql`),
+    ).toBeUndefined()
   })
 })
 
@@ -456,7 +503,6 @@ describe("a gh api graphql call that merges or moves a ref is refused on any rep
       "app",
     ],
     ["a query from a file", "worker", "gh api graphql -F query=@$S/merge.graphql", "app"],
-    ["a query built at run time", "worker", 'gh api graphql -f query="$Q"', "app"],
   ] as const)("%s", async (_, session, command, dir) => {
     const reason = await as(session, command.replace("$S", scratch), dirs[dir])
     expect(reason).toContain("no-protected-push hook refuses this gh api graphql call")
