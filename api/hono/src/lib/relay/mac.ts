@@ -339,7 +339,7 @@ const webSocket = (url: URL, token: string): RelaySocket =>
   new WebSocket(url, { headers: { authorization: `Bearer ${token}` } } as never)
 
 // Holds the relay while the API runs: one outbound socket to the hub, opened with the owner's relay-on token, answering each read and sending a heartbeat every RELAY_HEARTBEAT_MS, replaced before Vercel's cap, and opened again after any drop, a socket not open within CONNECT_MS, or once the hub has been silent for RELAY_SILENT_MS, each connect and each end said in a `[relay]` line.
-export function startRelay(deps: RelayDeps): () => void {
+export function startRelay(deps: RelayDeps): (() => void) & { renew: () => void } {
   const {
     connect = webSocket,
     connectMs = CONNECT_MS,
@@ -467,9 +467,10 @@ export function startRelay(deps: RelayDeps): () => void {
   }
 
   void open()
-  return () => {
+  const stop = () => {
     stopped = true
     if (timer) clearTimeout(timer)
     for (const one of [...sockets.keys()]) one.close()
   }
+  return Object.assign(stop, { renew: () => {} })
 }

@@ -3,6 +3,8 @@ import { describe, expect, test } from "bun:test"
 import {
   KEYCHAIN_SERVICE,
   keychain,
+  PENDING_SERVICE,
+  pendingKeychain,
   type Run,
 } from "../../../../../../api/hono/src/lib/yard/keychain"
 
@@ -32,7 +34,7 @@ const fake = (items: Record<string, string>, refuse = false) => {
     if (wrote && value) items[wrote] = value
     return { code: 0, stderr: "", stdout: "" }
   }
-  return { calls, inputs, items, store: keychain(run, "owner") }
+  return { calls, inputs, items, run, store: keychain(run, "owner") }
 }
 
 const find = (service: string) => [
@@ -62,7 +64,22 @@ describe("the Mac's Yard token in the Keychain", () => {
     await store.write("yard_new-Token_1")
     await store.write(RELAY_TOKEN)
     const del = ["security", "delete-generic-password", "-s", OLD_RELAY, "-a", "owner"]
-    expect(calls).toEqual([["security", "-i"], del, ["security", "-i"], del])
+    const dropPending = [
+      "security",
+      "delete-generic-password",
+      "-s",
+      PENDING_SERVICE,
+      "-a",
+      "owner",
+    ]
+    expect(calls).toEqual([
+      ["security", "-i"],
+      del,
+      dropPending,
+      ["security", "-i"],
+      del,
+      dropPending,
+    ])
     expect(inputs.filter(Boolean)).toEqual([
       `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "owner" -w "yard_new-Token_1"\n`,
       `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "owner" -w "${RELAY_TOKEN}"\n`,
@@ -92,17 +109,33 @@ describe("the Mac's Yard token in the Keychain", () => {
     expect(items).toEqual({ [OLD_RELAY]: RELAY_TOKEN })
   })
 
-  test("a write deletes the old item after it, so the next read keeps the new token", async () => {
-    const { items, store } = fake({ [OLD_RELAY]: RELAY_TOKEN })
+  test("a write deletes the old item and a pending swap's after it, so the next read keeps the new token and no swap takes the pending one over it", async () => {
+    const { items, store } = fake({ [OLD_RELAY]: RELAY_TOKEN, [PENDING_SERVICE]: RELAY_TOKEN })
     await store.write("yard_new-Token_1")
     expect(items).toEqual({ [KEYCHAIN_SERVICE]: "yard_new-Token_1" })
     expect(await store.read()).toBe("yard_new-Token_1")
   })
 
-  test("a logout removes the old item too, so the next read finds no token", async () => {
-    const { items, store } = fake({ [KEYCHAIN_SERVICE]: "yard_abc", [OLD_RELAY]: RELAY_TOKEN })
+  test("a logout removes the old item and a pending swap's too, so the next read finds no token and no swap takes one back", async () => {
+    const { items, store } = fake({
+      [KEYCHAIN_SERVICE]: "yard_abc",
+      [OLD_RELAY]: RELAY_TOKEN,
+      [PENDING_SERVICE]: RELAY_TOKEN,
+    })
     await store.remove()
     expect(items).toEqual({})
     expect(await store.read()).toBeNull()
+  })
+
+  test("a swap's pending token sits in an item of its own, read only in a Yard token's shape", async () => {
+    const { items, run } = fake({})
+    const pending = pendingKeychain(run, "owner")
+    await pending.write(RELAY_TOKEN)
+    expect(items).toEqual({ [PENDING_SERVICE]: RELAY_TOKEN })
+    expect(await pending.read()).toBe(RELAY_TOKEN)
+    items[PENDING_SERVICE] = "hunter2"
+    expect(await pending.read()).toBeNull()
+    await pending.remove()
+    expect(items).toEqual({})
   })
 })

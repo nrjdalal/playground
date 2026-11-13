@@ -40,6 +40,11 @@ export const keychain = (run?: Run, account = userInfo().username): KeychainItem
   }
 }
 
+export const PENDING_SERVICE = "playground-yard-pending"
+
+export const pendingKeychain = (run?: Run, account = userInfo().username): KeychainItem =>
+  keychainItem(PENDING_SERVICE, { account, run })
+
 // A bot's token, which `playground yard bot add` writes and never prints, in an item of its own a reveal card names for the owner's Copy.
 export const botService = (name: string) => `playground-yard-bot-${name}`
 
