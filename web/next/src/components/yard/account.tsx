@@ -19,7 +19,7 @@ import { toast } from "@/components/ui/toast"
 import { inviteRequests } from "@/lib/yard"
 import { BOTS_KEY, INVITES_KEY, TOKENS_KEY, yardApi } from "@/lib/yard-api"
 
-// Account and tokens: each token is a device's way to post without a browser, named for that device (never "web"), its secret shown once. A member asks the owner to let someone in here, and the owner sees those requests and the bots `playground yard bot add` made.
+// Account and tokens: each token is a device's way to post without a browser, named for that device (never "web"), its secret shown once; the owner's relay token, which the switch makes, opens the Mac's relay alone. A member asks the owner to let someone in here, and the owner sees those requests and the bots `playground yard bot add` made.
 export function Account({ role }: { role: string | null | undefined }) {
   const client = useQueryClient()
   const { data: tokens } = useQuery({
@@ -28,10 +28,10 @@ export function Account({ role }: { role: string | null | undefined }) {
   })
   const [secret, setSecret] = useState<string | null>(null)
   const form = useForm({
-    defaultValues: { name: "" },
+    defaultValues: { name: "", relay: false },
     onSubmit: async ({ value }) => {
       try {
-        const { token } = await yardApi.createToken(value.name.trim())
+        const { token } = await yardApi.createToken(value.name.trim(), value.relay)
         setSecret(token.secret)
         form.reset()
         await client.invalidateQueries({ queryKey: TOKENS_KEY })
@@ -39,7 +39,7 @@ export function Account({ role }: { role: string | null | undefined }) {
         toast.add({ title: (error as Error).message, type: "error" })
       }
     },
-    validators: { onSubmit: z.object({ name: tokenNameSchema }) },
+    validators: { onSubmit: z.object({ name: tokenNameSchema, relay: z.boolean() }) },
   })
   const revoke = async (id: string) => {
     try {
@@ -88,6 +88,20 @@ export function Account({ role }: { role: string | null | undefined }) {
                 )
               }}
             </form.Field>
+            {roleAtLeast(role, "owner") && (
+              <form.Field name="relay">
+                {(field) => (
+                  <label className="flex items-center gap-2 text-xs">
+                    <Switch
+                      checked={field.state.value}
+                      onCheckedChange={(checked) => field.handleChange(checked)}
+                      size="sm"
+                    />
+                    A relay token, which opens your Mac&apos;s relay and nothing else
+                  </label>
+                )}
+              </form.Field>
+            )}
           </FieldGroup>
         </form>
         {secret && (

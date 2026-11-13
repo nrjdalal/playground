@@ -18,6 +18,8 @@ export const botService = (name: string) => `playground-yard-bot-${name}`
 export const botKeychain = (name: string, run?: Run, account = userInfo().username): KeychainItem =>
   keychainItem(botService(name), { account, run })
 
-export const relayKeychain = keychain
+// The Mac's relay token, in an item of its own that the local API alone reads, to hold the relay; `playground yard` never reads it.
+export const relayKeychain = (run?: Run, account = userInfo().username): KeychainItem =>
+  keychainItem("relay", { account, run })
 
 export type Keychain = KeychainItem

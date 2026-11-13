@@ -316,10 +316,14 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
   test("a bot the owner lets read the log reads a page through the owner's Mac, a line in its DM says so and cards nothing, and every other caller is refused (#1888)", async () => {
     await sql`insert into "user" (id, name, email, login, role) values ('lo', 'lo', ${["lo", "example.com"].join("@")}, 'lo', 'owner')`
     await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update("yard_lo").digest("hex")}, ${"mac"}, 'lo')`
+    // a made-up relay token in the shape Yard mints one, which the Mac holds the relay with
+    const relay = `yard_relay_${"lo".repeat(16)}`
+    await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update(relay).digest("hex")}, ${"mac-relay"}, 'lo')`
     const run = child(await Bun.file(BOT_LOG).text(), {
       OWNER_ID: "lo",
       OWNER_TOKEN: "yard_lo",
       POSTGRES_URL: url,
+      RELAY_TOKEN: relay,
     })
     expect(run.err).not.toContain("error:")
     const out = JSON.parse(last(run.out))

@@ -21,18 +21,20 @@ import {
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 
 import { ApiError } from "@/lib/error"
+import { KEYCHAIN_ITEMS } from "@/lib/keychain-items"
 import { live, take } from "@/lib/yard/limits"
 import { HELD_KINDS, heldBecause, mentionsOf } from "@/lib/yard/tier"
 
 type YardChannel = typeof yardChannel.$inferSelect
 
-// Who is calling: a member signed in on the web, or one of their tokens, whose name is the device a post carries; bot names the member who made a bot's token's user (yard_bot), and whether the owner lets it read the dispatcher's log.
+// Who is calling: a member signed in on the web, or one of their tokens, whose name is the device a post carries; bot names the member who made a bot's token's user (yard_bot), and whether the owner lets it read the dispatcher's log; relay marks the owner's relay token (createRelayToken).
 export type Caller = {
   bot?: { madeBy: string; readsLog?: boolean }
   device: string
   id: string
   login: string
   owner: boolean
+  relay?: true
   via: "token" | "web"
 }
 
@@ -504,11 +506,20 @@ export const tokens = async (db: Database, caller: Caller) =>
       .orderBy(asc(yardToken.name))
   ).map(tokenOut)
 
-// A new token: its secret, yard_ and 32 random characters, is returned this once and kept only as its hash.
-export const createToken = async (db: Database, caller: Caller, name: string, now = Date.now()) => {
+// A relay token's shape, yard_relay_ and 32 characters (KEYCHAIN_ITEMS.relay), which no person's token, yard_ and 32, takes; the hash binds the whole secret, so no caller can make one up.
+const isRelayToken = (value: string) => KEYCHAIN_ITEMS.relay.valid.test(value)
+
+// A new token: its secret, its prefix and 32 random characters, is returned this once and kept only as its hash.
+const mintToken = async (
+  db: Database,
+  caller: Caller,
+  name: string,
+  prefix: string,
+  now: number,
+) => {
   tokenNameSchema.parse(name)
   await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR, now)
-  const value = secret("yard_")
+  const value = secret(prefix)
   try {
     const [row] = await db
       .insert(yardToken)
@@ -521,7 +532,19 @@ export const createToken = async (db: Database, caller: Caller, name: string, no
   }
 }
 
-export const createRelayToken = createToken
+export const createToken = (db: Database, caller: Caller, name: string, now = Date.now()) =>
+  mintToken(db, caller, name, "yard_", now)
+
+// The token the owner's Mac holds the relay with, the only one the relay socket takes, which reaches no route but that socket and /me (yardCaller's relay).
+export const createRelayToken = async (
+  db: Database,
+  caller: Caller,
+  name: string,
+  now = Date.now(),
+) => {
+  if (!caller.owner) throw new ApiError(403, "FORBIDDEN", "Only the owner makes a relay token")
+  return mintToken(db, caller, name, "yard_relay_", now)
+}
 
 export const revokeToken = async (db: Database, caller: Caller, id: string) => {
   const [row] = await db
@@ -533,7 +556,7 @@ export const revokeToken = async (db: Database, caller: Caller, id: string) => {
   return tokenOut(row)
 }
 
-// The member a token names, when it is live, stamping its last use, with the bot row when its user is a bot.
+// The member a token names, when it is live, stamping its last use, with the bot row when its user is a bot, and whether it is the owner's relay token.
 export const tokenOwner = async (db: Database, value: string) => {
   const [row] = await db
     .select({ bot: yardBot, name: yardToken.name, tokenId: yardToken.id, user })
@@ -546,6 +569,7 @@ export const tokenOwner = async (db: Database, value: string) => {
   return {
     bot: row.bot ? { madeBy: row.bot.madeBy, readsLog: row.bot.readsLog } : null,
     device: row.name,
+    relay: isRelayToken(value),
     user: row.user,
   }
 }
