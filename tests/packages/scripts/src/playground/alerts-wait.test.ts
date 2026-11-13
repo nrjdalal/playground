@@ -22,9 +22,9 @@ describe("playground alerts-wait (PG-2184)", () => {
     appendFileSync(file, line("ops", "not yours"))
     appendFileSync(file, line("builder", "x-worker is stuck"))
     appendFileSync(file, line("builder", "y-worker is stuck"))
-    expect(await first).toBe("2026-10-26T05:40:00Z x-worker is stuck")
+    expect(await first).toBe("[ops-stuck-alert] 2026-10-26T05:40:00Z x-worker is stuck")
     expect(await alertsWait("builder", outbox, 5, BEGAN)).toBe(
-      "2026-10-26T05:40:00Z y-worker is stuck",
+      "[ops-stuck-alert] 2026-10-26T05:40:00Z y-worker is stuck",
     )
   })
 
@@ -34,7 +34,7 @@ describe("playground alerts-wait (PG-2184)", () => {
     await Bun.sleep(30)
     expect(await Bun.file(waiterPidPath(outbox, "planner")).text()).toBe(String(process.pid))
     await Bun.write(join(outbox, "ops-stuck-alert.jsonl"), line("planner", "p is stuck"))
-    expect(await waiting).toBe("2026-10-26T05:40:00Z p is stuck")
+    expect(await waiting).toBe("[ops-stuck-alert] 2026-10-26T05:40:00Z p is stuck")
     expect(await Bun.file(waiterPidPath(outbox, "planner")).exists()).toBe(false)
   })
 
@@ -51,7 +51,7 @@ describe("playground alerts-wait (PG-2184)", () => {
     )
     const began = new Date("2026-11-07T07:16:00Z")
     expect(await alertsWait("builder", outbox, 5, began)).toBe(
-      "(skipped 2 older alerts, queued over 5 minutes before this wait began; the relay sent each) 2026-11-07T07:12:00Z 4 minutes before",
+      "[ops-stuck-alert] (skipped 2 older alerts, queued over 5 minutes before this wait began; the relay sent each) 2026-11-07T07:12:00Z 4 minutes before",
     )
   })
 
@@ -68,7 +68,9 @@ describe("playground alerts-wait (PG-2184)", () => {
     const waiting = alertsWait("builder", outbox, 5, BEGAN)
     await Bun.sleep(30)
     appendFileSync(file, job("firefighting-headsup", "builder", "HEADS-UP MADE-1 raised"))
-    expect(await within(waiting)).toBe("2026-10-26T05:40:00Z HEADS-UP MADE-1 raised")
+    expect(await within(waiting)).toBe(
+      "[ops-firefighting-headsup] 2026-10-26T05:40:00Z HEADS-UP MADE-1 raised",
+    )
     expect(await Bun.file(waiterPidPath(outbox, "builder")).exists()).toBe(false)
   })
 
@@ -84,14 +86,14 @@ describe("playground alerts-wait (PG-2184)", () => {
         job("firefighting-headsup", "builder", "HEADS-UP second"),
     )
     expect(await within(alertsWait("builder", outbox, 5, BEGAN))).toBe(
-      "2026-10-26T05:40:00Z HEADS-UP first",
+      "[ops-firefighting-headsup] 2026-10-26T05:40:00Z HEADS-UP first",
     )
     expect(await within(alertsWait("builder", outbox, 5, BEGAN))).toBe(
-      "2026-10-26T05:40:00Z HEADS-UP second",
+      "[ops-firefighting-headsup] 2026-10-26T05:40:00Z HEADS-UP second",
     )
     expect(await within(alertsWait("builder", outbox, 5, BEGAN))).toBe("still waiting")
     expect(await within(alertsWait("ops", outbox, 5, BEGAN))).toBe(
-      "2026-10-26T05:40:00Z HEADS-UP for ops",
+      "[ops-firefighting-headsup] 2026-10-26T05:40:00Z HEADS-UP for ops",
     )
     expect(await Bun.file(join(outbox, "cursor.json")).exists()).toBe(false)
   })
@@ -107,14 +109,14 @@ describe("playground alerts-wait (PG-2184)", () => {
     )
     await Bun.write(join(outbox, "alerts-wait", "builder"), String(Buffer.byteLength(seen)))
     expect(await within(alertsWait("builder", outbox, 5, BEGAN))).toBe(
-      "2026-10-26T05:40:00Z x-worker is stuck",
+      "[ops-stuck-alert] 2026-10-26T05:40:00Z x-worker is stuck",
     )
     appendFileSync(
       join(outbox, "ops-firefighting-headsup.jsonl"),
       job("firefighting-headsup", "builder", "HEADS-UP after"),
     )
     expect(await within(alertsWait("builder", outbox, 5, BEGAN))).toBe(
-      "2026-10-26T05:40:00Z HEADS-UP after",
+      "[ops-firefighting-headsup] 2026-10-26T05:40:00Z HEADS-UP after",
     )
   })
 
@@ -133,7 +135,9 @@ describe("playground alerts-wait (PG-2184)", () => {
       const waiting = alertsWait("builder", outbox, 5, BEGAN)
       await Bun.sleep(30)
       appendFileSync(file, job("firefighting-headsup", "builder", "HEADS-UP after"))
-      expect(await within(waiting)).toBe("2026-10-26T05:40:00Z HEADS-UP after")
+      expect(await within(waiting)).toBe(
+        "[ops-firefighting-headsup] 2026-10-26T05:40:00Z HEADS-UP after",
+      )
     }
   })
 
@@ -155,6 +159,6 @@ describe("playground alerts-wait (PG-2184)", () => {
     await Bun.sleep(30)
     writeFileSync(join(dir, "ignored"), "")
     await Bun.write(join(outbox, "ops-stuck-alert.jsonl"), line("ops", "z-runner is stuck"))
-    expect(await waiting).toBe("2026-10-26T05:40:00Z z-runner is stuck")
+    expect(await waiting).toBe("[ops-stuck-alert] 2026-10-26T05:40:00Z z-runner is stuck")
   })
 })

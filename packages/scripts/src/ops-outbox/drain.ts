@@ -6,7 +6,13 @@ import { writeAtomic } from "../write-atomic"
 
 export type Queued = { at: string; job: string; text: string; to: string }
 
-// The outbox lines notify.sh queued since the last drain, oldest first, for Ops' sweep to send whole (a script cannot SendMessage, ADR 0010), each its job read from its queue file's name and its text led by `[ops-<job>]`, so the line's own words never name the job that sent it; cursor.json holds each queue's byte offset, and is rewritten only when a line went out, the move relay-watch in ops-tick reads; a first run starts it at every queue's end.
+// A queue file's job, from its name alone (ops-<job>.jsonl), never from a line it holds.
+export const jobOf = (file: string): string => file.slice("ops-".length, -".jsonl".length)
+
+// A line as a session reads it, led by its queue file's job, so the line's own words never name the job that sent it.
+export const tagged = (file: string, text: string): string => `[ops-${jobOf(file)}] ${text}`
+
+// The outbox lines notify.sh queued since the last drain, oldest first, for Ops' sweep to send whole (a script cannot SendMessage, ADR 0010), each its job and its text's lead tag read from its queue file (`tagged`); cursor.json holds each queue's byte offset, and is rewritten only when a line went out, the move relay-watch in ops-tick reads; a first run starts it at every queue's end.
 export async function drain(outbox: string): Promise<Queued[]> {
   if (await Bun.file(join(outbox, "relay.py")).exists())
     throw new Error(`${outbox}/relay.py owns cursor.json here: its relay sends these lines`)
@@ -29,7 +35,6 @@ export async function drain(outbox: string): Promise<Queued[]> {
     const from = (cursor[file] ?? 0) > bytes.length ? 0 : (cursor[file] ?? 0)
     const end = bytes.lastIndexOf(10) + 1
     if (end <= from) continue
-    const job = file.slice("ops-".length, -".jsonl".length)
     for (const line of new TextDecoder()
       .decode(bytes.subarray(from, end))
       .split("\n")
@@ -40,7 +45,7 @@ export async function drain(outbox: string): Promise<Queued[]> {
       } catch {
         throw new Error(`${file}: unreadable line at byte ${from}: ${line.slice(0, 120)}`)
       }
-      out.push({ ...queued, job, text: `[ops-${job}] ${queued.text}` })
+      out.push({ ...queued, job: jobOf(file), text: tagged(file, queued.text) })
     }
     next[file] = end
   }
