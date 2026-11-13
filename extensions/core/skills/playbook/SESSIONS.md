@@ -180,6 +180,7 @@ playground picker <session> allow <key> --rule <name>
 When a standing rule settles the answer, add `--rule <name>`, the name `playground rules` lists it under with a hyphen for each space (`--rule local-page`), to either form; picker refuses a name no rules file holds and presses nothing.
 
 Allow presses Yes once in the session's herdr pane while its prompt shows that call, a subagent's command included; deny presses No (Escape), and the relay sends the session the reason.
+A hook's confirmation prompt is a permission prompt too, and so is one whose long command Claude Code clips at the pane's top: picker then matches the rows still showing to the end of the call's command.
 Each answer is a line in `ops/picker.log`: the time, the manager, the answer, the session, the command's first 120 characters and, with `--rule`, `under **<name>**`, which a deny's message to the session names too.
 Done when it prints that line; it refuses any caller but the session's manager or the primary dispatcher, a deny with no reason, a dispatcher's session, a session in no herdr pane, and a key no waiting call or shown prompt matches, which means the prompt changed: wait for its next alert.
 An ops-unstick alert that says picker cannot answer the prompt found no waiting call surely its own, and names the close and resume below.
