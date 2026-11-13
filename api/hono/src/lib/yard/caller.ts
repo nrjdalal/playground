@@ -12,13 +12,12 @@ export type YardVariables = { caller: Caller }
 
 type Signed = { banned?: boolean | null; id: string; login?: string | null; role?: string | null }
 
-// Who may call, through a session or a bearer token: rung the lowest console rung that passes (member for Yard, user to redeem an invite, owner for invites and bots), web true where a bearer token is refused (approving, tokens, invites), since a token, an agent's, never decides for its person, and bots true on the message routes, by a channel's id or the bot's own, and the log route, the only ones a bot's token reaches, and relay true on the relay's socket and /me, the only ones the owner's relay token reaches.
+// Who may call, through a session or a bearer token: rung the lowest console rung that passes (member for Yard, user to redeem an invite, owner for invites and bots), web true where a bearer token is refused (approving, tokens, invites), since a token, an agent's, never decides for its person, and bots true on the message routes, by a channel's id or the bot's own, and the log route, the only ones a bot's token reaches; a token whose Relay switch is off reads alone, every write answering 403.
 export const yardCaller = ({
   bots = false,
-  relay = false,
   rung = "member",
   web = false,
-}: { bots?: boolean; relay?: boolean; rung?: ConsoleRole; web?: boolean } = {}) =>
+}: { bots?: boolean; rung?: ConsoleRole; web?: boolean } = {}) =>
   createMiddleware<{ Variables: YardVariables }>(async (c, next) => {
     const bearer = c.req.header("authorization")?.match(/^Bearer\s+(yard_\S+)$/)?.[1]
     let signed: Signed
@@ -33,8 +32,6 @@ export const yardCaller = ({
       device = found.device
       bot = found.bot
       relayToken = found.relay
-      if (relayToken && !relay)
-        throw new ApiError(403, "FORBIDDEN", "A relay token opens the relay alone")
     } else {
       // A browser's write carries its cookie wherever a page sends it from, so it must come from a trusted origin (writes.md); a token is never sent on its own, so a token's write needs none.
       if (c.req.method !== "GET") await requireTrustedOrigin(c, async () => {})
@@ -55,6 +52,8 @@ export const yardCaller = ({
         "FORBIDDEN",
         "A bot's token reaches only its DM's messages and the log",
       )
+    if (bearer && !bot && !relayToken && c.req.method !== "GET")
+      throw new ApiError(403, "FORBIDDEN", "A read-only token reads alone")
     c.set("caller", {
       ...(bot ? { bot } : {}),
       device,

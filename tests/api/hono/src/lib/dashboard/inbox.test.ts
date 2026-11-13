@@ -4830,9 +4830,18 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         Object.assign(console, console_)
       }
       expect(sink.calls).toHaveLength(0)
-      expect(security).toHaveLength(1)
+      // the write, then the old relay item's delete, so a later read keeps this token
+      expect(security).toHaveLength(2)
       expect(security[0]?.argv).toEqual(["security", "-i"])
       expect(security[0]?.input).toContain(`-w "${token}"`)
+      expect(security[1]?.argv).toEqual([
+        "security",
+        "delete-generic-password",
+        "-s",
+        "playground-yard-relay",
+        "-a",
+        "owner",
+      ])
       expect(provided.ok && provided.item.answer).toMatchObject({
         choice: "provided",
         results: [{ environment: "Keychain", exitCode: 0, line: "saved" }],

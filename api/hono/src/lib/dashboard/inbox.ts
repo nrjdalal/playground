@@ -180,7 +180,7 @@ const vercelSinkSchema = z.strictObject({
   type: z.literal("vercel"),
 })
 
-// A Keychain item a card names: a typed one by name (relay, slack, yard), or any of Playground's own by its full service (keychainSpec), always as this Mac's signed-in user.
+// A Keychain item a card names: a typed one by name (slack, yard), or any of Playground's own by its full service (keychainSpec), always as this Mac's signed-in user.
 const playgroundService = z.string().regex(PLAYGROUND_SERVICE, "Must be a playground- service")
 const keychainItemField = z.union([z.enum(KEYCHAIN_ITEM_NAMES), playgroundService])
 

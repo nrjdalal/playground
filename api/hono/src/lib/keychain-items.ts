@@ -1,21 +1,15 @@
 // The Keychain items whose value has a known shape, by name: each one's service and the shape its value takes, which a write and a read check (keychainSpec below adds Playground's other items).
 export const KEYCHAIN_ITEMS = {
-  // the Mac's relay token, yard_relay_ and 32 characters as Yard mints it, 6 longer than a person's yard_ token, so none of those takes its shape
-  relay: {
-    invalid: "a relay token starts yard_relay_",
-    service: "playground-yard-relay",
-    valid: /^yard_relay_[A-Za-z0-9_-]{32}$/,
-  },
   slack: {
     invalid: "a Slack user token starts xoxp-",
     service: "playground-slack",
     valid: /^xoxp-[A-Za-z0-9-]+$/,
   },
-  // a person's token, never the relay token, which keeps to its own item
+  // the Mac's one Yard token, relay-on (yard_relay_) or read-only
   yard: {
     invalid: "a Yard token starts yard_",
     service: "playground-yard",
-    valid: /^(?!yard_relay_[A-Za-z0-9_-]{32}$)yard_[A-Za-z0-9_-]+$/,
+    valid: /^yard_[A-Za-z0-9_-]+$/,
   },
 } as const
 

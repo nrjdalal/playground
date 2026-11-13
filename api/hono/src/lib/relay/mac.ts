@@ -330,7 +330,7 @@ type RelayDeps = {
   // the values hidden in a bot's read; the API's own checkout's .env by default
   secretValues?: () => readonly string[]
   silentMs?: number
-  // the relay token from its own Keychain item, or null with none
+  // the Mac's Yard token from the Keychain, or null with none
   token: () => Promise<string | null>
 }
 
@@ -338,7 +338,7 @@ type RelayDeps = {
 const webSocket = (url: URL, token: string): RelaySocket =>
   new WebSocket(url, { headers: { authorization: `Bearer ${token}` } } as never)
 
-// Holds the relay while the API runs: one outbound socket to the hub, opened with the owner's relay token, answering each read and sending a heartbeat every RELAY_HEARTBEAT_MS, replaced before Vercel's cap, and opened again after any drop, a socket not open within CONNECT_MS, or once the hub has been silent for RELAY_SILENT_MS, each connect and each end said in a `[relay]` line.
+// Holds the relay while the API runs: one outbound socket to the hub, opened with the owner's relay-on token, answering each read and sending a heartbeat every RELAY_HEARTBEAT_MS, replaced before Vercel's cap, and opened again after any drop, a socket not open within CONNECT_MS, or once the hub has been silent for RELAY_SILENT_MS, each connect and each end said in a `[relay]` line.
 export function startRelay(deps: RelayDeps): () => void {
   const {
     connect = webSocket,

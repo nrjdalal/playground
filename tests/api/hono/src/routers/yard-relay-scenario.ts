@@ -24,7 +24,7 @@ const closeCode = (path: string, headers: Record<string, string>) =>
 const body = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64")
 
 const out: Record<string, unknown> = {}
-// the owner's browser mints the Mac's relay token, which a member's cannot
+// a browser mints a relay-on token, the owner's and a member's alike
 const mint = async (headers: Record<string, string>) =>
   fetch(`http://127.0.0.1:${server.port}/api/v1/yard/tokens`, {
     body: JSON.stringify({ name: "mac-relay", relay: true }),
@@ -36,15 +36,28 @@ const minted = await mint(owner)
 const relayToken: string = (await minted.json()).data?.token?.secret ?? ""
 out.mint = [minted.status, /^yard_relay_[A-Za-z0-9_-]{32}$/.test(relayToken)]
 const asRelay = { authorization: `Bearer ${relayToken}` }
-out.relayMe = (
-  await fetch(`http://127.0.0.1:${server.port}/api/v1/yard/me`, { headers: asRelay })
-).status
-out.relayElsewhere = (
-  await fetch(`http://127.0.0.1:${server.port}/api/v1/yard/channels`, { headers: asRelay })
-).status
-out.personSocket = await closeCode("/socket", {
-  authorization: `Bearer ${process.env.OWNER_TOKEN}`,
-})
+// a relay-on token reads and posts as its person does; a read-only one reads alone, and neither a read-only token nor a member's relay-on one holds the relay
+const yard = async (path: string, headers: Record<string, string>, body?: unknown) => {
+  const response = await fetch(
+    `http://127.0.0.1:${server.port}/api/v1/yard${path}`,
+    body === undefined
+      ? { headers }
+      : {
+          body: JSON.stringify(body),
+          headers: { ...headers, "content-type": "application/json" },
+          method: "POST",
+        },
+  )
+  return [response.status, (await response.json().catch(() => null))?.error?.message ?? null]
+}
+const readOnly = { authorization: `Bearer ${process.env.READ_ONLY_TOKEN}` }
+out.relayMe = (await yard("/me", asRelay))[0]
+out.relayRead = (await yard("/channels", asRelay))[0]
+out.relayWrite = (await yard("/channels", asRelay, { name: "from-the-mac" }))[0]
+out.readOnlyMe = (await yard("/me", readOnly))[0]
+out.readOnlyRead = (await yard("/channels", readOnly))[0]
+out.readOnlyWrite = await yard("/channels", readOnly, { name: "from-a-reader" })
+out.readOnlySocket = await closeCode("/socket", readOnly)
 out.memberSocket = await closeCode("/socket", {
   authorization: `Bearer ${process.env.MEMBER_TOKEN}`,
 })

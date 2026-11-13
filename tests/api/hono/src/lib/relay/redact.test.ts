@@ -78,7 +78,6 @@ describe("redaction of a bot's read on this Mac (#1888)", () => {
     const asked: string[] = []
     const kept: Record<string, string> = {
       "playground-yard-bot-scout": "madeUpBotTokenValue",
-      relay: "madeUpRelayTokenValue",
       slack: "short",
       yard: "madeUpYardTokenValue",
     }
@@ -88,12 +87,10 @@ describe("redaction of a bot's read on this Mac (#1888)", () => {
       return kept[item] ?? null
     }
     expect(await keychainValues(["scout[bot]", "gone[bot]"], read)).toEqual([
-      "madeUpRelayTokenValue",
       "madeUpYardTokenValue",
       "madeUpBotTokenValue",
     ])
     expect(asked).toEqual([
-      "relay",
       "slack",
       "yard",
       "playground-yard-bot-scout",

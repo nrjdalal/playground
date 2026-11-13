@@ -24,7 +24,7 @@ import { dataDir } from "@/lib/sessions/paths"
 import { sessionCookie } from "@/lib/sign-in"
 import { yardClient } from "@/lib/yard/client"
 import { startYardPoll } from "@/lib/yard/inbound"
-import { relayKeychain } from "@/lib/yard/keychain"
+import { keychain } from "@/lib/yard/keychain"
 import { requireFeature } from "@/middlewares"
 import {
   accountsRouter,
@@ -305,7 +305,7 @@ seedFixtureThreadsAtStart(db).catch((error: unknown) =>
   ),
 )
 
-// The relay to the hosted Yard, on a stack that reads this Mac alone, never a fixture's: with YARD_API_URL set and the relay token in its own Keychain item (relayKeychain), the owner's browser on Yard reads this dashboard through one socket this API dials out, and sends the writes its paired key signs, each run here as the one local owner.
+// The relay to the hosted Yard, on a stack that reads this Mac alone, never a fixture's: with YARD_API_URL set and a relay-on token in the Keychain (keychain), the owner's browser on Yard reads this dashboard through one socket this API dials out, and sends the writes its paired key signs, each run here as the one local owner.
 if (env.YARD_API_URL && readsLive()) {
   const api = env.YARD_API_URL
   let made: Promise<string> | null = null
@@ -344,7 +344,7 @@ if (env.YARD_API_URL && readsLive()) {
       readers,
       // the .env read at each bot's read, the Keychain's values once, before the relay opens
       secretValues: () => [...checkoutEnvValues(), ...kept],
-      token: () => relayKeychain().read(),
+      token: () => keychain().read(),
     }),
   )
 }
