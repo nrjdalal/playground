@@ -330,6 +330,7 @@ export const addCommand = (
 
   if (dispatcher) {
     if (
+      account !== undefined ||
       manager !== undefined ||
       words.length ||
       brief !== undefined ||

@@ -325,6 +325,7 @@ describe("addCommand", () => {
     [["--kind", "researcher"], "--kind takes worker or runner, not researcher"],
     [["--dispatcher", "--kind", "runner"], "--dispatcher takes --backend alone"],
     [["--dispatcher", "--title", "Plain work"], "--dispatcher takes --backend alone"],
+    [["--dispatcher", "--account", "zai"], "--dispatcher takes --backend alone"],
     [
       ["--dispatcher"],
       "a second dispatcher runs on --backend glm, since on Claude it needs a second account",
