@@ -114,7 +114,7 @@
   A token swaps itself, its one token write: `POST /api/v1/yard/tokens/swap` takes a new secret of the calling token's own kind (`sameKind` in `lib/yard/secret.ts`) and gives its row that secret's hash in place (`swapToken` in `store.ts`), the same name and member and no other token, so the old secret's next call reads 401;
   a read-only token makes this one write too (`yardCaller`'s `swap`), and a bot's token and a signed-in browser read 403.
   A token's Relay switch, set when a browser makes it on Account, decides what it reaches: on, a relay-on token (`yard_relay_` and 32 characters, `createRelayToken` in `store.ts`) reads and posts as its member does;
-  off, any other member's `yard_` token reads alone, every write answering 403 "A read-only token reads alone" (`yardCaller`), and a bot's token keeps to its own routes, below.
+  off, any other member's `yard_` token reads alone, every write but its own swap answering 403 "A read-only token reads alone" (`yardCaller`), and a bot's token keeps to its own routes, below.
   The relay's socket takes the owner's relay-on token alone: a member's relay-on token fails its owner rung, a bot's token its bot fence, and a read-only token the socket's relay check.
   The owner's relay-on token makes, lists and revokes bots (`/api/v1/yard/bots`), the one token route that makes a credential, since `playground yard bot add` runs on the Mac.
   A bot is a user of its own whose login, `<name>[bot]`, no GitHub sign-in can claim and `githubLoginSchema` refuses, its `yard_bot` row naming its maker.
