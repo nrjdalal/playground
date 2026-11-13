@@ -111,7 +111,7 @@ export function startRotation({
         await rotate(deps)
       } catch (error) {
         await alert(
-          `The Mac could not swap its Yard token, and tries again at its next check: ${error instanceof Error ? error.message : String(error)}`,
+          `The Mac could not swap its Yard token, and tries again within a day: ${error instanceof Error ? error.message : String(error)}`,
         )
       }
       await Bun.write(stamp, JSON.stringify({ at: new Date(now()).toISOString() }))
