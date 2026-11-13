@@ -67,14 +67,14 @@ Every audit gate fails on a moderate advisory or worse. An advisory that no upda
 - **Advisory:** moderate: esbuild's development server (`esbuild --serve`) answers any website's request, so a page open in the browser can read what it serves. Affects `esbuild <=0.24.2`; patched in `0.25.0`.
 - **Why an ignore:** the tree's `esbuild@0.18.20` comes only through `drizzle-kit@0.31.11` (the latest) > `@esbuild-kit/esm-loader@2.6.5` > `@esbuild-kit/core-utils@3.3.2`, which pins `esbuild ~0.18.20` and is deprecated with no later release. An override by name would also move the tree's other copies (`0.25.12` and `0.28.2`) to one range, across esbuild's breaking releases for `fumadocs-mdx` and `tsdown`'s `tsx`.
 - **Risk:** negligible. The copy loads `packages/db`'s config for the `drizzle-kit` CLI (`bun run db:generate`, `db:migrate`, `db:studio`), a dev dependency that only transforms code and never starts esbuild's server; nothing the api bundle or the web app ships imports it.
-- **Exit criteria:** drop the ignore once `drizzle-kit` drops `@esbuild-kit/esm-loader` or the tree resolves no `esbuild` below `0.25.0`.
+- **Exit criteria:** drop the ignore once a `drizzle-kit` past `0.31.11` drops `@esbuild-kit/esm-loader` (it declares `^2.5.5`, and `2.6.5`, the latest, holds `@esbuild-kit/core-utils@3.3.2` and its `esbuild ~0.18.20`), or the tree resolves no `esbuild` below `0.25.0`.
 
 ### `minimatch` ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249))
 
 - **Advisory:** moderate: denial of service through glob-part amplification in a crafted pattern. Affects `minimatch >=7.0.0 <11.0.1`; patched in `11.0.1`.
 - **Why an ignore:** the tree's `minimatch@10.2.6` comes only through `@ts-morph/common`, at `0.29.0` under `ts-morph@28.0.0` (the latest) and `0.27.0` under `shadcn@4.23.0`'s `ts-morph ^26`; both declare `minimatch ^10.0.1`, so the fix is a major away and an override would cross it under them.
 - **Risk:** negligible. `ts-morph` runs only in dev tooling: `packages/scripts/src/shadcn-customize.ts` and the `shadcn` CLI behind `bun run shadcn:update`, each on the repo's own fixed globs, never a pattern from untrusted input.
-- **Exit criteria:** drop the ignore once `@ts-morph/common` declares a `minimatch` range that resolves `>=11.0.1`, or the tree resolves no `minimatch` below it.
+- **Exit criteria:** drop the ignore once a `@ts-morph/common` past `0.29.0` (reached by `ts-morph` past `28.0.0`, and by a `shadcn` past `4.23.0`, whose `ts-morph ^26` holds `0.27.0`) declares a `minimatch` range that resolves `>=11.0.1`, or the tree resolves no `minimatch` below it.
 
 ## Retired overrides
 
