@@ -1,5 +1,10 @@
 // The Keychain items whose value has a known shape, by name: each one's service and the shape its value takes, which a write and a read check (keychainSpec below adds Playground's other items).
 export const KEYCHAIN_ITEMS = {
+  relay: {
+    invalid: "a Yard token starts yard_",
+    service: "playground-yard",
+    valid: /^yard_[A-Za-z0-9_-]+$/,
+  },
   slack: {
     invalid: "a Slack user token starts xoxp-",
     service: "playground-slack",

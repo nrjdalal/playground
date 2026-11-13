@@ -18,4 +18,6 @@ export const botService = (name: string) => `playground-yard-bot-${name}`
 export const botKeychain = (name: string, run?: Run, account = userInfo().username): KeychainItem =>
   keychainItem(botService(name), { account, run })
 
+export const relayKeychain = keychain
+
 export type Keychain = KeychainItem

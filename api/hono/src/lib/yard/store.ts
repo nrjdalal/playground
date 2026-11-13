@@ -521,6 +521,8 @@ export const createToken = async (db: Database, caller: Caller, name: string, no
   }
 }
 
+export const createRelayToken = createToken
+
 export const revokeToken = async (db: Database, caller: Caller, id: string) => {
   const [row] = await db
     .update(yardToken)
