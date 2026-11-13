@@ -157,8 +157,10 @@ export const rootLocked = (root: string): boolean =>
   Boolean(chflags()) &&
   existsSync(root) &&
   Bun.spawnSync(["stat", "-f", "%Sf", root]).stdout.toString().trim().split(",").includes("uchg")
-// A tree's flag set or cleared, and the time it took: a path gone by the time the walk reaches it is skipped, since git maintenance can remove a file of a scope's .git mid-walk, and any other failure throws.
+// A tree's flag set or cleared, and the time it took: a path inside the tree gone by the time the walk reaches it is skipped, since git maintenance can remove a file of a scope's .git mid-walk, and a missing tree or any other failure throws.
 const flagTree = (tree: string, locked: boolean): number => {
+  if (!existsSync(tree))
+    throw new Error(`chflags could not ${locked ? "lock" : "unlock"} ${tree}: it does not exist`)
   const start = performance.now()
   const run = Bun.spawnSync([chflags()!, "-R", locked ? "uchg" : "nouchg", tree], {
     stderr: "pipe",
