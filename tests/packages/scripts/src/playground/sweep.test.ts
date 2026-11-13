@@ -321,6 +321,90 @@ describe("playground sweep", () => {
     })
   })
 
+  // issue 2030: a worker's merge-tree check reads the queue, so the Builder's sweep says when it is missing or out of step with the open PRs
+  describe("the merge queue against the owner's open PRs", () => {
+    const open =
+      (...prs: number[]) =>
+      async () =>
+        prs
+    const queued = (dir: string, queue: number[], parked: number[] = []) =>
+      writeFileSync(
+        join(dir, "merge-queue.json"),
+        JSON.stringify({
+          parked: parked.map((pr) => ({ pr })),
+          queue: queue.map((pr) => ({ pr })),
+        }),
+      )
+    // runSweep's open-PR reader, typed here so a sweep without one fails on its lines rather than its types
+    const withOpen: (
+      lead: string,
+      dir: string,
+      now: Date,
+      load5: number,
+      hold: undefined,
+      open: () => Promise<number[] | null>,
+    ) => Promise<string[]> = runSweep
+    const check = (dir: string, prs: () => Promise<number[] | null>, lead = "builder") =>
+      withOpen(lead, dir, NOW, 4, undefined, prs)
+
+    test("a missing file while PRs are open prints one line, once", async () => {
+      const dir = folder()
+      rmSync(join(dir, "merge-queue.json"))
+      expect(await check(dir, open(21, 20))).toEqual(["merge queue missing: open #20, #21"])
+      expect(await check(dir, open(21, 20))).toEqual(["quiet"])
+    })
+
+    test("a closed PR it lists prints one line, once", async () => {
+      const dir = folder()
+      queued(dir, [12, 20])
+      expect(await check(dir, open(20))).toEqual([
+        "queue: #12, #20",
+        "merge queue stale: lists closed #12",
+      ])
+      expect(await check(dir, open(20))).toEqual(["quiet"])
+    })
+
+    test("an open PR it leaves out prints one line, and a new gap prints again", async () => {
+      const dir = folder()
+      queued(dir, [20])
+      expect(await check(dir, open(20, 22))).toEqual([
+        "queue: #20",
+        "merge queue stale: leaves out open #22",
+      ])
+      expect(await check(dir, open(20, 22, 23))).toEqual([
+        "merge queue stale: leaves out open #22, #23",
+      ])
+    })
+
+    test("a correct queue, its parked PRs included, prints nothing", async () => {
+      const dir = folder()
+      queued(dir, [20], [22])
+      expect(await check(dir, open(20, 22))).toEqual(["queue: #20"])
+      expect(await check(dir, open(20, 22))).toEqual(["quiet"])
+    })
+
+    test("no open PR, an unread list or the ops lead's sweep prints nothing", async () => {
+      const dir = folder()
+      rmSync(join(dir, "merge-queue.json"))
+      expect(await check(dir, open())).toEqual(["quiet"])
+      expect(await check(dir, async () => null)).toEqual(["quiet"])
+      expect(await check(dir, open(20), "ops")).toEqual(["quiet"])
+    })
+
+    test("reads the open PRs in one call a builder's sweep and none for the ops lead's", async () => {
+      const dir = folder()
+      let calls = 0
+      const counted = async () => {
+        calls++
+        return [20, 21, 22]
+      }
+      await check(dir, counted)
+      expect(calls).toBe(1)
+      await check(dir, counted, "ops")
+      expect(calls).toBe(1)
+    })
+  })
+
   test("a cursor file of another shape counts as a first sweep", async () => {
     const dir = folder()
     mkdirSync(join(dir, "sweep"))

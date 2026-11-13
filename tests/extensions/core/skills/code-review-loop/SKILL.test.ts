@@ -506,3 +506,41 @@ describe("code-review-loop takes a lead's ruling only by SendMessage, and reads 
     )
   })
 })
+
+// issue 2030: the whole-suite touched list, the wait on its log, a pnpm repo's install and an extension item's fixed point
+describe("code-review-loop runs the touched tests as the sandbox and the repo allow", () => {
+  const last = async () => (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+
+  test("a whole-suite touched list runs in chunks of 200 files a call", async () => {
+    const text = await last()
+    const line = text.split("\n").find((l) => l.startsWith("**The whole suite**")) ?? ""
+    expect(line).toContain("a change to the root `package.json` or `bun.lock`")
+    expect(line).toContain("chunks of 200 files per `bun run test:file` call")
+    expect(line).toContain("1200 s deadline")
+    expect(line).toContain("CI's green run does not stand in for it")
+  })
+
+  test("a wait on a bun test log ends on its summary line, never its first error line", async () => {
+    const text = await last()
+    expect(text).toContain(
+      "stops on the run's summary line (`Ran N tests`), never on the first `error:` line",
+    )
+  })
+
+  test("a pnpm repo installs and tests from its package folder by env -C, with no pipe to hide the exit", async () => {
+    const text = await skill()
+    expect(text).toContain(
+      "`~/.playground/ops/run-slot.sh <your session name> -- /usr/bin/env -C <clone>/<pkg> pnpm install --frozen-lockfile`",
+    )
+    expect(text).toContain("`/usr/bin/env -C <clone>/<pkg> pnpm exec vitest run <files>`")
+    expect(text).toContain("since corepack reads the working folder's `packageManager`")
+    expect(text).toContain("`set -o pipefail`")
+  })
+
+  test("an extension item's fresh read takes a scratch repo of the base and the proposed revision", async () => {
+    const text = await last()
+    expect(text).toContain(
+      "build a scratch repo in your scratch folder, the base revision's commit then the proposed one's",
+    )
+  })
+})

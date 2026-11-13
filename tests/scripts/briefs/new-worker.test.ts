@@ -29,3 +29,14 @@ test("the worker template, which runners read too, keeps a runner's job up throu
     "only its heavy upkeep (an install, a build, a clone) waits for the all-clear",
   )
 })
+
+// issue 2030: a checker's account goes through $acct, and a Python worktree takes its own venv
+test("a worker's start script resolves its checker's account into $acct and makes its own venv", async () => {
+  const text = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/new-worker.md")).text()
+  expect(text).toContain(
+    '`acct=$(bun packages/scripts/src/playground/cli.ts accounts list | grep -o "<pattern>" | head -1)`',
+  )
+  expect(text).toContain("no call's input holds a full email address")
+  expect(text).toContain("`uv sync --frozen`")
+  expect(text).toContain("never borrows another worktree's")
+})
