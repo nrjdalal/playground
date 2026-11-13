@@ -15,6 +15,7 @@ const RELAY = join(import.meta.dir, "yard-relay-scenario.ts")
 const GITHUB = join(import.meta.dir, "yard-github.ts")
 const BOT = join(import.meta.dir, "yard-bot-scenario.ts")
 const BOT_LOG = join(import.meta.dir, "yard-bot-log-scenario.ts")
+const SWAP = join(import.meta.dir, "yard-swap-scenario.ts")
 const WEB = "http://127.0.0.1:3000"
 const PASSWORD = crypto.randomUUID()
 
@@ -367,6 +368,62 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       waiting: [["scout[bot]", "text"]],
     })
     expect(run.out).not.toMatch(/yard_[A-Za-z0-9_-]{32}/)
+  })
+
+  test("a token swaps itself in place for a new one of its own kind, the old one reading 401 after, and a bot's token, a browser and a swap to the other kind are refused", async () => {
+    const readOnly = `yard_${"q".repeat(32)}`
+    await sql`insert into "user" (id, name, email, login, role) values ('sw', 'sw', ${["sw", "example.com"].join("@")}, 'sw', 'owner')`
+    await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update(relayOn("sw")).digest("hex")}, ${"mac"}, 'sw')`
+    await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update(readOnly).digest("hex")}, ${"studio"}, 'sw')`
+    await sql`insert into "user" (id, name, email, login, role) values ('sb', 'sb', ${["sb", "example.com"].join("@")}, 'swapper[bot]', 'member')`
+    await sql`insert into yard_bot (user_id, made_by) values ('sb', 'sw')`
+    await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash(
+      "sha256",
+    )
+      .update(`yard_${"s".repeat(32)}`)
+      .digest("hex")}, ${"bot"}, 'sb')`
+    const run = child(await Bun.file(SWAP).text(), {
+      BOT_TOKEN: `yard_${"s".repeat(32)}`,
+      OWNER_ID: "sw",
+      POSTGRES_URL: url,
+      READ_ONLY_TOKEN: readOnly,
+      RELAY_TOKEN: relayOn("sw"),
+    })
+    expect(run.err).not.toContain("error:")
+    expect(JSON.parse(last(run.out))).toEqual({
+      afterRefusals: [200, 200],
+      answerHoldsSecret: false,
+      answerKeys: ["createdAt", "id", "lastUsedAt", "name", "revokedAt"],
+      badShape: 400,
+      bot: 403,
+      browser: 403,
+      newReadOnly: 200,
+      newReadOnlyWrites: 403,
+      newRelay: 200,
+      newRelayWrites: 201,
+      oldAgain: 401,
+      oldReadOnly: 401,
+      oldRelay: 401,
+      readOnlySwap: 200,
+      relaySwap: [200, "mac"],
+      tokens: [
+        ["mac", null],
+        ["studio", null],
+      ],
+      readOnlyToRelay: 400,
+      toOtherKind: 400,
+    })
+    // the swap made no token: the bot's and the member's two rows alone, each swapped row still its maker's, holding only the new secret's hash
+    const hash = (secret: string) => createHash("sha256").update(secret).digest("hex")
+    expect(
+      await sql`select name, user_id, hash from yard_token where user_id in ('sw', 'sb') order by name`,
+    ).toEqual([
+      { hash: hash(`yard_${"s".repeat(32)}`), name: "bot", user_id: "sb" },
+      { hash: hash(`yard_relay_${"n".repeat(32)}`), name: "mac", user_id: "sw" },
+      { hash: hash(`yard_${"r".repeat(32)}`), name: "studio", user_id: "sw" },
+    ])
+    // no log line of the hosted side holds a secret, the old ones or the new
+    expect(`${run.out}${run.err}`).not.toMatch(/yard_[A-Za-z0-9_-]{32}/)
   })
 
   test("GitHub's sign-in stamps the login and takes it from a stale holder, and no client sets one", async () => {

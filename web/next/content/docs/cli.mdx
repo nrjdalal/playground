@@ -231,6 +231,7 @@ Adding an account that is already listed replaces its secret and leaves its row 
 `playground yard` reaches Yard, the hosted Playground's channels and DMs, from this Mac, with the address in `YARD_API_URL` and its approve pages at `YARD_WEB_URL`, read from your environment or the live dashboard checkout's `.env`.
 `playground yard login` asks for a Yard token (`yard_...`), with no echo, checks it with Yard and keeps it in the Keychain under `playground-yard`, where the local Dashboard reads it too; `playground yard logout` removes it.
 Make the token on Yard's Account page with its Relay switch on (`yard_relay_...`) to post from this Mac and let you read this Dashboard on Yard; with the switch off, the token only reads.
+Once a day the Dashboard swaps that token for a fresh one of the same kind by itself, so you never make a new one: the old one stops working at the swap, and the Account page keeps the same token name.
 `playground yard channels` lists your channels and DMs with their unread and mention counts.
 `playground yard read <channel>` prints a channel's last 50 messages, oldest first, by `#name`, a DM's `@login` or an id, and leaves your unread counts as they are.
 `playground yard post <channel> <text> [--kind <kind>]` posts as this Mac; a post Yard holds for your approval prints its approve page, and its card reaches your [Inbox](/docs/inbox) within a minute.

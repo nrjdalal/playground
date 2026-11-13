@@ -86,13 +86,14 @@ describe("a keychain sink's writer", () => {
     return { calls, run }
   }
 
-  test("writes the Mac's one Yard item through the Yard keychain, so the old relay item goes after it", async () => {
+  test("writes the Mac's one Yard item through the Yard keychain, so the old relay item and a swap's pending one go after it", async () => {
     for (const item of ["yard", "playground-yard"]) {
       const { calls, run } = fake()
       await keychainWriter(item, run).write("yard_made-up-token")
       expect(calls).toEqual([
         ["security", "-i", 'add-generic-password -U -s "playground-yard"'],
         ["security", "delete-generic-password", "-s", "playground-yard-relay"],
+        ["security", "delete-generic-password", "-s", "playground-yard-pending"],
       ])
     }
   })

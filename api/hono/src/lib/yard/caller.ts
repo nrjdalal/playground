@@ -12,12 +12,13 @@ export type YardVariables = { caller: Caller }
 
 type Signed = { banned?: boolean | null; id: string; login?: string | null; role?: string | null }
 
-// Who may call, through a session or a bearer token: rung the lowest console rung that passes (member for Yard, user to redeem an invite, owner for invites and bots), web true where a bearer token is refused (approving, tokens, invites), since a token, an agent's, never decides for its person, and bots true on the message routes, by a channel's id or the bot's own, and the log route, the only ones a bot's token reaches; a token whose Relay switch is off reads alone, every write answering 403.
+// Who may call, through a session or a bearer token: rung the lowest console rung that passes (member for Yard, user to redeem an invite, owner for invites and bots), web true where a bearer token is refused (approving, tokens, invites), since a token, an agent's, never decides for its person, and bots true on the message routes, by a channel's id or the bot's own, and the log route, the only ones a bot's token reaches; a token whose Relay switch is off reads alone, every write answering 403 but swap's, a token's swap of itself.
 export const yardCaller = ({
   bots = false,
   rung = "member",
+  swap = false,
   web = false,
-}: { bots?: boolean; rung?: ConsoleRole; web?: boolean } = {}) =>
+}: { bots?: boolean; rung?: ConsoleRole; swap?: boolean; web?: boolean } = {}) =>
   createMiddleware<{ Variables: YardVariables }>(async (c, next) => {
     const bearer = c.req.header("authorization")?.match(/^Bearer\s+(yard_\S+)$/)?.[1]
     let signed: Signed
@@ -52,7 +53,7 @@ export const yardCaller = ({
         "FORBIDDEN",
         "A bot's token reaches only its DM's messages and the log",
       )
-    if (bearer && !bot && !relayToken && c.req.method !== "GET")
+    if (bearer && !bot && !relayToken && !swap && c.req.method !== "GET")
       throw new ApiError(403, "FORBIDDEN", "A read-only token reads alone")
     c.set("caller", {
       ...(bot ? { bot } : {}),

@@ -22,6 +22,7 @@ import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 
 import { ApiError } from "@/lib/error"
 import { live, take } from "@/lib/yard/limits"
+import { isRelayToken, sameKind, tokenSecret as secret } from "@/lib/yard/secret"
 import { HELD_KINDS, heldBecause, mentionsOf } from "@/lib/yard/tier"
 
 type YardChannel = typeof yardChannel.$inferSelect
@@ -47,8 +48,6 @@ export const JOINED_ON_REDEEM = [
 export const WRITES_HOUR = 20
 
 export const hashOf = (secret: string): string => createHash("sha256").update(secret).digest("hex")
-
-const secret = (prefix: string): string => `${prefix}${randomBytes(24).toString("base64url")}`
 
 // A unique-constraint violation, which a write that can lose a race answers as 409; drizzle wraps the driver's error as its cause.
 const taken = (error: unknown): boolean => {
@@ -505,9 +504,6 @@ export const tokens = async (db: Database, caller: Caller) =>
       .orderBy(asc(yardToken.name))
   ).map(tokenOut)
 
-// A relay-on token's shape, yard_relay_ and 32 characters, which no read-only token, yard_ and 32, takes; the hash binds the whole secret, so no caller can make one up.
-const isRelayToken = (value: string) => /^yard_relay_[A-Za-z0-9_-]{32}$/.test(value)
-
 // A new token: its secret, its prefix and 32 random characters, is returned this once and kept only as its hash.
 const mintToken = async (
   db: Database,
@@ -546,6 +542,37 @@ export const revokeToken = async (db: Database, caller: Caller, id: string) => {
     .returning()
   if (!row) throw notFound("Token")
   return tokenOut(row)
+}
+
+// A token's swap of itself, in place: its row takes next's hash, keeping its name, its member and so its kind, which next must share (sameKind), and makes no other token; old's next call reads 401. A swap counts on the member's token writes.
+export const swapToken = async (
+  db: Database,
+  caller: Caller,
+  old: string,
+  next: string,
+  now = Date.now(),
+) => {
+  if (!sameKind(old, next))
+    throw new ApiError(400, "BAD_REQUEST", "A token swaps for a new one of its own kind")
+  await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR, now)
+  try {
+    const [row] = await db
+      .update(yardToken)
+      .set({ hash: hashOf(next) })
+      .where(
+        and(
+          eq(yardToken.hash, hashOf(old)),
+          eq(yardToken.userId, caller.id),
+          isNull(yardToken.revokedAt),
+        ),
+      )
+      .returning()
+    if (!row) throw new ApiError(401, "UNAUTHORIZED", "Unauthorized")
+    return tokenOut(row)
+  } catch (error) {
+    if (taken(error)) throw new ApiError(409, "CONFLICT", "That secret is taken")
+    throw error
+  }
 }
 
 // The member a token names, when it is live, stamping its last use, with the bot row when its user is a bot, and whether it is relay-on.

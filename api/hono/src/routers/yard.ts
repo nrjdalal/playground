@@ -99,6 +99,8 @@ const owner = yardCaller({ rung: "owner", web: true })
 const memberOrBot = yardCaller({ bots: true })
 // the owner's session or the owner's own token, since `playground yard bot add` makes a bot from the Mac: the one token route that makes a credential, safe as the bot it makes reaches only its DM with the owner, and its log grant is the browser's alone
 const botMaker = yardCaller({ rung: "owner" })
+// a token's swap of itself, the one write a read-only token makes; a bot's token is refused, as on every route but its own
+const swapper = yardCaller({ swap: true })
 
 // A post's body, the same on a channel's route and a bot's own
 const postBody = z.object({
@@ -353,6 +355,25 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       const { name, relay } = c.req.valid("json")
       const make = relay ? store.createRelayToken : store.createToken
       return c.json({ data: { token: await make(db, c.get("caller"), name) } }, 201)
+    },
+  )
+  .post(
+    "/tokens/swap",
+    doc(
+      "Swaps the calling token for a new secret of its own kind, which the caller makes and sends, in place: the same token, name and member, and no other token made; the old secret's next call reads 401. The Mac's own swap on a schedule; a signed-in browser and a bot's token are refused",
+      z.object({ token: tokenSchema }),
+      [validationErrorResponses, conflictErrorResponses],
+    ),
+    swapper,
+    valid("json", z.object({ secret: z.string() })),
+    async (c) => {
+      const caller = c.get("caller")
+      const old = c.req.header("authorization")?.match(/^Bearer\s+(yard_\S+)$/)?.[1]
+      if (caller.via !== "token" || !old)
+        throw new ApiError(403, "FORBIDDEN", "Only a token swaps itself")
+      return c.json({
+        data: { token: await store.swapToken(db, caller, old, c.req.valid("json").secret) },
+      })
     },
   )
   .delete(

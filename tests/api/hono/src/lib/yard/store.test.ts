@@ -583,6 +583,44 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       await store.revokeToken(db, web("ada", true), relay.id)
       expect(await store.tokenOwner(db, relay.secret)).toBeNull()
     })
+
+    test("a token swaps itself in place for a fresh secret of its own kind, the old one reading as none after, and a revoked or other member's token swaps nothing", async () => {
+      // a fixed hour of its own, so these writes leave the other tests under the hour's cap
+      const now = Date.UTC(2026, 10, 13, 9, 0, 0)
+      const fresh = (prefix: string, fill: string) => `${prefix}${fill.repeat(32)}`
+      const relay = await store.createRelayToken(db, web("bo"), "swap-mac", now)
+      const next = fresh("yard_relay_", "n")
+      for (const [secret, status] of [
+        [fresh("yard_", "r"), 400],
+        [relay.secret, 400],
+        ["yard_relay_short", 400],
+      ] as const)
+        await expect(
+          store.swapToken(db, token("bo"), relay.secret, secret, now),
+        ).rejects.toMatchObject({ status })
+      await expect(store.swapToken(db, token("di"), relay.secret, next, now)).rejects.toMatchObject(
+        { status: 401 },
+      )
+      expect(await store.swapToken(db, token("bo"), relay.secret, next, now)).toMatchObject({
+        id: relay.id,
+        name: "swap-mac",
+        revokedAt: null,
+      })
+      expect(await store.tokenOwner(db, relay.secret)).toBeNull()
+      expect(await store.tokenOwner(db, next)).toMatchObject({ device: "swap-mac", relay: true })
+      const readOnly = await store.createToken(db, web("bo"), "swap-phone", now)
+      await expect(
+        store.swapToken(db, token("bo"), readOnly.secret, fresh("yard_relay_", "x"), now),
+      ).rejects.toMatchObject({ status: 400 })
+      expect(await store.tokenOwner(db, readOnly.secret)).toMatchObject({ relay: false })
+      const nextReadOnly = fresh("yard_", "p")
+      await store.swapToken(db, token("bo"), readOnly.secret, nextReadOnly, now)
+      expect(await store.tokenOwner(db, nextReadOnly)).toMatchObject({ relay: false })
+      await store.revokeToken(db, web("bo"), readOnly.id)
+      await expect(
+        store.swapToken(db, token("bo"), nextReadOnly, fresh("yard_", "q"), now),
+      ).rejects.toMatchObject({ status: 401 })
+    })
   })
 
   describe("invites", () => {
