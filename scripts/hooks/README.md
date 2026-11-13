@@ -369,8 +369,10 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Each guard reads its list and `policy.json` there, each scope's `lists/` and `settings.json` render into them on the next write (its `git add -A` takes a hand edit along), and a root that is gone sends the guards back to core's smaller lists.
   Two fences hold the root: a sandboxed session (a probe today) meets spawn.sh's sandbox entry, the root under `denyWrite`, so the kernel refuses its write whatever the shell spelling, and every other session meets this guard.
   Under both sits the root's file lock, the fence for every process: macOS's user immutable flag on the root and everything under it (`chflags -R uchg`), so a plain write meets EPERM.
-  The CLI is its lifter: `withLock` in `packages/settings/src/folder.ts`, which every writer of the root goes through, lifts a locked root for its write, locks it again after and logs both steps' time, and `playground ext lock` and `playground ext unlock` set and clear it.
-  The ops tick's extensions-lock beat locks a root that stands unlocked every 5 minutes (playbook's LIFECYCLE.md); a machine with no `chflags` (Linux) has no lock.
+  The CLI is its lifter: `withLock` in `packages/settings/src/folder.ts`, which every writer of the root goes through, lifts the part of a locked root its write touches, locks it again after and logs both steps' time, and `playground ext lock` and `playground ext unlock` set and clear it.
+  A write to one scope that leaves the root's own files alone lifts that scope's folder alone, so every other scope stays locked while it runs; a write that touches the root itself (its `policy.json`, its `login` file, a `hooks/` list or a new scope) lifts the whole root.
+  The walk skips a file inside its tree gone by the time it reaches it, since git maintenance can remove one of a scope's `.git` files mid-walk, and fails on a missing tree or any other error.
+  The ops tick's extensions-lock beat locks a root that stands unlocked, at its top or at a scope folder a write killed mid-way left lifted, every 5 minutes (playbook's LIFECYCLE.md); a machine with no `chflags` (Linux) has no lock.
   It refuses a file tool's path in the root, `~` expanded, and a redirect into it, a group's, a subshell's, `exec`'s, a shell's, `eval`'s, `source`'s, `.`'s, `cd`'s, `pushd`'s, `popd`'s or a bare one included, and zsh's `>!` and `>>!` with them.
   A command run through `run-slot.sh` is read as the words after its `--` (`slotWords`), on a copy of the line's env: run-slot runs them in a process of its own, so a `cd` or `pushd` there moves no folder for the commands after the call, while a command among those words is judged where its own `cd` lands.
   It refuses any program but a reader that names the root, a path in it, a folder above it (`~/.playground`, `~`) or a glob there (`*`, `?`, `[…]`, `{…}` or zsh's `(…)`, in a redirect's target too), links followed, in any word: the program word, an option's attached value (`-o<path>`, `--out=<path>`), a variable the call sets (`GIT_DIR=<clone>`), or the stdin xargs hands it.
@@ -1030,6 +1032,11 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It fails open on a call it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-raw-wa.test.ts`.
   [guards](#guards) runs it on Bash, and both settings files register it for Edit, Glob, Grep, MultiEdit, NotebookEdit, Read and Write, after its script reached `main` by the order in [Registered in both settings files](#registered-in-both-settings-files).
   ops-wa pairs a device only while that registration stands (`unguarded()` in `packages/scripts/src/ops-wa/life.ts`), so no auth state exists for a session to reach without it.
+- A factory session queues no line as an owner-word job, ops-wa or ops-dm-watch: the relay leads each line with `[ops-<job>]` from its queue file's name (`packages/scripts/src/ops-outbox/drain.ts`), and a line led by either tag reads as the owner's own words (the `whatsapp` and `slack` skills).
+  no-raw-wa refuses a `notify.sh` call whose job is `wa` or `dm-watch`, or a word it cannot read, run as the program or as a shell's script (`bash notify.sh wa …`), and a call that reaches either job's queue file in the data folder's `ops/outbox/` (`ops-wa.jsonl`, `ops-dm-watch.jsonl`), as typed, through its links, by a glob that may match it, and on Read, Write, Edit, MultiEdit and NotebookEdit.
+  Its text net refuses a call whose text names either form, whatever reads it; `notify.sh` itself refuses a job outside lower-case letters, digits and hyphens, so a job word names its own queue alone.
+  Every other job's `notify.sh` call runs, as does a read of the outbox folder (`ls`, `grep -r`) and every other queue file.
+  Its refusal names the way through: `notify.sh <your job> <text>` under the session's own job, or `SendMessage` to its manager.
 
 ## no-release-comment
 

@@ -176,7 +176,7 @@ test("import stores a source folder's 755 script as 100755 and keeps the stored 
   expect(statSync(at).mode & 0o777).toBe(0o755)
 })
 
-// The root's file lock: an import's fetch runs under withLock, which lifts a locked root for it, so an export that carries the scope's history on still fast-forwards.
+// The root's file lock: an import's fetch runs under withLock, which lifts that scope's folder of a locked root for it, so an export that carries the scope's history on still fast-forwards.
 test.skipIf(!Bun.which("chflags"))(
   "an import into a locked root fast-forwards a scope and leaves the root locked",
   () => {

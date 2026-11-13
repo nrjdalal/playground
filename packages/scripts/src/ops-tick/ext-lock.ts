@@ -5,7 +5,7 @@ import { extensionsDir, relockRoot } from "@packages/settings"
 
 import type { Context } from "./tick"
 
-// The extensions root's file lock kept on: a root that stands unlocked (a new one, one a move of the data folder made, or one playground ext unlock left) is locked again, one line in ops/log/ext-lock.log.
+// The extensions root's file lock kept on: a root that stands unlocked (a new one, one a move of the data folder made, one playground ext unlock left, or a scope folder a write killed mid-way left lifted) is locked again, one line in ops/log/ext-lock.log.
 export const extLock =
   (relock: (data: string) => boolean = relockRoot) =>
   async (ctx: Context) => {
