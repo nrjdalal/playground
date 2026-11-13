@@ -1139,7 +1139,12 @@ describe("a bot's read of the dispatcher's log, on this Mac (#1888)", () => {
   const botDeps = (
     dispatch: (request: Request) => Promise<Response>,
     over: Record<string, unknown> = {},
-  ) => ({ ...deps(dispatch), envValues: () => [], readers: () => ({ "Scout[bot]": DM }), ...over })
+  ) => ({
+    ...deps(dispatch),
+    secretValues: () => [],
+    readers: () => ({ "Scout[bot]": DM }),
+    ...over,
+  })
 
   test("a bot on yard.logReaders reads the log route as this Mac's owner, its answer redacted before it leaves", async () => {
     const reached: string[][] = []
@@ -1152,7 +1157,7 @@ describe("a bot's read of the dispatcher's log, on this Mac (#1888)", () => {
     }
     const answer = await answerRelay(
       botFrame(),
-      botDeps(dispatch, { envValues: () => [ENV_VALUE] }),
+      botDeps(dispatch, { secretValues: () => [ENV_VALUE] }),
     )
     expect(answer?.status).toBe(200)
     expect(reached).toEqual([[`${LOG}?after=4`, "session=fake"]])
