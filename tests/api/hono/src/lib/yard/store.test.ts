@@ -562,6 +562,25 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       expect(await store.tokenOwner(db, made.secret)).toBeNull()
       await expect(store.revokeToken(db, web("di"), made.id)).rejects.toMatchObject({ status: 404 })
     })
+
+    test("a relay token is the owner's alone, yard_relay_ and 32 characters, and names itself a relay token where a person's does not", async () => {
+      // a fixed hour of its own, so these writes leave the owner's other tests under the hour's cap
+      const now = Date.UTC(2026, 9, 31, 14, 0, 0)
+      await expect(store.createRelayToken(db, web("bo"), "mac", now)).rejects.toMatchObject({
+        status: 403,
+      })
+      const relay = await store.createRelayToken(db, web("ada", true), "mac-relay", now)
+      expect(relay.secret).toMatch(/^yard_relay_[A-Za-z0-9_-]{32}$/)
+      expect(await store.tokenOwner(db, relay.secret)).toMatchObject({
+        device: "mac-relay",
+        relay: true,
+      })
+      const person = await store.createToken(db, web("ada", true), "phone", now)
+      expect(person.secret).toMatch(/^yard_[A-Za-z0-9_-]{32}$/)
+      expect(await store.tokenOwner(db, person.secret)).toMatchObject({ relay: false })
+      await store.revokeToken(db, web("ada", true), relay.id)
+      expect(await store.tokenOwner(db, relay.secret)).toBeNull()
+    })
   })
 
   describe("invites", () => {

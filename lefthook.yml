@@ -71,6 +71,7 @@ pre-commit:
       skip:
         - merge
       glob: &bundle-inputs
+        - "api/hono/src/lib/dev/proxy.ts"
         - "bun.lock"
         - "packages/config/src/*"
         - "packages/env/src/*"

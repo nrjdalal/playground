@@ -20,6 +20,7 @@ import {
 } from "@/lib/error"
 import { readEntriesAfter } from "@/lib/sessions/read"
 import { authMiddleware, guardWrites, requireConsoleRole } from "@/middlewares"
+import { refuseAgentOffFixture } from "@/middlewares/agent"
 import { invalid } from "@/routers/store"
 
 // The home's Start <dispatcher>, for a dashboard with an account and no dispatcher, and Settings' Switch Alpha, which moves it to the other harness: dashboard writes, behind the write guards and the owner rung.
@@ -45,6 +46,7 @@ export const dispatcherRouter = new Hono<{ Variables: Session }>()
   .use("/*", guardWrites)
   .use("/*", authMiddleware)
   .use("/*", requireConsoleRole("owner"))
+  .use("/*", refuseAgentOffFixture)
   .post(
     "/start",
     describeRoute({

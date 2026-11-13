@@ -123,6 +123,7 @@ import {
   requireConsoleRole,
   requireTrustedOrigin,
 } from "@/middlewares"
+import { refuseAgentOffFixture } from "@/middlewares/agent"
 
 // A person types a handful of messages a minute; this stops a stuck client or a loop from flooding a session's input.
 export const messageLimiter = createRateLimiter({
@@ -912,6 +913,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
       },
     }),
     messageLimiter,
+    refuseAgentOffFixture,
     sValidator("json", messageSchema, (result) => {
       if (!result.success) {
         throw new ApiError(400, "VALIDATION_ERROR", "Invalid input", { issues: result.error })
