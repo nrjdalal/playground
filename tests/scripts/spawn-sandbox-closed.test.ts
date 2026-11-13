@@ -284,14 +284,16 @@ describe("the closed sandbox lets a session work in its own worktree", () => {
     join(main, ".git", "logs", "refs", "heads", "PG-1-x"),
     join(main, ".git", "logs", "refs", "remotes", "origin", "canary"),
   ]
-  // The branches the main checkout and the merge flow follow, another session's worktree and the rest of .git and the checkout.
+  // The branches the main checkout, the merge flow and the live dashboard (live.branch) follow, another session's worktree and the rest of .git and the checkout.
+  const branchesOf = (main: string, live: string) =>
+    ["canary", "main", live].flatMap((branch) => [
+      join(main, ".git", "refs", "heads", branch),
+      join(main, ".git", "logs", "refs", "heads", branch),
+    ])
   const shut = (main: string) => [
+    ...branchesOf(main, "live/dashboard"),
     treeOf(main, "worker-other"),
     join(main, ".git", "worktrees", "worker-other"),
-    join(main, ".git", "refs", "heads", "canary"),
-    join(main, ".git", "refs", "heads", "main"),
-    join(main, ".git", "logs", "refs", "heads", "canary"),
-    join(main, ".git", "logs", "refs", "heads", "main"),
     join(main, ".git", "config"),
     join(main, ".git", "HEAD"),
     join(main, ".git", "hooks"),
@@ -396,6 +398,23 @@ describe("the closed sandbox lets a session work in its own worktree", () => {
       expect(under(denyWrite)(path), path).toBe(false)
     }
     for (const path of shut(main)) expect(under(denyWrite)(path), path).toBe(true)
+  })
+
+  test("a live.branch of its own stays shut in place of the default", async () => {
+    const { env, main, spawnSh } = checkout()
+    const r = await spawn(
+      ["worker", "worker-x", "b.md", "--reads-only", "--sandbox"],
+      [],
+      { ...env, SETTINGS_JSON: JSON.stringify({ "live.branch": "live/board" }) },
+      spawnSh,
+    )
+    expect(r.code, r.err).toBe(0)
+    const { allowWrite, denyWrite } = filesystemOf(r.home, "worker-x")
+    for (const path of branchesOf(main, "live/board")) {
+      expect(under(allowWrite)(path), path).toBe(true)
+      expect(under(denyWrite)(path), path).toBe(true)
+    }
+    expect(under(denyWrite)(join(main, ".git", "refs", "heads", "live", "dashboard"))).toBe(false)
   })
 
   test("a start without --sandbox makes no worktree", async () => {

@@ -69,6 +69,7 @@ fake(
   "bun",
   `[ "$1" = install ] && { printf '%s\\n' "$*" >> "$HOME/bun-install.log"; [ -z "$FAKE_INSTALL_FAIL" ] || { echo "error: lockfile had changes, but lockfile is frozen"; exit 1; }; exit 0; }
 case "$2" in */playground/orgs.ts) exec "${process.execPath}" "$1" "${join(root, "packages", "scripts", "src", "playground", "orgs.ts")}" "\${@:3}" ;; esac
+case "$2" in */playground/setting.ts) exec "${process.execPath}" "$1" "${join(root, "packages", "scripts", "src", "playground", "setting.ts")}" "\${@:3}" ;; esac
 case "$2" in */playground/cli.ts) exec "${process.execPath}" "$1" "${join(root, "packages", "scripts", "src", "playground", "cli.ts")}" "\${@:3}" ;; esac
 case "$1" in */setting.ts) shift; exec "${process.execPath}" "${join(root, "packages", "scripts", "src", "playground", "setting.ts")}" "$@" ;; esac
 [ "$2" = who ] || [ "$1" = --no-env-file ] && exec "${process.execPath}" "$@"

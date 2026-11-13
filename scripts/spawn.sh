@@ -63,7 +63,7 @@ set -euo pipefail
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
 #   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
-#   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, holds outbound hosts to the ones a worker's loop needs, and a worker or reviewer with no --in starts in a detached worktree made for it (review-<n> for this checkout's PR n, else <name>), whose folder, git entry and the main checkout's FETCH_HEAD, objects, refs and logs it writes, canary's and main's refs left shut; its roster row records sandbox=on, which a resume keeps and a start without it clears
+#   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, holds outbound hosts to the ones a worker's loop needs, and a worker or reviewer with no --in starts in a detached worktree made for it (review-<n> for this checkout's PR n, else <name>), whose folder, git entry and the main checkout's FETCH_HEAD, objects, refs and logs it writes, canary's, main's and live.branch's refs left shut; its roster row records sandbox=on, which a resume keeps and a start without it clears
 #   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate; the load, memory and usage gates still hold it
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words, and on a worker's, reviewer's or tester's Claude start while usage.accounts lists a Claude row, which the refusal lists in order: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
@@ -1662,12 +1662,15 @@ if [ -n "$SANDBOX_ARG" ] && [ -z "$IN_DIR" ] && [[ $ROLE =~ ^(worker|reviewer)$ 
   fi
   DIR=$(cd -P "$TREE" && pwd -P)
 fi
+# The live dashboard's branch, live.branch, which a closed session's refs stay shut to beside canary and main; its default when the setting reads empty, so the deny never drops.
+LIVE=
+[ -n "$CLOSED" ] && { LIVE=$(setting_text live.branch); LIVE=${LIVE:-live/dashboard}; }
 # The folder the session runs in, as the launch below moves to it.
 OWN=${DIR:-$REPO}
 [ "$MODE" = column ] && [ -z "$TREE" ] && OWN=$REPO
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" "$MANAGER" "$CLOSED" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" "$MANAGER" "$CLOSED" "$LIVE" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
-src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager, closed = sys.argv[1:14]
+src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager, closed, live = sys.argv[1:15]
 settings = json.load(open(src))
 settings["autoCompactWindow"] = int(window)
 if manager:
@@ -1696,9 +1699,9 @@ if sandbox:
         return [d for p in paths if p not in kept for d in (denied(p) if any(k.startswith(p + os.sep) for k in kept) else [p])]
     # The extensions root, the data folder's extensions folder, which every guard reads its lists from, is denied too, so a sandboxed session writes the rest of the data folder alone.
     deny = denied(main) + [os.path.join(data, "extensions")]
-    # The branches the main checkout and the merge flow follow stay shut inside the refs and logs a closed session writes, and so does packed-refs, which git makes only when it packs.
+    # The branches the main checkout, the merge flow and the live dashboard follow stay shut inside the refs and logs a closed session writes, and so does packed-refs, which git makes only when it packs.
     if closed:
-        shut = [os.path.join(git, *parts, branch) for parts in (("refs", "heads"), ("logs", "refs", "heads")) for branch in ("canary", "main")] + [os.path.join(git, "packed-refs")]
+        shut = [os.path.join(git, *parts, branch) for parts in (("refs", "heads"), ("logs", "refs", "heads")) for branch in ("canary", "main", live)] + [os.path.join(git, "packed-refs")]
         deny += [path for path in shut if path not in deny]
     home = os.path.expanduser("~")
     settings["sandbox"] = {
