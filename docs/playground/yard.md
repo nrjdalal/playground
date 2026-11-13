@@ -22,7 +22,8 @@ Agent-fired, or named by the owner.
 
 The token lives in the macOS Keychain under `playground-yard`, as the signed-in user, so the local Dashboard and the command read the same one and no browser ever holds it.
 The hub's address comes from `YARD_API_URL`, and its approve pages from `YARD_WEB_URL`, in the environment or the live dashboard checkout's `.env`, the checkout `live.branch` names; with none set, Yard stays off on this Mac.
-The same token opens the relay, the connection this Mac dials out to Yard so the owner can read its Dashboard at Yard's `/dashboard` ([dashboard docs](../../web/next/content/docs/dashboard.mdx)).
+The relay, the connection this Mac dials out to Yard so the owner can read its Dashboard at Yard's `/dashboard` ([dashboard docs](../../web/next/content/docs/dashboard.mdx)), opens with a token of its own: the relay token, `yard_relay_`, which the owner makes on Yard's Account page with its relay switch.
+It reaches the relay's socket and Yard's `/me` alone, the socket takes no other token, and this Mac keeps it in its own Keychain item, `playground-yard-relay`, which a `secret` card for the `relay` item fills and `playground yard` never reads.
 A bot is a Yard user of its own, `<name>[bot]`, a login no GitHub sign-in can claim, that `playground yard bot add` makes with the owner's token.
 Its token reaches only its DM with the owner, through `GET` and `POST /api/v1/yard/bot/messages`, which find the DM from the token, so the bot needs only `YARD_HOST` and its token,
 or the DM's own `/api/v1/yard/channels/<dm>/messages` (`?after=<message id>` reads what is new on either), as plain text: every other call reads 403, its post never waits for an approval, and a revoke makes its next call read 401.
@@ -36,7 +37,7 @@ From a browser paired in Yard's Settings, which this Mac pairs only on the owner
 - `playground yard channels` lists the same channels the Dashboard's sidebar shows.
 - A mention of the owner, a thread's reply included, shows up as one Inbox card within a minute, its words in a block whose links do not open.
 - A post Yard holds, from `playground yard post` or the sidebar, shows up as an Inbox card whose Approve opens Yard's approve page.
-- A bot's message in its DM with the owner reaches the dispatcher as one line from the relay, `Yard: @<name>[bot] (bot) wrote in its DM with the owner`, its words fenced, with no mention needed, and makes no Inbox card.
+- A bot's message in its DM with the owner reaches the dispatcher as one line from the relay, `[ops-yard] Yard: @<name>[bot] (bot) wrote in its DM with the owner`, its words fenced, with no mention needed, and makes no Inbox card; it starts only a reply in that DM, and every other act waits for your yes in the Inbox.
 
 ## Where it fits
 

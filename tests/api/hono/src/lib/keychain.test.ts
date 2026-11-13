@@ -7,6 +7,9 @@ import {
   keychainSpec,
 } from "../../../../../api/hono/src/lib/keychain-items"
 
+// A made-up relay token, in the shape Yard mints one.
+const RELAY_TOKEN = `yard_relay_${"0123456789abcdefghijABCDEFGHIJ_-"}`
+
 // A fake `security`, so no test reaches the real Keychain.
 const fake = (answer: { code: number; stderr?: string }, name: KeychainItemName = "yard") => {
   const calls: { argv: string[]; input?: string }[] = []
@@ -18,8 +21,27 @@ const fake = (answer: { code: number; stderr?: string }, name: KeychainItemName 
 }
 
 describe("an allowlisted Keychain item", () => {
-  test("the allowlist holds slack and yard", () => {
-    expect(Object.keys(KEYCHAIN_ITEMS)).toEqual(["slack", "yard"])
+  test("the allowlist holds relay, slack and yard", () => {
+    expect(Object.keys(KEYCHAIN_ITEMS)).toEqual(["relay", "slack", "yard"])
+  })
+
+  test("relay takes the Mac's relay token, yard_relay_ and 32 characters, under playground-yard-relay, and refuses a person's token", async () => {
+    const { calls, item } = fake({ code: 0 }, "relay")
+    for (const value of ["yard_made-up", "yard_relay_short", `yard_relay_${"a".repeat(33)}`])
+      await expect(item.write(value)).rejects.toThrow("a relay token starts yard_relay_")
+    await item.write(RELAY_TOKEN)
+    expect(calls).toEqual([
+      {
+        argv: ["security", "-i"],
+        input: `add-generic-password -U -s "playground-yard-relay" -a "owner" -w "${RELAY_TOKEN}"\n`,
+      },
+    ])
+  })
+
+  test("yard refuses the relay token, so the item `playground yard` reads never holds it", async () => {
+    const { calls, item } = fake({ code: 0 })
+    await expect(item.write(RELAY_TOKEN)).rejects.toThrow("a Yard token starts yard_")
+    expect(calls).toEqual([])
   })
 
   test("slack takes a Slack user token, xoxp-, under playground-slack, and refuses any other", async () => {
@@ -91,6 +113,7 @@ describe("Playground's other Keychain items, by service (keychainSpec)", () => {
   test("a typed item's service keeps its typed check, by name or by service", () => {
     expect(keychainSpec("playground-slack")).toBe(KEYCHAIN_ITEMS.slack)
     expect(keychainSpec("yard")).toBe(KEYCHAIN_ITEMS.yard)
+    expect(keychainSpec("playground-yard-relay")).toBe(KEYCHAIN_ITEMS.relay)
   })
 
   test("an untyped item takes printable words with no quote, backslash, line break or space at either end", async () => {

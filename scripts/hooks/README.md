@@ -221,7 +221,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
   Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
-  no-prepare-write, a check with no process of its own, runs behind `fromFactory` through its `check`.
+  no-prepare-write and no-protected-push, checks with no process of their own, run behind `fromFactory` through their `check`.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
@@ -717,7 +717,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Only a parsed `-H` or `--head` flag counts, the last one given, as gh keeps it, and only when its value is a non-empty literal: one empty, only whitespace, unreadable, or holding `$`, a backtick, a glob character or a quote reads as no `--head`, so the commits and the branch are read as before.
   The same pull request opened through `gh api repos/<owner>/<repo>/pulls -X POST` is judged on its `-F title=@<file>` and `-F body=@<file>` alike.
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, taking the word after each option it lists as that option's value, as git does (`--attr-source <tree>` and `--config-env <key>=<variable>` among them), so `git --attr-source HEAD push` reads as a push and `git -C log push` as a push from `log`.
-  `GIT_TAKES` is the one list every git-reading hook steps over (no-glm-heavy-path, no-main-checkout, no-playground-leak, no-stash, no-unslotted-run, no-false-green, no-ours-merge, no-prepare-write and no-raw-delete through no-stash's `gitCommand`, and no-extensions-write through no-main-checkout's `gitCall`), and no-extension-repo-write reads git the same way.
+  `GIT_TAKES` is the one list every git-reading hook steps over (no-glm-heavy-path, no-main-checkout, no-playground-leak, no-stash, no-unslotted-run, no-false-green, no-ours-merge, no-prepare-write, no-protected-push and no-raw-delete through no-stash's `gitCommand`, and no-extensions-write through no-main-checkout's `gitCall`), and no-extension-repo-write reads git the same way.
   Outside `anyWrite`, it follows a `-c alias.<name>=<value>` whose value is literal git words, reading that value as the subcommand, so `git -c alias.p=push p …` is judged as the push and `git -c alias.l=log l` runs;
   it refuses a `!` alias, an alias whose value or name it cannot read (a variable, a `--config-env` value), an alias that names another alias, and a subcommand it cannot read after one.
   A same-user session can still get past it, for example through a git alias set in a config file it does not read.
@@ -809,6 +809,15 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   The refusal of a body it cannot read names the fix, the query written with the Write tool first and named by its literal absolute path in a call of its own (`curl -d @/abs/query.json`, `gh api --input /abs/query.json`), and says none of the call's commands ran.
   The refusal of an endpoint or URL it cannot read names its fix, that endpoint written out literally (`gh api https://api.linear.app/graphql`).
   It reads Bash through `scripts/hooks/shell.ts`, the reader it shares with the release hook, and its tests are in `bun run test:file tests/scripts/hooks` too.
+
+## no-live-sign-in
+
+- A factory session signs in on its own worktree's stack alone: `scripts/hooks/no-live-sign-in.ts`, run on Bash by [guards](#guards) for a factory session alone (`fromFactory`), refuses a command naming `/api/v1/onboard/sign-in`, `/api/v1/onboard/finish` or `/api/agents/sign-in-as` together with the live dashboard's host,
+  since each of those mints a session holding the owner rung there.
+  The live host is a bare name (`playground.localhost`, `api.playground.localhost`), every name portless's route file (`routes.json` in `portlessDir()`'s folder) gives a bare name's port, and a loopback address (`127.0.0.1`, `localhost`, `[::1]`, `0.0.0.0`) on one of those ports; with no route file it reads the bare names alone.
+  It reads the command's text with its quotes and backslashes dropped, so a worktree's own name or port, and the dev skill's Agent login by `bunx portless get`, pass.
+  It is a speed bump while sessions run as the owner's own macOS user: a host it cannot read in the text (one built by a command substitution) passes.
+  It fails open on a call it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-live-sign-in.test.ts`.
 
 ## no-mac-web-build
 
@@ -972,6 +981,20 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A name a level deeper (`/usr/x`) and a redirect into `/` run, as they do in Claude Code.
   It fails open on a call it cannot read.
 
+## no-protected-push
+
+- `main` and `canary` of the factory's repository move only through GitHub's merge: `canary` through `bun run pr:merge <n>` or merge-on-ready, `main` through the release skill's `ship:merge`, each a bun script whose merge runs no `git push` a Bash call shows.
+  `scripts/hooks/no-protected-push.ts`, run on Bash by [guards](#guards) for a factory session, refuses a `git push` that writes either branch there, naming those two routes and the work branch's own push (`git push` bare from it, or `git push origin HEAD:<branch>`).
+  The factory's repository is `factory.repo`, else the main checkout's origin (`factoryRepo` in `packages/scripts/src/playground/setting.ts`).
+- It reads each branch a push writes: a refspec's destination (`main`, `HEAD:canary`, `refs/heads/main`, a force push, a delete, in any case), and for a push naming no refspec the checked-out branch with the branch it tracks, read before the call runs.
+  A push lands in the factory's repository through a remote of the checkout whose push URL names it (every remote when the push names none, since `pushRemote` and `pushDefault` may pick any), or through a URL naming it.
+- It refuses a push it cannot read wherever it may land in the factory's repository: an option outside its list (`--all`, `--mirror`, `--prune`, an abbreviation), a glob or the matching refspec, a ref, remote or folder built at run time, a push of the checked-out branch after an earlier command in the call that may switch it,
+  a configured push refspec or `push.default=matching`, a pushInsteadOf rule over the remote, `-c`, `--config-env`, `--git-dir`, `--work-tree` or a `GIT_DIR` or `GIT_CONFIG` variable, refs from `xargs`, `git send-pack`, `git subtree push`, and an alias whose text names a push.
+- Two pushes to `main` stay outside it: ops-ext-sync's `HEAD:main` push lands in an extension repository, and `ensure-remote-branches.ts` runs as lefthook's pre-push step, never as a session's Bash call.
+- It is a check with no process of its own, which [guards](#guards) runs, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
+  It fails closed only on a call that names a push.
+  Its tests are `bun run test:file tests/scripts/hooks/no-protected-push.test.ts`.
+
 ## no-raw-delete
 
 - A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>` (with `--discard` once its PR has merged or closed, whatever it holds), so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
@@ -1018,6 +1041,11 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It fails open on a call it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-raw-wa.test.ts`.
   [guards](#guards) runs it on Bash, and both settings files register it for Edit, Glob, Grep, MultiEdit, NotebookEdit, Read and Write, after its script reached `main` by the order in [Registered in both settings files](#registered-in-both-settings-files).
   ops-wa pairs a device only while that registration stands (`unguarded()` in `packages/scripts/src/ops-wa/life.ts`), so no auth state exists for a session to reach without it.
+- A factory session queues no line as an owner-word job, ops-wa or ops-dm-watch: the relay leads each line with `[ops-<job>]` from its queue file's name (`packages/scripts/src/ops-outbox/drain.ts`), and a line led by either tag reads as the owner's own words (the `whatsapp` and `slack` skills).
+  no-raw-wa refuses a `notify.sh` call whose job is `wa` or `dm-watch`, or a word it cannot read, run as the program or as a shell's script (`bash notify.sh wa …`), and a call that reaches either job's queue file in the data folder's `ops/outbox/` (`ops-wa.jsonl`, `ops-dm-watch.jsonl`), as typed, through its links, by a glob that may match it, and on Read, Write, Edit, MultiEdit and NotebookEdit.
+  Its text net refuses a call whose text names either form, whatever reads it; `notify.sh` itself refuses a job outside lower-case letters, digits and hyphens, so a job word names its own queue alone.
+  Every other job's `notify.sh` call runs, as does a read of the outbox folder (`ls`, `grep -r`) and every other queue file.
+  Its refusal names the way through: `notify.sh <your job> <text>` under the session's own job, or `SendMessage` to its manager.
 
 ## no-release-comment
 
