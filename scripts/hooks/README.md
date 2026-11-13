@@ -810,6 +810,15 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   The refusal of an endpoint or URL it cannot read names its fix, that endpoint written out literally (`gh api https://api.linear.app/graphql`).
   It reads Bash through `scripts/hooks/shell.ts`, the reader it shares with the release hook, and its tests are in `bun run test:file tests/scripts/hooks` too.
 
+## no-live-sign-in
+
+- A factory session signs in on its own worktree's stack alone: `scripts/hooks/no-live-sign-in.ts`, run on Bash by [guards](#guards) for a factory session alone (`fromFactory`), refuses a command naming `/api/v1/onboard/sign-in`, `/api/v1/onboard/finish` or `/api/agents/sign-in-as` together with the live dashboard's host,
+  since each of those mints a session holding the owner rung there.
+  The live host is a bare name (`playground.localhost`, `api.playground.localhost`), every name portless's route file (`routes.json` in `portlessDir()`'s folder) gives a bare name's port, and a loopback address (`127.0.0.1`, `localhost`, `[::1]`, `0.0.0.0`) on one of those ports; with no route file it reads the bare names alone.
+  It reads the command's text with its quotes and backslashes dropped, so a worktree's own name or port, and the dev skill's Agent login by `bunx portless get`, pass.
+  It is a speed bump while sessions run as the owner's own macOS user: a host it cannot read in the text (one built by a command substitution) passes.
+  It fails open on a call it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-live-sign-in.test.ts`.
+
 ## no-mac-web-build
 
 - A factory session builds the web image on the box: `scripts/hooks/no-mac-web-build.ts`, run on Bash by [guards](#guards), refuses a factory session's web image build on the Mac while the live dashboard's Postgres runs in the same Docker VM.

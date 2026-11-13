@@ -20,6 +20,7 @@ const BASH_GUARDS = [
   "no-headless-login",
   "no-kill-by-name",
   "no-linear-ticket",
+  "no-live-sign-in",
   "no-mac-web-build",
   "no-main-checkout",
   "no-off-palette-label",
