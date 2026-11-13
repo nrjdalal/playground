@@ -10052,9 +10052,9 @@ async function check5(raw, environment = process.env) {
   try {
     return await inspect3(raw, environment);
   } catch (error) {
-    if (!/push/i.test(raw))
+    if (!/push|merge|refs|contents|graphql|_file/i.test(raw))
       return;
-    return `no-protected-push hook could not read this call (${error}), which names a push, so it refuses it. ${FIX}`;
+    return `no-protected-push hook could not read this call (${error}), which names a route onto main or canary, so it refuses it. ${FIX}`;
   }
 }
 

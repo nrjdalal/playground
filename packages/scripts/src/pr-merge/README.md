@@ -91,7 +91,7 @@ On every run, built or not, pr:merge and pr:train also stop on a worktree whose 
 
 A PR behind `canary` that merges with it clean merges on its own head's checks and 5/5 once the `types` gate's check of the merged tree passes (its type check, and its bundles step for a PR touching `scripts/hooks/` or `packages/`), so several gated PRs merge back to back with no new GitHub run.
 When its head conflicts with `canary`, merge `canary` in and resolve it; the new head then needs GitHub's checks and a 5/5 of its own.
-A refusal `--explain` shows to be wrong goes to the Builder, who alone may merge that PR by hand with `gh pr merge <n> --squash --body <body> --match-head-commit <head>`, `<body>` the one pr:merge would pass (above), on an override in the factory's **override** shape, and has pr:merge fixed.
+A refusal `--explain` shows to be wrong goes to the Builder, who alone may merge that PR by hand with `gh pr merge <n> --squash --body <body> --match-head-commit <head>`, the one hand merge the no-protected-push hook passes ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#no-protected-push)), `<body>` the one pr:merge would pass (above), on an override in the factory's **override** shape, and has pr:merge fixed.
 
 ## The merge queue
 

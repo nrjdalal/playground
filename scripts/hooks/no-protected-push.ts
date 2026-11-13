@@ -1,4 +1,4 @@
-// A check for the factory's sessions, run on Bash by guards.ts alone, so it has no main block of its own: refuses a git push that writes main or canary of the factory's repository (factory.repo, else the main checkout's origin), since canary takes a pull request only through pr:merge or merge-on-ready and main moves only through the ship step's ship:merge, both of which merge through GitHub and run no git push of their own. A push it cannot read (a ref, a remote or a folder built at run time, an option it does not know, a branch an earlier command in the call may switch) is refused when it may land there; any other push passes.
+// A check for the factory's sessions, run on Bash by guards.ts and on the GitHub tools by no-playground-leak's process, so it has no main block of its own: refuses a git push, a hand-run gh pr merge (the Builder's one form aside), a gh api or GitHub tool write, and a GraphQL merge or ref move (on any repository) that writes main or canary of the factory's repository (factory.repo, else the main checkout's origin), since canary takes a pull request only through pr:merge or merge-on-ready and main moves only through the ship step's ship:merge, both of which merge through GitHub and run no git push of their own. A push it cannot read (a ref, a remote or a folder built at run time, an option it does not know, a branch an earlier command in the call may switch) is refused when it may land there; any other push passes.
 import "../../packages/env/src/aliases"
 import { dataDir } from "../../packages/env/src/data-dir"
 import { factoryRepo } from "../../packages/scripts/src/playground/setting"
@@ -571,7 +571,7 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
   return run(lex(command, env.known), env, visit)
 }
 
-// Fails closed only on a call that names a push: an error on any other call lets it run, so a parser bug cannot block every Bash command.
+// Fails closed only on a call that names a push or another route it reads (a merge, a ref, a file write, GraphQL): an error on any other call lets it run, so a parser bug cannot block every Bash command.
 export async function check(
   raw: string,
   environment: Environment = process.env,
@@ -579,7 +579,7 @@ export async function check(
   try {
     return await inspect(raw, environment)
   } catch (error) {
-    if (!/push/i.test(raw)) return
-    return `no-protected-push hook could not read this call (${error}), which names a push, so it refuses it. ${FIX}`
+    if (!/push|merge|refs|contents|graphql|_file/i.test(raw)) return
+    return `no-protected-push hook could not read this call (${error}), which names a route onto main or canary, so it refuses it. ${FIX}`
   }
 }
