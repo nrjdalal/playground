@@ -322,6 +322,19 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
     }
   })
 
+  test("with no upkeep given, the beat reads the run slots' holders itself and waits on one running upkeep", async () => {
+    const m = await machine({
+      "ps -o command= -p 4242": { code: 0, out: "bun install --cwd /x\n" },
+    })
+    m.wipe()
+    writeFileSync(join(m.ops, "run-slot.holder"), "ops 4242 2026-11-07T06:00:00Z 1 medium\n")
+    const beat = restoreBeat({ guards: GUARDS, main: m.main })
+    await beat(m.ctx(T0))
+    await beat(m.ctx(later(300_000)))
+    expect(m.runs).toEqual(["ps -o command= -p 4242"])
+    expect(missingGuards(m.main, GUARDS)).toEqual(GUARDS)
+  })
+
   test("a failed step is told once and not tried again until the guards are back", async () => {
     const m = await machine({
       "checkout HEAD -- .": { code: 1, out: "error: unable to unlink old 'x'\n" },

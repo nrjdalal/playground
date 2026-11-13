@@ -239,7 +239,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
     expect(JSON.parse(last(run.out))).toEqual([201, 201, 200])
   })
 
-  test("the owner's token makes a bot that reads and posts in its own DM alone, never held, and a revoke cuts it with a 401", async () => {
+  test("the owner's token makes a bot that reads and posts in its own DM alone, by its id or by the bot routes that find it from the token (#1995), never held, and a revoke cuts it with a 401", async () => {
     await sql`insert into "user" (id, name, email, login, role) values ('ox', 'ox', ${["ox", "example.com"].join("@")}, 'ox', 'owner')`
     await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update("yard_ox").digest("hex")}, ${"mac"}, 'ox')`
     await sql`insert into "user" (id, name, email, login, role) values ('gh', 'ghost', ${["gh", "example.com"].join("@")}, 'ghost[bot]', 'member')`
@@ -264,10 +264,14 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       add: [201, bot, "string"],
       addAgain: 409,
       afterRevoke: 401,
+      afterRevokeRoute: 401,
       badName: 400,
       botPost: [201, "sent", { device: "bot", login: "grok[bot]" }],
       botRead: ["hello owner", "hello bot"],
       botReadAfter: [200, ["hello bot"]],
+      botRoutePost: [201, "sent", true],
+      botRouteRead: ["hello owner", "hello bot", "via the bot route"],
+      botRouteReadAfter: [200, ["hello bot", "via the bot route"]],
       controls: [200, 200],
       dmToBot: 400,
       ghost: 401,
@@ -276,7 +280,10 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       memberAdd: 403,
       memberList: 403,
       memberRevoke: 403,
+      personOnBotRoute: [403, 403],
       refused: {
+        botRouteHeldKind: 403,
+        botRouteMention: 403,
         bots: 403,
         channels: 403,
         dms: 403,

@@ -53,7 +53,7 @@ const fixture = (visibility: Record<string, string> = {}) => {
 
 const head = (dir: string) => extGit(dir, ["rev-parse", "HEAD"]).out.trim()
 
-// The root's file lock: every git write a sync makes, its fetch and push included, runs under withLock, which lifts a locked root for it.
+// The root's file lock: every git write a sync makes, its fetch and push included, runs under withLock, which lifts that scope's folder of a locked root for it.
 test.skipIf(!Bun.which("chflags"))("a locked root syncs every scope and stays locked", async () => {
   const { bares, data, run } = fixture()
   setRootLock(data, true)

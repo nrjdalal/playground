@@ -113,7 +113,8 @@
   A token never approves, makes tokens or touches invites, which a signed-in browser alone does.
   The owner's token makes, lists and revokes bots (`/api/v1/yard/bots`), the one token route that makes a credential, since `playground yard bot add` runs on the Mac.
   A bot is a user of its own whose login, `<name>[bot]`, no GitHub sign-in can claim and `githubLoginSchema` refuses, its `yard_bot` row naming its maker.
-  Its token reaches only `GET` and `POST /api/v1/yard/channels/<dm>/messages` in its DM with its maker (`yardCaller`'s `bots` and `fenceBot` in `store.ts`), as plain text with no held kind, mention or link, so its post never holds, and the log route while the owner lets it read the log (the relay rule below);
+  Its token reaches only `GET` and `POST /api/v1/yard/bot/messages`, which find its DM with its maker from the token (`botDm` in `store.ts`), and the same DM's `/api/v1/yard/channels/<dm>/messages` (`yardCaller`'s `bots` and `fenceBot` in `store.ts`),
+  as plain text with no held kind, mention or link, so its post never holds, and the log route while the owner lets it read the log (the relay rule below);
   every other call reads 403, and a revoke deletes its user and DM, so its next call reads 401.
   Which of its writes take a trusted Origin is writes.md's hosted rule, walked by `tests/api/hono/src/routers/guards.test.ts`.
   A token's tier-two post (`tier.ts`: bug, fix, log, steps, a mention, a post to a DM with no sent message yet unless a bot's maker posts it in their `createBot` DM, an owner-only channel) is stored pending, read by its sender alone until that sender's browser approves or denies it; an approved one takes the approval's time, so it counts as unread for a member who read the channel meanwhile.

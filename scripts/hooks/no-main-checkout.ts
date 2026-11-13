@@ -757,7 +757,15 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     }
     const slot = slotWords(parsed)
     if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
+      return slot.length === 0
+        ? undefined
+        : examine(
+            { ...cmd, words: slot },
+            // run-slot.sh runs its words in a process of its own, so a cd among them moves no folder for the commands after it
+            { ...env, files: new Map(env.files), vars: new Map(env.vars) },
+            visit,
+            false,
+          )
     const { args, local, name } = parsed
     // a line that names more folders than the reader carries may run anywhere, the main checkout included, so what it guards is refused with no folder to name
     if (env.cwdAnywhere) {
