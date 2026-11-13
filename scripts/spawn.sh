@@ -1678,6 +1678,8 @@ if sandbox:
             "allowUnixSockets": settings["sandbox"]["network"]["allowUnixSockets"],
             "strictAllowlist": True,
         }
+        # gpg writes its home folder to sign, which stays shut since gpg-agent runs the programs its config there names outside the sandbox, so a closed session's commits go unsigned; pr:merge's squash is GitHub's own commit.
+        settings["env"] = {**settings.get("env", {}), "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "commit.gpgsign", "GIT_CONFIG_VALUE_0": "false"}
 if memory:
     settings["autoMemoryEnabled"] = True
     settings["autoMemoryDirectory"] = memory
