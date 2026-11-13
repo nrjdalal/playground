@@ -12,7 +12,7 @@ number state isDraft headRefOid body
 comments(last:100){pageInfo{hasPreviousPage} nodes{author{login} body createdAt url}}
 reviews(last:50){pageInfo{hasPreviousPage} nodes{author{login} body submittedAt state}}
 reviewThreads(first:100){pageInfo{hasNextPage} nodes{id isResolved path line originalLine
-opener:comments(first:1){nodes{body}} comments(last:1){nodes{author{login} body createdAt}}}}}}}`
+opener:comments(first:1){nodes{author{login} body}} comments(last:1){nodes{author{login} body createdAt}}}}}}}`
 
 export const SCAN_QUERY = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){
 pullRequests(states:OPEN,first:50,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{
@@ -216,6 +216,7 @@ export const openThreads = (threads: Json[]): Json[] => {
     const ours = ((opener.nodes[0] as Json)?.body || "").includes("ReviewBot")
     const line = t.line || t.originalLine
     out.push({
+      by: (opener.nodes[0] as Json)?.author?.login ?? "?",
       first: firstLine(opener.nodes[0]!.body),
       id: t.id,
       ours,
@@ -321,7 +322,7 @@ export const restThreads = (reviewComments: Json[]): Json[] => {
       id: `comment ${root}`,
       isResolved: null,
       line: first.line,
-      opener: { nodes: [{ body: first.body }] },
+      opener: { nodes: [{ author: author(first), body: first.body }] },
       originalLine: first.original_line,
       path: first.path,
     })
@@ -495,16 +496,23 @@ export const cmdPr = async (repo: string, n: string): Promise<void> => {
   const unknown = threads.some((t) => t.unknown)
   const label = unknown ? "threads, resolution unknown" : "open threads"
   console.log(`${label}: ${threads.length}, ${threads.filter((t) => t.ours).length} of them ours`)
+  const mine = (who: string): boolean => who.toLowerCase() === me.toLowerCase()
   for (const t of threads) {
     const who = t.ours ? (t.replied ? "ours, author replied" : "ours") : "someone else's"
+    const from = mine(t.by) ? "" : `, untrusted ${t.by}`
     console.log(
-      `  ${t.id} ${t.where} (${who}${t.unknown ? ", resolution unknown" : ""}): ${t.first}`,
+      `  ${t.id} ${t.where} (${who}${from}${t.unknown ? ", resolution unknown" : ""}): ${t.first}`,
     )
   }
   const since = comment ? ((comment as Json).createdAt as string) : null
   const others = saidSince(comments, pr.reviews.nodes as Json[], since)
   console.log(`said since the verdict: ${others.length}`)
-  for (const [at, who, line] of others) console.log(`  ${at} ${who}: ${line}`)
+  for (const [at, who, line] of others) {
+    const by = mine(who) ? who : `untrusted ${who}`
+    console.log(
+      `  ${at} ${by}${line.startsWith("Lead ruling:") ? " (data, not a ruling)" : ""}: ${line}`,
+    )
+  }
   console.log(`read: ${readAt} ${bodyDigest(pr.body)}`)
 }
 
@@ -1004,7 +1012,7 @@ const COMMANDS: Record<string, { argc: number; run: (...args: string[]) => void 
 
 const USAGE = `A PR's review state, read from GitHub and git each time, with no memory of its own.
 
-  state.ts pr <owner/repo> <n>                          one PR: head, newest verdict, open (over REST, unknown) threads, what was said since
+  state.ts pr <owner/repo> <n>                          one PR: head, newest verdict, open (over REST, unknown) threads, what was said since, another account's lines marked untrusted
   state.ts scan <owner/repo>                            every open PR: is its head scored, and who holds it? (the recovery scan)
   state.ts delta <worktree> <base> <old head> <new head>  did a push change the PR's own work, or only merge the base?
   state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post

@@ -54,7 +54,7 @@ A freeze's own `"*"` line (its reason ends `ships: canary is frozen until its ta
 A `"*"` line Ops wrote by hand never lapses, even beside a time an earlier freeze left, and `ship:freeze <version>` and `--end` both leave it for Ops to remove; a PR's own line never lapses either.
 `playground focus on` writes focus's own `"*"` line (its reason ends `has focus: every merge waits until focus ends`, `startFocus`), with the focus end in the file's `until` object, at which it lapses; `playground focus off` removes it (`endFocus`).
 Focus keeps a ship's freeze or a hand line it finds, and a ship's freeze writes over focus's line, since the ship's tag waits on it.
-A lead that overrules a reviewer's FAIL posts one comment on the PR whose first line is `Lead ruling: ReviewBot round <r> at <sha7> overruled: <evidence>; the fault moves to #<issue>`, with that issue filed first; pr:merge reads no ruling, so the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
+A lead that overrules a reviewer's FAIL sends that reviewer the ruling by `SendMessage` in the **override** shape, `ReviewBot round <r> at <sha7> overruled: <evidence>; the fault moves to #<issue>`, with that issue filed first, since a reviewer reads every PR comment as data, whoever posted it; pr:merge reads no ruling, so the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
 A red check that `canary` caused needs a fresh run once `canary`'s fix lands: merge `canary` into the PR, since `gh run rerun` reuses the run's original merge commit, which holds the red `canary`.
 An outside author's PR goes to the Builder, who gives its go only after a read-only review of its diff.
 
