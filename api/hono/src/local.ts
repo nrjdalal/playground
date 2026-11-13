@@ -18,6 +18,7 @@ import { seedFixtureThreadsAtStart } from "@/lib/dashboard/threads"
 import { globalErrorResponses } from "@/lib/error"
 import { DB_TIMEOUT_MS, healthData } from "@/lib/health"
 import { startRelay } from "@/lib/relay/mac"
+import { checkoutEnvValues, keychainValues } from "@/lib/relay/redact"
 import { createServer, upgradeWebSocket } from "@/lib/server"
 import { dataDir } from "@/lib/sessions/paths"
 import { sessionCookie } from "@/lib/sign-in"
@@ -318,29 +319,34 @@ if (env.YARD_API_URL && readsLive()) {
       made = null
       throw error
     }))
-  startRelay({
-    api,
-    cookie,
-    // a session the API refuses (expired) is made again for the next read
-    dispatch: async (request) => {
-      const response = await app.fetch(request)
-      if (response.status === 401) made = null
-      return response
-    },
-    // a card's kind (answerKind) by its id, as its answer, schedule and dismiss read it, or by the exact `#iN` a message's reply names, never a bare `iN`
-    kindOf: async (key) => {
-      const item = await getItem(db, key)
-      if (!item || (key !== item.id && key !== `#i${item.ref}`)) return null
-      return answerKind(item)
-    },
-    login: async (token) => (await yardClient(api, token).me()).login,
-    // read at each bot's read, so a bot add --log or a revoke counts from the next one, and a policy.json that does not parse lets no bot read
-    readers: () => {
-      const read = readPolicyOrDefaults(dataDir())
-      return read.refusal === undefined ? yardSettings.get(read.settings, "yard.logReaders") : {}
-    },
-    token: () => keychain().read(),
-  })
+  // read at each bot's read, so a bot add --log or a revoke counts from the next one, and a policy.json that does not parse lets no bot read
+  const readers = () => {
+    const read = readPolicyOrDefaults(dataDir())
+    return read.refusal === undefined ? yardSettings.get(read.settings, "yard.logReaders") : {}
+  }
+  void keychainValues(Object.keys(readers())).then((kept) =>
+    startRelay({
+      api,
+      cookie,
+      // a session the API refuses (expired) is made again for the next read
+      dispatch: async (request) => {
+        const response = await app.fetch(request)
+        if (response.status === 401) made = null
+        return response
+      },
+      // a card's kind (answerKind) by its id, as its answer, schedule and dismiss read it, or by the exact `#iN` a message's reply names, never a bare `iN`
+      kindOf: async (key) => {
+        const item = await getItem(db, key)
+        if (!item || (key !== item.id && key !== `#i${item.ref}`)) return null
+        return answerKind(item)
+      },
+      login: async (token) => (await yardClient(api, token).me()).login,
+      readers,
+      // the .env read at each bot's read, the Keychain's values once, before the relay opens
+      secretValues: () => [...checkoutEnvValues(), ...kept],
+      token: () => keychain().read(),
+    }),
+  )
 }
 
 mountOldPaths(routes, {

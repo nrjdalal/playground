@@ -6,6 +6,7 @@ import { join } from "node:path"
 import type { Channel, Message } from "../../../../../packages/message/src/index"
 import { liveBranch } from "../../../../../packages/scripts/src/playground/probe"
 import { runYard, type YardIo, yardIo } from "../../../../../packages/scripts/src/playground/yard"
+import { settingHistory } from "../../../../../packages/settings/src/settings-folder"
 
 type YardClient = import("../../../../../api/hono/src/lib/yard/client").YardClient
 const { YardError } = await import("../../../../../api/hono/src/lib/yard/client")
@@ -170,12 +171,14 @@ describe("playground yard", () => {
     expect(lines.join("\n")).not.toContain("yard_madeUp")
   })
 
-  test("bot add --log lets the bot read the dispatcher's log on Yard and puts it on this Mac's yard.logReaders, and a revoke takes it off (#1888)", async () => {
+  test("bot add --log puts the bot on this Mac's yard.logReaders and leaves Yard's grant to the owner's browser, and a revoke takes it off (#1888, #2032)", async () => {
     const { calls, io, lines, readers } = setUp()
     expect(await runYard(["bot", "add", "grok", "--log"], io)).toBe(0)
-    expect(calls.at(-1)).toEqual(["addBot", "grok", { log: true }])
+    expect(calls.at(-1)).toEqual(["addBot", "grok"])
     expect(readers).toEqual(["+grok[bot] dm-bot"])
-    expect(lines.join("\n")).toContain("reads the dispatcher's log")
+    expect(lines.join("\n")).toContain(
+      "once the owner turns its log switch on in Yard's Account page",
+    )
     expect(await runYard(["bot", "revoke", "grok"], io)).toBe(0)
     expect(readers).toEqual(["+grok[bot] dm-bot", "-grok[bot]"])
     const plain = setUp()
@@ -226,6 +229,34 @@ describe("playground yard", () => {
     })
     expect(await runYard(["login"], slow.io)).toBe(1)
     expect(slow.lines).toEqual(["err: Yard: The operation timed out."])
+  })
+})
+
+describe("yardIo's yard.logReaders write", () => {
+  const dirs: string[] = []
+  afterAll(() => {
+    for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
+  })
+
+  test("records the calling session as its author and the command line as its actor, never the owner (#2032)", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "yard-readers-")))
+    dirs.push(root)
+    const login = process.env.PLAYGROUND_LOGIN
+    process.env.PLAYGROUND_LOGIN = "made-up-me"
+    Bun.spawnSync(["git", "init", "-q", root])
+    const authorOf = async (env: Record<string, string>, data: string) => {
+      const io = await yardIo(root, async () => "", data, env)
+      await io.logReaders.add("grok[bot]", "dm-bot")
+      const [entry] = settingHistory(data, "yard.logReaders") ?? []
+      return [entry?.author, entry?.actor]
+    }
+    expect(await authorOf({ PLAYGROUND_ROLE: "worker" }, join(root, "session"))).toEqual([
+      "worker",
+      "cli",
+    ])
+    expect(await authorOf({}, join(root, "terminal"))).toEqual(["cli", "cli"])
+    if (login === undefined) delete process.env.PLAYGROUND_LOGIN
+    else process.env.PLAYGROUND_LOGIN = login
   })
 })
 

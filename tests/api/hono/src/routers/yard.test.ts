@@ -321,7 +321,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
     expect(run.out).not.toMatch(/yard_[A-Za-z0-9_-]{32}/)
   })
 
-  test("a bot the owner lets read the log reads a page through the owner's Mac, a line in its DM says so and cards nothing, and every other caller is refused (#1888)", async () => {
+  test("a bot the owner lets read the log from the browser reads a page through the owner's Mac, a line in its DM says so and cards nothing, and every other caller is refused, a token's grant included (#1888, #2032)", async () => {
     await sql`insert into "user" (id, name, email, login, role) values ('lo', 'lo', ${["lo", "example.com"].join("@")}, 'lo', 'owner')`
     // the Mac's one token, relay on, which makes the bots and holds the relay
     await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update(relayOn("lo")).digest("hex")}, ${"mac"}, 'lo')`
@@ -363,6 +363,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       switchOff: [200, false],
       switchOn: true,
       switchToken: 403,
+      tokenLog: 403,
       waiting: [["scout[bot]", "text"]],
     })
     expect(run.out).not.toMatch(/yard_[A-Za-z0-9_-]{32}/)
