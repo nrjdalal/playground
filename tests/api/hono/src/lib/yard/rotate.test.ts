@@ -235,6 +235,43 @@ describe("startRotation, the Mac's schedule", () => {
   })
 })
 
+describe("startRotation's line for Ops", () => {
+  test("a run of failed checks, the network gone with a token pending, queues one line, and the next failure after a swap that went through queues another", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "yard-rotate-"))
+    try {
+      const { deps, state } = world(RELAY, { lose: "before" })
+      state.meDown = true
+      const alerts: string[] = []
+      let now = Date.parse("2026-11-13T00:00:00Z")
+      const stop = startRotation({
+        ...deps,
+        alert: async (text) => void alerts.push(text),
+        checkMs: 5,
+        now: () => now,
+        stamp: join(dir, "yard-rotated.json"),
+      })
+      try {
+        await until("the first alert", () => alerts.length === 1)
+        expect(state.pending).not.toBeNull()
+        await Bun.sleep(100)
+        expect(alerts).toHaveLength(1)
+        state.meDown = false
+        state.lose = null
+        await until("the swap", () => state.renewed === 1)
+        expect([...state.live]).toEqual([state.main!])
+        expect(alerts).toHaveLength(1)
+        state.failPending = true
+        now += 86_400_000
+        await until("the next alert", () => alerts.length === 2)
+      } finally {
+        stop()
+      }
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+})
+
 describe("outboxAlert, a failed swap's line for Ops", () => {
   test("queues one line for the ops seat in the ops outbox, its secrets hidden", async () => {
     const dir = mkdtempSync(join(tmpdir(), "yard-rotate-"))

@@ -75,17 +75,18 @@ export async function rotate({
   return "swapped"
 }
 
-// When the last swap ran, from its stamp file, or null with none.
-const lastSwap = async (stamp: string): Promise<number | null> => {
+// When the last try ran, from its stamp file, or null with none, and whether Ops has its line for the failing tries since the last swap that went through.
+const lastTry = async (stamp: string): Promise<{ alerted: boolean; at: number | null }> => {
   try {
-    const at = Date.parse((await Bun.file(stamp).json()).at)
-    return Number.isNaN(at) ? null : at
+    const read = await Bun.file(stamp).json()
+    const at = Date.parse(read.at)
+    return { alerted: read.alerted === true, at: Number.isNaN(at) ? null : at }
   } catch {
-    return null
+    return { alerted: false, at: null }
   }
 }
 
-// Swaps the Mac's token while the API runs: at start and at each check, once the stamp's last swap is ROTATE_DUE_MS old or none is stamped, or a token waits pending; each try is stamped, and a failed one sends alert why, once per try.
+// Swaps the Mac's token while the API runs: at start and at each check, once the stamp's last try is ROTATE_DUE_MS old or none is stamped, or a token waits pending; each try is stamped, and the first of a run of failed tries sends alert why, one line until a swap goes through.
 export function startRotation({
   alert,
   checkMs = ROTATE_CHECK_MS,
@@ -105,16 +106,21 @@ export function startRotation({
     if (running) return
     running = true
     try {
-      const last = await lastSwap(stamp)
-      if (last !== null && now() - last < ROTATE_DUE_MS && !(await deps.pending.read())) return
+      const last = await lastTry(stamp)
+      if (last.at !== null && now() - last.at < ROTATE_DUE_MS && !(await deps.pending.read()))
+        return
+      let alerted = false
       try {
         await rotate(deps)
       } catch (error) {
-        await alert(
-          `The Mac could not swap its Yard token, and tries again within a day: ${error instanceof Error ? error.message : String(error)}`,
-        )
+        if (!last.alerted)
+          await alert(
+            `The Mac could not swap its Yard token, and keeps trying with no further line until a swap goes through: ${error instanceof Error ? error.message : String(error)}`,
+          )
+        alerted = true
       }
-      await Bun.write(stamp, JSON.stringify({ at: new Date(now()).toISOString() }))
+      const at = new Date(now()).toISOString()
+      await Bun.write(stamp, JSON.stringify(alerted ? { alerted, at } : { at }))
     } catch (error) {
       console.error("[yard] the token swap's check failed", error)
     } finally {
