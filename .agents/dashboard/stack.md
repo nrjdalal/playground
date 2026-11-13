@@ -139,7 +139,8 @@
   each from the owner's browser alone), every other caller reading 403.
   The hub sends the maker's Mac a bot frame (`relayBotSchema`) naming the bot and its DM, and `requireBotRead` in `mac.ts` refuses as `requireRelay` does, then a bot off `yard.logReaders` or with a DM other than the one listed for it, as a bot made again under a revoked bot's name, the list that `bot add --log` adds to and `bot revoke` takes from, then a path off `BOT_GETS`,
   so every `RELAY_GETS` and `RELAY_WRITES` route is refused to a bot.
-  The Mac answers `GET /api/v1/dashboard/dispatcher/log` (`readEntriesAfter`, `LOG_PAGE` lines after the seq) as its owner, then hides every secret shape (`hideSecrets`) and every `.env` value of 8 characters or more in it (`api/hono/src/lib/relay/redact.ts`) before it leaves;
+  The Mac answers `GET /api/v1/dashboard/dispatcher/log` (`readEntriesAfter`, `LOG_PAGE` lines after the seq) as its owner, then hides every secret shape (`hideSecrets`),
+  and every value of 8 characters or more that its `.env` or one of the factory's own Keychain items holds (`keychainValues`: each `KEYCHAIN_ITEMS` item and each listed bot's own, read once as the relay starts), in its keys and values alike (`api/hono/src/lib/relay/redact.ts`), before it leaves;
   the hub posts one line in the bot's DM per read, kind `log`, which no bot posts itself and `waiting` leaves out, so it makes no Inbox card.
   This Mac dials out: on a stack that reads this Mac (`readsLive()`: the live dashboard, a person's own clone or a `PLAYGROUND_LIVE_READS` probe, never a fixture's) with `YARD_API_URL` set and the relay token in the Keychain, `local.ts` holds one WebSocket to the hub's `GET /api/v1/yard/relay/socket` (`startRelay` in `api/hono/src/lib/relay/mac.ts`),
   opened with that token from its own Keychain item, `playground-yard-relay` (`relayKeychain`), which a `secret` card for the `relay` item fills and `playground yard` never reads,
