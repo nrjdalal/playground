@@ -43,6 +43,7 @@ import {
   authMiddleware,
   guardWrites,
   refuseAgent,
+  refuseAgentOffFixture,
   requireConsoleRole,
   requireLoopback,
   requireTrustedOrigin,
@@ -167,6 +168,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         ...conflictErrorResponses,
       },
     }),
+    refuseAgentOffFixture,
     sValidator("json", answerInputSchema, invalid),
     async (c) => {
       const user = c.get("user")

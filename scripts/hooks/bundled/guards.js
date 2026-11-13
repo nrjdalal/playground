@@ -14324,8 +14324,73 @@ async function inspect8(raw, environment, now) {
 }
 if (false) {}
 
+// scripts/hooks/no-live-sign-in.ts
+import { join as join17 } from "path";
+
+// api/hono/src/lib/dev/proxy.ts
+import { existsSync as existsSync9, mkdirSync as mkdirSync3, readFileSync as readFileSync6, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "fs";
+import { homedir as homedir4 } from "os";
+import { basename as basename7, dirname as dirname8, join as join16 } from "path";
+var serving = (dir) => {
+  try {
+    const pid = Number(readFileSync6(join16(dir, "proxy.pid"), "utf8").trim());
+    if (!(pid > 0))
+      return false;
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+};
+var portlessDir = (env = process.env) => {
+  if (env.PORTLESS_STATE_DIR)
+    return env.PORTLESS_STATE_DIR;
+  const dir = join16(env.HOME || homedir4(), ".portless");
+  return !serving(dir) && serving(fallbackDir(dir)) ? fallbackDir(dir) : dir;
+};
+var fallbackDir = (dir) => join16(dir, "fallback");
+
+// scripts/hooks/no-live-sign-in.ts
+var SIGN_IN = /\/api\/(?:v1\/onboard\/(?:sign-in|finish)|agents\/sign-in-as)\b/;
+var BARE2 = ["api.playground.localhost", "playground.localhost"];
+var LOOPBACK = /(?<![\w.-])(?:127(?:\.\d{1,3}){3}|localhost|\[::1\]|0\.0\.0\.0):(\d+)/g;
+async function liveOf(environment) {
+  const hosts = new Set(BARE2);
+  const ports = new Set;
+  try {
+    const routes = await Bun.file(join17(portlessDir(environment), "routes.json")).json();
+    for (const { hostname, port } of routes)
+      if (typeof port === "number" && BARE2.includes(String(hostname)))
+        ports.add(port);
+    for (const { hostname, port } of routes)
+      if (typeof hostname === "string" && typeof port === "number" && ports.has(port))
+        hosts.add(hostname);
+  } catch {}
+  return { hosts, ports };
+}
+var names3 = (text, host) => new RegExp(`(?<![\\w.-])${host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`).test(text);
+async function check13(raw, environment = process.env) {
+  try {
+    const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
+    if (tool !== "Bash" || typeof toolInput?.command !== "string")
+      return;
+    const text = toolInput.command.replace(/["'\\]/g, "");
+    if (!SIGN_IN.test(text))
+      return;
+    const live = await liveOf(environment);
+    const host = [...live.hosts].find((name) => names3(text, name));
+    const port = [...text.matchAll(LOOPBACK)].map((m) => Number(m[1])).find((p) => live.ports.has(p));
+    if (!host && port === undefined)
+      return;
+    return `no-live-sign-in hook refuses a sign-in call to the live dashboard (${host ?? `loopback port ${port}`}): the owner sign-in, first run's finish and the agent sign-in each mint a session holding the owner rung there. Sign in on your own worktree's stack instead, by the dev skill's Agent login, whose names \`bunx portless get api.playground\` prints in your worktree.`;
+  } catch {
+    return;
+  }
+}
+if (false) {}
+
 // scripts/hooks/no-mac-web-build.ts
-import { join as join16 } from "path";
+import { join as join18 } from "path";
 
 // scripts/hooks/docker-build.ts
 var DOCKERS = new Set(["docker", "docker-compose"]);
@@ -14500,7 +14565,7 @@ var API_HERE = "The api image still builds here (docker compose build api).";
 var BOX_ROUTE = `Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. ${API_HERE}`;
 var NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on, and the live dashboard's Postgres stays up: set one up (scripts/ops/runner-host/host.sh setup <ip>, then write its address to that ip file), or build the web image on a machine with no live dashboard running. ${API_HERE}`;
 async function hasRunnerHost(environment) {
-  const ip = environment.RUNNER_HOST || (await Bun.file(join16(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
+  const ip = environment.RUNNER_HOST || (await Bun.file(join18(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
   return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip);
 }
 function composeBuild2({ rest, sub }) {
@@ -14539,7 +14604,7 @@ async function dashboardRuns(what, environment) {
   const cannot = async (why) => `no-mac-web-build hook refuses ${what}: ${why}, so it cannot tell whether the live dashboard's Postgres runs in this Mac's Docker VM, where a web image build's memory takes the VM's out-of-memory killer to the dashboard's database. ${await route()}`;
   let name;
   try {
-    name = (await Bun.file(join16(dataDirOf(environment), "ops", "dashboard", "dashboard-db")).text()).trim();
+    name = (await Bun.file(join18(dataDirOf(environment), "ops", "dashboard", "dashboard-db")).text()).trim();
   } catch (error) {
     if (error.code === "ENOENT")
       return cannot("there is no dashboard-db in the dashboard supervisor's state folder");
@@ -14589,10 +14654,10 @@ var visit4 = async (_cmd, { args, first, name }, env) => {
   if (nested !== -1)
     return judge(args.slice(nested + 1), program(args[nested].value) === "docker-compose");
 };
-var BARE2 = (command) => command.replace(/[\\'"]/g, "");
+var BARE3 = (command) => command.replace(/[\\'"]/g, "");
 var BUILDS = /build|compose/;
-var candidate4 = (command) => command.includes("$'") || BUILDS.test(BARE2(command));
-var buildCall = (command) => /\bdocker/i.test(BARE2(command)) && BUILDS.test(BARE2(command));
+var candidate4 = (command) => command.includes("$'") || BUILDS.test(BARE3(command));
+var buildCall = (command) => /\bdocker/i.test(BARE3(command)) && BUILDS.test(BARE3(command));
 async function inspect9(raw, environment) {
   let payload;
   try {
@@ -14618,7 +14683,7 @@ async function inspect9(raw, environment) {
   };
   return run(lex(command, env.known), env, visit4);
 }
-async function check13(raw, environment = process.env) {
+async function check14(raw, environment = process.env) {
   try {
     return await inspect9(raw, environment);
   } catch (error) {
@@ -14754,7 +14819,7 @@ async function inspect10(raw) {
   };
   return run(lex(command, env.known), env, visit5);
 }
-async function check14(raw) {
+async function check15(raw) {
   try {
     return await inspect10(raw);
   } catch {
@@ -14835,9 +14900,9 @@ var visit6 = async (_cmd, { args, first, name }) => {
   if (nested !== -1)
     return judgeGit2(args.slice(nested + 1));
 };
-var BARE3 = (command) => command.replace(/[\\'"]/g, "");
-var candidate5 = (command) => command.includes("$'") || /ours/.test(BARE3(command));
-var mergeCall = (command) => /\bgit\b/i.test(BARE3(command)) && /\b(?:merge|pull)\b/.test(BARE3(command)) && /ours/.test(BARE3(command));
+var BARE4 = (command) => command.replace(/[\\'"]/g, "");
+var candidate5 = (command) => command.includes("$'") || /ours/.test(BARE4(command));
+var mergeCall = (command) => /\bgit\b/i.test(BARE4(command)) && /\b(?:merge|pull)\b/.test(BARE4(command)) && /ours/.test(BARE4(command));
 async function inspect11(raw, environment) {
   let payload;
   try {
@@ -14863,7 +14928,7 @@ async function inspect11(raw, environment) {
   };
   return run(lex(command, env.known), env, visit6);
 }
-async function check15(raw, environment = process.env) {
+async function check16(raw, environment = process.env) {
   try {
     return await inspect11(raw, environment);
   } catch (error) {
@@ -14929,7 +14994,7 @@ async function inspect12(raw) {
   };
   return run(lex(command, env.known), env, visit7);
 }
-async function check16(raw) {
+async function check17(raw) {
   try {
     return await inspect12(raw);
   } catch {
@@ -15410,7 +15475,7 @@ var shipWrite = (raw) => {
     return false;
   }
 };
-async function check17(raw, environment = process.env) {
+async function check18(raw, environment = process.env) {
   const loaded = await guardList("no-public-leak", "no-public-leak", isPublicList, EMPTY_LIST, environment);
   if (loaded.refusal)
     return refusedList(raw, `${loaded.refusal} The list is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`);
@@ -15423,7 +15488,7 @@ if (false) {}
 
 // scripts/hooks/no-raw-delete.ts
 import { realpathSync as realpathSync5 } from "fs";
-import { basename as basename7, dirname as dirname8, resolve as resolve10, sep as sep4 } from "path";
+import { basename as basename8, dirname as dirname9, resolve as resolve10, sep as sep4 } from "path";
 var INSTEAD4 = "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
 var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it, it holds no uncommitted change and its work has landed on canary.";
 var refuse12 = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD4) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
@@ -15507,8 +15572,8 @@ function real3(path) {
   try {
     return realpathSync5(path);
   } catch {
-    const parent = dirname8(path);
-    return parent === path ? path : resolve10(real3(parent), basename7(path));
+    const parent = dirname9(path);
+    return parent === path ? path : resolve10(real3(parent), basename8(path));
   }
 }
 function rootsOf(cwd, session) {
@@ -15712,7 +15777,7 @@ function commandOf2(raw) {
     return;
   }
 }
-async function check18(raw, environment = process.env) {
+async function check19(raw, environment = process.env) {
   try {
     return await withDeadline(1e4, async () => inspect13(raw, environment));
   } catch (error) {
@@ -15724,8 +15789,8 @@ async function check18(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-raw-spawn.ts
-import { join as join17, resolve as resolve11, sep as sep5 } from "path";
-var SPAWN = join17(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
+import { join as join19, resolve as resolve11, sep as sep5 } from "path";
+var SPAWN = join19(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
 var HEADS = new Set([
   "agent",
   "agent-hibernation",
@@ -15966,11 +16031,11 @@ var visit8 = async (cmd, { args, first, local, name }, env) => {
   if (name === "claude" && reopens(args))
     return refuse13("a claude --resume or --continue");
 };
-var BARE4 = (command) => command.replace(/[\\'"]/g, "");
+var BARE5 = (command) => command.replace(/[\\'"]/g, "");
 var OPENS3 = new RegExp(`\\b(?:cmux|hc|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH|${[...HEADS, ...HERDR_HEADS, ...HC_HEADS].join("|")})\\b`, "i");
 var REOPEN = /\bclaude\b[\s\S]*(?:\s-[cr]\b|--resume|--continue)/i;
-var candidate6 = (command) => command.includes("$'") || OPENS3.test(BARE4(command)) || /\bcmux\b/i.test(BARE4(command)) || REOPEN.test(BARE4(command)) || UNIX.test(BARE4(command));
-var spawnCall = (command) => /\b(?:hc|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/i.test(BARE4(command)) || /\bcmux\b/i.test(BARE4(command)) && /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(BARE4(command)) || REOPEN.test(BARE4(command));
+var candidate6 = (command) => command.includes("$'") || OPENS3.test(BARE5(command)) || /\bcmux\b/i.test(BARE5(command)) || REOPEN.test(BARE5(command)) || UNIX.test(BARE5(command));
+var spawnCall = (command) => /\b(?:hc|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/i.test(BARE5(command)) || /\bcmux\b/i.test(BARE5(command)) && /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(BARE5(command)) || REOPEN.test(BARE5(command));
 function commandOf3(raw) {
   try {
     const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
@@ -16001,7 +16066,7 @@ async function inspect14(raw, environment) {
   };
   return run(lex(command, env.known), env, visit8, true);
 }
-async function check19(raw, environment = process.env) {
+async function check20(raw, environment = process.env) {
   try {
     return await inspect14(raw, environment);
   } catch (error) {
@@ -16015,7 +16080,7 @@ if (false) {}
 
 // scripts/hooks/no-raw-wa.ts
 import { realpathSync as realpathSync6 } from "fs";
-import { homedir as homedir4 } from "os";
+import { homedir as homedir5 } from "os";
 import { resolve as resolve12 } from "path";
 var refuse14 = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
 var RECURSIVE = new Set(["ack", "ag", "ditto", "find", "rg", "rsync", "tar"]);
@@ -16093,7 +16158,7 @@ async function judgeBash(command, cwd, environment) {
         if (!word?.value)
           continue;
         for (const raw of [word.value, word.value.slice(word.value.indexOf("=") + 1)]) {
-          const value = /^~(?:\/|$)/.test(raw) ? `${homedir4()}${raw.slice(1)}` : raw;
+          const value = /^~(?:\/|$)/.test(raw) ? `${homedir5()}${raw.slice(1)}` : raw;
           const path = value.startsWith("/") ? value : place.cwd && resolve12(place.cwd, value);
           if (!path)
             continue;
@@ -16137,7 +16202,7 @@ async function inspect15(raw, environment) {
       return refuse14(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
   }
 }
-async function check20(raw, environment = process.env) {
+async function check21(raw, environment = process.env) {
   try {
     return await eachInput(raw, "no-raw-wa", (one) => inspect15(one, environment));
   } catch {
@@ -16147,7 +16212,7 @@ async function check20(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-release-comment.ts
-import { join as join18 } from "path";
+import { join as join20 } from "path";
 var guardedOwners = new Set;
 var WORD2 = /release/i;
 var UNRESOLVED = "a repository the hook cannot resolve";
@@ -16353,8 +16418,8 @@ function candidate7(command) {
   const bare = command.replace(/[\\'"]/g, "");
   return command.includes("$'") || GH2.test(bare) && MAYBE_COMMENT.test(bare);
 }
-async function check21(raw, environment = process.env, lists = join18(coreDir(), "lists")) {
-  const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join18(lists, "release-owners.json"));
+async function check22(raw, environment = process.env, lists = join20(coreDir(), "lists")) {
+  const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join20(lists, "release-owners.json"));
   if (owners.refusal)
     return commentCall(subjectOf3(raw)) ? owners.refusal : undefined;
   guardedOwners = new Set((owners.list ?? []).map((owner) => owner.toLowerCase()));
@@ -16408,9 +16473,9 @@ async function inspect16(raw, environment) {
 if (false) {}
 
 // scripts/hooks/no-unslotted-run.ts
-import { existsSync as existsSync9, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync2 } from "fs";
+import { existsSync as existsSync10, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync3 } from "fs";
 import { tmpdir } from "os";
-import { join as join19, resolve as resolve13, sep as sep6 } from "path";
+import { join as join21, resolve as resolve13, sep as sep6 } from "path";
 var refuse16 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var COMMIT_TAKES3 = new Set([
@@ -16488,11 +16553,11 @@ async function commitLint(cmd, args, env, wrote) {
     stderr: "ignore"
   });
   const root = top.success ? top.stdout.toString().trim() : "";
-  const lint = join19(root, "node_modules", ".bin", "commitlint");
-  if (!root || !existsSync9(lint))
+  const lint = join21(root, "node_modules", ".bin", "commitlint");
+  if (!root || !existsSync10(lint))
     return;
-  const folder = mkdtempSync(join19(tmpdir(), "commit-msg-"));
-  const file = join19(folder, "COMMIT_EDITMSG");
+  const folder = mkdtempSync(join21(tmpdir(), "commit-msg-"));
+  const file = join21(folder, "COMMIT_EDITMSG");
   let out = "";
   let err = "";
   let code;
@@ -16514,7 +16579,7 @@ async function commitLint(cmd, args, env, wrote) {
     ]);
     signal = proc.signalCode;
   } finally {
-    rmSync2(file, { force: true });
+    rmSync3(file, { force: true });
     rmdirSync2(folder);
   }
   if (code === 0 || signal)
@@ -16701,8 +16766,8 @@ function inspect17(raw, environment, main) {
   if (typeof command !== "string")
     return;
   const worktrees = [
-    join19(main, ".claude", "worktrees"),
-    real(join19(main, ".claude", "worktrees"))
+    join21(main, ".claude", "worktrees"),
+    real(join21(main, ".claude", "worktrees"))
   ].map((w) => w + sep6);
   const inWorktree = (dir) => dir !== undefined && [resolve13(dir), real(resolve13(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
   const directory = typeof cwd === "string" ? cwd : undefined;
@@ -16772,7 +16837,7 @@ function inspect17(raw, environment, main) {
   line = lexed.commands;
   return run(lexed, env, visit);
 }
-async function check22(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
+async function check23(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
     return await inspect17(raw, environment, main);
   } catch {
@@ -16796,23 +16861,24 @@ var GUARDS = [
   { factory: false, name: "no-headless-login", run: (raw, env) => check9(raw, env) },
   { factory: true, name: "no-kill-by-name", run: (raw) => check11(raw) },
   { factory: false, name: "no-linear-ticket", run: (raw, env) => check12(raw, env) },
-  { factory: true, name: "no-mac-web-build", run: (raw, env) => check13(raw, env) },
+  { factory: true, name: "no-live-sign-in", run: (raw, env) => check13(raw, env) },
+  { factory: true, name: "no-mac-web-build", run: (raw, env) => check14(raw, env) },
   { factory: true, name: "no-main-checkout", run: (raw, env) => check7(raw, env) },
-  { factory: false, name: "no-off-palette-label", run: (raw) => check14(raw) },
-  { factory: true, name: "no-ours-merge", run: (raw, env) => check15(raw, env) },
+  { factory: false, name: "no-off-palette-label", run: (raw) => check15(raw) },
+  { factory: true, name: "no-ours-merge", run: (raw, env) => check16(raw, env) },
   { factory: true, name: "no-playground-leak", run: (raw, env) => check5(raw, env) },
   { factory: true, name: "no-prepare-write", run: (raw, env) => check4(raw, env) },
-  { factory: true, name: "no-prompt-stop", run: (raw) => check16(raw) },
-  { factory: true, name: "no-public-leak", run: (raw, env) => check17(raw, env) },
-  { factory: false, name: "no-raw-delete", run: (raw, env) => check18(raw, env) },
-  { factory: true, name: "no-raw-spawn", run: (raw, env) => check19(raw, env) },
-  { factory: true, name: "no-raw-wa", run: (raw, env) => check20(raw, env) },
-  { factory: false, name: "no-release-comment", run: (raw, env) => check21(raw, env) },
+  { factory: true, name: "no-prompt-stop", run: (raw) => check17(raw) },
+  { factory: true, name: "no-public-leak", run: (raw, env) => check18(raw, env) },
+  { factory: false, name: "no-raw-delete", run: (raw, env) => check19(raw, env) },
+  { factory: true, name: "no-raw-spawn", run: (raw, env) => check20(raw, env) },
+  { factory: true, name: "no-raw-wa", run: (raw, env) => check21(raw, env) },
+  { factory: false, name: "no-release-comment", run: (raw, env) => check22(raw, env) },
   { factory: true, name: "no-stash", run: (raw, env) => check3(raw, env) },
-  { factory: true, name: "no-unslotted-run", run: (raw, env) => check22(raw, env) }
+  { factory: true, name: "no-unslotted-run", run: (raw, env) => check23(raw, env) }
 ];
 var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`;
-async function check23(raw, environment = process.env, guards = GUARDS) {
+async function check24(raw, environment = process.env, guards = GUARDS) {
   let factory;
   const reasons = await Promise.all(guards.map(async ({ factory: gated, name, run }) => {
     try {
@@ -16828,7 +16894,7 @@ async function check23(raw, environment = process.env, guards = GUARDS) {
 `) || undefined;
 }
 async function hook() {
-  const reason = await check23(await Bun.stdin.text());
+  const reason = await check24(await Bun.stdin.text());
   if (!reason)
     return 0;
   console.error(reason);
@@ -16838,6 +16904,6 @@ if (import.meta.main)
   process.exit(await hook());
 export {
   GUARDS,
-  check23 as check,
+  check24 as check,
   hook
 };

@@ -120,6 +120,7 @@ import {
   authMiddleware,
   createRateLimiter,
   guardWrites,
+  refuseAgentOffFixture,
   requireConsoleRole,
   requireTrustedOrigin,
 } from "@/middlewares"
@@ -912,6 +913,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
       },
     }),
     messageLimiter,
+    refuseAgentOffFixture,
     sValidator("json", messageSchema, (result) => {
       if (!result.success) {
         throw new ApiError(400, "VALIDATION_ERROR", "Invalid input", { issues: result.error })
