@@ -1,6 +1,6 @@
 ---
 name: audit
-description: Run the dependency security audit, update every package to its latest version, and maintain docs/dependencies.md. Use when the canary pre-push audit hook fails, when `bun audit` flags a high advisory, or when asked to update all packages to latest.
+description: Run the dependency security audit, update every package to its latest version, and maintain docs/dependencies.md. Use when the canary pre-push audit hook fails, when `bun audit` flags a moderate or worse advisory, or when asked to update all packages to latest.
 source: https://github.com/nrjdalal/zerostarter
 ---
 
@@ -33,10 +33,10 @@ bun update --latest --recursive
 ## 1. Run
 
 ```bash
-bun audit --audit-level high
+bun audit --audit-level moderate
 ```
 
-Done when the output is clean, or you have the list of high advisories to clear.
+Every gate fails at this level. Done when the output is clean, or you have the list of advisories to clear.
 
 ## 2. Fix on the highest rung that works
 
@@ -50,13 +50,15 @@ Fix each advisory on the highest rung that lifts the whole tree; drop a rung onl
    "overrides": { "<vulnerable-package>": "<patched-version>" }
    ```
 
+4. **Ignore** (only when an override would cross a breaking range under its parents): add `--ignore <GHSA id>` to the four gates that `docs/dependencies.md`'s Ignored advisories names.
+
 `bun audit fix` applies the first two rungs mechanically when a patched version exists within the ranges parents allow; `--dry-run` previews and `--latest` also crosses majors, so review what it picks before accepting. Read the advisory's affected ranges before reaching for a lower rung: the audit header lists every installed version of the package, not only the vulnerable ones. Follow with `bun dedupe` to collapse duplicate versions the tree accumulated.
 
-Then `bun i` and prove nothing broke. Done when `bun run check-types && bun run build` pass and `bun audit --audit-level high` reports no high advisories.
+Then `bun i` and prove nothing broke. Done when `bun run check-types && bun run build` pass and `bun audit --audit-level moderate` reports no advisory but the ignored ones.
 
-## 3. Record every override
+## 3. Record every override and ignore
 
-Every entry in root `overrides` needs a matching block in `docs/dependencies.md`, in the file's existing shape: one `### <package> → <version>` under `## Active overrides`, carrying **Advisory** (link, severity, affected range), **Why an override** (why an update or parent bump can't lift the tree), **Risk**, and **Exit criteria** (when to remove it). Delete a block when its override goes. Done when every override has a block and no block outlives its override.
+Every entry in root `overrides` needs a matching block in `docs/dependencies.md`, in the file's existing shape: one `### <package> → <version>` under `## Active overrides`, carrying **Advisory** (link, severity, affected range), **Why an override** (why an update or parent bump can't lift the tree), **Risk**, and **Exit criteria** (when to remove it). Delete a block when its override goes. Every `--ignore` needs a block under `## Ignored advisories` in the same shape, its **Why an ignore** in place of **Why an override**. Done when every override and ignore has a block and no block outlives its entry.
 
 ## 4. Ship
 

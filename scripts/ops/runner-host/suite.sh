@@ -293,8 +293,8 @@ step install 900 bun install --ignore-scripts --frozen-lockfile
 # audit.ts retries a hang or 5xx inside this step's 300s, and with ci.sh's base lockfile fails only on what the head adds
 over=()
 [ -f "$F.base" ] && over=(--new-over "$F.base")
-# GHSA-vfj7-8cjw-p6xm: braces has no patched release, and only dev tooling (shadcn, globby) reaches it
-step audit 300 bun packages/scripts/src/audit.ts --audit-level high --ignore GHSA-vfj7-8cjw-p6xm "${over[@]}"
+# GHSA-67mh-4wv8-2f99 (esbuild) and GHSA-g3hv-75wg-m249 (minimatch): only dev tooling reaches them, and each parent's latest still pins the old range
+step audit 300 bun packages/scripts/src/audit.ts --audit-level moderate --ignore GHSA-67mh-4wv8-2f99 --ignore GHSA-g3hv-75wg-m249 "${over[@]}"
 step format:check 600 bun run format:check
 step lint 600 bun run lint
 step check-types 1200 bun run check-types

@@ -1,9 +1,9 @@
 # bun audit
 
 > [!NOTE]
-> This file is the canonical record of dependency-audit overrides/exceptions (`bun audit --audit-level high` runs in the pre-push hook on canary). It intentionally exists even when no overrides are required, do not delete it.
+> This file is the canonical record of dependency-audit overrides/exceptions (`bun audit --audit-level moderate` runs in the pre-push hook on canary). It intentionally exists even when no overrides are required, do not delete it.
 
-> bun audit --level high
+> bun audit --audit-level moderate
 
 ## Catalog ranges
 
@@ -60,14 +60,21 @@ A patch lives in `patches/`, made with `bun patch <pkg>` and registered under `p
 
 ## Ignored advisories
 
-An advisory with no patched version anywhere cannot be cleared by updating it, by updating a parent or by an override, so the gate ignores it by ID instead. Each `--ignore` sits in both gates, `lefthook.yml` and `.github/workflows/auto-check-build.yml`. Remove it from both when its exit criteria are met.
+Every audit gate fails on a moderate advisory or worse. An advisory that no update, parent bump or safe override can clear, since every parent's latest still pins an affected range, is ignored by ID instead. Each `--ignore` sits in all four gates, `lefthook.yml`, `.github/workflows/auto-check-build.yml`, `.github/workflows/audit-canary.yml` and `scripts/ops/runner-host/suite.sh`, and `tests/github/workflows/audit.test.ts` holds those four to the IDs headed below. Remove an ID from all four, with its block here, when its exit criteria are met.
 
-### `braces` ([GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm))
+### `esbuild` ([GHSA-67mh-4wv8-2f99](https://github.com/advisories/GHSA-67mh-4wv8-2f99))
 
-- **Advisory:** high: stack-exhaustion denial of service through deeply nested brace patterns. Affects `braces <=3.0.3`, which is every published version; the advisory lists no patched version.
-- **Why an ignore:** there is nothing to update to or override with. `braces@3.0.3` is the latest release, and every parent's latest still reaches it through `micromatch@4.0.8`: `shadcn@4.21.1` depends on `fast-glob` directly, and `globby@16.2.4` on both `fast-glob` and `micromatch`. The `ts-morph` path under `shadcn` would clear at `ts-morph@28` (its `@ts-morph/common` moved to `tinyglobby`), but `shadcn` still declares `ts-morph ^26` and its own `fast-glob`, so the tree keeps the copy either way.
-- **Risk:** negligible. The only consumers are dev tooling: the `shadcn` CLI behind `bun run shadcn:update`, and `globby` in `packages/scripts/src/deps-manager.ts`, which globs the fixed pattern `**/package.json` on install. Neither takes a pattern from untrusted input, and nothing the api bundle or the web app ships imports the chain.
-- **Exit criteria:** drop the ignore once `braces` publishes a patched version (then a normal `bun audit fix` or refresh lifts it), or once neither `shadcn` nor `globby` resolves `micromatch`.
+- **Advisory:** moderate: esbuild's development server (`esbuild --serve`) answers any website's request, so a page open in the browser can read what it serves. Affects `esbuild <=0.24.2`; patched in `0.25.0`.
+- **Why an ignore:** the tree's `esbuild@0.18.20` comes only through `drizzle-kit@0.31.11` (the latest) > `@esbuild-kit/esm-loader@2.6.5` > `@esbuild-kit/core-utils@3.3.2`, which pins `esbuild ~0.18.20` and is deprecated with no later release. An override by name would also move the tree's other copies (`0.25.12` and `0.28.2`) to one range, across esbuild's breaking releases for `fumadocs-mdx` and `tsdown`'s `tsx`.
+- **Risk:** negligible. The copy loads `packages/db`'s config for the `drizzle-kit` CLI (`bun run db:generate`, `db:migrate`, `db:studio`), a dev dependency that only transforms code and never starts esbuild's server; nothing the api bundle or the web app ships imports it.
+- **Exit criteria:** drop the ignore once `drizzle-kit` drops `@esbuild-kit/esm-loader` or the tree resolves no `esbuild` below `0.25.0`.
+
+### `minimatch` ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249))
+
+- **Advisory:** moderate: denial of service through glob-part amplification in a crafted pattern. Affects `minimatch >=7.0.0 <11.0.1`; patched in `11.0.1`.
+- **Why an ignore:** the tree's `minimatch@10.2.6` comes only through `@ts-morph/common`, at `0.29.0` under `ts-morph@28.0.0` (the latest) and `0.27.0` under `shadcn@4.23.0`'s `ts-morph ^26`; both declare `minimatch ^10.0.1`, so the fix is a major away and an override would cross it under them.
+- **Risk:** negligible. `ts-morph` runs only in dev tooling: `packages/scripts/src/shadcn-customize.ts` and the `shadcn` CLI behind `bun run shadcn:update`, each on the repo's own fixed globs, never a pattern from untrusted input.
+- **Exit criteria:** drop the ignore once `@ts-morph/common` declares a `minimatch` range that resolves `>=11.0.1`, or the tree resolves no `minimatch` below it.
 
 ## Retired overrides
 
