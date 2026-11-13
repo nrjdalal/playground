@@ -480,3 +480,40 @@ test.skipIf(!CHFLAGS)("the relock locks a scope left unlocked under a locked roo
   expect(relockRoot(data)).toBe(true)
   expect(allLocked(data)).toEqual([true, true, true])
 })
+
+// Each root-level writer the per-scope lift leaves whole: the walk lifts and relocks the root, with the other scope's file unlocked during it.
+const rootLifts = (name: string, write: (data: string) => unknown) => {
+  const data = twoScopes(name)
+  const calls = join(scratch, `${name}.calls`)
+  const probe = join(scopeDir(data, OTHER), "settings.json")
+  withChflags(name, logged(calls, probe), () => write(data))
+  expect(callsIn(calls)).toEqual([
+    [`-R nouchg ${extensionsDir(data)}`, "-"],
+    [`-R uchg ${extensionsDir(data)}`, "uchg"],
+  ])
+  expect(allLocked(data)).toEqual([true, true, true])
+}
+
+test.skipIf(!CHFLAGS)("a first write to a scope with no folder yet lifts the whole root", () =>
+  rootLifts("new-scope", (data) =>
+    writeTree(data, "made-up-two", new Map([["a.md", "a"]]), { author: "o", reason: "r" }),
+  ),
+)
+
+test.skipIf(!CHFLAGS)("an accepted list's put lifts the whole root, whose hooks/ it writes", () =>
+  rootLifts("list-put", (data) =>
+    revOf(
+      putItem(
+        data,
+        { key: "no-public-leak", kind: "list", scope: ME },
+        { attachments: [], body: null, files: null, value: ["made-up-term"] },
+        OWNER,
+        true,
+      ),
+    ),
+  ),
+)
+
+test.skipIf(!CHFLAGS)("ext lock refuses a root that does not exist", () => {
+  expect(() => setRootLock(join(scratch, "no-root"), true)).toThrow("does not exist")
+})
