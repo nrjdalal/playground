@@ -11,6 +11,12 @@ import { git } from "./scratch-git"
 // Made-up repositories: made-up/app is the factory's, by factory.repo; made-up/other is any other.
 const APP = "https://github.com/made-up/app.git"
 const OTHER = "https://github.com/made-up/other.git"
+// The closed sandbox's git env config, which turns commit signing off (scripts/spawn.sh).
+const UNSIGNED = {
+  GIT_CONFIG_COUNT: "1",
+  GIT_CONFIG_KEY_0: "commit.gpgsign",
+  GIT_CONFIG_VALUE_0: "false",
+}
 const dirs: Record<string, string> = {}
 let scratch = ""
 let data = ""
@@ -145,6 +151,55 @@ describe("a push the hook cannot read is refused where it may land in the factor
     expect(reason).toContain(why)
   })
 
+  // Only the closed sandbox's exact set in the session's own environment reads as signing alone; each near miss of it stays a variable that may move the push.
+  test.each([
+    ["a count of 0", { ...UNSIGNED, GIT_CONFIG_COUNT: "0" }],
+    ["a count of 01", { ...UNSIGNED, GIT_CONFIG_COUNT: "01" }],
+    ["a count with a space", { ...UNSIGNED, GIT_CONFIG_COUNT: " 1" }],
+    ["a count of 2 with one key", { ...UNSIGNED, GIT_CONFIG_COUNT: "2" }],
+    ["no count", { GIT_CONFIG_KEY_0: "commit.gpgsign", GIT_CONFIG_VALUE_0: "false" }],
+    ["a missing key", { GIT_CONFIG_COUNT: "1", GIT_CONFIG_VALUE_0: "false" }],
+    ["a missing value", { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "commit.gpgsign" }],
+    ["a value of False", { ...UNSIGNED, GIT_CONFIG_VALUE_0: "False" }],
+    ["a value of 0", { ...UNSIGNED, GIT_CONFIG_VALUE_0: "0" }],
+    ["a value of no", { ...UNSIGNED, GIT_CONFIG_VALUE_0: "no" }],
+    ["an empty value", { ...UNSIGNED, GIT_CONFIG_VALUE_0: "" }],
+    ["the key in another case", { ...UNSIGNED, GIT_CONFIG_KEY_0: "commit.gpgSign" }],
+    ["another key", { ...UNSIGNED, GIT_CONFIG_KEY_0: "push.default" }],
+    [
+      "a key past the count",
+      { ...UNSIGNED, GIT_CONFIG_KEY_1: "push.default", GIT_CONFIG_VALUE_1: "matching" },
+    ],
+    ["a bare GIT_CONFIG", { ...UNSIGNED, GIT_CONFIG: "/x/config" }],
+    ["GIT_CONFIG_PARAMETERS", { ...UNSIGNED, GIT_CONFIG_PARAMETERS: "'push.default'='matching'" }],
+    ["GIT_CONFIG_GLOBAL", { ...UNSIGNED, GIT_CONFIG_GLOBAL: "/x/config" }],
+    ["GIT_CONFIG_SYSTEM", { ...UNSIGNED, GIT_CONFIG_SYSTEM: "/x/config" }],
+    ["GIT_CONFIG_NOSYSTEM", { ...UNSIGNED, GIT_CONFIG_NOSYSTEM: "1" }],
+    ["GIT_DIR beside it", { ...UNSIGNED, GIT_DIR: "/x/.git" }],
+  ])("a bare push with %s in the session's environment", async (_, environment) => {
+    expect(await bash("git push", dirs.app, environment)).toContain(
+      "no-protected-push hook refuses this git push",
+    )
+  })
+
+  test.each([
+    [
+      "the closed sandbox's set typed on the line",
+      "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false git push",
+    ],
+    [
+      "the set exported earlier on the line",
+      "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false && git push",
+    ],
+    ["-c turning signing off", "git -c commit.gpgsign=false push"],
+  ])("%s", async (_, command) => {
+    expect(await bash(command)).toContain("no-protected-push hook refuses this git push")
+  })
+
+  test("a closed sandbox's session still cannot write main", async () => {
+    expect(await bash("git push origin main", dirs.app, UNSIGNED)).toContain("it writes main")
+  })
+
   test("a configured alias in the alias checkout", async () => {
     expect(await bash("git p origin main", dirs.alias)).toContain("an alias that may push")
   })
@@ -211,6 +266,15 @@ describe("every other push runs", () => {
     ["main of an extension repository", "git push origin HEAD:main", "ext"],
   ])("%s", async (_, command, dir) => {
     expect(await bash(command, dirs[dir])).toBeUndefined()
+  })
+
+  // The closed sandbox's settings turn commit signing off through git's env config (scripts/spawn.sh), which reaches the hook as the session's own environment.
+  test.each([
+    ["a bare push of the work branch", "git push"],
+    ["HEAD with -u", "git push -u origin HEAD"],
+    ["HEAD onto the work branch", "git push origin HEAD:work"],
+  ])("%s from a closed sandbox's session", async (_, command) => {
+    expect(await bash(command, dirs.app, UNSIGNED)).toBeUndefined()
   })
 
   test("a call that is not Bash runs", async () => {

@@ -63,6 +63,7 @@ set -euo pipefail
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
 #   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
+#   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, and holds outbound hosts to the ones a worker's loop needs; its roster row records sandbox=on, which a resume keeps and a start without it clears
 #   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate; the load, memory and usage gates still hold it
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
@@ -826,7 +827,7 @@ PY
   esac
 }
 
-# --account, --backend, --harness, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check, --priority and --reads-only may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --harness, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check, --priority, --reads-only and --sandbox may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -861,6 +862,7 @@ MEMORY_OFF=
 CHECK=
 PRIORITY=
 READS_ONLY=
+SANDBOX_ARG=
 NAME_PROJECT=
 SIZE=
 RUNTIME=
@@ -940,6 +942,9 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = --reads-only ]; then
     READS_ONLY=1
     shift
+  elif [ "$1" = --sandbox ]; then
+    SANDBOX_ARG=1
+    shift
   elif [ "$1" = --brief ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RESUME_BRIEF" ] || usage
     case "$2" in --*) usage "--brief needs a value; \"$2\" starts with --" ;; esac
@@ -991,6 +996,8 @@ MODE=${1:-}
 [ -z "$REPORTS_TO" ] || [ "$MODE" = worker ] || usage "--reports-to is for a worker, not ${MODE:-no mode}"
 [ -z "$IN_DIR" ] || [ "$MODE" = worker ] || usage "--in is for a worker, not ${MODE:-no mode}"
 [ -z "$READS_ONLY" ] || [ "$MODE" = worker ] || usage "--reads-only is for a worker, not ${MODE:-no mode}"
+SANDBOX_ONLY="--sandbox is for a worker's, a reviewer's or a probe's start"
+[ -z "$SANDBOX_ARG" ] || [[ $MODE =~ ^(worker|column|probe)$ ]] || usage "$SANDBOX_ONLY, not a ${MODE:-session}'s"
 [ -z "$PR_ARG" ] || [[ $MODE =~ ^(column|resume)$ ]] || usage "--pr is for a reviewer's or tester's column or resume, not ${MODE:-no mode}"
 [ -z "$TITLE_ARG" ] || [[ $MODE =~ ^(worker|column|resume)$ ]] || usage "--title is for a worker or a reviewer's or tester's column, not ${MODE:-no mode}"
 # herdr 0.9.5 keeps a resume command only from a source that holds the pane through report-agent, and then shows that source's state in place of its own (measured: a 14s turn read idle throughout), so restore reruns the sessions spawn.sh itself listed, with ops-herdr's resume_agents_on_restore off. Each goes through resume, so the gate and the live-name check judge it, and a live one is left as it is.
@@ -1328,6 +1335,7 @@ case "$MODE" in
     ;;
   *) NAME=${MODE:-session}; usage ;;
 esac
+[ -z "$SANDBOX_ARG" ] || [[ $ROLE =~ ^(worker|reviewer|probe)$ ]] || usage "$SANDBOX_ONLY, not a $ROLE's"
 word "$NAME" || refuse "a name is lowercase words joined by hyphens"
 # A new name gives its kind, since a reader of the name alone would show and place it as another; a lead or manager may take its kind from the roster instead, and a resume keeps the name it has.
 NAMED=$(kind_of_name "$NAME")
@@ -1419,14 +1427,18 @@ except Exception:
 sys.exit(0 if isinstance(email, str) and email.lower() == sys.argv[2].lower() else 1)
 PY
 }
+# Whether the Keychain holds service $1's item for account $2: only that it exists, with no -w, so the token is never read here. Claude Code's sandbox (SANDBOX_RUNTIME=1 in its shell) can close the Keychain, which then reads as no item, so a start from inside it names the check it leaves to the new pane's shell, which runs outside the sandbox and stops on a missing item before claude runs.
+keychain_has() {
+  security find-generic-password -s "$1" -a "$2" >/dev/null 2>&1 && return
+  [ "${SANDBOX_RUNTIME:-}" = 1 ] || return 1
+  echo "spawn.sh: the sandbox closes the Keychain to this shell, so the new pane checks the $1 item for $2" >&2
+}
 # An --account, or the login the usage gate picks for a bare spawn, is a second login whose Keychain item exists.
 check_account() {
   # The email goes into the pane's command, so it is a plain local@domain: no quote, space or $.
   [[ $ACCOUNT =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || refuse "--account takes a plain email, not $ACCOUNT"
   ! own_login || refuse "--account $ACCOUNT is this machine's own Claude login, whose usage the session would share unchecked: name a second account"
-  # Only that the item exists: no -w, so the token is never read here.
-  security find-generic-password -s "$KEYCHAIN" -a "$ACCOUNT" >/dev/null 2>&1 ||
-    refuse "the Keychain holds no $KEYCHAIN item for $ACCOUNT"
+  keychain_has "$KEYCHAIN" "$ACCOUNT" || refuse "the Keychain holds no $KEYCHAIN item for $ACCOUNT"
 }
 # --account naming this machine's own login starts on it with no token, as a bare start does, its usage judged by that login's reading and the split skipped.
 OWN_LOGIN=
@@ -1486,8 +1498,7 @@ if [ "$BACKEND" = glm ]; then
     GLM_ACCOUNT=$(head -n 1 <<<"$GLM_LABELS") GLM_GIVEN=
     [ -n "$GLM_ACCOUNT" ] || refuse "usage.accounts lists no GLM key: add one with playground accounts add --provider glm --label <label>"
   fi
-  security find-generic-password -s "$GLM_KEYCHAIN" -a "$GLM_ACCOUNT" >/dev/null 2>&1 ||
-    refuse "the Keychain holds no $GLM_KEYCHAIN item for $GLM_ACCOUNT"
+  keychain_has "$GLM_KEYCHAIN" "$GLM_ACCOUNT" || refuse "the Keychain holds no $GLM_KEYCHAIN item for $GLM_ACCOUNT"
 fi
 
 holders=$(live_holders "$NAME") || refuse "it cannot read the live sessions in $REGISTRY"
@@ -1608,9 +1619,12 @@ fi
 # The window reaches the session through its one settings file, built here from the factory's on every launch so the two never drift, one file per backend. On GLM: the user settings may turn on telemetry to an org's usage collector, which counts Claude usage alone, so a GLM session exports none. Claude Code keeps only the last --settings, and the user settings' env beats a variable on the launch line (both measured by a reviewer, 16 Oct), so the session's one settings file also turns the telemetry off (measured from a folder outside any checkout, 16 Oct: a SessionStart hook ran, no-env-dump refused printenv, and no metric left).
 TAG=
 [ "$BACKEND" = glm ] && TAG=glm-
-# A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own. Workers and testers join once the worker git flow runs inside it, as run-slot and spawn.sh do.
+# A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own.
 SANDBOX=
 [ "$ROLE" = probe ] && SANDBOX=sandbox-
+# --sandbox, or a resumed row that records it, takes the closed sandbox in a file of its own: a probe's, with loopback, the Keychain and the data folder's secret files closed too (scripts/README.md, spawn.sh).
+CLOSED=
+{ [ -n "$SANDBOX_ARG" ] || { [ "$MODE" = resume ] && [ "$(roster_field "$NAME" sandbox)" = on ]; }; } && CLOSED=1 SANDBOX=sandbox-closed-
 # A manager hands every build, read or research to a worker session (playbook's **workers**), so its file of its own denies the Agent and Workflow tools, which a bare deny takes out of its tools; every other session keeps both, a reviewer's code-review sub-agents among them.
 MANAGER=
 case "$ROLE" in dispatcher | lead) MANAGER=manager- ;; esac
@@ -1620,9 +1634,9 @@ BUILT="$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k.json"
 # The folder the session runs in, as the launch below moves to it.
 OWN=${DIR:-$REPO}
 [ "$MODE" = column ] && OWN=$REPO
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" "$MANAGER" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" "$MANAGER" "$CLOSED" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
-src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager = sys.argv[1:13]
+src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager, closed = sys.argv[1:14]
 settings = json.load(open(src))
 settings["autoCompactWindow"] = int(window)
 if manager:
@@ -1656,6 +1670,18 @@ if sandbox:
         },
         "network": {"allowLocalBinding": True, "allowUnixSockets": sorted({herdr, os.path.join(home, ".agent-browser")})},
     }
+    if closed:
+        # Claude Code's sandbox opens loopback whole or not at all (allowLocalBinding gives every localhost port), and portless's proxy serves the live API's name on the same port as every other stack's, so loopback closes whole; a strict list keeps outbound hosts to the ones a worker's loop reads, since bypass mode lets any other pass. The Keychain's login items are files the client reads itself, so a read deny on its folder refuses them.
+        secrets = [os.path.join(data, name) for name in ("dumps", "remote-key.json", "whatsapp")]
+        settings["sandbox"]["filesystem"]["denyRead"] = sorted([os.path.join(home, "Library", "Keychains")] + secrets)
+        settings["sandbox"]["filesystem"]["denyWrite"] = deny + secrets
+        settings["sandbox"]["network"] = {
+            "allowedDomains": ["api.github.com", "github.com", "registry.npmjs.org"],
+            "allowUnixSockets": settings["sandbox"]["network"]["allowUnixSockets"],
+            "strictAllowlist": True,
+        }
+        # gpg writes its home folder to sign, which stays shut since gpg-agent runs the programs its config there names outside the sandbox, so a closed session's commits go unsigned; pr:merge's squash is GitHub's own commit.
+        settings["env"] = {**settings.get("env", {}), "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "commit.gpgsign", "GIT_CONFIG_VALUE_0": "false"}
 if memory:
     settings["autoMemoryEnabled"] = True
     settings["autoMemoryDirectory"] = memory
@@ -1955,6 +1981,12 @@ PY
   [ -z "$TITLE_ARG" ] || set -- "$@" "title=$TITLE_ARG"
   [ "${held:1:1}" = 1 ] || set -- "$@" "task=$TASK"
   set -- "$@" "memory=$MEMORY"
+  # A start without the flag clears a row's sandbox=on, so a later resume or restore keeps the settings this start took.
+  if [ -n "$CLOSED" ]; then
+    set -- "$@" sandbox=on
+  elif [ "$MODE" != resume ] && [ "$(roster_field "$NAME" sandbox)" = on ]; then
+    set -- "$@" sandbox=
+  fi
   [ -z "${ARM:-}" ] || { mkdir -p "$DATA/memory" && printf '%s\n' "$MEMORY" > "$ARM"; } || echo "spawn.sh: $NAME $WHEN, but the memory trial's turn could not be written to $ARM" >&2
   said=
   if ! roster "$@"; then
