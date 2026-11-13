@@ -3,7 +3,11 @@ import { resolve } from "node:path"
 
 import { hideSecrets } from "@packages/settings"
 
-// What this Mac hides in a bot's read before it leaves: every secret shape hideSecrets knows, then every value of the live checkout's .env this long or longer, each as [hidden].
+import { keychainItem } from "@/lib/keychain"
+import { KEYCHAIN_ITEM_NAMES } from "@/lib/keychain-items"
+import { botService } from "@/lib/yard/keychain"
+
+// What this Mac hides in a bot's read before it leaves: every secret shape hideSecrets knows, then every value of the live checkout's .env and of the factory's own Keychain items this long or longer, each as [hidden].
 export const ENV_VALUE_MIN = 8
 const HIDDEN = "[hidden]"
 
@@ -30,6 +34,19 @@ export const checkoutEnvValues = (): string[] => {
   }
 }
 
+// The values of the factory's own Keychain items this Mac knows, read once as the relay starts: each KEYCHAIN_ITEMS item and each yard.logReaders bot's own item, one it cannot read left out.
+export const keychainValues = async (
+  bots: readonly string[],
+  read: (item: string) => Promise<string | null> = async (item) => keychainItem(item).read(),
+): Promise<string[]> => {
+  const items = [
+    ...KEYCHAIN_ITEM_NAMES,
+    ...bots.map((login) => botService(login.replace(/\[bot\]$/, ""))),
+  ]
+  const values = await Promise.all(items.map((item) => read(item).catch(() => null)))
+  return values.filter((value): value is string => (value?.length ?? 0) >= ENV_VALUE_MIN)
+}
+
 // longest first, so a value inside another is hidden with it
 const hideIn = (text: string, values: readonly string[]): string =>
   [...values]
@@ -42,10 +59,12 @@ const hideEach = (value: unknown, values: readonly string[]): unknown =>
     : Array.isArray(value)
       ? value.map((item) => hideEach(item, values))
       : value && typeof value === "object"
-        ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, hideEach(v, values)]))
+        ? Object.fromEntries(
+            Object.entries(value).map(([k, v]) => [hideIn(k, values), hideEach(v, values)]),
+          )
         : value
 
-// Pure: a body with every secret hidden: each string of a JSON body as its text reads, so an escaped line break never hides a key block's end, or the body as text when it is not JSON.
+// Pure: a body with every secret hidden: each string of a JSON body, its keys included, as its text reads, so an escaped line break never hides a key block's end, or the body as text when it is not JSON.
 export const redact = (body: string, values: readonly string[]): string => {
   try {
     return JSON.stringify(hideEach(JSON.parse(body), values))
@@ -53,8 +72,3 @@ export const redact = (body: string, values: readonly string[]): string => {
     return hideIn(body, values)
   }
 }
-
-export const keychainValues = async (
-  _bots: readonly string[],
-  _read?: (item: string) => Promise<string | null>,
-): Promise<string[]> => []

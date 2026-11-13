@@ -62,7 +62,7 @@ mac.onmessage = async (event) => {
   const answer = await answerRelay(raw, {
     cookie: async () => "session=made-up",
     dispatch: async () => Response.json(page),
-    envValues: () => [],
+    secretValues: () => [],
     login: "lo",
     readers: () => ({ "scout[bot]": dm }),
     seen,
