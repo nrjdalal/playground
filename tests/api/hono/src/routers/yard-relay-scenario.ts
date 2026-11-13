@@ -24,6 +24,27 @@ const closeCode = (path: string, headers: Record<string, string>) =>
 const body = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64")
 
 const out: Record<string, unknown> = {}
+// the owner's browser mints the Mac's relay token, which a member's cannot
+const mint = async (headers: Record<string, string>) =>
+  fetch(`http://127.0.0.1:${server.port}/api/v1/yard/tokens`, {
+    body: JSON.stringify({ name: "mac-relay", relay: true }),
+    headers: { ...headers, "content-type": "application/json", origin: web },
+    method: "POST",
+  })
+out.mintMember = (await mint(member)).status
+const minted = await mint(owner)
+const relayToken: string = (await minted.json()).data?.token?.secret ?? ""
+out.mint = [minted.status, /^yard_relay_[A-Za-z0-9_-]{32}$/.test(relayToken)]
+const asRelay = { authorization: `Bearer ${relayToken}` }
+out.relayMe = (
+  await fetch(`http://127.0.0.1:${server.port}/api/v1/yard/me`, { headers: asRelay })
+).status
+out.relayElsewhere = (
+  await fetch(`http://127.0.0.1:${server.port}/api/v1/yard/channels`, { headers: asRelay })
+).status
+out.personSocket = await closeCode("/socket", {
+  authorization: `Bearer ${process.env.OWNER_TOKEN}`,
+})
 out.memberSocket = await closeCode("/socket", {
   authorization: `Bearer ${process.env.MEMBER_TOKEN}`,
 })
@@ -34,7 +55,7 @@ const requests: Record<string, unknown>[] = []
 const pairs: Record<string, unknown>[] = []
 const writes: Record<string, unknown>[] = []
 const mac = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/yard/relay/socket`, {
-  headers: { authorization: `Bearer ${process.env.OWNER_TOKEN}` },
+  headers: asRelay,
 } as never)
 mac.onmessage = (event) => {
   const request = JSON.parse(String(event.data))
@@ -169,7 +190,7 @@ const after = (
 out.statusAfter = { online: after.online, since: typeof after.since }
 // a socket the Mac closes as replaced goes from this instance alone, so no instance learns a since, as the bus-free gone above did
 const next = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/yard/relay/socket`, {
-  headers: { authorization: `Bearer ${process.env.OWNER_TOKEN}` },
+  headers: asRelay,
 } as never)
 await new Promise((done) => (next.onopen = done))
 await new Promise((done) => {
