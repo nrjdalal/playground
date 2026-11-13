@@ -213,6 +213,7 @@ It reads its stuck alerts first (ops-stuck-alert.jsonl, where a session's own ho
 playground alerts-wait <your name>
 ```
 
+Its line leads with its queue's `[ops-<job>]` tag, as the relay's copy does.
 Run it with Bash `run_in_background`; when it exits it has printed one line: start it again at once, then act on the line, a stuck session's alert, a job's line such as a heads-up, or a late sweep's, whose line Ops answers by running its sweep or resuming the relay, and the dispatcher by resolving the stop, posting to the owner's Inbox only if it cannot.
 A waiter started after time down skips the alerts queued over 5 minutes before it began and names how many, since the relay sent each; while none runs, each alert also goes to Ops to send on, which is fast only while Ops' own waiter runs, so each line to Ops names Ops' restart while it does not.
 A worker a probe reports to keeps no waiter, and its probe's alert comes by the relay alone.
