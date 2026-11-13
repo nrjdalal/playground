@@ -48,12 +48,18 @@ export const runUpdate = async (
   done?: string,
 ): Promise<number> => {
   const git = (...args: string[]) => run(["git", "-C", repo, ...args])
-  // a step whose output the terminal shows, named before it runs and again when it fails
+  // a step whose output the terminal shows, named before it runs and again when it ends, with its seconds
   const shown = async ([name, argv]: [string, string[]]): Promise<boolean> => {
     log(`playground update: ${name}`)
-    if ((await run(argv, true)).code === 0) return true
-    log(`playground update: ${name} failed; fix it and run playground update again`)
-    return false
+    const started = performance.now()
+    const ok = (await run(argv, true)).code === 0
+    const seconds = Math.round((performance.now() - started) / 1000)
+    if (ok) log(`playground update: ${name} done in ${seconds} s`)
+    else
+      log(
+        `playground update: ${name} failed in ${seconds} s; fix it and run playground update again`,
+      )
+    return ok
   }
   const head = (await git("rev-parse", "HEAD")).out.trim()
   const recorded =
