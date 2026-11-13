@@ -48,14 +48,17 @@ describe("drain", () => {
     )
     appendFileSync(join(dir, "ops-dashboard.jsonl"), '{"at": "2026-10-23T07:03')
     writeFileSync(join(dir, "alerts.log"), "not a queue\n")
-    expect((await drain(dir)).map((r) => r.text)).toEqual(["a", "b"])
+    expect((await drain(dir)).map((r) => r.text)).toEqual([
+      "[ops-channel-watch] a",
+      "[ops-dashboard] b",
+    ])
     expect(await drain(dir)).toEqual([])
     appendFileSync(
       join(dir, "ops-dashboard.jsonl"),
       `:00Z", "job": "dashboard", "text": "c", "to": "ops"}\n`,
     )
     expect(await drain(dir)).toEqual([
-      { at: "2026-10-23T07:03:00Z", job: "dashboard", text: "c", to: "ops" },
+      { at: "2026-10-23T07:03:00Z", job: "dashboard", text: "[ops-dashboard] c", to: "ops" },
     ])
   })
 
@@ -96,7 +99,7 @@ describe("drain", () => {
     )
     await drain(dir)
     writeFileSync(join(dir, "ops-dashboard.jsonl"), rec("2026-10-23T07:00:00Z", "dashboard", "new"))
-    expect((await drain(dir)).map((r) => r.text)).toEqual(["new"])
+    expect((await drain(dir)).map((r) => r.text)).toEqual(["[ops-dashboard] new"])
   })
 
   test("an unreadable line fails loud and moves no cursor", async () => {
@@ -164,7 +167,7 @@ describe("pending", () => {
     appendFileSync(join(dir, Q), `:00Z", "job": "dashboard", "text": "c", "to": "ops"}\n`)
     expect(await pending(dir)).toEqual([Q])
     expect(await pending(dir)).toEqual([Q])
-    expect((await drain(dir)).map((r) => r.text)).toEqual(["c"])
+    expect((await drain(dir)).map((r) => r.text)).toEqual(["[ops-dashboard] c"])
     expect(await pending(dir)).toEqual([])
   })
 
@@ -173,7 +176,7 @@ describe("pending", () => {
     writeFileSync(join(dir, Q), rec("2026-10-23T07:00:00Z", "dashboard", "kept"))
     writeFileSync(join(dir, "cursor.json"), "")
     expect(await pending(dir)).toEqual([Q])
-    expect((await drain(dir)).map((r) => r.text)).toEqual(["kept"])
+    expect((await drain(dir)).map((r) => r.text)).toEqual(["[ops-dashboard] kept"])
   })
 
   test("a cursor past a file cut shorter: the file, read again from its start", async () => {
@@ -182,6 +185,6 @@ describe("pending", () => {
     await drain(dir)
     writeFileSync(join(dir, Q), rec("2026-10-23T07:00:00Z", "dashboard", "new"))
     expect(await pending(dir)).toEqual([Q])
-    expect((await drain(dir)).map((r) => r.text)).toEqual(["new"])
+    expect((await drain(dir)).map((r) => r.text)).toEqual(["[ops-dashboard] new"])
   })
 })
