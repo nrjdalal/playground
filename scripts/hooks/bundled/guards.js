@@ -15519,6 +15519,20 @@ function globals(args, env) {
   return { carried, dir };
 }
 var gitVariable = (key) => /^GIT_(?:COMMON_DIR|CONFIG(?:_\w+)?|DIR|NAMESPACE|WORK_TREE)$/.test(key);
+function signingOff(environment) {
+  const count = environment.GIT_CONFIG_COUNT;
+  if (count === undefined || !/^[1-9]\d*$/.test(count))
+    return false;
+  const expected = new Set(["GIT_CONFIG_COUNT"]);
+  for (let n = 0;n < Number(count); n++) {
+    const key = `GIT_CONFIG_KEY_${n}`;
+    const value = `GIT_CONFIG_VALUE_${n}`;
+    if (environment[key] !== "commit.gpgsign" || environment[value] !== "false")
+      return false;
+    expected.add(key).add(value);
+  }
+  return Object.keys(environment).filter(gitVariable).every((name) => expected.has(name));
+}
 function aliasOf(sub, args, dir) {
   if (builtin2(sub))
     return false;
@@ -15533,7 +15547,7 @@ function judge6(args, parsed, env, factory, settled) {
   if (!sub)
     return;
   const { carried: optioned, dir } = globals(args, env);
-  const carried = optioned || [...parsed.local.keys(), ...env.vars.keys(), ...Object.keys(env.process)].some(gitVariable);
+  const carried = optioned || [...parsed.local.keys(), ...env.vars.keys()].some(gitVariable) || !signingOff(env.process) && Object.keys(env.process).some(gitVariable);
   if (sub.value !== "push") {
     const other = sub.value === "send-pack" || sub.value === "subtree" && rest[0]?.value === "push";
     const alias = other || marked(sub.value) ? undefined : aliasOf(sub.value, args, dir);
