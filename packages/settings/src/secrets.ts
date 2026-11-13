@@ -14,7 +14,7 @@ const SECRET_SHAPES: [string, RegExp][] = [
   ["a Stripe key", /\b[rs]k_live_[A-Za-z0-9]{24,}/],
   ["a URL with a password", /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:[^\s@/]+@/i],
   ["a Vercel token", /\bvc[aikpr]_[A-Za-z0-9_]{24,}/],
-  // a person's yard_ and 32 characters, and the relay's yard_relay_ and 32 (KEYCHAIN_ITEMS in api/hono/src/lib/keychain-items.ts)
+  // a read-only yard_ and 32 characters, and a relay-on yard_relay_ and 32 (mintToken in api/hono/src/lib/yard/store.ts)
   ["a Yard token", /\byard_(?:relay_)?[A-Za-z0-9_-]{32}(?![A-Za-z0-9_-])/],
   ["an OpenAI-style key", /\bsk-(?:proj-)?[A-Za-z0-9_-]{32,}/],
 ]
