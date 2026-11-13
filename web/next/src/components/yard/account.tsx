@@ -97,8 +97,8 @@ export function Account({ role }: { role: string | null | undefined }) {
                     size="sm"
                   />
                   {roleAtLeast(role, "owner")
-                    ? "Relay: reads, posts and connects your Mac. Off, it only reads"
-                    : "Relay: reads and posts. Off, it only reads"}
+                    ? "Relay: posts and connects your Mac. Off: read-only"
+                    : "Relay: posts. Off: read-only"}
                 </label>
               )}
             </form.Field>
