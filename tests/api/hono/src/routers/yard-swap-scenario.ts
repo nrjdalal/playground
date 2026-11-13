@@ -34,10 +34,18 @@ out.browser = await status("/tokens/swap", browser, { secret: made("yard_relay_"
 out.bot = await status("/tokens/swap", as(process.env.BOT_TOKEN!), {
   secret: made("yard_", "g"),
 })
+// a read-only token asking for a relay-on secret is refused, and each refused token still works
+out.readOnlyToRelay = await status("/tokens/swap", as(readOnly), {
+  secret: made("yard_relay_", "u"),
+})
+out.afterRefusals = [await status("/me", as(relay)), await status("/me", as(readOnly))]
 
 const nextRelay = made("yard_relay_", "n")
 const swapped = await call("/tokens/swap", as(relay), { secret: nextRelay })
 out.relaySwap = [swapped.status, swapped.body?.data?.token?.name]
+// the answer names the token, never a secret
+out.answerKeys = Object.keys(swapped.body?.data?.token ?? {}).sort()
+out.answerHoldsSecret = JSON.stringify(swapped.body).includes("yard_")
 out.oldRelay = await status("/me", as(relay))
 out.newRelay = await status("/me", as(nextRelay))
 // the new one keeps its kind: it still posts

@@ -612,6 +612,7 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       await expect(
         store.swapToken(db, token("bo"), readOnly.secret, fresh("yard_relay_", "x"), now),
       ).rejects.toMatchObject({ status: 400 })
+      expect(await store.tokenOwner(db, readOnly.secret)).toMatchObject({ relay: false })
       const nextReadOnly = fresh("yard_", "p")
       await store.swapToken(db, token("bo"), readOnly.secret, nextReadOnly, now)
       expect(await store.tokenOwner(db, nextReadOnly)).toMatchObject({ relay: false })

@@ -391,6 +391,9 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
     })
     expect(run.err).not.toContain("error:")
     expect(JSON.parse(last(run.out))).toEqual({
+      afterRefusals: [200, 200],
+      answerHoldsSecret: false,
+      answerKeys: ["createdAt", "id", "lastUsedAt", "name", "revokedAt"],
       badShape: 400,
       bot: 403,
       browser: 403,
@@ -407,12 +410,20 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
         ["mac", null],
         ["studio", null],
       ],
+      readOnlyToRelay: 400,
       toOtherKind: 400,
     })
-    expect(await sql`select count(*)::int as n from yard_token where user_id = 'sw'`).toEqual([
-      { n: 2 },
+    // the swap made no token: the bot's and the member's two rows alone, each swapped row still its maker's, holding only the new secret's hash
+    const hash = (secret: string) => createHash("sha256").update(secret).digest("hex")
+    expect(
+      await sql`select name, user_id, hash from yard_token where user_id in ('sw', 'sb') order by name`,
+    ).toEqual([
+      { hash: hash(`yard_${"s".repeat(32)}`), name: "bot", user_id: "sb" },
+      { hash: hash(`yard_relay_${"n".repeat(32)}`), name: "mac", user_id: "sw" },
+      { hash: hash(`yard_${"r".repeat(32)}`), name: "studio", user_id: "sw" },
     ])
-    expect(run.out).not.toMatch(/yard_[A-Za-z0-9_-]{32}/)
+    // no log line of the hosted side holds a secret, the old ones or the new
+    expect(`${run.out}${run.err}`).not.toMatch(/yard_[A-Za-z0-9_-]{32}/)
   })
 
   test("GitHub's sign-in stamps the login and takes it from a stale holder, and no client sets one", async () => {
