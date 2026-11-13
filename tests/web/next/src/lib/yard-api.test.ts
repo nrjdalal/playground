@@ -44,6 +44,18 @@ describe("an invite request's page", () => {
   })
 })
 
+describe("a new token", () => {
+  test("asks for a person's token by default, and for the Mac's relay token when the owner turns it on", async () => {
+    answer("open")
+    await yardApi.createToken("phone")
+    await yardApi.createToken("mac-relay", true)
+    expect(calls.map((call) => [call.url, JSON.parse(String(call.init?.body))])).toEqual([
+      [`${config.api.url}/api/v1/yard/tokens`, { name: "phone", relay: false }],
+      [`${config.api.url}/api/v1/yard/tokens`, { name: "mac-relay", relay: true }],
+    ])
+  })
+})
+
 describe("the sidebar's channel reads", () => {
   test("read again every 30s on a local stack, through a passing error, and stop on a 404 or hosted", () => {
     expect(channelsEvery(false, null)).toBe(30_000)

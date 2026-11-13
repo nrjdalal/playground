@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   KEYCHAIN_SERVICE,
   keychain,
+  relayKeychain,
   type Run,
 } from "../../../../../../api/hono/src/lib/yard/keychain"
 
@@ -41,5 +42,21 @@ describe("the Mac's Yard token in the Keychain", () => {
     ])
     await expect(store.write("not a token")).rejects.toThrow("starts yard_")
     await expect(store.write('yard_a" -w "x')).rejects.toThrow("starts yard_")
+  })
+})
+
+describe("the Mac's relay token in the Keychain", () => {
+  test("is read from an item of its own, playground-yard-relay, apart from the one `playground yard` reads", async () => {
+    const calls: string[][] = []
+    const value = `yard_relay_${"0123456789abcdefghijABCDEFGHIJ_-"}`
+    const run: Run = async (argv) => {
+      calls.push(argv)
+      return { code: 0, stderr: "", stdout: `${value}\n` }
+    }
+    expect(await relayKeychain(run, "owner").read()).toBe(value)
+    expect(calls).toEqual([
+      ["security", "find-generic-password", "-s", "playground-yard-relay", "-a", "owner", "-w"],
+    ])
+    expect(await keychain(run, "owner").read()).toBeNull()
   })
 })
