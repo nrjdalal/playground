@@ -59,6 +59,11 @@ export const groups: Group[] = [
         String.raw`sed -i '' '/as/d;s/a/touch ~\/.play*\/extensions\/x/' .git/hooks/pre-commit`,
       ],
       [
+        "an in-place sed whose s/// writes a glob through a link to the root into a git hook",
+        String.raw`sed -i '' 's/a/touch ~\/store\/*\/x/' .git/hooks/pre-commit`,
+        "home",
+      ],
+      [
         "an in-place sed of an ordinary regex on a file in the session's scratch",
         `sed -i '' 's/a*b/c/' ${DATA}/scratch/w/a.txt`,
       ],
@@ -79,6 +84,14 @@ export const groups: Group[] = [
         String.raw`sed -i '' 's/~\/.play*\/extensions/x/' run.sh`,
       ],
       ["an in-place sed whose s/// writes the text its & matched", `sed -i '' 's/a.*/[&]/' run.sh`],
+      [
+        "an in-place sed whose s/// writes a regex in slashes holding an escaped *",
+        String.raw`sed -i '' 's/a/awk '"'"'\/\\\\*\/'"'"'/' run.sh`,
+      ],
+      [
+        "an in-place sed whose s/// writes the home's name and a path in the scratch",
+        String.raw`sed -i '' 's/a/$HOME:h modifiers, ~\/.playground\/handoffs\/x.md/' notes.md`,
+      ],
     ],
   },
 ]
@@ -90,4 +103,6 @@ export const allowed: string[] = [
   "an in-place sed whose /regex/d holds an absolute path and a glob",
   "an in-place sed whose s/// pattern names the root and writes a plain word",
   "an in-place sed whose s/// writes the text its & matched",
+  "an in-place sed whose s/// writes a regex in slashes holding an escaped *",
+  "an in-place sed whose s/// writes the home's name and a path in the scratch",
 ]
