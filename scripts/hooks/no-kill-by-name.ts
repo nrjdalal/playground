@@ -7,6 +7,8 @@ import {
   parse,
   program,
   run,
+  shellSlot,
+  SHELLS,
   slotWords,
   UNKNOWN,
   type Command,
@@ -64,15 +66,19 @@ async function inspect(raw: string) {
   // a pid xargs hands a shell it starts arrives as the -I string (`xargs -I{} sh -c 'kill {}'`)
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || [])
   const visit: Visit = async (cmd, parsed, env) => {
-    // run-slot.sh runs the words after its -- as the command, with the input an xargs running run-slot hands it
-    const slot = slotWords(parsed)
-    if (slot?.length)
+    // run-slot.sh, typed bare or as a shell's script, runs the words after its -- as the command, with the input an xargs running run-slot hands that command alone
+    const slot =
+      slotWords(parsed) ??
+      (SHELLS.has(parsed.name) ? shellSlot(parsed.args, parsed.name) : undefined)
+    if (slot?.length) {
+      const slotted = { ...cmd, words: slot }
       return examine(
-        { ...cmd, words: slot },
+        slotted,
         env,
-        (c, p, e) => visit(c, { ...p, xargs: p.xargs ?? parsed.xargs }, e),
+        (c, p, e) => visit(c, c === slotted ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e),
         false,
       )
+    }
     const { args, first, name, xargs } = parsed
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args)) return refuse(name)
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
@@ -87,7 +93,7 @@ async function inspect(raw: string) {
         ` Run a kill of a pid you hold in a Bash call of its own, apart from the search.`,
       )
   }
-  return run(lexed, fresh(), visit)
+  return run(lexed, { ...fresh(), visitShells: true }, visit)
 }
 
 // Fails open: a call the hook cannot read runs, so a parser bug never blocks a Bash command.

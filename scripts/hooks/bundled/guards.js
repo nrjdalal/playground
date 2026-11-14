@@ -14839,9 +14839,11 @@ async function inspect8(raw) {
   await run(lexed, fresh(), find);
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || []);
   const visit = async (cmd, parsed, env) => {
-    const slot = slotWords(parsed);
-    if (slot?.length)
-      return examine({ ...cmd, words: slot }, env, (c, p, e) => visit(c, { ...p, xargs: p.xargs ?? parsed.xargs }, e), false);
+    const slot = slotWords(parsed) ?? (SHELLS.has(parsed.name) ? shellSlot(parsed.args, parsed.name) : undefined);
+    if (slot?.length) {
+      const slotted = { ...cmd, words: slot };
+      return examine(slotted, env, (c, p, e) => visit(c, c === slotted ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e), false);
+    }
     const { args, first, name, xargs } = parsed;
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args))
       return refuse9(name);
@@ -14853,7 +14855,7 @@ async function inspect8(raw) {
     if (fed)
       return refuse9(`a kill in a call that searches with ${search}`, ` Run a kill of a pid you hold in a Bash call of its own, apart from the search.`);
   };
-  return run(lexed, fresh(), visit);
+  return run(lexed, { ...fresh(), visitShells: true }, visit);
 }
 async function check12(raw) {
   try {
