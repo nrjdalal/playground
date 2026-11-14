@@ -165,7 +165,7 @@ export const issueOf = (ref: Ref): number | undefined => {
   return n ? Number(n) : undefined
 }
 
-// Pure: what the branch step does. A local branch merged into origin/canary, or one whose merged or closed PR still holds its head, goes with -D (the main checkout's HEAD is main, so -d would refuse one merged into canary alone), and a remote one whose merged or closed PR holds its head is deleted on origin, since GitHub restores it from the PR's page. An unmerged local branch with no open PR is judged: one that is not useful goes to the bundle list, written to a git bundle in the trash before any delete: its name marks a copy, its PG-<n> issue is closed, its newest subject says it was superseded, or its head is a deleted or merged branch's. One whose PG-<n> issue is open stays; any other goes to the archive list, whose head is tagged on origin before any delete, so the tag holds the old head. A kept branch (canary, main, the live dashboard's), one a worktree has checked out, and one with an open PR stay.
+// Pure: what the branch step does. A local branch merged into origin/canary, or one whose merged or closed PR still holds its head, goes with -D (the main checkout's HEAD is main, so -d would refuse one merged into canary alone), and a remote one whose merged or closed PR holds its head is deleted on origin, since GitHub restores it from the PR's page. An unmerged local branch with no open PR is judged: one whose PG-<n> issue is open and that is no copy by name stays, whatever its subject or head; one that is not useful goes to the bundle list, written to a git bundle in the trash before any delete: its name marks a copy, its PG-<n> issue is closed, its newest subject says it was superseded, or its head is a deleted or merged branch's. Any other goes to the archive list, whose head is tagged on origin before any delete, so the tag holds the old head. A kept branch (canary, main, the live dashboard's), one a worktree has checked out, and one with an open PR stay.
 export const staleBranches = (input: {
   checkedOut: Set<string>
   issues?: Map<number, IssueState>
@@ -197,15 +197,19 @@ export const staleBranches = (input: {
     const n = issueOf(b)
     return n === undefined ? undefined : input.issues?.get(n)
   }
+  const useful = (b: Ref) => !isCopy(b.name) && issue(b) === "OPEN"
   for (const b of judged)
-    if (isCopy(b.name) || issue(b) === "CLOSED" || /supersed/i.test(b.subject ?? "")) {
+    if (
+      !useful(b) &&
+      (isCopy(b.name) || issue(b) === "CLOSED" || /supersed/i.test(b.subject ?? ""))
+    ) {
       out.bundle.push(b.name)
       gone.add(b.sha)
     }
   for (const b of judged) {
-    if (out.bundle.includes(b.name)) continue
+    if (useful(b) || out.bundle.includes(b.name)) continue
     if (gone.has(b.sha)) out.bundle.push(b.name)
-    else if (issue(b) !== "OPEN") out.archive.push(b.name)
+    else out.archive.push(b.name)
   }
   for (const r of input.remote)
     if (!input.keep.has(r.name) && done(input.prs.get(r.name), r.sha)) out.remote.push(r.name)

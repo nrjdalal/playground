@@ -31,7 +31,7 @@ export type Proc = { command: string; cwd: string; pid: number; sockets: string[
 // A running node_modules clone, from run-slot's clone holder record: the session that runs it, its pid, the checkout it copies from and the one it copies into.
 export type Clone = { destination: string; pid: number; source: string; who: string }
 
-// What tells a worktree is held: the folder another repo's worktree whose branch gh answers has no PR has its commits no remote holds archived in before it goes (archiveUnlanded), the running clones, a reader quarantine calls again right before its move, the roster's live statuses, the folders beyond the other worktrees read for links into it (linkPlaces), every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, its commits no remote holds bundled first, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that; the worktree's own PR once it reads MERGED or CLOSED (freed, at its head), which no roster row naming its branch or its number holds while the worktree sits at that PR's head, and where a pass past such a row is told (note).
+// What tells a worktree is held: the folder another repo's worktree whose branch gh answers has no PR has its commits no remote holds archived in before it goes (archiveUnlanded), the running clones, a reader quarantine calls again right before its move, the roster's live statuses, the folders beyond the other worktrees read for links into it (linkPlaces), every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, its commits no remote holds bundled first, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that, under --discard only once that PR reads MERGED or CLOSED (freed); the worktree's own PR once it reads MERGED or CLOSED (freed, at its head), which no roster row naming its branch or its number holds while the worktree sits at that PR's head, and where a pass past such a row is told (note).
 export type Holders = {
   archive?: string
   clones: () => Clone[]
@@ -680,10 +680,10 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const byId = /\d/.test(id) && where.includes(id)
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
+    // --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
+    const lifted = agent.pr === holders.pr && (!holders.discard || holders.freed !== undefined)
     const pr =
-      typeof agent.pr === "string" && agent.pr !== holders.pr
-        ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1]
-        : undefined
+      typeof agent.pr === "string" && !lifted ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1] : undefined
     const byPr = pr !== undefined && new RegExp(`(^|\\D)${pr}(\\D|$)`).test(where)
     if (!byBranch && !byPr && !byName && !byId) continue
     // a finished PR frees its worktree from a row that names it by its branch or by that PR's own number alone, so a row naming another PR, or the session by name or id, still holds it; commits past the freed PR's head keep the hold, named with them, so --discard cannot take unmerged work
