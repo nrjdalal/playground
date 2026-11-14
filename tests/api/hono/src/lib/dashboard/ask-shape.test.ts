@@ -82,6 +82,14 @@ describe("shapeHints", () => {
     expect(shapeHints(ask(`- ${"word ".repeat(ASK_CODE_COLUMNS)}`))).toEqual([])
   })
 
+  test("takes a drawing up to 72 columns, so a 60-column line posts quiet and a 73-column one still hints (#2050)", () => {
+    const drawing = (columns: number) =>
+      ask(`\`\`\`\n${"─".repeat(columns)}\n\`\`\`\n\n- One line.`)
+    expect(shapeHints(drawing(60))).toEqual([])
+    expect(shapeHints(drawing(72))).toEqual([])
+    expect(shapeHints(drawing(73))).toEqual([{ kind: "wide", longest: 73 }])
+  })
+
   test("skips a diff block's lines, which wrap on the card, and still hints at the same line in any other code block", () => {
     const wide = `+ ${"x".repeat(ASK_CODE_COLUMNS)}`
     for (const fence of ["```diff", "```Diff"])
