@@ -13,6 +13,7 @@ import {
 import { dataDir } from "../../packages/env/src/data-dir"
 import { ownerSettings } from "../../packages/settings/src/owner"
 import { readPolicy } from "../../packages/settings/src/rendered"
+import { input } from "./input"
 import { loadNames, MANAGER_ROLES, registryName, roleOfName, rosterNames, rosterRole } from "./role"
 
 export const REASON =
@@ -427,7 +428,7 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const reason = await check(await Bun.stdin.text())
+  const reason = await check(await input("no-chat-question", "recorder"))
   // PreToolUse blocks a call on exit 2 alone, with the reason on stderr
   if (reason === PICKER_REASON) {
     console.error(reason)

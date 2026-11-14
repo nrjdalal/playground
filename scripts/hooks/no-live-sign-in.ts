@@ -2,6 +2,7 @@
 import { join } from "node:path"
 
 import { portlessDir } from "../../api/hono/src/lib/dev/proxy"
+import { input } from "./input"
 import { fromFactory } from "./role"
 
 type Environment = Record<string, string | undefined>
@@ -60,7 +61,7 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-live-sign-in", "guard")
   const reason = (await fromFactory(raw)) ? await check(raw) : undefined
   if (reason) {
     console.error(reason)

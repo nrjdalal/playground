@@ -6251,6 +6251,24 @@ async function eachInput(raw, guard, judge) {
   }
 }
 
+// scripts/hooks/input.ts
+var DEADLINE = 13000;
+async function input(name, kind, deadline = DEADLINE) {
+  let timer;
+  const raw = await Promise.race([
+    Bun.stdin.text(),
+    new Promise((done) => {
+      timer = setTimeout(() => done(undefined), deadline - performance.now());
+    })
+  ]).finally(() => clearTimeout(timer));
+  if (raw !== undefined)
+    return raw;
+  if (kind === "recorder")
+    process.exit(0);
+  console.error(`${name} hook: the call's input did not arrive by its deadline, about ${deadline / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`);
+  process.exit(2);
+}
+
 // scripts/hooks/no-main-checkout.ts
 import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync3, realpathSync as realpathSync2 } from "fs";
 import { basename as basename3, dirname as dirname3, isAbsolute as isAbsolute4, join as join6, normalize, resolve as resolve4, sep } from "path";
@@ -11280,7 +11298,7 @@ async function guarded(raw, environment = process.env, wait = 12000, url = new U
   }
 }
 if (import.meta.main) {
-  const raw = await Bun.stdin.text();
+  const raw = await input("no-extensions-write", "guard");
   const reason = await fromFactory(raw) ? await guarded(raw) : undefined;
   if (reason) {
     console.error(reason);
