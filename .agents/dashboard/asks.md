@@ -83,7 +83,7 @@
   an unread update keeps its dot.
   An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
   A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
-  `ASK_CODE_COLUMNS` (`@packages/config/inbox`) is the widest drawing line that fits the narrowest card at 12px.
+  `ASK_CODE_COLUMNS` (`@packages/config/inbox`), 72 columns, is the owner's chosen drawing width, wider than the narrowest card, which shrinks, then scrolls, any line wider than itself.
   A `delete` decision's `why` renders the same, so a link it holds opens, while its `what` stays plain text, the paths Approve removes.
   Every other preview's words, a Slack message's included, stay plain text, since they go out exactly as written, marked as quoted by a `border-l-2` rule rather than a background, and no card's body, a Done one's included, sits on gray, the band alone muted.
   The card's header is one `minmax(0,1fr)` column and a card's table cells wrap, so a wide table or drawing stays inside the card.
@@ -116,10 +116,12 @@
   Each verb is an icon button too, named in its `aria-label`, its `Hint` saying what it does ("should be just icon in this case also").
   Every open card ends in a comment box above its buttons, named Comment, the same gap above it as between the card's other parts, at least as tall as its first choice (`NoteBox`):
   on an open decision or draft it reads Add an optional comment, and what the owner types there goes with whatever he answers, as `answer.note` (at most 4000 characters), its poster reading it as the answer line's `comment`, the answered card reading `You: ...` under its result and the box emptying;
-  on any other card (an update, an answered card, a secret ask) it reads Add a comment, and Reply alone sends it.
+  on a secret ask or a reveal card it reads Type a note to Playground, then press Reply (the hosted build's reveal card keeps Add an optional comment, since it draws no Reply);
+  on any other card (an update, an answered card) it reads Add a comment, and Reply alone sends it.
   Reply (the reply icon, named `Reply to #iN`) with the box empty hands the card's ref to Playground's composer (`outbox.reply` in `web/next/src/lib/chat.ts`, `replyRoute` and `withRef` in `web/next/src/lib/reply.ts`),
   which starts with `re #iN: `, before the words it held and in place of another item's ref they opened with, the aside showing that chat, with focus in its box in the click's own frame and the caret at the end, so a dictation app's Cmd+V sent at once lands there (`bun run verify reply-focus`);
-  a secret ask's or a reveal card's Reply opens its own box instead (`keepsReply`), so a secret never reaches the chat, and so does any card's while Playground's session is down (`dispatcherOf`), since no composer would take the hand until it is back, and a folded card's with words in its box;
+  a secret ask's or a reveal card's Reply opens its own box instead (`keepsReply`), so a secret never reaches the chat, with one muted line under the box, `Type your note in the box above, then press Reply. The token goes in its own field`, until the box holds text;
+  any card's Reply opens its own box too while Playground's session is down (`dispatcherOf`), since no composer would take the hand until it is back, and a folded card's with words in its box;
   with words in the box it sends them alone through `POST /api/v1/inbox/:id/reply` (`replyItem()` in `api/hono/src/lib/dashboard/inbox.ts`), typed into the poster through `deliver()` as `re #iN: <words>`, or into the dispatcher once the poster has ended (`posterGone`), the box emptying once it is in;
   one that reaches no session is refused with why, its words kept in the box.
   On an open decision or draft with no answer yet it is recorded as his reply (`recordReply`, below), and the poster changes the card in place with `bun run ask edit`, which takes the reply off (`editItem()`), so the card waits on him again, open and marked Updated; on any other card the answer and its delivery stay as they were.
@@ -495,7 +497,8 @@
 
 - The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in three parts, top to bottom:
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
-     Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from; a `diff` block's lines may run longer, since the card wraps them.
+     Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names; a `diff` block's lines may run longer, since the card wraps them.
+     Draw several items or events as a compact table, one row per item, over a tall chain of one event per line.
      A wider drawing still posts and shrinks to 10px, then scrolls, so the limit is a writing guide.
      A note of one sentence on the point follows the picture, by the `plain-words` skill's owner style (`extensions/core/skills/plain-words/SKILL.md`).
   2. Short bullets, one fact each, an emoji as each one's marker.
