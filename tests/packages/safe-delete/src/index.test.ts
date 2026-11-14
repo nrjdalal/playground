@@ -757,6 +757,25 @@ describe("worktreeRefusal", () => {
     expect(worktreeRefusal(past.wt, past.roots, past.holders)).toContain("is held by pg-1")
   })
 
+  // status.showUntrackedFiles=no hides an untracked file from a plain git status --porcelain, so both clean-tree reads name every untracked file themselves.
+  test("an untracked file counts under status.showUntrackedFiles=no: it keeps a live row's hold on a detached canary checkout, and is named as an uncommitted change", () => {
+    const held = withWorktree()
+    git(held.roots.main, "config", "status.showUntrackedFiles", "no")
+    writeFileSync(
+      held.holders.roster,
+      JSON.stringify({ agents: [{ name: "pg-1", status: "working" }] }),
+    )
+    git(held.wt, "checkout", "-q", "--detach", "origin/canary")
+    file(join(held.wt, "extra.txt"), "x")
+    expect(worktreeRefusal(held.wt, held.roots, held.holders)).toContain("is held by pg-1")
+    const changed = withWorktree()
+    git(changed.roots.main, "config", "status.showUntrackedFiles", "no")
+    file(join(changed.wt, "extra.txt"), "x")
+    expect(worktreeRefusal(changed.wt, changed.roots, changed.holders)).toContain(
+      "holds 1 uncommitted change (extra.txt)",
+    )
+  })
+
   test("refuses a worktree a live session holds by branch, by name, or by a process's folder", () => {
     const { holders, roots, wt } = withWorktree()
     git(wt, "push", "-q", "origin", "PG-1-thing")
