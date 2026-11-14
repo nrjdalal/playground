@@ -47,6 +47,24 @@ describe("the job registry", () => {
     expect(plists.size).toBe(0)
   })
 
+  test("the tunnel job renders beside the other ops jobs, off until its host is set, held always in a terminal (PG-2207)", () => {
+    const { jobs } = renderJobs({}, [], fill)
+    const names = jobs.map((job) => job.name)
+    expect(names.slice(names.indexOf("ops-tick"), names.indexOf("ops-tick") + 3)).toEqual([
+      "ops-tick",
+      "ops-tunnel",
+      "ops-unstick",
+    ])
+    expect(jobs.find((job) => job.name === "ops-tunnel")).toMatchObject({
+      command: "/b/bun --no-env-file /c/packages/scripts/src/ops-tunnel/cli.ts --data /d",
+      config: { host: "" },
+      cwd: "/c",
+      disabled: true,
+      runtime: "herdr",
+      schedule: { always: true },
+    })
+  })
+
   test("the Dashboard's job runs its own checkout's run.sh from that checkout, the one its supervisor rolls", () => {
     const { jobs } = renderJobs({}, [], { ...fill, dashboard: "/c/.claude/worktrees/desk" })
     expect(jobs.find((job) => job.name === "ops-dashboard")).toMatchObject({

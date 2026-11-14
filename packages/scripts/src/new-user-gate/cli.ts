@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path"
 import { makeScratch, removeScratch } from "@packages/safe-delete"
 import { gateSettings, SCHEMA_VERSION } from "@packages/settings"
 
+import { procSource, type SysctlName, sysctlOf } from "../ops-machine/readings"
 import { gateLine } from "../pr-merge/ship-lines"
 import { GATE_LABEL, stubs, usageReading } from "./stubs"
 
@@ -404,17 +405,38 @@ const step = async (
   console.log(report(steps).split("\n").at(-2))
 }
 
-// Waits up to ROOM_WAIT_MS for this Mac's load to fall under the line spawn.sh's load gate holds a dispatcher's start to, and says how long it waited.
+// The cores and max(load1, load5) as spawn.sh's load gate reads them: sysctl's answer, else Linux's /proc text (sysctlOf), each null when neither reads.
+export const roomReadings = (sysctl: (name: SysctlName) => { code: number; out: string }) => {
+  const cores = sysctlOf("hw.ncpu", sysctl("hw.ncpu"))
+  const loads = sysctlOf("vm.loadavg", sysctl("vm.loadavg"))
+  const [load1, load5] = (loads ?? "").replace(/[{}]/g, "").trim().split(/\s+/).map(Number)
+  return {
+    cores: cores === null ? null : Number(cores),
+    load: loads === null ? null : Math.max(load1!, load5!),
+  }
+}
+
+const sysctlRun = (name: SysctlName) => {
+  const { code, out } = run(["sysctl", "-n", name])
+  return { code: code ?? 1, out }
+}
+
+// Waits up to ROOM_WAIT_MS for this machine's load to fall under the line spawn.sh's load gate holds a dispatcher's start to, and says how long it waited.
 const waitForRoom = async () => {
-  const cores = Number(run(["sysctl", "-n", "hw.ncpu"]).out.trim())
+  const { cores } = roomReadings(sysctlRun)
+  if (cores === null)
+    throw new Error(`gate: neither sysctl hw.ncpu nor ${procSource("hw.ncpu")} reads`)
   const mult = Number(process.env.PLAYGROUND_LOAD_MULT) || 1
   const line =
     cores *
     mult *
     (1 - gateSettings.get({ schemaVersion: SCHEMA_VERSION, values: {} }, "gates.smallReserve"))
-  const load = () => {
-    const fields = run(["sysctl", "-n", "vm.loadavg"]).out.split(/\s+/).filter(Boolean)
-    return Math.max(Number(fields[1]), Number(fields[2]))
+  // an unread load fails the gate, since it is never 0
+  const load = (): number => {
+    const read = roomReadings(sysctlRun).load
+    if (read === null)
+      throw new Error(`gate: neither sysctl vm.loadavg nor ${procSource("vm.loadavg")} reads`)
+    return read
   }
   if (!(load() >= line)) return
   const started = Date.now()

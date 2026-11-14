@@ -19,6 +19,7 @@ import {
   sendAs,
 } from "../../../../../packages/scripts/src/ops-job/job"
 import type { Context } from "../../../../../packages/scripts/src/ops-tick/tick"
+import { procDir } from "../../../../scripts/fixtures/proc"
 
 const dirs: string[] = []
 // every job copy a test starts, stopped by its own handle once the file ends, so a red run leaves none running
@@ -391,5 +392,58 @@ describe("sendAs", () => {
     expect(log).toContain("[ops-wa → dispatcher] (a private line of 19 characters)")
     expect(log).not.toContain("made-up owner words")
     expect(await Bun.file(join(outbox, "ops-wa.jsonl")).text()).toContain("made-up owner words")
+  })
+})
+
+// Linux has neither sysctl name: procps's sysctl names each it cannot stat and exits 255, so the gate reads /proc's text, and a reading neither gives holds the run, never reading as 0 or NaN (#2201).
+describe("dashboardRun's gate where sysctl has neither name", () => {
+  const LINUX = {
+    code: 255,
+    out: "sysctl: cannot stat /proc/sys/vm/loadavg: No such file or directory\nsysctl: cannot stat /proc/sys/kern/memorystatus_vm_pressure_level: No such file or directory\n",
+  }
+  const saved = process.env.PLAYGROUND_PROC
+  afterAll(() => {
+    process.env.PLAYGROUND_PROC = saved
+  })
+
+  test("gateOf reads /proc/loadavg and PSI's /proc/pressure/memory", () => {
+    process.env.PLAYGROUND_PROC = procDir({ full: 12, load5: 13.5 })
+    expect(gateOf(LINUX.out, LINUX.code)).toEqual({ load5: 13.5, pressure: 4 })
+  })
+
+  test("a calm Linux machine runs it", async () => {
+    process.env.PLAYGROUND_PROC = procDir({ load5: 2 })
+    const dir = scratch()
+    const { ctx, ran, sent } = fake(dir, {
+      [process.execPath]: { code: 0, out: "synced\n" },
+      sysctl: LINUX,
+    })
+    await dashboardRun("Changelog sync", ["changelog", "sync"], join(dir, "l"))(ctx)
+    expect(ran.at(-1)).toEqual([process.execPath, "run", "--cwd", dir, "changelog", "sync"])
+    expect(sent).toEqual([])
+  })
+
+  test("critical PSI skips the run and tells ops", async () => {
+    process.env.PLAYGROUND_PROC = procDir({ full: 10, some: 40 })
+    const dir = scratch()
+    const { ctx, ran, sent } = fake(dir, { sysctl: LINUX })
+    await dashboardRun("Changelog sync", ["changelog"], join(dir, "l"))(ctx)
+    expect(ran.some((argv) => argv[0] === process.execPath)).toBe(false)
+    expect(sent).toEqual([{ text: "Changelog sync skipped: load5 2.5, pressure 4", to: "ops" }])
+  })
+
+  test.each([
+    ["sysctl exits non-zero", LINUX],
+    ["sysctl prints nothing", { code: 0, out: "" }],
+    ["sysctl prints no numbers", { code: 0, out: "{ x y z }\nx\n" }],
+  ])("%s and /proc gives neither reading: the run is held", async (_, answer) => {
+    process.env.PLAYGROUND_PROC = procDir({}, ["loadavg", "pressure/memory"])
+    const dir = scratch()
+    const { ctx, ran, sent } = fake(dir, { sysctl: answer })
+    await dashboardRun("Changelog sync", ["changelog"], join(dir, "l"))(ctx)
+    expect(ran.some((argv) => argv[0] === process.execPath)).toBe(false)
+    expect(sent).toEqual([
+      { text: "Changelog sync skipped: load5 unread, pressure unread", to: "ops" },
+    ])
   })
 })

@@ -85,37 +85,66 @@ export const leftOverLines = (
         `Left for you: herdr server ${name} still runs from an older Playground in ${dir}, beside the current ones; playground herdr stop stops every server there, then playground starts the current ones`,
     )
 
-// This uid's account name and login shell as /usr/bin/dscl reads them, for a start from a GUI app or env -i: Bun's userInfo() takes them from USER and SHELL, else "unknown" (measured on 1.4.4), macOS has an account named unknown whose shell is /usr/bin/false, and herdr refuses every pane of a server whose SHELL it cannot find. PLAYGROUND_DSCL names a fake dscl inside the test sandbox alone.
-function account(env: Record<string, string | undefined>): { name?: string; shell?: string } {
-  const dscl = (env.TEST_SANDBOX_HOME && env.PLAYGROUND_DSCL) || "/usr/bin/dscl"
-  const read = (...args: string[]): string => {
+// This uid's account name and login shell, for a start from a GUI app or env -i: Bun's userInfo() takes them from USER and SHELL, else "unknown", on macOS and on Linux alike (measured on 1.4.4), macOS has an account named unknown whose shell is /usr/bin/false, and herdr refuses every pane of a server whose SHELL it cannot find: macOS reads them through /usr/bin/dscl, Linux from `getent passwd <uid>`, else /etc/passwd's line for the uid; PLAYGROUND_DSCL, PLAYGROUND_GETENT and PLAYGROUND_PASSWD name a fake inside the test sandbox alone.
+function account(
+  env: Record<string, string | undefined>,
+  platform: NodeJS.Platform,
+): { name?: string; shell?: string; source: string } {
+  const uid = String(process.getuid?.())
+  const fake = (name: string, real: string) => (env.TEST_SANDBOX_HOME && env[name]) || real
+  const read = (argv: string[]): string => {
     try {
-      const done = Bun.spawnSync([dscl, ".", ...args])
+      const done = Bun.spawnSync(argv)
       return done.exitCode === 0 ? done.stdout.toString() : ""
     } catch {
       return ""
     }
   }
-  const name = read("-search", "/Users", "UniqueID", String(process.getuid?.())).split(/\s/)[0]
-  if (!name) return {}
-  return {
-    name,
-    shell: read("-read", `/Users/${name}`, "UserShell").split("UserShell:")[1]?.trim(),
+  if (platform === "darwin") {
+    const dscl = fake("PLAYGROUND_DSCL", "/usr/bin/dscl")
+    const source = `dscl . -read /Users/<name> UserShell for uid ${uid}`
+    const name = read([dscl, ".", "-search", "/Users", "UniqueID", uid]).split(/\s/)[0]
+    if (!name) return { source }
+    const shell = read([dscl, ".", "-read", `/Users/${name}`, "UserShell"]).split("UserShell:")[1]
+    return { name, shell: shell?.trim(), source }
   }
+  const passwd = fake("PLAYGROUND_PASSWD", "/etc/passwd")
+  const source = `getent passwd ${uid} or ${passwd}`
+  let line = read([fake("PLAYGROUND_GETENT", "/usr/bin/getent"), "passwd", uid])
+  if (!line) {
+    try {
+      line = readFileSync(passwd, "utf8")
+    } catch {
+      return { source }
+    }
+  }
+  const fields = line
+    .split("\n")
+    .map((entry) => entry.split(":"))
+    .find((entry) => entry.length === 7 && entry[2] === uid)
+  return { name: fields?.[0] || undefined, shell: fields?.[6]?.trim() || undefined, source }
 }
 
-// The shell basics alone, so a herdr call with no session or socket of its own reaches the default server.
-export function basicEnv(env: Record<string, string | undefined>): Record<string, string> {
+// The shell basics alone, so a herdr call with no session or socket of its own reaches the default server; with no SHELL and no login shell for this uid it throws, naming where it looked, so the job beats that and starts no server in place of guessing one.
+export function basicEnv(
+  env: Record<string, string | undefined>,
+  platform: NodeJS.Platform = process.platform,
+): Record<string, string> {
   const user = userInfo()
-  const found = env.SHELL && env.USER && env.LOGNAME ? {} : account(env)
+  const found = env.SHELL && env.USER && env.LOGNAME ? null : account(env, platform)
+  const shell = env.SHELL || found?.shell
+  if (!shell)
+    throw new Error(
+      `no login shell: SHELL is unset and ${found?.source} gives none, and herdr refuses every pane whose SHELL it cannot find`,
+    )
   const fallback: Record<(typeof BASICS)[number], string> = {
     HOME: user.homedir,
     LANG: "en_US.UTF-8",
-    LOGNAME: found.name || user.username,
+    LOGNAME: found?.name || user.username,
     PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
-    SHELL: found.shell || "/bin/zsh",
+    SHELL: shell,
     TERM: "xterm-256color",
-    USER: found.name || user.username,
+    USER: found?.name || user.username,
   }
   return Object.fromEntries(BASICS.map((name) => [name, env[name] || fallback[name]]))
 }
@@ -125,9 +154,10 @@ export function serverEnv(
   env: Record<string, string | undefined>,
   dir: string,
   session: string,
+  platform: NodeJS.Platform = process.platform,
 ): Record<string, string> {
   return {
-    ...basicEnv(env),
+    ...basicEnv(env, platform),
     HERDR_CONFIG_PATH: join(dir, "config.toml"),
     HERDR_SESSION: session,
     HERDR_SOCKET_PATH: join(dir, `${session}.sock`),
