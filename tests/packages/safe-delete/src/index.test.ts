@@ -302,6 +302,48 @@ describe("the tripwire", () => {
     expect(existsSync(big)).toBe(true)
   })
 
+  // #2088: the nightly clean's gone option moves an entry directly in scratch/ whole, a loose file included, under the 2 GB cap alone; without it a session's own scratch folder keeps the file count
+  test("a gone session's entry directly in scratch/ moves whole past 5,000 files and comes back; without gone it is refused, and gone reaches nothing else", () => {
+    const roots = machine()
+    const dir = join(roots.home, ".playground", "scratch")
+    const big = (name: string) => {
+      mkdirSync(join(dir, name, "deep"), { recursive: true })
+      for (let i = 0; i <= 5000; i++) writeFileSync(join(dir, name, "deep", String(i)), "")
+      return join(dir, name)
+    }
+    const own = big("j6rjgy-worker")
+    expect(quarantine(own, opts, roots, { now: NOW })).toMatchObject({ kind: "tripwire" })
+    expect(existsSync(own)).toBe(true)
+    const gone = { gone: true as const, reason: "test", session: "q1w2e3-worker" }
+    const folder = big("q1w2e3-worker")
+    expect(quarantine(folder, gone, roots, { now: NOW })).toHaveProperty("id")
+    expect(existsSync(folder)).toBe(false)
+    const loose = file(join(dir, "q1w2e3-page.html"))
+    const moved = quarantine(loose, { ...gone, session: "q1w2e3-page-html" }, roots, { now: NOW })
+    expect(existsSync(loose)).toBe(false)
+    expect(restore((moved as Quarantined).id, roots)).toEqual({ path: loose })
+    expect(existsSync(loose)).toBe(true)
+    const huge = file(join(dir, "q1w2e3-huge.bin"), "")
+    truncateSync(huge, 2 * 1024 ** 3 + 1)
+    expect(
+      quarantine(huge, { ...gone, session: "q1w2e3-huge" }, roots, { now: NOW }),
+    ).toMatchObject({
+      kind: "tripwire",
+    })
+    symlinkSync(join(roots.home, ".ssh"), join(dir, "q1w2e3-keys"))
+    for (const path of [
+      join(own, "deep", "1"),
+      join(dir, "q1w2e3-keys"),
+      join(roots.home, ".playground", "roster.json"),
+      join(roots.home, ".ssh", "id_ed25519"),
+    ])
+      expect(
+        quarantine(path, { ...gone, session: "q1w2e3-other" }, roots, { now: NOW }),
+      ).toMatchObject({
+        kind: "protected",
+      })
+  })
+
   test("refuses a path of more than 2 GB", () => {
     const roots = machine()
     const path = file(join(roots.home, "huge.bin"), "")
