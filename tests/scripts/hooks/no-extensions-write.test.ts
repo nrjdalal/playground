@@ -2045,6 +2045,36 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "a writer under xargs fed a program's output with no -a or cd, as on canary",
       "git ls-files | xargs sed -i s/a/b/",
     ],
+    // PG-2094: a program on neither list under xargs after a cd to a variable, writing nothing or only absolute paths
+    [
+      "an in-place sed under xargs fed an absolute path after a cd to a variable",
+      `cd "$X" && echo /tmp/f | xargs sed -i s/a/b/`,
+    ],
+    [
+      "perl -pi under xargs fed an absolute path after a cd to a variable",
+      `cd "$X" && echo /tmp/f | xargs perl -pi -e s/a/b/`,
+    ],
+    [
+      "chmod under xargs fed absolute paths after a cd to a variable",
+      `cd "$X" && echo /tmp/f /tmp/g | xargs chmod +x`,
+    ],
+    [
+      "a sed that only prints under xargs after a cd to a variable",
+      `cd "$X" && grep -l a f | xargs sed -n p`,
+    ],
+    [
+      "a sed with no -i under xargs after a cd to a variable",
+      `cd "$X" && grep -l a f | xargs sed s/a/b/`,
+    ],
+    [
+      "a perl that only prints under xargs after a cd to a variable",
+      `cd "$X" && grep -l a f | xargs perl -ne print`,
+    ],
+    ["git add under xargs after a cd to a variable", `cd "$X" && grep -l a f | xargs git add`],
+    [
+      "an in-place sed under xargs after a cd to a literal path",
+      "cd /tmp && grep -l a f | xargs sed -i s/a/b/",
+    ],
     ["cp of a relative file to an absolute path after a cd to a variable", `cd "$X"; cp a /tmp/b`],
     [
       "a redirect to a file the line holds after a cd to a variable",
@@ -2231,7 +2261,7 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["a bare mktemp", `cd "$X"; mktemp`],
     ["mktemp of a template in the temp folder", `cd "$X"; mktemp -t x.XXXX`],
     ["mktemp of a template in an absolute folder", `cd "$X"; mktemp -p /tmp/scratch x.XXXX`],
-    ["chmod under xargs of an absolute file", `cd "$X"; xargs chmod 644 /tmp/p`],
+    ["chmod under xargs of an absolute file", `cd "$X"; echo /tmp/q | xargs chmod 644 /tmp/p`],
     ["GNU chmod of an absolute file", `cd "$X"; gchmod 644 /tmp/p`],
     ["sort's shortened --output to an absolute file", `cd "$X"; sort --outp /tmp/p /tmp/a`],
     ["tar's -f before its -C", `cd "$X"; tar -x -f /tmp/a.tar -C /tmp/out`],

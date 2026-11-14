@@ -2004,9 +2004,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           ? writeTargets(tool, given, gnu, posix)
           : []
     }
-    // a program on neither list is judged on its typed words alone (unreadCdWrites)
+    // a program on neither list is judged in every call xargs may build too (unreadCdWrites), so a file an in-place edit takes from stdin counts
     const unlisted =
-      !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env, !gnu || posix) : []
+      !remover && !WRITERS.has(tool)
+        ? shapes.flatMap((typed) => unreadCdWrites(tool, typed, env, !gnu || posix))
+        : []
     const loose = [...shapes.flatMap(operandsOf), ...unlisted].find(
       (word) => !placed(word, env, steady),
     )
