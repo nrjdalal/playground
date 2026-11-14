@@ -40,7 +40,7 @@
   built on captured Claude Code permission boxes.
   Any other read that fails is named in the System report's `problems` (`herdrProblem()`).
   `tests/api/hono/src/lib/dashboard/herdr.test.ts` holds the boundary: no other API source speaks herdr's protocol, only `deliver.ts` imports `pressEnter`, `prompt` reaches only it and `idle-compact.ts` (ADR 0020's idle `/compact`), and every field the schemas read stands in the pinned binary's `herdr api schema --json`.
-  Its pane-typing guards keep every herdr method that types (`agent.prompt`, `agent.send_keys`, `pane.send_*`) to herdr.ts and `typeKeys` to `feed.ts`, and fail on any file in the repo outside `tests/` that types into a pane through cmux (`cmux send`, `send-key`).
+  Its pane-typing guards keep every herdr method that types (`agent.prompt`, `agent.send_keys`, `pane.send_*`) to herdr.ts and `typeKeys` to `feed.ts` and `deliver.ts`'s model switch, and fail on any file in the repo outside `tests/` that types into a pane through cmux (`cmux send`, `send-key`).
 - ALWAYS: Count a session record as live only through `liveRecords()` (`isLiveRecord()` in `api/hono/src/lib/dashboard/workers.ts`), which `listLive` applies to herdr's records before any read, then drops the transcript reads kept for sessions it no longer holds;
   it returns the branded `LiveRecords` that `composeWorkers` and the transcript reads require, so an ended session never reaches a row, a light, a picker or a needs-you count.
   A Codex record is live on the read that found its `codex` process in its pane, since it has no registry file to prove it by; every other agent's is never live.

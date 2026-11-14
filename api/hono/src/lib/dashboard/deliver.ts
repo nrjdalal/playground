@@ -1,7 +1,7 @@
 import { readdir, realpath, stat } from "node:fs/promises"
 import { isAbsolute, join } from "node:path"
 
-import { storedAs } from "@packages/config/console"
+import { SESSION_MODELS, storedAs } from "@packages/config/console"
 import {
   activity,
   db,
@@ -20,7 +20,15 @@ import {
   type Attachment,
 } from "@/lib/dashboard/attachments"
 import { configDir, readsLive } from "@/lib/dashboard/fixture"
-import { pressEnter, prompt, promptOutcome, typeKeys, type KeyStep } from "@/lib/dashboard/herdr"
+import {
+  pressEnter,
+  prompt,
+  promptOnScreen,
+  promptOutcome,
+  switchKeys,
+  typeKeys,
+  type KeyStep,
+} from "@/lib/dashboard/herdr"
 import { settingCommand, settingSummary, type SessionSetting } from "@/lib/dashboard/setting"
 import { readScreen } from "@/lib/dashboard/terminal"
 import { readTail, TEXT_LIMIT, type Entry } from "@/lib/dashboard/transcript"
@@ -264,6 +272,35 @@ export const holdsUnsent = (screen: string, text: string, images: string[]): boo
 // How a herdr session's box is read after the send: up to 8 reads 150ms apart, 1.2s in all, the first after one gap, so Claude Code has drawn the paste or taken the Enter.
 export const SETTLE_GAP_MS = 150
 export const SETTLE_READS = 8
+// How long the model menu's switch reads the pane for its end state: up to 40 reads SETTLE_GAP_MS apart, 6s in all, since a confirm drawn over the box comes first and the status line redraws after the switch.
+export const SWITCH_READS = 40
+
+// The status line: the lines below the input box's bottom rule, as one line.
+const statusLine = (screen: string): string => {
+  const lines = screen.split("\n").map((line) => line.trimEnd())
+  return flat(lines.slice(lines.findLastIndex((line) => RULE.test(line)) + 1).join(" "))
+}
+
+// The model the session's status line names, by its alias as a whole word (Opus 5.5 reads opus); null when it names none, or no box shows, since a prompt drawn over the box names models of its own.
+const statusModel = (screen: string): string | null => {
+  if (!inputBox(screen)) return null
+  const status = statusLine(screen)
+  return SESSION_MODELS.find((alias) => new RegExp(`\\b${alias}\\b`, "i").test(status)) ?? null
+}
+
+const cut = (words: string): string => (words.length > 300 ? `${words.slice(0, 299)}…` : words)
+
+// Pure: what the pane shows, in words for a refusal to name: the status line under an empty box, the words a box holds, or, with no box, the lines below the last rule (a prompt drawn over the box), else the last 3 lines.
+const shownOn = (screen: string): string => {
+  const lines = screen.split("\n").map((line) => line.trimEnd())
+  const box = inputBox(screen)
+  if (box && inputState(screen) === "empty")
+    return `its status line reads "${cut(statusLine(screen))}"`
+  if (box) return `its input holds "${cut(boxWords(box) ?? flat(box.join(" ")))}"`
+  const rule = lines.findLastIndex((line) => NAMED_RULE.test(line))
+  const below = (rule >= 0 ? lines.slice(rule + 1) : lines).filter((line) => line.trim())
+  return `its pane shows "${cut(flat((rule >= 0 ? below : below.slice(-3)).join(" ")))}"`
+}
 
 // The lines between the last two rules on the screen, or null when no rules frame a box.
 const inputBox = (screen: string): string[] | null => {
@@ -766,6 +803,69 @@ export async function deliver(
           "held",
         )
       }
+      // The model menu's switch after its /model paste, judged by the model the session then runs, as its status line names it, never by a fixed screen text, since Claude Code may draw a confirm over the box, a reworded one or none. It presses a key only on what it has read: the one option of a prompt over the box that reads as the switch (switchKeys()), since the owner's pick is the consent, one more Enter on its own paste still in the box, and once the wait is out, a Backspace for each character of that paste, so the box ends as empty as it was. A refusal names what the pane shows.
+      const switchedTo = async (model: string, at: string, lost: unknown): Promise<void> => {
+        const press = async (steps: KeyStep[]): Promise<void> => {
+          try {
+            await deps.typeKeys(at, steps)
+          } catch (error) {
+            throw new TypingFailed(1, true, error)
+          }
+        }
+        const notSwitched = (why: string): TypingStopped =>
+          new TypingStopped(
+            refused("INTERRUPTED", `${worker.name} did not switch to ${model}: ${why}`),
+            "held",
+          )
+        let screen = ""
+        let answered = false
+        let entered = false
+        for (let i = 0; i < SWITCH_READS; i++) {
+          await deps.wait(SETTLE_GAP_MS)
+          try {
+            screen = await deps.readScreen(at)
+          } catch (error) {
+            throw new TypingFailed(1, true, lost ?? error)
+          }
+          if (delivery.id && holdsQueued(screen, text)) throw queueIt(true)
+          const input = inputState(screen)
+          if (input === "empty") {
+            if (statusModel(screen) === model) return
+            continue
+          }
+          if (input === "holds" && holdsMessage(screen, text)) {
+            if (entered) continue
+            entered = true
+            try {
+              await deps.pressEnter(at)
+            } catch (error) {
+              throw new TypingFailed(1, true, error)
+            }
+            continue
+          }
+          const shown = promptOnScreen(screen)
+          if (answered || input !== "missing" || !shown.options.some((o) => o.on)) continue
+          const keys = switchKeys(shown, model)
+          if (!keys) {
+            throw notSwitched(
+              `${shownOn(screen)}, and none of its options reads as the switch, so nothing was pressed. Answer it in the session.`,
+            )
+          }
+          await press(keys)
+          answered = true
+        }
+        if (holdsUnsent(screen, text, [])) {
+          await press(Array.from(text, () => ({ key: "backspace" as const })))
+          throw notSwitched(
+            `the command sat unsent in its input after one more Enter, so it was cleared. Pick it again.`,
+          )
+        }
+        throw notSwitched(
+          `${shownOn(screen)} after ${(SWITCH_READS * SETTLE_GAP_MS) / 1000}s. Check the session before you pick again.`,
+        )
+      }
+      const switching =
+        delivery.setting && "model" in delivery.setting ? delivery.setting.model : null
       try {
         await deps.record(event, async () => {
           // read once more before the send: a herdr pane's id changes when it moves, so this read names where the session is now
@@ -845,6 +945,8 @@ export async function deliver(
             if (outcome !== "typed") throw new TypingFailed(0, false, error)
             lost = error
           }
+          // a switch's paste is never remembered, so no later send presses Enter on a /model it left
+          if (switching) return switchedTo(switching, again.surface, lost)
           // herdr took the paste, or may have, so it is remembered for a later try to find
           const kept = (pastes.get(sessionId) ?? []).filter((paste) => !isThis(paste))
           pastes.set(
