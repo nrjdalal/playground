@@ -39,6 +39,7 @@ import {
 } from "../../../../packages/scripts/src/hook-differential"
 
 const SCRIPT = join(import.meta.dir, "../../../../packages/scripts/src/hook-differential.ts")
+const SETTING = join(import.meta.dir, "../../../../packages/scripts/src/playground/setting.ts")
 const DIR = mkdtempSync(join(tmpdir(), "hook-differential-"))
 
 afterAll(() => rmSync(DIR, { force: true, recursive: true }))
@@ -1287,5 +1288,42 @@ export const check = (raw: string, env: Record<string, string | undefined>) =>
     expect(existsSync(join(at, ".playground", "hook-differential", "results"))).toBe(false)
     expect(run(at, root, sweepAt()).stdout.toString()).not.toContain("reused:")
     expect(readFileSync(join(at, "tickets"), "utf8")).toContain(`-- bun ${SCRIPT} sweep`)
+  })
+
+  // a repo with a made-up GitHub origin whose hook x reads the factory's repository from its own copy's checkout, as no-protected-push's factoryRepo does through setting.ts, and refuses a merge there, or anywhere while it reads none; canary's unpacked tree has no origin of its own (PG-2036)
+  test("a hook that reads its own checkout's origin gives the same verdict on both sides, since canary's tree takes the head main checkout's origin", () => {
+    const at = home("origin")
+    const { root } = repo("origin-repo")
+    git(root, "remote", "add", "origin", "git@github.com:acme/made-up.git")
+    writeFileSync(
+      join(root, "scripts", "hooks", "x.ts"),
+      `import { resolve } from "node:path"
+import { originRepo } from ${JSON.stringify(SETTING)}
+export const check = (raw: string) => {
+  const repo = originRepo(resolve(import.meta.dir, "../.."))
+  return !repo || raw.includes(\`--repo \${repo} \`) ? "refused" : undefined
+}
+`,
+    )
+    git(root, "commit", "-qam", "reads its origin")
+    mkdirSync(join(at, ".claude", "projects", "p"), { recursive: true })
+    writeFileSync(
+      join(at, ".claude", "projects", "p", "s1.jsonl"),
+      [
+        bashLine("gh pr merge 1 --repo acme/made-up --squash", "s1", join(at, "w")),
+        bashLine("gh pr merge 2 --repo other/elsewhere --squash", "s1", join(at, "w")),
+      ].join("\n"),
+    )
+    const done = run(at, root, ["replay", "--canary", "HEAD", "--hook", "x", "--fresh"], {
+      RUN_SLOT_NICE: "10",
+    })
+    expect(done.exitCode).toBe(0)
+    expect(JSON.parse(done.stdout.toString().trim())).toEqual({
+      hook: "x",
+      calls: 2,
+      "newly allowed": 0,
+      "newly refused": 0,
+      same: 2,
+    })
   })
 })
