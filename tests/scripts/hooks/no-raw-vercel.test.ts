@@ -211,7 +211,7 @@ describe("a factory session's Vercel call that moves production or reads its sec
   })
 })
 
-// Ops' ship of the hosted build: one production deploy a project, its ids in the call's environment; the ids are made up.
+// The call ship:yard makes for each hosted project, and Ops' hand form of it: one production deploy a project, its ids in the call's environment; the ids are made up.
 const OPS_SHIP: [string, string][] = [
   [
     "with the project's ids as assignments",
