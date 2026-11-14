@@ -502,6 +502,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It finds git's subcommand and tree past git's own options through `GIT_TAKES`, by no-main-checkout's `gitCall`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD log -1` reads as a `log` and `git --attr-source log commit -m x` as a commit.
   It refuses the `playground` CLI's calls that change what a guard reads, the CLI found by where its word lands: `playground` by name in any case, or by a path that is no folder, or the checkout's `cli.ts` with or without its extension, as any word of a command but a reader's, so behind any wrapper (`bun`, `npx`, `find -exec`, `arch`, `watch`),
   its words followed by the stdin xargs hands it or carried in xargs' `-I` string.
+  A word of a package runner's call is read from the shell's folder and from each folder the runner may start it in (`runnerDirs`): bun's last `--cwd`, for `bunx` and `bun x` also the folder their `--cwd` options chain to, each read from the one before,
+  and for a `bun`, `bunx` or `npx` that `bunx`, `bun x`, `npx` or `bun run` starts, that started runner's own folders, read from the folder the outer runner starts it in.
   Its words split as that command's own parse splits them (`--dry-run` and `--yes` are bare for `ext`, `--dry-run` alone for `settings`):
   `ext accept`, the owner's own call, whatever its words (the role cleared in the same call included);
   `ext score` on a line where any command clears or sets `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` or `PLAYGROUND_ROLE` (an assignment or `+=` to one, one exported earlier, or env with `-u` or `--unset` naming one, `-i` alone or in a cluster, `--ignore-environment` or `-`), a shell the line runs or pipes into included,

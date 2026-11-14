@@ -13051,6 +13051,7 @@ var GUARD_KEYS = new Set([
 ]);
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
+var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];
 var SCORE_AS_OTHER = `playground ext score on a line that clears or sets ${IDENTITY.join(", ")}, which reads as another author than the calling session`;
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);

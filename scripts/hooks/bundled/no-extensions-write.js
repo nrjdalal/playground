@@ -9004,6 +9004,7 @@ var FILE_TOOLS = {
 };
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
 var RUNNERS = new Set(["npx"]);
+var X = { quoted: false, value: "x" };
 var TOOLS = new Set(["lefthook", "turbo"]);
 function bunCall(args, env) {
   let cwd = env.cwd;
@@ -9117,6 +9118,13 @@ var RUNNER_TAKES = new Set([
   "--registry",
   "-p"
 ]);
+function runnerTarget(args) {
+  let k = 0;
+  while (k < args.length && args[k].value.startsWith("-"))
+    k += RUNNER_TAKES.has(args[k].value) ? 2 : 1;
+  return k;
+}
+var toolName = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""));
 var LETTERS = {
   perl: {
     "0": "digits",
@@ -9811,12 +9819,31 @@ function isCli(word, dirs) {
   const cli = (sep2 + CLI).toLowerCase();
   return paths.some((path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
 }
+var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
+function runnerDirs(name, args, env) {
+  if (name === "bunx")
+    return runnerDirs("bun", [X, ...args], env);
+  if (name === "npx") {
+    const at = runnerTarget(args);
+    const started = toolName(args[at]?.value);
+    return STARTED_RUNNERS.has(started) ? runnerDirs(started, args.slice(at + 1), env) : [];
+  }
+  if (name !== "bun")
+    return [];
+  const { at, chained, cwd, words } = bunCall(args, env);
+  const x = words[0] === "x";
+  const own = x ? [cwd, chained] : [cwd];
+  const started = x || words[0] === "run" ? toolName(args[at]?.value) : "";
+  if (!STARTED_RUNNERS.has(started))
+    return own;
+  return [...own, ...runnerDirs(started, args.slice(at + 1), { ...env, cwd: x ? chained : cwd })];
+}
 function cliCalls(parsed, env) {
   const { args, first, name } = parsed;
   if (!first)
     return [];
   const words = [first, ...args];
-  const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined];
+  const dirs = [env.cwd, ...runnerDirs(name, args, env)];
   return words.flatMap((word, at) => isCli(word, dirs) ? [words.slice(at + 1)] : []);
 }
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];
