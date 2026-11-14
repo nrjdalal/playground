@@ -71,6 +71,8 @@ Run each row as `bun <main checkout>/scripts/roster.ts <row>` (`$PLAYGROUND_REPO
   Each reader of a manager goes through it or its rule (`managerOf` in `packages/config/src/kinds.ts`): spawn.sh's reports-to, notify.sh's default and kind words, and the backlog marks below.
   Write "your builder" in a brief and resolve it with `who builder` when you send it.
 - `who assistant` prints the session holding the assistant seat the same way, the newest live entry of kind `assistant`, and exits 1 printing nothing while none holds it, since the Assistant has no set name to fall back on; ops-dm-watch reads the seat by the same rule (`seatOf`).
+- `holders <pr>` prints each live row (status `starting`, `waiting` or `working`) naming the PR, its number or its URL, in `pr` or `prs`, by safe-delete's `rowPullRequests`, writing nothing.
+  It exits 0 when it prints a name, 1 when no live row names the PR and 2 when the roster does not read, so a reviewer moves a review clone only on exit 1 ([code-review-loop](../code-review-loop/SKILL.md)).
 - A runner under another name (a headless job such as `nightly-digest`) is recorded with `kind=runner` on its `assign`, which places it as a runner whatever its name.
 - A new name needs a task, since the dashboard's schema drops an agent with none: `set` and `report` refuse a name the roster lacks unless `task=` gives one, and `assign` gives it as its third word.
 - A name is lowercase words joined by `-`, spawn.sh's word shape: `set`, `report` and `assign` refuse any other, naming it, before they read or write the roster.
