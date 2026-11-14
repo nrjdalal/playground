@@ -2,7 +2,7 @@
 
 The factory's own scripts: `spawn.sh`, which starts and resumes every factory session, `link-skills.sh`, which installs the skills, the herdr servers' ops job, a worktree's `node_modules` clone and `bun run test:skills`.
 AGENTS.md keeps one line for each, and this file holds the text that line stands for.
-It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes, the rule for an edit script's replacements, and where a factory script's orphan is ended.
+It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes, the rule for an edit script's replacements, a zsh loop's variable names, and where a factory script's orphan is ended.
 Read a section before you change its script or its tests, or when it refuses a start you did not expect.
 The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
@@ -324,3 +324,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 An edit script that writes code or text with JavaScript passes each replacement that may hold `$` through a replacer function, `s.replace(a, () => b)`, or `split(a).join(b)`, since a string replacement reads `$$`, `$&`, `` $` ``, `$'` and `$1` as patterns: `"a".replace("a", "echo $$")` gives `echo $`, and an edit script once turned `$$` into `$` in `run-slot.sh` with no error.
 In the repo's TypeScript, `tests/packages/scripts/src/replace-dollar.test.ts` fails on a literal replacement holding `$$`, `` $` `` or `$'`, or `$&` after a string search, naming the file, the line and the fix.
+
+## A zsh loop's variable names
+
+In zsh, `path` is tied to `PATH`, so name loop variables `p` or `file`, never `path`: a loop that sets `path=` empties the command search, so every command after it fails as not found, and a check written `cmd && echo ok || echo MISSING` then reports every item missing.
