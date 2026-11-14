@@ -663,6 +663,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     kind?: unknown
     name?: unknown
     pr?: unknown
+    prs?: unknown
     status?: unknown
   } | null)[]
   try {
@@ -697,11 +698,14 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const byId = /\d/.test(id) && where.includes(id)
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
-    // --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
-    const lifted = agent.pr === holders.pr && (!holders.discard || holders.freed !== undefined)
-    const pr =
-      typeof agent.pr === "string" && !lifted ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1] : undefined
-    const byPr = pr !== undefined && new RegExp(`(^|\\D)${pr}(\\D|$)`).test(where)
+    // a row holds by its pr and every PR in its prs; --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
+    const liftable = !holders.discard || holders.freed !== undefined
+    const listed = [agent.pr, ...(Array.isArray(agent.prs) ? agent.prs : [])]
+    const prs = listed
+      .filter((u): u is string => typeof u === "string" && !(liftable && u === holders.pr))
+      .map((u) => /\/pull\/(\d+)$/.exec(u)?.[1])
+      .filter((n) => n !== undefined && new RegExp(`(^|\\D)${n}(\\D|$)`).test(where))
+    const byPr = prs.length > 0
     if (!byBranch && !byPr && !byName && !byId) continue
     // a clean detached checkout at a commit its base holds (origin/canary, or another repo's default branch) is a reader of that base, not the row's work, so a live row holds it no more
     const base =
@@ -715,7 +719,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     // a finished PR frees its worktree from a row that names it by its branch or by that PR's own number alone, so a row naming another PR, or the session by name or id, still holds it; commits past the freed PR's head keep the hold, named with them, so --discard cannot take unmerged work
     const freed = holders.freed
     const ownRow =
-      !byName && !byId && (!byPr || (freed !== undefined && pr === String(freed.number)))
+      !byName && !byId && prs.every((n) => freed !== undefined && n === String(freed.number))
     if (freed && ownRow && freed.head === head) {
       holders.note?.(
         `${at} is freed by #${freed.number}, which reads ${freed.state}, past ${agent.name}'s roster row (${agent.status})`,
