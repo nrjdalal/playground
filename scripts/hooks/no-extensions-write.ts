@@ -2051,9 +2051,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (inRoot(here.cwd)) return refuse(`${verb} run inside ${root}`)
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`)
-      // a value the hook cannot read under a remover, as a writer's target, or in git's -c, could name the root, so it is refused unless the call holds it
+      // a value the hook cannot read under a remover, as a writer's target, as a file an in-place sed or perl edit edits, or in git's -c, could name the root, so it is refused unless the call holds it
       const unheld = (
-        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : []
+        remover
+          ? args
+          : WRITERS.has(tool)
+            ? writeTargets(tool, args, gnu, posix)
+            : inPlace(tool, args)
       ).find((word) => !held(word, here, steady))
       if (unheld)
         return refuse(
@@ -2172,7 +2176,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const fromStdin = new Set<Word>(fedWords)
     const fromArgFile = new Set<Word>(argWord ? [argWord] : [])
     // xargs puts each stdin word in place of its -I or -J string
-    const inPlace = (word: Word) =>
+    const putIn = (word: Word) =>
       args.map((arg) => {
         if (!replace || !arg.value.includes(replace)) return arg
         const put = { ...arg, value: arg.value.replaceAll(replace, word.value) }
@@ -2186,7 +2190,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       ...(!xargs
         ? []
         : replace
-          ? fedWords.map(inPlace)
+          ? fedWords.map(putIn)
           : [[...args, ...fedWords], ...fedWords.map((word) => [...args, word])]),
     ]
     // a dash with more after it is an option, while a lone dash is an operand

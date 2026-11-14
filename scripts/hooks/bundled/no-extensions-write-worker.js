@@ -10924,7 +10924,7 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`${verb} run inside ${root}`);
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`);
-      const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : []).find((word) => !held3(word, here, steady));
+      const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : inPlace(tool, args)).find((word) => !held3(word, here, steady));
       if (unheld)
         return refuse(unheld.splits ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally` : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`);
       if (name === "git") {
@@ -10984,7 +10984,7 @@ async function inspect(raw, environment, unknown = false) {
     const replace = xargs?.replace;
     const fromStdin = new Set(fedWords);
     const fromArgFile = new Set(argWord ? [argWord] : []);
-    const inPlace = (word) => args.map((arg) => {
+    const putIn = (word) => args.map((arg) => {
       if (!replace || !arg.value.includes(replace))
         return arg;
       const put = { ...arg, value: arg.value.replaceAll(replace, word.value) };
@@ -10995,7 +10995,7 @@ async function inspect(raw, environment, unknown = false) {
     });
     const shapes = [
       args,
-      ...!xargs ? [] : replace ? fedWords.map(inPlace) : [[...args, ...fedWords], ...fedWords.map((word) => [...args, word])]
+      ...!xargs ? [] : replace ? fedWords.map(putIn) : [[...args, ...fedWords], ...fedWords.map((word) => [...args, word])]
     ];
     const option = (word) => /^-./.test(word.value);
     const operandsOf = (typed) => {
