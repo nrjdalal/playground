@@ -1022,6 +1022,7 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#2103 turbo's build by npx past a user config option's value | --cwd",
       "#2103 turbo's build by npx started by npx | --cwd",
       "#2103 turbo's build by npx started by npx, both past an unlisted option's value | --cwd",
+      "#2103 turbo's build by runners nested past the readings' cap | --cwd",
       "#2103 turbo's build in the main checkout by npx past a user config option's value | --cwd",
       "#2103 turbo's build in the main checkout by npx started by npx past a user config option's value | --cwd",
       "#2103 turbo's build in the main checkout by npx started by npx | --cwd",

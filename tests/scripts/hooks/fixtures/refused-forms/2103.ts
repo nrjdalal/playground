@@ -1,5 +1,8 @@
 import type { Group } from "./_shared"
 
+// 22 runners each started by the one before, each past three unlisted options' values, so the readings pass their cap at every level
+const DEEP = Array.from({ length: 22 }, (_, i) => `npx --a${i} a --b${i} b --c${i} c`).join(" ")
+
 // #2103: a value-taking option the shared runner reader does not list had its value read as the program, so a later --cwd went unread; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
   {
@@ -91,6 +94,7 @@ export const groups: Group[] = [
     folders: ["main checkout"],
     guards: ["no-main-checkout"],
     rows: () => [
+      ["turbo's build by runners nested past the readings' cap", `${DEEP} turbo run build`],
       [
         "bun's build past more unlisted options than the readings hold",
         "bun run --oa build --o0 v0 --o1 v1 --o2 v2 --o3 v3 --o4 v4 --o5 v5 --o6 v6 --o7 v7 --o8 v8 --o9 v9 --o10 v10 --o11 v11 --o12 v12 --o13 v13 --o14 v14",
@@ -110,6 +114,10 @@ export const groups: Group[] = [
     folders: ["checkout", "main checkout"],
     guards: ["no-unslotted-run"],
     rows: ({ MAIN }) => [
+      [
+        "turbo's build by runners nested past the readings' cap",
+        `${DEEP} turbo run build --cwd ${MAIN}/.claude/worktrees/a`,
+      ],
       [
         "bun's build past more unlisted options than the readings hold",
         `cd ${MAIN}/.claude/worktrees/a && bun run --oa build --o0 v0 --o1 v1 --o2 v2 --o3 v3 --o4 v4 --o5 v5 --o6 v6 --o7 v7 --o8 v8 --o9 v9 --o10 v10 --o11 v11 --o12 v12 --o13 v13 --o14 v14`,
