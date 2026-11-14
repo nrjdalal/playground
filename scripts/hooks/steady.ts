@@ -375,11 +375,12 @@ function holdable(key: string, named: Namings, counts: Map<string, number>): boo
   )
 }
 
-// has: whether the call holds a steady value for a key; exported: the same for a key a bare `export K=value` sets, which a redirect alone reads; loop: the literal words a for loop around the command gives a key that nothing else on the line names
+// has: whether the call holds a steady value for a key; exported: the same for a key a bare `export K=value` sets, which a redirect alone reads; loop: the literal words a for loop around the command gives a key that nothing else on the line names; past: a key a cd's && chain sets to a literal, held past that chain where the session's environment does not set it (steadyNames' past)
 export type Steady = {
   exported?: (key: string) => boolean
   has: (key: string) => boolean
   loop?: (key: string) => string[] | undefined
+  past?: (key: string) => boolean
 }
 export const NONE: Steady = { has: () => false }
 
@@ -498,7 +499,12 @@ const CLOSES = new Set(["done", "esac", "fi", "}"])
 const LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"])
 
 // For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs text or loads code in its own shell (a RUNS_TEXT builtin, or a command whose name the hook cannot read, which may be any of them or a builtin that sets a variable), sets a variable by a name the hook cannot read whole (a name-indirection assignment, a bash nameref, an integer attribute or text the shell evaluates among them), or names IFS, holds none, and holdable() is the rest of the allow-list
-export function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Steady {
+// With past, an assignment of one literal word (LITERAL) on an `&&` chain whose every command before it is a cd or a pushd is held past that chain too, as a writer's file alone (a hook holds a folder with past left out): when the cd fails the shell skips it, and the name, set nowhere else on the line, is then empty or the session's own, which the hook's process holds
+export function steadyNames(
+  named: Namings,
+  commands: Command[],
+  past = false,
+): (cmd: Command) => Steady {
   if (named.blind || named.counts.has("IFS")) return () => NONE
   const counts = new Map(named.counts)
   const parses = commands.map((cmd) => parse(cmd))
@@ -537,6 +543,9 @@ export function steadyNames(named: Namings, commands: Command[]): (cmd: Command)
     }
   }
   const set = new Map<string, { at: number; chain?: number }>()
+  const pasts = new Map<string, number>()
+  // whether every command of the current && chain so far is a cd or a pushd at the top level, or an assignment after one
+  let moves = false
   const exports = new Map<string, { at: number; chain?: number }>()
   const where = new Map<Command, { at: number; chain: number }>()
   // the for loops whose body the walk is in, each with the depth its body sits at, and the loop values each body command takes
@@ -562,6 +571,9 @@ export function steadyNames(named: Namings, commands: Command[]): (cmd: Command)
     const head = forList(cmd, named)
     if (head) open.push({ depth, ...head })
     const always = !cmd.follows || cmd.follows === ";" || cmd.follows === "&"
+    const moved: boolean = moves && cmd.follows === "&&"
+    const isMove = top && !cmd.detached && ["cd", "pushd"].includes(parses[at].name)
+    moves = (always || moved) && (isMove || (moved && parses[at].name === ""))
     if (!top || cmd.detached || (!always && cmd.follows !== "&&")) continue
     if (bareExport(parses[at])) {
       for (const w of parses[at].args) {
@@ -576,6 +588,10 @@ export function steadyNames(named: Namings, commands: Command[]): (cmd: Command)
     if (/^[A-Za-z_]\w*\+?=\(/.test(first.value)) continue
     for (const key of parses[at].local.keys())
       if (holdable(key, named, counts)) set.set(key, always ? { at } : { at, chain })
+    const literal = first.source?.slice(first.source.indexOf("=") + 1) ?? ""
+    if (past && moved && cmd.words.length === 1 && LITERAL.test(literal))
+      for (const key of parses[at].local.keys())
+        if (holdable(key, named, counts)) pasts.set(key, at)
   }
   return (cmd) => {
     const here = where.get(cmd)
@@ -586,9 +602,13 @@ export function steadyNames(named: Namings, commands: Command[]): (cmd: Command)
       exported: (key) => before(exports.get(key)),
       has: (key) => before(set.get(key)),
       loop: (key) => loops.get(cmd)?.get(key),
+      past: (key) => (pasts.get(key) ?? here.at) < here.at,
     }
   }
 }
+
+// One literal word as an assignment writes its value: plain characters, or a quoted span holding no expansion, with no glob, ~ or blank
+const LITERAL = /^(?:[\w./:@%+,-]|'[^'\s]*'|"[^"$`\\\s]*")+$/
 
 // An export with no option whose every word is a plain unquoted NAME=value, so each name it sets is counted once, by its own spelling
 const bareExport = ({ args, name }: Parsed): boolean =>
@@ -615,7 +635,10 @@ function forList(cmd: Command, named: Namings): { key: string; values: string[] 
 // Every reading of a word over the values the for loops around it give its variables, the steady ones held too; undefined when one still holds a value the hook cannot read, or the readings pass LOOP_READINGS
 export function heldReadings(word: Word, env: Env, steady: Steady): Word[] | undefined {
   if (!word.raw || !marked(word.value)) return undefined
-  const known = heldVars(env, { has: (key) => steady.has(key) || !!steady.exported?.(key) })
+  const known = heldVars(env, {
+    has: (key) => steady.has(key) || !!steady.exported?.(key),
+    past: steady.past,
+  })
   let sets: Record<string, string>[] = [known]
   for (const key of new Set(word.raw.match(/[A-Za-z_]\w*/g) ?? [])) {
     const values = steady.loop?.(key)
@@ -645,7 +668,8 @@ function heldVars(env: Env, steady: Steady): Record<string, string> {
   const known = { ...env.known }
   for (const [key, text] of env.vars) {
     // a TMPDIR the call sets steers mktemp, so mktemp's path stays unheld
-    if (key === "TMPDIR" || !steady.has(key)) continue
+    const held = steady.has(key) || (!!steady.past?.(key) && env.process[key] === undefined)
+    if (key === "TMPDIR" || !held) continue
     if (!text.unknown && !marked(text.value)) known[key] = text.value
     else if ("raw" in text && typeof text.raw === "string") {
       const again = relexed(text.raw, known)?.value

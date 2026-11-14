@@ -6239,7 +6239,28 @@ async function runAll(lexed, env, visit, builtins) {
       return verdict;
     unbind.get(cmd)?.();
     bind(lexed.commands, k, at, unbind);
+    change(cmd, at);
   }
+}
+var CHANGED = { ...unknown("a value a builtin may change"), vanishes: true };
+var DECLARES = new Set([...EXPORTS, "float", "integer", "private"]);
+function change(cmd, env) {
+  const { args, name } = parse3(cmd);
+  const words = args.map((a) => a.value);
+  const options = words.filter((w) => /^[-+]./.test(w) && w !== "--");
+  const all = marked(name) || name === "." || name === "source" || name === "eval" && args.some(unreadWord) || name === "unset" && options.some((w) => w.includes("m"));
+  const names = all ? [...env.vars.keys()] : name === "unset" ? options.some((w) => w.includes("f")) ? [] : words : name === "read" || name === "printf" && !printsText(words) ? binds(cmd) : DECLARES.has(name) ? words.filter((w) => options.length > 0 || !ASSIGN.test(w) && name !== "export" && name !== "readonly") : name === "set" ? words.flatMap((w, k) => /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : []) : [];
+  for (const key of names.map((w) => w.split("=")[0])) {
+    if (!NAME.test(key))
+      continue;
+    if (env.vars.has(key) || name === "read" || name === "printf")
+      setVar(env.vars, key, CHANGED);
+  }
+}
+function printsText(words) {
+  const v = words.findIndex((w) => w === "-v" || /^-v\w/.test(w));
+  const format = words[v + (words[v] === "-v" ? 2 : 1)];
+  return v >= 0 && format !== undefined && !marked(format) && /^[^%\\]*\S[^%\\]*$/.test(format);
 }
 function bind(commands, k, env, unbind) {
   const cmd = commands[k];
@@ -6474,7 +6495,7 @@ function binds({ words }) {
 }
 var mayVanish = (w, env) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source) && [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
   const set = env.vars.get(name);
-  return !set || !set.unknown && set.value === "";
+  return !set || !!set.vanishes || !set.unknown && /^[ \t\n]*$/.test(set.value);
 }));
 function emptyProgram(cmd, env) {
   if (!cmd.words.some((w) => mayVanish(w, env)))
@@ -7544,7 +7565,7 @@ var testsAName = (args, expands) => args.some((w, k) => {
 var OPENS2 = new Set(["case", "for", "if", "select", "until", "while", "{"]);
 var CLOSES2 = new Set(["done", "esac", "fi", "}"]);
 var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
-function steadyNames(named, commands) {
+function steadyNames(named, commands, past = false) {
   if (named.blind || named.counts.has("IFS"))
     return () => NONE2;
   const counts = new Map(named.counts);
@@ -7581,6 +7602,8 @@ function steadyNames(named, commands) {
     }
   }
   const set = new Map;
+  const pasts = new Map;
+  let moves = false;
   const exports = new Map;
   const where = new Map;
   const open = [];
@@ -7615,6 +7638,9 @@ function steadyNames(named, commands) {
     if (head)
       open.push({ depth, ...head });
     const always = !cmd.follows || cmd.follows === ";" || cmd.follows === "&";
+    const moved = moves && cmd.follows === "&&";
+    const isMove = top && !cmd.detached && ["cd", "pushd"].includes(parses[at].name);
+    moves = (always || moved) && (isMove || moved && parses[at].name === "");
     if (!top || cmd.detached || !always && cmd.follows !== "&&")
       continue;
     if (bareExport(parses[at])) {
@@ -7633,6 +7659,12 @@ function steadyNames(named, commands) {
     for (const key of parses[at].local.keys())
       if (holdable(key, named, counts))
         set.set(key, always ? { at } : { at, chain });
+    const literal = first.source?.slice(first.source.indexOf("=") + 1) ?? "";
+    if (past && moved && cmd.words.length === 1 && LITERAL.test(literal)) {
+      for (const key of parses[at].local.keys())
+        if (holdable(key, named, counts))
+          pasts.set(key, at);
+    }
   }
   return (cmd) => {
     const here = where.get(cmd);
@@ -7642,10 +7674,12 @@ function steadyNames(named, commands) {
     return {
       exported: (key) => before(exports.get(key)),
       has: (key) => before(set.get(key)),
-      loop: (key) => loops.get(cmd)?.get(key)
+      loop: (key) => loops.get(cmd)?.get(key),
+      past: (key) => (pasts.get(key) ?? here.at) < here.at
     };
   };
 }
+var LITERAL = /^(?:[\w./:@%+,-]|'[^'\s]*'|"[^"$`\\\s]*")+$/;
 var bareExport = ({ args, name }) => name === "export" && args.length > 0 && args.every((w) => !w.quoted && ASSIGN.test(w.value) && PLAIN_NAME.test(w.value.slice(0, w.value.indexOf("="))));
 function forList(cmd, named) {
   const at = cmd.words.findIndex((w) => w.quoted || !(LEADS.has(w.value) || w.value === "{"));
@@ -7670,7 +7704,8 @@ function relexed(raw, known) {
 function heldVars(env, steady) {
   const known = { ...env.known };
   for (const [key, text] of env.vars) {
-    if (key === "TMPDIR" || !steady.has(key))
+    const held = steady.has(key) || !!steady.past?.(key) && env.process[key] === undefined;
+    if (key === "TMPDIR" || !held)
       continue;
     if (!text.unknown && !marked(text.value))
       known[key] = text.value;

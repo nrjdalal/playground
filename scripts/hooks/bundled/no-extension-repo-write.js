@@ -7650,7 +7650,28 @@ async function runAll(lexed, env, visit, builtins) {
       return verdict;
     unbind.get(cmd)?.();
     bind(lexed.commands, k, at, unbind);
+    change(cmd, at);
   }
+}
+var CHANGED = { ...unknown2("a value a builtin may change"), vanishes: true };
+var DECLARES = new Set([...EXPORTS, "float", "integer", "private"]);
+function change(cmd, env) {
+  const { args, name } = parse3(cmd);
+  const words = args.map((a) => a.value);
+  const options = words.filter((w) => /^[-+]./.test(w) && w !== "--");
+  const all = marked(name) || name === "." || name === "source" || name === "eval" && args.some(unreadWord) || name === "unset" && options.some((w) => w.includes("m"));
+  const names = all ? [...env.vars.keys()] : name === "unset" ? options.some((w) => w.includes("f")) ? [] : words : name === "read" || name === "printf" && !printsText(words) ? binds(cmd) : DECLARES.has(name) ? words.filter((w) => options.length > 0 || !ASSIGN.test(w) && name !== "export" && name !== "readonly") : name === "set" ? words.flatMap((w, k) => /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : []) : [];
+  for (const key of names.map((w) => w.split("=")[0])) {
+    if (!NAME.test(key))
+      continue;
+    if (env.vars.has(key) || name === "read" || name === "printf")
+      setVar(env.vars, key, CHANGED);
+  }
+}
+function printsText(words) {
+  const v = words.findIndex((w) => w === "-v" || /^-v\w/.test(w));
+  const format = words[v + (words[v] === "-v" ? 2 : 1)];
+  return v >= 0 && format !== undefined && !marked(format) && /^[^%\\]*\S[^%\\]*$/.test(format);
 }
 function bind(commands, k, env, unbind) {
   const cmd = commands[k];
@@ -7885,7 +7906,7 @@ function binds({ words }) {
 }
 var mayVanish = (w, env) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source) && [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
   const set = env.vars.get(name);
-  return !set || !set.unknown && set.value === "";
+  return !set || !!set.vanishes || !set.unknown && /^[ \t\n]*$/.test(set.value);
 }));
 function emptyProgram(cmd, env) {
   if (!cmd.words.some((w) => mayVanish(w, env)))

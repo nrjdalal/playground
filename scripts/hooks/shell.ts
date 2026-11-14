@@ -13,8 +13,10 @@ export type Text = {
   tilde?: boolean
   unknown?: string
   value: string
+  vanishes?: boolean
   variable?: string
 }
+// `vanishes` marks a variable a builtin may have changed (`changes`), whose value may be no word.
 // `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
 // `raw` keeps the source of a word that holds a value the lexer cannot read, so a hook can lex it again once the call has set its variables.
 // `source` is the word as written, quotes and expansions included, so a hook can judge what a word expands rather than what it came to.
@@ -1640,7 +1642,53 @@ async function runAll(
     if (verdict) return verdict
     unbind.get(cmd)?.()
     bind(lexed.commands, k, at, unbind)
+    change(cmd, at)
   }
+}
+
+// A variable a builtin may have changed: unread, and maybe no word, so the empty reading drops it as a program word; the split reading still reads the value it held before (heldResolved), so no reading is lost
+const CHANGED: Text = { ...unknown("a value a builtin may change"), vanishes: true }
+const DECLARES = new Set([...EXPORTS, "float", "integer", "private"])
+
+// Marks each held variable a command may change, wherever on the line it is, since a change the shell may make is one the reader cannot rule out: from bash 3.2's bash(1), SHELL BUILTIN COMMANDS, and zsh 5.9's zshbuiltins(1) and zshmodules(1) (zsh/param/private): unset's names (every one under zsh's -m), read's and printf -v's (`binds`), which end of input or an empty format leaves empty, a declaration's names under an option or, but for export and readonly, with no `=` (a local of its own in a function), zsh's `set -A` or `+A` name, and every variable after an eval, a source or a `.`, or a program word the reader cannot read, which may be any of them
+function change(cmd: Command, env: Env): void {
+  const { args, name } = parse(cmd)
+  const words = args.map((a) => a.value)
+  const options = words.filter((w) => /^[-+]./.test(w) && w !== "--")
+  const all =
+    marked(name) ||
+    name === "." ||
+    name === "source" ||
+    (name === "eval" && args.some(unreadWord)) ||
+    (name === "unset" && options.some((w) => w.includes("m")))
+  const names = all
+    ? [...env.vars.keys()]
+    : name === "unset"
+      ? options.some((w) => w.includes("f"))
+        ? []
+        : words
+      : name === "read" || (name === "printf" && !printsText(words))
+        ? binds(cmd)
+        : DECLARES.has(name)
+          ? words.filter(
+              (w) =>
+                options.length > 0 || (!ASSIGN.test(w) && name !== "export" && name !== "readonly"),
+            )
+          : name === "set"
+            ? words.flatMap((w, k) => (/^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : []))
+            : []
+  for (const key of names.map((w) => w.split("=")[0])) {
+    if (!NAME.test(key)) continue
+    // a name a read or printf -v sets is set, maybe empty; one any other builtin names is changed only where the line holds it, since an unset one already reads as no word
+    if (env.vars.has(key) || name === "read" || name === "printf") setVar(env.vars, key, CHANGED)
+  }
+}
+
+// Whether printf -v sets its name to a format of plain text with a word in it, which no argument can leave empty: no `%` and no `\\`
+function printsText(words: string[]): boolean {
+  const v = words.findIndex((w) => w === "-v" || /^-v\w/.test(w))
+  const format = words[v + (words[v] === "-v" ? 2 : 1)]
+  return v >= 0 && format !== undefined && !marked(format) && /^[^%\\]*\S[^%\\]*$/.test(format)
 }
 
 // A binder (`binds`) gives its names a value the reader cannot read in walk order, in its own scope: a for or select header for its own body alone, back to what they held at its close, since its body runs only once it has bound and its list may be empty; any other binder for the commands after it, where the shell runs it unconditionally there
@@ -1925,7 +1973,8 @@ const mayVanish = (w: Word, env: Env): boolean =>
     (vanishingParts(w.source) &&
       [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
         const set = env.vars.get(name)
-        return !set || (!set.unknown && set.value === "")
+        // a value of blanks alone splits to no word under bash's default IFS and any IFS holding them
+        return !set || !!set.vanishes || (!set.unknown && /^[ \t\n]*$/.test(set.value))
       })))
 
 // The empty reading of a command: each program word that may expand to no word (mayVanish) dropped, until one that stays leads, so the word after it is judged as the program (`$X git commit`, `nice $X git commit`, `$X $Y git commit`); none when the program word stays. It is judged beside the typed reading, so a verdict only moves to refused.
