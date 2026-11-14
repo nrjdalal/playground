@@ -552,12 +552,13 @@ const copyTree = (data: string, scope: string, from: string, who: Who) =>
     (file) => (statSync(join(from, file)).mode & 0o111) !== 0,
   )
 
-// The guards' list files of a folder (scripts/hooks in a checkout) into the login's lists, one commit, then the root's lists derived: what a fresh machine seeds its guards with.
+// The guards' list files of a folder (scripts/hooks in a checkout) into the login's lists, one commit, then the root's lists derived: what a fresh machine seeds its guards with. With keep, a list the login already holds stays as it is, so a second seed changes nothing.
 export const importLists = (
   data: string,
   dir: string,
   dryRun: boolean,
   who: Who,
+  keep = false,
 ): Outcome<{ lines: string[] }> => {
   let login: string
   try {
@@ -569,6 +570,10 @@ export const importLists = (
   const files = new Map<string, string>()
   for (const name of GUARD_LISTS) {
     const file = join(dir, `${name}.json`)
+    if (keep && existsSync(join(scopeDir(data, login), "lists", `${name}.json`))) {
+      lines.push(`= list ${login} ${name} kept`)
+      continue
+    }
     if (!existsSync(file)) {
       lines.push(
         `- ${name}: no ${file}; add it with playground ext put ${login} list ${name} <file> --reason <why>`,

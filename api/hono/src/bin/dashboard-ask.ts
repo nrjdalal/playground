@@ -53,7 +53,8 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 Approve stops at the first that fails
                                                 a clone decision lists up to 20 repos, the login's first, each
                                                 with its scope and that scope's full folder in this machine's
-                                                extensions; one whose folder is already there is refused
+                                                extensions; one whose folder is already there is refused;
+                                                Approve then seeds the guards' lists, keeping each one there
                                                 a guard decision names a key a guard reads, or an ops job's
                                                 jobs.<name>, or an org's own job's jobs.<camelName>, whose value is
                                                 {"enabled": true|false} alone or {"config": {...}} alone, any

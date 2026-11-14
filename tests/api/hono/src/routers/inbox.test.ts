@@ -166,7 +166,7 @@ describe("an Approve the dashboard carries out: an accept, an apps change, a gra
     const source = await Bun.file(
       join(import.meta.dir, "../../../../../api/hono/src/routers/inbox.ts"),
     ).text()
-    expect(source).toContain("clone: readsLive() ? runCli() : undefined,")
+    expect(source).toContain("clone: readsLive() ? cloneRun() : undefined,")
     expect((await approve({}, peer("127.0.0.1"))).status).toBe(403)
     expect((await approve({ origin: "http://evil.localhost" }, peer("127.0.0.1"))).status).toBe(403)
     expect((await approve({ origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)

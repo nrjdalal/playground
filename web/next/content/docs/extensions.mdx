@@ -161,11 +161,7 @@ Each file is written under a temp name and renamed into place, so a session neve
 The root existing is what says a machine has extensions, so a machine with them never falls back to the lists in its checkout.
 
 A root that lacks a guard's list refuses that guard's calls, so a guard never runs without its list.
-On a new machine, seed the guards' lists from the checkout:
-
-```bash
-playground ext import --from-tree extensions/core/lists   # the guards' list files, into your login's lists
-```
+On a new machine, the Inbox card **Clone your extensions onto this machine?** seeds them: its **Approve** clones your extensions, then copies the guards' list files from your checkout's `extensions/core/lists` into your login's lists, keeping each list your login already holds ([A new machine](/docs/backup#a-new-machine)).
 
 Core ships no `no-public-leak` list, since its names and handles are yours, so write that one yourself: a JSON file with an array of strings under each of `companies`, `handles`, `linearKeys`, `names` and `slackIds`.
 

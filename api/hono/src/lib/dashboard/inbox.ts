@@ -21,6 +21,7 @@ import {
   extensionsDir,
   extScopeSchema,
   GUARD_SETTING_KEYS,
+  importLists,
   itemKeySchema,
   JOBS,
   jobKey,
@@ -459,6 +460,29 @@ const cloneHeld = (data: string, preview: InboxClone): string | undefined => {
   const held = preview.repos.filter((repo) => existsSync(repo.folder))
   if (held.length)
     return `This machine's extensions already hold ${held.map((repo) => repo.folder).join(", ")}, so nothing is cloned`
+}
+
+// What a clone's Approve runs with: `playground ext` for the clone, and the folder the guards' lists are seeded from after it (the checkout's extensions/core/lists).
+export type CloneRun = { lists: string; run: ExtRun }
+
+// Seeds the guards' lists into the login's scope as the owner's act, the item named in its commit, after a clone: each list from the folder the login does not hold yet, a list it holds kept as it is, so a second seed changes nothing.
+function seedLists(data: string, lists: string, ref: number, actor: string): RunResult {
+  const done = importLists(
+    data,
+    lists,
+    false,
+    {
+      actor,
+      author: "owner",
+      inboxRef: ref,
+      reason: `the owner approved it in the Inbox (${itemTag(ref)})`,
+    },
+    true,
+  )
+  if (!done.ok) return { exitCode: 1, line: done.message }
+  const added = done.lines.filter((line) => line.startsWith("+ ")).length
+  const kept = done.lines.filter((line) => line.startsWith("= ")).length
+  return { exitCode: 0, line: `seeded ${added} of the guards' lists, kept ${kept} already there` }
 }
 
 // Clones each repo in order through `playground ext`, stopping at the first that fails: ext init --dry-run first, so the login's repo it clones is the card's first, then ext init, then ext add for each further one. Neither runs with --yes, so off a terminal neither makes a repo.
@@ -1827,7 +1851,7 @@ export async function answerItem(
     accept?: ExtRun
     actor: ActivityActor
     apps?: OwnerApps
-    clone?: ExtRun
+    clone?: CloneRun
     deliver?: Deliver
     dispatcher?: string
     grant?: ArgvRun
@@ -2031,7 +2055,7 @@ function stepOf(
     accept?: ExtRun
     actor: string
     apps?: OwnerApps
-    clone?: ExtRun
+    clone?: CloneRun
     grant?: ArgvRun
     settingsData?: string
   },
@@ -2054,7 +2078,20 @@ function stepOf(
     const held = cloneHeld(settingsData, parsed.data)
     if (held) return { refusal: held }
     if (!clone) return { refusal: "This dashboard clones nothing: it shows test data" }
-    return { key: "cloned", run: () => cloneAll(clone, parsed.data) }
+    return {
+      key: "cloned",
+      run: async () => {
+        const cloned = await cloneAll(clone.run, parsed.data)
+        if (cloned.exitCode !== 0) return cloned
+        const seeded = seedLists(settingsData, clone.lists, ref, actor)
+        return seeded.exitCode === 0
+          ? { exitCode: 0, line: `${cloned.line}; ${seeded.line}` }
+          : {
+              exitCode: seeded.exitCode,
+              line: `cloned ${cloned.line}; seeding the guards' lists failed: ${seeded.line}`,
+            }
+      },
+    }
   }
   if (preview.type === "apps") {
     if (!apps)

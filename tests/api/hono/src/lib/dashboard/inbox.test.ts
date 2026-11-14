@@ -31,6 +31,7 @@ import {
   askCli,
   checkAnswer,
   closedPayload,
+  type CloneRun,
   inboxCount,
   inboxInputSchema,
   type Delivery,
@@ -64,8 +65,8 @@ import { extInitCheck, extVerb } from "../../../../../../packages/scripts/src/pl
 import type { Io } from "../../../../../../packages/scripts/src/playground/store"
 import { writeFiles } from "../../../../../../packages/settings/src/folder"
 import { GUARD_SETTING_KEYS } from "../../../../../../packages/settings/src/guard-keys"
-import { judgeItem, putItem } from "../../../../../../packages/settings/src/items"
-import { loginPath, scopeDir } from "../../../../../../packages/settings/src/rendered"
+import { importLists, judgeItem, putItem } from "../../../../../../packages/settings/src/items"
+import { GUARD_LISTS, loginPath, scopeDir } from "../../../../../../packages/settings/src/rendered"
 import {
   readSetting,
   resetSetting,
@@ -6292,8 +6293,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     let n = 0
     const git = (cwd: string, ...args: string[]) =>
       Bun.spawnSync(["git", ...args], { cwd, stderr: "pipe", stdout: "pipe" })
-    // A new machine: a data folder with no extensions root yet, and a scratch bare repo with one commit standing in for each private GitHub repo a fake gh shows, signed in as made-up-me; no real repo is read or made.
-    const machine = (slugs = [`${ME}/playground-${ME}`, `${ME}/playground-made-up-tools`]) => {
+    // the checkout's guard lists, read alone: the seed copies them into the scratch login repo
+    const LISTS = join(import.meta.dir, "../../../../../../extensions/core/lists")
+    // A new machine: a data folder with no extensions root yet, and a scratch bare repo with one commit (settings.json and any files given) standing in for each private GitHub repo a fake gh shows, signed in as made-up-me; no real repo is read or made.
+    const machine = (
+      slugs = [`${ME}/playground-${ME}`, `${ME}/playground-made-up-tools`],
+      files: Record<string, string> = {},
+      lists = LISTS,
+    ) => {
       const at = join(scratch, `${n++}`)
       const data = join(at, "data")
       const repos = new Map<string, string>()
@@ -6303,8 +6310,11 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         mkdirSync(work, { recursive: true })
         git(at, "init", "-q", "--bare", "-b", "main", bare)
         git(work, "init", "-q", "-b", "main")
-        writeFileSync(join(work, "settings.json"), "{}\n")
-        git(work, "add", "settings.json")
+        for (const [path, text] of Object.entries({ "settings.json": "{}\n", ...files })) {
+          mkdirSync(dirname(join(work, path)), { recursive: true })
+          writeFileSync(join(work, path), text)
+        }
+        git(work, "add", "-A")
         git(
           work,
           "-c",
@@ -6331,7 +6341,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       }
       const calls: string[][] = []
       // `playground ext <args>` as runCli runs it: off a terminal with no --yes, so it makes no repo; init --dry-run prints its JSON, and a refusal its error with exit 1
-      const clone = async (args: string[]) => {
+      const run: ExtRun = async (args) => {
         calls.push(args)
         const lines: string[] = []
         const io = { data, out: (line: string) => lines.push(line) } as unknown as Io
@@ -6344,9 +6354,10 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           return { code: 1, err: `playground ext: ${(error as Error).message}`, out: "" }
         }
       }
+      const clone: CloneRun = { lists, run }
       return { calls, clone, data, ghCalls }
     }
-    const approveWith = (id: string, clone: ExtRun, data: string) =>
+    const approveWith = (id: string, clone: CloneRun, data: string) =>
       store.answerItem(
         db,
         id,
@@ -6430,12 +6441,79 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(readFileSync(loginPath(data), "utf8")).toBe(`${ME}\n`)
       for (const scope of [ME, "made-up-tools"])
         expect(existsSync(join(scopeDir(data, scope), ".git", "HEAD")), scope).toBe(true)
+      const seeded = GUARD_LISTS.filter((name) => existsSync(join(LISTS, `${name}.json`)))
+      for (const name of seeded)
+        expect(
+          JSON.parse(readFileSync(join(scopeDir(data, ME), "lists", `${name}.json`), "utf8")),
+          name,
+        ).toEqual(JSON.parse(readFileSync(join(LISTS, `${name}.json`), "utf8")))
       expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
         cloned: {
           exitCode: 0,
-          line: `${ME}/playground-${ME} into ${scopeDir(data, ME)}, ${ME}/playground-made-up-tools into ${scopeDir(data, "made-up-tools")}`,
+          line: `${ME}/playground-${ME} into ${scopeDir(data, ME)}, ${ME}/playground-made-up-tools into ${scopeDir(data, "made-up-tools")}; seeded ${seeded.length} of the guards' lists, kept 0 already there`,
         },
       })
+    })
+
+    test("the seed keeps a list the login's repo already holds, and a second seed changes nothing", async () => {
+      const KEPT = '["made-up-kept"]\n'
+      const { clone, data } = machine(undefined, { "lists/slack-cleared.json": KEPT })
+      const posted = await postClone(card(data), data)
+      await approveWith(posted.id, clone, data)
+      const seeded = GUARD_LISTS.filter(
+        (name) => name !== "slack-cleared" && existsSync(join(LISTS, `${name}.json`)),
+      )
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        cloned: {
+          exitCode: 0,
+          line: expect.stringContaining(
+            `; seeded ${seeded.length} of the guards' lists, kept 1 already there`,
+          ),
+        },
+      })
+      const listFile = join(scopeDir(data, ME), "lists", "slack-cleared.json")
+      expect(readFileSync(listFile, "utf8")).toBe(KEPT)
+      const head = () => git(scopeDir(data, ME), "rev-parse", "HEAD").stdout.toString().trim()
+      const before = head()
+      const again = importLists(
+        data,
+        LISTS,
+        false,
+        { actor: actor.email, author: "owner", inboxRef: null, reason: "a second seed" },
+        true,
+      )
+      expect(again.ok).toBe(true)
+      expect(again.ok && again.lines.filter((line) => !line.startsWith("- "))).toEqual(
+        GUARD_LISTS.filter((name) => name === "slack-cleared" || seeded.includes(name)).map(
+          (name) => `= list ${ME} ${name} kept`,
+        ),
+      )
+      expect(head()).toBe(before)
+      expect(readFileSync(listFile, "utf8")).toBe(KEPT)
+    })
+
+    test("a seed that fails after the clone keeps the clone and records which part failed", async () => {
+      const lists = join(scratch, `lists-${n++}`)
+      mkdirSync(lists)
+      // a list holding a URL with a password, built at run time, which the seed refuses
+      writeFileSync(
+        join(lists, "slack-cleared.json"),
+        JSON.stringify([`https://made-up:${"x".repeat(8)}@example.com`]),
+      )
+      const { clone, data } = machine(undefined, {}, lists)
+      const posted = await postClone(card(data), data)
+      await approveWith(posted.id, clone, data)
+      const answer = (await store.getItem(db, posted.id))?.answer as unknown as {
+        cloned: { exitCode: number; line: string }
+      }
+      expect(answer.cloned.exitCode).toBe(1)
+      expect(answer.cloned.line).toStartWith(
+        `cloned ${ME}/playground-${ME} into ${scopeDir(data, ME)}, ${ME}/playground-made-up-tools into ${scopeDir(data, "made-up-tools")}; seeding the guards' lists failed: `,
+      )
+      expect(answer.cloned.line).toContain("a URL with a password")
+      for (const scope of [ME, "made-up-tools"])
+        expect(existsSync(join(scopeDir(data, scope), ".git", "HEAD")), scope).toBe(true)
+      expect(existsSync(join(scopeDir(data, ME), "lists", "slack-cleared.json"))).toBe(false)
     })
 
     test("refuses on a machine whose extensions root already holds a repo's folder: as it is posted, and at Approve before anything runs or is recorded", async () => {

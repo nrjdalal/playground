@@ -774,7 +774,9 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
         <>
           <p>
             On Approve, the dashboard clones these repos into this machine&apos;s extensions, in
-            order, and stops at the first that fails. It makes no repo.
+            order, and stops at the first that fails. Then it copies the guards&apos; lists from
+            this checkout into your login&apos;s lists, keeping each one already there. It makes no
+            repo.
           </p>
           <ol className="list-decimal pl-5">
             {preview.repos.map((repo) => (
