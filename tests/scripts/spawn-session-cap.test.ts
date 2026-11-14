@@ -1,8 +1,8 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { writeFileSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { capacityLog, placing, root, spawn } from "./spawn-fake"
+import { capacityLog, lw, placing, root, spawn } from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them; one took 19.9s on the loaded runner box, so each gets twice that.
 setDefaultTimeout(40_000)
@@ -167,5 +167,36 @@ describe("the sessions gate caps the live workers and checkers at gates.sessionC
     )
     expect(r.code).not.toBe(0)
     expect(r.err).toContain("the sessions gate holds it")
+  })
+
+  // a Claude Code update closes a live row, ending it, then resumes it: the count held it before the close
+  test("a resume 2 minutes after spawn.sh close ended its live row passes at the cap", async () => {
+    const r = await spawn(
+      ["resume", "t4n7vx-worker", root, ID],
+      [],
+      env(2, [...FLOOR, row("t4n7vx-worker", "ended")]),
+      undefined,
+      { name: "t4n7vx-worker", backend: "claude" },
+      (home) => {
+        mkdirSync(lw(home, "closes"), { recursive: true })
+        const at = new Date(Date.now() - 2 * 60_000)
+        writeFileSync(
+          lw(home, "closes", "t4n7vx-worker"),
+          `${Math.floor(at.getTime() / 1000)} ${at.toISOString().slice(0, 19)}Z working\n`,
+        )
+      },
+    )
+    expect(r.err).not.toContain("the sessions gate holds it")
+    expect(r.code).toBe(0)
+    expect(capacityLog(r)).toEqual([
+      expect.objectContaining({
+        readings: expect.objectContaining({
+          counted: true,
+          just_closed: expect.stringContaining("its working row closed at "),
+          sessions: 2,
+        }),
+        verdict: "pass",
+      }),
+    ])
   })
 })
