@@ -282,7 +282,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   Each run builds its tree in a folder of its own and renames it to `hook-differential/<sha>` in the temp folder, so two runs against one sha share the finished tree alone; the tree, `node_modules` included, stays there for the next run against that sha, beside any folder a run that lost the rename left.
 - It prints one line of counts per hook, the figures a hook PR's Evidence quotes: forms, cases, the same, newly allowed and newly refused, split by the form's class; calls, the same, newly allowed and newly refused.
   The first 20 changed cases of each hook go to stderr, so read them there, and past 20 one more line says how many it cut, `<hook>: <n> more changed lines not shown (--all prints them)`.
-  `--all` prints every changed case, and the stored result keeps every one.
+  `--all` prints every changed case, and the stored result keeps every one, so a guard PR's run takes `--all`, since its Evidence lists every everyday call it newly refuses.
   A sweep lists only the cases outside the form's class and the newly refused ones, and transcript text stays out of the repo and the PR.
 - A run at a clean worktree stores its counts and changed cases under a key in the data folder (`hook-differential/results/<key>.json`), once it finds the worktree still clean at the key's tree and a sweep's forms module still the key's blob; a run whose inputs moved under it stores nothing.
   The key hashes the head's tree sha (`HEAD^{tree}`), the `--canary` sha, the mode with its inputs (a sweep's forms module blob sha, a replay's `--hours` and its newest transcript's mtime), the sorted `--hook` names, `--all`, `--role` and `--glm`, and those alone:
