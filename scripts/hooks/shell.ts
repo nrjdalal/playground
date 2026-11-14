@@ -32,7 +32,7 @@ export type Command = {
   atLeastOnce?: boolean
   // Set on the bare copy run() hands a hook's visit for a followed command with a redirect: the command it stands for
   bareOf?: Command
-  // Set on every command of a line that defines a function named cd or chpwd, or names zsh's chpwd hooks anywhere (`chpwd_functions`, `add-zsh-hook chpwd`), so each cd there is unread
+  // Set on every command of a line that defines a function named cd or chpwd, or names zsh's chpwd hooks anywhere, its quotes and backslashes removed (`chpwd_functions`, `chp""wd_functions`, `add-zsh-hook chpwd`), so each cd there is unread
   cdRedefined?: boolean
   // The token of the run of commands this one belongs to: it changes at each operator that runs a command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and carries into every group, body and pipeline the run reaches, so a cd is read as having moved the shell only for the commands whose token is its own
   chain?: number
@@ -87,10 +87,10 @@ export type Env = {
   cwdBack?: string[]
   // The folders the shell was in before a cd an `&&` alone made sure, which become the shell's again at the first command outside that cd's own run, since such a command runs whether or not the cd did
   cwdChain?: string[]
-  // Set when the shell's folder was unread before such a cd, so it is unread again there
-  cwdChainUnread?: boolean
   // The `Command.chain` token of that cd, so only a command of its own run keeps the folder it named
   cwdChainToken?: number
+  // Set when the shell's folder was unread before that cd, so it is unread again there
+  cwdChainUnread?: boolean
   // The folders the cd that opens a body on the line may reach, which no later cd clears, since the shell may run that body at any point of the line
   cwdHeld?: string[]
   // The folders a cd the reader could not be sure of may have left the shell in, beside `cwdSure`; `cwdSure` is unnamed whenever one of them is the shell's instead
@@ -844,7 +844,7 @@ export function lex(src: string, known: Record<string, string> = {}): Lexed {
   const lx: Lexer = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() }
   list(lx, 0, false)
   calledAgain(lx.commands, src)
-  if (/chpwd/.test(src)) for (const c of lx.commands) c.cdRedefined = true
+  if (/chpwd/.test(src.replace(/["'\\]/g, ""))) for (const c of lx.commands) c.cdRedefined = true
   braced(lx.commands)
   return { commands: lx.commands, scopes: lx.scopes }
 }

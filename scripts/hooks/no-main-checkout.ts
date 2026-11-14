@@ -457,7 +457,7 @@ export const UNREAD_CWD: Word = {
   ...unknown("a runner's option past the readings the hook makes"),
 }
 
-// The readings of a bun, bunx or npx call's words: as typed, and for each option before the word it runs that no list names, written without = and followed by a word (`--env-file /tmp/e`, `-w pkg`), one more that takes that word as its value, as `--env-file=/tmp/e`, so a value the reader would take for the program is judged as the option's too, and a runner it starts read by its own readings; any other program's words read as typed alone
+// The readings of a bun, bunx or npx call's words: as typed, and for each option before the word it runs but bun's own --cwd, --filter and -F (BUN_SPLITS), written without = and followed by a word (`--env-file /tmp/e`, `-w pkg`), one more that takes that word as its value, as `--env-file=/tmp/e`, so a value the reader would take for the program is judged as the option's too, and a runner it starts read by its own readings; any other program's words read as typed alone
 export function runnerReadings(name: string, args: Word[]): Word[][] {
   if (!STARTED_RUNNERS.has(name)) return [args]
   const out: Word[][] = []
