@@ -150,7 +150,7 @@ export const postCard = async (db: Database, card: Card): Promise<void> => {
 // The newest time this Playground has carded, in the data folder, so a restart never cards a message twice.
 const marksFile = () => join(dataDir(), "yard", "mentions.json")
 
-// cards counts the mention cards each sender's login made on one UTC day, for the daily cap.
+// cards counts the mention cards each sender's login made on one UTC day, for the daily cap; from has no prototype, so a login such as constructor counts from 0.
 type Mark = { after?: string; cards?: Cards; since: string }
 type Cards = { day: string; from: Record<string, number> }
 
@@ -190,7 +190,11 @@ export async function pollWaiting(
   const { login } = await client.me()
   const channels = new Map((await client.channels()).map((channel) => [channel.id, channel]))
   let carded = 0
-  let counts: Cards = cards?.from ? cards : { day: "", from: {} }
+  const fresh = (day: string, from = {}): Cards => ({
+    day,
+    from: Object.assign(Object.create(null), from),
+  })
+  let counts = cards?.from ? fresh(cards.day, cards.from) : fresh("")
   for (const { held, message, shownAt } of due) {
     const channel = channels.get(message.channel)
     if (channel && !held && fromBotDm(message, channel, login)) {
@@ -202,7 +206,7 @@ export async function pollWaiting(
         (held ? pendingCard(message, channel, web) : inboundCard(message, channel, login))
       if (card && !held) {
         const day = shownAt.slice(0, 10)
-        if (counts.day !== day) counts = { day, from: {} }
+        if (counts.day !== day) counts = fresh(day)
         const sender = message.from.login.toLowerCase()
         const n = (counts.from[sender] ?? 0) + 1
         counts.from[sender] = n
