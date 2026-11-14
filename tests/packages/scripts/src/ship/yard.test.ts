@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   BOT_ROUTE,
+  type Launch,
   type Project,
   schemaChanges,
   shipYard,
@@ -14,6 +15,7 @@ const HOSTS = { api: "https://api.yard.example.com", web: "https://yard.example.
 type Fake = {
   changed?: string[]
   deploys?: Partial<Record<Project, boolean>>
+  launch?: Launch
   record?: string
   statuses?: Record<string, number>
 }
@@ -39,6 +41,7 @@ const fake = (set: Fake = {}) => {
     fetch: async (tags) => {
       calls.push(`fetch ${tags.join(" ")}`)
     },
+    launch: async () => set.launch ?? { kind: "ops", role: "lead" },
     out: (line) => lines.push(line),
     readRecord: async () => record,
     status: async (url) => {
@@ -159,6 +162,28 @@ describe("ship:yard's schema stop", () => {
         ...SCHEMA,
       ]),
     ).toEqual(SCHEMA)
+  })
+})
+
+describe("ship:yard's launch", () => {
+  test.each([
+    ["a worker's", { kind: "worker", role: "worker" }],
+    ["the Builder's", { kind: "builder", role: "lead" }],
+    ["an unset role's", { kind: "ops" }],
+    ["a lead role with no session name", { role: "lead" }],
+  ] as [string, Launch][])(
+    "%s launch is refused before any git or vercel call, naming the role",
+    async (_, launch) => {
+      const { calls, code, out } = await run({}, { launch, record: "v0.0.110" })
+      expect(code).not.toBe(0)
+      expect(calls).toEqual([])
+      expect(out()).toContain(`PLAYGROUND_ROLE is ${launch.role ?? "unset"}`)
+    },
+  )
+
+  test("the Ops lead's launch goes on", async () => {
+    const { code } = await run({}, { launch: { kind: "ops", role: "lead" }, record: "v0.0.110" })
+    expect(code).toBe(0)
   })
 })
 
