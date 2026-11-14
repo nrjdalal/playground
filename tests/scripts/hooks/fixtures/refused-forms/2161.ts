@@ -119,4 +119,14 @@ export const groups: Group[] = [
       ],
     ],
   },
+  {
+    folders: ["extensions root"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a copy by a literal held past a cd's && chain and joined to a relative name, which an empty value leaves in the root",
+        `cd /tmp && S=/tmp/; cp /tmp/a "\${S}x"`,
+      ],
+    ],
+  },
 ]

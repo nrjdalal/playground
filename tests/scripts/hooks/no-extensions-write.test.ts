@@ -2461,6 +2461,8 @@ describe("a writer's file a cd's && chain sets to a literal runs past the chain,
     ["a copy", `cd /tmp && f=/tmp/out.txt; cp /tmp/a "$f"`],
     ["a tee", `cd /tmp && f=/tmp/out.txt; echo x | tee "$f"`],
     ["a move", `cd /tmp && f=/tmp/out.txt; mv /tmp/a "$f"`],
+    ["a copy by the unquoted read", `cd /tmp && f=/tmp/out.txt; cp /tmp/a $f`],
+    ["a copy by the braced read", `cd /tmp && f=/tmp/out.txt; cp /tmp/a "\${f}"`],
     ["a copy after a pushd", `pushd /tmp && f=/tmp/out.txt; cp /tmp/a "$f"`],
     [
       "a copy by a relative literal under a folder outside the root",
