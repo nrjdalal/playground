@@ -42,7 +42,6 @@ The link's host comes from the `live.branch` setting (`live/dashboard` by defaul
 Its config names the machine: `{"host": "<name or address>", "port": 1355}`, with optional `key` and `user` (your Mac's user by default).
 That machine serves its names under the certificate authority your Mac already trusts, since its setup copies your Mac's portless folder there, so there is no trust step.
 Two Approves set the job up, in this order: a session posts the host as an Inbox guard decision, `{"config": {"host": ...}}`, then the switch, `{"enabled": true}`, and you click Approve on each.
-A session that cannot post them sets the same values itself, through the job's config card and switch in Settings > Jobs, so you type nothing either way.
 If your Mac does not trust the certificate that machine serves, `playground doctor` says so and the job posts no link.
 
 Once the tunnel is up and your Mac trusts the certificate the other machine serves, the job posts the link to your Inbox once: click the card's title and the Dashboard opens in a new tab.

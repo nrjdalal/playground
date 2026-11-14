@@ -59,7 +59,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   Its `jobs.opsTunnel` row's `config.host` names the machine, and `config.port` is the same at both ends, 1355 by default.
   So its link, `https://dashboard.playground.localhost:<port>/dashboard` on the default `live.branch`, is that machine's live Dashboard's own web origin, which its trusted origins already name, and the API's origin goes through the same port.
   That machine serves under this Mac's own portless CA, which its setup copies there, so the owner trusts no new CA.
-  A session asks for the host and then the switch as two Inbox guard decisions, `{"config": {"host": ...}}` then `{"enabled": true}`, so the owner only clicks Approve; a session that cannot post them sets the same values through Settings > Jobs' config card and switch, a session's act alone.
+  A session asks for the host and then the switch as two Inbox guard decisions, `{"config": {"host": ...}}` then `{"enabled": true}`, so the owner only clicks Approve; a session that cannot post them reports up its chain and sets nothing itself.
   It starts ssh again after a drop, 2 s on and doubling to 60 s, from 2 s again once a link held 60 s.
   A port another program already answers on starts no ssh.
   It beats `up: <link> through <host>` once the port answers and macOS trusts the certificate served there (checked each minute), else `down: <why>`.
