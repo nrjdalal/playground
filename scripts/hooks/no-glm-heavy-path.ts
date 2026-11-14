@@ -18,6 +18,7 @@ import { readPin } from "../../packages/settings/src/harnesses"
 import { readPolicy } from "../../packages/settings/src/rendered"
 import { ruleSettings } from "../../packages/settings/src/rules"
 import { implicitRepos, type Repo, remotes, repoOf } from "./github"
+import { input } from "./input"
 import { headless } from "./no-headless-login"
 import { fromFactory, registryName, sessionOf } from "./role"
 import {
@@ -1842,7 +1843,7 @@ export async function refusal(
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-glm-heavy-path", "guard")
   const reason = (await fromFactory(raw)) ? await refusal(raw) : undefined
   if (reason) {
     console.error(reason)

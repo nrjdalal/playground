@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
+import { input } from "./input"
 import { mainCheckout } from "./no-main-checkout"
 import { readsWords } from "./read-only"
 import { registryName, sessionRole } from "./role"
@@ -466,7 +467,7 @@ export function live(environment: Environment): Lookup {
 }
 
 if (import.meta.main) {
-  const reason = await check(await Bun.stdin.text())
+  const reason = await check(await input("no-outside-pr-code", "guard"))
   if (reason) {
     console.error(reason)
     process.exit(2)
