@@ -157,6 +157,14 @@ export const groups: Group[] = [
         "a kill by pattern behind a variable read binds only in a pipeline",
         "echo | read X; $X pkill -f watcher",
       ],
+      [
+        "a kill by pattern behind a loop's variable after its loop",
+        "for s in a b; do :; done; $s pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind an inner loop's variable after the inner loop",
+        "for s in a; do for t in b; do :; done; $t pkill -f watcher; done",
+      ],
     ],
   },
   {

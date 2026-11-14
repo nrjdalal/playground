@@ -118,6 +118,8 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "${X:?} pkill -f watch",
     "for s in a b; do $s pkill -f watch; done",
     "for f in a b; do $f --version; done",
+    "if true; then for s in a; do $s pkill -f watch; done; fi",
+    "for s in a; do for t in b; do $t pkill -f watch; done; done",
     "select s in a; do $s pkill -f watch; done",
     "read s; $s pkill -f watch",
     "read -r -p prompt s; $s pkill -f watch",
