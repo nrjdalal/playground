@@ -7,7 +7,7 @@ const A = "a".repeat(40)
 const B = "b".repeat(40)
 const NOW = Date.parse("2026-11-14T08:00:00Z")
 
-type Reply = { body?: unknown; headers?: Record<string, string>; path: string }
+type Reply = { body?: unknown; headers?: Record<string, string>; path: string; status?: string }
 
 const pr = (sha: string): Reply => ({ body: { sha }, path: `repos/${REPO}/pulls/7` })
 const runs = (sha: string, ...checks: [string, string, string | null, number][]): Reply => ({
@@ -31,7 +31,7 @@ const fakeGh = (replies: Reply[]) => {
     if (!next) throw new Error(`no reply left for ${args.join(" ")}`)
     expect(args.slice(0, 3)).toEqual(["api", "-i", next.path])
     const headers = Object.entries(next.headers ?? {}).map(([k, v]) => `${k}: ${v}`)
-    const head = ["HTTP/2.0 200 OK", ...headers].join("\n")
+    const head = [`HTTP/2.0 ${next.status ?? "200 OK"}`, ...headers].join("\n")
     if (next.body === undefined)
       return { code: 1, stderr: "gh: API rate limit exceeded", stdout: `${head}\n\n{}` }
     return { code: 0, stderr: "", stdout: `${head}\n\n${JSON.stringify(next.body)}` }
@@ -151,6 +151,15 @@ describe("playground ci-wait (PG-2113)", () => {
     expect(sleeps).toEqual([])
     expect(lines.join("\n")).toContain(`no ${BUILD} check`)
     expect(lines.join("\n")).toContain("gh run rerun 10")
+  })
+
+  test("a PR or repo GitHub does not know, or a login it refuses, exits 2 at once rather than waiting for good", async () => {
+    for (const status of ["404 Not Found", "401 Unauthorized"]) {
+      const { code, lines, sleeps } = await wait([{ path: `repos/${REPO}/pulls/7`, status }])
+      expect(code).toBe(2)
+      expect(sleeps).toEqual([])
+      expect(lines.join("\n")).toContain(status)
+    }
   })
 
   test("a rate limit waits out its reset, then reads again", async () => {
