@@ -894,7 +894,5 @@ test("test:file and check-types:tests run the prebuild before their tests and ty
   )
   const sandbox = await Bun.file(join(ROOT, "packages/scripts/src/test-sandbox.ts")).text()
   expect(sandbox).toContain("await prebuildTests(")
-  expect(sandbox.indexOf("await prebuildTests(")).toBeLessThan(
-    sandbox.indexOf("await runParallel("),
-  )
+  expect(sandbox.indexOf("await prebuildTests(")).toBeLessThan(sandbox.indexOf("await runPass("))
 })

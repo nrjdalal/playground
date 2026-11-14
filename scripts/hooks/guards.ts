@@ -119,14 +119,22 @@ export async function check(
   return reasons.filter(Boolean).join("\n\n") || undefined
 }
 
-// The hook's exit: 2 with the reasons on stderr, else 0; its deadline counts from the process's start, so the imports spend it too.
-export async function hook(guards: readonly Guard[] = GUARDS): Promise<number> {
-  const reason = await check(
-    await Bun.stdin.text(),
-    process.env,
-    guards,
-    DEADLINE - performance.now(),
-  )
+const unread = `guards hook: the call's input did not arrive by its deadline, about ${DEADLINE / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`
+
+// The hook's exit: 2 with the reasons on stderr, else 0; its deadline counts from the process's start, so the imports and the input's read spend it too.
+export async function hook(
+  guards: readonly Guard[] = GUARDS,
+  deadline = DEADLINE,
+): Promise<number> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const raw = await Promise.race([
+    Bun.stdin.text(),
+    new Promise<undefined>((done) => {
+      timer = setTimeout(() => done(undefined), deadline - performance.now())
+    }),
+  ]).finally(() => clearTimeout(timer))
+  const reason =
+    raw === undefined ? unread : await check(raw, process.env, guards, deadline - performance.now())
   if (!reason) return 0
   console.error(reason)
   return 2

@@ -10407,8 +10407,37 @@ function textFlagValues({ args, name }) {
 var SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/;
 var SED_SUFFIX = /^(?:\.[\w.~-]*)?$/;
 var SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
-var SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}${SED_TEXT}[gpI0-9]*)[ \t]*`;
+var SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}(${SED_TEXT})[gpI0-9]*)[ \t]*`;
 var SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`);
+function follows(have, want) {
+  for (let k = 0;k < want.length; k++) {
+    const part = have[k];
+    if (part === "**")
+      return true;
+    if (part === undefined)
+      return false;
+    const glob = part.includes("(") && part.includes(")") ? part.replace(/\(/g, "{").replace(/\)/g, "}").replace(/\|/g, ",") : part.replace(/[()]/g, "");
+    if (!new Bun.Glob(glob).match(want[k]))
+      return false;
+  }
+  return true;
+}
+var SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y");
+function sedWrites(script) {
+  const read = (text) => text.replace(/\\(.)|&/gs, (m, c) => m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
+` : c ?? m);
+  const writes = [];
+  SED_EDIT_STEP.lastIndex = 0;
+  while (SED_EDIT_STEP.lastIndex < script.length) {
+    const at = SED_EDIT_STEP.lastIndex;
+    const item = SED_EDIT_STEP.exec(script);
+    if (!item || SED_EDIT_STEP.lastIndex === at)
+      return [read(script)];
+    if (item[1])
+      writes.push(read(item[1].slice(0, -1)));
+  }
+  return writes;
+}
 function sedInPlace(cmd, parsed) {
   const { args, local, name } = parsed;
   if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed))
@@ -10870,6 +10899,36 @@ async function inspect(raw, environment, unknown = false) {
       }
     }
   };
+  const scriptNames = (script, env) => {
+    for (const text of sedWrites(script)) {
+      const plain = text.replace(/['"]/g, "");
+      if (holds(plain, env))
+        return `${root} in its text`;
+      for (const token of plain.split(/[\s;&<>=]+/))
+        for (const word of [token, ...token.split(/[{},]/)]) {
+          const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word);
+          const value = tilde ? home + word.slice(tilde[0].length) : word;
+          if (value.startsWith(sep2) && reaches(value))
+            return value;
+          if (env.cwd && !value.startsWith(sep2) && /[/*?[(]/.test(value) && reaches(resolve5(env.cwd, value)))
+            return word;
+          const parts = word.split(sep2);
+          const expands = (k) => parts.slice(0, k).some((part) => /[$~`]/.test(part));
+          if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts)))
+            return word;
+        }
+    }
+  };
+  const rootParts = needle.split(sep2).filter(Boolean);
+  const reaches = (path) => {
+    const parts = path.split(sep2);
+    const at = parts.findIndex((part) => GLOB.test(part));
+    if (at < 0)
+      return inRoot(path);
+    const base = real(parts.slice(0, at).join(sep2) || sep2);
+    const have = [...base === sep2 ? [""] : base.split(sep2), ...parts.slice(at)];
+    return follows(have, root.split(sep2));
+  };
   const placed = (word, env, steady) => pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined;
   const afterUnreadCd = (write) => `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`;
   const seen = new Set;
@@ -11035,6 +11094,8 @@ async function inspect(raw, environment, unknown = false) {
     const tool = GNU_NAMED.exec(name)?.[1] ?? name;
     const gnu = tool !== name || first.value.includes("/gnubin/");
     const remover = REMOVERS.has(tool);
+    const edited = new Set(inPlace(tool, args));
+    const sedEdit = sedInPlace(cmd, parsed) ?? (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : []);
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"));
     if (env.cwdAnywhere)
       return refuse(`${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`);
@@ -11045,7 +11106,7 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`${verb} run inside ${root}`);
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`);
-      const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : []).find((word) => !held3(word, here, steady));
+      const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : inPlace(tool, args)).find((word) => !held3(word, here, steady));
       if (unheld)
         return refuse(unheld.splits ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally` : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`);
       if (name === "git") {
@@ -11069,6 +11130,11 @@ async function inspect(raw, environment, unknown = false) {
         const named = names({ ...value, quoted: false }, here, remover);
         if (named)
           return refuse(`${verb} with a variable on ${named}`);
+      }
+      for (const script of sedEdit) {
+        const named = scriptNames(script.value, here);
+        if (named)
+          return refuse(`${verb} with a script that names ${named}`);
       }
       const literal = !whole && narrow(cmd, here);
       for (const word of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word))) {
@@ -11100,7 +11166,7 @@ async function inspect(raw, environment, unknown = false) {
     const replace = xargs?.replace;
     const fromStdin = new Set(fedWords);
     const fromArgFile = new Set(argWord ? [argWord] : []);
-    const inPlace = (word) => args.map((arg) => {
+    const putIn = (word) => args.map((arg) => {
       if (!replace || !arg.value.includes(replace))
         return arg;
       const put = { ...arg, value: arg.value.replaceAll(replace, word.value) };
@@ -11111,7 +11177,7 @@ async function inspect(raw, environment, unknown = false) {
     });
     const shapes = [
       args,
-      ...!xargs ? [] : replace ? fedWords.map(inPlace) : [[...args, ...fedWords], ...fedWords.map((word) => [...args, word])]
+      ...!xargs ? [] : replace ? fedWords.map(putIn) : [[...args, ...fedWords], ...fedWords.map((word) => [...args, word])]
     ];
     const option = (word) => /^-./.test(word.value);
     const operandsOf = (typed) => {

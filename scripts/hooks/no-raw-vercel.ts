@@ -1,11 +1,20 @@
-// A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: lets a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx) run only as a read (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) or a preview deploy, and refuses every other call, a command or deploy subcommand a later CLI adds included; a production move (a production deploy, which also migrates the hosted database, a deploy continue, a redeploy, a promote, a rollback, an alias or a rolling release) passes for the Ops lead alone, in a call that names no role variable and sources no file.
+// A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: lets a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx, a runner one of them or bun's run or bare path starts included) run only as a read (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) or a preview deploy, and refuses every other call, a command or deploy subcommand a later CLI adds included; a production move (a production deploy, which also migrates the hosted database, a deploy continue, a redeploy, a promote, a rollback, an alias or a rolling release) passes for the Ops lead alone, in a call that names no role variable and sources no file.
 import { basename, isAbsolute, resolve } from "node:path"
 
-import { bunCall, runnerReadings, toolName, toolWords } from "./no-main-checkout"
+import {
+  bunCall,
+  runnerReadings,
+  runnerTarget,
+  STARTED_RUNNERS,
+  toolName,
+  toolWords,
+  UNREAD_CWD,
+} from "./no-main-checkout"
 import { namesRole, opsLead } from "./role"
 import {
   type Env,
   lex,
+  marked,
   program,
   run,
   slotWords,
@@ -315,8 +324,14 @@ type Reached = { args: Word[]; shell: Env }
 function runnerBuns(name: string, args: Word[], shell: Env): Reached[] {
   let offset = 0
   if (name === "bun") {
-    const { sub, words } = bunCall(args, shell)
-    if (words[0] !== "x") return []
+    const { at, chained, sub, words } = bunCall(args, shell)
+    if (words[0] !== "x") {
+      // bun run starts a package's bin or a command on PATH by its name, and bare bun a package's bin (bun's run docs, its resolution order), so a runner either names may reach bun
+      const started = toolName(args[at]?.value)
+      const there = { ...shell, cwd: chained }
+      if (started === "bun") return [{ args: args.slice(at + 1), shell: there }]
+      return PACKAGE_RUNNERS.has(started) ? runnerBuns(started, args.slice(at + 1), there) : []
+    }
     offset = sub + 1
   } else if (!PACKAGE_RUNNERS.has(name)) return []
   const reached: Reached[] = []
@@ -353,6 +368,39 @@ function runnerCalls(name: string, args: Word[]): Word[] {
   return calls
 }
 
+type Link = { args: Word[]; name: string }
+type Unread = { unread: string }
+
+// A runner's program whose own name, after its last /, is built at run time, so it may name any runner; a written-out name in a folder built at run time (`$P/probe.ts`) names itself
+const builtName = (word: Word | undefined) =>
+  !!word && marked(word.value.slice(word.value.lastIndexOf("/") + 1))
+
+// Each runner a call reaches, the call's own program first, then each runner it starts (npx npx, bunx npx, bun x npx, and bun run's or bare bun's runner, as runnerBuns reads it) until one runs vercel; a reading past runnerReadings' cap, or a program built at run time, may run any program, so it ends the chain as unread at any depth
+function chain(name: string, args: Word[], shell: Env): (Link | Unread)[] {
+  const links: (Link | Unread)[] = []
+  for (;;) {
+    if (args[1] === UNREAD_CWD)
+      return [...links, { unread: "a runner call past the readings the hook makes" }]
+    links.push({ args, name })
+    if (!STARTED_RUNNERS.has(name) || toolWords(NAMES, name, args, shell)) return links
+    let rest = args
+    let at: number
+    if (name === "bun") {
+      const call = bunCall(args, shell)
+      at = call.at
+      if (call.words[0] === "x") {
+        rest = args.slice(call.sub + 1)
+        at = runnerTarget(rest)
+      }
+    } else at = runnerTarget(rest)
+    if (builtName(rest[at])) return [...links, { unread: "a runner's program built at run time" }]
+    const started = toolName(rest[at]?.value)
+    if (!STARTED_RUNNERS.has(started)) return links
+    name = started
+    args = rest.slice(at + 1)
+  }
+}
+
 export async function check(
   raw: string,
   environment: Environment = process.env,
@@ -386,24 +434,35 @@ export async function check(
         throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell))
       )
         verdicts.push({ production: true, what: "the Yard ship step, which deploys production" })
-      // a runner's -c line runs in a shell, so it is read as sh -c's is, and one the hook cannot read is the step on a line naming it
-      for (const call of runnerCalls(name, args))
-        if (!unreadable(call))
-          await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit)
-        else if (STEP_NAMED.test(command))
-          verdicts.push({
-            production: true,
-            what: "a runner's command line built at run time on a line naming the Yard ship step",
-          })
-      const words = toolWords(NAMES, name, args, shell)
-      // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string
-      const verdict =
-        words &&
-        judgeAll(
-          words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })),
-          parsed.xargs !== undefined,
-        )
-      if (verdict) verdicts.push(verdict)
+      // npx reads every word for its -c line, so the runners after it need no second read
+      let scanned = false
+      for (const link of chain(name, args, shell)) {
+        if ("unread" in link) {
+          if (NAMED.test(command))
+            verdicts.push({ production: false, what: `${link.unread} on a line naming vercel` })
+          continue
+        }
+        // a runner's -c line runs in a shell, so it is read as sh -c's is, and one the hook cannot read is the step on a line naming it
+        if (!scanned)
+          for (const call of runnerCalls(link.name, link.args))
+            if (!unreadable(call))
+              await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit)
+            else if (STEP_NAMED.test(command))
+              verdicts.push({
+                production: true,
+                what: "a runner's command line built at run time on a line naming the Yard ship step",
+              })
+        scanned ||= link.name === "npx"
+        const words = toolWords(NAMES, link.name, link.args, shell)
+        // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string
+        const verdict =
+          words &&
+          judgeAll(
+            words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })),
+            parsed.xargs !== undefined,
+          )
+        if (verdict) verdicts.push(verdict)
+      }
     }
     return undefined
   }
