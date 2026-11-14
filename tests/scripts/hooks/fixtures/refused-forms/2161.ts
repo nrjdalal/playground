@@ -152,6 +152,18 @@ export const groups: Group[] = [
         "X=a; until false; do $X pkill -f watcher; unset X; done",
       ],
       [
+        "a kill by pattern a zsh repeat loop's body runs first",
+        "repeat 2 do pkill -f watcher; done",
+      ],
+      [
+        "a kill by pattern behind a variable a zsh repeat loop's body unsets for its next pass",
+        "X=a; repeat 2 do $X pkill -f watcher; unset X; done",
+      ],
+      [
+        "a kill by pattern behind a variable zsh's nameref makes a reference",
+        "X=a; nameref X=Y; $X pkill -f watcher",
+      ],
+      [
         "a kill by pattern behind a variable a loop's body assigns for its next pass",
         "X=a; for i in 1 2; do $X pkill -f watcher; X=; done",
       ],
@@ -162,6 +174,16 @@ export const groups: Group[] = [
       [
         "a kill by pattern behind a variable an array that holds source may change",
         'X=a; A=(source); "${A[@]}" ./env.sh; $X pkill -f watcher',
+      ],
+    ],
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      [
+        "a commit after a relative cd a zsh repeat loop's body holds",
+        "repeat 3 do cd ..; done; git commit -m x",
       ],
     ],
   },
