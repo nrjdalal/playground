@@ -376,9 +376,9 @@ test("runRm refuses an ended session's whole scratchpad folder over 2 GB, naming
   ])
 })
 
-test("runRm keeps the tripwire's file count for the caller's own scratchpad folder, a path inside an ended folder and any other path", async () => {
+test("runRm keeps the tripwire's file count and its alert for a path inside the caller's own scratchpad folder, a path inside an ended folder and any other path", async () => {
   for (const at of [
-    (pad: string) => join(pad, "j6rjgy-worker"),
+    (pad: string) => join(pad, "j6rjgy-worker", "work"),
     (pad: string) => join(pad, "a4b5c6-worker", "1938"),
     (pad: string) => join(pad, "..", "..", "big"),
   ]) {
@@ -391,6 +391,26 @@ test("runRm keeps the tripwire's file count for the caller's own scratchpad fold
     expect(await runRm([path], deps)).toBe(1)
     expect(existsSync(join(path, "clone", "0", "0"))).toBe(true)
     expect(told.some((line) => line.includes("past the tripwire"))).toBe(true)
+  }
+})
+
+test("an end leaves its own scratch or scratchpad folder over the tripwire in place, with no move and no alert, its refusal naming who clears it", async () => {
+  for (const dir of ["scratch", "scratchpad"]) {
+    const { deps, told } = pads([{ name: "j6rjgy-worker", status: "working" }])
+    const folder = join(deps.data, dir, "j6rjgy-worker")
+    overCount(folder)
+    const errors: string[] = []
+    const error = console.error
+    console.error = (line: string) => void errors.push(line)
+    try {
+      expect(await runRm([folder], deps)).toBe(1)
+    } finally {
+      console.error = error
+    }
+    expect(existsSync(join(folder, "clone", "0", "0"))).toBe(true)
+    expect(listTrash(join(deps.data, "trash"))).toEqual([])
+    expect(told).toEqual([])
+    expect(errors.join("\n")).toContain("leave it in place whole, never split")
   }
 })
 
