@@ -111,6 +111,7 @@ const machine = () => {
     clones: () => [],
     procs: () => [],
     data,
+    defaultBranch: () => null,
     home,
     main,
     merged: () => false,
@@ -1079,12 +1080,11 @@ test("--worktree reads another repo's default branch from gh when origin/HEAD na
   git(repo, "remote", "set-head", "origin", "-d")
   landOnMain(repo)
   const asked: string[] = []
-  const unread = Object.assign(
-    { ...deps, prState: openPr(wt) },
-    {
-      defaultBranch: (at: string) => (asked.push(at), null),
-    },
-  )
+  const unread: RmDeps = {
+    ...deps,
+    defaultBranch: (at) => (asked.push(at), null),
+    prState: openPr(wt),
+  }
   const discard = `playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`
   expect(await rmTold(["--worktree", wt], unread)).toEqual({
     code: 1,
@@ -1094,7 +1094,7 @@ test("--worktree reads another repo's default branch from gh when origin/HEAD na
     out: [],
   })
   expect(asked).toEqual([wt])
-  const read = Object.assign({ ...deps, prState: openPr(wt) }, { defaultBranch: () => "main" })
+  const read: RmDeps = { ...deps, defaultBranch: () => "main", prState: openPr(wt) }
   const told = await rmTold(["--worktree", wt], read)
   expect({ ...told, out: notes(told.out) }).toEqual({ code: 0, err: [], out: [] })
   expect(existsSync(wt)).toBe(false)

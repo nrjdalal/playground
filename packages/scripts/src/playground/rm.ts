@@ -75,12 +75,13 @@ export const freedOf = (
     ? { head: pr.head, number: pr.number, state: pr.state }
     : undefined
 
-// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR state by its --pr or else its branch ("none" when gh answers with no PR, null when no PR of its own reads), and the session's name.
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, the default branch gh names for a worktree's repo, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR state by its --pr or else its branch ("none" when gh answers with no PR, null when no PR of its own reads), and the session's name.
 export type RmDeps = {
   clones: () => Clone[]
   data: string
   home: string
   main: string
+  defaultBranch: (at: string) => string | null
   merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
   places: () => string[]
@@ -180,6 +181,16 @@ const merged = (sha: string, at: string): boolean | null => {
   return run.exitCode === 0 && (out === "true" || out === "false") ? out === "true" : null
 }
 
+// The default branch gh names for the worktree's repository, or null when gh cannot answer.
+const defaultBranch = (at: string): string | null => {
+  const run = Bun.spawnSync(
+    ["gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+    { cwd: at, stderr: "ignore", stdout: "pipe" },
+  )
+  const name = run.stdout.toString().trim()
+  return run.exitCode === 0 && name ? name : null
+}
+
 // Pure: a worktree's PR state, counted only when exactly one PR answers, since a branch name used twice can find another's, that PR is this worktree's own (its branch is the worktree's, or its head is HEAD, so a stacked child does not pass under its parent's PR), and its head is HEAD or an ancestor of it; "none" when gh's list is empty; else null.
 export const prStateOf = (
   prs: { headRefName: string; headRefOid: string; number: number; state: PrState }[] | null,
@@ -225,11 +236,12 @@ const prState = async (path: string, pr?: string): Promise<Pr | "none" | null> =
   )
 }
 
-// This machine's: run-slot's running clone, HOME, the data folder, the main checkout, gh for a merged PR, notify.sh to the dispatcher, linkPlaces' temp and scratchpad folders, lsof and ps, and the Claude Code registry's name for this session, else "shell".
+// This machine's: run-slot's running clone, HOME, the data folder, the main checkout, gh for a repo's default branch and a merged PR, notify.sh to the dispatcher, linkPlaces' temp and scratchpad folders, lsof and ps, and the Claude Code registry's name for this session, else "shell".
 export const rmDeps = (repo: string): RmDeps => ({
   clones: clones(dataDir()),
   data: dataDir(),
   home: homedir(),
+  defaultBranch,
   main: mainCheckout(repo),
   merged,
   notify: (text) =>
@@ -344,6 +356,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
               ? {
                   ...(own === "none" ? { archive: join(deps.data, "scratchpad", "archive") } : {}),
                   clones: deps.clones,
+                  defaultBranch: deps.defaultBranch,
                   discard: args.discard,
                   ...(freed ? { freed } : {}),
                   live: STATUSES.live,
