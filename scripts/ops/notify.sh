@@ -21,7 +21,7 @@ line=$(printf '%s' "$2" | tr '\r\n' '  ')
 # NOTIFY_WHOLE=1: the line goes whole, as the channel watch's posts do (a runner's SendMessage carried them uncut); every other line stops at 400.
 [ "$NOTIFY_WHOLE" = 1 ] || line=$(printf '%s' "$line" | cut -c1-400)
 mkdir -p "$OPS/outbox"
-# NOTIFY_PRIVATE=1: alerts.log names the line's length alone, as ops-wa sets for the owner's WhatsApp words, which stay out of every log.
+# NOTIFY_PRIVATE=1: alerts.log names the line's length alone, as ops-wa and ops-dm-watch set for the owner's WhatsApp and Slack DM words, which stay out of every log.
 logged=$line
 [ "$NOTIFY_PRIVATE" != 1 ] || logged="(a private line of ${#line} characters)"
 echo "$(date -u +%FT%TZ) [ops-$1 → $to] $logged" >> "$OPS/alerts.log"
