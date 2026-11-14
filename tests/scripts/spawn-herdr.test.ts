@@ -19,6 +19,7 @@ import {
   execLine,
   herdrPin,
   launchOf,
+  linuxTemp,
   lw,
   opened,
   placing,
@@ -218,11 +219,21 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
   test.each([
     ["with none set gets the user's temp folder", {}, "/var/folders/zz/T/"],
     ["keeps one already set", { TMPDIR: "/tmp/own/" }, "/tmp/own/"],
+    [
+      "on Linux, whose getconf has no such name, gets a folder of its own under /tmp, mode 700",
+      { LINUX_GETCONF: "1" },
+      /^\/.*\/playground-worker-brave-otter\.[A-Za-z0-9]{6}$/,
+    ],
+    [
+      "on Linux gets its own folder over an inherited /tmp, which every session shares",
+      { LINUX_GETCONF: "1", TMPDIR: "/tmp" },
+      /^\/.*\/playground-worker-brave-otter\.[A-Za-z0-9]{6}$/,
+    ],
   ])("a herdr session %s as TMPDIR", async (_, env, expected) => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md", "--runtime", "herdr"],
       [],
-      {},
+      "LINUX_GETCONF" in env ? { LINUX_GETCONF: "1" } : {},
       undefined,
       undefined,
       herdrPin(),
@@ -233,10 +244,10 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
       join(shim, "claude"),
       '#!/bin/bash\nprintf %s "$TMPDIR" > "$HOME/claude.tmpdir"\n',
     )
-    // macOS's getconf, which names the user's temp folder; the box runs Linux, whose getconf has no such name.
+    // macOS's getconf, which names the user's temp folder; under LINUX_GETCONF it is Linux's, which has no such name.
     writeFileSync(
       join(shim, "getconf"),
-      '#!/bin/bash\n[ "$1" = DARWIN_USER_TEMP_DIR ] && echo /var/folders/zz/T/\n',
+      '#!/bin/bash\n[ -n "$LINUX_GETCONF" ] && { echo "getconf: Unrecognized variable $1" >&2; exit 1; }\n[ "$1" = DARWIN_USER_TEMP_DIR ] && echo /var/folders/zz/T/\n',
     )
     for (const name of ["claude", "getconf"]) chmodSync(join(shim, name), 0o755)
     const run = Bun.spawn(["bash", lw(r.home, "launch", "worker-brave-otter.sh")], {
@@ -245,7 +256,11 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
       stdout: "ignore",
     })
     expect(await run.exited).toBe(0)
-    expect(readFileSync(join(r.home, "claude.tmpdir"), "utf8")).toBe(expected)
+    const tmpdir = readFileSync(join(r.home, "claude.tmpdir"), "utf8")
+    if (typeof expected === "string") return expect(tmpdir).toBe(expected)
+    expect(tmpdir).toMatch(expected)
+    expect(dirname(tmpdir)).toBe(linuxTemp)
+    expect(statSync(tmpdir).mode & 0o777).toBe(0o700)
   })
 
   test("a session on the probes server records that server in its resume record", async () => {

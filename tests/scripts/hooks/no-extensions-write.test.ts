@@ -2456,6 +2456,51 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
   })
 })
 
+describe("a writer's file a cd's && chain sets to a literal runs past the chain, read as that literal (PG-2161)", () => {
+  test.each([
+    ["a copy", `cd /tmp && f=/tmp/out.txt; cp /tmp/a "$f"`],
+    ["a tee", `cd /tmp && f=/tmp/out.txt; echo x | tee "$f"`],
+    ["a move", `cd /tmp && f=/tmp/out.txt; mv /tmp/a "$f"`],
+    ["a copy by the braced read", `cd /tmp && f=/tmp/out.txt; cp /tmp/a "\${f}"`],
+    ["a copy after a pushd", `pushd /tmp && f=/tmp/out.txt; cp /tmp/a "$f"`],
+    ["an in-place sed", `cd /tmp && f=/tmp/out.txt; sed -i '' s/a/b/ "$f"`],
+    ["an in-place sed with no suffix", `cd /tmp && f=/tmp/out.txt; sed -i s/a/b/ "$f"`],
+    ["an in-place perl", `cd /tmp && f=/tmp/out.txt; perl -pi -e s/a/b/ "$f"`],
+  ])("%s", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "a copy by a literal the session's environment also sets",
+      `cd /tmp && f=/tmp/out.txt; cp /tmp/a "$f"`,
+    ],
+  ])("%s stays refused", async (_, command) => {
+    const raw = JSON.stringify({ cwd: HOME, tool_input: { command }, tool_name: "Bash" })
+    expect(await check(raw, { ...ENV, f: `${ROOT}/x` })).toBeDefined()
+  })
+
+  test.each([
+    [
+      "a cd through it, which an empty value leaves in the root",
+      `cd /tmp && d=/tmp; cd "$d"; cp /tmp/a x`,
+    ],
+  ])("%s stays refused, from the root", async (_, command) => {
+    expect(await bash(command, ROOT)).toBeDefined()
+  })
+})
+
+describe("a tool an array holds, run with an argument the reader cannot read, changes no variable (PG-2161)", () => {
+  test("a write through a held name after it", async () => {
+    expect(
+      await bash(
+        `A=(agent-browser --session w); S=/tmp/s; "\${A[@]}" eval "$(cat $S/m.js)"; "\${A[@]}" screenshot --full $S/a.png`,
+        WORK,
+      ),
+    ).toBeUndefined()
+  })
+})
+
 describe("a call the reader parses whole keeps its verdict beside the unread-folder rule (PG-2106)", () => {
   test("a runner chain nested 10 deep, three options each, is judged within a bound", async () => {
     const chain = Array.from({ length: 10 }, (_, i) => `npx --a${i} a --b${i} b --c${i} c`).join(

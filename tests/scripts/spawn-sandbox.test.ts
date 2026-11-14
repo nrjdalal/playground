@@ -1,8 +1,16 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-import { FACTORY_SETTINGS, launchAfterRm, root, spawn } from "./spawn-fake"
+import {
+  FACTORY_SETTINGS,
+  launchAfterRm,
+  launchOf,
+  linuxTemp,
+  root,
+  spawn,
+  userTemp,
+} from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them; one took 19.9s on the loaded runner box, so each gets twice that.
 setDefaultTimeout(40_000)
@@ -13,8 +21,6 @@ const main = dirname(
     .stdout.toString()
     .trim(),
 )
-const temp = Bun.spawnSync(["getconf", "DARWIN_USER_TEMP_DIR"]).stdout.toString().trim()
-
 const sandboxOf = (home: string, data = join(home, ".playground")) => ({
   allowUnsandboxedCommands: false,
   enabled: true,
@@ -28,7 +34,7 @@ const sandboxOf = (home: string, data = join(home, ".playground")) => ({
       join(home, ".bun", "install", "cache"),
       join(home, ".cache", "turbo"),
       join(home, ".portless"),
-      ...(temp ? [temp.replace(/\/$/, "")] : []),
+      userTemp,
     ].sort(),
     denyWrite: expect.any(Array),
   },
@@ -65,6 +71,33 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
     })
     expect(existsSync(settingsOf(r, "factory-settings-400k.json"))).toBe(false)
   })
+
+  // Linux's /tmp is every user's and session's, so a sandboxed session there may write a folder of its own under it alone, mode 700, its TMPDIR, in a settings file of its own.
+  test.each([
+    ["a probe", ["probe", "probe-x", "ops", "p.md"], "factory-settings-sandbox-400k-probe-x.json"],
+    [
+      "a closed probe",
+      ["probe", "probe-x", "ops", "p.md", "--sandbox"],
+      "factory-settings-sandbox-closed-400k-probe-x.json",
+    ],
+  ])(
+    "on Linux %s may write its own temp folder under /tmp, and no other place there",
+    async (_, args, file) => {
+      const r = await spawn(args, [], { LINUX_GETCONF: "1" })
+      expect(r.code, r.err).toBe(0)
+      const { allowWrite } = builtOf(r, file).sandbox.filesystem
+      const own = allowWrite.filter((path: string) => dirname(path) === linuxTemp)
+      expect(own).toHaveLength(1)
+      expect(own[0]).toMatch(/\/playground-probe-x\.[A-Za-z0-9]{6}$/)
+      expect(statSync(own[0]).mode & 0o777).toBe(0o700)
+      expect(launchOf(r)).toContain(`export TMPDIR=${own[0]}\n`)
+      const writes = (path: string) =>
+        allowWrite.some((entry: string) => path === entry || path.startsWith(`${entry}/`))
+      for (const path of ["/tmp", "/tmp/another-session/file", join(linuxTemp, "another")])
+        expect(writes(path), path).toBe(false)
+      expect(existsSync(settingsOf(r, "factory-settings-sandbox-400k.json"))).toBe(false)
+    },
+  )
 
   test("a probe whose folder is the main checkout can write no entry of it, .git and .claude/worktrees included", async () => {
     const r = await spawn(["resume", "probe-x", main, id], [], {}, undefined, {

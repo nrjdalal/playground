@@ -146,7 +146,7 @@
   An answered card's result line names what was picked, in the card's own words (`outcomeLine` in `web/next/src/lib/inbox.ts`):
   `B · Hotfix main` for a lettered pick, `A. staging · C. soon` for a multi-question ask's one pick per question, `Approve · Ship 3f9a2c1 to main` for a yes or no, a bare `Approve` or `Deny` for an unlabelled ask, `Sent`, `Saved as a Slack draft`, `Discarded` or `Archived <time>`,
   then a state only where the answer did not simply go through (`Queued for <taker>`, `Send failed: <why>`, `No link: <why>`), never a word typed for its poster, since its light says the rest.
-  A go's light stays blue while its poster carries it out (an accept, an apps change, a guard setting or an own account change the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line, below),
+  A go's light stays blue while its poster carries it out (an accept, a clone, an apps change, a guard setting or an own account change the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line, below),
   until its poster closes it, even once typed into its session,
   since only the ack says it landed (#i115's earlier Delivered word read as landed when it was not).
   A `<taker>` is the session that took the answer: its poster, unless the poster has ended.
@@ -174,7 +174,7 @@
   A pick names its `option`, the row the card showed, by `index`, `letter` and `label` (`choicesOf`): a yes or no's Approve is A and its Deny B, and a lettered ask's None of these takes the letter after its last option.
   A multi-question ask's payload names `picks` instead, one entry per question with its `question` and the same three fields (`picksOf`).
   His comment rides as `comment`, a changed draft's words as `text` (left out once they went with its files, below), a Slack draft's link command as `linkConverter`, what the dashboard ran on Approve as `accepted` (an accept),
-  `listed` (an apps change), `set` (a guard setting), `owned` (an own account change) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
+  `cloned` (a clone), `listed` (an apps change), `set` (a guard setting), `owned` (an own account change) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
   A comment alone (the card's Reply or a chat reply, `re #iN`) stays his own words, typed as he wrote them.
   In every chat the line reads as one answer chip in his bubble, an outline badge holding the item's `ref` and the option's `label`, else the `verb`, with the `comment` as the bubble's words after it (`answerChipOf` in `web/next/src/lib/answer-chip.ts`, `TranscriptBubble`), and a line `payloadOf` cannot parse shows as written.
   A click on the chip opens that card in the aside's Inbox, opening the shelf that holds it first.
@@ -198,7 +198,7 @@
   Retry is offered only after a failure that comes before anything is typed, a lost one, or a stuck queued one (`RETRY_CODES`: `INPUT_NOT_EMPTY`, `LOST`, `NOT_FOUND`, `ON_PICKER`, `SESSIONS_FAILED`, `UPLOAD_FAILED`, and `stuckQueued`,
   so it never types an answer twice) and marks it pending in one write that holds only while it still reads failed or queued at the version read and types it again (`retryDelivery`),
   until it is delivered or they press its own Dismiss;
-  the session carries it out, and the Dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files and running only an `accept` decision's accept, an `apps` decision's list write, a `grant` decision's System Settings pane, a `guard` decision's setting write and an `own` decision's accounts write (all below).
+  the session carries it out, and the Dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files and running only an `accept` decision's accept, a `clone` decision's clone, an `apps` decision's list write, a `grant` decision's System Settings pane, a `guard` decision's setting write and an `own` decision's accounts write (all below).
   No session row carries a count, Playground's included (Worker Lights): the Inbox tab counts what needs the owner and arrived since their last look at the Inbox (`newInInboxCount` in `web/next/src/lib/tab-dot.ts`, the rule `newInInbox` lights the tab dot by), so a look clears it with no answer given,
   its name reading `N new` (a click made only to clear the bar's dot),
   while the Inbox's first row counts every item in the list; the API's `inboxCount` (`api/hono/src/lib/dashboard/inbox.ts`), which Needs you and the sidebar read, counts the open decisions and drafts and the answers that failed to send, plus the unread updates, one put away with Later counted again only once its time has passed,
@@ -241,14 +241,14 @@
   ```
 
   `kind` is `decision` (left out, it is one), `draft` or `update`; `from` is the posting session's name as the Dashboard shows it, since the answer is typed into that session; `title` is one line.
-  A decision's `preview` is one of fourteen, each what Approve does except the `secret` ask and the `reveal` card (below), written in plain words (the `plain-words` skill): `accept` (`scope`, `kind`, `key`, `rev`, `why`, an optional `more` list, below), `apps` (`app`, `change`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
+  A decision's `preview` is one of fifteen, each what Approve does except the `secret` ask and the `reveal` card (below), written in plain words (the `plain-words` skill): `accept` (`scope`, `kind`, `key`, `rev`, `why`, an optional `more` list, below), `apps` (`app`, `change`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
   a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with its options labelled one line each, `options`, 1 to 5 rows of `{label, description?}`, one row for a yes or no and 2 or more for lettered choices, or the older `approve` alone, never both, and an optional `deny` naming the no-go row (Deny, or None of these past one option),
   or a `questions` list of 2 to 20 entries for a card that asks one question at a time, each `{question, options, recommended?}` with its own 1 to 5 `options` and an optional `recommended` index into them, never beside `options`, `approve` or `deny`,
   and optional `attachments` and `scope`, below), `slack` (`to`, `text`, optional `attachments`),
   `ship` (`sha`, `prs` of `{number, title, url?}`, where `bun run ask new` and `edit` fill each `url` into the factory's repo, `factory.repo` else the checkout's origin, so the card links each PR),
-  `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `grant` (`permission`, `why`, below), `guard` (`key`, `scope`, optional `value`, `why`, below), `own` (`key`, `own`, `scope`, `why`, below), `secret` (`key`, `sink`) or `reveal` (`service`, `why`); a decision with none is refused.
+  `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `clone` (`repos`, `why`, below), `grant` (`permission`, `why`, below), `guard` (`key`, `scope`, optional `value`, `why`, below), `own` (`key`, `own`, `scope`, `why`, below), `secret` (`key`, `sink`) or `reveal` (`service`, `why`); a decision with none is refused.
   A `delete`'s `what` names each target by its full path, so the owner approves the very path that goes: `bun run ask new` refuses a short name that is there (a relative or `~` path, a worktree's bare folder name), naming the full path to write, unless that full path stands beside it (`deleteRefusal` in `api/hono/src/lib/dashboard/delete-targets.ts`).
   An `ask`'s `attachments`, a draft's, a `slack` decision's and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
@@ -329,7 +329,7 @@
   What that read found goes in the item's `thread`, a line for each message that leads up to the reply.
   A draft, and a `slack`, `ship` or `ticket` decision, also names where it will land, upfront, not after the send: `link`, the https URL of the Slack thread, channel or DM it posts in (a DM's conversation found or opened first, read-only where it already exists), the canary compare or the pull request,
   or the Linear team or project; or, with no place yet (a brand-new DM nobody can open), `noLink`, one line saying why.
-  One of the two is required and both are refused; `accept`, `apps`, `ask`, `budget`, `delete`, `grant`, `guard`, `own`, `reveal`, `schema` and `secret` take neither.
+  One of the two is required and both are refused; `accept`, `apps`, `ask`, `budget`, `clone`, `delete`, `grant`, `guard`, `own`, `reveal`, `schema` and `secret` take neither.
   A draft that asks or nudges a named person goes to that person's DM, never a public comment: its `to` names the DM and its `link` is that DM conversation, never a thread reply or a PR comment; a channel ask, such as the one in an org's review channel, stays in its channel.
   Its card's place line, above its title, shows the link by name (Open thread for a draft or a Slack link, `owner/repo#N`, `owner/repo compare`, a Linear ID) or `No link: <why>` (`upfrontLink` in `web/next/src/lib/inbox.ts`), until the poster's ack links where it landed.
   An `ask`'s or an update's optional `scope` names whose work it is, unlike a `guard`'s or an `own`'s `scope`, the settings scope its write lands in.
@@ -345,10 +345,10 @@
   Delivery is `pending`, then `delivered` (`via: "session"` with `to`, the session that took it), `queued` (Claude Code holds it, above) or `failed` with the adapter's code; when it fails, or to collect the answer without waiting, the poster polls `playground ask get <id> --ack` until `status` is not `open`, and `--ack` records `{at, status: "delivered", via: "cli"}` (`readAnswer`),
   the first delivery recorded standing.
   A go (Approve, Edit, Send, Draft) closes only once carried out, with where it landed, whatever its kind of link: `playground ask ack <id> --link <https url>` (the Slack message, the pull request, issue or comment,
-  the Linear ticket or comment) or `--no-link "<why>"` for a go with no page (a budget, an accept, an apps change, a grant, a guard setting, an own account change) or a Draft Slack refused (`draft_already_exists`), which `ack` refuses to go without, and one way alone: `--no-link` fits a go with no link recorded, and `--link` one not closed with no link;
+  the Linear ticket or comment) or `--no-link "<why>"` for a go with no page (a budget, an accept, a clone, an apps change, a grant, a guard setting, an own account change) or a Draft Slack refused (`draft_already_exists`), which `ack` refuses to go without, and one way alone: `--no-link` fits a go with no link recorded, and `--link` one not closed with no link;
   a deny, a clear, a discard or a provided secret closes when read, by `get --ack` or a bare `ack`.
   Closing stamps `answer.ackedAt`, the first close's time, even after a delivery to the session, and records `answer.link` or `answer.noLink`; until then a go's card names its pick alone under a blue light;
-  an accept, an apps change, a guard setting or an own account change the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line (below),
+  an accept, a clone, an apps change, a guard setting or an own account change the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line (below),
   and once closed with no link it adds `No link: <why>`, but for a Draft, which reads, gray, `Draft not saved: <why>`.
   `bun run ask stale [--minutes 15] [--since <iso>]` prints one line for each answer of the owner's (not a settle) given since `--since` (default 24 hours ago) and at least `--minutes` ago with no `ackedAt` (a go not closed with its link or why, anything else not read), its delivery pending, failed or typed into the session alike, but for a failed one the owner dismissed,
   which the owner chose not to send (`staleItems`; an answer delivered before acks were stamped, `ACKS_STAMPED_FROM`, is not listed, since it may have been acked with no stamp, while one never delivered still is, and a go delivered before then, read through bun run ask or typed into its session, reads as closed):
@@ -398,7 +398,7 @@
   ```
 
 - An `accept` decision asks the owner to accept an extension proposal no 5 has accepted (`web/next/content/docs/extensions.mdx`'s Review), since a 5 from another session accepts it itself (`judgeItem` in `packages/settings/src/items.ts`) with no card.
-  It is one of the five decisions whose Approve the Dashboard carries out itself, with an `apps` change, a `grant`, a `guard` setting and an `own` account change (below), since an accept is the owner's own act and the CLI refuses one from a session with a role.
+  It is one of the six decisions whose Approve the Dashboard carries out itself, with a `clone`, an `apps` change, a `grant`, a `guard` setting and an `own` account change (below), since an accept is the owner's own act and the CLI refuses one from a session with a role.
   Its `scope`, `kind` and `key` name the proposal in the store's own patterns, none able to start as a flag; its `rev` (7 to 40 hex) is the proposal's head the poster read, so a proposal written since is refused with a 409 (`acceptSchema` in `api/hono/src/lib/dashboard/inbox.ts`); `why` says why to accept it.
   A set the owner reads as one change is one card: `more` lists 1 to 20 further proposals, each with its own `scope`, `kind`, `key` and `rev` by the same rules, accepted after the first in the order written, so a proposal that needs another lands after it.
   Its card reads `On Approve, the dashboard accepts the proposed <kind> <key> in <scope>, as it reads at <rev>.` and the why, or with `more` one numbered line a proposal, in order, and an Approve of `Accept the <kind> <key> and N more`; Edit is refused, so the words approved are the words posted.
@@ -427,6 +427,25 @@
                         {"scope": "acme", "kind": "rule", "key": "quiet-hours", "rev": "6c2d3e4f"}],
                "why": "The skill reads the templates, and the rule names the skill"}}
   EOF
+  ```
+
+- A `clone` decision asks the owner to clone the extensions onto a new machine, its first clone, since the extensions root takes writes from the owner alone (`scripts/hooks/README.md`'s no-extensions-write) and every step the owner takes is one GUI action.
+  Its `repos` lists 1 to 20, each scope once, in the order Approve clones them: each its `repo` (`owner/name`), its `scope` and its `folder`, that scope's full path in the extensions root (`scopeDir`), the login's repo first; `why` says why (`cloneSchema` in `api/hono/src/lib/dashboard/inbox.ts`).
+  A card whose `folder` is not its scope's in the data folder, or is already there, is refused as it is posted or edited, naming each such folder (`cloneRefused`), so the card shows the very folders Approve fills.
+  Its card reads `On Approve, the dashboard clones these repos into this machine's extensions, in order, and stops at the first that fails. Then it copies the guards' lists from this checkout into your login's lists, keeping each one already there. It makes no repo.`
+  Under it come one numbered `<repo> into <folder>` line a repo and the why, with an Approve of `Clone <repo>` or `Clone the N repos`; Edit is refused.
+  Approve checks the card again as it runs, its shape and its folders against this machine, refusing before it records anything, then runs `ext init --dry-run` through `runCli()`, recording a failure with nothing cloned when gh's login or the repo it names is not the card's first, or that repo is not on GitHub,
+  then `ext init` for the first and `ext add <scope> <repo>` for each further one, in order, neither with `--yes`, so off a terminal neither makes a repo (`cloneAll`); a stack showing test data refuses it, cloning nothing.
+  Once every repo is cloned, it seeds the guards' lists from the checkout's `extensions/core/lists` into the login's lists as one commit, the step `playground ext import --from-tree` takes, keeping each list the login already holds, so a second seed changes nothing (`seedLists`, `importLists` with `keep`).
+  The answer keeps `cloned: {exitCode, line}`: `<repo> into <folder>, …; seeded N of the guards' lists, kept M already there`, then `; still missing: <lists>` for each list neither the checkout nor the login holds (core ships no `no-public-leak`).
+  On a clone failure it keeps the ones cloned, the failed one with its reason, then `not tried:` and the rest, and on a seed failure `cloned <repos>; seeding the guards' lists failed: <reason>`.
+  The card reads `Cloned: <line>` green or `Clone failed (exit N): <line>` red.
+  A failure part way leaves the cloned folders in place, so a new card names only the rest, since one naming a folder already there is refused.
+
+  ```json
+  {"from": "dispatcher", "title": "Clone your extensions onto this machine?",
+   "preview": {"type": "clone", "why": "This machine has no extensions yet",
+     "repos": [{"folder": "<data folder>/extensions/<login>", "repo": "<login>/playground-<login>", "scope": "<login>"}]}}
   ```
 
 - An `apps` decision asks the owner to add an app to the owner's own apps, the `desktop-owner-apps` guard list no-desktop-owner-app keeps agent-desktop away from, or to remove one, since that list changes only by the owner's act (`scripts/hooks/README.md`'s no-desktop-owner-app).

@@ -32,6 +32,7 @@ import {
   trashPurge,
 } from "../../../../../packages/scripts/src/ops-tick/tick"
 import { NO_CHECKOUT } from "../../../../../packages/scripts/src/playground/probe"
+import { procDir } from "../../../../scripts/fixtures/proc"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
 import { watchTorn } from "../torn-reads"
@@ -2179,5 +2180,64 @@ describe("every script a beat runs", () => {
     expect(
       scripts.filter((path) => !existsSync(path)).map((path) => path.slice(REPO.length + 1)),
     ).toEqual([])
+  })
+})
+
+// Linux has no vm.loadavg: procps's sysctl says so and exits 255, so the load comes from /proc/loadavg, and with neither it is named, never read as 0 (#2201).
+describe("the load where sysctl has no vm.loadavg", () => {
+  const LINUX = {
+    "vm.loadavg": {
+      code: 255,
+      err: "sysctl: cannot stat /proc/sys/vm/loadavg: No such file or directory\n",
+    },
+  }
+  const saved = process.env.PLAYGROUND_PROC
+  afterAll(() => {
+    process.env.PLAYGROUND_PROC = saved
+  })
+
+  test("the tick beat reads /proc/loadavg's load5", async () => {
+    process.env.PLAYGROUND_PROC = procDir({ load1: 12, load5: 16.5 })
+    const { ctx, sent } = fake(scratch(), at(13, 3), { ...LINUX, "pcpu=": PS })
+    await beat("tick").run(ctx)
+    expect(sent).toEqual([
+      {
+        text: "load5 16.5: bun pid 4242: 300% CPU cmux pid 311: 90% CPU launchd pid 12: 10% CPU kernel_task pid 1: 0% CPU",
+        to: "builder",
+      },
+    ])
+  })
+
+  test.each([
+    ["sysctl exits non-zero and /proc/loadavg is missing", LINUX],
+    ["sysctl prints nothing and /proc/loadavg is missing", { "vm.loadavg": "" }],
+    ["sysctl prints no numbers and /proc/loadavg is missing", { "vm.loadavg": "{ x y z }\n" }],
+  ])("the tick beat names an unread load when %s", async (_, answers) => {
+    process.env.PLAYGROUND_PROC = procDir({}, ["loadavg"])
+    const { ctx, sent } = fake(scratch(), at(13, 3), answers)
+    await beat("tick").run(ctx)
+    expect(sent).toEqual([
+      { text: "load5 unread: neither sysctl vm.loadavg nor /proc/loadavg reads", to: "builder" },
+    ])
+  })
+
+  test("the sweep reads /proc/loadavg's load5 past 30, and names an unread load to ops", async () => {
+    const ops = scratch()
+    process.env.PLAYGROUND_PROC = procDir({ load1: 31, load5: 31 })
+    const high = fake(ops, at(13, 7), LINUX)
+    await beat("sweep").run(high.ctx)
+    expect(high.sent).toEqual([
+      { text: "load5 31 (passed 30); lanes drop to 12", to: "dispatcher" },
+      { text: "load5 31: lanes drop to 12", to: "ops" },
+    ])
+    process.env.PLAYGROUND_PROC = procDir({}, ["loadavg"])
+    const unread = fake(ops, at(13, 37), LINUX)
+    await beat("sweep").run(unread.ctx)
+    expect(unread.sent).toEqual([
+      {
+        text: "ops-tick sweep: load failed: load5 unread: neither sysctl vm.loadavg nor /proc/loadavg reads",
+        to: "ops",
+      },
+    ])
   })
 })

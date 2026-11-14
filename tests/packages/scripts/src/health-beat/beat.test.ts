@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -9,6 +9,7 @@ import {
   readBeat,
   type Reading,
 } from "../../../../../packages/scripts/src/health-beat/beat"
+import { procDir } from "../../../../scripts/fixtures/proc"
 
 const scratch = mkdtempSync(join(tmpdir(), "health-beat-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -207,5 +208,44 @@ describe("readBeat", () => {
       sessions: { idle: 1, stuck: 1, working: 2 },
       zone: "UTC",
     })
+  })
+})
+
+// Linux's top has no -l, so the idle share comes from two /proc/stat reads a wait apart, and with neither it reads as unknown, never 0 (#2201).
+describe("the idle share where top has no -l", () => {
+  const saved = process.env.PLAYGROUND_PROC
+  afterAll(() => {
+    process.env.PLAYGROUND_PROC = saved
+  })
+  const linux = async (argv: string[]) =>
+    argv[0] === "top"
+      ? { code: 1, out: "top: unknown option 'l'\n" }
+      : argv[0] === "sysctl"
+        ? { code: 255, out: `sysctl: cannot stat /proc/sys/${argv[2]!.replaceAll(".", "/")}\n` }
+        : { code: 1, out: "" }
+  const read = (wait: () => Promise<void>) =>
+    readBeat({
+      at: AT,
+      data: join(scratch, "linux"),
+      freeMin: 8,
+      portless: join(scratch, "no-portless"),
+      repo: join(scratch, "repo"),
+      run: linux,
+      wait,
+      zone: "UTC",
+    })
+
+  test("reads /proc/stat twice", async () => {
+    const dir = procDir({ cores: 20, idle: 37.5, load5: 4 }, [], [["stat"]])
+    process.env.PLAYGROUND_PROC = dir
+    const got = await read(async () =>
+      renameSync(join(dir, "later", "1", "stat"), join(dir, "stat")),
+    )
+    expect(got).toMatchObject({ cores: 20, idlePct: 37.5, load5: 4 })
+  })
+
+  test("reads unknown when /proc/stat does not move between the reads", async () => {
+    process.env.PLAYGROUND_PROC = procDir()
+    expect(await read(async () => {})).toMatchObject({ idlePct: null })
   })
 })

@@ -2324,14 +2324,16 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   if (unknown) for (const key of steered) delete known[key]
   const lexed = lex(command, known)
   if (!loneCall(lexed.commands)) tuning = NO_TUNING
-  steadyAt = steadyNames(named, lexed.commands)
+  // a writer's file a cd's && chain sets to a literal is held past the chain too, never a folder, since a failed cd leaves it empty and a cd to it then stays put
+  steadyAt = steadyNames(named, lexed.commands, true)
   const env: Env = {
     cwd: directory,
     // the line starts in the folder the tool names, which the reader has proved by the payload itself
     cwdSure: directory,
     files: new Map(),
     // a cd or env -C through a steady variable holding a literal absolute path is read by that path (landsHeld in shell.ts)
-    hold: (word, cmd, here) => heldWord(word, here, steadyAt(slotOf.get(cmd) ?? cmd)),
+    hold: (word, cmd, here) =>
+      heldWord(word, here, { ...steadyAt(slotOf.get(cmd) ?? cmd), past: undefined }),
     known,
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },

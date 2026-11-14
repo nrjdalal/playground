@@ -307,34 +307,111 @@ def sysctl_int(name):
 def sandbox_refuses(name):
     return "not permitted" in subprocess.run(["sysctl", "-n", name], capture_output=True, text=True).stderr
 
-# (load1, load5) from sysctl, else from uptime, since Claude Code's sandbox refuses the sysctl command's name lookup; None when neither reads
-def loadavg():
-    words = subprocess.run(["sysctl", "-n", "vm.loadavg"], capture_output=True, text=True).stdout.strip(" {}\n").split()
-    if len(words) < 2:
-        out = subprocess.run(["uptime"], capture_output=True, text=True, env=dict(os.environ, LC_ALL="C")).stdout
-        words = out.rpartition("load average")[2].lstrip("s:").replace(",", " ").split()
+# Each reading takes macOS's command first and, where it does not read, Linux's /proc text (packages/scripts/src/ops-machine/readings.ts takes the same sources), and is None when neither reads, never 0; source names where each gate's reading came from, for its lines.
+# PROC is the folder that text comes from: PLAYGROUND_PROC under the test sandbox's marker alone (TEST_SANDBOX_HOME), where a test points it at recorded text, so a session that sets it cannot feed a gate a reading; else /proc.
+PROC = (os.environ.get("TEST_SANDBOX_HOME") and os.environ.get("PLAYGROUND_PROC")) or "/proc"
+source = {"cpu_idle": "top -l 2 -n 0", "free": "sysctl kern.memorystatus_level", "load5": "sysctl vm.loadavg", "pressure": "sysctl kern.memorystatus_vm_pressure_level", "swapins": "vm_stat"}
+
+def proc_text(name):
+    try:
+        with open(os.path.join(PROC, name)) as f:
+            return f.read()
+    except OSError:
+        return None
+
+# name's text now and once the sleep program has slept a second (a program, so a test's fake can move the second read's text in), or None when either does not read
+def proc_pair(name):
+    first = proc_text(name)
+    if first is None:
+        return None
+    subprocess.run(["sleep", "1"])
+    second = proc_text(name)
+    return None if second is None else (first, second)
+
+def loads_of(text):
+    words = text.replace("{", " ").replace("}", " ").replace(",", " ").split()
     try:
         return float(words[0]), float(words[1])
     except (IndexError, ValueError):
         return None
 
-# the CPU's idle share from top's second sample, as run-slot's gauges read it (the first reads since boot), or None when it cannot be read
+# (load1, load5) from sysctl, else Linux's /proc/loadavg, else uptime, since Claude Code's sandbox refuses the sysctl command's name lookup; None when none reads
+def loadavg():
+    loads = loads_of(subprocess.run(["sysctl", "-n", "vm.loadavg"], capture_output=True, text=True).stdout)
+    if loads is None:
+        loads = loads_of(proc_text("loadavg") or "")
+        if loads is not None:
+            source["load5"] = "/proc/loadavg"
+    if loads is None:
+        out = subprocess.run(["uptime"], capture_output=True, text=True, env=dict(os.environ, LC_ALL="C")).stdout
+        loads = loads_of(out.rpartition("load average")[2].lstrip("s:"))
+    return loads
+
+# the core count: sysctl's hw.ncpu, else the cpu<n> lines of Linux's /proc/stat, else Python's count
+def cores_count():
+    n = sysctl_int("hw.ncpu") or len(re.findall(r"^cpu\d+ ", proc_text("stat") or "", re.M))
+    return n or os.cpu_count()
+
+# the memory pressure level: sysctl's, else Linux's PSI in /proc/pressure/memory on macOS's scale, 4 (critical) once full avg10 is 10% or more, 2 (warn) once some avg10 is, else 1 (the 10% lines are estimated, from Android's lmkd, which acts on memory stalls of 70 to 100 ms a second)
+def pressure_level():
+    level = sysctl_int("kern.memorystatus_vm_pressure_level")
+    if level is not None:
+        return level
+    avg = dict(re.findall(r"^(some|full) avg10=([0-9.]+)", proc_text("pressure/memory") or "", re.M))
+    if len(avg) < 2:
+        return None
+    source["pressure"] = "/proc/pressure/memory"
+    return 4 if float(avg["full"]) >= 10 else 2 if float(avg["some"]) >= 10 else 1
+
+# the free share: sysctl's, else MemAvailable's whole share of MemTotal in Linux's /proc/meminfo
+def free_share():
+    free = sysctl_int("kern.memorystatus_level")
+    if free is not None:
+        return free
+    kb = dict(re.findall(r"^(MemTotal|MemAvailable):\s+(\d+) kB", proc_text("meminfo") or "", re.M))
+    if len(kb) < 2 or int(kb["MemTotal"]) == 0:
+        return None
+    source["free"] = "/proc/meminfo"
+    return int(kb["MemAvailable"]) * 100 // int(kb["MemTotal"])
+
+# the CPU's idle share from top's second sample, as run-slot's gauges read it (the first reads since boot), else idle and iowait's share of every field over two of Linux's /proc/stat reads a second apart, or None when neither reads
 def cpu_idle():
     try:
         out = subprocess.run(["top", "-l", "2", "-n", "0"], capture_output=True, text=True, timeout=10).stdout
         shares = re.findall(r"^CPU usage:.* ([0-9.]+)% idle", out, re.M)
-        return float(shares[1]) if len(shares) == 2 else None
+        if len(shares) == 2:
+            return float(shares[1])
     except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    pair = proc_pair("stat")
+    try:
+        # user, nice, system, idle, iowait, irq, softirq, steal (guest time is counted in user already)
+        a, b = ([int(n) for n in re.search(r"^cpu\s+(.*)$", text, re.M).group(1).split()[:8]] for text in pair)
+    except (AttributeError, TypeError, ValueError):
         return None
+    total = sum(b) - sum(a)
+    if total <= 0:
+        return None
+    source["cpu_idle"] = "/proc/stat"
+    return round((b[3] + b[4] - a[3] - a[4]) * 100 / total, 2)
 
-# the last second's swap-ins, from vm_stat's last row under a header naming each column, or None when it cannot be read
+# the last second's swap-ins, from vm_stat's last row under a header naming each column, else pswpin's rise over a second in Linux's /proc/vmstat, or None when neither reads
 def swapins():
     try:
         rows = [line.split() for line in subprocess.run(["vm_stat", "-c", "2", "1"], capture_output=True, text=True, timeout=10, check=True).stdout.splitlines()]
         column = next(row for row in rows if "swapins" in row).index("swapins")
         return int(rows[-1][column])
     except (IndexError, OSError, StopIteration, subprocess.SubprocessError, ValueError):
+        pass
+    pair = proc_pair("vmstat")
+    try:
+        a, b = (int(re.search(r"^pswpin (\d+)$", text, re.M).group(1)) for text in pair)
+    except (AttributeError, TypeError):
         return None
+    if b < a:
+        return None
+    source["swapins"] = "/proc/vmstat"
+    return b - a
 
 def load(name):
     path = os.path.join(data_dir, name)
@@ -373,22 +450,22 @@ if backend == "glm":
         # a GLM session draws no Claude usage, so it has its own gate: load5 under gates.glmLoad5Max, memory pressure 1 and swap-ins under gates.glmSwapinsMax a second
         loads = loadavg()
         if loads is None:
-            refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
+            refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime), nor Linux's /proc/loadavg")
         readings["load5"] = loads[1]
         if readings["load5"] >= gates["glmLoad5Max"]:
-            refuse("load", f"load5 is {readings['load5']:.2f} (sysctl vm.loadavg), and a GLM session starts under {fmt(gates['glmLoad5Max'])}")
-        readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
+            refuse("load", f"load5 is {readings['load5']:.2f} ({source['load5']}), and a GLM session starts under {fmt(gates['glmLoad5Max'])}")
+        readings["pressure"] = pressure_level()
         if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
             readings["memory"] = "pressure level refused by the sandbox, so the swap-ins alone decide"
         elif readings["pressure"] is None:
-            refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
+            refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level), nor Linux's /proc/pressure/memory")
         elif readings["pressure"] != 1:
-            refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), and a GLM session starts at 1 alone")
+            refuse("memory", f"pressure level is {readings['pressure']} ({source['pressure']}), and a GLM session starts at 1 alone")
         readings["swapins"] = swapins()
         if readings["swapins"] is None:
-            refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1)")
+            refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1), nor Linux's /proc/vmstat")
         if readings["swapins"] >= gates["glmSwapinsMax"]:
-            refuse("memory", f"swap-ins are {readings['swapins']}/s (vm_stat), and a GLM session starts under {fmt(gates['glmSwapinsMax'])}/s")
+            refuse("memory", f"swap-ins are {readings['swapins']}/s ({source['swapins']}), and a GLM session starts under {fmt(gates['glmSwapinsMax'])}/s")
     except Skip:
         pass
 else:
@@ -396,11 +473,11 @@ else:
         # 1 load: max(load1, load5) plus the starts the log holds from the last gates.startsWindow seconds
         loads = loadavg()
         if loads is None:
-            refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
+            refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime), nor Linux's /proc/loadavg")
         load1, load5 = loads
-        cores = sysctl_int("hw.ncpu") or os.cpu_count()
+        cores = cores_count()
         if cores is None:
-            refuse("load", "it cannot read the core count (sysctl hw.ncpu)")
+            refuse("load", "it cannot read the core count (sysctl hw.ncpu), nor Linux's /proc/stat")
         readings["cores"] = cores
         mult = 1.0
         raw_mult = os.environ.get("PLAYGROUND_LOAD_MULT")
@@ -454,39 +531,39 @@ else:
                 else f"the {cores} cores"
             )
             at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
-            idle = "" if role not in MANAGER_ROLES else f", and the CPU's idle share, which passes a manager at {MANAGER_IDLE_MIN}% or more, does not read (top -l 2 -n 0)" if readings["cpu_idle"] is None else f", and the CPU reads {readings['cpu_idle']:g}% idle (top -l 2 -n 0), under the {MANAGER_IDLE_MIN}% a manager needs to pass it"
+            idle = "" if role not in MANAGER_ROLES else f", and the CPU's idle share, which passes a manager at {MANAGER_IDLE_MIN}% or more, does not read (top -l 2 -n 0), nor Linux's /proc/stat" if readings["cpu_idle"] is None else f", and the CPU reads {readings['cpu_idle']:g}% idle ({source['cpu_idle']}), under the {MANAGER_IDLE_MIN}% a manager needs to pass it"
             refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}{idle}. Wait for it to fall, or close a session that is done, and run it again.")
     except Skip:
         pass
 
     try:
         # 2 memory; where Claude Code's sandbox refuses the pressure level and free share, the swap-ins stand in, under GLM's line
-        readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
+        readings["pressure"] = pressure_level()
         if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
             readings["memory"] = "pressure level and free share refused by the sandbox"
             readings["swapins"] = swapins()
             if readings["swapins"] is None:
-                refuse("memory", "the sandbox refuses the pressure level, and it cannot read the swap-ins (vm_stat -c 2 1)")
+                refuse("memory", "the sandbox refuses the pressure level, and it cannot read the swap-ins (vm_stat -c 2 1), nor Linux's /proc/vmstat")
             if readings["swapins"] >= gates["glmSwapinsMax"]:
-                refuse("memory", f"the sandbox refuses the pressure level, and swap-ins are {readings['swapins']}/s (vm_stat), {fmt(gates['glmSwapinsMax'])}/s is the line. Close a session or wait for the pressure to pass, and run it again.")
+                refuse("memory", f"the sandbox refuses the pressure level, and swap-ins are {readings['swapins']}/s ({source['swapins']}), {fmt(gates['glmSwapinsMax'])}/s is the line. Close a session or wait for the pressure to pass, and run it again.")
         else:
             if readings["pressure"] is None:
-                refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
+                refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level), nor Linux's /proc/pressure/memory")
             if readings["pressure"] not in (1, 2):
-                refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), 1 or 2 passes")
-            readings["free"] = sysctl_int("kern.memorystatus_level")
+                refuse("memory", f"pressure level is {readings['pressure']} ({source['pressure']}), 1 or 2 passes")
+            readings["free"] = free_share()
             if readings["free"] is None:
-                refuse("memory", "it cannot read the free share (sysctl kern.memorystatus_level)")
+                refuse("memory", "it cannot read the free share (sysctl kern.memorystatus_level), nor Linux's /proc/meminfo")
             if readings["free"] < gates["memoryFreeMin"]:
-                refuse("memory", f"free is {readings['free']}% (sysctl kern.memorystatus_level), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
+                refuse("memory", f"free is {readings['free']}% ({source['free']}), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
         # paging, for a fresh worker start alone (room is read for one), since free memory counts compressible pages
         if room and "swapins" not in readings:
             readings["swapins"] = swapins()
             if readings["swapins"] is None:
-                refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1)")
+                refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1), nor Linux's /proc/vmstat")
             if readings["swapins"] >= gates["glmSwapinsMax"]:
-                free = f", while free reads {readings['free']}% (sysctl kern.memorystatus_level), which counts compressible pages" if "free" in readings else ""
-                refuse("memory", f"swap-ins are {readings['swapins']}/s (vm_stat), {fmt(gates['glmSwapinsMax'])}/s is the line{free}. Close a session or wait for the paging to pass, and run it again.")
+                free = f", while free reads {readings['free']}% ({source['free']}), which counts compressible pages" if "free" in readings else ""
+                refuse("memory", f"swap-ins are {readings['swapins']}/s ({source['swapins']}), {fmt(gates['glmSwapinsMax'])}/s is the line{free}. Close a session or wait for the paging to pass, and run it again.")
     except Skip:
         pass
 
@@ -1696,7 +1773,15 @@ LIVE=
 # The folder the session runs in, as the launch below moves to it.
 OWN=${DIR:-$REPO}
 [ "$MODE" = column ] && [ -z "$TREE" ] && OWN=$REPO
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" "$MANAGER" "$CLOSED" "$LIVE" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+# The session's temp folder, which its sandbox may write: macOS's per-user one, else on Linux, whose getconf has no such name and whose /tmp every user and session shares, a folder of the session's own that mktemp makes under /tmp at each launch, mode 700, which the launch sets as TMPDIR; a sandboxed start there builds a file of its own, since the folder is the session's.
+TEMP=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null) || TEMP=
+LINUX_TEMP=
+if [ -z "$TEMP" ]; then
+  LINUX_TEMP=$(mktemp -d "/tmp/playground-$NAME.XXXXXX") || refuse "mktemp -d under /tmp failed, so $NAME has no temp folder of its own"
+  TEMP=$LINUX_TEMP
+  [ -n "$SANDBOX" ] && [ "$BUILT" = "$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k.json" ] && BUILT="$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k-$NAME.json"
+fi
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$TEMP" "$OWN" "$MEMORY_DIR" "$MANAGER" "$CLOSED" "$LIVE" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
 src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager, closed, live = sys.argv[1:15]
 settings = json.load(open(src))
@@ -1879,8 +1964,12 @@ if [ "$RUNTIME" = herdr ]; then
   mkdir -p "$RESUME_DIR" && chmod 700 "$RESUME_DIR" || refuse "it cannot prepare $RESUME_DIR"
   # A pane herdr restored keeps the folder it had, so the launch moves to the session's own; a resume stamps each run in <name>.ran, so you can see when a restore ran it.
   HEAD_LINES="cd $(printf %q "$CWD") || exit 1"$'\n'
-  # A herdr server hands its panes the shell basics alone, so the launch gives the session the user's temp folder, keeping one already set.
-  HEAD_LINES+='export TMPDIR="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR)}"'$'\n'
+  # A herdr server hands its panes the shell basics alone, so the launch gives the session its temp folder (TEMP, above): on macOS its per-user one, keeping one already set; on Linux the session's own, always, since an inherited TMPDIR there (an rc file's /tmp) would widen the sandbox's and no-raw-spawn's temp folder to what every session shares.
+  if [ -n "$LINUX_TEMP" ]; then
+    HEAD_LINES+="export TMPDIR=$(printf %q "$LINUX_TEMP")"$'\n'
+  else
+    HEAD_LINES+='export TMPDIR="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR)}"'$'\n'
+  fi
   [ "$MODE" = resume ] && HEAD_LINES+="date -u +%FT%TZ >> $(printf %q "$RESUME_DIR/$NAME.ran")"$'\n'
 fi
 (umask 077 && printf 'rm -f -- "$0"\n%sexport PLAYGROUND_REPO=%q\n%s' "$HEAD_LINES" "$MAIN" "$COMMAND" > "$LAUNCH_FILE" && chmod 700 "$LAUNCH_FILE") ||

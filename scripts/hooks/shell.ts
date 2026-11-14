@@ -13,8 +13,10 @@ export type Text = {
   tilde?: boolean
   unknown?: string
   value: string
+  vanishes?: boolean
   variable?: string
 }
+// `vanishes` marks a variable a builtin or a loop's later pass may have changed (`change`, `repass`), whose value may be no word.
 // `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
 // `raw` keeps the source of a word that holds a value the lexer cannot read, so a hook can lex it again once the call has set its variables.
 // `source` is the word as written, quotes and expansions included, so a hook can judge what a word expands rather than what it came to.
@@ -105,6 +107,8 @@ export type Env = {
   // Set by a hook that holds the line's steady variables (`steady.ts`): a cd's folder word with those it reads put in, else undefined, so a cd through one is read by the folder it names, and one through a literal absolute path (`landsHeld`) is read as a cd to that path
   hold?: (word: Word, cmd: Command, env: Env) => Word | undefined
   known: Record<string, string>
+  // How many times the whole line names each name, a whole array run as a program word aside (`namings`), so `arrayRun` reads an array only where its one assignment names it
+  namings?: Map<string, number>
   old?: { dir?: string }
   // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
   oldFrom?: string[]
@@ -201,6 +205,8 @@ let tokens = 0
 const freshToken = () => ++tokens
 // The reserved words a body's own commands carry, which the shell may not run
 const BODIES = new Set(["do", "elif", "else", "then"])
+// The words that open zsh's `repeat N` body: a `do` up to its `done`, or a brace up to its own
+const REPEAT_BODY = new Set(["do", "{"])
 // Every reserved word the walk counts, each read in command position alone: `grep -q done` names a pattern, not a loop's end
 const MARKERS = new Set([...RESERVED, ...OPENS, ...CLOSES, ...BODIES])
 
@@ -216,6 +222,13 @@ function markers(words: Word[]): string[] {
     } else if (MARKERS.has(w.value)) {
       out.push(w.value)
       k++
+    } else if (
+      w.value === "repeat" &&
+      REPEAT_BODY.has(words[k + 2]?.value ?? "") &&
+      !words[k + 2].quoted
+    ) {
+      // zsh's `repeat N do … done` and `repeat N { … }` are loops: the count is skipped so the do or the brace opens the body
+      k += 2
     } else if (ASSIGN.test(w.value)) k++
     else break
   }
@@ -963,6 +976,8 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   // How many bodies the walk is inside, how many of them a loop runs, and the operator that joined the last command to this one, so a command the shell may not run is marked unsure and one it runs only on the command before it succeeding is marked chained.
   let depth = 0
   let loops = 0
+  // the depth each zsh `repeat N {` body sits at, a loop until its closing brace
+  const counted: number[] = []
   let after = ""
   // each body the walk is inside, true for one the shell may keep for a later call
   const bodies: boolean[] = []
@@ -1019,18 +1034,29 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       }
       if (each === "foreach") heads.push(false)
       else if (each === "end" && heads.length > 0 && !loop) heads.pop()
+      // zsh's `repeat N {` opens a loop's body that its closing brace ends (markers reads the brace)
+      const counting = each === "repeat" && reserved.includes("{")
       // every command between a loop's head and its `do` runs once for each pass: a while's or an until's condition, and the body of zsh's short loops, which have no `do`
-      if (loops > 0 || loop || head || each === "foreach") done.repeated = true
+      if (loops > 0 || loop || head || each === "foreach" || counting) done.repeated = true
       if (outer && !loop && reserved.some((w) => w === "while" || w === "until"))
         done.atLeastOnce = true
       depth = Math.max(0, depth + opened - closed)
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0))
+      if (counting) {
+        counted.push(depth)
+        loops++
+      }
+      while (counted.length > 0 && depth < counted[counted.length - 1]) {
+        counted.pop()
+        loops = Math.max(0, loops - 1)
+      }
       // a run ends only at an operator that runs the next command whatever this one did, and only outside every body: a `|` keeps the pipeline in the run, and entering a group, a body or a script keeps the run it was reached through
       if (depth === 0 && FREES.has(op)) {
         lx.token = freshToken()
         lx.orRun = op === "||"
       }
       after = op
+      if (counting) opens.push(lx.commands.length)
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted) break
         opens.push(lx.commands.length)
@@ -1653,6 +1679,8 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       } else break
     }
     if (COUNTED.has(wrapper)) take()
+    // zsh's `repeat N do … done` and `repeat N { … }` run their body's first command after the do or the brace
+    if (wrapper === "repeat" && REPEAT_BODY.has(peek()?.value ?? "") && !peek()?.quoted) take()
   }
   const first = take()
   return {
@@ -1724,14 +1752,242 @@ async function runAll(
     // a script in another language is not read as shell
     consumer.runsStdin = kind !== "code"
   }
+  // a script the line runs keeps the whole line's count, which a hook's own reading of the line again leaves as it is
+  env.namings ??= namings(lexed.commands)
   const unbind = new Map<Command, () => void>()
   for (const [k, cmd] of lexed.commands.entries()) {
     const at = envOf(cmd.scope)
+    if (cmd.repeated && !lexed.commands[k - 1]?.repeated) repass(lexed.commands.slice(k), envs)
     const verdict = await examine(cmd, at, visit, builtins)
     if (verdict) return verdict
     unbind.get(cmd)?.()
     bind(lexed.commands, k, at, unbind)
+    change(cmd, at)
   }
+}
+
+// The builtins that set a variable by a name among their words, from bash 5.3's bash(1), SHELL BUILTIN COMMANDS, and zsh 5.9's zshbuiltins(1) and zshmodules(1)
+export const NAME_SETTERS = new Set([
+  "compgen",
+  "declare",
+  "export",
+  "float",
+  "getln",
+  "getopts",
+  "integer",
+  "let",
+  "local",
+  "mapfile",
+  "nameref",
+  "pcre_match",
+  "print",
+  "printf",
+  "private",
+  "read",
+  "readarray",
+  "readonly",
+  "set",
+  "shift",
+  "stat",
+  "strftime",
+  "syserror",
+  "sysopen",
+  "sysread",
+  "syswrite",
+  "typeset",
+  "unset",
+  "vared",
+  "wait",
+  "zcurses",
+  "zformat",
+  "zgdbmpath",
+  "zgetattr",
+  "zlistattr",
+  "zmodload",
+  "zparseopts",
+  "zpty",
+  "zregexparse",
+  "zselect",
+  "zsocket",
+  "zstat",
+  "zstyle",
+  "zsystem",
+  "ztcp",
+  "ztie",
+  "zuntie",
+])
+// the setters that name a variable only by their v option, so their other words are text they print
+export const PRINTS = new Set(["print", "printf"])
+// the builtins that run text or load code as the line's own shell, which can set any variable: a trap's text runs there (a DEBUG trap's before each command), as do zsh's sched's, emulate -c's, a zstyle -e value's and a zregexparse action's, bash's mapfile -C callback, an alias on a later line, a history event fc or r runs, and the code autoload, zmodload and enable -f load
+export const RUNS_TEXT = new Set([
+  ".",
+  "alias",
+  "autoload",
+  "emulate",
+  "enable",
+  "eval",
+  "fc",
+  "mapfile",
+  "r",
+  "readarray",
+  "sched",
+  "source",
+  "trap",
+  "zmodload",
+  "zregexparse",
+  "zstyle",
+])
+
+// A variable a builtin may have changed: unread, and maybe no word, so the empty reading drops it as a program word; the split reading still reads the value it held before (heldResolved), so no reading is lost
+const CHANGED: Text = { ...unknown("a value a builtin may change"), vanishes: true }
+const DECLARES = new Set([...EXPORTS, "float", "integer", "private"])
+
+// Marks each held variable a command may change, wherever on the line it is, since a change the shell may make is one the reader cannot rule out: from bash 3.2's bash(1), SHELL BUILTIN COMMANDS (bash 5.3's for the nameref `declare -n`), and zsh 5.9's zshbuiltins(1) and zshmodules(1), every variable after text a RUNS_TEXT builtin runs or loads (an eval's only when the reader cannot read it, since the walk follows it otherwise) and after a setter (NAME_SETTERS) whose name word the reader cannot read; else unset's names (every one under zsh's -m), read's (REPLY when it names none), and print -v's and printf -v's but for a format of plain text, which end of input or an empty format leaves empty, a declaration's names under an option or, but for export and readonly, with no `=` (a local of its own in a function), zsh's `set -A` or `+A` name, and every name any other setter's words hold but getopts', which always takes an option letter or `?`; a program word the reader cannot read is the program a split reading resolves it to, or an array run whole its elements (arrayRun), and one none resolves is read as an eval when an argument is unread too (d-2047r)
+function change(cmd: Command, env: Env): void {
+  const { args, first, name } = parse(cmd)
+  const words = args.map((a) => a.value)
+  // a program word a split reading resolves (`U=unset; $U X`), or an array run whole (`A=(tool …); "${A[@]}" …`, `A=(unset X)`), changes what that program changes; one none resolves may be any builtin: with an argument it cannot read either, as an eval's, it may change every variable, and else the names its arguments hold
+  if (marked(name)) {
+    const array = arrayRun(cmd, first, env)
+    // an array's text-runner runs text the walk never follows (`A=(eval 'unset X')`), and one the reader cannot read whole may hold any builtin
+    if (array === null || (array && RUNS_TEXT.has(parse(array).name))) {
+      for (const key of env.vars.keys()) setVar(env.vars, key, CHANGED)
+      return
+    }
+    const variants = array
+      ? [array]
+      : splitHeld(cmd, name, env).filter((variant) => !marked(parse(variant).name))
+    for (const variant of variants) change(variant, env)
+    if (variants.length > 0) return
+    const known = heldKnown(env)
+    const unread = args.some((a) => {
+      const value = marked(a.value) && a.raw ? relexedValue(a.raw, known) : a.value
+      return value === undefined || marked(value)
+    })
+    const names = unread ? [...env.vars.keys()] : words.filter((w) => NAME.test(w))
+    for (const key of names) if (env.vars.has(key)) setVar(env.vars, key, CHANGED)
+    return
+  }
+  // an element's assignment or an append (`A[1]=x`, `A[1]+=x`, zsh's `A[1]=()`, `A+=(x)`) reads as a program word, and changes its array
+  const element = (first?.source ?? first?.value ?? "").match(SUBSCRIPTED)?.[1]
+  if (element) {
+    if (env.vars.has(element)) setVar(env.vars, element, CHANGED)
+    return
+  }
+  const options = words.filter((w) => /^[-+]./.test(w) && w !== "--")
+  const prints = PRINTS.has(name)
+  // print and printf name one only by a v in an option cluster (`-v N`, `-vN`, `-rv N`), as steadyNames reads them
+  const vNames = prints
+    ? words.flatMap((w, k) =>
+        /^-[^-\s]*v/.test(w) ? [w.slice(w.indexOf("v") + 1), words[k + 1] ?? ""] : [],
+      )
+    : []
+  const nameWords = prints ? vNames : words.map((w) => w.split("=")[0])
+  const all =
+    (RUNS_TEXT.has(name) && (name !== "eval" || args.some(unreadWord))) ||
+    (NAME_SETTERS.has(name) && nameWords.some(marked)) ||
+    (name === "unset" && options.some((w) => w.includes("m")))
+  const read = name === "read" ? binds(cmd) : []
+  const names = all
+    ? [...env.vars.keys()]
+    : name === "unset"
+      ? options.some((w) => w.includes("f"))
+        ? []
+        : words
+      : name === "read"
+        ? read.length > 0
+          ? read
+          : ["REPLY"]
+        : prints
+          ? printsText(words)
+            ? []
+            : vNames
+          : DECLARES.has(name)
+            ? words.filter(
+                (w) =>
+                  options.length > 0 ||
+                  (!ASSIGN.test(w) && name !== "export" && name !== "readonly"),
+              )
+            : name === "set"
+              ? words.flatMap((w, k) =>
+                  /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : [],
+                )
+              : NAME_SETTERS.has(name) && name !== "getopts"
+                ? words.flatMap((w) => w.match(/[A-Za-z_]\w*/g) ?? [])
+                : []
+  // a subscripted name (`unset 'A[0]'`, `read 'A[1]'`) changes its array
+  for (const key of names.map((w) => w.split("=")[0].replace(/\[[\s\S]*$/, ""))) {
+    if (!NAME.test(key)) continue
+    // a name a read or a v option sets is set, maybe empty; one any other builtin names is changed only where the line holds it, since an unset one already reads as no word
+    if (env.vars.has(key) || name === "read" || prints) setVar(env.vars, key, CHANGED)
+  }
+}
+
+// Each time the line names a variable, counted, a whole array run as a program word aside: an expansion as written (`$A`, `${A[1]}`, `${#A[@]}`), and a word whose value names it as a setter or an assignment takes a name (`A`, `A[0]`, `A=x`, `A+=(x)`, `x=A`, `-vA[0]`)
+function namings(commands: Command[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  const add = (name: string): void => void counts.set(name, (counts.get(name) ?? 0) + 1)
+  const count = (source: string | undefined, value: string | undefined): void => {
+    for (const [, name] of (source ?? "").matchAll(/\$\{?[#!+^=~]?([A-Za-z_]\w*)/g)) add(name)
+    const text = value ?? ""
+    for (const [, name] of text.matchAll(/(?<=^|=)([A-Za-z_]\w*)(?=\[|\+?=|$)/g)) add(name)
+    const cluster = text.match(/^-(\w+)/)?.[1] ?? ""
+    for (let k = 1; k < cluster.length; k++) {
+      const name = cluster.slice(k).match(/^[A-Za-z_]\w*/)?.[0]
+      if (name && /^(?:\[|\+?=|$)/.test(text.slice(k + 1 + name.length))) add(name)
+    }
+  }
+  for (const cmd of commands) {
+    const { args, first, name } = parse(cmd)
+    // eval's text runs in the line's own shell, so every name it holds counts as the line's, read in one pass so a deep chain of evals stays linear
+    if (name === "eval")
+      for (const a of args) for (const [key] of a.value.matchAll(/[A-Za-z_]\w*/g)) add(key)
+    for (const w of cmd.words)
+      if (w !== first || !WHOLE_RUN.test(w.raw ?? w.source ?? "")) count(w.source ?? w.raw, w.value)
+    for (const r of cmd.redirects) {
+      count(r.target?.source, r.target?.value)
+      count(r.body?.value, undefined)
+    }
+  }
+  return counts
+}
+
+// An array the line holds, run whole as the program word (`"${A[@]}"`), runs its elements as the command's first words: the command with them in its place when each is a word the reader reads as written, null when one is not, when something may have changed the array, or when the line names it beside its one whole assignment and its runs (`namings`), so the program may be any; undefined for any other program word, or a name the line never set to an array
+function arrayRun(cmd: Command, first: Word | undefined, env: Env): Command | null | undefined {
+  const key = (first?.raw ?? first?.source)?.match(WHOLE_RUN)?.[1]
+  const set = key ? env.vars.get(key) : undefined
+  if (!key || !set) return
+  // an array the line names anywhere but its one whole assignment and its runs may have changed there (`read "A[0]"`, `export "A[1]=x"`, `: ${A[1]}`)
+  if ((env.namings?.get(key) ?? 0) > 1) return null
+  if (set.unknown !== undefined || set.vanishes) return null
+  // an assignment's word keeps its source in the line's variables, an array's `A=(…)` as written
+  const inner = (set as Partial<Word>).source?.match(/^[A-Za-z_]\w*=\(([\s\S]*)\)$/)?.[1]
+  if (inner === undefined) return
+  const { commands } = lex(inner)
+  const elements = commands.length === 1 ? commands[0].words : []
+  if (elements.length === 0 || commands[0].redirects.length > 0 || elements.some(unreadWord))
+    return null
+  return { ...cmd, words: cmd.words.flatMap((w) => (w === first ? elements : [w])) }
+}
+
+// A loop runs its body again after every change the pass before made, so a run of commands a loop or a count may repeat takes, before its first is read, each change its commands make and an unread value for each held variable it assigns, which a later pass reads (d-2047r); a scope the walk has not entered yet copies these from the one around it
+function repass(commands: Command[], envs: Map<number, Env>): void {
+  for (const cmd of commands) {
+    if (!cmd.repeated) return
+    const env = envs.get(cmd.scope)
+    if (!env) continue
+    change(cmd, env)
+    const { local, name } = parse(cmd)
+    if (name !== "") continue
+    for (const key of local.keys()) if (env.vars.has(key)) setVar(env.vars, key, CHANGED)
+  }
+}
+
+// Whether print -v or printf -v sets its name to a format of plain text with a word in it, which no argument can leave empty: no `%` and no `\\`
+function printsText(words: string[]): boolean {
+  const v = words.findIndex((w) => w === "-v" || /^-v\w/.test(w))
+  const format = words[v + (words[v] === "-v" ? 2 : 1)]
+  return v >= 0 && format !== undefined && !marked(format) && /^[^%\\]*\S[^%\\]*$/.test(format)
 }
 
 // A binder (`binds`) gives its names a value the reader cannot read in walk order, in its own scope: a for or select header for its own body alone, back to what they held at its close, since its body runs only once it has bound and its list may be empty; any other binder for the commands after it, where the shell runs it unconditionally there
@@ -2024,6 +2280,10 @@ const vanishingParts = (source: string): boolean => {
 // read's options that take a value, which binds no name (bash manual, Bourne Shell Builtins and Bash Builtins: read)
 const READ_VALUES = new Set(["d", "i", "n", "N", "p", "t", "u"])
 const NAME = /^[A-Za-z_]\w*$/
+// An array element's assignment or an append as written, its name captured: `A[1]=x`, `A[$k]+=x`, zsh's `A[1]=()`, `A+=(x)`
+const SUBSCRIPTED = /^([A-Za-z_]\w*)(?:\[[^\]]*\]\+?|\+)=/
+// A whole array run as written, its name captured: `"${A[@]}"`, `${A[@]}`
+const WHOLE_RUN = /^"?\$\{([A-Za-z_]\w*)\[@\]\}"?$/
 
 // The names one command gives a value without an `=` (bind reads them), each at its builtin's binding place as the bash manual gives it: `for NAME in`, `select NAME in`, `read [options] NAME…` and its `-a NAME`, `getopts OPTSTRING NAME` and `printf -v NAME`; a declaration builtin gives none, its `=` part read as an assignment
 function binds({ words }: Command): string[] {
@@ -2059,7 +2319,7 @@ function binds({ words }: Command): string[] {
   return names.filter((w) => NAME.test(w))
 }
 
-// Whether a word may expand to no word: the reader read none of it, and it is VANISHING_PART alone with every variable it names one the line never set (a binder sets one, `binds`) or set to nothing, or an unread part of a word a script the line built carries (`eval $X …`, `bash -c "$X …"`), which keeps no source of its own
+// Whether a word may expand to no word: the reader read none of it, and it is VANISHING_PART alone with every variable it names one the line never set (a binder sets one, `binds`), set to nothing or blanks alone, or one a builtin may have changed (`change`), or an unread part of a word a script the line built carries (`eval $X …`, `bash -c "$X …"`), which keeps no source of its own
 const mayVanish = (w: Word, env: Env): boolean =>
   !!w.source &&
   /^\u0000+$/.test(w.value) &&
@@ -2067,7 +2327,8 @@ const mayVanish = (w: Word, env: Env): boolean =>
     (vanishingParts(w.source) &&
       [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
         const set = env.vars.get(name)
-        return !set || (!set.unknown && set.value === "")
+        // a value of blanks alone splits to no word under bash's default IFS and any IFS holding them
+        return !set || !!set.vanishes || (!set.unknown && /^[ \t\n]*$/.test(set.value))
       })))
 
 // The empty reading of a command: each program word that may expand to no word (mayVanish) dropped, until one that stays leads, so the word after it is judged as the program (`$X git commit`, `nice $X git commit`, `$X $Y git commit`); none when the program word stays. It is judged beside the typed reading, so a verdict only moves to refused.
