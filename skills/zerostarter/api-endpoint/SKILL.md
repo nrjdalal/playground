@@ -135,6 +135,10 @@ A capability the owner may keep or remove is an experiment, so it is a plugin, a
 - **Web**: `web/next/src/plugins/<id>/` holds its page view and hooks; core reaches it only through `web/next/src/plugins/registry.ts` (the sidebar's `useAppUnread`, for one), so core imports no plugin there either. Its page file under `app/(protected)/dashboard/apps/<id>/` and its entry in `lib/apps.ts` go with it on removal. The page calls `notFound()` and `lib/apps.ts` drops its entry while `features.<id>` is off; the env override reaches only the API, so a web query of its routes reads a 404 as empty with `retry: false`.
 - Done when `tests/api/hono/src/plugins/registry.test.ts` passes: its import check fails a core file that imports a plugin other than through the registry, and a plugin that imports another.
 
+## A lib file that starts a process
+
+A file under `api/hono/src/lib` that starts a process (`Bun.spawn`, `Bun.$`, `child_process`) goes on the `ALLOWLIST` in `tests/api/hono/src/lib/spawn-allowlist.test.ts` in the same change, since that test fails on a start it does not list.
+
 ## WebSocket routes
 
 For a live server-to-client stream instead of polling, upgrade a `GET` with `upgradeWebSocket` (`api/hono/src/local.ts`). The socket owner differs by host: on Bun (local, Docker) it is `hono/bun` with the shared `websocket` handler next to `fetch` in the `Bun.serve()` export; on Vercel it is the Node adapter (`@hono/node-server` + `ws`) exporting the http server, the setup Vercel documents for Hono. That host branching (adapter + server export) lives in `@/lib/server`, picked at boot from `process.env.VERCEL`, so a new WS route just imports `upgradeWebSocket` from there and registers. `/api/health/ws` is the reference: a snapshot on connect, then a heartbeat every 5s.

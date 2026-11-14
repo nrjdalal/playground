@@ -44,6 +44,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A worker's brief says that any change under `web/next/`, a docs `.mdx` included, gets its tester's drive, posted as a `## TesterBot · PASS at <sha7>` comment.
    A guard's plan and its brief (a hook or a gate that refuses calls) each name its threat model as a closed list of literal forms (for a path guard: an Edit or Write tool call on the path, and a shell write, copy, move or delete that names the path literally),
    say plainly that a same-user session can still get past the guard by a form outside that list, and hold a Done when that names only forms from that list.
+   A guard that reads a program started by a wrapper (`xargs`, `env`, `nice`, `timeout` and the like) names in its plan every wrapper option that changes what runs or what it runs with,
+   such as xargs' `-I`, `-J` and `--replace`, whose replace string can stand for the program's own word, and `--process-slot-var`, which sets a variable such as `PATH` in the program's environment, since one PR's round 1 found two such bypasses its new reader had opened.
    A guard's brief tells its worker that it, and every harness it starts, tests each form only as data, through the hook's own `check()` or test entry point, and runs no recursive-delete form at all, since a form can name a path outside HOME, so pointing HOME at a scratch folder contains nothing.
    A guard's false positive that has a working form takes the docs path first: name the working form once, in the skill that hits it.
    A loosening goes ahead only when no working form exists or the refusal recurs.
