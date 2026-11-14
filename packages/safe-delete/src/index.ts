@@ -689,7 +689,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     // a clean detached checkout at a commit origin/canary holds is a reader of canary, not the row's work, so a live row holds it no more
     if (
       !branch.length &&
-      !git("status", "--porcelain").out &&
+      !git("status", "--porcelain", "--untracked-files=all").out &&
       git("merge-base", "--is-ancestor", "HEAD", "origin/canary").ok
     ) {
       holders.note?.(
@@ -735,7 +735,9 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   }
   if (holders.discard) return null
   const discard = `playground rm --worktree ${at} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`
-  const changed = git("status", "--porcelain", "-z", "--no-renames").out.split("\0").filter(Boolean)
+  const changed = git("status", "--porcelain", "-z", "--no-renames", "--untracked-files=all")
+    .out.split("\0")
+    .filter(Boolean)
   if (changed.length) {
     const paths = changed.slice(0, 3).map((line) => line.slice(3))
     const more = changed.length > 3 ? `, and ${changed.length - 3} more` : ""
