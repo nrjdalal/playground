@@ -10364,6 +10364,19 @@ var SED_SUFFIX = /^(?:\.[\w.~-]*)?$/;
 var SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
 var SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}(${SED_TEXT})[gpI0-9]*)[ \t]*`;
 var SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`);
+function follows(have, want) {
+  for (let k = 0;k < want.length; k++) {
+    const part = have[k];
+    if (part === "**")
+      return true;
+    if (part === undefined)
+      return false;
+    const glob = part.includes("(") && part.includes(")") ? part.replace(/\(/g, "{").replace(/\)/g, "}").replace(/\|/g, ",") : part.replace(/[()]/g, "");
+    if (!new Bun.Glob(glob).match(want[k]))
+      return false;
+  }
+  return true;
+}
 var SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y");
 function sedWrites(script) {
   const read = (text) => text.replace(/\\(.)|&/gs, (m, c) => m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
@@ -10842,17 +10855,26 @@ async function inspect(raw, environment, unknown = false) {
     }
   };
   const scriptNames = (script, env) => {
+    const near = relative(env)?.split(sep2);
     for (const text of sedWrites(script)) {
-      if (holds(text, env))
+      const plain = text.replace(/['"]/g, "");
+      if (holds(plain, env))
         return `${root} in its text`;
-      for (const token of text.split(/[\s;|&'"`<>=:]+/)) {
-        const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(token);
-        const value = tilde ? home + token.slice(tilde[0].length) : token;
-        if (value.startsWith(sep2) && reaches(value))
-          return value;
-      }
+      for (const token of plain.split(/[\s;&`<>=:]+/))
+        for (const word of [token, ...token.split(/[{},]/)]) {
+          const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word);
+          const value = tilde ? home + word.slice(tilde[0].length) : word;
+          if (value.startsWith(sep2) && reaches(value))
+            return value;
+          const parts = word.split(sep2);
+          if (near && follows(parts, near))
+            return word;
+          if (parts.some((_, k) => k > 0 && follows(parts.slice(k), rootParts)))
+            return word;
+        }
     }
   };
+  const rootParts = needle.split(sep2).filter(Boolean);
   const reaches = (path) => {
     const parts = path.split(sep2);
     const at = parts.findIndex((part) => GLOB.test(part));
@@ -10860,15 +10882,7 @@ async function inspect(raw, environment, unknown = false) {
       return inRoot(path);
     const base = real(parts.slice(0, at).join(sep2) || sep2);
     const have = [...base === sep2 ? [""] : base.split(sep2), ...parts.slice(at)];
-    const want = root.split(sep2);
-    for (let k = 0;k < want.length; k++) {
-      const part = have[k];
-      if (part === "**" || part?.includes("("))
-        return true;
-      if (part === undefined || !new Bun.Glob(part).match(want[k]))
-        return false;
-    }
-    return true;
+    return follows(have, root.split(sep2));
   };
   const placed = (word, env, steady) => pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined;
   const afterUnreadCd = (write) => `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`;
@@ -11029,13 +11043,14 @@ async function inspect(raw, environment, unknown = false) {
     }
     const quiet = !whole && quietCommit(cmd, parsed, env);
     const sedScripts = whole ? undefined : inPlaceScripts(cmd, parsed, env);
-    const sedEdit = sedInPlace(cmd, parsed);
     if (!first || EXPORTS3.has(name) || reader)
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
     const tool = GNU_NAMED.exec(name)?.[1] ?? name;
     const gnu = tool !== name || first.value.includes("/gnubin/");
     const remover = REMOVERS.has(tool);
+    const edited = new Set(inPlace(tool, args));
+    const sedEdit = sedInPlace(cmd, parsed) ?? (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : []);
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"));
     if (env.cwdAnywhere)
       return refuse(`${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`);

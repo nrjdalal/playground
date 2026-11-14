@@ -1152,6 +1152,20 @@ const SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
 const SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}(${SED_TEXT})[gpI0-9]*)[ \t]*`
 // an in-place sed's script read whole by its allowlist: line, $ or /regex/ addresses and their ranges, then d, p, or s/// with flags from g, p, I and digits; every other command and flag (w, W, r, R, e, s///w, s///e) is off it
 const SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`)
+// Whether a path's parts can match each of `want`'s in turn, the parts after them free: each a glob of its own, a ** matching the rest, a zsh (a|b) read as {a,b}, and a lone ( or ), a subshell's, dropped
+function follows(have: string[], want: string[]): boolean {
+  for (let k = 0; k < want.length; k++) {
+    const part = have[k]
+    if (part === "**") return true
+    if (part === undefined) return false
+    const glob =
+      part.includes("(") && part.includes(")")
+        ? part.replace(/\(/g, "{").replace(/\)/g, "}").replace(/\|/g, ",")
+        : part.replace(/[()]/g, "")
+    if (!new Bun.Glob(glob).match(want[k])) return false
+  }
+  return true
+}
 // one item of an in-place sed's script and its separator, read in turn from where the last ended
 const SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y")
 // The text each s/// of an in-place sed's script writes, as sed reads it: a backslash dropped (`\/` reads as /, `\n` as a line break) and the matched text (&, \1 to \9) read as a *, since it can be anything; the whole script read so when its items do not read in turn
@@ -1744,17 +1758,25 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
-  // What an in-place sed's script writes that a shell may run later (sedWrites): the root in its text, else a word under ~, $HOME or / that can name the root or a path in it (reaches), so a glob or an escaped slash spells the root no other way than its literal path
+  // What an in-place sed's script writes that a shell may run later (sedWrites), its quotes dropped: the root in its text, else a word, or a part of a brace list, under ~, $HOME or / that can name the root or a path in it (reaches), or that holds the root's own parts after any / (follows), from its start too when the cwd is above the root, so a glob or an escaped slash spells the root no other way than its literal path
   const scriptNames = (script: string, env: Env): string | undefined => {
+    const near = relative(env)?.split(sep)
     for (const text of sedWrites(script)) {
-      if (holds(text, env)) return `${root} in its text`
-      for (const token of text.split(/[\s;|&'"`<>=:]+/)) {
-        const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(token)
-        const value = tilde ? home + token.slice(tilde[0].length) : token
-        if (value.startsWith(sep) && reaches(value)) return value
-      }
+      const plain = text.replace(/['"]/g, "")
+      if (holds(plain, env)) return `${root} in its text`
+      for (const token of plain.split(/[\s;&`<>=:]+/))
+        for (const word of [token, ...token.split(/[{},]/)]) {
+          const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word)
+          const value = tilde ? home + word.slice(tilde[0].length) : word
+          if (value.startsWith(sep) && reaches(value)) return value
+          const parts = word.split(sep)
+          if (near && follows(parts, near)) return word
+          if (parts.some((_, k) => k > 0 && follows(parts.slice(k), rootParts))) return word
+        }
     }
   }
+  // the root's parts as a script may spell them: from the home when the root is under it, else from /
+  const rootParts = needle.split(sep).filter(Boolean)
   // Whether an absolute path or glob can name the root or a path in it: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any
   const reaches = (path: string) => {
     const parts = path.split(sep)
@@ -1762,13 +1784,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (at < 0) return inRoot(path)
     const base = real(parts.slice(0, at).join(sep) || sep)
     const have = [...(base === sep ? [""] : base.split(sep)), ...parts.slice(at)]
-    const want = root.split(sep)
-    for (let k = 0; k < want.length; k++) {
-      const part = have[k]
-      if (part === "**" || part?.includes("(")) return true
-      if (part === undefined || !new Bun.Glob(part).match(want[k])) return false
-    }
-    return true
+    return follows(have, root.split(sep))
   }
   // whether the hook places a write's path, the whole word, with no folder of the shell's: absolute, under ~, or through a variable the call holds
   const placed = (word: Word, env: Env, steady: Steady) =>
@@ -2045,7 +2061,6 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // a quiet commit's message is text git never runs, a gated call it names included, and an in-place sed's script is text sed reads as a program of its own
     const quiet = !whole && quietCommit(cmd, parsed, env)
     const sedScripts = whole ? undefined : inPlaceScripts(cmd, parsed, env)
-    const sedEdit = sedInPlace(cmd, parsed)
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
@@ -2054,6 +2069,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const tool = GNU_NAMED.exec(name)?.[1] ?? name
     const gnu = tool !== name || first.value.includes("/gnubin/")
     const remover = REMOVERS.has(tool)
+    // an in-place sed's scripts: sedInPlace's, else on a sed spelled off its list (-I, --in-place=, s|||) every word but the files inPlace reads, each read whole by sedWrites
+    const edited = new Set(inPlace(tool, args))
+    const sedEdit =
+      sedInPlace(cmd, parsed) ??
+      (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : [])
     // POSIXLY_CORRECT set in the call, by a prefix or on its line, makes a GNU build stop its options at the first operand
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"))
     // a line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run inside this root, whatever folder it started in
