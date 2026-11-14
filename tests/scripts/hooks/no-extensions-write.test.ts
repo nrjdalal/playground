@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { GUARD_SETTING_KEYS } from "../../../packages/settings/src/guard-keys"
 import { check, GUARD_KEYS, guarded } from "../../../scripts/hooks/no-extensions-write"
 import { overBaseline, stepsOf } from "./pace"
+import { as, pinPlatform } from "./platform"
 
 // A home whose data folder holds an extensions root, with a list, policy.json and a scope's sources, as a machine with extensions has.
 const HOME = mkdtempSync(join(tmpdir(), "no-extensions-write-"))
@@ -31,6 +32,7 @@ symlinkSync(ROOT, LINK)
 symlinkSync(ROOT, join(DATA, "store"))
 symlinkSync(DATA, join(HOME, "pg"))
 afterAll(() => rmSync(HOME, { force: true, recursive: true }))
+pinPlatform("darwin")
 
 const ENV = { HOME }
 const CHECKOUT = join(import.meta.dir, "..", "..", "..")
@@ -3432,5 +3434,66 @@ describe("an xargs-led grep and bun -e from the data folder", () => {
     const reason = await bash(`bun -e 'await Bun.write("extensions/x", "")'`, DATA)
     expect(reason).toContain("the dispatcher hands the owner the command")
     expect(reason).not.toContain(WORKING)
+  })
+})
+
+describe("on Linux a bare cp, ln, mv, install and sed read as GNU's builds (PG-2204)", () => {
+  test.each([
+    ["cp of a variable GNU may read as its target folder", "cp $X /tmp/y"],
+    ["cp of a quoted variable GNU may read as its target folder", `cp "$S" /tmp/y`],
+    ["ln of a variable GNU may read as its target folder", "ln $X /tmp/y"],
+    ["ln -s of a variable GNU may read as its target folder", "ln -s $X /tmp/y"],
+    ["cp of a substitution GNU may read as its target folder", "cp $(cat /tmp/a) /tmp/y"],
+    ["cp of a backtick substitution GNU may read as its target folder", "cp `cat /tmp/a` /tmp/y"],
+  ])("%s is refused on Linux and allowed on macOS", async (_, command) => {
+    expect(await as("linux", () => bash(command))).toContain("no-extensions-write hook refuses")
+    expect(await as("darwin", () => bash(command))).toBeUndefined()
+  })
+
+  test.each([
+    ["an in-place sed beside another call", `bun x.ts; sed -i '/(a) .*/d' ${WORK}/f`],
+    [
+      "an in-place sed of an absolute file after a cd to a variable",
+      `cd "$X"; sed -i s/a/b/ /tmp/p.json`,
+    ],
+    [
+      "an in-place sed of a file through a variable the line holds",
+      `F=${WORK}/f; bun x.ts; sed -i '/x (a)/d' "$F"`,
+    ],
+    [
+      "an in-place sed of parenthesised addresses beside a writing redirect",
+      `sed -i '/item 5 (a, after item 4)/d; /item 5 note: carry it/d' ${WORK}/queue.md; echo "$(date -u +%FT%TZ) x" >> ${WORK}/notes.md`,
+    ],
+  ])(
+    "GNU sed's script after a bare -i: %s is allowed on Linux and refused on macOS",
+    async (_, command) => {
+      expect(await as("linux", () => bash(command))).toBeUndefined()
+      expect(await as("darwin", () => bash(command))).toContain("no-extensions-write hook refuses")
+    },
+  )
+
+  test.each([
+    ["cp into the root as its target folder", `cp -t ${ROOT} /tmp/f`],
+    ["cp into the root by its long target option", `cp --target-directory=${ROOT} /tmp/f`],
+    [
+      "cp into the root by its long target option and the next word",
+      `cp --target-directory ${ROOT} /tmp/f`,
+    ],
+    ["ln into the root as its target folder", `ln -t ${ROOT} /tmp/f`],
+    ["ln -s into the root as its target folder", `ln -s -t ${ROOT} /tmp/f`],
+    ["mv into the root as its target folder", `mv -t ${ROOT} /tmp/f`],
+    ["install into the root as its target folder", `install -t ${ROOT} /tmp/f`],
+    ["cp with its target folder after an operand", `cp /tmp/f -t ${ROOT}`],
+    ["mv with its target folder after an operand", `mv /tmp/f -t ${ROOT}`],
+    ["cp to a file in the root", `cp /tmp/f ${ROOT}/x`],
+    ["an in-place GNU-form sed of a file in the root", `bun x.ts; sed -i '/(a) .*/d' ${LIST}`],
+  ])("%s stays refused on both", async (_, command) => {
+    for (const platform of ["darwin", "linux"] as const)
+      expect(await as(platform, () => bash(command))).toContain("no-extensions-write hook refuses")
+  })
+
+  test("cp to a literal path elsewhere stays allowed on both", async () => {
+    for (const platform of ["darwin", "linux"] as const)
+      expect(await as(platform, () => bash("cp /tmp/f /tmp/y"))).toBeUndefined()
   })
 })

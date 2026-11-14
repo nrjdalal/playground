@@ -43,6 +43,7 @@ import {
   NEVER_MADE,
   REFUSED_FORMS,
 } from "./fixtures/refused-forms"
+import { pinPlatform } from "./platform"
 import { storeWith } from "./render-set"
 import { git } from "./scratch-git"
 
@@ -50,6 +51,8 @@ const CHECKOUT = join(import.meta.dir, "..", "..", "..")
 // where it lands, since no-outside-pr-code judges a skill script's path past this Mac's /var link
 const SCRATCH = realpathSync(mkdtempSync(join(tmpdir(), "refused-forms-")))
 afterAll(() => rmSync(SCRATCH, { force: true, recursive: true }))
+// every row holds macOS's reading of a bare build, which no-extensions-write reads as GNU's on Linux
+pinPlatform("darwin")
 
 // A home whose data folder holds an extensions root, its links and files, as the guards' own tests build it.
 const HOME = join(SCRATCH, "home")
