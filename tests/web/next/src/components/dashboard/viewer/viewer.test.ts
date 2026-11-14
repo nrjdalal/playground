@@ -69,7 +69,7 @@ describe("Open in new tab opens a blob URL with the Dashboard's origin only for 
       "MGI5YzZmMWUtMTExMS00MTExLTgxMTEtMDAwMDAwMDAwMDAx",
     )
     expect(tab).toContain(
-      'srcdoc="&lt;script nonce=MGI5YzZmMWUtMTExMS00MTExLTgxMTEtMDAwMDAwMDAwMDAx&gt;a()&lt;/script&gt;',
+      'srcdoc="&lt;script nonce=MGI5YzZmMWUtMTExMS00MTExLTgxMTEtMDAwMDAwMDAwMDAx &gt;a()&lt;/script&gt;',
     )
     expect(tab).toContain('<iframe sandbox="allow-scripts" srcdoc=')
     expect(tab).not.toContain("allow-same-origin")

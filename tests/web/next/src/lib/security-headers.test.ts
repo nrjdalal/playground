@@ -59,6 +59,7 @@ describe("the local build's headers", () => {
 })
 
 describe("the wiring", () => {
+  // read as text, since importing next.config.ts validates the env and generates the docs' MDX files
   test("next.config.ts sets securityHeaders by the hosted flag on every path", async () => {
     const source = await Bun.file(join(web, "next.config.ts")).text()
     expect(source).toContain("securityHeaders(env.NEXT_PUBLIC_PLAYGROUND_HOSTED)")

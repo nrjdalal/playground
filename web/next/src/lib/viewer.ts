@@ -74,9 +74,9 @@ export const frameLoad = (ready: boolean, restored: boolean): FrameLoad =>
 const PAGE_POLICY =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'"
 
-// On the hosted build the Dashboard page's CSP holds a nonce, which a frame's srcdoc and a blob it makes inherit, so each script tag in a framed page's text carries it to run, one a script's own string names too; it goes in unquoted, since the proxy's base64 has no padding, so that string stays whole. The frame's sandbox, with no same-origin, keeps the nonce from the Dashboard's storage, and the local build's page holds none, so its pages are served as before.
+// On the hosted build the Dashboard page's CSP holds a nonce, which a frame's srcdoc and a blob it makes inherit, so each script tag in a framed page's text carries it to run, one a script's own string names too; it goes in unquoted, since the proxy's base64 has no padding, so that string stays whole, and with a space after it, so a self-closing slash never runs into it. The frame's sandbox, with no same-origin, keeps the nonce from the Dashboard's storage, and the local build's page holds none, so its pages are served as before.
 const withNonce = (html: string, nonce?: string): string =>
-  nonce ? html.replace(/<script\b/gi, `<script nonce=${nonce}`) : html
+  nonce ? html.replace(/<script(?=[\s/>])/gi, `<script nonce=${nonce} `) : html
 
 // The nonce the Dashboard page's own scripts carry, which the browser keeps on each script's nonce property alone; none on the local build or off the browser.
 export const documentNonce = (

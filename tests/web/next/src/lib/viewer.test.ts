@@ -140,12 +140,14 @@ describe("asViewerPage", () => {
   // the hosted build's page CSP reaches a srcdoc frame too, so each script in it carries the page's nonce to run; the frame's sandbox, with no same-origin (documents.test.ts), keeps the nonce from the Dashboard's storage
   test("on the hosted build, every script in the page and the keys script carries the page's nonce", () => {
     const served = asViewerPage(
-      "<p>hi</p><script>a()</script><SCRIPT src=x></SCRIPT><scripts>",
+      "<p>hi</p><script>a()</script><SCRIPT src=x></SCRIPT><script/><scripts><script-card></script-card>",
       NONCE,
     )
-    expect(served.match(/<script\b/gi)?.length).toBe(3)
-    expect(served.match(new RegExp(`<script nonce=${NONCE}[ >]`, "gi"))?.length).toBe(3)
-    expect(served).toContain("<scripts>")
+    expect(served.match(new RegExp(`<script nonce=${NONCE} `, "gi"))?.length).toBe(4)
+    // a tag the nonce cannot run into: a self-closing slash stays its own, and another element named script-something stays itself
+    expect(served).toContain(`<script nonce=${NONCE} />`)
+    expect(served).toContain(`<script nonce=${NONCE}  src=x></SCRIPT>`)
+    expect(served).toContain("<scripts><script-card></script-card>")
   })
 
   // the nonce goes in unquoted, as base64 with no padding needs no quotes, so a script's own string that names a script tag stays one string
@@ -155,7 +157,7 @@ describe("asViewerPage", () => {
       NONCE,
     )
     expect(served).toContain(
-      `const tag = "<script nonce=${NONCE}>"; const other = '<script nonce=${NONCE}>'`,
+      `const tag = "<script nonce=${NONCE} >"; const other = '<script nonce=${NONCE} >'`,
     )
   })
 
