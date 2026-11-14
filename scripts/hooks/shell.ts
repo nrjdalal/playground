@@ -1706,23 +1706,70 @@ function expandTilde(cmd: Command, name: string, env: Env): Command[] {
   })
 }
 
-// The words a command's unquoted reads of a variable the line set to a value the reader holds (`$V`, `${V}`) split into at blanks, as bash and zsh under sh_word_split run them, the home a value opens with expanded as the assignment did (`C="git push"; $C`, `W="w --"; run-slot.sh $W git push`), judged beside the typed reading so the hook is never looser than that reading; none when no word reads one, and a cd's own words stay as chdirTo reads them.
-function splitHeld(cmd: Command, name: string, env: Env): Command[] {
+// A word that is one or more bare variable reads and nothing else (`$C`, `${C}`, `$C""`, `$P$Q`, zsh's `${=C}`), its quotes and split flag stripped: splitting such a word reveals a held command or a held run-slot framing, where resplitting a word that merely holds a variable among other text (`$D/README.md`) would only re-judge an argument the typed reading already read.
+const holdsCommand = (w: Word): boolean =>
+  !!w.source &&
+  /^(?:\$\{\w+\}|\$\w+)+$/.test(w.source.replace(/["']/g, "").replace(/\$\{[=~^]+/g, "${"))
+
+// The split readings of a command: each word that holds a command (holdsCommand) re-lexed with the variables the line set, resolved through one another, and split at blanks and the line's IFS, each unread part kept as one unread word so the program word is still judged (`C="git push"; $C`, `$C""`, `${=C}`, a copy `A=git; C=$A; $C`, a partial `C="git push $X"; $C`). It is judged beside the typed reading, so a verdict only moves to refused; none when no word holds a command, and a cd keeps its own words, which chdirTo reads.
+export function splitHeld(cmd: Command, name: string, env: Env): Command[] {
   if (name === "cd" || name === "popd" || name === "pushd") return []
+  if (!cmd.words.some((w) => w.splits && w.raw && holdsCommand(w))) return []
+  const known = heldKnown(env)
+  const seps = ifsSplit(env)
   let split = false
   const words = cmd.words.flatMap((w): Word[] => {
-    const held =
-      !w.quoted && w.value === UNKNOWN && w.variable ? env.vars.get(w.variable) : undefined
-    if (!held || held.unknown || marked(held.value)) return [w]
+    if (!w.splits || !w.raw || !holdsCommand(w)) return [w]
+    const value = relexedValue(w.raw, known)
+    if (value === undefined) return [w]
     split = true
-    // an assignment expands the ~ its value opens with (`S=~/x`), which the held value keeps as written
-    return held.value
-      .replace(/^~(?=\/|$)/, homedir())
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((value) => ({ quoted: false, value }))
+    return splitValue(value, seps)
   })
   return split ? [{ ...cmd, words }] : []
+}
+
+// A raw word re-lexed with the known variables, its value kept even where an unread part stays; undefined when the lexer makes other than one word (a substitution of its own), as relexed drops it. zsh's `${=V}` split flag is stripped so the braced read resolves, since the split reading splits the value anyway.
+function relexedValue(raw: string, known: Record<string, string>): string | undefined {
+  const words = lex(raw.replace(/\$\{[=~^]+/g, "${"), known).commands.at(-1)?.words
+  return words?.length === 1 ? words[0].value : undefined
+}
+
+// The home an assignment expands the value's leading ~ to (`S=~/x`), which the held value keeps as written, applied to a word the reader can still read whole.
+const tildeHome = (value: string): string =>
+  marked(value) ? value : value.replace(/^~(?=\/|$)/, homedir())
+
+// The variables the line set whose value the reader can build, each resolved through those set before it and an unread part kept, over the base environment; a copy's raw holds `key=value`, so its value is read after the first `=`.
+function heldKnown(env: Env): Record<string, string> {
+  const known: Record<string, string> = { ...env.known }
+  for (const [key, text] of env.vars) {
+    if (key === "TMPDIR") continue
+    if (!text.unknown && !marked(text.value)) known[key] = tildeHome(text.value)
+    else if ("raw" in text && typeof text.raw === "string") {
+      const value = relexedValue(text.raw, known)
+      const eq = value?.indexOf("=") ?? -1
+      if (value !== undefined && eq >= 0) known[key] = tildeHome(value.slice(eq + 1))
+    }
+  }
+  return known
+}
+
+// The separators the shell splits a word at: blanks always, and the characters a line set IFS to a literal, so `IFS=:; C="a:b"; $C` splits at the colon too; an IFS the reader cannot read stays blanks alone, a residual the README names.
+function ifsSplit(env: Env): RegExp {
+  const ifs = env.vars.get("IFS")
+  if (!ifs || ifs.unknown || marked(ifs.value) || !ifs.value) return /\s+/
+  return new RegExp(`[\\s${ifs.value.replace(/[\]\\^-]/g, "\\$&")}]+`)
+}
+
+// The words a value splits into, each unread part (a `$X` or a substitution the reader could not build) kept as one unread word in its place, so the program word stays literal and every guard judges it.
+function splitValue(value: string, seps: RegExp): Word[] {
+  return value
+    .split(seps)
+    .filter(Boolean)
+    .map((part) =>
+      marked(part)
+        ? { quoted: false, unknown: "a shell variable", value: part }
+        : { quoted: false, value: tildeHome(part) },
+    )
 }
 
 // The expanded words are judged on the command itself, swapped in and back, since hooks key their notes on the command, and on a copy of the env before it, as every other reading is.

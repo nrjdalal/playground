@@ -1537,18 +1537,55 @@ function expandTilde(cmd, name, env) {
     };
   });
 }
+var holdsCommand = (w) => !!w.source && /^(?:\$\{\w+\}|\$\w+)+$/.test(w.source.replace(/["']/g, "").replace(/\$\{[=~^]+/g, "${"));
 function splitHeld(cmd, name, env) {
   if (name === "cd" || name === "popd" || name === "pushd")
     return [];
+  if (!cmd.words.some((w) => w.splits && w.raw && holdsCommand(w)))
+    return [];
+  const known = heldKnown(env);
+  const seps = ifsSplit(env);
   let split = false;
   const words = cmd.words.flatMap((w) => {
-    const held = !w.quoted && w.value === UNKNOWN && w.variable ? env.vars.get(w.variable) : undefined;
-    if (!held || held.unknown || marked(held.value))
+    if (!w.splits || !w.raw || !holdsCommand(w))
+      return [w];
+    const value = relexedValue(w.raw, known);
+    if (value === undefined)
       return [w];
     split = true;
-    return held.value.replace(/^~(?=\/|$)/, homedir2()).split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
+    return splitValue(value, seps);
   });
   return split ? [{ ...cmd, words }] : [];
+}
+function relexedValue(raw, known) {
+  const words = lex(raw.replace(/\$\{[=~^]+/g, "${"), known).commands.at(-1)?.words;
+  return words?.length === 1 ? words[0].value : undefined;
+}
+var tildeHome = (value) => marked(value) ? value : value.replace(/^~(?=\/|$)/, homedir2());
+function heldKnown(env) {
+  const known = { ...env.known };
+  for (const [key, text] of env.vars) {
+    if (key === "TMPDIR")
+      continue;
+    if (!text.unknown && !marked(text.value))
+      known[key] = tildeHome(text.value);
+    else if ("raw" in text && typeof text.raw === "string") {
+      const value = relexedValue(text.raw, known);
+      const eq = value?.indexOf("=") ?? -1;
+      if (value !== undefined && eq >= 0)
+        known[key] = tildeHome(value.slice(eq + 1));
+    }
+  }
+  return known;
+}
+function ifsSplit(env) {
+  const ifs = env.vars.get("IFS");
+  if (!ifs || ifs.unknown || marked(ifs.value) || !ifs.value)
+    return /\s+/;
+  return new RegExp(`[\\s${ifs.value.replace(/[\]\\^-]/g, "\\$&")}]+`);
+}
+function splitValue(value, seps) {
+  return value.split(seps).filter(Boolean).map((part) => marked(part) ? { quoted: false, unknown: "a shell variable", value: part } : { quoted: false, value: tildeHome(part) });
 }
 async function examineExpanded(cmd, expanded, before, visit, builtins) {
   const { redirects, words } = cmd;

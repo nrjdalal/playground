@@ -4,6 +4,7 @@ import { gitCommand } from "./no-stash"
 import { fromFactory } from "./role"
 import {
   type Command,
+  type Env,
   lex,
   parse,
   parseFlags,
@@ -14,6 +15,8 @@ import {
   shellOperand,
   shellSlot,
   slotWords,
+  splitHeld,
+  type Text,
   UV_TAKES,
   type Word,
 } from "./shell"
@@ -131,12 +134,26 @@ const KEEPS_STATUS = {
 type Dialect = keyof typeof KEEPS_STATUS
 const dialect = (shell: string): Dialect => (program(shell) === "zsh" ? "zsh" : "bash")
 
+// Each command's split readings beside the typed one: a command held in a variable the line set, and one feeding a pipe, so a held test run or push is judged too (`C="bun run test"; $C | tail`). This hook judges its own lexed line rather than through run(), so it tracks the line's variables itself.
+function heldVariants(cmd: Command, env: Env): Command[] {
+  const own = splitHeld(cmd, parse(cmd).name, env)
+  if (!cmd.stdin) return own
+  const fed = splitHeld(cmd.stdin, parse(cmd.stdin).name, env)
+  return [...own, ...fed.map((stdin) => ({ ...cmd, stdin }))]
+}
+
 // Each script is judged by its own guard, since a pipefail outside a shell's -c script never reaches the pipes inside it.
 function judge(script: string, shell: Dialect): string | undefined {
   const guarded = KEEPS_STATUS[shell](script)
+  const vars = new Map<string, Text>()
   for (const cmd of lex(script).commands) {
-    const reason = judgeCommand(cmd, guarded)
-    if (reason) return reason
+    const parsed = parse(cmd)
+    const env: Env = { files: new Map(), known: {}, process: {}, vars }
+    for (const variant of [cmd, ...heldVariants(cmd, env)]) {
+      const reason = judgeCommand(variant, guarded)
+      if (reason) return reason
+    }
+    if (parsed.name === "") for (const [key, value] of parsed.local) vars.set(key, value)
   }
 }
 

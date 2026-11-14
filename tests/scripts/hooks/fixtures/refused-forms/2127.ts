@@ -32,6 +32,25 @@ export const groups: Group[] = [
         "a kill by pattern held in run-slot's session name variable set by export",
         'export W="w -- pkill -f watcher"; ~/.playground/ops/run-slot.sh $W -- true',
       ],
+      [
+        "a kill by pattern held in a variable the word shares with an empty quote",
+        'C="pkill -f watcher"; $C""',
+      ],
+      [
+        "a kill by pattern held in a variable read with zsh's split flag",
+        'C="pkill -f watcher"; ${=C}',
+      ],
+      ["a kill by pattern held in a copy of a variable", 'A="pkill -f watcher"; C=$A; $C'],
+      ["a kill by name held in a copy of a variable", "A=pkill; C=$A; $C -f watcher"],
+      ["a kill by pattern whose literal text a partly unread value holds", 'C="pkill -f $X"; $C'],
+      [
+        "a kill whose search a partly unread value's substitution holds",
+        'C="kill -9 $(pgrep -f watcher)"; $C',
+      ],
+      [
+        "a kill by pattern held in a variable set with a literal IFS",
+        'IFS=:; C="pkill:-f:watcher"; $C',
+      ],
     ],
   },
   {
@@ -54,6 +73,40 @@ export const groups: Group[] = [
         "a recursive delete held in run-slot's session name variable set by export",
         `export W="w -- rm -rf ${NEVER_MADE}"; ~/.playground/ops/run-slot.sh $W -- true`,
       ],
+      [
+        "a recursive delete held in a variable the word shares with an empty quote",
+        `c="rm -rf ${NEVER_MADE}"; $c""`,
+      ],
+      [
+        "a recursive delete held in a variable read with zsh's split flag",
+        `c="rm -rf ${NEVER_MADE}"; \${=c}`,
+      ],
+      ["a recursive delete held in a copy of a variable", `A="rm -rf ${NEVER_MADE}"; c=$A; $c`],
+      ["a recursive delete whose literal text a partly unread value holds", 'c="rm -rf $X"; $c'],
+      [
+        "a recursive delete held in a variable set with a literal IFS",
+        `IFS=:; c="rm:-rf:${NEVER_MADE}"; $c`,
+      ],
+    ],
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-unslotted-run"],
+    rows: () => [
+      ["a suite held in a variable the word shares with an empty quote", 'C="bun run test"; $C""'],
+      ["a suite held in a variable read with zsh's split flag", 'C="bun run test"; ${=C}'],
+      ["a suite held in a copy of a variable", 'A="bun run test"; C=$A; $C'],
+    ],
+  },
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      [
+        "a commit held in a variable the word shares with an empty quote",
+        'C="git commit -m x"; $C""',
+      ],
+      ["a commit held in a copy of a variable", 'A="git commit -m x"; C=$A; $C'],
     ],
   },
 ]
