@@ -1512,7 +1512,7 @@ test("pre-commit runs the no-raw-delete test on any text commit and the workflow
     "packages/scripts/src/workflow-runners.ts",
     "tests/packages/scripts/src/workflow-runners.test.ts",
   ])
-  const dir = mkdtempSync(join(tmpdir(), "lefthook-text-tests-"))
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-delete-runners-"))
   const run = (argv: string[]) => {
     const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
     return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }

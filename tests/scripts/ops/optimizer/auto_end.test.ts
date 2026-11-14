@@ -6,6 +6,7 @@ import { join } from "node:path"
 import type { RmDeps } from "../../../../packages/scripts/src/playground/rm"
 import {
   type CleanupDeps,
+  checkersOf,
   cleanWorktree,
   cleanupHeld,
   cleanupLive,
@@ -81,6 +82,27 @@ test("finishedOf reads rm's reader shape, a PR beside its head, number and state
   expect(finishedOf({ head: "h", number: 7, state: "CLOSED" })).toBe(true)
   expect(finishedOf({ head: "h", number: 7, state: "OPEN" })).toBe(false)
   expect(finishedOf(null)).toBe(false)
+})
+
+// PG-2144: the roster reader the kept-clone step asks, a reviewer or tester by its row's kind or its name
+test("checkersOf names each live reviewer and tester row on the PR alone, by its pr or its prs list, and reads null off a roster with no agents list", () => {
+  const pr = "https://github.com/o/r/pull/7"
+  const agents = [
+    { name: "k3m9px-reviewer", pr, status: "working" },
+    { kind: "tester", name: "tester-calm-otter", pr, status: "waiting" },
+    { name: "m2xv8k-reviewer", pr: "https://github.com/o/r/pull/6", prs: [pr], status: "working" },
+    { name: "q7wz2b-tester", pr, status: "ended" },
+    { name: "k3m9px-worker", pr, status: "working" },
+    { name: "h8rt4d-reviewer", pr: "https://github.com/o/r/pull/8", status: "working" },
+    null,
+  ]
+  expect(checkersOf(JSON.stringify({ agents }), pr)).toEqual([
+    "k3m9px-reviewer",
+    "tester-calm-otter",
+    "m2xv8k-reviewer",
+  ])
+  expect(checkersOf("", pr)).toBeNull()
+  expect(checkersOf(JSON.stringify({ agents: {} }), pr)).toBeNull()
 })
 
 describe("sweep: ops-tick ends what the detector flags", () => {
@@ -1290,6 +1312,74 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     ).toEqual([])
     expect(await worktreesOf({ ...target, kind: "worker" }, projects, main)).toEqual([])
     expect(await worktreesOf(target, projects)).toEqual([])
+  })
+
+  // PG-2144: an end keeps the other checker's clone of its PR while that checker is live, so the other checker's own end takes it
+  const reading = (deps: CleanupDeps, live: string[] | null) =>
+    Object.assign(deps, { checkers: async (_pr: string) => live })
+
+  test("a clone the tester's end kept, since the PR's reviewer held it, is taken at the reviewer's end", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const tester: Target = { ...target, kind: "tester", name: "k3m9px-tester" }
+    const holder = (path: string) =>
+      `${path} is held by k3m9px-reviewer, which the roster lists as working`
+    const first = fakes(main, [], undefined, { held: async (path) => holder(path) })
+    const atTester = reading(first.deps, ["k3m9px-reviewer"])
+    expect(await cleanupLive(projects, async () => atTester)(tester)).toEqual([
+      ...rest.map((p) => `kept ${p}: ${holder(p)}`),
+      `kept ${clone}: k3m9px-reviewer still checks #7`,
+    ])
+    const atReviewer = reading(fakes(main, []).deps, ["k3m9px-reviewer"])
+    expect(await cleanupLive(projects, async () => atReviewer)(target)).toEqual(
+      [clone, ...rest].map((p) => `removed ${p}`),
+    )
+    expect([clone, ...rest].filter((p) => existsSync(p))).toEqual([])
+  })
+
+  test("a kept clone a third, still-live checker of the PR holds stays, named with it, while the ending checker's own clone goes", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const { calls, deps } = fakes(main, [])
+    const asked: string[] = []
+    const third = Object.assign(deps, {
+      checkers: async (pr: string) => (asked.push(pr), ["q7wz2b-tester"]),
+    })
+    expect(await cleanupLive(projects, async () => third)(target)).toEqual([
+      `removed ${clone}`,
+      ...rest.map((p) => `kept ${p}: q7wz2b-tester still checks #7`),
+    ])
+    expect(asked).toEqual([target.pr!])
+    expect(calls).toEqual([`rm ${clone} (k3m9px-reviewer ended)`])
+    expect(rest.filter((p) => existsSync(p))).toEqual(rest)
+  })
+
+  test("with no other checker live, the other checker's clone still keeps its uncommitted work and a live roster row's hold", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const [head, before] = rest as [string, string]
+    const holder = `${head} is held by k3m9px-worker, which the roster lists as working`
+    writeFileSync(join(before, "wip.txt"), "x\n")
+    const { calls, deps } = fakes(main, [], undefined, {
+      held: async (path) => (path === head ? holder : null),
+    })
+    expect(await cleanupLive(projects, async () => reading(deps, []))(target)).toEqual([
+      `removed ${clone}`,
+      `kept ${head}: ${holder}`,
+      `kept ${before}: uncommitted work`,
+    ])
+    expect(calls).toEqual([`rm ${clone} (k3m9px-reviewer ended)`])
+  })
+
+  test("a roster that cannot be read keeps the other checker's clones, and deps with no roster reader never look at them", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const unread = fakes(main, [])
+    expect(await cleanupLive(projects, async () => reading(unread.deps, null))(target)).toEqual([
+      `removed ${clone}`,
+      ...rest.map((p) => `kept ${p}: the roster could not be read`),
+    ])
+    const tester: Target = { ...target, kind: "tester", name: "k3m9px-tester" }
+    const bare = fakes(main, [])
+    expect(await cleanupLive(projects, async () => bare.deps)(tester)).toEqual(
+      rest.map((p) => `removed ${p}`),
+    )
   })
 })
 
