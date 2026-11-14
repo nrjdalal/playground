@@ -475,8 +475,11 @@ export function quarantine(
     limits: opts.worktree ? undefined : cap,
     skip: carve ? undefined : isRebuildable,
   })
+  // A session's own folder over the tripwire is a plain no, matched at its own place and never at a symlink's target, so every other path keeps the alert.
   if (!opts.worktree && (files > cap.files || size > cap.bytes))
-    return ownScratchOf(real(roots.home), opts.session).includes(own)
+    return ["scratch", "scratchpad"].some(
+      (dir) => own === join(real(join(roots.home, ".playground", dir)), opts.session),
+    )
       ? refused(
           `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire: leave it in place whole, never split, for the nightly clean (scratch/) or your lead's cleanup (scratchpad/) once you end`,
         )
