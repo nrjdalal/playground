@@ -990,13 +990,15 @@ describe("the comment box and Reply on every card", () => {
     }
   })
 
-  test("an empty-box Reply on a secret ask or a reveal card shows one muted line under the box, gone once the box holds text (#2038)", () => {
+  test("an empty-box Reply on a secret ask or a reveal card shows one muted line under the box, gone for good once the box holds text (#2038)", () => {
     const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
     const reply = source.slice(source.indexOf("const onReply = () => {"))
-    expect(reply).toContain("if (keepsReply) setHinted(true)")
+    // set by an empty box's Reply alone, and cleared once the box holds text, so a sent note or a cleared box never brings it back
+    expect(reply).toContain('if (keepsReply && text === "") setHinted(true)')
     const box = source.slice(source.indexOf("const noteContent ="))
-    expect(box).toContain('{hinted && note.trim() === "" && (')
-    const line = box.slice(box.indexOf('{hinted && note.trim() === "" && ('))
+    expect(box).toContain('if (event.target.value.trim() !== "") setHinted(false)')
+    expect(box).toContain("{hinted && (")
+    const line = box.slice(box.indexOf("{hinted && ("))
     expect(line).toMatch(
       /^[^}]*<p className="text-muted-foreground mt-2 text-xs">\s+Type your note/,
     )
