@@ -334,7 +334,7 @@ describe("the tripwire", () => {
     for (const path of [
       join(own, "deep", "1"),
       join(dir, "q1w2e3-keys"),
-      join(roots.home, ".playground", "roster.json"),
+      file(join(roots.home, ".playground", "roster.json")),
       join(roots.home, ".ssh", "id_ed25519"),
     ])
       expect(
