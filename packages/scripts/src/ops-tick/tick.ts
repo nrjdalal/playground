@@ -916,7 +916,7 @@ const sweepHold = async (ctx: Context): Promise<boolean> => {
   return !Number.isNaN(at) && at > ctx.now.getTime()
 }
 
-// Ops itself is down when nothing reads its queue: its alerts-wait waiter holds no running pid and handed it no alert within the grace (waiterLive, the liveness the stuck alerts judge a manager by), since a roster status cannot tell a down pane from a live one, live managers reading starting for their whole run; that absence no other check reports, so the Inbox is the fallback for it alone.
+// Ops itself is down when nothing reads its queue: its alerts-wait waiter holds no running pid and handed it no alert within the grace (waiterLive, the liveness the stuck alerts judge a manager by), since a roster status cannot tell a down pane from a live one, live managers reading starting for their whole run; that absence no other check reports, so the watch tells the dispatcher at once for it alone.
 const opsLive = async (ctx: Context): Promise<boolean> => {
   const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
     agents?: unknown
