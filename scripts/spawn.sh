@@ -1141,7 +1141,7 @@ if [ "$MODE" = close ]; then
   NAME=${1:-close}
   [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
   word "$NAME" || refuse "a name is lowercase words joined by hyphens"
-  # A start stopped after herdr ran the session but before its pin landed leaves its record and its pane, so an absent pin passes on to them and each refusal after names it.
+  # A start stopped after herdr ran the session but before its pin landed leaves its record and its pane, so an absent pin passes on to them, and their refusals name it.
   unpinned=
   if [ ! -e "$DATA/runtimes/$NAME" ]; then
     unpinned=", and it has no runtime pin ($SHOWN/runtimes/$NAME)"
