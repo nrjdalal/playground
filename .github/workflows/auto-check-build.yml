@@ -41,6 +41,19 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --ignore-scripts
 
+      # the list kinds over what this PR adds (each changed file, a new file's path, each commit message, the branch's name), the list from the TRACE_TERMS secret written to a data folder outside the checkout; the log names a place and a kind, never a term, and a run with no secret, a fork's PR among them, skips with a notice
+      - name: List check
+        run: |
+          if [ -z "$TRACE_TERMS" ]; then echo "::notice::no TRACE_TERMS secret, so the list check is skipped"; exit 0; fi
+          mkdir -p "$PLAYGROUND_DATA_DIR/extensions/hooks"
+          printf '%s' "$TRACE_TERMS" > "$PLAYGROUND_DATA_DIR/extensions/hooks/no-public-leak.json"
+          bun --no-env-file packages/scripts/src/trace-count/cli.ts --lists --since "origin/$BASE_REF" --branch "$HEAD_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          PLAYGROUND_DATA_DIR: ${{ runner.temp }}/pg
+          TRACE_TERMS: ${{ secrets.TRACE_TERMS }}
+
       # audit.ts tries again when npm's advisories endpoint hangs or answers 5xx, and fails only on an advisory this PR adds over its base
       - name: Audit
         # GHSA-67mh-4wv8-2f99 (esbuild) and GHSA-g3hv-75wg-m249 (minimatch): only dev tooling reaches them, and each parent's latest still pins the old range

@@ -585,6 +585,82 @@ test("the pre-push trailer check refuses a pushed commit a --no-verify commit le
   }
 }, 60_000)
 
+// the same pre-push job reads each new commit's message and the pushed branch's name against no-public-leak's list, a made-up one in a scratch data folder here, so a --no-verify commit holding a list term is refused before it reaches the remote; the refusal names the sha and the kind, never the term
+test("the pre-push list check refuses a pushed commit message or branch name holding a list term", async () => {
+  const trailer = await pushScript("commit-trailer.sh")
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-push-lists-"))
+  const data = join(dir, ".data")
+  mkdirSync(join(data, "extensions", "hooks"), { recursive: true })
+  const LIST = {
+    companies: ["Vantorix"],
+    handles: ["qmarsh"],
+    linearKeys: ["MADEVX"],
+    names: ["Quilla Marsh"],
+    slackIds: ["C0MADE0401"],
+  }
+  writeFileSync(join(data, "extensions", "hooks", "no-public-leak.json"), JSON.stringify(LIST))
+  const run = (
+    argv: string[],
+    stdin?: string,
+    env = { ...SCRATCH_ENV, PLAYGROUND_DATA_DIR: data },
+  ) => {
+    const result = Bun.spawnSync(argv, {
+      cwd: dir,
+      env,
+      stdin: stdin === undefined ? "ignore" : Buffer.from(stdin),
+    })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const git = (...args: string[]) =>
+    run([
+      "git",
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "core.hooksPath=/dev/null",
+      ...args,
+    ])
+  const commit = (path: string, message: string) => {
+    writeFileSync(join(dir, path), message)
+    expect(git("add", path)).toMatchObject({ code: 0 })
+    expect(git("commit", "-q", "--no-verify", "-m", message)).toMatchObject({ code: 0 })
+    return git("rev-parse", "HEAD").out.trim()
+  }
+  const ZERO = "0".repeat(40)
+  const push = (local: string, branch = "b") =>
+    run(["bash", "-c", trailer], `refs/heads/${branch} ${local} refs/heads/${branch} ${ZERO}\n`)
+  const printsNoTerm = (out: string) =>
+    expect(
+      ["vantorix", "qmarsh", "quilla"].filter((term) => out.toLowerCase().includes(term)),
+    ).toEqual([])
+  try {
+    expect(git("init", "-q")).toMatchObject({ code: 0 })
+    const base = commit("a.txt", "chore: base for Vantorix")
+    expect(git("update-ref", "refs/remotes/origin/canary", base)).toMatchObject({ code: 0 })
+    // a commit a remote already holds is not read
+    expect(push(base)).toEqual({ code: 0, out: "" })
+    const clean = commit("b.txt", "fix: a plain change")
+    expect(push(clean)).toEqual({ code: 0, out: "" })
+    const named = push(clean, "fix-qmarsh-page")
+    expect(named.code).not.toBe(0)
+    expect(named.out).toContain("the pushed branch's name holds a handles term")
+    printsNoTerm(named.out)
+    const term = commit("c.txt", "fix: thanks Quilla Marsh")
+    const refused = push(term)
+    expect(refused.code).not.toBe(0)
+    expect(refused.out).toContain(`${term.slice(0, 9)}'s message holds a names term`)
+    printsNoTerm(refused.out)
+    // a delete reads nothing, and with no list in the data folder the push passes
+    expect(push(ZERO)).toEqual({ code: 0, out: "" })
+    rmSync(join(data, "extensions", "hooks", "no-public-leak.json"))
+    expect(push(term)).toEqual({ code: 0, out: "" })
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
 // the real lefthook on this repo's pre-push stdin scripts, their paths pointed at this checkout, in a scratch clone whose commits go in with hooks off: with main level with origin/main, a push of another branch is still read, and keeps-canary refuses a normal push as before
 test("pre-push reads a pushed branch while the checked-out one has nothing new", async () => {
   const prePush = await prePushConfig()
