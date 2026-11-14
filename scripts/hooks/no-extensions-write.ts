@@ -22,8 +22,10 @@ import {
   gitCall,
   inPlace,
   real,
+  runnerReadings,
   runnerTarget,
   toolName,
+  UNREAD_CWD,
   X,
 } from "./no-main-checkout"
 import { fromFactory, opsLead } from "./role"
@@ -34,6 +36,7 @@ import {
   examine,
   filled,
   GIT_TAKES,
+  isFolder,
   knownVariables,
   lex,
   marked,
@@ -292,7 +295,7 @@ function reads(parsed: Parsed, env: Env): boolean {
     !!sub &&
     (GIT_READS.has(sub) || (sub === "worktree" && rest[0] === "list")) &&
     !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) &&
-    !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w))
+    !rest.some((w) => /^(?:--out|-O|--op|--ext(?:-|$)|--textc)/.test(w))
   )
 }
 
@@ -535,18 +538,8 @@ function remoteName(v: string): boolean {
   return false
 }
 
-// Programs on neither REMOVERS nor WRITERS that unreadCdWrites judges by the words they write; after a cd the hook cannot read, any other program but a reader (reads()) or one of NO_WRITES is refused, since it may write in the shell's folder
-const UNREAD_CD_JUDGED = new Set([
-  "chmod",
-  "curl",
-  "mktemp",
-  "perl",
-  "sed",
-  "shred",
-  "sort",
-  "tar",
-  "truncate",
-])
+// Programs on neither REMOVERS nor WRITERS that unreadCdWrites judges by the words they write; after a cd the hook cannot read, any other program but a reader (reads()), sed or perl as their closed grammars read them (scriptRead) or one of NO_WRITES is refused, since it may write in the shell's folder
+const UNREAD_CD_JUDGED = new Set(["chmod", "curl", "mktemp", "shred", "sort", "tar", "truncate"])
 // Programs and builtins that write no file but through a redirect, each by its macOS man page or zsh's builtins (a for opener runs no command of its own)
 const NO_WRITES = new Set([
   ":",
@@ -859,19 +852,18 @@ const SWITCHES: Record<string, string[]> = {
   settings: ["--dry-run"],
 }
 
-// Whether a word is the playground CLI: the command by name in any case, as macOS's filesystem reads it, or by a path that is no folder, or the checkout's cli.ts, with or without its extension, links followed.
+// Whether a word is the playground CLI in any one of the folders it may be read from: the command by name in any case, as macOS's filesystem reads it, or by a path that is no folder, or the checkout's cli.ts, with or without its extension, links followed; in a folder the hook cannot read, a relative word is the CLI by its last part alone (playground, cli or cli.ts).
 function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   tick()
   if (marked(word.value) || word.value.startsWith("-")) return false
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir } as Env))
   if (program(word.value) === "playground")
-    return (
-      !word.value.includes("/") ||
-      !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory())
-    )
+    return !word.value.includes("/") || paths.some((path) => !path || !isFolder(path))
   const cli = (sep + CLI).toLowerCase()
-  return paths.some(
-    (path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)),
+  return paths.some((path) =>
+    path === undefined
+      ? /^cli(?:\.ts)?$/.test(program(word.value))
+      : [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)),
   )
 }
 
@@ -880,19 +872,29 @@ const STARTED_RUNNERS = new Set(["bun", "bunx", "npx"])
 
 // The folders a bun, bunx or npx call's word may land in: bun's last --cwd, for bun x and bunx also the folder their --cwd options chain to, and for a bun, bunx or npx that bunx, bun x, npx or bun run starts, its own folders read from the folder the runner starts it in, as no-main-checkout's runs() reads a bun x program.
 function runnerDirs(name: string, args: Word[], env: Env): (string | undefined)[] {
-  if (name === "bunx") return runnerDirs("bun", [X, ...args], env)
-  if (name === "npx") {
-    const at = runnerTarget(args)
-    const started = toolName(args[at]?.value)
-    return STARTED_RUNNERS.has(started) ? runnerDirs(started, args.slice(at + 1), env) : []
-  }
+  // each reading of the runner's options (runnerReadings), and an unread folder past them
+  return runnerReadings(name, args).flatMap((reading) =>
+    reading[1] === UNREAD_CWD ? [undefined] : readingDirs(name, reading, env),
+  )
+}
+function readingDirs(name: string, args: Word[], env: Env): (string | undefined)[] {
+  if (name === "bunx") return readingDirs("bun", [X, ...args], env)
+  if (name === "npx") return startedDirs(args.slice(runnerTarget(args)), env)
   if (name !== "bun") return []
   const { at, chained, cwd, words } = bunCall(args, env)
   const x = words[0] === "x"
   const own = x ? [cwd, chained] : [cwd]
-  const started = x || words[0] === "run" ? toolName(args[at]?.value) : ""
-  if (!STARTED_RUNNERS.has(started)) return own
-  return [...own, ...runnerDirs(started, args.slice(at + 1), { ...env, cwd: x ? chained : cwd })]
+  const started = x || words[0] === "run" ? args.slice(at) : []
+  return [...own, ...startedDirs(started, { ...env, cwd: x ? chained : cwd })]
+}
+
+// The folders of a package runner that a runner starts in env's folder, behind any wrapper the reader parses (env, nice), whose env -C moves it
+function startedDirs(words: Word[], env: Env): (string | undefined)[] {
+  if (words.length === 0) return []
+  const { args, chdir, name } = parse({ redirects: [], scope: 0, words })
+  const tool = toolName(name)
+  if (!STARTED_RUNNERS.has(tool)) return []
+  return runnerDirs(tool, args, chdir ? { ...env, cwd: pathOf(chdir, env) } : env)
 }
 
 // The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare, a package runner's word read in each folder runnerDirs names too.
@@ -901,6 +903,15 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   if (!first) return []
   const words = [first, ...args]
   const dirs = [env.cwd, ...runnerDirs(name, args, env)]
+  // a runner behind a wrapper the reader does not parse (find -exec, arch, watch) reads its folders from each one found before it (the shell's, an outer runner's), all unread past 16, and find's -execdir runs it in a folder the hook cannot read
+  for (const [at, word] of words.entries()) {
+    const tool = toolName(word.value)
+    const bases = [...new Set(dirs)]
+    if (at > 0 && STARTED_RUNNERS.has(tool))
+      for (const here of bases.length > 16 ? [undefined] : bases)
+        dirs.push(...runnerDirs(tool, words.slice(at + 1), { ...env, cwd: here }))
+    if (word.value === "-execdir" || word.value === "-okdir") dirs.push(undefined)
+  }
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
@@ -1131,6 +1142,10 @@ const SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM}
 function sedInPlace(cmd: Command, parsed: Parsed): Set<Word> | undefined {
   const { args, local, name } = parsed
   if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed)) return undefined
+  return sedEdits(args)
+}
+// The scripts of a sed call's words that edit its files in place and write nothing else, by sedInPlace's reading of them
+function sedEdits(args: Word[]): Set<Word> | undefined {
   const scripts: Word[] = []
   const operands: Word[] = []
   let inPlace = false
@@ -1160,8 +1175,11 @@ function sedInPlace(cmd: Command, parsed: Parsed): Set<Word> | undefined {
 
 // An in-place perl edit read call by call as an in-place sed is: perl as its own program with no PERL variable set, its options l, n, p and w clustered with a bare i (`-pi`), each -e script a literal word PERL_SCRIPT holds, and each file a literal PERL_FILE; its scripts are the words it returns, text perl reads as its program
 function perlInPlace(cmd: Command, parsed: Parsed, env: Env): Set<Word> | undefined {
-  const { args, local, name } = parsed
-  if (program(name) !== "perl" || !ownProgram(cmd, parsed)) return undefined
+  if (program(parsed.name) !== "perl" || !ownProgram(cmd, parsed)) return undefined
+  return perlEdits(parsed, env)
+}
+// The scripts of a perl call's words that edit its files in place and write nothing else, by perlInPlace's reading of them
+function perlEdits({ args, local }: Parsed, env: Env): Set<Word> | undefined {
   if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL"))) return undefined
   const scripts: Word[] = []
   let inPlace = false
@@ -1187,6 +1205,15 @@ function perlInPlace(cmd: Command, parsed: Parsed, env: Env): Set<Word> | undefi
 }
 // an in-place perl edit's option clusters of l, n, p and w: one ending in i, which takes the rest of its cluster as a backup suffix and so ends it bare (`-pi`), or one whose last letter is e, whose script is the next word
 const PERL_IN_PLACE = /^-[lnpw]*[ei]?$/
+// Whether sed or perl is read whole by its closed grammars, a read or an in-place edit whose files unreadCdWrites places, so after a cd the hook cannot read any other call of either is refused
+function scriptRead(tool: string, parsed: Parsed, env: Env): boolean {
+  // xargs hands an in-place edit its files, judged by placement as any of its words
+  const edits = { ...parsed, args: parsed.xargs ? [...parsed.args, XARGS_FILE] : parsed.args }
+  return tool === "sed"
+    ? !!(sedReadScripts(parsed.args) || (parsed.local.size === 0 && sedEdits(edits.args)))
+    : tool === "perl" && (perlReads(parsed, env) || !!perlEdits(edits, env))
+}
+const XARGS_FILE: Word = { quoted: false, value: "/dev/stdin" }
 // Each word an in-place sed or perl edit reads as its script, or undefined for any other call
 const inPlaceScripts = (cmd: Command, parsed: Parsed, env: Env) =>
   sedInPlace(cmd, parsed) ?? perlInPlace(cmd, parsed, env)
@@ -1876,6 +1903,21 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       evaluated && masked !== undefined ? { ...evaluated, value: masked } : undefined
     const own = (word: Word): Word => (word === evaluated && shownEval ? shownEval : word)
     const shownText = new Set([...wholeText].map(own))
+    // a shell a package runner starts runs its script in the runner's folders too, an unread one included
+    const started = STARTED_RUNNERS.has(name)
+      ? places(env).flatMap((here) => runnerDirs(name, args, here))
+      : []
+    const ranIn = started.filter((dir): dir is string => dir !== undefined)
+    const textEnv: Env =
+      started.length === 0
+        ? env
+        : {
+            ...env,
+            cwd: undefined,
+            cwdMaybe: [...new Set([...places(env).flatMap(({ cwd }) => cwd ?? []), ...ranIn])],
+            cwdSure: undefined,
+            cwdUnread: env.cwdUnread || started.length > ranIn.length,
+          }
     for (const raw of reader
       ? []
       : [
@@ -1889,7 +1931,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       textDepth++
       const verdict = await run(
         lex(line, env.known),
-        { ...env, vars: new Map() },
+        { ...textEnv, vars: new Map() },
         visit,
         true,
       ).finally(() => textDepth--)
@@ -2021,6 +2063,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       !NO_WRITES.has(tool) &&
       !portlessRead(tool, args) &&
       !reads(parsed, env) &&
+      !scriptRead(tool, parsed, env) &&
       (git ? git.sub !== "rm" && gitPlaced(args, env) === undefined : !UNREAD_CD_JUDGED.has(tool))
     )
       return refuse(

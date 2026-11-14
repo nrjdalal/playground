@@ -475,6 +475,23 @@ describe("a git commit whose message commitlint refuses is refused before its pr
   })
 })
 
+describe("a runner's option the reader does not list keeps its verdict when no reading reaches a heavy run (PG-2103)", () => {
+  test.each([
+    ["npx's help with -y", "npx -y inscope@0.18.0 --help"],
+    ["bun's evaluated script", "bun -e 'console.log(1)'"],
+    ["bun's script with no env file", "bun --no-env-file packages/scripts/src/x.ts"],
+  ])("in a worktree, %s, runs", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    ["a quiet build", "bun run --silent build"],
+    ["a build past bun's env file option", "bun --env-file /tmp/e run build"],
+  ])("in a worktree, %s, is refused", async (_, command) => {
+    expect(await bash(command)).toBeDefined()
+  })
+})
+
 describe("a git commit whose message commitlint passes, or one the hook cannot read, runs", () => {
   test.each([
     ...forms(GOOD, "good.txt"),

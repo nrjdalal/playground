@@ -27,6 +27,7 @@ import {
   stdinOf,
   stdinShell,
   type Text,
+  unknown,
   unreadWord,
   type Visit,
   type Word,
@@ -447,6 +448,46 @@ export function runnerFolders(
   return xCwd ? [...folders, xCwd.dir] : folders
 }
 
+// bun's options whose value bunCall reads itself, and the most readings runnerReadings makes of one call, past which the call as typed and a --cwd the hook cannot read (UNREAD_CWD) join them, so the call's folder reads as unread too
+const BUN_SPLITS = new Set(["--cwd", "--filter", "-F"])
+const OPTION_READINGS = 16
+export const UNREAD_CWD: Word = {
+  quoted: false,
+  ...unknown("a runner's option past the readings the hook makes"),
+}
+
+// The readings of a bun, bunx or npx call's words: as typed, and for each option before the word it runs that no list names, written without = and followed by a word (`--env-file /tmp/e`, `-w pkg`), one more that takes that word as its value, as `--env-file=/tmp/e`, so a value the reader would take for the program is judged as the option's too; any other program's words read as typed alone
+export function runnerReadings(name: string, args: Word[]): Word[][] {
+  if (name !== "bun" && name !== "bunx" && name !== "npx") return [args]
+  const out: Word[][] = []
+  const walk = (from: number, head: Word[]): void => {
+    let k = from
+    for (; k < args.length && out.length <= OPTION_READINGS; k++) {
+      const word = args[k]
+      const next = args[k + 1]
+      const v = word.value
+      if (!v.startsWith("-") || v === "-") {
+        if (v !== "run" && v !== "x") break
+      } else if (BUN_SPLITS.has(v) && next) {
+        head = [...head, word, next]
+        k++
+        continue
+      } else if (!v.includes("=") && next && !next.value.startsWith("-"))
+        walk(k + 2, [...head, { ...word, value: `${v}=${next.value}` }])
+      head = [...head, word]
+    }
+    out.push([...head, ...args.slice(k)])
+  }
+  walk(0, [])
+  return out.length > OPTION_READINGS
+    ? [
+        args,
+        ...out.slice(0, OPTION_READINGS - 1),
+        [{ quoted: false, value: "--cwd" }, UNREAD_CWD, ...args],
+      ]
+    : out
+}
+
 // The word a package runner runs, past its options and their values (-y, --yes, -p turbo).
 export function runnerTarget(args: Word[]): number {
   let k = 0
@@ -782,10 +823,13 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     // a line that names more folders than the reader carries may run anywhere, the main checkout included, so what it guards is refused with no folder to name
     if (env.cwdAnywhere) {
       const blind: Env = { ...env, cwd: undefined }
-      const ran = runs(name, args, local, blind)
       // a folder the command names itself is judged by that path, as everywhere else; one the shell gives it could be the main checkout
-      if (ran && ranIn(ran.cwd, ran.also).some((dir) => dir === undefined || inMain(dir)))
-        return refuse(ran.what, ANYWHERE_FIX)
+      const ran = runnerReadings(name, args)
+        .map((reading) => runs(name, reading, local, blind))
+        .find(
+          (ran) => ran && ranIn(ran.cwd, ran.also).some((dir) => dir === undefined || inMain(dir)),
+        )
+      if (ran) return refuse(ran.what, ANYWHERE_FIX)
       const blindWrite = writeTargets(cmd, name, args).find((t) => {
         const path = pathOf(t, blind)
         return path === undefined || inMain(path)
@@ -820,9 +864,13 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       }
       const script = await fedScript(cmd, here, sure, inMain, visit)
       if (script) return script
-      const ran = runs(name, args, local, here)
-      if (ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)))
-        return refuse(ran.what, fixFor(sure, ran.fix))
+      const ran = runnerReadings(name, args)
+        .map((reading) => runs(name, reading, local, here))
+        .find(
+          (ran) =>
+            ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)),
+        )
+      if (ran) return refuse(ran.what, fixFor(sure, ran.fix))
       const moved =
         name === "git"
           ? await liveRefusal(args, local, here, inLive, fixFor(sure, LIVE_FIX))

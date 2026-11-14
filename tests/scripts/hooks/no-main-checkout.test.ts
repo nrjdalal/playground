@@ -1184,6 +1184,24 @@ describe("a file in the worktrees folder", () => {
   })
 })
 
+describe("a runner's option the reader does not list keeps its verdict when no reading reaches a build (PG-2103)", () => {
+  test.each([
+    ["npx's help with -y", "npx -y inscope@0.18.0 --help"],
+    ["bun's evaluated script", "bun -e 'console.log(1)'"],
+    ["bun's script with no env file", "bun --no-env-file packages/scripts/src/x.ts"],
+    ["a package runner's tool", "bunx cowsay hi"],
+  ])("in the main checkout, %s, runs", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    ["a quiet build", "bun run --silent build"],
+    ["a build past bun's env file option", "bun --env-file /tmp/e run build"],
+  ])("in the main checkout, %s, is refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-main-checkout hook refuses")
+  })
+})
+
 describe("a GIT_DIR or GIT_WORK_TREE that names your own worktree", () => {
   test.each([
     ["set for the call", `GIT_DIR=${WORKTREE}/.git git commit -m x`],

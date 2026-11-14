@@ -226,6 +226,22 @@ const OPS_SHIP: [string, string][] = [
   ],
 ]
 
+describe("a runner's option the reader does not list hides no production deploy (PG-2103)", () => {
+  test.each([
+    ["npx past a user config option's value", "npx --userconfig /tmp/u vercel deploy --prod"],
+    ["bun x past bun's own env file option", "bun --env-file /tmp/e x vercel deploy --prod"],
+  ])("for a worker: %s", async (_, command) => {
+    expect(await as("worker", command)).toContain(REFUSED)
+  })
+
+  test.each([
+    ["npx -y's preview deploy", "npx -y vercel deploy"],
+    ["npx -y's whoami", "npx -y vercel whoami"],
+  ])("for a worker: %s runs", async (_, command) => {
+    expect(await as("worker", command)).toBeUndefined()
+  })
+})
+
 describe("Ops' ship of the hosted build", () => {
   test.each(OPS_SHIP)("passes for the Ops lead %s", async (_, command) => {
     expect(await as("ops", command)).toBeUndefined()

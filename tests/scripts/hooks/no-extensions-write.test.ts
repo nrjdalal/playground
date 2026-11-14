@@ -2044,7 +2044,7 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     // PG-2094: a program on neither list under xargs writing nothing or only absolute paths after a cd to a variable, and an in-place edit after a cd to a literal path
     [
       "an in-place sed under xargs fed an absolute path after a cd to a variable",
-      `cd "$X" && echo /tmp/f | xargs sed -i s/a/b/`,
+      `cd "$X" && echo /tmp/f | xargs sed -i '' s/a/b/`,
     ],
     [
       "perl -pi under xargs fed an absolute path after a cd to a variable",
@@ -2348,6 +2348,52 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["a reader after a cd to a variable", `cd "$X"; cat policy.json`],
   ])("%s, from the root", async (_, command) => {
     expect(await bash(command, ROOT)).toBeUndefined()
+  })
+})
+
+describe("a call the reader parses whole keeps its verdict beside the unread-folder rule (PG-2106)", () => {
+  test.each([
+    ["a relative cd after a held absolute one", `W=/opt/w; cd "$W" && cd sub && ex -sc wq f`],
+    ["a held absolute cd after a cd to a variable", `W=/opt/w; cd "$X" && cd "$W" && ex -sc wq f`],
+    ["an absolute cd after a cd to a variable", `cd "$X" && cd /tmp && ex -sc wq f`],
+    ["a bare cd after a cd to a variable", `cd "$X" && cd && ex -sc wq f`],
+    ["sed printing lines after a cd to a variable", `cd "$X" && sed -n 1,40p f`],
+    ["sed's substitution after a cd to a variable", `cd "$X" && sed 's/a/b/' f`],
+    ["perl printing matches after a cd to a variable", `cd "$X" && perl -ne 'print if /x/' f`],
+    ["perl's substitution after a cd to a variable", `cd "$X" && perl -pe 's/a/b/' f`],
+    [
+      "git grep's extended pattern after a cd to a variable",
+      `cd "$X" && git grep --extended-regexp x`,
+    ],
+    ["git diff as text after a cd to a variable", `cd "$X" && git diff --text`],
+    [
+      "bun's version behind arch under bunx's --cwd",
+      `bunx --cwd=${CLI_DIR}/../../.. arch -arm64 bun --cwd=scripts/src/playground --version`,
+    ],
+    ["a package runner's tool", "bunx cowsay hi"],
+    ["a build", "bun run build"],
+    ["bunx bun in a --cwd", `bunx bun --cwd ${CHECKOUT}/packages test`],
+    ["bunx bun's version in the CLI's folder", `bunx bun --cwd=${CLI_DIR} --version`],
+    ["bun x bun's build in a --cwd", `bun x --cwd ${CHECKOUT}/packages bun run build`],
+    ["npx bun's dev", "npx bun run dev"],
+    [
+      "bun's version in a --cwd under bunx's",
+      `bunx --cwd ${CHECKOUT}/packages bun --cwd scripts/src/playground --version`,
+    ],
+    ["npx's help with -y", "npx -y inscope@0.18.0 --help"],
+    ["bun's script with no env file", "bun --no-env-file packages/scripts/src/x.ts"],
+    ["a quiet build", "bun run --silent build"],
+    ["npx -y before a tool", "npx -y prettier --check ."],
+    ["bun's evaluated script", "bun -e 'console.log(1)'"],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+
+  test.each([
+    ["find naming the CLI's file", "find . -name cli.ts"],
+    ["xargs cat of the CLI's file", "echo cli.ts | xargs cat"],
+  ])("%s, in the CLI's folder", async (_, command) => {
+    expect(await bash(command, CLI_DIR)).toBeUndefined()
   })
 })
 

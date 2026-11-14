@@ -904,6 +904,9 @@ function lex(src, known = {}) {
   const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() };
   list(lx, 0, false);
   calledAgain(lx.commands, src);
+  if (/chpwd/.test(src))
+    for (const c of lx.commands)
+      c.cdRedefined = true;
   braced(lx.commands);
   return { commands: lx.commands, scopes: lx.scopes };
 }
@@ -948,6 +951,9 @@ function calledAgain(commands, src) {
     }
     const body = commands.slice(k, end + 1);
     const name = word.value.replace(/\(\)$/, "");
+    if (name === "cd" || name === "chpwd")
+      for (const c of commands)
+        c.cdRedefined = true;
     if (word.quoted || !/^[\w.:-]+$/.test(name)) {
       for (const c of body)
         c.repeated = true;
@@ -1334,6 +1340,8 @@ function dollar(lx, plain = false) {
     const from = lx.i;
     while (/\w/.test(src[lx.i] ?? ""))
       lx.i++;
+    if (/^:[A-Za-z&]/.test(src.slice(lx.i, lx.i + 2)))
+      return unknown("a zsh modifier");
     return variable(src.slice(from, lx.i));
   }
   if (next === "$") {
@@ -1435,6 +1443,7 @@ function mktempPath(cmd, known) {
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`;
 }
 var SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/;
+var chdirOf = (state, word) => state.chdir && word ? { ...word, ...unknown("a second env -C") } : word;
 var READINGS = 16;
 function parse(cmd) {
   const state = { local: new Map, rest: cmd.words.toReversed(), xargs: undefined };
@@ -1498,9 +1507,9 @@ function unwrap(state, inside, budget) {
           rest.push({ quoted: false, value: split[j] });
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         take();
-        state.chdir = take();
+        state.chdir = chdirOf(state, take());
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
-        state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length);
+        state.chdir = chdirOf(state, slice(w, v.startsWith("-C") ? 2 : "--chdir=".length));
         take();
       } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
@@ -1816,6 +1825,8 @@ function cdTargets(name, cmd, parsed, env, from) {
     const word = env.hold?.(typed, cmd, env) ?? typed;
     if (word !== typed && !landsHeld(typed, cmd, env))
       unread = true;
+    if (env.cwdUnread && pathOf(word, { ...env, cwd: undefined }) === undefined)
+      unread = true;
     for (const base of from.length > 0 ? from : [undefined]) {
       tick();
       const path = pathOf(word, { ...env, cwd: base });
@@ -1869,7 +1880,8 @@ async function chdirTo(name, cmd, parsed, env) {
   const back = [...new Set([...env.cwdBack ?? [], ...from])];
   const bases = [...new Set([...from, ...env.cwdHeld ?? []])];
   const move = name === "popd" ? { back: true, paths: [], unread: true } : tildeMove(cdTargets(name, cmd, parsed, env, bases), name, parsed, env, from, back);
-  const { paths, unread } = move;
+  const { paths } = move;
+  const unread = move.unread || !!cmd.cdRedefined;
   const named = [left, env.cwd].filter((dir) => dir !== undefined);
   env.cwdBack = keep([...new Set([...back, ...paths, ...named])], env);
   if (cmd.held) {
@@ -1881,6 +1893,8 @@ async function chdirTo(name, cmd, parsed, env) {
   if (sureToRun(cmd, parsed) && !unread && paths.length === 1 && (chained || isFolder(paths[0]))) {
     env.cwdSure = paths[0];
     env.cwdMaybe = [];
+    if (chained)
+      env.cwdChainUnread ||= env.cwdUnread;
     env.cwdUnread = false;
     env.cwdOr = chained ? undefined : { before: from, cdChain: cmd.chain, scope: cmd.scope };
     if (env.old)
@@ -1931,9 +1945,18 @@ function orElse(cmd, env) {
   env.cwdOr = undefined;
 }
 function unchain(cmd, env) {
-  if (!env.cwdChain?.length || cmd.chain === env.cwdChainToken)
+  if (!env.cwdChain?.length && !env.cwdChainUnread || cmd.chain === env.cwdChainToken)
     return;
-  env.cwdMaybe = keep([...new Set([...env.cwdMaybe ?? [], ...env.cwdSure ? [env.cwdSure] : [], ...env.cwdChain])], env);
+  if (env.cwdChainUnread)
+    env.cwdUnread = true;
+  env.cwdChainUnread = undefined;
+  env.cwdMaybe = keep([
+    ...new Set([
+      ...env.cwdMaybe ?? [],
+      ...env.cwdSure ? [env.cwdSure] : [],
+      ...env.cwdChain ?? []
+    ])
+  ], env);
   env.cwdSure = undefined;
   if (env.old)
     env.oldFrom = [];
