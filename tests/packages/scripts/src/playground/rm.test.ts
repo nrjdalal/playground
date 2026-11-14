@@ -963,6 +963,48 @@ test("--worktree keeps another repo's worktree with no PR whose archive holds pa
   expect(readdirSync(archive)).toEqual(["0001-other.patch"])
 })
 
+// #2139: a remote that cannot be read keeps another repo's no-PR worktree, with no patch written, since an archive past no tip covers its whole history; once it reads, only the commits no remote holds are archived
+test("--worktree keeps another repo's worktree with no PR while its remote cannot be read, writing no archive, and archives only its commits no remote holds once it reads", async () => {
+  const { deps, home, root } = machine()
+  const { repo, wt } = otherRepo(root, home)
+  const session = { ...deps, prState: readPrs([]) }
+  const discard = `playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`
+  git(repo, "remote", "set-url", "origin", join(root, "gone.git"))
+  expect(await rmSaid(["--worktree", wt], session)).toEqual({
+    code: 1,
+    said: [
+      `playground: ${wt}'s HEAD holds work not landed on origin/main or on any remote branch (fetch origin if it merged or was pushed since), and its remote origin could not be read, so its work stays until it answers: ${discard}`,
+    ],
+  })
+  expect(existsSync(wt)).toBe(true)
+  expect(existsSync(join(deps.data, "scratchpad"))).toBe(false)
+  git(repo, "remote", "set-url", "origin", join(root, "app.git"))
+  const shas = unlanded(wt)
+  expect(shas).toHaveLength(1)
+  const archive = archiveOf(deps.data, repo, wt)
+  expect(await rmSaid(["--worktree", wt], session)).toEqual({ code: 0, said: [] })
+  expect(existsSync(wt)).toBe(false)
+  expect(patchesIn(archive)).toEqual(shas)
+})
+
+// #2139's control: --discard with a remote that cannot be read still bundles every commit and removes the tree, writing no archive
+test("--worktree --discard takes another repo's worktree with no PR while its remote cannot be read, its commits in a bundle and no archive written", async () => {
+  const { deps, home, root } = machine()
+  const { repo, wt } = otherRepo(root, home)
+  const head = git(wt, "rev-parse", "HEAD")
+  git(repo, "remote", "set-url", "origin", join(root, "gone.git"))
+  expect(await rmSaid(["--worktree", wt, "--discard"], { ...deps, prState: readPrs([]) })).toEqual({
+    code: 0,
+    said: [],
+  })
+  expect(existsSync(wt)).toBe(false)
+  expect(existsSync(join(deps.data, "scratchpad"))).toBe(false)
+  const [entry] = listTrash(join(deps.data, "trash"))
+  git(repo, "branch", "-D", "APP-1-thing")
+  git(repo, "fetch", "-q", entry!.bundle!, "HEAD:refs/heads/APP-1-thing")
+  expect(git(repo, "rev-parse", "APP-1-thing")).toBe(head)
+})
+
 // #1962: the archive route runs only on gh's clean answer of no PR; a read gh could not make, two PRs answering, or one that is not the worktree's own keep canary's refusal
 test.each([
   ["a PR read gh could not make", null],
