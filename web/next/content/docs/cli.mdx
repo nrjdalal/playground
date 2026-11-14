@@ -126,6 +126,15 @@ It opens nothing on your screen: the agent sends you the page as an Inbox card, 
 The page then shows on the [Pages](/docs/agents#pages) tab of both sessions and of your chat, and in the Previews app.
 It refuses a file that is not an HTML page, and a `--by` or `--for` that names no session on the roster.
 
+## Wait on CI: `playground ci-wait`
+
+`playground ci-wait <pr>` waits until each check `pr:merge` needs, `Audit, Lint, and Build` and `test`, exists at the PR's head and has finished, then prints each result and exits 0 when all passed, else 1.
+It reads GitHub every 5 minutes, waits out a rate limit, and starts over when a push moves the head.
+When a check's workflow run ends without creating the check, it exits 1 and names the `gh run rerun` that brings it.
+When GitHub does not know the PR or repo, or refuses your login, it exits 2 at once.
+`--repo <owner/name>` points it at another repo; it reads the factory's own by default.
+Run it as a background task, and read the head's checks once more yourself before you call it green.
+
 ## Wait for alerts: `playground alerts-wait`
 
 `playground alerts-wait <name>` waits until the next line in the outbox addressed to `<name>`, prints it, and exits: a stuck session's alert or the relay watch's late-stop line first, else any job's line, such as a firefighting heads-up to the Builder.
