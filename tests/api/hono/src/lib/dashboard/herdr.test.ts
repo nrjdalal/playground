@@ -820,9 +820,9 @@ describe("switchKeys", () => {
   test("takes the one option that carries out the switch, by its words or the model's name, from the cursor", () => {
     expect(keys(SWITCH_TODAY)).toEqual([{ key: "enter" }])
     expect(keys(SWITCH_REWORDED)).toEqual([{ key: "down" }, { key: "enter" }])
-    expect(keys(confirm("Switch?", "   1. Keep Opus 9.9", " ❯ 2. Switch anyway"))).toEqual([
-      { key: "enter" },
-    ])
+    expect(
+      keys(confirm("Switch?", "   1. Keep Opus 9.9", " ❯ 2. Switch to Sonnet 9.9 anyway")),
+    ).toEqual([{ key: "enter" }])
   })
 
   test("no option reading as the switch, two of them, no cursor or a multi-select gives no keys", () => {
@@ -835,6 +835,22 @@ describe("switchKeys", () => {
     expect(keys(SWITCH_TODAY.replace("❯", " "))).toBeNull()
     expect(keys(confirm("Switch?", " ❯ 1. [ ] Yes, switch", "   2. [ ] No"))).toBeNull()
     expect(keys(PICKER)).toBeNull()
+  })
+
+  // a prompt that draws over the box within the switch's read is not its confirm unless an option names the model picked
+  test("a permission prompt, a plain yes or no question, or a switch naming no model gets no keys", () => {
+    expect(
+      keys(
+        confirm(
+          "Bash command: bun run test Do you want to proceed?",
+          " ❯ 1. Yes",
+          "   2. Yes, and don't ask again for bun run test commands in this folder",
+          "   3. No, and tell Claude what to do differently (esc)",
+        ),
+      ),
+    ).toBeNull()
+    expect(keys(confirm("Ship it now?", " ❯ 1. Yes (Recommended)", "   2. No"))).toBeNull()
+    expect(keys(confirm("Switch model?", " ❯ 1. Yes, switch", "   2. No, go back"))).toBeNull()
   })
 })
 

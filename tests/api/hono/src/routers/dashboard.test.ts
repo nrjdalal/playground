@@ -488,6 +488,7 @@ describe("sendMessage", () => {
   test("every refusal becomes the API's error, with its reason and its code under delivery", async () => {
     const expected: Record<string, [number, string]> = {
       AMBIGUOUS: [409, "CONFLICT"],
+      BUSY: [409, "CONFLICT"],
       COMMAND: [400, "VALIDATION_ERROR"],
       EMPTY: [400, "VALIDATION_ERROR"],
       INPUT_NOT_EMPTY: [409, "CONFLICT"],

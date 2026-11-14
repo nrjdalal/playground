@@ -1289,6 +1289,53 @@ describe("deliver to a herdr session", () => {
       expect(run.enters).toEqual([])
     })
 
+    test("a branch or folder in the status line that names another model is not the model it runs", async () => {
+      const branch = (label: string) =>
+        running(label).replace("  💡", "  📂 playground · 🌱 PG-1-opus-menu\n  💡")
+      const run = switchRun(branch("Sonnet 9.9"))
+      run.deps.readScreen = async () =>
+        !run.sent.length ? branch("Opus 9.9") : branch("Sonnet 9.9")
+      expect(await run.send()).toMatchObject({ ok: true })
+    })
+
+    // a /model Claude Code holds until its turn or compaction ends draws its confirm later, with no one left to answer it
+    describe("a busy session", () => {
+      const COMPACTING = running("Opus 9.9").replace(
+        "⏺ Done.",
+        "✻ Compacting conversation… (38s · esc to interrupt)",
+      )
+
+      test("one working a turn is refused before anything is typed", async () => {
+        const run = switchRun(NEW)
+        const busy = live([worker({ lifecycle: "running", light: "working" })], {
+          "s-dispatcher": HERDR,
+        })
+        run.deps.board = async () => busy
+        run.deps.readSession = async () => busy
+        const result = await run.send()
+        expect(result).toMatchObject({ code: "BUSY", ok: false })
+        expect(reason(result)).toContain("once it is idle")
+        expect(run.sent).toEqual([])
+      })
+
+      test("one compacting is refused before anything is typed", async () => {
+        const run = switchRun(NEW)
+        run.deps.readScreen = async () => (!run.sent.length ? COMPACTING : NEW)
+        expect(await run.send()).toMatchObject({ code: "BUSY", ok: false })
+        expect(run.sent).toEqual([])
+      })
+
+      test("its paste Claude Code holds in the box as a compaction starts is cleared, its own characters alone", async () => {
+        const held = COMPACTING.replace(/^❯$/m, `❯ ${COMMAND}`)
+        const run = switchRun(held, COMPACTING)
+        const result = await run.send()
+        expect(result).toMatchObject({ code: "BUSY", ok: false })
+        expect(run.keys).toEqual(Array(COMMAND.length).fill({ key: "backspace" }))
+        expect(run.enters).toEqual([])
+        expect(run.recorded).toEqual([])
+      })
+    })
+
     test("a plain message that meets a dialog after its send never presses a key in it", async () => {
       const run = switchRun(TODAY)
       const result = await deliver(
@@ -1592,15 +1639,15 @@ describe("deliver to a herdr session", () => {
         expect(run.sent).toHaveLength(1)
       })
 
-      // a model or effort setting types its slash command the way a message types its words, so Claude Code holds it as it holds a message
+      // an effort setting types its slash command the way a message types its words, so Claude Code holds it as it holds a message; a model switch to a busy session is refused before it is typed (the model menu's switch, above)
       describe("a setting", () => {
-        const COMMAND = "/model opus"
+        const COMMAND = "/effort max"
         const settingRun = (held: string) => {
           const run = after([held], [held])
           run.deps.now = () => new Date(NOW)
           const id = nextId()
           const send = () =>
-            deliver({ actor, id, setting: { model: "opus" }, text: "", to: "dispatcher" }, run.deps)
+            deliver({ actor, id, setting: { effort: "max" }, text: "", to: "dispatcher" }, run.deps)
           return { ...run, send }
         }
 
@@ -1620,10 +1667,10 @@ describe("deliver to a herdr session", () => {
         })
 
         test("sent to an idle session reads delivered", async () => {
-          const run = settingRun(running("Opus 9.9"))
+          const run = settingRun(EMPTY)
           expect(await run.send()).toMatchObject({ ok: true, sessionId: "s-dispatcher" })
           expect(run.sent).toEqual([{ surface: HERDR, text: COMMAND }])
-          expect(run.recorded).toEqual(["Set dispatcher's model to opus"])
+          expect(run.recorded).toEqual(["Set dispatcher's effort to max"])
         })
       })
 
