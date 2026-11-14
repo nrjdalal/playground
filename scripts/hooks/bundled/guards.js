@@ -17271,6 +17271,23 @@ function runnerCalls(name, args) {
   }
   return calls;
 }
+function vercelWords(name, args, shell) {
+  if (args[1] === UNREAD_CWD)
+    return "unread";
+  const words = toolWords(NAMES2, name, args, shell);
+  if (words || !STARTED_RUNNERS.has(name))
+    return words;
+  let rest = args;
+  if (name === "bun") {
+    const { sub, words: bun } = bunCall(args, shell);
+    if (bun[0] !== "x")
+      return;
+    rest = args.slice(sub + 1);
+  }
+  const at = runnerTarget(rest);
+  const started = toolName(rest[at]?.value);
+  return STARTED_RUNNERS.has(started) ? vercelWords(started, rest.slice(at + 1), shell) : undefined;
+}
 async function check22(raw, environment = process.env) {
   const {
     cwd,
@@ -17302,7 +17319,15 @@ async function check22(raw, environment = process.env) {
             production: true,
             what: "a runner's command line built at run time on a line naming the Yard ship step"
           });
-      const words = toolWords(NAMES2, name, args, shell);
+      const words = vercelWords(name, args, shell);
+      if (words === "unread") {
+        if (NAMED.test(command))
+          verdicts.push({
+            production: false,
+            what: "a runner call past the readings the hook makes on a line naming vercel"
+          });
+        continue;
+      }
       const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
       if (verdict)
         verdicts.push(verdict);

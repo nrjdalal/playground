@@ -1,7 +1,15 @@
-// A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: lets a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx) run only as a read (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) or a preview deploy, and refuses every other call, a command or deploy subcommand a later CLI adds included; a production move (a production deploy, which also migrates the hosted database, a deploy continue, a redeploy, a promote, a rollback, an alias or a rolling release) passes for the Ops lead alone, in a call that names no role variable and sources no file.
+// A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: lets a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx, a runner one of them starts included) run only as a read (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) or a preview deploy, and refuses every other call, a command or deploy subcommand a later CLI adds included; a production move (a production deploy, which also migrates the hosted database, a deploy continue, a redeploy, a promote, a rollback, an alias or a rolling release) passes for the Ops lead alone, in a call that names no role variable and sources no file.
 import { basename, isAbsolute, resolve } from "node:path"
 
-import { bunCall, runnerReadings, toolName, toolWords } from "./no-main-checkout"
+import {
+  bunCall,
+  runnerReadings,
+  runnerTarget,
+  STARTED_RUNNERS,
+  toolName,
+  toolWords,
+  UNREAD_CWD,
+} from "./no-main-checkout"
 import { namesRole, opsLead } from "./role"
 import {
   type Env,
@@ -353,6 +361,22 @@ function runnerCalls(name: string, args: Word[]): Word[] {
   return calls
 }
 
+// The vercel call's words a runner reaches, through each runner it starts (npx npx, bunx npx, bun x npx), as no-main-checkout's runs() follows one; a reading past runnerReadings' cap may run any program, so it reads as unread at any depth
+function vercelWords(name: string, args: Word[], shell: Env): Word[] | "unread" | undefined {
+  if (args[1] === UNREAD_CWD) return "unread"
+  const words = toolWords(NAMES, name, args, shell)
+  if (words || !STARTED_RUNNERS.has(name)) return words
+  let rest = args
+  if (name === "bun") {
+    const { sub, words: bun } = bunCall(args, shell)
+    if (bun[0] !== "x") return
+    rest = args.slice(sub + 1)
+  }
+  const at = runnerTarget(rest)
+  const started = toolName(rest[at]?.value)
+  return STARTED_RUNNERS.has(started) ? vercelWords(started, rest.slice(at + 1), shell) : undefined
+}
+
 export async function check(
   raw: string,
   environment: Environment = process.env,
@@ -395,7 +419,15 @@ export async function check(
             production: true,
             what: "a runner's command line built at run time on a line naming the Yard ship step",
           })
-      const words = toolWords(NAMES, name, args, shell)
+      const words = vercelWords(name, args, shell)
+      if (words === "unread") {
+        if (NAMED.test(command))
+          verdicts.push({
+            production: false,
+            what: "a runner call past the readings the hook makes on a line naming vercel",
+          })
+        continue
+      }
       // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string
       const verdict =
         words &&
