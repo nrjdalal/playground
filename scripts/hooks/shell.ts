@@ -1435,8 +1435,8 @@ function mktempPath(cmd: Command, known: Record<string, string>): string | undef
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`
 }
 
-// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments.
-export type Xargs = { replace?: string } | undefined
+// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string, which xargs fills from stdin.
+export type Xargs = { filled?: Word[]; replace?: string } | undefined
 
 export type Parsed = {
   // the other readings of a wrapper's option it cannot read, each judged as the command too
@@ -1453,6 +1453,8 @@ export type Parsed = {
 
 // env's split-string option, attached or not, with the text it carries attached
 const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
+// Each word env -S splits out of its string, to the typed word in cmd.words that string came from, so xargsFilled fills the typed word; keyed on parse's own words alone, so no call's state is kept
+const splitFrom = new WeakMap<Word, Word>()
 
 type State = { chdir?: Word; local: Map<string, Text>; rest: Word[]; xargs: Xargs }
 // env's folder word, which a second -C leaves unread, since one env moves by each in turn and another by the last alone
@@ -1512,7 +1514,12 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
   }
   for (let wrapper = inside; ; wrapper = undefined) {
     if (!wrapper) {
-      wrapper = program(peek()?.value ?? "")
+      const word = peek()
+      if (word && fromXargs(word, state.xargs)) {
+        const typed = splitFrom.get(word) ?? word
+        state.xargs = { ...state.xargs, filled: [...(state.xargs?.filled ?? []), typed] }
+      }
+      wrapper = program(word?.value ?? "")
       if (!WRAPPERS.has(wrapper)) break
       if (wrapper === "xargs") state.xargs ??= {}
       take()
@@ -1525,8 +1532,13 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       else if (wrapper === "env" && SPLIT.test(v)) {
         const attached = SPLIT.exec(v)?.[1] ?? ""
         take()
-        const split = (attached || take()?.value || "").split(/\s+/).filter(Boolean)
-        for (let j = split.length - 1; j >= 0; j--) rest.push({ quoted: false, value: split[j] })
+        const from = attached ? w : take()
+        const split = (attached || from?.value || "").split(/\s+/).filter(Boolean)
+        for (let j = split.length - 1; j >= 0; j--) {
+          const word = { quoted: false, value: split[j] }
+          if (from) splitFrom.set(word, splitFrom.get(from) ?? from)
+          rest.push(word)
+        }
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         take()
         state.chdir = chdirOf(state, take())
@@ -1706,6 +1718,7 @@ export async function examine(
     ...expandTilde(cmd, primary.name, env),
     ...splitHeld(cmd, primary.name, env),
     ...vanished,
+    ...(await xargsFilled(cmd, [primary, ...others], env)),
   ]
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env
@@ -1741,6 +1754,30 @@ function stdinScript({ args, name }: Parsed): boolean {
   if (!SHELLS.has(name)) return false
   const { inline, operand } = shellOperand(args, name)
   return !operand || (!inline && STDIN_PATHS.has(operand.value))
+}
+
+// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J), which xargs fills from stdin, so it runs a program no typed word names: each such word filled with stdin's text, as a whole and line by line, and split at blanks into the words xargs runs, or unread when the hook cannot read stdin or it holds more lines than READINGS, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
+async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Command[]> {
+  const filled = new Set(parsed.flatMap((p) => p.xargs?.filled ?? []))
+  const replace = parsed.find((p) => p.xargs?.filled?.length)?.xargs?.replace
+  if (filled.size === 0 || replace === undefined) return []
+  const fed = await stdinOf(cmd, env)
+  const lines = fed.unknown ? [] : fed.value.split("\n").map((line) => line.trim())
+  const texts = [...new Set([fed.value.trim(), ...lines])].filter(Boolean)
+  const fill = (text: string | undefined) => ({
+    ...cmd,
+    words: cmd.words.flatMap((w): Word[] => {
+      if (!filled.has(w)) return [w]
+      if (text === undefined)
+        return [{ ...w, ...unknown(`the program xargs puts in place of ${replace}`) }]
+      return w.value
+        .replaceAll(replace, text)
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((value) => ({ quoted: false, value }))
+    }),
+  })
+  return fed.unknown || texts.length > READINGS ? [fill(undefined)] : texts.map(fill)
 }
 
 const BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line"

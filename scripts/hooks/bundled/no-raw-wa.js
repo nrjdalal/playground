@@ -1446,6 +1446,7 @@ function mktempPath(cmd, known) {
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`;
 }
 var SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/;
+var splitFrom = new WeakMap;
 var chdirOf = (state, word) => state.chdir && word ? { ...word, ...unknown("a second env -C") } : word;
 var READINGS = 16;
 function parse(cmd) {
@@ -1490,7 +1491,12 @@ function unwrap(state, inside, budget) {
   };
   for (let wrapper = inside;; wrapper = undefined) {
     if (!wrapper) {
-      wrapper = program(peek()?.value ?? "");
+      const word = peek();
+      if (word && fromXargs(word, state.xargs)) {
+        const typed = splitFrom.get(word) ?? word;
+        state.xargs = { ...state.xargs, filled: [...state.xargs?.filled ?? [], typed] };
+      }
+      wrapper = program(word?.value ?? "");
       if (!WRAPPERS.has(wrapper))
         break;
       if (wrapper === "xargs")
@@ -1505,9 +1511,14 @@ function unwrap(state, inside, budget) {
       else if (wrapper === "env" && SPLIT.test(v)) {
         const attached = SPLIT.exec(v)?.[1] ?? "";
         take();
-        const split = (attached || take()?.value || "").split(/\s+/).filter(Boolean);
-        for (let j = split.length - 1;j >= 0; j--)
-          rest.push({ quoted: false, value: split[j] });
+        const from = attached ? w : take();
+        const split = (attached || from?.value || "").split(/\s+/).filter(Boolean);
+        for (let j = split.length - 1;j >= 0; j--) {
+          const word = { quoted: false, value: split[j] };
+          if (from)
+            splitFrom.set(word, splitFrom.get(from) ?? from);
+          rest.push(word);
+        }
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         take();
         state.chdir = chdirOf(state, take());
@@ -1651,7 +1662,8 @@ async function examine(cmd, env, visit, builtins) {
   const expanded = [
     ...expandTilde(cmd, primary.name, env),
     ...splitHeld(cmd, primary.name, env),
-    ...vanished
+    ...vanished,
+    ...await xargsFilled(cmd, [primary, ...others], env)
   ];
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
@@ -1687,6 +1699,27 @@ function stdinScript({ args, name }) {
     return false;
   const { inline, operand } = shellOperand(args, name);
   return !operand || !inline && STDIN_PATHS.has(operand.value);
+}
+async function xargsFilled(cmd, parsed, env) {
+  const filled = new Set(parsed.flatMap((p) => p.xargs?.filled ?? []));
+  const replace = parsed.find((p) => p.xargs?.filled?.length)?.xargs?.replace;
+  if (filled.size === 0 || replace === undefined)
+    return [];
+  const fed = await stdinOf(cmd, env);
+  const lines = fed.unknown ? [] : fed.value.split(`
+`).map((line) => line.trim());
+  const texts = [...new Set([fed.value.trim(), ...lines])].filter(Boolean);
+  const fill = (text) => ({
+    ...cmd,
+    words: cmd.words.flatMap((w) => {
+      if (!filled.has(w))
+        return [w];
+      if (text === undefined)
+        return [{ ...w, ...unknown(`the program xargs puts in place of ${replace}`) }];
+      return w.value.replaceAll(replace, text).split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
+    })
+  });
+  return fed.unknown || texts.length > READINGS ? [fill(undefined)] : texts.map(fill);
 }
 var BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line";
 function expandTilde(cmd, name, env) {
@@ -2427,6 +2460,7 @@ async function readPath(path, env) {
     return unknown("a file path the hook cannot resolve");
   return env.files.get(resolved) ?? await readFile(resolved) ?? unknown(`${resolved}, which does not exist yet`);
 }
+var fromXargs = (text, xargs) => Boolean(xargs?.replace) && text.value.includes(xargs?.replace ?? "");
 function knownVariables(command, environment, cwd) {
   const values = {
     HOME: environment.HOME,
