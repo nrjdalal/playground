@@ -5,7 +5,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, join } from "node:path"
 
 import { dataDir, dataDirOf } from "../../packages/env/src/data-dir"
-import { heldBy, pushRemote } from "../../packages/safe-delete/src/live-refs"
+import { heldBy, pushRemote, withLiveBudget } from "../../packages/safe-delete/src/live-refs"
 import { guardedOrgs } from "../../packages/settings/src/ext"
 import { coreDir, readPolicy, readPolicySync } from "../../packages/settings/src/rendered"
 import { gatedSendsSchema } from "../../packages/settings/src/slack"
@@ -1751,19 +1751,21 @@ export async function inspectAs(
   cleared: Cleared = {},
 ): Promise<string | undefined> {
   const call: Call = { changed: false, cleared, moved: false, movedBefore: false, policy: given }
-  return await calls.run(call, async () => {
-    try {
-      return await inspect(raw, environment)
-    } catch (error) {
-      const subject = subjectOf(raw)
-      // Under anyWrite a call that may write is refused whatever it names, since an error it caused may hide where it writes.
-      const writes = WRITE_CALL.test(subject) || (given.anyWrite && candidate(subject))
-      if (!writes || (!given.anyWrite && !given.find(subject))) return
-      if (given.anyWrite)
-        return `${given.guard} hook refused this call: it could not read it (${error}), so it cannot tell whether it is ${given.what}. Split it into plain commands and run them again.`
-      return `${given.guard} hook could not read this call (${error}), which may carry ${given.what} to ${given.place}, so it refuses it. Split it into plain commands and run them again.`
-    }
-  })
+  return await withLiveBudget(() =>
+    calls.run(call, async () => {
+      try {
+        return await inspect(raw, environment)
+      } catch (error) {
+        const subject = subjectOf(raw)
+        // Under anyWrite a call that may write is refused whatever it names, since an error it caused may hide where it writes.
+        const writes = WRITE_CALL.test(subject) || (given.anyWrite && candidate(subject))
+        if (!writes || (!given.anyWrite && !given.find(subject))) return
+        if (given.anyWrite)
+          return `${given.guard} hook refused this call: it could not read it (${error}), so it cannot tell whether it is ${given.what}. Split it into plain commands and run them again.`
+        return `${given.guard} hook could not read this call (${error}), which may carry ${given.what} to ${given.place}, so it refuses it. Split it into plain commands and run them again.`
+      }
+    }),
+  )
 }
 
 // What an error is judged by: the Bash command, or the tool's name and input, never its cwd.

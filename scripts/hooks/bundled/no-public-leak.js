@@ -6088,6 +6088,11 @@ function roleOfName(name) {
 var SEATLESS = new Set(["ended", "parked"]);
 
 // packages/safe-delete/src/live-refs.ts
+import { AsyncLocalStorage } from "async_hooks";
+var budget = new AsyncLocalStorage;
+function withLiveBudget(body, ms = 6000) {
+  return budget.getStore() ? body() : budget.run({ reads: new Map, until: performance.now() + ms }, body);
+}
 var run = (at, args, env, timeout) => {
   const proc = Bun.spawnSync(["git", "-C", at, ...args], {
     env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", ...env },
@@ -6130,7 +6135,14 @@ function pushRemote(at, branch = run(at, ["symbolic-ref", "-q", "--short", "HEAD
   return branch && config(`branch.${branch}.pushRemote`) || config("remote.pushDefault") || branch && config(`branch.${branch}.remote`) || "origin";
 }
 function heldBy(at, remote, timeout = 5000) {
-  const live = liveHeads(at, remote, timeout);
+  const call = budget.getStore();
+  const key = `${at}\x00${remote}`;
+  let live = call?.reads.get(key);
+  if (live === undefined) {
+    const left = call ? Math.floor(call.until - performance.now()) : timeout;
+    live = left > 0 ? liveHeads(at, remote, Math.min(timeout, left)) : null;
+    call?.reads.set(key, live);
+  }
   if (!live?.length)
     return [];
   const here = present(at, live) ?? [];
@@ -6811,7 +6823,7 @@ async function loadList(guard, path, valid, empty, environment = process.env) {
 }
 
 // scripts/hooks/no-playground-leak.ts
-import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
+import { AsyncLocalStorage as AsyncLocalStorage3 } from "async_hooks";
 import { basename as basename2, join as join5 } from "path";
 
 // scripts/hooks/github.ts
@@ -6940,7 +6952,7 @@ function sessionOf(raw) {
 }
 
 // scripts/hooks/shell.ts
-import { AsyncLocalStorage } from "async_hooks";
+import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
 import { realpathSync, statSync } from "fs";
 import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve3 } from "path";
@@ -6950,7 +6962,7 @@ var NOT_RUN = "The refusal stopped this whole Bash call, so none of its commands
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
-var deadlines = new AsyncLocalStorage;
+var deadlines = new AsyncLocalStorage2;
 function pastDeadline() {
   const deadline = deadlines.getStore();
   if (deadline !== undefined && performance.now() > deadline)
@@ -9521,7 +9533,7 @@ var leakPolicy = (orgs, term = /(?!)/) => ({
   what: "a factory term",
   why: "the factory is private, so nothing about it, its skills or its sessions goes into anything a guarded org sees, in any shape."
 });
-var calls = new AsyncLocalStorage2;
+var calls = new AsyncLocalStorage3;
 var IDLE = {
   changed: false,
   cleared: {},
@@ -10459,7 +10471,7 @@ function candidate(command) {
 var refusedList = (raw, refusal) => WRITE_CALL.test(subjectOf(raw)) && !readOnly(raw) ? refusal : undefined;
 async function inspectAs(given, raw, environment, cleared = {}) {
   const call = { changed: false, cleared, moved: false, movedBefore: false, policy: given };
-  return await calls.run(call, async () => {
+  return await withLiveBudget(() => calls.run(call, async () => {
     try {
       return await inspect(raw, environment);
     } catch (error) {
@@ -10471,7 +10483,7 @@ async function inspectAs(given, raw, environment, cleared = {}) {
         return `${given.guard} hook refused this call: it could not read it (${error}), so it cannot tell whether it is ${given.what}. Split it into plain commands and run them again.`;
       return `${given.guard} hook could not read this call (${error}), which may carry ${given.what} to ${given.place}, so it refuses it. Split it into plain commands and run them again.`;
     }
-  });
+  }));
 }
 function subjectOf(raw) {
   try {

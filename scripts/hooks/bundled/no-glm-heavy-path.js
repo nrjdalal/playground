@@ -69,6 +69,11 @@ var dataDirOf = (env, home = env.HOME || homedir()) => {
 var dataDir = (env = process.env) => dataDirOf(env);
 
 // packages/safe-delete/src/live-refs.ts
+import { AsyncLocalStorage } from "async_hooks";
+var budget = new AsyncLocalStorage;
+function withLiveBudget(body, ms = 6000) {
+  return budget.getStore() ? body() : budget.run({ reads: new Map, until: performance.now() + ms }, body);
+}
 var run = (at, args, env, timeout) => {
   const proc = Bun.spawnSync(["git", "-C", at, ...args], {
     env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", ...env },
@@ -111,7 +116,14 @@ function pushRemote(at, branch = run(at, ["symbolic-ref", "-q", "--short", "HEAD
   return branch && config(`branch.${branch}.pushRemote`) || config("remote.pushDefault") || branch && config(`branch.${branch}.remote`) || "origin";
 }
 function heldBy(at, remote, timeout = 5000) {
-  const live = liveHeads(at, remote, timeout);
+  const call = budget.getStore();
+  const key = `${at}\x00${remote}`;
+  let live = call?.reads.get(key);
+  if (live === undefined) {
+    const left = call ? Math.floor(call.until - performance.now()) : timeout;
+    live = left > 0 ? liveHeads(at, remote, Math.min(timeout, left)) : null;
+    call?.reads.set(key, live);
+  }
   if (!live?.length)
     return [];
   const here = present(at, live) ?? [];
@@ -5481,7 +5493,7 @@ function sessionOf(raw) {
 }
 
 // scripts/hooks/shell.ts
-import { AsyncLocalStorage } from "async_hooks";
+import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
 import { realpathSync, statSync } from "fs";
 import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
@@ -5490,7 +5502,7 @@ var READ = "\x01";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
-var deadlines = new AsyncLocalStorage;
+var deadlines = new AsyncLocalStorage2;
 function pastDeadline() {
   const deadline = deadlines.getStore();
   if (deadline !== undefined && performance.now() > deadline)
@@ -9576,7 +9588,7 @@ var mayRefuse = (text, load5, limit) => GIT_CALL.test(text) || ORG_CALL.test(tex
 async function check(raw, environment = process.env, load5 = currentLoad5()) {
   const limit = await loadLimit(environment);
   try {
-    return await inspect(raw, environment, load5, limit);
+    return await withLiveBudget(() => inspect(raw, environment, load5, limit));
   } catch (error) {
     if (!mayRefuse(raw, load5, limit))
       return;

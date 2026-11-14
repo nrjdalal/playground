@@ -12,7 +12,7 @@ import { loadavg } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
-import { heldBy, pushRemote } from "../../packages/safe-delete/src/live-refs"
+import { heldBy, pushRemote, withLiveBudget } from "../../packages/safe-delete/src/live-refs"
 import { guardedOrgs } from "../../packages/settings/src/ext"
 import { readPin } from "../../packages/settings/src/harnesses"
 import { readPolicy } from "../../packages/settings/src/rendered"
@@ -1825,7 +1825,7 @@ export async function check(
 ): Promise<string | undefined> {
   const limit = await loadLimit(environment)
   try {
-    return await inspect(raw, environment, load5, limit)
+    return await withLiveBudget(() => inspect(raw, environment, load5, limit))
   } catch (error) {
     if (!mayRefuse(raw, load5, limit)) return
     return `no-glm-heavy-path hook could not read this call (${error}), which reads as a git commit or push, an org tool, or an install or clone on a busy machine, from a GLM session, so it refuses it, as the glm rule (playground rules glm) asks of an org tool it cannot read. Run it as one plain command, or report to your lead.`

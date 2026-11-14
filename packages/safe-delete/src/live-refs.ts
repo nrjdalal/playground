@@ -1,5 +1,18 @@
 // The live read of a remote's branches that unpushed (index.ts) and the push scans share: commit-trailer's pre-push step and the push-scan guards, which import this file by its relative source path, since index.ts reads @packages/config's built kinds and a guard reads no dist (scripts/hooks/role.ts).
+import { AsyncLocalStorage } from "node:async_hooks"
+
 export type Tip = { ref: string; sha: string }
+
+// A hook call's budget: the time every live read inside it may take in all, and each remote's read, so several scans in one call read a remote once and a hung remote holds the call for the budget alone.
+type Budget = { reads: Map<string, Tip[] | null>; until: number }
+const budget = new AsyncLocalStorage<Budget>()
+
+// Runs body under one budget of ms for every heldBy read inside it, held in its async context so overlapping calls in one process never share it; a body already under one keeps that one.
+export function withLiveBudget<T>(body: () => T, ms = 6_000): T {
+  return budget.getStore()
+    ? body()
+    : budget.run({ reads: new Map(), until: performance.now() + ms }, body)
+}
 
 const run = (at: string, args: string[], env?: Record<string, string>, timeout?: number) => {
   const proc = Bun.spawnSync(["git", "-C", at, ...args], {
@@ -55,9 +68,16 @@ export function pushRemote(
   )
 }
 
-// What a push scan to remote leaves out, as git rev-list words after --not: each live tip of remote this repo has, and for a live branch whose tip it lacks that branch's own remote-tracking ref, the remote's last fetch of it, which stands in until a fetch, since a push only moves it on unless that branch was force-pushed; none when the remote cannot be read in timeout ms, so every local commit is scanned.
+// What a push scan to remote leaves out, as git rev-list words after --not: each live tip of remote this repo has, and for a live branch whose tip it lacks that branch's own remote-tracking ref, the remote's last fetch of it, which stands in until a fetch, since a push only moves it on unless that branch was force-pushed; none when the remote cannot be read in timeout ms, or in what is left of the call's budget (withLiveBudget), so every local commit is scanned.
 export function heldBy(at: string, remote: string, timeout = 5_000): string[] {
-  const live = liveHeads(at, remote, timeout)
+  const call = budget.getStore()
+  const key = `${at}\0${remote}`
+  let live = call?.reads.get(key)
+  if (live === undefined) {
+    const left = call ? Math.floor(call.until - performance.now()) : timeout
+    live = left > 0 ? liveHeads(at, remote, Math.min(timeout, left)) : null
+    call?.reads.set(key, live)
+  }
   if (!live?.length) return []
   const here = present(at, live) ?? []
   const had = new Set(here.map((t) => t.ref))

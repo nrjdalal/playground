@@ -498,7 +498,7 @@ test("the pre-push marker check refuses a pushed conflict marker a hooks-off com
   }
 }, 60_000)
 
-// this repo's pre-push trailer job, its script run from this checkout, in a scratch repo whose commits go in with --no-verify, the route that once let a Co-Authored-By trailer past commit-msg: a pushed commit no remote holds yet is refused when its message holds the trailer, naming the amend that drops it, and that amend, run with commit-msg's step, clears the push
+// this repo's pre-push trailer job, its script run from this checkout, in a scratch repo whose commits go in with --no-verify, the route that once let a Co-Authored-By trailer past commit-msg: a pushed commit that no live branch of the remote it pushes to holds yet is refused when its message holds the trailer, naming the amend that drops it, and that amend, run with commit-msg's step, clears the push
 test("the pre-push trailer check refuses a pushed commit a --no-verify commit let a Co-authored-by trailer into", async () => {
   const trailer = await pushScript("commit-trailer.sh")
   const dir = mkdtempSync(join(tmpdir(), "lefthook-push-trailer-"))
