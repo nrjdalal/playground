@@ -399,7 +399,7 @@ def pct(part, whole):
 def fmt(x):
     return f"{x:g}"
 
-# a manager (spawn.sh's dispatcher and lead roles) over the load line passes while the CPU reads MANAGER_IDLE_MIN% idle or more, run-slot's own bar for slots 2 to 4 (after a reboot load5 still carries the boot's spike and every settled start still counts, so the line held the managers' restore at 63% idle)
+# a manager (spawn.sh's dispatcher and lead roles) over the load line passes while the CPU reads MANAGER_IDLE_MIN% idle or more, run-slot's default bar for slots 2 to 4 (after a reboot load5 still carries the boot's spike and every settled start still counts, so the line held the managers' restore at 63% idle)
 MANAGER_ROLES = ("dispatcher", "lead")
 MANAGER_IDLE_MIN = 40
 
