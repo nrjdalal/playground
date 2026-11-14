@@ -17,6 +17,7 @@ import { dirname, join } from "node:path"
 
 import { GUARD_LISTS, loginPath } from "../../packages/settings/src/rendered"
 import { OLD_NAMES } from "../session-names"
+import { FAKE_SLEEP } from "./fixtures/proc"
 import { storeWith } from "./hooks/render-set"
 
 // spawn.sh's fakes and its spawn() for the spawn*.test.ts files, split so the parallel pass spreads them; test-sandbox's --parallel loads this afresh for each file, so the afterAll is that file's own
@@ -86,10 +87,12 @@ fake(
   `printf '%s\\n' "$*" >> "$HOME/claude.args"
 exit 0`,
 )
+// FAKE_LINUX answers as Ubuntu does: procps's sysctl names each macOS name it cannot stat and exits 255, its top has no -l, and there is no vm_stat, so every reading comes from PLAYGROUND_PROC's recorded text (tests/scripts/fixtures/proc.ts).
 fake(
   "sysctl",
   // spawn.sh always reads with -n, so the name is $2.
-  `[ -n "$FAKE_SYSCTL_BROKEN" ] && exit 1
+  `[ -n "$FAKE_LINUX" ] && { echo "sysctl: cannot stat /proc/sys/\${2//.//}: No such file or directory" >&2; exit 255; }
+[ -n "$FAKE_SYSCTL_BROKEN" ] && exit 1
 [ -n "$FAKE_SYSCTL_SANDBOXED" ] && { echo "sysctl: sysctl fmt -1 1024 1: Operation not permitted" >&2; exit 1; }
 [ "$1" = -n ] || exit 1
 case "$2" in
@@ -104,6 +107,7 @@ esac`,
 fake(
   "top",
   `echo "$*" >> "$HOME/top.calls"
+[ -n "$FAKE_LINUX" ] && { echo "top: unknown option 'l'" >&2; exit 1; }
 echo "CPU usage: 30.00% user, 20.00% sys, 50.00% idle"
 echo "CPU usage: 60.00% user, 40.00% sys, \${FAKE_CPU_IDLE:-0.00}% idle"`,
 )
@@ -116,12 +120,15 @@ echo "22:15  2 users, load averages: \${FAKE_LOAD1:-1.00} \${FAKE_LOAD5:-2.00} 3
 // The swap-in read, vm_stat -c 2 1: its first row the totals since boot, its second the last second's, swap-ins at FAKE_SWAPINS (0 by default).
 fake(
   "vm_stat",
-  `[ -n "$FAKE_VMSTAT_BROKEN" ] && exit 1
+  `[ -n "$FAKE_LINUX" ] && { echo "vm_stat: command not found" >&2; exit 127; }
+[ -n "$FAKE_VMSTAT_BROKEN" ] && exit 1
 echo "Mach Virtual Memory Statistics: (page size of 16384 bytes)"
 echo "    free  pageins  pageout  swapins swapouts"
 echo "    8023  346118K   502178  9966113 12153731"
 echo "    7698      542        0  \${FAKE_SWAPINS:-0}        0"`,
 )
+// sleep as it is, but first the next second read's /proc text moves in (FAKE_SLEEP)
+fake("sleep", FAKE_SLEEP.replace("#!/bin/bash\n", ""))
 // grep as it is, but a resume's name check over a folder's transcripts, its one call naming customTitle, is logged to grep.calls first, so a case sees whether that read ran.
 fake(
   "grep",
@@ -335,8 +342,11 @@ export async function spawn(
     env: {
       FAKE_LSTART: LSTART,
       HOME: home,
+      // the readings' /proc text: none unless a case records its own, under the test sandbox's marker, which alone lets spawn.sh read it
+      PLAYGROUND_PROC: join(home, "no-proc"),
       PLAYGROUND_REPO: join(home, "code", "factory"),
       PATH: `${bin}:${process.env.PATH}`,
+      TEST_SANDBOX_HOME: scratch,
       ...env,
     },
     stderr: "pipe",

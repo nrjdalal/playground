@@ -218,6 +218,7 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
   test.each([
     ["with none set gets the user's temp folder", {}, "/var/folders/zz/T/"],
     ["keeps one already set", { TMPDIR: "/tmp/own/" }, "/tmp/own/"],
+    ["on Linux, whose getconf has no such name, gets /tmp", { LINUX_GETCONF: "1" }, "/tmp"],
   ])("a herdr session %s as TMPDIR", async (_, env, expected) => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md", "--runtime", "herdr"],
@@ -233,10 +234,10 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
       join(shim, "claude"),
       '#!/bin/bash\nprintf %s "$TMPDIR" > "$HOME/claude.tmpdir"\n',
     )
-    // macOS's getconf, which names the user's temp folder; the box runs Linux, whose getconf has no such name.
+    // macOS's getconf, which names the user's temp folder; under LINUX_GETCONF it is Linux's, which has no such name.
     writeFileSync(
       join(shim, "getconf"),
-      '#!/bin/bash\n[ "$1" = DARWIN_USER_TEMP_DIR ] && echo /var/folders/zz/T/\n',
+      '#!/bin/bash\n[ -n "$LINUX_GETCONF" ] && { echo "getconf: Unrecognized variable $1" >&2; exit 1; }\n[ "$1" = DARWIN_USER_TEMP_DIR ] && echo /var/folders/zz/T/\n',
     )
     for (const name of ["claude", "getconf"]) chmodSync(join(shim, name), 0o755)
     const run = Bun.spawn(["bash", lw(r.home, "launch", "worker-brave-otter.sh")], {
