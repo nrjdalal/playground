@@ -168,6 +168,22 @@ export const groups: Group[] = [
         "X=a; repeat 2 { $X pkill -f watcher; unset X; }",
       ],
       [
+        "a kill by pattern behind a variable an array run whole unsets",
+        'A=(unset X); X=a; "${A[@]}"; $X pkill -f watcher',
+      ],
+      [
+        "a kill by pattern behind a variable an array run whole reads",
+        'A=(read X); X=a; "${A[@]}" < /dev/null; $X pkill -f watcher',
+      ],
+      [
+        "a kill by pattern behind a variable an array run whole evaluates text on",
+        `A=(eval 'unset X'); X=a; "\${A[@]}"; $X pkill -f watcher`,
+      ],
+      [
+        "a kill by pattern behind a variable an array the reader cannot read whole may change",
+        'A=($(printf unset) X); X=a; "${A[@]}"; $X pkill -f watcher',
+      ],
+      [
         "a kill by pattern behind a variable zsh's nameref makes a reference",
         "X=a; nameref X=Y; $X pkill -f watcher",
       ],
