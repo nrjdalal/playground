@@ -399,7 +399,7 @@ def pct(part, whole):
 def fmt(x):
     return f"{x:g}"
 
-# a manager (spawn.sh's dispatcher and lead roles) over the load line passes while the CPU reads MANAGER_IDLE_MIN% idle or more, run-slot's own bar for slots 2 to 4 (after a reboot load5 still carries the boot's spike and every settled start still counts, so the line held the managers' restore at 63% idle)
+# a manager (spawn.sh's dispatcher and lead roles) over the load line passes while the CPU reads MANAGER_IDLE_MIN% idle or more, run-slot's default bar for slots 2 to 4 (after a reboot load5 still carries the boot's spike and every settled start still counts, so the line held the managers' restore at 63% idle)
 MANAGER_ROLES = ("dispatcher", "lead")
 MANAGER_IDLE_MIN = 40
 
@@ -1867,6 +1867,9 @@ COMMAND="($COMMAND)"
 LAUNCH_DIR="$DATA/launch"
 mkdir -p "$LAUNCH_DIR" && chmod 700 "$LAUNCH_DIR" || refuse "it cannot prepare $LAUNCH_DIR"
 LAUNCH_FILE="$LAUNCH_DIR/$NAME.sh"
+# A session writes its notes and logs to its own scratchpad from its first step, so the folder is there, owner-only, before the pane opens.
+SCRATCHPAD="$DATA/scratchpad/$NAME"
+mkdir -p "$SCRATCHPAD" && chmod 700 "$SCRATCHPAD" || refuse "it cannot prepare $SCRATCHPAD"
 [ -z "$BEAT" ] || rm -f -- "$BEAT"
 # The factory's hooks read PLAYGROUND_REPO before the session's own folder, so the launch file's second line exports this script's main checkout: a session in a worktree, or outside any Playground checkout, runs the main checkout's guards.
 HEAD_LINES=
