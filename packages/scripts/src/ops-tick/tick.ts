@@ -870,13 +870,8 @@ const neverRanSince = async (ctx: Context, outbox: string): Promise<string | und
 
 // The week-usage alert's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
 export const USAGE_LINK = "- 💰 Each account's week shows on the [System page](/dashboard/system)."
-// Pure: the relay-down alert's link line, naming the row that relays on this machine: the relay runner under AI Runners, else Ops under Orchestrators, whose sweep relays.
-export const relayLink = (relay: boolean): string =>
-  relay
-    ? `- 🔎 The relay's row is under AI Runners in the sidebar (${RELAY} on hover), and this Mac's state is on the [System page](/dashboard/system).`
-    : "- 🔎 Ops' row is under Orchestrators in the sidebar, since its sweep relays here, and this Mac's state is on the [System page](/dashboard/system)."
 
-// The late-stop line's text, the Inbox alert's title among its uses: the relay's own on a machine that runs it, else the sweep's, each with the next step and naming only what this machine runs.
+// The late-stop line's text: the relay's own on a machine that runs it, else the sweep's, each with the next step and naming only what this machine runs.
 const relayDown = (relay: boolean, moved: number): string => {
   const since = moved ? `since ${isoSeconds(new Date(moved))}` : "since the watch began"
   if (relay)
@@ -902,6 +897,12 @@ export const escalateMs = async (data: string): Promise<number> => {
   const read = await readPolicy(data)
   const settings = read.settings ?? { schemaVersion: 1 as const, values: {} }
   return ruleSettings.get(settings, "unstick.escalateMinutes") * 60_000
+}
+
+// The machine's latest boot or wake from sleep, read from sysctl's `{ sec = <s>, usec = <us> } <date>` lines, 0 when unread: no beat runs while the machine is off or asleep, so a wait from before it is not the relay's or the sweep's.
+const upSince = async (ctx: Context): Promise<number> => {
+  const { out } = await ctx.run(["sysctl", "-n", "kern.boottime", "kern.waketime"])
+  return Math.max(0, ...[...out.matchAll(/\bsec = (\d+)/g)].map((m) => Number(m[1]) * 1000))
 }
 
 // The hold Ops sets when it slows or pauses its sweep on purpose, a usage squeeze or maintenance: ops/sweep-hold-until holds a future ISO time with its zone, and while one stands the watch keeps quiet and clears its state, so it judges unheld time only and a lift never alerts for the held window; a missing, empty, past or unreadable time leaves the watch on.
@@ -933,35 +934,27 @@ const queueWaiterLine = async (ctx: Context, to: string, text: string) => {
   )
 }
 
-// The ops relay's watch: a line pending() reads is timed from the first cycle that reads it, and once it has waited two cycles of whoever relays (relayDown) with no cursor moved since, the stop goes to the session that can act on it, the way unstick routes a stuck session: one line into the managers' waiter queue for ops (queueWaiterLine, since the stalled relay or sweep that the stop names delivers every other channel), then one for the dispatcher once the escalation window has passed with Ops yet to pick it up; the Inbox alert under the ops manager's name posts only while Ops itself is down (opsLive), the one absence no other check reports. The state in tick/relay-watch.json keeps each stop to one line per route, the Inbox post resolved once a cursor moves after it or its item is gone, and a routed stop's state clearing once the cursor moves or nothing waits.
+// The ops relay's watch: a line pending() reads is timed from the first cycle that reads it, or from ops-session-resume's escalation window after the machine's last boot or wake (upSince) when that is later, and once it has waited two cycles of whoever relays (relayDown) with no cursor moved since, the stop goes to the session that can act on it, the way unstick routes a stuck session: one line into the managers' waiter queue for ops (queueWaiterLine, since the stalled relay or sweep that the stop names delivers every other channel), then one for the dispatcher once the escalation window has passed with Ops yet to pick it up, or at once while Ops itself is down (opsLive); it posts nothing to the Inbox, and resolves an Inbox alert an earlier watch left open on its first cycle. The state in tick/relay-watch.json keeps each stop to one line per route, clearing once the cursor moves or nothing waits.
 const relayWatch = async (ctx: Context) => {
   const outbox = join(ctx.ops, "outbox")
   const statePath = join(ctx.ops, "tick", "relay-watch.json")
   const state = (await readJson(statePath).catch(() => null)) as RelayWatch | null
+  if (state?.id && state.by) {
+    await resolveOwn(
+      ctx,
+      state.id,
+      state.by,
+      "This alert goes to the dispatcher now, not the Inbox",
+    )
+    await unlink(statePath)
+    return
+  }
   if (await sweepHold(ctx)) {
-    if (state?.id && state.by)
-      await resolveOwn(
-        ctx,
-        state.id,
-        state.by,
-        "The sweep hold stands: Ops set ops/sweep-hold-until, and the watch stays quiet until it passes",
-      )
     if (state) await unlink(statePath)
     return
   }
   const moved = await relayMovedAt(outbox)
   const start = await neverRanSince(ctx, outbox)
-  if (state?.id && state.by) {
-    if (moved <= Date.parse(state.at ?? "")) return
-    await resolveOwn(
-      ctx,
-      state.id,
-      state.by,
-      `The relay moved its cursor again at ${isoSeconds(new Date(moved))}`,
-    )
-    await unlink(statePath)
-    return
-  }
   if ((await pending(outbox, start)).length === 0) {
     if (state) await unlink(statePath)
     return
@@ -972,40 +965,34 @@ const relayWatch = async (ctx: Context) => {
     return
   }
   const relay = await hasRelay(ctx)
-  if (ctx.now.getTime() - since < 2 * (relay ? RELAY_CYCLE_MS : SWEEP_CYCLE_MS)) return
+  const escalate = await escalateMs(join(ctx.ops, ".."))
+  const from = Math.max(since, (await upSince(ctx)) + escalate)
+  if (ctx.now.getTime() - from < 2 * (relay ? RELAY_CYCLE_MS : SWEEP_CYCLE_MS)) return
   const line = relayDown(relay, moved)
+  const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+    agents?: unknown
+  } | null
+  const ask = "Resolve it; post it to the owner's Inbox only if you cannot."
   if (!(await opsLive(ctx))) {
-    if (!state?.id) {
-      const { by, id } = await postAlert(ctx, line, relayLink(relay))
+    if (!state?.toldDispatcher) {
+      await queueWaiterLine(ctx, dispatcherOf(roster?.agents, 1), `${line} Ops is down. ${ask}`)
       await writeAtomic(
         statePath,
-        JSON.stringify({ at: ctx.now.toISOString(), by, id, pendingSince: state?.pendingSince }),
+        JSON.stringify({ ...state, toldDispatcher: ctx.now.toISOString() }),
       )
     }
     return
   }
   if (!state?.sentAt) {
-    const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
-      agents?: unknown
-    } | null
     await queueWaiterLine(ctx, managerOf(roster?.agents, "ops"), line)
-    await writeAtomic(
-      statePath,
-      JSON.stringify({ pendingSince: state?.pendingSince, sentAt: ctx.now.toISOString() }),
-    )
+    await writeAtomic(statePath, JSON.stringify({ ...state, sentAt: ctx.now.toISOString() }))
     return
   }
-  if (
-    !state.toldDispatcher &&
-    ctx.now.getTime() - Date.parse(state.sentAt) >= (await escalateMs(join(ctx.ops, "..")))
-  ) {
-    const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
-      agents?: unknown
-    } | null
+  if (!state.toldDispatcher && ctx.now.getTime() - Date.parse(state.sentAt) >= escalate) {
     await queueWaiterLine(
       ctx,
       dispatcherOf(roster?.agents, 1),
-      `${line} Ops has not picked it up. Resolve it; post it to the owner's Inbox only if you cannot.`,
+      `${line} Ops has not picked it up. ${ask}`,
     )
     await writeAtomic(
       statePath,
@@ -1038,7 +1025,7 @@ export const BEATS: Beat[] = [
     cron: "*/5 * * * *",
     name: "relay-watch",
     run: relayWatch,
-    to: "ops, then the dispatcher at unstick's escalation, and the Inbox once Ops is down",
+    to: "ops, then the dispatcher at unstick's escalation, or the dispatcher at once while Ops is down",
   },
   { cron: "*/10 * * * *", name: "guard-probe", run: guardProbe, to: "dispatcher" },
   { cron: "*/5 * * * *", name: "ext-lock", run: extLock(), to: "ops/log/ext-lock.log" },
