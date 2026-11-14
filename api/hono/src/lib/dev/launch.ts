@@ -22,7 +22,7 @@ import {
   livePair,
   unreusedLiveDatabase,
 } from "@/lib/dev/live-dashboard"
-import { listening, portlessDir } from "@/lib/dev/proxy"
+import { listening, portlessDir, prefixOf } from "@/lib/dev/proxy"
 import {
   GuardError,
   type GuardFailure,
@@ -277,19 +277,6 @@ export const othersLiveDashboard = (
   branch: string | null,
   liveDashboard: LiveDashboard = livePair(),
 ): boolean => isLiveDatabase(container, liveDashboard) && branch !== liveDashboard.branch
-
-const UNPREFIXED = new Set(["main", "master"])
-
-// The prefix portless gives a linked worktree's stack, as its cli.js names it (branchToPrefix and sanitizeForHostname): the branch's last segment, lowercased, with anything but letters, digits and hyphens turned to hyphens, runs of them merged and the ends trimmed; none on main or master, or when nothing is left. Its truncation of a label past 63 characters ends in a hash, so it never yields a short prefix such as dashboard.
-export const prefixOf = (branch: string): string | null => {
-  if (UNPREFIXED.has(branch)) return null
-  const prefix = (branch.split("/").at(-1) ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^-+|-+$/g, "")
-  return prefix || null
-}
 
 const OWN_DATABASE =
   "start this worktree's .env from .env.example and point POSTGRES_URL at a container of its own, published on loopback alone: `docker run -d --name playground-<worktree>-db -e POSTGRES_PASSWORD=<pw> -p 127.0.0.1::5432 postgres:alpine`, then `docker port playground-<worktree>-db 5432` for its port (the db-migration skill's step 3)"
