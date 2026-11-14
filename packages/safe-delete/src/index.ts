@@ -31,10 +31,11 @@ export type Proc = { command: string; cwd: string; pid: number; sockets: string[
 // A running node_modules clone, from run-slot's clone holder record: the session that runs it, its pid, the checkout it copies from and the one it copies into.
 export type Clone = { destination: string; pid: number; source: string; who: string }
 
-// What tells a worktree is held: the folder another repo's worktree whose branch gh answers has no PR has its commits no remote holds archived in before it goes (archiveUnlanded), the running clones, a reader quarantine calls again right before its move, the roster's live statuses, the folders beyond the other worktrees read for links into it (linkPlaces), every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, its commits no remote holds bundled first, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that, under --discard only once that PR reads MERGED or CLOSED (freed); the worktree's own PR once it reads MERGED or CLOSED (freed, at its head), which no roster row naming its branch or its number holds while the worktree sits at that PR's head, and where a pass past such a row is told (note).
+// What tells a worktree is held: the folder another repo's worktree whose branch gh answers has no PR has its commits no remote holds archived in before it goes (archiveUnlanded), the running clones, the name gh gives another repo's default branch (null when it cannot answer), asked only when origin/HEAD names none, a reader quarantine calls again right before its move, the roster's live statuses, the folders beyond the other worktrees read for links into it (linkPlaces), every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, its commits no remote holds bundled first, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that, under --discard only once that PR reads MERGED or CLOSED (freed); the worktree's own PR once it reads MERGED or CLOSED (freed, at its head), which no roster row naming its branch or its number holds while the worktree sits at that PR's head, and where a pass past such a row is told (note).
 export type Holders = {
   archive?: string
   clones: () => Clone[]
+  defaultBranch?: (at: string) => string | null
   discard: boolean
   freed?: { head: string; number: number; state: "CLOSED" | "MERGED" }
   live: string[]
@@ -253,7 +254,7 @@ const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string 
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, and the folders in `ended`, ended sessions' scratchpad folders (endedPadOf), and nothing else.
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, and the paths in `ended`, ended sessions' scratchpad folders (endedPadOf) and gone sessions' entries directly in scratch/ (goneScratchOf), and nothing else.
 export function isProtected(
   path: string,
   roots: Roots,
@@ -573,7 +574,7 @@ export function restore(
       (at !== entry.ended && stands && !stands.isDirectory())
     )
       return refused(
-        `${entry.path} came from ${entry.ended}, an ended session's folder, which no longer reaches it as a real folder in ${pads.join(" or ")}`,
+        `${entry.path} came from ${entry.ended}, an ended session's folder or a gone session's entry, which no longer reaches it as a real entry directly in ${pads.join(" or ")}`,
       )
     back = [entry.ended]
   }
@@ -651,7 +652,7 @@ const linkHolder = (at: string, roots: Roots, places: string[]): string | null =
   return `${at} is linked into by ${links.sort().slice(0, 3).join(", ")}${more}: repoint or remove each link first`
 }
 
-// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit origin/canary holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree given an archive folder, archiveUnlanded has archived each of its commits no remote holds.
+// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit origin/canary holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree, on that repo's default branch (defaultBase), or on a remote branch the remote still holds (remoteHolding), or, given an archive folder, archiveUnlanded has archived each of its commits no remote holds.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   const repo = worktreeRepo(at, roots)
@@ -757,18 +758,79 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const more = changed.length > 3 ? `, and ${changed.length - 3} more` : ""
     return `${at} holds ${changed.length} uncommitted change${changed.length === 1 ? "" : "s"} (${paths.join(", ")}${more}): ${discard}`
   }
-  if (landed(git, holders, at)) return null
+  const own = repo === real(roots.main)
+  const base = own ? "origin/canary" : defaultBase(git, holders, at)
+  if (landed(git, holders, at, base)) return null
+  const holding = own ? null : remoteHolding(git, at)
+  if (holding) {
+    holders.note?.(
+      `${at}'s commits are all on ${holding}, which the remote still holds, so no work is lost`,
+    )
+    return null
+  }
   const archived =
-    holders.archive !== undefined && repo !== real(roots.main)
-      ? archiveUnlanded(at, holders.archive)
-      : undefined
+    holders.archive !== undefined && !own ? archiveUnlanded(at, holders.archive) : undefined
   if (archived && !("refused" in archived)) {
     holders.note?.(
       `archived ${counted(archived.count, "commit", "commits")} no remote holds at ${archived.path}`,
     )
     return null
   }
-  return `${at}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since)${archived ? `, and ${archived.refused}` : ""}: ${discard}`
+  const measured = own
+    ? "origin/canary (fetch origin canary if it merged since)"
+    : `${base ?? "its repo's default branch, which neither origin/HEAD nor gh names,"} or on any remote branch (fetch origin if it merged or was pushed since)`
+  return `${at}'s HEAD holds work not landed on ${measured}${archived ? `, and ${archived.refused}` : ""}: ${discard}`
+}
+
+// The ref another repo's worktree is measured against: origin/HEAD's branch, else origin/<the branch gh names as the repo's default>, else null.
+const defaultBase = (
+  git: (...args: string[]) => { ok: boolean; out: string },
+  holders: Holders,
+  at: string,
+): string | null => {
+  const head = git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+  if (head.ok && head.out) return head.out
+  const name = holders.defaultBranch?.(at)
+  return name ? `origin/${name}` : null
+}
+
+// The remote branch that holds HEAD, and so every commit HEAD holds, as <remote>/<branch>, or null; since a remote-tracking ref is only the remote's last fetch, each is read again from the remote itself and counts only when ls-remote names a sha that is HEAD or has HEAD as an ancestor.
+const remoteHolding = (
+  git: (...args: string[]) => { ok: boolean; out: string },
+  at: string,
+): string | null => {
+  const refs = git(
+    "for-each-ref",
+    "--contains",
+    "HEAD",
+    "--format=%(refname:lstrip=2)",
+    "refs/remotes",
+  )
+  if (!refs.ok) return null
+  for (const ref of refs.out.split("\n").filter((r) => r.includes("/") && !r.endsWith("/HEAD"))) {
+    const slash = ref.indexOf("/")
+    const live = Bun.spawnSync(
+      [
+        "git",
+        "-C",
+        at,
+        "ls-remote",
+        "--",
+        ref.slice(0, slash),
+        `refs/heads/${ref.slice(slash + 1)}`,
+      ],
+      {
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+        stderr: "ignore",
+        stdin: "ignore",
+        stdout: "pipe",
+      },
+    )
+    const sha = live.exitCode === 0 ? live.stdout.toString().split("\t")[0]!.trim() : ""
+    if (/^[0-9a-f]{40,64}$/.test(sha) && git("merge-base", "--is-ancestor", "HEAD", sha).ok)
+      return ref
+  }
+  return null
 }
 
 // Writes each ref's commits past exclude (git rev-list words, such as origin/canary or --remotes) by git bundle create in repo into <trash>/<UTC-ts>-<session>/<name>.bundle, beside <name>.shas with a "<sha> <ref>" line each, then reads the bundle's heads back: its path and the refs it holds at their sha, or why none was written. The trash purge takes both with their batch.
@@ -873,20 +935,21 @@ export function archiveUnlanded(
   return { count: shas.length, path }
 }
 
-// Whether HEAD's work is on origin/canary: each file HEAD changed since their merge-base, named raw (-z) and matched literally so no name is quoted or globbed, reads the same there, or, since canary squash-merges and may change those files again, a merged PR holds HEAD's commit.
+// Whether HEAD's work is on base (origin/canary, or another repo's default branch; null when none reads): each file HEAD changed since their merge-base, named raw (-z) and matched literally so no name is quoted or globbed, reads the same there, or, since a squash merge may change those files again, a merged PR holds HEAD's commit.
 const landed = (
   git: (...args: string[]) => { ok: boolean; out: string },
   holders: Holders,
   at: string,
+  ref: string | null,
 ): boolean => {
-  const base = git("merge-base", "HEAD", "origin/canary")
-  if (base.ok) {
+  const base = ref === null ? { ok: false, out: "" } : git("merge-base", "HEAD", ref)
+  if (base.ok && ref !== null) {
     const files = git("diff", "--name-only", "-z", "--no-renames", base.out, "HEAD")
     const paths = files.out.split("\0").filter(Boolean)
     if (
       files.ok &&
       (!paths.length ||
-        git("--literal-pathspecs", "diff", "--quiet", "HEAD", "origin/canary", "--", ...paths).ok)
+        git("--literal-pathspecs", "diff", "--quiet", "HEAD", ref, "--", ...paths).ok)
     )
       return true
   }
