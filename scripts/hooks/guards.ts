@@ -72,6 +72,9 @@ export const GUARDS: readonly Guard[] = [
   { factory: true, name: "no-unslotted-run", run: (raw, env) => unslottedRun(raw, env) },
 ]
 
+// The hook's own deadline, from its process start, inside the runner's 15 s timeout.
+export const DEADLINE = 13_000
+
 const threw = (name: string, error: unknown) =>
   `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`
 
@@ -80,6 +83,7 @@ export async function check(
   raw: string,
   environment: Environment = process.env,
   guards: readonly Guard[] = GUARDS,
+  _wait = DEADLINE,
 ): Promise<string | undefined> {
   let factory: Promise<boolean> | undefined
   // every guard's live reads of a push's remote share one budget, so a hung remote leaves the call inside its timeout
@@ -99,8 +103,8 @@ export async function check(
 }
 
 // The hook's exit: 2 with the reasons on stderr, else 0.
-export async function hook(): Promise<number> {
-  const reason = await check(await Bun.stdin.text())
+export async function hook(guards: readonly Guard[] = GUARDS): Promise<number> {
+  const reason = await check(await Bun.stdin.text(), process.env, guards)
   if (!reason) return 0
   console.error(reason)
   return 2

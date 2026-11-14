@@ -17995,8 +17995,9 @@ var GUARDS = [
   { factory: true, name: "no-stash", run: (raw, env) => check3(raw, env) },
   { factory: true, name: "no-unslotted-run", run: (raw, env) => check25(raw, env) }
 ];
+var DEADLINE = 13000;
 var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`;
-async function check26(raw, environment = process.env, guards = GUARDS) {
+async function check26(raw, environment = process.env, guards = GUARDS, _wait = DEADLINE) {
   let factory;
   const reasons = await withLiveBudget(() => Promise.all(guards.map(async ({ factory: gated, name, run }) => {
     try {
@@ -18011,8 +18012,8 @@ async function check26(raw, environment = process.env, guards = GUARDS) {
 
 `) || undefined;
 }
-async function hook() {
-  const reason = await check26(await Bun.stdin.text());
+async function hook(guards = GUARDS) {
+  const reason = await check26(await Bun.stdin.text(), process.env, guards);
   if (!reason)
     return 0;
   console.error(reason);
@@ -18021,6 +18022,7 @@ async function hook() {
 if (import.meta.main)
   process.exit(await hook());
 export {
+  DEADLINE,
   GUARDS,
   check26 as check,
   hook
