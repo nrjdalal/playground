@@ -85,13 +85,13 @@ export const worktreesIn = (porcelain: string, main: string): Worktree[] =>
     return [{ branch: /^branch refs\/heads\/(.+)$/m.exec(block)?.[1] ?? null, path }]
   })
 
-// Pure: the PR number a review-<n> or test-<n> clone's folder names, else undefined.
+// Pure: the PR number a review-<n>, test-<n> or test-<n>-before clone's folder names, else undefined.
 const cloneOf = (path: string): number | undefined => {
-  const n = /^(?:review|test)-(\d+)$/.exec(basename(path))?.[1]
+  const n = /^(?:review|test)-(\d+)(?:-before)?$/.exec(basename(path))?.[1]
   return n ? Number(n) : undefined
 }
 
-// Pure: the worktrees whose PR is merged or closed, each with that PR: its branch's newest PR, else a review-<n> or test-<n> clone's PR n; a worktree with no PR, or an open one, stays.
+// Pure: the worktrees whose PR is merged or closed, each with that PR: its branch's newest PR, else a review-<n>, test-<n> or test-<n>-before clone's PR n; a worktree with no PR, or an open one, stays.
 export const staleWorktrees = (worktrees: Worktree[], prs: Prs): (Worktree & { pr: Pr })[] =>
   worktrees.flatMap((w) => {
     const n = cloneOf(w.path)

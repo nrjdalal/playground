@@ -38,6 +38,8 @@ describe("a delete the hook lets run", () => {
     "rsync -a src/ dst/",
     "~/.playground/ops/run-slot.sh me -- rm notes.txt",
     "~/.playground/ops/run-slot.sh me -- bun run test",
+    'C="rm notes.txt"; $C',
+    "W=me; ~/.playground/ops/run-slot.sh $W -- bun run test",
     "git clean -f",
     "git clean -n -d",
     "git clean -ndx",

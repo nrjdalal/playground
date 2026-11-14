@@ -49,7 +49,7 @@ describe("brief-rush.md's merge and scratch lines run as written", () => {
   test("every log goes inside the session's own scratch folder", async () => {
     const text = await read(join("scripts/briefs", "brief-rush.md"))
     const line = text.split("\n").find((l) => l.startsWith("Plan: ")) ?? ""
-    expect(line).toContain("Write every log inside that folder")
+    expect(line).toContain("Write every log inside `scratch/<session name>/`")
     expect(line).toContain("`scratch/<session>-x.log`")
   })
 })

@@ -50,8 +50,9 @@ async function inspect(raw: string) {
     tool_name?: unknown
   }
   if (tool !== "Bash" || typeof toolInput?.command !== "string") return
-  // quotes and backslashes go first, since the shell reads p"k"ill and \pkill as pkill
-  if (!/\b(?:fuser|kill|killall|pkill)\b/.test(toolInput.command.replace(/["'\\]/g, ""))) return
+  // quotes and backslashes go first, since the shell reads p"k"ill and \pkill as pkill; a word of 2 or more back-to-back variable reads (`$P$Q`) passes too, since the reader joins the program name they hold where no literal kill token shows
+  const bare = toolInput.command.replace(/["'\\]/g, "")
+  if (!/\b(?:fuser|kill|killall|pkill)\b/.test(bare) && !/(?:\$\{?\w+\}?){2,}/.test(bare)) return
   const lexed = lex(toolInput.command)
   const fresh = () => ({ files: new Map(), known: {}, process: {}, vars: new Map() })
   // the whole call is read for a search first, since a loop's `done < <(pgrep …)` is read after the kill it feeds

@@ -122,6 +122,22 @@ describe("worktrees", () => {
     ).toEqual([at("review-19")])
   })
 
+  // PG-2144: a tester's before clone sits detached at canary, so its PR is read from its folder's name too
+  test("a tester's test-<n>-before clone goes once PR n merges, and stays while PR n is open", () => {
+    const clones = worktreesIn(
+      [
+        `worktree ${at("test-21")}\nHEAD i\ndetached`,
+        `worktree ${at("test-21-before")}\nHEAD j\ndetached`,
+      ].join("\n\n"),
+      main,
+    )
+    expect(staleWorktrees(clones, prsOf({}, { 21: pr("MERGED") })).map((w) => w.path)).toEqual([
+      at("test-21"),
+      at("test-21-before"),
+    ])
+    expect(staleWorktrees(clones, prsOf({}, { 21: pr("OPEN") }))).toEqual([])
+  })
+
   test("a kept line is trashed under the standing approval only for work it may drop", () => {
     expect(discardable("kept /w: uncommitted work")).toBe(true)
     expect(discardable("kept /w: unpushed commits")).toBe(true)
