@@ -1182,22 +1182,10 @@ describe("worktreeRefusal", () => {
     ).toEqual([work])
   })
 
-  // #2132: a remote that cannot be read holds no commit, so every commit HEAD holds is archived
-  test("archiveUnlanded archives every commit of a worktree whose remote cannot be read", () => {
+  // #2139: a remote that cannot be read gives no tip to archive past, so archiveUnlanded writes nothing and keeps the tree, then archives only what no remote holds once it reads
+  test("archiveUnlanded refuses, writing no archive, while a remote cannot be read, then archives only the commits no remote holds once it reads", () => {
     const { roots, wt } = withWorktree()
     const archive = join(roots.root, "archive")
-    git(wt, "push", "-q", "origin", "PG-1-thing")
-    git(roots.main, "remote", "set-url", "origin", join(roots.root, "gone.git"))
-    const path = join(archive, "playground", `pg-1-${git(wt, "rev-parse", "HEAD").slice(0, 7)}`)
-    expect(archiveUnlanded(wt, archive)).toEqual({ count: 2, path })
-  })
-
-  // #2132: a short archive written while the remote could not be read, a merge commit's patch missing, lets the tree go once the remote reads again and lists fewer commits
-  test("archiveUnlanded refuses a short archive of the whole history while the remote cannot be read, then passes the same folder once it reads", () => {
-    const { roots, wt } = withWorktree()
-    const archive = join(roots.root, "archive")
-    const side = git(wt, "commit-tree", "-p", "HEAD", "-m", "side", "HEAD^{tree}")
-    git(wt, "merge", "-q", "--no-ff", "-m", "merge", side)
     git(wt, "push", "-q", "origin", "PG-1-thing")
     file(join(wt, "late.txt"))
     git(wt, "add", ".")
@@ -1206,10 +1194,16 @@ describe("worktreeRefusal", () => {
     const path = join(archive, "playground", `pg-1-${late.slice(0, 7)}`)
     git(roots.main, "remote", "set-url", "origin", join(roots.root, "gone.git"))
     expect(archiveUnlanded(wt, archive)).toEqual({
-      refused: `its archive at ${path} holds 4 patches, 4 of its 5 commits no remote holds`,
+      refused: "its remote origin could not be read, so its work stays until it answers",
     })
+    expect(existsSync(archive)).toBe(false)
     git(roots.main, "remote", "set-url", "origin", join(roots.root, "remote.git"))
     expect(archiveUnlanded(wt, archive)).toEqual({ count: 1, path })
+    expect(
+      readdirSync(path).map(
+        (f) => /^From ([0-9a-f]+) /.exec(readFileSync(join(path, f), "utf8"))?.[1],
+      ),
+    ).toEqual([late])
   })
 
   // #2132: ssh's options go on the command git would run, so a configured core.sshCommand still reads the remote

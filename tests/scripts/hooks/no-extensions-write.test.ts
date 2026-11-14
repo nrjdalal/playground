@@ -3197,3 +3197,80 @@ describe("a write outside the root whose text names an extension script runs, an
     expect(await bash(command)).toContain("no-extensions-write hook refuses")
   })
 })
+
+// #2140: grep that xargs starts reads its pattern as a pattern, as a direct grep does; bun -e run from the data folder keeps its refusal, which names the form that runs
+describe("an xargs-led grep and bun -e from the data folder", () => {
+  const PATTERN = `"refuses x in $HOME/.playground"`
+  const WORKING = "run bun -e from a worktree, with absolute paths built from process.env.HOME."
+
+  test.each([
+    ["grep under xargs", `ls /tmp | xargs grep -h -o ${PATTERN}`],
+    ["grep under xargs -0", `ls /tmp | xargs -0 grep -h ${PATTERN}`],
+    ["grep under xargs -n 1", `ls /tmp | xargs -n 1 grep -h ${PATTERN}`],
+    ["grep under xargs -I {}", `ls /tmp | xargs -I {} grep -h ${PATTERN} {}`],
+    ["grep under xargs -J %", `ls /tmp | xargs -J % grep -h ${PATTERN} %`],
+    ["grep by a system path under xargs", `ls /tmp | /usr/bin/xargs /usr/bin/grep -h ${PATTERN}`],
+    ["a direct grep", `grep -c ${PATTERN} /tmp/x.log`],
+    [
+      "grep under xargs with a redirect into the data folder",
+      `ls /tmp | xargs grep -h ${PATTERN} > $HOME/.playground/out`,
+    ],
+    ["bun -e testing a regex from a worktree", `bun -e 'console.log(/round [2-5]: /.test("x"))'`],
+    [
+      "bun -e reading a file from a worktree",
+      `bun -e 'console.log((await Bun.file("roster.json").json()).length)'`,
+    ],
+  ])("%s runs from a worktree", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "grep under xargs with a redirect into the root",
+      `ls /tmp | xargs grep -h ${PATTERN} > $HOME/.playground/extensions/out`,
+    ],
+    ["cp under xargs into the data folder", "ls /tmp | xargs cp -t $HOME/.playground"],
+    ["tee under xargs into the root", "ls /tmp | xargs tee $HOME/.playground/extensions/x"],
+    [
+      "sed -i under xargs on a file in the root",
+      "ls /tmp | xargs sed -i s/a/b/ $HOME/.playground/extensions/x",
+    ],
+    ["grep under xargs through env", `ls /tmp | xargs env grep -h ${PATTERN}`],
+    ["grep under an xargs flag off its list", `ls /tmp | xargs -Q grep -h ${PATTERN}`],
+    ["a grep of the shell's folder under xargs", `ls /tmp | xargs ./grep -h ${PATTERN}`],
+    ["grep under xargs with a variable set", `ls /tmp | GREP=1 xargs grep -h ${PATTERN}`],
+    ["grep under xargs piped into a shell", `ls /tmp | xargs grep -h ${PATTERN} | sh`],
+    [
+      "grep under xargs with a shortened --process-slot-var",
+      `ls /tmp | xargs --process-slot=PATH grep -h ${PATTERN}`,
+    ],
+    [
+      "perl -i on a file in the root, its script holding an xargs-led grep",
+      `perl -0pi -e 's/(a)/ls \\/tmp | xargs grep -h x \\$HOME\\/.playground\\/extensions\\/policy.json $1/' $HOME/.playground/extensions/x.json`,
+    ],
+  ])("%s stays refused", async (_, command) => {
+    expect(await bash(command, WORK)).toContain("no-extensions-write hook refuses")
+  })
+
+  test("perl -i on a relative file in the root, its script holding an xargs-led grep, stays refused", async () => {
+    expect(
+      await bash(`perl -0pi -e 's/(a)/ls \\/tmp | xargs grep -h x $1/' extensions/x.json`, DATA),
+    ).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each([
+    ["bun -e testing a regex", `bun -e 'console.log(/round [2-5]: /.test("x"))'`],
+    [
+      "bun -e reading a file by a relative path",
+      `bun -e 'console.log((await Bun.file("roster.json").json()).length)'`,
+    ],
+  ])("%s from the data folder stays refused, naming the form that runs", async (_, command) => {
+    expect(await bash(command, DATA)).toContain(WORKING)
+  })
+
+  test("bun -e writing into the root by a relative path keeps the owner's route", async () => {
+    const reason = await bash(`bun -e 'await Bun.write("extensions/x", "")'`, DATA)
+    expect(reason).toContain("the dispatcher hands the owner the command")
+    expect(reason).not.toContain(WORKING)
+  })
+})
