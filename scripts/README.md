@@ -171,7 +171,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A plain shell pane on `playground-probes`, with no Claude in it, opens, runs, reads and closes only through `scripts/shell-pane.ts` (the `shell-pane` skill), which types a command only once its caller's session id and role match the session it runs under (session-state's `callerRefusal`, [hooks/README.md](hooks/README.md#session-state)) and every registered Bash guard's `check()` has passed it,
   in a child bun started as the hooks start, since a pane has no PreToolUse hook of its own.
   Its `login <pane> github` runs `gh auth login --web` there and posts the owner an Inbox card with `gh`'s one-time code and link (`bun run ask new`), closing it once the login ends.
-  A scratch herdr server, for a test or a smoke, takes its folder from `mktemp -d "$(getconf DARWIN_USER_TEMP_DIR)<prefix>.XXXX"`: macOS caps a socket path at 104 bytes (`sun_path`), a session scratchpad path alone runs past that, and the server then stops with `local socket name length exceeds capacity of sun_path`.
+  A scratch herdr server, for a test or a smoke, takes its folder from `mktemp -d "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || echo /tmp/)<prefix>.XXXX"`, macOS's user temp folder or `/tmp` on Linux, whose `getconf` has no such name:
+  macOS caps a socket path at 104 bytes (`sun_path`) and Linux at 108, a session scratchpad path alone runs past that, and the server then stops with `local socket name length exceeds capacity of sun_path`.
   playbook's LIFECYCLE.md, Ops jobs, has the rest.
 
 ## link-skills.sh and rerere
