@@ -1952,6 +1952,8 @@ describe("a listed program's single-quoted text stays text on a line read whole"
     ["an in-place sed of a quoted substitution", `bun x.ts; sed -i '' '/x (a)/d' "$(echo f)"`],
     ["an in-place sed of a backtick substitution", "bun x.ts; sed -i '' '/x (a)/d' `echo f`"],
     ["a sh -c writing the root", `bun x.ts; sh -c 'echo x > ${LIST}'`],
+    ["a browser wait --fn naming the root", `sleep 1; agent-browser wait --fn 'a > ${LIST}'`],
+    ["an awk program naming the root", `sleep 1; awk '/x/, / > ${LIST}/' ${WORK}/f`],
     [
       "a browser wait --fn whose output a shell runs",
       `agent-browser wait --fn 'a > ${HOME}/.play*/extensions/policy.json' | sh`,
