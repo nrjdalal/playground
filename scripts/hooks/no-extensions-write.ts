@@ -612,7 +612,12 @@ function unreadCdWrites(tool: string, args: Word[], env: Env, stopsAtOperand: bo
     const files = stopsAtOperand
       ? args.slice(at === -1 ? args.length : at)
       : operandsPast(args, "", [])
-    return MODE.test(files[0]?.value ?? "") ? files.slice(1) : files
+    // GNU chmod, Linux's, takes its mode from a dash-led one (-w) or --reference when the call gives one, so its first operand is then a file
+    const given =
+      process.platform === "linux" &&
+      !stopsAtOperand &&
+      args.some((w) => CHMOD_DASH_MODE.test(w.value) || w.value.startsWith("--reference"))
+    return !given && MODE.test(files[0]?.value ?? "") ? files.slice(1) : files
   }
   if (tool === "truncate") return operandsPast(args, "rs", ["--reference", "--size"])
   if (tool === "shred")
@@ -721,7 +726,7 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
   if (name === "ln" && !folder && operands.length === 1)
     return [{ quoted: false, value: "." }, ...splits]
   const targets = into && !folders ? (folder ? [folder] : operands.slice(-1)) : operands
-  // on Linux, install -d with no operand writes nothing only because GNU's operand check fails, so the values its options took are judged as targets
+  // on Linux, install -d with no operand writes nothing only because GNU's operand check fails, so the values its options took are judged as targets; read by the platform rather than `gnu`, so a g-named install on macOS keeps canary's verdict
   if (process.platform === "linux" && name === "install" && folders && operands.length === 0)
     targets.push(...values)
   // macOS's cp, ln and mv take no target option and write to their last operand, so a split word moves no target there
@@ -2085,6 +2090,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : [])
     // POSIXLY_CORRECT set in the call, by a prefix or on its line, makes a GNU build stop its options at the first operand
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"))
+    // on Linux POSIXLY_CORRECT can reach a bare build by a route the hook does not carry (a shell's -c, eval, a function, a sourced file), so its words are judged under both of GNU's readings: permuted, and stopped at the first operand
+    const readings = process.platform === "linux" ? [false, true] : [posix]
+    const writes = (typed: Word[]) =>
+      readings.flatMap((stops) => writeTargets(tool, typed, gnu, stops))
     // a line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run inside this root, whatever folder it started in
     if (env.cwdAnywhere)
       return refuse(
@@ -2099,13 +2108,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`)
       // a value the hook cannot read under a remover, as a writer's target, as a file an in-place sed or perl edit edits, or in git's -c, could name the root, so it is refused unless the call holds it
-      const unheld = (
-        remover
-          ? args
-          : WRITERS.has(tool)
-            ? writeTargets(tool, args, gnu, posix)
-            : inPlace(tool, args)
-      ).find((word) => !held(word, here, steady))
+      const unheld = (remover ? args : WRITERS.has(tool) ? writes(args) : inPlace(tool, args)).find(
+        (word) => !held(word, here, steady),
+      )
       if (unheld)
         return refuse(
           unheld.splits
@@ -2255,7 +2260,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       const end = given.findIndex((word) => word.value === "--")
       // macOS unlink reads no option but a leading --
       const stop =
-        !GETOPT_REMOVERS.has(tool) || (gnu && !posix)
+        !GETOPT_REMOVERS.has(tool) || (gnu && !readings.includes(true))
           ? -1
           : tool === "unlink" && !gnu
             ? Number(given[0]?.value === "--")
@@ -2263,7 +2268,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       // mv's -t folder, rsync's path values and the file find's write actions name are written to, though their word opens with a dash
       const values =
         tool === "mv"
-          ? writeTargets(tool, given, gnu, posix)
+          ? writes(given)
           : tool === "rsync"
             ? given.flatMap((word, k) => {
                 const long = /^--([^=]+)=?/.exec(word.value)
@@ -2290,13 +2295,17 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
             ...values,
           ]
         : WRITERS.has(tool)
-          ? writeTargets(tool, given, gnu, posix)
+          ? writes(given)
           : []
     }
     // a program on neither list is judged in every call xargs may build too (unreadCdWrites), so a file an in-place edit takes from stdin counts
     const unlisted =
       !remover && !WRITERS.has(tool)
-        ? shapes.flatMap((typed) => unreadCdWrites(tool, typed, env, !gnu || posix))
+        ? shapes.flatMap((typed) =>
+            (process.platform === "linux" ? [false, true] : [!gnu || posix]).flatMap((stops) =>
+              unreadCdWrites(tool, typed, env, stops),
+            ),
+          )
         : []
     const loose = [...shapes.flatMap(operandsOf), ...unlisted].find(
       (word) => !placed(word, env, steady),

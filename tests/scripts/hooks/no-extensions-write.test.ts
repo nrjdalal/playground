@@ -3497,45 +3497,57 @@ describe("on Linux a bare cp, ln, mv, install and sed read as GNU's builds (PG-2
       expect(await as(platform, () => bash("cp /tmp/f /tmp/y"))).toBeUndefined()
   })
 
-  // GNU permutes a later dashed word into an option, while POSIXLY_CORRECT stops its options at the first operand, so that word is a file again; each was measured on GNU coreutils 9.4
+  // POSIXLY_CORRECT can reach a call by a route the hook does not carry, so on Linux a later dashed word is judged as a file too, as GNU reads it with the variable set; each route made GNU coreutils 9.4's mkdir write where its variable named
   test.each([
     [
       "a remover's option after its first operand after a cd to a variable",
       `cd "$X"; rm /tmp/x -f`,
     ],
     ["a writer's value option after its first operand", `mkdir /tmp/x -m "$M"`],
-  ])("%s is allowed on Linux and refused on macOS", async (_, command) => {
-    expect(await as("linux", () => bash(command))).toBeUndefined()
-    expect(await as("darwin", () => bash(command))).toContain("no-extensions-write hook refuses")
-  })
-
-  test.each([
+    ["a prefix on a shell's -c", `POSIXLY_CORRECT=1 bash -c 'mkdir /tmp/x -m "$M"'`],
+    ["a prefix on sh's -c", `POSIXLY_CORRECT=1 sh -c 'mkdir /tmp/x -m "$M"'`],
+    ["env's prefix on a shell's -c", `env POSIXLY_CORRECT=1 bash -c 'mkdir /tmp/x -m "$M"'`],
+    ["a prefix on a shell reading stdin", `echo 'mkdir /tmp/x -m "$M"' | POSIXLY_CORRECT=1 bash`],
+    ["a prefix on eval", `POSIXLY_CORRECT=1 eval 'mkdir /tmp/x -m "$M"'`],
+    ["a prefix on a function call", `f() { mkdir /tmp/x -m "$M"; }; POSIXLY_CORRECT=1 f`],
     [
-      "a remover's option after its first operand under POSIXLY_CORRECT after a cd to a variable",
-      `cd "$X"; POSIXLY_CORRECT=1 rm /tmp/x -f`,
+      "a := default then an export",
+      `: \${POSIXLY_CORRECT:=1}; export POSIXLY_CORRECT; mkdir /tmp/x -m "$M"`,
+    ],
+    ["an export of a word the hook cannot read", `export "$V"; mkdir /tmp/x -m "$M"`],
+    ["a sourced file", `. /tmp/env.sh; mkdir /tmp/x -m "$M"`],
+    ["BASH_ENV on a shell's -c", `BASH_ENV=/tmp/e bash -c 'mkdir /tmp/x -m "$M"'`],
+    [
+      "a prefix on a shell's -c holding a remover after a cd",
+      `POSIXLY_CORRECT=1 bash -c 'cd "$X"; rm /tmp/x -f'`,
     ],
     [
-      "a remover's option after its first operand after an exported POSIXLY_CORRECT and a cd to a variable",
-      `export POSIXLY_CORRECT=1; cd "$X"; rm /tmp/x -f`,
+      "a prefix on a shell's -c holding touch -r",
+      `POSIXLY_CORRECT=1 bash -c 'touch /tmp/x -r "$D"'`,
     ],
-    [
-      "a writer's value option after its first operand under POSIXLY_CORRECT",
-      `POSIXLY_CORRECT=1 mkdir /tmp/x -m "$M"`,
-    ],
-  ])("%s stays refused on Linux", async (_, command) => {
+    ["a prefix on the call itself", `POSIXLY_CORRECT=1 mkdir /tmp/x -m "$M"`],
+  ])("a later dashed word under %s stays refused on Linux", async (_, command) => {
     expect(await as("linux", () => bash(command))).toContain("no-extensions-write hook refuses")
   })
 
-  // GNU coreutils 9.4 exits 1 on each before it writes: chmod and install refuse an unknown letter, so a dash-led word GNU reads as options names no file
+  // GNU chmod takes its mode from a dash-led word or --reference, so its first operand is then a file: GNU coreutils 9.4 turned a file named 644 from 644 to 444
   test.each([
-    ["chmod of a dash-led file after a cd to a variable", `cd "$X"; chmod 644 -policy.json`],
-    [
-      "install with macOS's metalog option after a cd to a variable",
-      `cd "$X"; install -Mlog x /tmp/y`,
-    ],
-  ])("%s, which GNU refuses as an invalid option, is allowed on Linux", async (_, command) => {
+    ["an octal word after a dash mode", `cd "$X"; chmod 644 -w`],
+    ["an octal word before a dash mode", `cd "$X"; chmod -w 644`],
+    ["an octal word before a two-letter dash mode", `cd "$X"; chmod 644 -wx`],
+    ["a symbolic word beside a dash mode", `cd "$X"; chmod u+x -w`],
+    ["an octal word after --reference", `cd "$X"; chmod --reference=/tmp/r 644`],
+  ])("chmod of %s after a cd to a variable stays refused on Linux", async (_, command) => {
+    expect(await as("linux", () => bash(command))).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each([
+    ["chmod of an absolute file past its mode", `cd "$X"; chmod 644 /tmp/f`],
+    ["chmod of an absolute file past a dash mode", `cd "$X"; chmod -w /tmp/f`],
+    // GNU coreutils 9.4 exits 1 on -M, an option it does not know, before it writes
+    ["install with macOS's metalog option", `cd "$X"; install -Mlog x /tmp/y`],
+  ])("%s after a cd to a variable is allowed on Linux", async (_, command) => {
     expect(await as("linux", () => bash(command))).toBeUndefined()
-    expect(await as("darwin", () => bash(command))).toContain("no-extensions-write hook refuses")
   })
 
   test.each([
