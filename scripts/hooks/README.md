@@ -1167,6 +1167,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   The pre-commit steps `native-title` and `dashboard-map` each run a test of under 60 ms when a file it reads is staged, since both tests turned branches red in CI on 5 Nov while no commit ran them.
   `native-title` runs `tests/web/next/src/native-title.test.ts` for a file under `web/next/src/`, and `dashboard-map` runs `tests/packages/scripts/src/verify/dashboard-map.test.ts` for one under `web/next/src/`, `api/hono/src/` or `packages/scripts/src/verify/`, each also for its own test file.
   The pre-commit step `text-tests` runs the two tests that scan the tracked tree's text (`TREE_TEXT_TESTS` in `tests/lefthook.test.ts`) on every commit but one of images and fonts alone, since a commit anywhere can break them and they turned branches red in CI while no commit ran them; the step takes about 0.1 s (measured).
+  The pre-commit steps `no-raw-delete` and `workflow-runners` each run a test that went red only in CI after a push while no commit ran it.
+  `no-raw-delete` runs `tests/no-raw-delete.test.ts` on the same commits as `text-tests`, about 0.25 s, and `workflow-runners` runs `tests/packages/scripts/src/workflow-runners.test.ts` for a file under `.github/workflows/`, for `packages/scripts/src/workflow-runners.ts` or for its own test file, under 0.1 s (measured).
   Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts tests/lefthook.test.ts tests/scripts/ops/run-slot-quick.test.ts`.
 
 ## rules

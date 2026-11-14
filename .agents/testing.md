@@ -39,7 +39,8 @@ The Shards job merges the newest passing run's over `tests/timings.json` before 
 Only a run from a branch of this repo counts, since a fork's run could upload any times; with none to read, the split keeps the committed file, and a shard whose artifact does not read is skipped by name.
 No workflow commits the merged times, since a change reaches `canary` only through `pr:merge`, so the committed file stays a seed that `bun run test:timings`, committed in any PR, refreshes.
 `tests/` is fork-excluded, so the root script no-ops where the directory is absent.
-Pre-commit runs the tests that read every tracked file, since a commit anywhere can break them: `trace-count` runs the trace ratchet's test, and `text-tests` runs the two tests that scan the tracked tree's text (`TREE_TEXT_TESTS` in `tests/lefthook.test.ts`, which holds both in that one job), each on every commit but one of images and fonts alone.
+Pre-commit runs the tests that read every tracked file, since a commit anywhere can break them: `trace-count` runs the trace ratchet's test, `text-tests` runs the two tests that scan the tracked tree's text (`TREE_TEXT_TESTS` in `tests/lefthook.test.ts`, which holds both in that one job), and `no-raw-delete` runs `tests/no-raw-delete.test.ts`,
+each on every commit but one of images and fonts alone.
 
 ## The clock-ahead pass
 

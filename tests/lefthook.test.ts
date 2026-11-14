@@ -1490,6 +1490,80 @@ test("pre-commit runs the native-title and dashboard-map tests when a file they 
   }
 }, 60_000)
 
+// Two text tests went red only in CI after a push on 14 Nov: no-raw-delete reads every tracked file, as text-tests' tests do, and workflow-runners reads the workflows; checked on lefthook itself with each run swapped for an echo
+test("pre-commit runs the no-raw-delete test on any text commit and the workflow-runners test on a workflow commit", async () => {
+  type Job = { exclude?: string[]; glob?: string[]; run?: string }
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, Job>; piped?: boolean }
+  }
+  const {
+    "no-raw-delete": del,
+    "text-tests": text,
+    "workflow-runners": workflows,
+  } = config["pre-commit"].commands
+  expect(del?.run).toBe("bun run test:file tests/no-raw-delete.test.ts")
+  expect(del?.glob).toBeUndefined()
+  expect(del?.exclude).toEqual(text!.exclude)
+  expect(workflows?.run).toBe(
+    "bun run test:file tests/packages/scripts/src/workflow-runners.test.ts",
+  )
+  expect(workflows?.glob).toEqual([
+    ".github/workflows/*",
+    "packages/scripts/src/workflow-runners.ts",
+    "tests/packages/scripts/src/workflow-runners.test.ts",
+  ])
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-text-tests-"))
+  const run = (argv: string[]) => {
+    const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const git = (...args: string[]) =>
+    run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args])
+  // stage one file, run the hook, then put the tree back
+  const ran = async (file: string) => {
+    await Bun.write(join(dir, file), "staged\n")
+    expect(git("add", file)).toMatchObject({ code: 0 })
+    const hook = run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+    expect(git("reset", "-q", "--hard")).toMatchObject({ code: 0 })
+    expect(git("clean", "-q", "-fd")).toMatchObject({ code: 0 })
+    expect(hook.code).toBe(0)
+    return { del: hook.out.includes("delete-ran"), workflows: hook.out.includes("workflows-ran") }
+  }
+  try {
+    expect(git("init", "-q")).toMatchObject({ code: 0 })
+    // JSON is YAML, so the steps go in as lefthook read them
+    await Bun.write(
+      join(dir, "lefthook.yml"),
+      JSON.stringify({
+        "pre-commit": {
+          commands: {
+            "no-raw-delete": { ...del, run: "echo delete-ran" },
+            "workflow-runners": { ...workflows, run: "echo workflows-ran" },
+          },
+          piped: config["pre-commit"].piped,
+        },
+      }),
+    )
+    expect(git("add", ".")).toMatchObject({ code: 0 })
+    expect(git("commit", "-q", "--no-verify", "-m", "base")).toMatchObject({ code: 0 })
+
+    expect(await ran(".github/workflows/auto-test.yml")).toEqual({ del: true, workflows: true })
+    expect(await ran("packages/scripts/src/workflow-runners.ts")).toEqual({
+      del: true,
+      workflows: true,
+    })
+    expect(await ran("tests/packages/scripts/src/workflow-runners.test.ts")).toEqual({
+      del: true,
+      workflows: true,
+    })
+    expect(await ran("scripts/ops/clean.sh")).toEqual({ del: true, workflows: false })
+    expect(await ran("docs/playground/x.md")).toEqual({ del: true, workflows: false })
+    expect(await ran("web/next/public/logo.png")).toEqual({ del: false, workflows: false })
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
 // The hooks-bundle job of a lefthook stage, as lefthook.yml holds it.
 const hooksBundleJob = async (stage: "pre-commit" | "pre-push" = "pre-commit") =>
   (
