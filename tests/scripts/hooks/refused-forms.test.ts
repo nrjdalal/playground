@@ -901,8 +901,12 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1887 a commit by -C to another folder whose message holds a folder change | git -C, it moves folders",
       "#1887 a commit by -c whose message holds a folder change into the root | git -C, it moves folders",
       // the row's cd moves the shell to a folder the hook cannot read, so no spelling of its git folder flag is read from a folder the hook knows
+      "#2104 a recursive git rm with a git folder alone after a cd to a variable | git --git-dir, it moves folders",
+      "#2104 a recursive git rm with a work tree alone after a cd to a variable | git --work-tree, it moves folders",
       "#2104 git -C a relative folder after a cd to a variable | git -C, it moves folders",
       "#2104 git apply with a git folder alone after a cd to a variable | git --git-dir, it moves folders",
+      "#2104 git rm with a git folder alone after a cd to a variable | git --git-dir, it moves folders",
+      "#2104 git rm with a work tree alone after a cd to a variable | git --work-tree, it moves folders",
       "#2104 git with a git folder alone after a cd to a variable | git --git-dir, it moves folders",
       "#2104 git with a spaced git folder alone after a cd to a variable | git --git-dir, it moves folders",
       "#2104 git with a work tree alone after a cd to a variable | git --work-tree, it moves folders",
@@ -974,6 +978,8 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1747 ext add by bunx bun in a --cwd read from the one before | --cwd",
       "#1747 ext put by a bun that bunx starts, its --cwd read from the runner's | --cwd",
       // an option that takes no value, followed by an operand
+      "#2104 a recursive git rm with a git folder alone after a cd to a variable | -r",
+      "#2104 a recursive git rm with a work tree alone after a cd to a variable | -r",
       "#356 a link to the data folder made in the same call | -s",
       "#356 a write after a word with an unbalanced quote | -rf",
       "#356 many variables ahead of a write | -rf",

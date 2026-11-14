@@ -37,6 +37,22 @@ export const groups: Group[] = [
         "git with a work tree alone after a cd to a variable",
         `cd "$X" && git --work-tree=/tmp/r checkout -- f`,
       ],
+      [
+        "git rm with a git folder alone after a cd to a variable",
+        `cd "$X"; git --git-dir=/tmp/x/.git rm f`,
+      ],
+      [
+        "a recursive git rm with a git folder alone after a cd to a variable",
+        `cd "$X"; git --git-dir=/tmp/x/.git rm -r .`,
+      ],
+      [
+        "git rm with a work tree alone after a cd to a variable",
+        `cd "$X"; git --work-tree=/tmp/x rm f`,
+      ],
+      [
+        "a recursive git rm with a work tree alone after a cd to a variable",
+        `cd "$X"; git --work-tree=/tmp/x rm -r .`,
+      ],
       ["unzip after a cd to a variable", `cd "$X" && unzip /tmp/a.zip`],
       ["bun run after a cd to a variable", `cd "$X" && bun run build`],
       [
