@@ -73,7 +73,7 @@ A session that manages under the dispatcher: the Planner, the Builder, Ops and t
 The command (`playground picker`) by which a session's manager answers one permission prompt: it allows or denies only the call the session's stuck alert named, keyed to that call, and records the standing rule `--rule` cites (packages/scripts/src/playground/picker.ts).
 
 **Planner**:
-The Planner's session, a manager: it does every research, deep dive, comparison and plan, through read-only research workers the Builder dispatches, and never builds, so it stays free for the next ask. It keeps the roadmap, `~/.playground/bundles/plan.json`, whose lanes the Builder dispatches from ([playbook](./extensions/core/skills/playbook/SKILL.md)).
+The Planner's session, a manager: it does every research, deep dive, comparison and plan, through read-only research workers the Planner starts, and never builds, so it stays free for the next ask. It keeps the roadmap, `~/.playground/bundles/plan.json`, whose lanes the Builder dispatches from ([playbook](./extensions/core/skills/playbook/SKILL.md)).
 
 **Icebox**:
 The Optimizer's parking place for an idea a retro found but nothing needs yet, one GitHub issue it keeps and reads at each retro; an idea leaves it for a `PG-<n>` issue of its own once a lead schedules it.

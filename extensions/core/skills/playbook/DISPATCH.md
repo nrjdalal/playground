@@ -19,7 +19,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   - Each Inbox item about it is posted with `playground ask new --thread <id>`.
   - A follow-up with no marker is routed to the open thread whose title it matches (`bun run thread list`), or opens a new one.
   - A route waits up to a minute for ingest to bring the message; one that fails names the quote, so check its words against the message and route again.
-- The Planner orders and decides, and builds nothing: every research or advisor pass goes to the Builder as a read-only research worker that reports to the Planner (**workers**).
+- The Planner orders and decides, and builds nothing: every research or advisor pass runs as a read-only research worker the Planner starts and briefs from `scripts/briefs/new-research-worker.md`, reporting to the Planner (**workers**).
   Every non-trivial plan it writes is researched first and passes an advisor (a research worker asked for a second opinion, on Opus at high effort) before it is decided (**verify**); a design choice goes in `~/.playground/bundles/decisions.md`.
   A decision that claims no change for this machine or for the owner's setup cites its measurement there, the command run and its output, since one such claim, unmeasured, once nearly let a web build run beside the live dashboard's Postgres.
   It sends the dispatcher each result with any decision on **ask**'s list, which the dispatcher posts to his Inbox, and keeps the roadmap in `~/.playground/bundles/plan.json`, re-groomed whenever the owner adds something.
