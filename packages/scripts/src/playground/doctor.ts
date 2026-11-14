@@ -129,18 +129,17 @@ export const proxyCheck = (repo: string, down: number | null): Check =>
     "the Dashboard's https://playground.localhost",
   )
 
-// Each job jobs.json turns on that launchd runs, checked loaded; a job ops-tick runs has no label to check.
+// Each job jobs.json turns on that launchd runs, checked loaded, or on Linux its systemd user unit, checked active; a job ops-tick runs has no label to check.
 // The data folder this machine reads, named so a fresh install shows which one is in use; link-skills.sh makes it.
 export const dataCheck = (data: string, exists: (path: string) => boolean): Check =>
   check("data folder", true, exists(data), `run scripts/link-skills.sh, which makes ${data}`, data)
 
-export const jobLoaded = (_platform: NodeJS.Platform) => (_label: string) => false
-
 export const jobChecks = (
   jobsText: string | null,
   loaded: (label: string) => boolean,
-  _platform: NodeJS.Platform = process.platform,
+  platform: NodeJS.Platform = process.platform,
 ) => {
+  const linux = platform === "linux"
   let jobs: { disabled?: boolean; launchd?: string; name?: string }[] = []
   try {
     const parsed = JSON.parse(jobsText ?? "").jobs
@@ -153,8 +152,10 @@ export const jobChecks = (
       `job ${name}`,
       true,
       loaded(launchd!),
-      `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/${launchd}.plist`,
-      `${launchd} loaded`,
+      linux
+        ? `systemctl --user enable --now ${launchd}.service`
+        : `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/${launchd}.plist`,
+      linux ? `${launchd}.service active` : `${launchd} loaded`,
     ),
   )
 }
@@ -186,6 +187,14 @@ export const missing = (checks: Check[]): boolean => checks.some((c) => c.status
 const exitsZero = (argv: string[]): boolean =>
   Bun.spawnSync(argv, { stderr: "ignore", stdout: "ignore" }).exitCode === 0
 
+// Whether a launchd job runs: launchd holds its label on macOS, and on Linux systemd runs its user unit of the same name.
+export const jobLoaded =
+  (platform: NodeJS.Platform) =>
+  (label: string): boolean =>
+    platform === "linux"
+      ? exitsZero(["systemctl", "--user", "is-active", "--quiet", `${label}.service`])
+      : exitsZero(["launchctl", "print", `gui/${process.getuid!()}/${label}`])
+
 const tools = (): Check[] =>
   toolChecks(
     (cmd) => Bun.which(cmd) !== null,
@@ -194,18 +203,20 @@ const tools = (): Check[] =>
       Bun.spawnSync(["node", "--version"], { stderr: "ignore" }).stdout.toString().trim() || null,
   )
 
-// The jobs launchd should hold, from the job registry on a machine whose extensions hold policy.json, else from jobs.json.
+// The jobs launchd, or on Linux systemd, should hold, from the job registry on a machine whose extensions hold policy.json, else from jobs.json.
 export const launchdChecks = async (
   data: string,
   loaded: (label: string) => boolean,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<Check[]> => {
   const read = readPolicyFile(data)
-  if (read.path) return jobChecks(registryJobsText(readFileSync(read.path, "utf8")), loaded)
+  if (read.path)
+    return jobChecks(registryJobsText(readFileSync(read.path, "utf8")), loaded, platform)
   const jobs = join(data, "ops", "jobs.json")
-  return jobChecks(existsSync(jobs) ? readFileSync(jobs, "utf8") : null, loaded)
+  return jobChecks(existsSync(jobs) ? readFileSync(jobs, "utf8") : null, loaded, platform)
 }
 
-// The whole doctor: the tools, the data folder, the pinned herdr, the links into the checkout, the release it is at, and on macOS portless's proxy service and the jobs launchd should hold.
+// The whole doctor: the tools, the data folder, the pinned herdr, the links into the checkout, the release it is at, on macOS portless's proxy service, and the jobs launchd, or on Linux systemd, should hold.
 export const doctor = async (repo: string, home: string, data: string): Promise<Check[]> => [
   ...tools(),
   dataCheck(data, existsSync),
@@ -217,12 +228,10 @@ export const doctor = async (repo: string, home: string, data: string): Promise<
     Number(gitOut(repo, "rev-list", "--count", "HEAD..origin/main") ?? 0),
   ),
   ...(process.platform === "darwin"
-    ? [
-        proxyCheck(repo, await proxyDown(process.env, serviceDir(portlessDir()))),
-        ...(await launchdChecks(data, (label) =>
-          exitsZero(["launchctl", "print", `gui/${process.getuid!()}/${label}`]),
-        )),
-      ]
+    ? [proxyCheck(repo, await proxyDown(process.env, serviceDir(portlessDir())))]
+    : []),
+  ...(process.platform === "darwin" || process.platform === "linux"
+    ? await launchdChecks(data, jobLoaded(process.platform))
     : []),
 ]
 
