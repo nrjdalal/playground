@@ -27,7 +27,7 @@ Update `~/.playground/handoffs/<your name>-handoff.md` (mode 600) with every pus
 
 Every git call names its tree, `git -C <your worktree> ...`, so a shell left in another folder moves nothing there. Run spawn.sh by its absolute path, `"${PLAYGROUND_REPO:?}/scripts/spawn.sh"`, from your own folder. Every background command carries its own `cd <absolute path>` or `--cwd`, since a background task starts in the main checkout.
 Run every command under the factory's **signal** and **slots** rules.
-Your commands reach your own worktree, stack and scratch folders alone: a test stubs the live dashboard, its database, a live session's pane and a real token, and a kill form goes to a hook's `check()` as data alone, since each of those reaches the owner's running factory.
+A worker's commands leave the owner's running factory alone: a test stubs the live dashboard, its database, a live session's pane and a real token, and a kill form goes to a hook's `check()` as data alone, since each of those reaches it.
 On GLM, a file under `OPUS_PATHS` is a Claude worker's: its first edit is refused, so stop and report to your lead, who staffs it by brief-rush's GLM rule (`scripts/briefs/brief-rush.md`).
 Your worktree's Python venv is its own, made with `uv sync --frozen` through run-slot; a run never borrows another worktree's, since cleanup can remove a borrowed one mid-run.
 After a resume your shell starts in the folder you launched in, the main checkout, so `cd` to your worktree by its absolute path before any write.
