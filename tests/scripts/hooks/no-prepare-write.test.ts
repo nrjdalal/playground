@@ -96,12 +96,14 @@ const API_WRITES = [
   "gh api repos/made-up/app/merges -X POST -f base=main -f head=made-up",
   "gh api repos/made-up/app/pulls/7/merge -X PUT",
   "gh api repos/made-up/app/pulls/7/update-branch -X PUT",
+  "G=gh; $G api repos/made-up/app/pulls -X POST -f head=made-up",
 ]
 const PR_CREATES = [
   "gh pr create --draft --title made-up --body-file /made-up/body.md",
   "cd /made-up && gh -R made-up/app pr create --fill",
   "env GH_TOKEN=x gh pr create --fill",
   "git commit -m made-up && gh pr create --fill",
+  "G=gh; $G pr create --fill",
 ]
 const PUSHES = [
   "git push -u origin made-up",
@@ -109,6 +111,7 @@ const PUSHES = [
   "git -C /made-up push origin HEAD:made-up",
   "env GIT_TRACE=0 git push",
   "uv run git push",
+  "G=git; $G push -u origin made-up",
 ]
 
 describe("no-prepare-write refuses a prepare-only session's writes", () => {
@@ -201,6 +204,8 @@ describe("no-prepare-write refuses a prepare-only session's writes", () => {
     "gh api repos/made-up/app/git/trees -X POST -f base_tree=abc123",
     "gh api graphql -f query='mutation { addComment(input: {}) { clientMutationId } }'",
     "man git push",
+    "G=git; $G fetch origin",
+    "G=ls; $G -la",
   ])("lets it run %s", async (command) => {
     expect(await check(bash(command), env)).toBeUndefined()
   })
