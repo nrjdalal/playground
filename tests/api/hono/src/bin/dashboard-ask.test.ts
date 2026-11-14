@@ -229,7 +229,6 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     }
   })
 
-  // playground rm --decision matches a delete's what against the full path alone, so a short name there would take the owner a second approval
   test("refuses a delete decision that names its target by a short name, naming the full path, and posts one that names the full path", async () => {
     const target = mkdtempSync(join(tmpdir(), "ask-delete-"))
     try {

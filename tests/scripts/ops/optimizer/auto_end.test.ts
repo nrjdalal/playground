@@ -1098,10 +1098,8 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
   test("a stale working row naming the branch no longer keeps a merged PR's worktree, and one with a commit past the merged head stays, its commit named", async () => {
     const url = "https://github.com/o/r/pull/1"
     const rmOf = (data: string, main: string, prHead: string): RmDeps => ({
-      caller: async () => undefined,
       clones: () => [],
       data,
-      decision: async () => null,
       home: data,
       main,
       merged: () => null,
