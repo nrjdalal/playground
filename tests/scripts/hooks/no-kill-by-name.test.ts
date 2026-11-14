@@ -50,6 +50,11 @@ describe("a signal sent by name or pattern is refused, with the way out", () => 
     "{ pgrep -f watch; } | xargs kill",
     "pgrep -f watch | xargs -I{} sh -c 'kill {}'",
     "ps -ef | grep watch | awk '{print $2}' | xargs kill",
+    "~/.playground/ops/run-slot.sh w -- pkill -f watch",
+    "~/.playground/ops/run-slot.sh w -- killall node",
+    "~/.playground/ops/run-slot.sh w -- kill $(lsof -ti :3000)",
+    "~/.playground/ops/run-slot.sh w -- pgrep -f watch | xargs kill",
+    "bash ~/.playground/ops/run-slot.sh w -- pkill node",
   ])("%s", async (command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-kill-by-name hook refuses")
@@ -93,6 +98,12 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "sleep 60 & pid=$!; ps --pid $pid && kill $pid",
     "sleep 60 & pid=$!; ps --quick-pid $pid && kill $pid",
     "echo 1234 | xargs kill",
+    "~/.playground/ops/run-slot.sh w -- kill 1234",
+    "~/.playground/ops/run-slot.sh w -- kill $!",
+    "~/.playground/ops/run-slot.sh w -- pkill --help",
+    "~/.playground/ops/run-slot.sh w -- git commit -m 'no pkill here'",
+    "~/.playground/ops/run-slot.sh w -- bun run test:file tests/scripts/hooks/no-kill-by-name.test.ts",
+    "~/.playground/ops/run-slot.sh w -- pgrep -f watch",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
