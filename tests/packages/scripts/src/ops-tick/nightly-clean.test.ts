@@ -1403,7 +1403,7 @@ describe("one night's run against a fixture data folder", () => {
 
   // #1346: a factory script left with parent pid 1 after its worktree went is ended by its own pid, TERM then KILL past the grace, and logged; the signals are fakeRun's, so nothing real is signalled
   test("an orphan of a gone worktree's script is ended by its pid, logged with pid, age and command, and no decision is asked", async () => {
-    const { ctx, deps, inputs, ops, runs, sent, wt } = night({}, undefined, 0.01)
+    const { ctx, deps, inputs, ops, runs, sent, wt } = night()
     const orphan = `bash ${wt("review-947")}/scripts/ops/run-slot.sh worker-a -- sleep 5`
     const listed = [
       `58523     1  1-04:05:06 ${orphan}`,
@@ -1432,7 +1432,7 @@ describe("one night's run against a fixture data folder", () => {
   })
   // #2177: a test's child left with parent pid 1 runs a relative script, so only its working folder, read from lsof for the parent-pid-1 rows alone, names the removed sandbox it ran in
   test("a test's child under a removed sandbox is ended by its pid, its working folder read from lsof for the parent-pid-1 rows alone", async () => {
-    const { ctx, deps, ops, runs } = night({}, undefined, 0.01)
+    const { ctx, deps, ops, runs } = night()
     const sandbox = join(ops, "T", "test-sandbox-ended1")
     const listed = [
       "60001     1    02:00:00 bun --no-env-file scripts/hooks/guards.ts",
