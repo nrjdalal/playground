@@ -362,8 +362,8 @@ describe("a drawing on a card", () => {
     expect(fitWidth(37)).toBe("clamp(10px, calc((100cqi - 1.25rem) / 37), 12px)")
   })
 
-  test("the widest line an ask's drawing runs is the one the narrowest card shows at 12px", () => {
-    expect(ASK_CODE_COLUMNS).toBe(37)
+  test("the widest line an ask's drawing runs is the owner's chosen width, which a narrow card shrinks to 10px or scrolls", () => {
+    expect(ASK_CODE_COLUMNS).toBe(72)
   })
 })
 
