@@ -79,10 +79,10 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(await page()).toContain("its post runs behind `state.ts fresh`")
   })
 
-  test("step 8 names the one waiter on the head's checks, which a re-run at the same head ends (#1410)", async () => {
+  test("step 8 names the one waiter on the head's checks, which a re-run at the same head ends, and how to name another repo's gate checks (#1410, #2058)", async () => {
     const step8 = (await skill()).split("8. **Report and wait.**")[1]?.split("\n")[0] ?? ""
     expect(step8).toContain(
-      "`cd /private/tmp && ${CLAUDE_SKILL_DIR}/scripts/state.ts checks <repo> <n> <head>`",
+      "`cd /private/tmp && ${CLAUDE_SKILL_DIR}/scripts/state.ts checks <repo> <n> <head> [<check>...]`",
     )
     expect(step8).toContain(
       "`cd /private/tmp && ${CLAUDE_SKILL_DIR}/scripts/state.ts wait <repo> <n> <head>`",
@@ -90,10 +90,19 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(step8).toContain(
       "start `checks` again at once, which waits past a red that concluded before it started",
     )
-    expect(step8).toContain("`state.ts checks` on a head whose two gate checks are not both green")
+    expect(step8).toContain("`state.ts checks` on a head whose gate checks are not all green")
+    expect(step8).toContain(
+      "pass each name `gh pr checks <n> -R <repo> --required --json name -q '.[].name'` lists that the head's check runs also list",
+    )
+    expect(step8).toContain(
+      "start `wait` in place of `checks` when it lists names but no check run carries one",
+    )
+    expect(await page()).toContain(
+      "since the waiter reads check runs alone and a required commit status never ends it",
+    )
     expect(await page()).toContain("started again after a red it waits for that check's re-run")
     expect(await page()).toContain(
-      "`state.ts checks` on a head whose two gate checks are not both green",
+      "`state.ts checks` on a head whose gate checks are not all green",
     )
   })
 
