@@ -40,6 +40,10 @@ describe("bun with an option whose value is the next word, before run or test, i
       $label: "held in a copy of a variable (PG-2127)",
       command: `A="bun --cwd /w test x"; C=$A; $C`,
     },
+    {
+      $label: "held in a variable set by export (PG-2127)",
+      command: `export C="bun --cwd /w test x"; $C`,
+    },
   ])("$label", async ({ command }) => {
     const reason = await bash(command)
     expect(reason).toContain("no-false-green hook refuses bun -")
@@ -101,6 +105,14 @@ describe("a test run piped with no pipefail is refused, naming the fix", () => {
     {
       $label: "a test run held in a variable, piped (PG-2127)",
       command: `C="bun run test"; $C | tail`,
+    },
+    {
+      $label: "a test run held in a variable set by export, piped (PG-2127)",
+      command: `export C="bun run test"; $C | tail`,
+    },
+    {
+      $label: "a test run held in a variable set by declare, piped (PG-2127)",
+      command: `declare C="bun run test"; $C | tail`,
     },
   ])("$label", async ({ command }) => {
     const reason = await bash(command)

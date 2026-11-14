@@ -51,6 +51,24 @@ export const groups: Group[] = [
         "a kill by pattern held in a variable set with a literal IFS",
         'IFS=:; C="pkill:-f:watcher"; $C',
       ],
+      [
+        "a kill by pattern held in a variable read with zsh's bare split flag",
+        'C="pkill -f watcher"; $=C',
+      ],
+      [
+        "a kill by pattern held in a copy whose source is set again after it",
+        'A="pkill -f watcher"; C=$A; A=ls; $C',
+      ],
+      ["a kill by pattern a program word appends literal text to", 'C="pkill -f wat"; $C/x'],
+      [
+        "a kill by pattern a program word prefixes a literal path to",
+        'C="pkill -f watcher"; /usr/bin/$C',
+      ],
+      ["a kill by pattern held in TMPDIR", 'TMPDIR="pkill -f watcher"; $TMPDIR'],
+      [
+        "a kill by pattern whose program name two back-to-back variables hold",
+        'P=pk; Q="ill -f watcher"; $P$Q',
+      ],
     ],
   },
   {
@@ -87,6 +105,19 @@ export const groups: Group[] = [
         "a recursive delete held in a variable set with a literal IFS",
         `IFS=:; c="rm:-rf:${NEVER_MADE}"; $c`,
       ],
+      [
+        "a recursive delete held in a variable read with zsh's bare split flag",
+        `c="rm -rf ${NEVER_MADE}"; $=c`,
+      ],
+      [
+        "a recursive delete held in a copy whose source is set again after it",
+        `A="rm -rf ${NEVER_MADE}"; c=$A; A=ls; $c`,
+      ],
+      [
+        "a recursive delete a program word appends literal text to",
+        `c="rm -rf ${NEVER_MADE}"; $c-zz`,
+      ],
+      ["a recursive delete held in TMPDIR", `TMPDIR="rm -rf ${NEVER_MADE}"; $TMPDIR`],
     ],
   },
   {
@@ -95,6 +126,7 @@ export const groups: Group[] = [
     rows: () => [
       ["a suite held in a variable the word shares with an empty quote", 'C="bun run test"; $C""'],
       ["a suite held in a variable read with zsh's split flag", 'C="bun run test"; ${=C}'],
+      ["a suite held in a variable read with zsh's bare split flag", 'C="bun run test"; $=C'],
       ["a suite held in a copy of a variable", 'A="bun run test"; C=$A; $C'],
     ],
   },
@@ -107,6 +139,7 @@ export const groups: Group[] = [
         'C="git commit -m x"; $C""',
       ],
       ["a commit held in a copy of a variable", 'A="git commit -m x"; C=$A; $C'],
+      ["a commit held in a variable read with zsh's bare split flag", 'C="git commit -m x"; $=C'],
     ],
   },
 ]

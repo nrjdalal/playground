@@ -589,7 +589,7 @@ const QUOTED_ONE_WORD =
   /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/
 // The script names a shell or a source reads stdin through
 const STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"])
-const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
+export const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 export const PRINTERS = new Set(["echo", "printf"])
 // Every git-reading hook's one list of the words git 2.56 steps over before its subcommand: each option that takes the next word as its value, and --exec-path, which takes none but whose bare form prints git's folder and exits, so the word after it never runs.
 export const GIT_TAKES = new Set([
@@ -1706,20 +1706,30 @@ function expandTilde(cmd: Command, name: string, env: Env): Command[] {
   })
 }
 
-// A word that is one or more bare variable reads and nothing else (`$C`, `${C}`, `$C""`, `$P$Q`, zsh's `${=C}`), its quotes and split flag stripped: splitting such a word reveals a held command or a held run-slot framing, where resplitting a word that merely holds a variable among other text (`$D/README.md`) would only re-judge an argument the typed reading already read.
+// A word that is one or more bare variable reads and nothing else (`$C`, `${C}`, `$C""`, `$P$Q`, zsh's braced `${=C}` and bare `$=C`), its quotes and split flag stripped: splitting such a word reveals a held command or a held run-slot framing. A word that holds a read among literal text (`$C/x`, `/usr/bin/$C`, `$C.sh`) is split only where it is the program word, since resplitting such an argument (`$D/README.md`) would re-judge what the typed reading already read.
 const holdsCommand = (w: Word): boolean =>
   !!w.source &&
-  /^(?:\$\{\w+\}|\$\w+)+$/.test(w.source.replace(/["']/g, "").replace(/\$\{[=~^]+/g, "${"))
+  /^(?:\$\{\w+\}|\$\w+)+$/.test(
+    w.source
+      .replace(/["']/g, "")
+      .replace(/\$\{[=~^]+/g, "${")
+      .replace(/\$[=~^](?=\w)/g, "$"),
+  )
 
-// The split readings of a command: each word that holds a command (holdsCommand) re-lexed with the variables the line set, resolved through one another, and split at blanks and the line's IFS, each unread part kept as one unread word so the program word is still judged (`C="git push"; $C`, `$C""`, `${=C}`, a copy `A=git; C=$A; $C`, a partial `C="git push $X"; $C`). It is judged beside the typed reading, so a verdict only moves to refused; none when no word holds a command, and a cd keeps its own words, which chdirTo reads.
+// The split readings of a command: each word that holds a command (holdsCommand), and the program word where it holds a read among literal text (`$C/x`, `/usr/bin/$C`), re-lexed with the variables the line set, resolved through one another, and split at blanks and the line's IFS, each unread part kept as one unread word so the program word is still judged (`C="git push"; $C`, `$C""`, `${=C}`, a copy `A=git; C=$A; $C`, a partial `C="git push $X"; $C`). It is judged beside the typed reading, so a verdict only moves to refused; none when no word holds a command, and a cd keeps its own words, which chdirTo reads.
 export function splitHeld(cmd: Command, name: string, env: Env): Command[] {
   if (name === "cd" || name === "popd" || name === "pushd") return []
-  if (!cmd.words.some((w) => w.splits && w.raw && holdsCommand(w))) return []
+  // the program word is resolved only when a read sharing its word with literal text could be it, so an ordinary line pays no extra parse
+  const first = cmd.words.some((w) => w.splits && w.raw && !holdsCommand(w))
+    ? parse(cmd).first
+    : undefined
+  const holds = (w: Word): boolean => !!w.splits && !!w.raw && (holdsCommand(w) || w === first)
+  if (!cmd.words.some(holds)) return []
   const known = heldKnown(env)
   const seps = ifsSplit(env)
   let split = false
   const words = cmd.words.flatMap((w): Word[] => {
-    if (!w.splits || !w.raw || !holdsCommand(w)) return [w]
+    if (!holds(w) || !w.raw) return [w]
     const value = relexedValue(w.raw, known)
     if (value === undefined) return [w]
     split = true
@@ -1738,11 +1748,10 @@ function relexedValue(raw: string, known: Record<string, string>): string | unde
 const tildeHome = (value: string): string =>
   marked(value) ? value : value.replace(/^~(?=\/|$)/, homedir())
 
-// The variables the line set whose value the reader can build, each resolved through those set before it and an unread part kept, over the base environment; a copy's raw holds `key=value`, so its value is read after the first `=`.
+// The variables the line set whose value the reader can build, each resolved through those set before it and an unread part kept, over the base environment; a copy's raw holds `key=value`, so its value is read after the first `=`. A copy's value captured where it was set (heldResolved) overrides this read, so a later reassignment of its source does not leak in; the read stands alone across a scope copy, whose fresh vars map carries no capture.
 function heldKnown(env: Env): Record<string, string> {
   const known: Record<string, string> = { ...env.known }
   for (const [key, text] of env.vars) {
-    if (key === "TMPDIR") continue
     if (!text.unknown && !marked(text.value)) known[key] = tildeHome(text.value)
     else if ("raw" in text && typeof text.raw === "string") {
       const value = relexedValue(text.raw, known)
@@ -1750,7 +1759,20 @@ function heldKnown(env: Env): Record<string, string> {
       if (value !== undefined && eq >= 0) known[key] = tildeHome(value.slice(eq + 1))
     }
   }
-  return known
+  return Object.assign(known, heldResolved.get(env.vars))
+}
+
+// Each scope's variables resolved to the value they held where they were set, so a copy reads its source's value at the copy and a later reassignment of that source does not change it; recordHeld fills it at each assignment the reader reads.
+const heldResolved = new WeakMap<Map<string, Text>, Record<string, string>>()
+function recordHeld(env: Env, key: string, value: Text): void {
+  let record = heldResolved.get(env.vars)
+  if (!record) heldResolved.set(env.vars, (record = {}))
+  if (!value.unknown && !marked(value.value)) record[key] = tildeHome(value.value)
+  else if ("raw" in value && typeof value.raw === "string") {
+    const built = relexedValue(value.raw, { ...env.known, ...record })
+    const eq = built?.indexOf("=") ?? -1
+    if (built !== undefined && eq >= 0) record[key] = tildeHome(built.slice(eq + 1))
+  }
 }
 
 // The separators the shell splits a word at: blanks always, and the characters a line set IFS to a literal, so `IFS=:; C="a:b"; $C` splits at the colon too; an IFS the reader cannot read stays blanks alone, a residual the README names.
@@ -1836,7 +1858,10 @@ async function examineReading(
     if (verdict) return verdict
   }
   if (name === "") {
-    for (const [key, value] of local) setVar(env.vars, key, value)
+    for (const [key, value] of local) {
+      setVar(env.vars, key, value)
+      recordHeld(env, key, value)
+    }
     // a root shell with no program of its own (`sudo -s <<< …`) is visited when a redirect feeds it, so a hook can read that script
     if (builtins || cmd.feedsShell || rootFed(cmd)) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "popd" || name === "pushd") {
@@ -1847,7 +1872,9 @@ async function examineReading(
   } else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=")
-      setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1))
+      const value = slice(w, eq + 1)
+      setVar(env.vars, w.value.slice(0, eq), value)
+      recordHeld(env, w.value.slice(0, eq), value)
     }
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (SHELLS.has(name))

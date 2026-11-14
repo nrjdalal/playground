@@ -1577,17 +1577,19 @@ function expandTilde(cmd, name, env) {
     };
   });
 }
-var holdsCommand = (w) => !!w.source && /^(?:\$\{\w+\}|\$\w+)+$/.test(w.source.replace(/["']/g, "").replace(/\$\{[=~^]+/g, "${"));
+var holdsCommand = (w) => !!w.source && /^(?:\$\{\w+\}|\$\w+)+$/.test(w.source.replace(/["']/g, "").replace(/\$\{[=~^]+/g, "${").replace(/\$[=~^](?=\w)/g, "$"));
 function splitHeld(cmd, name, env) {
   if (name === "cd" || name === "popd" || name === "pushd")
     return [];
-  if (!cmd.words.some((w) => w.splits && w.raw && holdsCommand(w)))
+  const first = cmd.words.some((w) => w.splits && w.raw && !holdsCommand(w)) ? parse(cmd).first : undefined;
+  const holds = (w) => !!w.splits && !!w.raw && (holdsCommand(w) || w === first);
+  if (!cmd.words.some(holds))
     return [];
   const known = heldKnown(env);
   const seps = ifsSplit(env);
   let split = false;
   const words = cmd.words.flatMap((w) => {
-    if (!w.splits || !w.raw || !holdsCommand(w))
+    if (!holds(w) || !w.raw)
       return [w];
     const value = relexedValue(w.raw, known);
     if (value === undefined)
@@ -1605,8 +1607,6 @@ var tildeHome = (value) => marked(value) ? value : value.replace(/^~(?=\/|$)/, h
 function heldKnown(env) {
   const known = { ...env.known };
   for (const [key, text] of env.vars) {
-    if (key === "TMPDIR")
-      continue;
     if (!text.unknown && !marked(text.value))
       known[key] = tildeHome(text.value);
     else if ("raw" in text && typeof text.raw === "string") {
@@ -1616,7 +1616,21 @@ function heldKnown(env) {
         known[key] = tildeHome(value.slice(eq + 1));
     }
   }
-  return known;
+  return Object.assign(known, heldResolved.get(env.vars));
+}
+var heldResolved = new WeakMap;
+function recordHeld(env, key, value) {
+  let record = heldResolved.get(env.vars);
+  if (!record)
+    heldResolved.set(env.vars, record = {});
+  if (!value.unknown && !marked(value.value))
+    record[key] = tildeHome(value.value);
+  else if ("raw" in value && typeof value.raw === "string") {
+    const built = relexedValue(value.raw, { ...env.known, ...record });
+    const eq = built?.indexOf("=") ?? -1;
+    if (built !== undefined && eq >= 0)
+      record[key] = tildeHome(built.slice(eq + 1));
+  }
 }
 function ifsSplit(env) {
   const ifs = env.vars.get("IFS");
@@ -1673,8 +1687,10 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
       return verdict;
   }
   if (name === "") {
-    for (const [key, value] of local)
+    for (const [key, value] of local) {
       setVar(env.vars, key, value);
+      recordHeld(env, key, value);
+    }
     if (builtins || cmd.feedsShell || rootFed(cmd))
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "popd" || name === "pushd") {
@@ -1684,7 +1700,9 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   } else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=");
-      setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1));
+      const value = slice(w, eq + 1);
+      setVar(env.vars, w.value.slice(0, eq), value);
+      recordHeld(env, w.value.slice(0, eq), value);
     }
     if (builtins)
       verdict = await visit(cmd, parsed, here);
@@ -13322,6 +13340,9 @@ function judge4(script, shell) {
     if (parsed.name === "")
       for (const [key, value] of parsed.local)
         vars.set(key, value);
+    else if (EXPORTS.has(parsed.name))
+      for (const w of parsed.args.filter((a) => ASSIGN.test(a.value)))
+        vars.set(w.value.slice(0, w.value.indexOf("=")), slice(w, w.value.indexOf("=") + 1));
   }
 }
 function judgeCommand(cmd, guarded) {
@@ -14937,7 +14958,8 @@ async function inspect8(raw) {
   const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
-  if (!/\b(?:fuser|kill|killall|pkill)\b/.test(toolInput.command.replace(/["'\\]/g, "")))
+  const bare = toolInput.command.replace(/["'\\]/g, "");
+  if (!/\b(?:fuser|kill|killall|pkill)\b/.test(bare) && !/(?:\$\{?\w+\}?){2,}/.test(bare))
     return;
   const lexed = lex(toolInput.command);
   const fresh = () => ({ files: new Map, known: {}, process: {}, vars: new Map });

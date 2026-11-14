@@ -3,8 +3,10 @@
 import { gitCommand } from "./no-stash"
 import { fromFactory } from "./role"
 import {
+  ASSIGN,
   type Command,
   type Env,
+  EXPORTS,
   lex,
   parse,
   parseFlags,
@@ -14,6 +16,7 @@ import {
   SHELLS,
   shellOperand,
   shellSlot,
+  slice,
   slotWords,
   splitHeld,
   type Text,
@@ -154,6 +157,9 @@ function judge(script: string, shell: Dialect): string | undefined {
       if (reason) return reason
     }
     if (parsed.name === "") for (const [key, value] of parsed.local) vars.set(key, value)
+    else if (EXPORTS.has(parsed.name))
+      for (const w of parsed.args.filter((a) => ASSIGN.test(a.value)))
+        vars.set(w.value.slice(0, w.value.indexOf("=")), slice(w, w.value.indexOf("=") + 1))
   }
 }
 
