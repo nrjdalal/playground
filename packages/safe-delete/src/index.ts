@@ -652,7 +652,7 @@ const linkHolder = (at: string, roots: Roots, places: string[]): string | null =
   return `${at} is linked into by ${links.sort().slice(0, 3).join(", ")}${more}: repoint or remove each link first`
 }
 
-// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit origin/canary holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree, on that repo's default branch (defaultBase), or on a remote branch the remote still holds (remoteHolding), or, given an archive folder, archiveUnlanded has archived each of its commits no remote holds.
+// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit its base, origin/canary or another repo's default branch, holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree, on that repo's default branch (defaultBase), or on a branch the remote itself holds now (remoteHolding), or, given an archive folder, archiveUnlanded has archived each of its commits no remote holds.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   const repo = worktreeRepo(at, roots)
@@ -679,6 +679,8 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   if (!top.ok || real(top.out) !== at) return `${at} is not a git worktree`
   const branch = git("symbolic-ref", "--quiet", "--short", "HEAD").out
   const head = git("rev-parse", "HEAD").out
+  const own = repo === real(roots.main)
+  const baseOf = () => (own ? "origin/canary" : defaultBase(git, holders, at))
   const folder = basename(at).toLowerCase()
   const where = `${folder} ${branch.toLowerCase()}`
   // Each name's slug, after its PG-<n>- prefix: lint holds PG-12-lint-job, not PG-5-splint.
@@ -701,14 +703,12 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
       typeof agent.pr === "string" && !lifted ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1] : undefined
     const byPr = pr !== undefined && new RegExp(`(^|\\D)${pr}(\\D|$)`).test(where)
     if (!byBranch && !byPr && !byName && !byId) continue
-    // a clean detached checkout at a commit origin/canary holds is a reader of canary, not the row's work, so a live row holds it no more
-    if (
-      !branch.length &&
-      !git("status", "--porcelain", "--untracked-files=all").out &&
-      git("merge-base", "--is-ancestor", "HEAD", "origin/canary").ok
-    ) {
+    // a clean detached checkout at a commit its base holds (origin/canary, or another repo's default branch) is a reader of that base, not the row's work, so a live row holds it no more
+    const base =
+      !branch.length && !git("status", "--porcelain", "--untracked-files=all").out && baseOf()
+    if (base && git("merge-base", "--is-ancestor", "HEAD", base).ok) {
       holders.note?.(
-        `${at} sits clean, detached, at a commit origin/canary holds, so ${agent.name}'s roster row (${agent.status}) holds it no more`,
+        `${at} sits clean, detached, at a commit ${base} holds, so ${agent.name}'s roster row (${agent.status}) holds it no more`,
       )
       continue
     }
@@ -758,8 +758,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const more = changed.length > 3 ? `, and ${changed.length - 3} more` : ""
     return `${at} holds ${changed.length} uncommitted change${changed.length === 1 ? "" : "s"} (${paths.join(", ")}${more}): ${discard}`
   }
-  const own = repo === real(roots.main)
-  const base = own ? "origin/canary" : defaultBase(git, holders, at)
+  const base = baseOf()
   if (landed(git, holders, at, base)) return null
   const holding = own ? null : remoteHolding(git, at)
   if (holding) {
@@ -794,46 +793,65 @@ const defaultBase = (
   return name ? `origin/${name}` : null
 }
 
-// The remote branch that holds HEAD, and so every commit HEAD holds, as <remote>/<branch>, or null; since a remote-tracking ref is only the remote's last fetch, each is read again from the remote itself and counts only when ls-remote names a sha that is HEAD or has HEAD as an ancestor.
+// The remote branch that holds HEAD, and so every commit HEAD holds, as <remote>/<branch>, or null: once unpushed lists no commit, the first live tip it reads that is HEAD or has HEAD as an ancestor.
 const remoteHolding = (
   git: (...args: string[]) => { ok: boolean; out: string },
   at: string,
 ): string | null => {
-  const refs = git(
-    "for-each-ref",
-    "--contains",
-    "HEAD",
-    "--format=%(refname:lstrip=2)",
-    "refs/remotes",
-  )
-  if (!refs.ok) return null
-  for (const ref of refs.out.split("\n").filter((r) => r.includes("/") && !r.endsWith("/HEAD"))) {
-    const slash = ref.indexOf("/")
-    const live = Bun.spawnSync(
-      [
-        "git",
-        "-C",
-        at,
-        "ls-remote",
-        "--",
-        ref.slice(0, slash),
-        `refs/heads/${ref.slice(slash + 1)}`,
-      ],
-      {
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-        stderr: "ignore",
-        stdin: "ignore",
-        stdout: "pipe",
-      },
-    )
-    const sha = live.exitCode === 0 ? live.stdout.toString().split("\t")[0]!.trim() : ""
-    if (/^[0-9a-f]{40,64}$/.test(sha) && git("merge-base", "--is-ancestor", "HEAD", sha).ok)
-      return ref
-  }
-  return null
+  const ahead = unpushed(at)
+  if (!ahead || ahead.shas.length) return null
+  return ahead.tips.find((t) => git("merge-base", "--is-ancestor", "HEAD", t.sha).ok)?.ref ?? null
 }
 
-// Writes each ref's commits past exclude (git rev-list words, such as origin/canary or --remotes) by git bundle create in repo into <trash>/<UTC-ts>-<session>/<name>.bundle, beside <name>.shas with a "<sha> <ref>" line each, then reads the bundle's heads back: its path and the refs it holds at their sha, or why none was written. The trash purge takes both with their batch.
+// The commits HEAD holds that no remote holds now, past each branch tip ls-remote reads from each remote itself, since a remote-tracking ref is only the remote's last fetch; tips names those this repo has, as <remote>/<branch> at its sha, and unread each remote ls-remote could not read in 30 s, with ssh never prompting, which holds none. Null when the commits cannot be read.
+export function unpushed(
+  at: string,
+): { shas: string[]; tips: { ref: string; sha: string }[]; unread: string[] } | null {
+  const git = (args: string[], env?: Record<string, string>, timeout?: number) => {
+    const run = Bun.spawnSync(["git", "-C", at, ...args], {
+      env: env && { ...process.env, ...env },
+      stderr: "ignore",
+      stdin: "ignore",
+      stdout: "pipe",
+      timeout,
+    })
+    return { ok: run.exitCode === 0, out: run.stdout.toString() }
+  }
+  const remotes = git(["remote"])
+  if (!remotes.ok) return null
+  const listed: { ref: string; sha: string }[] = []
+  const unread: string[] = []
+  // ssh's options go on the command git would run (GIT_SSH_COMMAND, else core.sshCommand, else ssh), and none under GIT_SSH alone, whose program may take no -o
+  const command =
+    process.env.GIT_SSH_COMMAND ||
+    git(["config", "--get", "core.sshCommand"]).out.trim() ||
+    (process.env.GIT_SSH ? "" : "ssh")
+  const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0" }
+  if (command) env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`
+  for (const remote of remotes.out.split("\n").filter(Boolean)) {
+    const live = git(["ls-remote", "--heads", "--", remote], env, 30_000)
+    if (!live.ok) {
+      unread.push(remote)
+      continue
+    }
+    for (const line of live.out.split("\n")) {
+      const [sha, name] = line.split("\t")
+      if (/^[0-9a-f]{40,64}$/.test(sha ?? "") && name?.startsWith("refs/heads/"))
+        listed.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha: sha! })
+    }
+  }
+  const had = listed.length
+    ? git(["rev-list", "--no-walk", "--ignore-missing", ...listed.map((t) => t.sha)])
+    : { ok: true, out: "" }
+  if (!had.ok) return null
+  const here = new Set(had.out.split("\n").filter(Boolean))
+  const tips = listed.filter((t) => here.has(t.sha))
+  const past = git(["rev-list", "HEAD", "--not", ...tips.map((t) => t.sha)])
+  if (!past.ok) return null
+  return { shas: past.out.split("\n").filter(Boolean), tips, unread }
+}
+
+// Writes each ref's commits past exclude (git rev-list words, such as origin/canary or the live tips unpushed reads) by git bundle create in repo into <trash>/<UTC-ts>-<session>/<name>.bundle, beside <name>.shas with a "<sha> <ref>" line each, then reads the bundle's heads back: its path and the refs it holds at their sha, or why none was written. The trash purge takes both with their batch.
 export function bundleToTrash(
   repo: string,
   refs: { ref: string; sha: string }[],
@@ -862,7 +880,7 @@ export function bundleToTrash(
   return { held: refs.filter((r) => heads.has(`${r.sha} ${r.ref}`)).map((r) => r.ref), path }
 }
 
-// --discard's first step: the worktree's commits no remote holds, kept in a bundle in the trash beside its move, its path for the trash entry; none when every commit is on a remote, else why the worktree stays.
+// --discard's first step: the worktree's commits no remote holds, kept in a bundle in the trash beside its move, its path for the trash entry; none when the remotes hold every commit now (unpushed), else why the worktree stays.
 const bundleUnpushed = (
   at: string,
   trash: string,
@@ -870,19 +888,22 @@ const bundleUnpushed = (
   now: Date,
 ): { bundle?: string } | { refused: string } => {
   const head = Bun.spawnSync(["git", "-C", at, "rev-parse", "HEAD"], { stdout: "pipe" })
-  const ahead = Bun.spawnSync(["git", "-C", at, "rev-list", "-1", "HEAD", "--not", "--remotes"], {
-    stdout: "pipe",
-  })
+  const ahead = unpushed(at)
   const sha = head.stdout.toString().trim()
-  if (head.exitCode !== 0 || ahead.exitCode !== 0)
+  if (head.exitCode !== 0 || ahead === null)
     return { refused: `${at}'s commits could not be read, so it stays` }
-  if (!ahead.stdout.toString().trim()) return {}
-  const made = bundleToTrash(at, [{ ref: "HEAD", sha }], ["--remotes"], {
-    name: basename(at),
-    now,
-    session,
-    trash,
-  })
+  if (!ahead.shas.length) return {}
+  const made = bundleToTrash(
+    at,
+    [{ ref: "HEAD", sha }],
+    ahead.tips.map((t) => t.sha),
+    {
+      name: basename(at),
+      now,
+      session,
+      trash,
+    },
+  )
   if ("refused" in made)
     return { refused: `${at}'s commits no remote holds stay, and so does it: ${made.refused}` }
   return made.held.length
@@ -892,7 +913,7 @@ const bundleUnpushed = (
 
 const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 
-// The commits a worktree's HEAD holds that no remote does, archived by git format-patch into <archive>/<repo>/<worktree>-<HEAD sha7>, written only when that folder is not there yet, then read back: its path and count once it holds one patch for each of those commits, by each patch's From line, else why the worktree stays.
+// The commits a worktree's HEAD holds that no remote holds now (unpushed), archived by git format-patch into <archive>/<repo>/<worktree>-<HEAD sha7>, written only when that folder is not there yet, then read back: its path and count once it holds a patch for each of those commits, by each patch's From line, a patch for any other commit allowed since a remote read since may list fewer, else why the worktree stays.
 export function archiveUnlanded(
   at: string,
   archive: string,
@@ -902,9 +923,9 @@ export function archiveUnlanded(
     return { err: run.stderr.toString().trim(), ok: run.exitCode === 0, out: run.stdout.toString() }
   }
   const head = git("rev-parse", "HEAD")
-  const listed = git("rev-list", "HEAD", "--not", "--remotes")
-  if (!head.ok || !listed.ok) return { refused: "its commits could not be read" }
-  const shas = listed.out.split("\n").filter(Boolean)
+  const listed = unpushed(at)
+  if (!head.ok || listed === null) return { refused: "its commits could not be read" }
+  const { shas } = listed
   if (!shas.length) return { refused: "it holds no commit past its remotes to archive" }
   const repo = dirname(dirname(dirname(at)))
   const path = join(archive, basename(repo), `${basename(at)}-${head.out.trim().slice(0, 7)}`)
@@ -912,7 +933,16 @@ export function archiveUnlanded(
     let wrote: string | null = null
     try {
       mkdirSync(path, { recursive: true })
-      const patched = git("format-patch", "-q", "-o", path, "HEAD", "--not", "--remotes")
+      const patched = git(
+        "format-patch",
+        "-q",
+        "-o",
+        path,
+        "--root",
+        "HEAD",
+        "--not",
+        ...listed.tips.map((t) => t.sha),
+      )
       if (!patched.ok) wrote = patched.err
     } catch (error) {
       wrote = (error as Error).message
@@ -928,7 +958,7 @@ export function archiveUnlanded(
     return { refused: `its archive at ${path} could not be read: ${(error as Error).message}` }
   }
   const held = shas.filter((sha) => patches.includes(sha)).length
-  if (patches.length !== shas.length || held !== shas.length)
+  if (held !== shas.length)
     return {
       refused: `its archive at ${path} holds ${counted(patches.length, "patch", "patches")}, ${held} of its ${counted(shas.length, "commit", "commits")} no remote holds`,
     }
