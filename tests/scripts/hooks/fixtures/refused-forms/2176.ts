@@ -109,6 +109,34 @@ const rows = ({ DATA }: Paths): Row[] => [
     "process worktree",
   ],
   [
+    "an in-place sed whose s/// writes a relative ** glob",
+    String.raw`sed -i '' 's/a/src\/**\/*.ts/' tsconfig.json`,
+  ],
+  [
+    "an in-place sed whose s/// turns a quoted glob into a ** glob",
+    String.raw`sed -i '' 's/"src\/\*"/"src\/**\/*"/' tsconfig.json`,
+  ],
+  [
+    "an in-place sed whose s/// writes a trailing ** glob",
+    String.raw`sed -i '' 's/a/dist\/**/' .gitignore`,
+  ],
+  [
+    "an in-place sed whose s/// writes a relative glob of two parts",
+    String.raw`sed -i '' 's/a/packages\/*\/*/' package.json`,
+  ],
+  [
+    "an in-place sed whose s/// writes a regex then a glob after a relative folder",
+    String.raw`sed -i '' 's/a/x\/.*\/*/' notes.md`,
+  ],
+  [
+    "an in-place sed whose s/// writes two groups between slashes",
+    String.raw`sed -i '' 's/\(a\)\(b\)/x\/\1\/\2\/y/' notes.md`,
+  ],
+  [
+    "an in-place sed whose s/// writes its match twice after slashes",
+    String.raw`sed -i '' 's/a/\/&\/&/' notes.md`,
+  ],
+  [
     "an in-place sed whose s||| writes a path outside the root",
     `sed -i '' 's|a|ls ~/work/x|' run.sh`,
   ],
@@ -162,6 +190,13 @@ export const groups: Group[] = [
 ]
 
 const allowedCalls = [
+  "an in-place sed whose s/// writes a relative ** glob",
+  "an in-place sed whose s/// turns a quoted glob into a ** glob",
+  "an in-place sed whose s/// writes a trailing ** glob",
+  "an in-place sed whose s/// writes a relative glob of two parts",
+  "an in-place sed whose s/// writes a regex then a glob after a relative folder",
+  "an in-place sed whose s/// writes two groups between slashes",
+  "an in-place sed whose s/// writes its match twice after slashes",
   "an in-place sed whose s||| writes a path outside the root",
   "an in-place sed by BSD's -I whose s/// writes a path outside the root",
   "an in-place sed of an ordinary regex on a file in the session's scratch",
