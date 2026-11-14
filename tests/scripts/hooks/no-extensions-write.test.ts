@@ -2361,6 +2361,15 @@ describe("a call the reader parses whole keeps its verdict beside the unread-fol
     ["sed's substitution after a cd to a variable", `cd "$X" && sed 's/a/b/' f`],
     ["perl printing matches after a cd to a variable", `cd "$X" && perl -ne 'print if /x/' f`],
     ["perl's substitution after a cd to a variable", `cd "$X" && perl -pe 's/a/b/' f`],
+    [
+      "git grep's extended pattern after a cd to a variable",
+      `cd "$X" && git grep --extended-regexp x`,
+    ],
+    ["git diff as text after a cd to a variable", `cd "$X" && git diff --text`],
+    [
+      "bun's version behind arch under bunx's --cwd",
+      `bunx --cwd=${CLI_DIR}/../../.. arch -arm64 bun --cwd=scripts/src/playground --version`,
+    ],
     ["a package runner's tool", "bunx cowsay hi"],
     ["a build", "bun run build"],
     ["bunx bun in a --cwd", `bunx bun --cwd ${CHECKOUT}/packages test`],

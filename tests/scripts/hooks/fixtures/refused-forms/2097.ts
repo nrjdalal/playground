@@ -20,6 +20,10 @@ export const groups: Group[] = [
         `arch -arm64 bun --cwd=${CLI_DIR} cli.ts ext add login list x y`,
       ],
       [
+        "ext add by a relative bun --cwd behind arch under bunx's --cwd",
+        `bunx --cwd=${CLI_DIR}/../../.. arch -arm64 bun --cwd=scripts/src/playground cli.ts ext add login list x y`,
+      ],
+      [
         "ext add by a bun --cwd behind watch",
         `watch bun --cwd=${CLI_DIR} cli.ts ext add login list x y`,
       ],

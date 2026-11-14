@@ -32,6 +32,10 @@ export const groups: Group[] = [
         `chpwd() { builtin cd "$X"; }; cd /tmp && cp a b`,
       ],
       [
+        "cp after a cd under a chpwd hook the line adds to zsh's hook array",
+        `f() { builtin cd "$X"; }; chpwd_functions=(f); cd /tmp && cp a b`,
+      ],
+      [
         "cp after a held cd the line defines as a function",
         `W=/tmp; cd() { builtin cd "$X"; }; cd "$W" && cp a b`,
       ],
@@ -65,6 +69,27 @@ export const groups: Group[] = [
         "git show's longest abbreviated output after a cd to a variable",
         `cd "$X" && git show --outpu=f`,
       ],
+      [
+        "git grep's abbreviated pager option after a cd to a variable",
+        `cd "$X" && git grep --open=vi x`,
+      ],
+      [
+        "git diff's abbreviated external diff after a cd to a variable",
+        `cd "$X" && git diff --ext`,
+      ],
+      [
+        "git log's abbreviated text conversion after a cd to a variable",
+        `cd "$X" && git log --textc -p`,
+      ],
+      // a control, refused before this source's fix
+      [
+        "git grep's pager option after a cd to a variable",
+        `cd "$X" && git grep --open-files-in-pager=vi x`,
+      ],
+      // a control, refused before this source's fix
+      ["git diff's external diff after a cd to a variable", `cd "$X" && git diff --ext-diff`],
+      // a control, refused before this source's fix
+      ["git log's text conversion after a cd to a variable", `cd "$X" && git log --textconv -p`],
     ],
   },
 ]

@@ -904,6 +904,8 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1887 a commit by -C to another folder whose message holds a folder change | git -C, it moves folders",
       "#1887 a commit by -c whose message holds a folder change into the root | git -C, it moves folders",
       // the row's cd moves the shell to a folder the hook cannot read, so no spelling of its git folder flag is read from a folder the hook knows
+      "#2097 ext add by a relative bun --cwd behind arch under bunx's --cwd | bun --cwd, no folder",
+      "#2097 ext add by a relative bun --cwd behind arch under bunx's --cwd | bunx --cwd, no folder",
       "#2097 ext add by bun under env that bunx starts in a --cwd above the CLI's | bun --cwd, no folder",
       "#2097 ext add by bun under env that bunx starts in a --cwd above the CLI's | bunx --cwd, no folder",
       "#2098 ext add by bun of a CLI link in its --cwd | bun --cwd, it moves folders",
@@ -1015,6 +1017,7 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1747 ext add by bunx bun in a --cwd read from the one before | --cwd",
       "#1747 ext put by a bun that bunx starts, its --cwd read from the runner's | --cwd",
       // an option that takes no value, followed by an operand
+      "#2097 ext add by a relative bun --cwd behind arch under bunx's --cwd | --cwd",
       "#2097 ext add by bun under env that bunx starts in a --cwd above the CLI's | --cwd",
       "#2103 turbo's build by npx past a user config option's value | --cwd",
       "#2103 turbo's build in the main checkout by npx past a user config option's value | --cwd",

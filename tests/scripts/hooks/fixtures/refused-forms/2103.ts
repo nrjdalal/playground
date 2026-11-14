@@ -67,4 +67,38 @@ export const groups: Group[] = [
       ],
     ],
   },
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      [
+        "bun's build past more unlisted options than the readings hold",
+        "bun run --oa build --o0 v0 --o1 v1 --o2 v2 --o3 v3 --o4 v4 --o5 v5 --o6 v6 --o7 v7 --o8 v8 --o9 v9 --o10 v10 --o11 v11 --o12 v12 --o13 v13 --o14 v14",
+      ],
+      [
+        "turbo's build by npx past more unlisted options than the readings hold",
+        "npx --oa turbo --o0 v0 --o1 v1 --o2 v2 --o3 v3 --o4 v4 --o5 v5 --o6 v6 --o7 v7 --o8 v8 --o9 v9 --o10 v10 --o11 v11 --o12 v12 --o13 v13 --o14 v14 run build",
+      ],
+      // a control, refused before this source's fix
+      [
+        "bun's build past as many unlisted options as the readings hold",
+        "bun run --oa build --o0 v0 --o1 v1 --o2 v2 --o3 v3 --o4 v4 --o5 v5 --o6 v6 --o7 v7 --o8 v8 --o9 v9 --o10 v10 --o11 v11 --o12 v12 --o13 v13",
+      ],
+    ],
+  },
+  {
+    folders: ["checkout", "main checkout"],
+    guards: ["no-unslotted-run"],
+    rows: ({ MAIN }) => [
+      [
+        "bun's build past more unlisted options than the readings hold",
+        `bun --cwd ${MAIN}/.claude/worktrees/a run --oa build --o0 v0 --o1 v1 --o2 v2 --o3 v3 --o4 v4 --o5 v5 --o6 v6 --o7 v7 --o8 v8 --o9 v9 --o10 v10 --o11 v11 --o12 v12 --o13 v13 --o14 v14`,
+      ],
+      // a control, refused before this source's fix
+      [
+        "bun's build past as many unlisted options as the readings hold",
+        `bun --cwd ${MAIN}/.claude/worktrees/a run --oa build --o0 v0 --o1 v1 --o2 v2 --o3 v3 --o4 v4 --o5 v5 --o6 v6 --o7 v7 --o8 v8 --o9 v9 --o10 v10 --o11 v11 --o12 v12 --o13 v13`,
+      ],
+    ],
+  },
 ]
