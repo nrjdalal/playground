@@ -726,6 +726,56 @@ describe("worktreeRefusal", () => {
     )
   })
 
+  // PG-2017: a clean detached checkout at a commit origin/canary holds is a reader of canary, not the row's work; each broken condition keeps the hold. The row holds by the folder's name, since a detached tree reads no branch.
+  test("a clean detached checkout at a commit origin/canary holds passes a live row whole, and a dirty, untracked, branched or past-canary one keeps it", () => {
+    const row = [{ name: "pg-1", status: "working" }]
+    const withRow = () => {
+      const w = withWorktree()
+      writeFileSync(w.holders.roster, JSON.stringify({ agents: row }))
+      return w
+    }
+    const clean = withRow()
+    git(clean.wt, "checkout", "-q", "--detach", "origin/canary")
+    expect(worktreeRefusal(clean.wt, clean.roots, clean.holders)).toBeNull()
+    const dirty = withRow()
+    git(dirty.wt, "checkout", "-q", "--detach", "origin/canary")
+    file(join(dirty.wt, "README.md"), "dirty")
+    expect(worktreeRefusal(dirty.wt, dirty.roots, dirty.holders)).toContain("is held by pg-1")
+    const untracked = withRow()
+    git(untracked.wt, "checkout", "-q", "--detach", "origin/canary")
+    file(join(untracked.wt, "extra.txt"), "x")
+    expect(worktreeRefusal(untracked.wt, untracked.roots, untracked.holders)).toContain(
+      "is held by pg-1",
+    )
+    const branched = withRow()
+    git(branched.wt, "checkout", "-q", "-B", "PG-1-thing", "origin/canary")
+    expect(worktreeRefusal(branched.wt, branched.roots, branched.holders)).toContain(
+      "is held by pg-1",
+    )
+    const past = withRow()
+    git(past.wt, "checkout", "-q", "--detach", "PG-1-thing")
+    expect(worktreeRefusal(past.wt, past.roots, past.holders)).toContain("is held by pg-1")
+  })
+
+  // status.showUntrackedFiles=no hides an untracked file from a plain git status --porcelain, so both clean-tree reads name every untracked file themselves.
+  test("an untracked file counts under status.showUntrackedFiles=no: it keeps a live row's hold on a detached canary checkout, and is named as an uncommitted change", () => {
+    const held = withWorktree()
+    git(held.roots.main, "config", "status.showUntrackedFiles", "no")
+    writeFileSync(
+      held.holders.roster,
+      JSON.stringify({ agents: [{ name: "pg-1", status: "working" }] }),
+    )
+    git(held.wt, "checkout", "-q", "--detach", "origin/canary")
+    file(join(held.wt, "extra.txt"), "x")
+    expect(worktreeRefusal(held.wt, held.roots, held.holders)).toContain("is held by pg-1")
+    const changed = withWorktree()
+    git(changed.roots.main, "config", "status.showUntrackedFiles", "no")
+    file(join(changed.wt, "extra.txt"), "x")
+    expect(worktreeRefusal(changed.wt, changed.roots, changed.holders)).toContain(
+      "holds 1 uncommitted change (extra.txt)",
+    )
+  })
+
   test("refuses a worktree a live session holds by branch, by name, or by a process's folder", () => {
     const { holders, roots, wt } = withWorktree()
     git(wt, "push", "-q", "origin", "PG-1-thing")

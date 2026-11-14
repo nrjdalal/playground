@@ -466,6 +466,70 @@ test("runRm --worktree checks the holders, moves the worktree and prunes it from
   expect(git(main, "worktree", "list")).not.toContain("pg-1")
 })
 
+// A main checkout whose origin/canary sits at its head, and its worktree on PG-1-thing, for the live-row hold's cases.
+const canaryRepo = () => {
+  const { deps, main, root } = machine()
+  git(root, "init", "--bare", "-q", join(root, "remote.git"))
+  git(main, "init", "-q", "-b", "canary")
+  writeFileSync(join(main, "README.md"), "x")
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  git(main, "remote", "add", "origin", join(root, "remote.git"))
+  git(main, "push", "-q", "origin", "canary")
+  const wt = join(main, ".claude", "worktrees", "pg-1")
+  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+  return { deps, main, wt }
+}
+
+// PG-2017: a live row holds a worktree no more when it sits clean, detached, at a commit origin/canary holds; each broken condition keeps the hold. The row holds by the folder's name, since a detached tree reads no branch, and each case runs under --discard, so only the row's hold refuses.
+const detach = (wt: string) => git(wt, "checkout", "-q", "--detach", "origin/canary")
+const withRow = (deps: RmDeps) =>
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({ agents: [{ name: "pg-1", status: "working" }] }),
+  )
+test.each([
+  [
+    "frees a clean detached checkout at a commit origin/canary holds",
+    (wt: string) => detach(wt),
+    0,
+  ],
+  [
+    "refuses a dirty one",
+    (wt: string) => {
+      detach(wt)
+      writeFileSync(join(wt, "README.md"), "dirty")
+    },
+    1,
+  ],
+  [
+    "refuses one with an untracked file",
+    (wt: string) => {
+      detach(wt)
+      writeFileSync(join(wt, "extra.txt"), "x")
+    },
+    1,
+  ],
+  ["refuses one on a branch", () => {}, 1],
+  [
+    "refuses a clean detached one at a commit origin/canary lacks",
+    (wt: string) => {
+      detach(wt)
+      writeFileSync(join(wt, "README.md"), "past")
+      git(wt, "add", ".")
+      git(wt, "commit", "-qm", "past")
+    },
+    1,
+  ],
+])("runRm --worktree %s under a live row", async (_, arm, code) => {
+  const { deps, main, wt } = canaryRepo()
+  arm(wt)
+  withRow(deps)
+  expect(await runRm(["--worktree", wt, "--discard"], deps)).toBe(code)
+  expect(existsSync(wt)).toBe(code !== 0)
+  if (code === 0) expect(git(main, "worktree", "list")).not.toContain("pg-1")
+})
+
 // #1348: --discard needs no decision, and keeps the commits no remote holds in a bundle in the trash first
 test("runRm --worktree refuses a worktree with uncommitted work, naming --discard, which passes with no decision, keeping its commit no remote holds in a bundle that brings it back", async () => {
   const { deps, main, root } = machine()
