@@ -64,6 +64,7 @@ export type Row = {
   kind: string | null
   lead?: string
   name: string
+  pr?: string
   quiet: number
   refs: string[]
   sessionId?: string
@@ -275,6 +276,7 @@ export async function collect(input: CollectInput): Promise<Row[]> {
       kind,
       lead: r.lead ?? (worker ? roster[worker]?.lead : undefined),
       name,
+      pr: r.pr,
       quiet,
       refs,
       sessionId: d.sessionId,

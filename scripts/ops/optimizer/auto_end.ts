@@ -198,7 +198,7 @@ async function cwdsOf(sessionId: string, projectsDir: string): Promise<string[] 
   return [...cwds]
 }
 
-// The worktrees a session used: each linked worktree its transcript ran in, for a worker each worktree on its PRs' branches, and, given the main checkout, a checker's review-<n> clone of that checkout's PR n, which code-review-loop reads from outside so no cwd names it; null when its transcript cannot be read.
+// The worktrees a session used: each linked worktree its transcript ran in, for a worker each worktree on its PRs' branches, and, given the main checkout, a checker's clones of that checkout's PR n, a reviewer's review-<n> and a tester's test-<n> and test-<n>-before, which no cwd names when read from outside; null when its transcript cannot be read.
 export async function worktreesOf(
   target: Target,
   projectsDir: string,
@@ -224,11 +224,20 @@ export async function worktreesOf(
       if (path && branch && target.refs.includes(branch)) dirs.add(path)
     }
   }
-  const checker = target.kind === "reviewer" || target.kind === "tester"
-  const n = main && checker ? await ownPr(target.pr, main) : undefined
-  const clone = main && n ? join(main, ".claude", "worktrees", `review-${n}`) : undefined
-  if (clone && existsSync(clone)) dirs.add(clone)
+  const leaves = CLONES[target.kind ?? ""]
+  const n = main && leaves ? await ownPr(target.pr, main) : undefined
+  if (main && leaves && n)
+    for (const leaf of leaves) {
+      const clone = join(main, ".claude", "worktrees", leaf.replace("<n>", n))
+      if (existsSync(clone)) dirs.add(clone)
+    }
   return [...dirs]
+}
+
+// A checker's clones of its PR n in .claude/worktrees: code-review-loop's for a reviewer, new-tester.md's for a tester.
+const CLONES: Record<string, string[]> = {
+  reviewer: ["review-<n>"],
+  tester: ["test-<n>", "test-<n>-before"],
 }
 
 // The number of a PR on the main checkout's own origin repository, else undefined.
