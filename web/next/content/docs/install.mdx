@@ -56,7 +56,7 @@ A GitHub login (`gh auth login`) is optional for the install, and syncing your e
 4. Installs the rest of `playground doctor`'s tool list that is missing, then the pinned `herdr`, and signs Claude Code in.
 5. Installs the dependencies (`bun install --frozen-lockfile`) and builds the shared packages.
 6. Runs `scripts/link-skills.sh`, which installs the home skill set and links the command.
-7. With a GitHub login, sets your settings up in your private repo, which it reuses, or makes once you answer `y` on the terminal, and clones your extensions from it; when it cannot, **Set up settings** in the app's Settings does it ([Your private repos](/docs/backup#your-private-repos)).
+7. With a GitHub login, sets your settings up in your private repo, which it reuses, or makes once you answer `y` on the terminal, and clones your extensions from it; when it cannot, **Set up settings** in the app's Settings does it ([Your private repos](/docs/backup#your-private-repos)), or on a new machine an Inbox card you approve clones them ([A new machine](/docs/backup#a-new-machine)).
 8. Sets up the Dashboard's local address, `https://playground.localhost`: it says why, then `sudo` asks for your Mac's password once to install portless's proxy, a service on port 443 that starts with your Mac and adds its own certificate to your Mac's trusted list. A run that finds the proxy running asks nothing, and one that finds it stopped sets it up again. When the password is refused, or there is no terminal, it goes on the list and `playground` does not start; run the installer again to set it up.
 9. Prints **Left for you**, or `Playground is ready.` when nothing is left.
 10. Starts `playground` once every required tool is there and the local address is set up. Its first start cuts the Dashboard's own checkout in `.claude/worktrees/desk`, installs it, starts the Dashboard and opens it, whose chat starts with **Let's check this Mac** ([Where to start](/docs#where-to-start)).
@@ -79,7 +79,7 @@ Settings > Harness shows the same cards with **Switch Alpha**: Alpha writes its 
 
 Outside its own folder it writes in these places, besides the tools' own installers:
 
-- `~/.bun/bin`: the `playground` command, on a new terminal's `PATH`.
+- `~/.bun/bin`: the `playground` command, on a new terminal's `PATH`, and on Linux `security`, the store that keeps Playground's tokens where macOS has its Keychain.
 - `~/.playground`: the data folder (`$PLAYGROUND_DATA_DIR` when you set it, an absolute path), with your extensions, links to the brief templates and the background jobs' scripts, and the skill sets in `orgs`. Playground's own herdr stays at `~/.playground/bin/herdr` either way.
 - Claude Code's user settings: the home skill set, `ws-home@ws`, installed from the `ws` marketplace in `~/.playground/orgs` ([Skills and orgs](/docs/skills)).
 - `/Library/LaunchDaemons/sh.portless.proxy.plist`: portless's proxy service, installed with sudo, and its certificate in the System keychain; the proxy keeps its own files in `~/.portless`.

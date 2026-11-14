@@ -5894,6 +5894,7 @@ var answerPayloadSchema = strictObject({
   accepted: ranSchema.optional(),
   at: exports_iso.datetime(),
   close: string2().min(1).optional(),
+  cloned: ranSchema.optional(),
   comment: string2().optional(),
   go: boolean2(),
   id: string2().min(1),
@@ -6097,6 +6098,24 @@ var ownerSettings = defineSettings({
     schema: _enum(["", "singular"])
   }
 });
+
+// scripts/hooks/input.ts
+var DEADLINE = 13000;
+async function input(name, kind, deadline = DEADLINE) {
+  let timer;
+  const raw = await Promise.race([
+    Bun.stdin.text(),
+    new Promise((done) => {
+      timer = setTimeout(() => done(undefined), deadline - performance.now());
+    })
+  ]).finally(() => clearTimeout(timer));
+  if (raw !== undefined)
+    return raw;
+  if (kind === "recorder")
+    process.exit(0);
+  console.error(`${name} hook: the call's input did not arrive by its deadline, about ${deadline / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`);
+  process.exit(2);
+}
 
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
@@ -6398,7 +6417,7 @@ async function check(raw, env = process.env, deps = live) {
   }
 }
 if (import.meta.main) {
-  const reason = await check(await Bun.stdin.text());
+  const reason = await check(await input("no-chat-question", "recorder"));
   if (reason === PICKER_REASON) {
     console.error(reason);
     process.exit(2);

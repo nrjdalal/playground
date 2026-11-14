@@ -1,5 +1,6 @@
 // PreToolUse hook: refuses a git stash that can take another worktree's work, since every worktree of a checkout shares one stash list (worker-prose's bare `git stash pop` took worker-labels' lint-staged backup), and an agent-browser teardown of every session, since one closed seven other sessions' browsers.
 
+import { input } from "./input"
 import { fromFactory } from "./role"
 import {
   type Env,
@@ -210,7 +211,7 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-stash", "guard")
   const reason = (await fromFactory(raw)) ? await check(raw) : undefined
   if (reason) {
     console.error(reason)

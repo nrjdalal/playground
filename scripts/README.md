@@ -35,7 +35,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   That block is the probe's with five changes, each measured on a probe started with the flag or in a scratch clone under `@anthropic-ai/sandbox-runtime`:
   loopback closes whole (no `allowLocalBinding`), since Claude Code's sandbox opens every localhost port or none and portless's proxy serves the live API's name on the port every stack's name shares, so nothing in it listens on a port or reaches a stack, and the flag fits a worker with no stack, a tester staying off it;
   outbound hosts are held to `github.com` (git fetch, ls-remote and push, whose credentials gh's git helper gives with the Keychain closed), `api.github.com` (`gh`) and `registry.npmjs.org` (`bun install`) by `strictAllowlist`, since bypass mode lets an unlisted host pass otherwise;
-  `denyRead` closes `~/Library/Keychains`, whose login items the client reads itself, so a `security` read finds no item, and the closed sandbox refuses writes as well as reads to the data folder's `dumps/`, `remote-key.json` and `whatsapp/`;
+  `denyRead` closes `~/Library/Keychains`, whose login items the client reads itself, so a `security` read finds no item, and on Linux Claude Code's `~/.claude/.credentials.json` ([The secret store on Linux](#the-secret-store-on-linux)), and the closed sandbox refuses writes as well as reads to the data folder's `dumps/`, `remote-key.json`, `secrets/` and `whatsapp/`;
   git's env config sets `commit.gpgsign` false, since gpg writes `~/.gnupg`, which stays shut because gpg-agent runs the programs its config there names outside the sandbox, so its branch commits go unsigned, and [no-protected-push](./hooks/README.md#no-protected-push) reads that set alone as moving no push, so its work branch pushes bare;
   and the session works in the worktree it starts in: a fresh worker's or reviewer's start with no `--in` first makes it, detached, outside the sandbox, since Claude Code keeps `.git/worktrees` read-only in its sandbox but for the session's start folder,
   at the commit it works from, fetched from origin (`review-<n>` at the PR's head for a reviewer of the checkout's own PR, else `<name>` at `canary`), since the sandbox keeps `.claude/` and `skills/zerostarter/` read-only too, so a checkout that changes them fails (playbook's SPAWN.md, --sandbox),
@@ -157,8 +157,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 - The herdr servers belong to one ops job, `bun run ops:herdr` (`packages/scripts/src/ops-herdr/`): it starts each that is down on the binary the repo's `pin.json` beside it names, with its `config.toml`, so both change only through a merged PR, and `bun run ops:herdr stop <session>` refuses while the session holds a pane, since a stop exits every pane;
   `stop default` stops herdr's own default server (`~/.config/herdr/herdr.sock`), which no job starts, refusing only while one of its panes runs an agent.
-  The binary is Playground's own copy at `~/.playground/bin/herdr`, following HOME alone as the sockets do, and `playground herdr pin` (`packages/scripts/src/playground/herdr-pin.ts`) puts it there: it downloads the pinned version's release asset for this Mac, checks its SHA-256 against the pin before the move, and refuses a mismatch naming both sums.
-  The pin holds GitHub's digest of each release asset, keyed `darwin-arm64` and `darwin-x64`, and the job takes this Mac's, refusing a machine the pin names no asset for; a herdr on PATH is the human's own, which nothing runs.
+  The binary is Playground's own copy at `~/.playground/bin/herdr`, following HOME alone as the sockets do, and `playground herdr pin` (`packages/scripts/src/playground/herdr-pin.ts`) puts it there: it downloads the pinned version's release asset for this machine, checks its SHA-256 against the pin before the move, and refuses a mismatch naming both sums.
+  The pin holds GitHub's digest of each release asset, keyed `darwin-arm64`, `darwin-x64` and `linux-arm64`, and the job takes this machine's, refusing a machine the pin names no asset for; a herdr on PATH is the human's own, which nothing runs.
   Moving to a new herdr is a PR to `pin.json`: its version and every asset's sum.
   Once it has started a server, any of `PLAYGROUND_HERDR_SESSIONS` (`playground,playground-probes` by default; a name that is not a word is named on its beat and skipped), it runs `spawn.sh restore` pointed at that server, since the pinned config turns herdr's own resume off,
   and prints one line of counts for it once (`restoreLines` for a restore that exited 0, a gate's waits included, `restoreProblem` on the beat for one that failed, both in `packages/scripts/src/ops-herdr/herdr.ts`), each session's own line kept in `<server>.restore.log` beside the server's socket.
@@ -185,6 +185,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   this install is the fallback for a target that deletes or moves a manifest, a tree with edits or untracked files of its own, an install there that failed and put the old manifests back, or an update run by an older `update.ts`.
 - Beside the home set, it symlinks `~/.playground/factory-settings.json` to `scripts/factory-settings.json` for the readers that use the link (spawn.sh reads the checkout's file itself), each brief template in `~/.playground/handoffs/` to its file in `scripts/briefs/`, `~/.playground/brief-rush.md` to `scripts/briefs/brief-rush.md`,
   `~/.bun/bin/playground` and its old name to the `playground` command (`packages/scripts/src/playground/cli.ts`; `playground --help` lists what it does),
+  on Linux `~/.bun/bin/security` to the secret store ([The secret store on Linux](#the-secret-store-on-linux)),
   and each ops script it names into `~/.playground/ops/`;
   for the rename it links `~/.playground` to the old data folder where only that exists,
   all pointing into the main checkout, so a pull there updates the factory's hooks and the command.
@@ -193,6 +194,16 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   Every worktree shares one `.git/rr-cache`, and git runs rerere wherever that folder exists while the setting is unset, so a merge in one worktree replayed a resolution another had recorded, printing `using previous resolution` over a file its author never read.
   The folder stays in place, and a merge now stops on each conflict for its author to resolve.
   Tests: `bun run test:file tests/scripts/link-skills-settings.test.ts tests/scripts/link-skills-unlinked.test.ts`.
+
+## The secret store on Linux
+
+- Linux has no Keychain, so there `packages/scripts/src/security/cli.ts` answers as `security`, linked to `~/.bun/bin/security` by link-skills.sh, and every factory caller of `security` runs unchanged.
+- It serves the forms the factory runs: `find-generic-password -s <service> -a <account>`, with `-w` to print the value; `delete-generic-password -s -a`; `add-generic-password -s -a [-U] -w <value>`, a bare last `-w` reading the value from stdin; and `-i`, its `add-generic-password` lines read from stdin, so no argv holds a value.
+  It exits 44 for an item that is not there and 45 for an add without `-U` over one that is, as macOS's `security` does, and 1 for any other form (`verify-cert` among them), naming the forms it serves.
+- Each item is a file `secrets/keychain/<service>/<account>` in the data folder (`dataDir()`, so `PLAYGROUND_DATA_DIR` moves it), each name percent-encoded with its dots, in folders at mode 700; a write makes a mode-600 file beside the item and renames it into place.
+- The item `Claude Code-credentials` is Claude Code's own login, which it keeps on Linux in `~/.claude/.credentials.json` at mode 600, so that item reads and writes that file.
+- Its output names no value but a `-w` read's; the closed sandbox denies the folder and the login file (spawn.sh above).
+  Tests: `bun run test:file tests/packages/scripts/src/security/cli.test.ts`.
 
 ## A worktree's node_modules
 

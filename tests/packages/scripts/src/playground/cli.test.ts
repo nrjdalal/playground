@@ -177,7 +177,7 @@ describe("bare dispatcher", () => {
     expect(code).toBe(1)
   }, 15_000)
 
-  // Playground pins herdr only on macOS, so off a Mac pinHere refuses before any of this runs
+  // Playground pins herdr only on a Mac or on Linux arm64, and pinHere refuses elsewhere before any of this runs, so it runs on a Mac alone, as CI's Linux x64 refuses
   const onMac = process.platform === "darwin"
   // Start <dispatcher> runs playground dispatcher, which on a fresh install found no herdr and no factory settings: spawn.sh refused on each in turn, since only install and the bare start set them up.
   describe.if(onMac)(

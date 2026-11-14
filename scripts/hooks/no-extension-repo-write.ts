@@ -7,6 +7,7 @@ import { dataDir } from "../../packages/env/src/data-dir"
 import { scopesIn } from "../../packages/settings/src/folder"
 import { extensionsDir, loginOf, readPolicy } from "../../packages/settings/src/rendered"
 import { remoteRepo } from "./github"
+import { input } from "./input"
 import { type Hit, inspectAs, type Policy, refusedList } from "./no-playground-leak"
 import { fromFactory } from "./role"
 import { withDeadline } from "./shell"
@@ -117,7 +118,7 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-extension-repo-write", "guard")
   const reason = (await fromFactory(raw)) ? await check(raw) : undefined
   if (reason) {
     console.error(reason)
