@@ -242,6 +242,52 @@ describe("a runner's option the reader does not list hides no production deploy 
   })
 })
 
+// 22 runners each started by the one before, each past three unlisted options' values, so the readings pass their cap at every level
+const DEEP = Array.from({ length: 22 }, (_, i) => `npx --a${i} a --b${i} b --c${i} c`).join(" ")
+
+describe("a runner started by a runner hides no production deploy (PG-2163)", () => {
+  const nested: [string, string][] = [
+    ["npx started by npx", "npx npx vercel deploy --prod"],
+    ["npx started by bunx", "bunx npx vercel deploy --prod"],
+    ["bunx started by npx", "npx bunx vercel deploy --prod"],
+    [
+      "npx started by npx past an unlisted option's value",
+      "npx --userconfig /tmp/u npx vercel deploy --prod",
+    ],
+    ["npx started by bun x", "bun x npx vercel deploy --prod"],
+    ["bun x started by npx", "npx bun x vercel deploy --prod"],
+    ["bunx started by bunx, by vc", "bunx bunx vc --prod"],
+  ]
+
+  test.each(nested)("for a worker: %s", async (_, command) => {
+    expect(await as("worker", command)).toContain(REFUSED)
+  })
+
+  test.each(nested)("for the Ops lead, as one runner's: %s passes", async (_, command) => {
+    expect(await as("ops", command)).toBeUndefined()
+  })
+
+  test.each([
+    ["an env pull three runners deep", "npx npx npx vercel env pull"],
+    ["a deploy by runners nested past the readings' cap", `${DEEP} vercel deploy --prod`],
+  ])("for the Ops lead too: %s", async (_, command) => {
+    expect(await as("ops", command)).toContain(REFUSED)
+  })
+
+  test("a deploy by one runner stays refused", async () => {
+    expect(await as("worker", "npx vercel deploy --prod")).toContain(REFUSED)
+  })
+
+  test.each([
+    ["a whoami", "npx npx vercel whoami"],
+    ["a preview deploy", "bunx npx vercel deploy"],
+    ["a runner's version", "npx npx --version"],
+    ["a harmless program", "npx bunx cowsay vercel"],
+  ])("for a worker: %s under a runner a runner starts runs", async (_, command) => {
+    expect(await as("worker", command)).toBeUndefined()
+  })
+})
+
 describe("Ops' ship of the hosted build", () => {
   test.each(OPS_SHIP)("passes for the Ops lead %s", async (_, command) => {
     expect(await as("ops", command)).toBeUndefined()
