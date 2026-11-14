@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import {
   chmodSync,
   copyFileSync,
@@ -382,7 +382,7 @@ test("the pre-commit marker check refuses a staged conflict marker before lint-s
 
 // pre-push's jobs that read the pushed refs on stdin run as scripts, since lefthook 2.2.2 skips every pre-push command and job while the checked-out branch has nothing new against its upstream, and runs a script on every push
 const PUSH_SCRIPTS = {
-  "commit-trailer.sh": "bun --no-env-file packages/scripts/src/commit-trailer.ts --push",
+  "commit-trailer.sh": 'bun --no-env-file packages/scripts/src/commit-trailer.ts --push "$1"',
   "conflict-markers.sh": "bun --no-env-file packages/scripts/src/conflict-markers.ts --push",
   "keeps-canary.sh": "bun --no-env-file packages/scripts/src/pr-merge/prepush.ts",
 }
@@ -530,10 +530,16 @@ test("the pre-push trailer check refuses a pushed commit a --no-verify commit le
     return git("rev-parse", "HEAD").out.trim()
   }
   const ZERO = "0".repeat(40)
+  // pre-push's first argument names the remote it pushes to, whose live branches hold what it leaves out
   const push = (local: string) =>
-    run(["bash", "-c", trailer], `refs/heads/b ${local} refs/heads/b ${ZERO}\n`)
+    run(
+      ["bash", "-c", trailer, "pre-push", "origin"],
+      `refs/heads/b ${local} refs/heads/b ${ZERO}\n`,
+    )
   try {
     expect(git("init", "-q")).toMatchObject({ code: 0 })
+    expect(git("init", "-q", "--bare", ".origin")).toMatchObject({ code: 0 })
+    expect(git("remote", "add", "origin", join(dir, ".origin"))).toMatchObject({ code: 0 })
     // commit-msg's step alone, run by its path in this checkout, as lefthook would run it
     mkdirSync(hooks)
     await Bun.write(
@@ -542,7 +548,9 @@ test("the pre-push trailer check refuses a pushed commit a --no-verify commit le
     )
     chmodSync(join(hooks, "commit-msg"), 0o755)
     const base = await commit("a.txt", "chore: base\n\nCo-Authored-By: A <a@b.c>\n")
-    expect(git("update-ref", "refs/remotes/origin/canary", base)).toMatchObject({ code: 0 })
+    expect(git("push", "-q", "--no-verify", "origin", `${base}:refs/heads/canary`)).toMatchObject({
+      code: 0,
+    })
     // a commit every remote already holds is not read, the trailer on canary's base included
     expect(push(base)).toEqual({ code: 0, out: "" })
     const mention = await commit(
@@ -584,6 +592,98 @@ test("the pre-push trailer check refuses a pushed commit a --no-verify commit le
     rmSync(dir, { force: true, recursive: true })
   }
 }, 60_000)
+
+// the trailer check leaves out only what the remote it pushes to holds now, read live; each test builds on the one before
+describe("the pre-push trailer check reads the remote's live branches, not its tracking refs", () => {
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-push-live-"))
+  const work = join(dir, "work")
+  const run = (argv: string[], stdin?: string, cwd = work) => {
+    const result = Bun.spawnSync(argv, {
+      cwd,
+      env: SCRATCH_ENV,
+      stdin: stdin === undefined ? "ignore" : Buffer.from(stdin),
+    })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const git = (cwd: string, ...args: string[]) =>
+    run(
+      [
+        "git",
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "core.hooksPath=/dev/null",
+        ...args,
+      ],
+      undefined,
+      cwd,
+    )
+  const commit = (cwd: string, path: string, message: string) => {
+    writeFileSync(join(cwd, path), message)
+    expect(git(cwd, "add", path)).toMatchObject({ code: 0 })
+    expect(git(cwd, "commit", "-q", "-m", message)).toMatchObject({ code: 0 })
+    return git(cwd, "rev-parse", "HEAD").out.trim()
+  }
+  const ZERO = "0".repeat(40)
+  const TRAILER = "\n\nCo-Authored-By: A <a@b.c>\n"
+  let trailer = ""
+  let held = ""
+  const push = (local: string, remote = "origin") =>
+    run(["bash", "-c", trailer, "pre-push", remote], `refs/heads/n ${local} refs/heads/n ${ZERO}\n`)
+
+  beforeAll(async () => {
+    trailer = await pushScript("commit-trailer.sh")
+    expect(git(dir, "init", "-q", "--bare", "-b", "main", "origin.git")).toMatchObject({ code: 0 })
+    expect(git(dir, "clone", "-q", join(dir, "origin.git"), "work")).toMatchObject({ code: 0 })
+    held = commit(work, "a.txt", `chore: held${TRAILER}`)
+    expect(git(work, "push", "-q", "origin", "HEAD:refs/heads/main")).toMatchObject({ code: 0 })
+  })
+
+  afterAll(() => rmSync(dir, { force: true, recursive: true }))
+
+  test("a commit a live branch holds stays out", () => {
+    expect(push(held)).toEqual({ code: 0, out: "" })
+  })
+
+  test("a remote it cannot read leaves every commit in", () => {
+    const unread = push(held, join(dir, "nowhere.git"))
+    expect(unread.code).not.toBe(0)
+    expect(unread.out).toContain(`${held.slice(0, 9)} chore: held`)
+  })
+
+  test("a commit only a stale tracking ref holds, its branch deleted on the remote, is read", () => {
+    const gone = commit(work, "b.txt", `chore: gone${TRAILER}`)
+    expect(git(work, "push", "-q", "origin", "HEAD:refs/heads/gone")).toMatchObject({ code: 0 })
+    expect(git(join(dir, "origin.git"), "branch", "-D", "gone")).toMatchObject({ code: 0 })
+    expect(git(work, "rev-parse", "-q", "--verify", "refs/remotes/origin/gone").out.trim()).toBe(
+      gone,
+    )
+    const stale = push(gone)
+    expect(stale.code).not.toBe(0)
+    expect(stale.out).toContain(`${gone.slice(0, 9)} chore: gone`)
+    expect(stale.out).not.toContain(`${held.slice(0, 9)} chore: held`)
+  })
+
+  // a live branch's tip this repo has not fetched stands in by its own tracking ref, a stale read kept narrow on purpose: it misses a commit that branch dropped in a force-push this repo has not fetched
+  test("a live branch whose new tip this repo lacks stands in by its tracking ref", () => {
+    const other = join(dir, "other")
+    expect(git(dir, "clone", "-q", "-b", "main", join(dir, "origin.git"), "other")).toMatchObject({
+      code: 0,
+    })
+    commit(other, "c.txt", "chore: ahead")
+    expect(git(other, "push", "-q", "origin", "HEAD:refs/heads/main")).toMatchObject({ code: 0 })
+    expect(push(held)).toEqual({ code: 0, out: "" })
+    // the residual: the branch force-pushed back past held, which this repo has not fetched, still stands in
+    expect(git(other, "checkout", "-q", "--orphan", "fresh")).toMatchObject({ code: 0 })
+    commit(other, "d.txt", "chore: rewritten")
+    expect(git(other, "push", "-q", "-f", "origin", "HEAD:refs/heads/main")).toMatchObject({
+      code: 0,
+    })
+    expect(push(held)).toEqual({ code: 0, out: "" })
+  })
+})
 
 // the same pre-push job reads each new commit's message and the pushed branch or tag name against no-public-leak's list, a made-up one in a scratch data folder here, so a --no-verify commit holding a list term is refused before it reaches the remote; the refusal names the sha and the kind, never the term
 test("the pre-push list check refuses a pushed commit message or branch or tag name holding a list term", async () => {
@@ -630,15 +730,20 @@ test("the pre-push list check refuses a pushed commit message or branch or tag n
   }
   const ZERO = "0".repeat(40)
   const push = (local: string, branch = "b") =>
-    run(["bash", "-c", trailer], `refs/heads/${branch} ${local} refs/heads/${branch} ${ZERO}\n`)
+    run(
+      ["bash", "-c", trailer, "pre-push", "origin"],
+      `refs/heads/${branch} ${local} refs/heads/${branch} ${ZERO}\n`,
+    )
   const printsNoTerm = (out: string) =>
     expect(
       ["vantorix", "qmarsh", "quilla"].filter((term) => out.toLowerCase().includes(term)),
     ).toEqual([])
   try {
     expect(git("init", "-q")).toMatchObject({ code: 0 })
+    expect(git("init", "-q", "--bare", ".origin")).toMatchObject({ code: 0 })
+    expect(git("remote", "add", "origin", join(dir, ".origin"))).toMatchObject({ code: 0 })
     const base = commit("a.txt", "chore: base for Vantorix")
-    expect(git("update-ref", "refs/remotes/origin/canary", base)).toMatchObject({ code: 0 })
+    expect(git("push", "-q", "origin", `${base}:refs/heads/canary`)).toMatchObject({ code: 0 })
     // a commit a remote already holds is not read
     expect(push(base)).toEqual({ code: 0, out: "" })
     const clean = commit("b.txt", "fix: a plain change")
@@ -649,7 +754,7 @@ test("the pre-push list check refuses a pushed commit message or branch or tag n
     printsNoTerm(named.out)
     // a tag's name is read as a branch's is
     const tag = run(
-      ["bash", "-c", trailer],
+      ["bash", "-c", trailer, "pre-push", "origin"],
       `refs/tags/v1-qmarsh ${clean} refs/tags/v1-qmarsh ${ZERO}\n`,
     )
     expect(tag.code).not.toBe(0)

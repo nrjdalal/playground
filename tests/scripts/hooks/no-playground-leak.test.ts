@@ -388,6 +388,58 @@ describe(`a Acme write holding a ${OLD.dispatcher} term is refused`, () => {
   })
 })
 
+// origin names Acme's repository, so the hook places it, while an insteadOf rule sends git's reads to a local bare repo; each test builds on the one before
+describe("git push and gh pr create read the live branches of the remote they push to", () => {
+  const url = "https://github.com/acme-blue/app.git"
+  const pr = "gh pr create --title Fix --body ok"
+  let dir = ""
+  let bare = ""
+
+  beforeAll(async () => {
+    dir = join(scratch, "live")
+    bare = join(scratch, "live.git")
+    await mkdir(dir, { recursive: true })
+    git(scratch, "init", "-q", "--bare", "-b", "main", bare)
+    git(dir, "init", "-q", "-b", "main")
+    git(dir, "remote", "add", "origin", url)
+    git(dir, "config", `url.${bare}.insteadOf`, url)
+    git(dir, "commit", "-q", "--allow-empty", "-m", "Fix the export button")
+    git(dir, "push", "-q", "origin", "main")
+    git(dir, "checkout", "-q", "-b", "fix/export")
+    git(dir, "commit", "-q", "--allow-empty", "-m", "Fix from worker-envy")
+    git(dir, "push", "-q", "origin", "fix/export")
+    git(bare, "branch", "-D", "fix/export")
+  })
+
+  test("a commit only a stale tracking ref holds, its branch deleted on the remote, is read", async () => {
+    expect(await bash("git push", dir)).toContain('"worker-envy"')
+    expect(await bash("git push origin HEAD", dir)).toContain('"worker-envy"')
+    expect(await bash(pr, dir)).toContain('"worker-envy"')
+  })
+
+  test("a commit another remote holds and the one it pushes to does not is read", async () => {
+    git(dir, "update-ref", "-d", "refs/remotes/origin/fix/export")
+    git(scratch, "init", "-q", "--bare", "-b", "main", join(scratch, "live-fork.git"))
+    git(dir, "remote", "add", "fork", join(scratch, "live-fork.git"))
+    git(dir, "push", "-q", "fork", "fix/export")
+    expect(await bash(pr, dir)).toContain('"worker-envy"')
+    expect(await bash("git push", dir)).toContain('"worker-envy"')
+  })
+
+  test("a commit the live remote holds stays out", async () => {
+    git(dir, "push", "-q", "origin", "fix/export")
+    expect(await bash(pr, dir)).toBeUndefined()
+    expect(await bash("git push", dir)).toBeUndefined()
+  })
+
+  test("a remote it cannot read leaves every commit in", async () => {
+    git(dir, "config", `url.${join(scratch, "nowhere.git")}.insteadOf`, url)
+    git(dir, "config", "--unset", `url.${bare}.insteadOf`)
+    expect(await bash(pr, dir)).toContain('"worker-envy"')
+    expect(await bash("git push", dir)).toContain('"worker-envy"')
+  })
+})
+
 describe("the roster's names are terms too, since sessions are renamed", () => {
   const slack = "mcp__slack-shared__chat_post_message"
 
