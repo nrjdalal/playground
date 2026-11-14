@@ -167,7 +167,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   An `&&` before the loop (`false && while cd /tmp; do …`) may skip it, so its `cd` keeps the folder before it for every command after the loop, the ones the same chain joins included, though those run only once the loop has run.
   A `cd` through a steady variable reads the folder the variable names, in a hook that holds them (`Env.hold`, which no-extensions-write, no-glm-heavy-path and no-main-checkout set from `steady.ts`), so its climb is read from that folder; the start-folder reading the `cd` had stays beside it.
   A steady value that is a literal absolute path with no glob (`W=/abs; cd "$W"`, `env -C $W`) is read as that `cd` typed (`landsHeld`), so it leaves no unread folder and `Env.cwd` names it, as a hook that reads that alone needs.
-  A relative value, a substitution, a read, or a value holding a colon stays unread, the last since the lexer reads zsh's modifier on an unbraced name (`$W:t`, `$W:h`) as text, where zsh applies it.
+  A relative value, a substitution, a read, or a value holding a colon or a blank stays unread.
+  The lexer reads zsh's modifier on an unbraced name (`$W:t`, `$W:h`) as text, where zsh applies it, and `sh_word_split` splits a blank into zsh's two-operand `cd`.
   A `cd` that opens a function's, a brace group's or a coprocess's body adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point, and a relative `cd` after it resolves from those folders too, since the body may already have run.
   A `cd` later in the body is read where it stands, as one the shell may not run, so a sure `cd` after the body clears it, as `Env.cwd`'s own reading does too.
   `popd`, `cd -` and a bare `pushd` take every folder the line has named (`Env.cwdBack`).

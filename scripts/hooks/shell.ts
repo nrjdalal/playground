@@ -1964,10 +1964,10 @@ async function folder(path: string | undefined): Promise<string | undefined> {
 // Where a cd or pushd may leave the shell: each folder its own words name, whether its target names a folder the reader cannot read at all, and `back` for a form that returns to a folder the line named before, so every one of those is a candidate too. `cd -` and a bare `pushd` are such forms, and so is zsh's two-operand cd, which replaces part of the path the shell is in: its operands go in as candidates, since one of them is the folder a one-operand reading would reach. A bare `pushd` takes the home as well, which zsh's PUSHD_TO_HOME makes it reach.
 type Move = { back?: boolean; paths: string[]; unread: boolean }
 
-// The folder word a steady variable holds as a literal absolute path with no glob and no colon (`W=/abs; cd "$W"`), which a cd or env -C lands in as if typed; undefined for any other value, a relative one included, which stays unread, and so for one holding a colon, which is what the lexer leaves of a zsh modifier on an unbraced name (`$W:t`, `$W:h`), read as text where zsh applies it
+// The folder word a steady variable holds as a literal absolute path with no glob, colon or blank (`W=/abs; cd "$W"`), which a cd or env -C lands in as if typed; undefined for any other value, a relative one included, which stays unread, and so for one holding a colon, which is what the lexer leaves of a zsh modifier on an unbraced name (`$W:t`, `$W:h`), read as text where zsh applies it, and so for one holding a blank, which sh_word_split splits into zsh's two-operand cd
 const landsHeld = (word: Word, cmd: Command, env: Env): Word | undefined => {
   const held = env.hold?.(word, cmd, env)
-  return held && isAbsolute(held.value) && !held.glob && !held.value.includes(":")
+  return held && isAbsolute(held.value) && !held.glob && !/[:\s]/.test(held.value)
     ? held
     : undefined
 }
