@@ -384,4 +384,29 @@ describe("the poll", () => {
     expect(asked.at(-1)).toEqual({ after: "a", since: "2026-10-31T10:00:00.000Z" })
     expect(posted).toEqual([untrusted(a, channel()), untrusted(b, channel())])
   })
+
+  test("cards at most 20 mentions a day from one sender, then one card saying so, and starts again the next day", async () => {
+    const file = join(DIR, "marks-cap.json")
+    const cards: Card[] = []
+    const post = async (card: Card) => void cards.push(card)
+    const at = (day: number, i: number) => `2026-10-${day}T10:${String(i).padStart(2, "0")}:00.000Z`
+    const fromBo = Array.from({ length: 22 }, (_, i) => message({ at: at(30, i), id: `b${i}` }))
+    const fromCy = message({ at: at(30, 30), from: { device: "studio", login: "cy" }, id: "c0" })
+    const nextDay = message({ at: at(31, 0), id: "b-next" })
+    await pollWaiting(
+      client([channel()], []).yard,
+      { post, tell: noTell },
+      WEB,
+      file,
+      new Date("2026-10-30T00:00:00Z"),
+    )
+    const yard = client([channel()], [...fromBo, fromCy, nextDay]).yard
+    expect(await pollWaiting(yard, { post, tell: noTell }, WEB, file)).toBe(23)
+    expect(cards.map((c) => c.title)).toEqual([
+      ...Array.from({ length: 20 }, () => "@bo mentioned you in #ops"),
+      "@bo mentioned you more than 20 times today",
+      "@cy mentioned you in #ops",
+      "@bo mentioned you in #ops",
+    ])
+  })
 })

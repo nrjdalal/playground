@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test"
+
+import { testContainerName } from "../../../../container"
 
 // Better Auth refuses its default secret under NODE_ENV=production, which CI's build step sets; set one before the middleware loads.
 process.env.BETTER_AUTH_SECRET ||= "rate-limiter-test-secret-not-for-use-anywhere"
@@ -136,4 +138,77 @@ describe("rateLimiterMiddleware", () => {
     expect(limitExempt("GET", "/api/v1/user", "127.0.0.1")).toBe(false)
     expect(limitExempt("POST", "/api/health", "127.0.0.1")).toBe(false)
   })
+})
+
+const dockerUp = (): boolean =>
+  Bun.which("docker") !== null &&
+  Bun.spawnSync(["docker", "info"], { stderr: "ignore", stdout: "ignore" }).exitCode === 0
+
+// One request through a fresh API process, as a hosted instance of its own, with KV_URL as given; its status.
+const INSTANCE = new URL("./two-instances.ts", import.meta.url).pathname
+const instance = async (kvUrl?: string): Promise<string> => {
+  const env: Record<string, string | undefined> = { ...process.env, KV_URL: kvUrl }
+  if (!kvUrl) delete env.KV_URL
+  const child = Bun.spawn([process.execPath, INSTANCE], { env, stderr: "pipe", stdout: "pipe" })
+  const [out, err] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ])
+  if ((await child.exited) !== 0) throw new Error(err)
+  return out.trim()
+}
+
+describe("the limiter across instances", () => {
+  test("with no KV_URL, each instance counts alone, in its own memory", async () => {
+    expect([await instance(), await instance()]).toEqual(["200", "200"])
+  }, 30_000)
+
+  test("with a KV_URL nothing answers at, each instance still answers, counting alone", async () => {
+    expect([await instance("redis://127.0.0.1:1"), await instance("redis://127.0.0.1:1")]).toEqual([
+      "200",
+      "200",
+    ])
+  }, 30_000)
+})
+
+// A throwaway Redis in Docker published on 127.0.0.1 only; skipped where Docker is not running.
+describe.skipIf(!dockerUp())("the limiter on Redis", () => {
+  let container = ""
+  let url = ""
+
+  beforeAll(async () => {
+    container = Bun.spawnSync([
+      "docker",
+      "run",
+      "-d",
+      "--rm",
+      "--name",
+      testContainerName("redis-rate-limit"),
+      "-p",
+      "127.0.0.1::6379",
+      "redis:alpine",
+    ])
+      .stdout.toString()
+      .trim()
+    const port = Bun.spawnSync(["docker", "port", container, "6379/tcp"])
+      .stdout.toString()
+      .trim()
+      .split(":")
+      .at(-1)
+    url = `redis://127.0.0.1:${port}`
+    for (let i = 0; i < 60; i++) {
+      const probe = Bun.spawnSync(["docker", "exec", container, "redis-cli", "ping"])
+      if (probe.stdout.toString().trim() === "PONG") break
+      await Bun.sleep(250)
+    }
+  }, 60_000)
+
+  afterAll(() => {
+    if (container)
+      Bun.spawnSync(["docker", "rm", "-fv", container], { stderr: "ignore", stdout: "ignore" })
+  })
+
+  test("with KV_URL set, two instances count together: the request at the limit passes, and the next one is refused", async () => {
+    expect([await instance(url), await instance(url)]).toEqual(["200", "429"])
+  }, 30_000)
 })
