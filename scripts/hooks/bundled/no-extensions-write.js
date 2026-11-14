@@ -10231,6 +10231,10 @@ function awkPrograms(words) {
   }
   return programs.length ? programs : undefined;
 }
+function awkTexts(args) {
+  const programs = awkPrograms(args) ?? [];
+  return programs.every((w) => literal2(w) && !/[|"]/.test(w.value) && !awkRuns(w.value)) ? programs : [];
+}
 var EVALUATES2 = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"]);
 function evalProgram({ args, name }) {
   if (name === "agent-browser") {
@@ -10238,6 +10242,8 @@ function evalProgram({ args, name }) {
       const { value } = args[k];
       if (value === "eval")
         return args[k + 1];
+      if (value === "wait")
+        return args[k + 1]?.value === "--fn" ? args[k + 2] : undefined;
       const option = args[k - 1]?.value ?? "";
       if (!value.startsWith("-") && !(option.startsWith("--") && !option.includes("=")))
         return;
@@ -10910,10 +10916,13 @@ async function inspect(raw, environment, unknown = false) {
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
     const reader = !rootLine && (ownFirst(cmd, first) && reads(parsed, env) || xargsGrep(cmd, parsed, env));
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined;
+    const edits = SEDS.has(program(name)) ? sedInPlace(cmd, parsed) : undefined;
+    const editsHeld = !!edits && parsed.args.every((word) => edits.has(word) || !word.procs && held3(word, env, steadyAt(cmd)));
     const wholeText = new Set(whole && !rootLine && ownProgram(cmd, parsed) && ![...parsed.local.keys(), ...env.vars.keys()].some((key) => TEXT_RUNS.test(key) || marked(key)) ? [
       ...ghFilters(parsed),
       ...browserCode ? [browserCode] : [],
-      ...SEDS.has(program(name)) ? sedReadScripts(parsed.args) ?? [] : [],
+      ...AWKS.has(program(name)) ? awkTexts(parsed.args) : [],
+      ...SEDS.has(program(name)) ? sedReadScripts(parsed.args) ?? (editsHeld ? [...edits] : []) : [],
       ...textFlagValues(parsed)
     ] : []);
     const xargsOwn = xargs ? xargsOptions(cmd, first) : [];
