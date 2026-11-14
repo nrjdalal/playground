@@ -3,7 +3,6 @@ import { appendFile, lstat, mkdir, readdir, realpath, unlink } from "node:fs/pro
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
-import { managerOf } from "@packages/config/kinds"
 import { configDirOf } from "@packages/env/data-dir"
 import {
   archiveUnlanded,
@@ -24,11 +23,9 @@ import { writeAtomic } from "../write-atomic"
 import { CWDS, cwdsOf, endOrphans, orphansOf, procsOf, PS } from "./orphans"
 import type { Context } from "./tick"
 
-// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone and of test runs whose sandbox is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders and loose scratch files of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, and an Inbox update when 1 GB or more was freed. It asks no decision: each container or volume no rule removes is kept and named as kept.
+// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone and of test runs whose sandbox is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders and loose scratch files of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line with the free disk before and after, which the System page also shows, and one outbox line to ops naming each removal. It asks no decision: each container or volume no rule removes is kept and named as kept.
 
 const GB = 1024 ** 3
-// The freed-space finding's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
-export const FREED_LINK = "- 💾 Free disk shows on the [System page](/dashboard/system)."
 const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
 
 export type Pr = { headRefOid: string; state: "CLOSED" | "MERGED" | "OPEN"; url: string }
@@ -304,10 +301,6 @@ const UNKNOWN_SHA = /Object does not exist/
 export const discardable = (line: string): boolean =>
   /: (uncommitted work|unpushed commits)$/.test(line) ||
   line.includes("--discard removes it anyway")
-
-// --silent, since bun run's "$ bun ..." line goes to stderr, which ctx.run joins after stdout, and get's JSON would not parse
-const ask = async (ctx: Context, args: string[], stdin?: string) =>
-  ctx.run(["bun", "run", "--silent", "--cwd", ctx.repo, "ask", ...args], 120_000, stdin)
 
 const cliOf = (ctx: Context): string =>
   join(ctx.repo, "packages", "scripts", "src", "playground", "cli.ts")
@@ -787,21 +780,6 @@ export const nightlyClean =
         `nightly-clean removed ${removed.length}, kept ${kept.length}: ${named.join("; ")}`,
       )
     const after = deps.free(data)
-    const roster = await Bun.file(join(data, "roster.json"))
-      .json()
-      .catch(() => null)
-    const from = managerOf((roster as { agents?: unknown } | null)?.agents, "ops")
-    if (after - before >= GB)
-      await ask(
-        ctx,
-        ["new"],
-        JSON.stringify({
-          from,
-          kind: "update",
-          preview: { outcome: "finding", text: FREED_LINK },
-          title: `The nightly cleanup freed ${gbOf(after - before)} GB: free disk ${gbOf(before)} GB, now ${gbOf(after)} GB`,
-        }),
-      )
     await mkdir(join(ctx.ops, "tick"), { recursive: true })
     await writeAtomic(statePath, JSON.stringify({ at: ctx.now.toISOString() } satisfies State))
     await mkdir(join(ctx.ops, "log"), { recursive: true })

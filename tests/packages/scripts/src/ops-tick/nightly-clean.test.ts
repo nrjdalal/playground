@@ -488,7 +488,6 @@ describe("one night's run against a fixture data folder", () => {
     const all: Answers = {
       "docker ps": "playground-gone-db\texited\t10B\nplayground-dashboard-db\trunning\t10B",
       "docker system df": JSON.stringify({ Volumes: [] }),
-      "ask new": ID,
       "branch --merged": "PG-9-done",
       "for-each-ref refs/heads": "main m\nPG-9-done h9",
       "for-each-ref refs/remotes/origin": "HEAD x\nPG-8-gone r8",
@@ -582,7 +581,7 @@ describe("one night's run against a fixture data folder", () => {
       "docker rm -fv playground-gone-db",
       "docker rm -fv playground-gone-redis",
     ])
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(inputs).toEqual([])
     const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
     const line = sent.find((s) => s.to === "ops")?.text ?? ""
     for (const text of [log, line]) {
@@ -618,7 +617,7 @@ describe("one night's run against a fixture data folder", () => {
     }))
     await nightlyClean(deps)(ctx)
     expect(runs.some((r) => r.includes("ask") && r.includes(OLD))).toBe(false)
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(inputs).toEqual([])
     expect(JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))).toEqual({
       at: "2026-11-05T03:00:00.000Z",
     })
@@ -638,7 +637,7 @@ describe("one night's run against a fixture data folder", () => {
     )
     expect(log).toContain("branches: deleted 1 local, 1 remote; none to archive")
     expect(runs.map((r) => r.join(" "))).not.toContain("docker rm -fv playground-dashboard-db")
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(inputs).toEqual([])
     expect(JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))).toEqual({
       at: "2026-11-05T03:00:00.000Z",
     })
@@ -657,7 +656,7 @@ describe("one night's run against a fixture data folder", () => {
       `trashed ${wt("pg-2")} as 20261108T030000Z-shell/1, restorable with playground rm --restore 20261108T030000Z-shell/1`,
     )
     expect(log).not.toContain(`decision ${ID}`)
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(inputs).toEqual([])
     const line = sent.find((s) => s.to === "ops")
     expect(line?.text).toContain(
       `worktree ${wt("pg-2")} as trash 20261108T030000Z-shell/1 (playground rm --restore 20261108T030000Z-shell/1)`,
@@ -1366,7 +1365,7 @@ describe("one night's run against a fixture data folder", () => {
       `kept ${wt("pg-2")}: its trash move failed: playground: the roster cannot be read`,
     )
     expect(log).not.toContain(`trashed ${wt("pg-2")}`)
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(inputs).toEqual([])
     const line = sent.find((s) => s.to === "ops")
     expect(line?.text).toContain(`worktree ${wt("pg-2")} kept: its trash move failed`)
     expect(line?.text).toContain("removed 1, kept 1: container playground-gone-db; ")
@@ -1383,12 +1382,6 @@ describe("one night's run against a fixture data folder", () => {
     const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
     expect(log).toContain(`removed ${wt("pg-2")}`)
     expect(asked).toEqual([`${wt("pg-2")} https://github.com/acme/app/pull/2`])
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
-  })
-
-  test("a night that frees under 1 GB posts no update", async () => {
-    const { ctx, deps, inputs } = night(leftovers(), undefined, 0.01)
-    await nightlyClean(deps)(ctx)
     expect(inputs).toEqual([])
   })
 
