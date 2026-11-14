@@ -587,28 +587,18 @@ const portlessRead = (tool: string, args: Word[]): boolean => {
   return (tool === "portless" || words !== args) && PORTLESS_READS.has(words[0]?.value ?? "")
 }
 
-// The folder git's options place its work with no shell folder: its --work-tree when a -C or a --git-dir the hook reads goes with it, else the folder a -C the hook reads names; undefined otherwise, since git takes the shell's folder as the work tree for a --git-dir alone and finds the repository from it for a --work-tree alone
+// The folder git works in by its -C options alone, each read from the one before it; undefined when it has none or one the hook cannot read, since git reads its paths from the shell's folder for every other option, a --git-dir or --work-tree included (a --work-tree holding the shell's folder places nothing)
 const gitPlaced = (args: Word[], env: Env): string | undefined => {
   let cwd: string | undefined
-  let dir = false
-  let tree: string | undefined
   for (let k = 0; k < args.length && args[k].value.startsWith("-"); k++) {
     const v = args[k].value
-    const flag = ["-C", "--git-dir", "--work-tree"].find(
-      (f) => v === f || (f !== "-C" && v.startsWith(`${f}=`)),
-    )
-    if (!flag) {
-      if (GIT_TAKES.has(v)) k++
-      continue
-    }
-    const word = v === flag ? args[++k] : { ...args[k], value: v.slice(flag.length + 1) }
-    const at = word && pathOf(word, { ...env, cwd })
-    if (at === undefined) return undefined
-    if (flag === "-C") cwd = at
-    else if (flag === "--git-dir") dir = true
-    else tree = at
+    if (v === "-C") {
+      const word = args[++k]
+      cwd = word && pathOf(word, { ...env, cwd })
+      if (cwd === undefined) return undefined
+    } else if (GIT_TAKES.has(v)) k++
   }
-  return tree === undefined ? cwd : dir || cwd !== undefined ? tree : undefined
+  return cwd
 }
 
 // a word macOS chmod takes as a dash-led mode (-w, -go+x) rather than an option
@@ -2022,7 +2012,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     }
     // after a cd the hook cannot read, a remover's operand or a writer's target the hook can place only by the shell's own folder may be in the root
     if (!env.cwdUnread) return
-    // a typed program off every list may write in the shell's folder, and git but a read, git rm or a call whose work tree and index the hook places (gitPlaced) may write its clone there; a command read out of a quoted text is judged by the lists alone, since its words are most often no program
+    // a typed program off every list may write in the shell's folder, and git but a read, git rm or a call that an absolute -C places (gitPlaced) may write its clone there; a command read out of a quoted text is judged by the lists alone, since its words are most often no program
     const git = tool === "git" ? gitCall(args, { ...env, cwd: undefined }) : undefined
     if (
       textDepth === 0 &&
@@ -2035,7 +2025,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     )
       return refuse(
         afterUnreadCd(
-          `${git ? `git ${git.sub && !marked(git.sub) ? git.sub : "with a subcommand it cannot read"}` : verb}, which may write in the shell's folder,`,
+          `${git ? `git ${git.sub && !marked(git.sub) ? git.sub : "with a subcommand it cannot read"}, which may write in the shell's folder (an absolute git -C places it),` : `${verb}, which may write in the shell's folder,`}`,
         ),
       )
     // stdin xargs splits where the hook cannot see (a NUL, a part it cannot read, GNU's -d delimiter, a quote left open) is read as one value it cannot read

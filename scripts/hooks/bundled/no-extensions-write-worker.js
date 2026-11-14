@@ -9659,28 +9659,17 @@ var portlessRead = (tool, args) => {
 };
 var gitPlaced = (args, env) => {
   let cwd;
-  let dir = false;
-  let tree;
   for (let k = 0;k < args.length && args[k].value.startsWith("-"); k++) {
     const v = args[k].value;
-    const flag = ["-C", "--git-dir", "--work-tree"].find((f) => v === f || f !== "-C" && v.startsWith(`${f}=`));
-    if (!flag) {
-      if (GIT_TAKES.has(v))
-        k++;
-      continue;
-    }
-    const word = v === flag ? args[++k] : { ...args[k], value: v.slice(flag.length + 1) };
-    const at = word && pathOf(word, { ...env, cwd });
-    if (at === undefined)
-      return;
-    if (flag === "-C")
-      cwd = at;
-    else if (flag === "--git-dir")
-      dir = true;
-    else
-      tree = at;
+    if (v === "-C") {
+      const word = args[++k];
+      cwd = word && pathOf(word, { ...env, cwd });
+      if (cwd === undefined)
+        return;
+    } else if (GIT_TAKES.has(v))
+      k++;
   }
-  return tree === undefined ? cwd : dir || cwd !== undefined ? tree : undefined;
+  return cwd;
 };
 var CHMOD_DASH_MODE = /^-[gorstuwXx]/;
 function unreadCdWrites(tool, args, env, stopsAtOperand) {
@@ -10751,7 +10740,7 @@ async function inspect(raw, environment, unknown = false) {
       return;
     const git = tool === "git" ? gitCall(args, { ...env, cwd: undefined }) : undefined;
     if (textDepth === 0 && !remover && !WRITERS.has(tool) && !NO_WRITES.has(tool) && !portlessRead(tool, args) && !reads(parsed, env) && (git ? git.sub !== "rm" && gitPlaced(args, env) === undefined : !UNREAD_CD_JUDGED.has(tool)))
-      return refuse(afterUnreadCd(`${git ? `git ${git.sub && !marked(git.sub) ? git.sub : "with a subcommand it cannot read"}` : verb}, which may write in the shell's folder,`));
+      return refuse(afterUnreadCd(`${git ? `git ${git.sub && !marked(git.sub) ? git.sub : "with a subcommand it cannot read"}, which may write in the shell's folder (an absolute git -C places it),` : `${verb}, which may write in the shell's folder,`}`));
     const unsplit = fed && !fed.unknown && (marked(fed.value) || delimiter || !fedSplit);
     const fedWords = unsplit ? [{ quoted: false, value: UNKNOWN }, ...argWord ? [argWord] : []] : stdinWords;
     const replace = xargs?.replace;
