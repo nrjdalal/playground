@@ -1253,3 +1253,31 @@ test("processesOf joins lsof's working folders with ps's command lines and each 
     },
   ])
 })
+
+test("--pr naming a live reviewer's open PR lifts no hold under --discard, and its merged PR at that head frees the clone", async () => {
+  const { deps, main } = machine()
+  git(main, "init", "-q", "-b", "canary")
+  writeFileSync(join(main, "README.md"), "x")
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  const wt = join(main, ".claude", "worktrees", "review-1")
+  git(main, "worktree", "add", "-q", "--detach", wt)
+  writeFileSync(join(wt, "f.txt"), "x")
+  git(wt, "add", ".")
+  git(wt, "commit", "-qm", "the PR's own commit")
+  const url = "https://github.com/o/r/pull/1"
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({ agents: [{ name: "xyz789-reviewer", pr: url, status: "working" }] }),
+  )
+  const at = (state: "MERGED" | "OPEN"): RmDeps => ({
+    ...deps,
+    prState: async (path) => ({ head: git(path, "rev-parse", "HEAD"), number: 1, state }),
+  })
+  expect(await runRm(["--worktree", wt, "--discard"], at("OPEN"))).toBe(1)
+  expect(existsSync(wt)).toBe(true)
+  expect(await runRm(["--worktree", wt, "--discard", "--pr", url], at("OPEN"))).toBe(1)
+  expect(existsSync(wt)).toBe(true)
+  expect(await runRm(["--worktree", wt, "--discard", "--pr", url], at("MERGED"))).toBe(0)
+  expect(existsSync(wt)).toBe(false)
+})
