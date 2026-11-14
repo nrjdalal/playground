@@ -92,6 +92,8 @@ playground add --dispatcher --backend glm
                       start a second dispatcher on GLM
 playground alerts-wait <name>
                       for a manager's background task: wait for the next outbox line addressed to <name>, a stuck alert first, else any job's line such as a heads-up, print it and exit, so it wakes without waiting on the relay
+playground ci-wait <pr> [--repo <owner/name>]
+                      wait on a PR's CI, as a background task: poll its head over REST every 5 minutes until each check pr:merge needs (Audit, Lint, and Build and test) exists there and has concluded, then print each conclusion and exit 0 when all passed, else 1; a rate limit waits for its reset, a head that moves is waited on afresh, a check whose workflow run ended without creating it exits 1 with its rerun, and a PR or repo GitHub does not know, or a refused login, exits 2; --repo is the factory's own repo when left out
 playground picker <session> allow <key> [--rule <name>] | deny <key> [--rule <name>] "<reason>"
                       as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; --rule names the standing rule that settles the answer; each answer is a line in ops/picker.log`
 
@@ -130,6 +132,7 @@ export const WORDS: Record<string, number | "rest"> = {
   add: 1,
   "alerts-wait": 1,
   builder: 0,
+  "ci-wait": 1,
   dispatcher: 0,
   doctor: 0,
   "ext accept": 4,

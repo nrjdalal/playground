@@ -126,6 +126,15 @@ It opens nothing on your screen: the agent sends you the page as an Inbox card, 
 The page then shows on the [Pages](/docs/agents#pages) tab of both sessions and of your chat, and in the Previews app.
 It refuses a file that is not an HTML page, and a `--by` or `--for` that names no session on the roster.
 
+## Wait on CI: `playground ci-wait`
+
+`playground ci-wait <pr>` waits until each check `pr:merge` needs, `Audit, Lint, and Build` and `test`, exists at the PR's head and has finished, then prints each result and exits 0 when all passed, else 1.
+It reads GitHub every 5 minutes, waits out a rate limit, and starts over when a push moves the head.
+When a check's workflow run ends without creating the check, it exits 1 and names the `gh run rerun` that brings it.
+When GitHub does not know the PR or repo, or refuses your login, it exits 2 at once.
+`--repo <owner/name>` points it at another repo; it reads the factory's own by default.
+Run it as a background task, and read the head's checks once more yourself before you call it green.
+
 ## Wait for alerts: `playground alerts-wait`
 
 `playground alerts-wait <name>` waits until the next line in the outbox addressed to `<name>`, prints it, and exits: a stuck session's alert or the relay watch's late-stop line first, else any job's line, such as a firefighting heads-up to the Builder.
@@ -161,6 +170,7 @@ The Dashboard's supervisor takes `dashboard-supervisor`, through `packages/scrip
 The trash records the script as who deleted it, and `--restore` puts its entry back into that folder.
 The ops runner's render takes `jobs`: the plist of a job `jobs.json` no longer holds, out of `ops/launch-agents`, one file of at most 64 KB.
 It also takes `jobs-installed`: the plist of a launchd job turned off, out of `~/Library/LaunchAgents`, one `com.playground.*.plist` file of at most 64 KB, so no other app's agent can move.
+The nightly clean takes quarantine's `gone` option, which `playground rm` never takes: an entry directly in the data folder's `scratch/`, a real file or folder whose session it has found gone, moves whole, past the 5,000-file count and under the 2 GB cap, and `--restore` puts it back there.
 
 `playground rm --worktree <path>` removes a worktree under `.claude/worktrees/`, the main checkout's or another repo's: it refuses when the roster cannot be read, when a live session on the roster holds it by its branch, its name (but a manager's, below) or its pull request's number, when a running `node_modules` clone reads from it or copies into it, when a symlink outside it points into it, when a process works inside it, when `git status --porcelain` lists an uncommitted change in it (the refusal names the count and the first three paths), or when its HEAD's work has not landed on `origin/canary`, then moves it to the trash and runs `git worktree prune` in its own repo.
 A folder in another repo's `.claude/worktrees/` counts only when git proves it that repo's worktree: its `.git` file points into the repo's `.git/worktrees/` and the repo's `git worktree list` names it, so a plain folder, a clone, the repo's own checkout and a worktree elsewhere stay refused, and plain `playground rm` refuses a proven one, naming `--worktree`.

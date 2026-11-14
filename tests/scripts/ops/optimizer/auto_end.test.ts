@@ -8,6 +8,7 @@ import {
   type CleanupDeps,
   cleanWorktree,
   cleanupHeld,
+  cleanupLive,
   containersFor,
   type EndDeps,
   endMerged,
@@ -16,6 +17,7 @@ import {
   sweep,
   type Target,
   unsavedLive,
+  worktreesOf,
 } from "../../../../scripts/ops/optimizer/auto_end"
 import type {
   CollectInput,
@@ -144,6 +146,38 @@ describe("sweep: ops-tick ends what the detector flags", () => {
         to: "builder",
       },
     ])
+  })
+
+  // PG-2120: the sweep's row carries the roster pr, so a checker it ends hands its cleanup the PR its review-<n> clone is found by
+  test("a checker the sweep ends hands its cleanup its roster pr", async () => {
+    const handed: (string | undefined)[] = []
+    const { deps } = fakes({ cleanup: async (target) => (handed.push(target.pr), []) })
+    await sweep(
+      input({
+        roster: { "m4tqzr-reviewer": { kind: "reviewer", name: "m4tqzr-reviewer", pr: URL } },
+        sessions: {
+          "m4tqzr-reviewer": live("m4tqzr-reviewer"),
+          "m4tqzr-worker": live("m4tqzr-worker", { status: "busy" }),
+        },
+        workerPrs: async (name) => (name === "m4tqzr-reviewer" ? [URL] : []),
+      }),
+      deps,
+    )
+    expect(handed).toEqual([URL])
+  })
+
+  test("a worker the sweep ends hands its cleanup no pr, so its worktrees keep their own PR's reading", async () => {
+    const handed: (string | undefined)[] = []
+    const { deps } = fakes({ cleanup: async (target) => (handed.push(target.pr), []) })
+    await sweep(
+      input({
+        roster: { "q6dmtb-worker": { kind: "worker", name: "q6dmtb-worker", pr: URL } },
+        sessions: { "q6dmtb-worker": live("q6dmtb-worker") },
+        workerPrs: async (name) => (name === "q6dmtb-worker" ? [URL] : []),
+      }),
+      deps,
+    )
+    expect(handed).toEqual([undefined])
   })
 
   test("a reviewer idle 30+ minutes on a scored head ends with its resume named and its worktrees left for that resume; a tester does not", async () => {
@@ -1171,6 +1205,90 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     const { calls, deps } = fakes(main, listed)
     expect(await cleanWorktree(wt, "r ended", deps)).toBe(`removed ${wt}, branch PG-1-thing`)
     expect(calls.filter((c) => c.startsWith("docker"))).toEqual([])
+  })
+
+  // PG-2120: a reviewer reads its review-<n> clone from outside it, so no transcript cwd names the clone
+  const cloned = (names = ["review-7"]) => {
+    const { main, root } = machine()
+    run(main, "git", "remote", "set-url", "origin", "https://github.com/o/r.git")
+    const [clone, ...rest] = names.map((n) => join(main, ".claude", "worktrees", n))
+    for (const dir of [clone!, ...rest]) run(main, "git", "worktree", "add", "-q", "--detach", dir)
+    const projects = join(root, "projects")
+    mkdirSync(join(projects, "-scratch"), { recursive: true })
+    writeFileSync(
+      join(projects, "-scratch", "sess-1.jsonl"),
+      `${JSON.stringify({ cwd: root, type: "user" })}\n`,
+    )
+    const target: Target = {
+      kind: "reviewer",
+      name: "k3m9px-reviewer",
+      pr: "https://github.com/o/r/pull/7",
+      refs: [],
+      sessionId: "sess-1",
+    }
+    return { clone: clone!, main, projects, rest, target }
+  }
+
+  test("a reviewer whose row names the main checkout's PR n has its review-<n> clone found and cleaned, though its transcript never ran there", async () => {
+    const { clone, main, projects, target } = cloned()
+    expect(await worktreesOf(target, projects, main)).toEqual([clone])
+    const { calls, deps } = fakes(main, [])
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual([`removed ${clone}`])
+    expect(calls).toEqual([`rm ${clone} (k3m9px-reviewer ended)`])
+    expect(existsSync(clone)).toBe(false)
+  })
+
+  test("a tester whose row names PR n has its test-<n> and test-<n>-before clones found, and never the reviewer's review-<n>", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const tester: Target = { ...target, kind: "tester", name: "k3m9px-tester" }
+    expect(await worktreesOf(tester, projects, main)).toEqual(rest)
+    expect(await worktreesOf(target, projects, main)).toEqual([clone])
+    const lone = cloned(["test-7"])
+    expect(await worktreesOf(tester, lone.projects, lone.main)).toEqual([lone.clone])
+  })
+
+  test("a transcript that cannot be read cleans nothing, the review clone included, and says so", async () => {
+    const { clone, main, projects, target } = cloned()
+    const { calls, deps } = fakes(main, [])
+    const file = join(projects, "..", "not-a-folder")
+    writeFileSync(file, "")
+    expect(await cleanupLive(file, async () => deps)(target)).toEqual([
+      `could not read its transcript in ${file}, so nothing was cleaned`,
+    ])
+    expect(calls).toEqual([])
+    expect(existsSync(clone)).toBe(true)
+  })
+
+  test("a held or dirty review-<n> clone is found, then kept and named", async () => {
+    const { clone, main, projects, target } = cloned()
+    expect(await worktreesOf(target, projects, main)).toEqual([clone])
+    const holder = `${clone} is held by k3m9px-worker, which the roster lists as working`
+    const held = fakes(main, [], undefined, { held: async () => holder })
+    expect(await cleanWorktree(clone, "r ended", held.deps, { pr: target.pr })).toBe(
+      `kept ${clone}: ${holder}`,
+    )
+    writeFileSync(join(clone, "wip.txt"), "x\n")
+    const dirty = fakes(main, [])
+    expect(await cleanWorktree(clone, "r ended", dirty.deps, { pr: target.pr })).toBe(
+      `kept ${clone}: uncommitted work`,
+    )
+    expect([...held.calls, ...dirty.calls]).toEqual([])
+    expect(existsSync(clone)).toBe(true)
+  })
+
+  test("a checker with no PR on its row, a PR of another repo or of a missing clone, a worker, or no main checkout given finds no review clone", async () => {
+    const { main, projects, target } = cloned()
+    expect(await worktreesOf({ ...target, kind: "reviewer" }, projects, main)).toHaveLength(1)
+    const { pr: _pr, ...bare } = target
+    expect(await worktreesOf(bare, projects, main)).toEqual([])
+    expect(
+      await worktreesOf({ ...target, pr: "https://github.com/x/r/pull/7" }, projects, main),
+    ).toEqual([])
+    expect(
+      await worktreesOf({ ...target, pr: "https://github.com/o/r/pull/8" }, projects, main),
+    ).toEqual([])
+    expect(await worktreesOf({ ...target, kind: "worker" }, projects, main)).toEqual([])
+    expect(await worktreesOf(target, projects)).toEqual([])
   })
 })
 

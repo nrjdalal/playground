@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
+import { restore } from "../../../../../packages/safe-delete/src"
 import {
   bytesOf,
   discardable,
@@ -1756,35 +1757,19 @@ test("the folders other repos are read in: the code root, else the checkout's fo
   ).toEqual(["/srv/src", "/home/me/acme"])
 })
 
-// #1778's add: a gone session's scratch folder in the data folder, through safe-delete's quarantine with that session's own-scratch route, no carve-out
-test("a scratch folder no live session and no roster row but an ended one names goes to the trash; a live session's and a working row's stay", async () => {
+// A data folder in a fake HOME with the given roster rows and live sessions, whose night runs the gone sessions step through safe-delete's real quarantine; run returns the ops line.
+const goneNight = (agents: object[], live: string[]) => {
   const root = scratch()
   const home = join(root, "home")
   const data = join(home, ".playground")
   const ops = join(data, "ops")
   const main = join(root, "main")
   mkdirSync(join(ops, "log"), { recursive: true })
+  mkdirSync(join(data, "scratch"), { recursive: true })
   mkdirSync(join(data, "trash"), { recursive: true })
   mkdirSync(main, { recursive: true })
-  const pad = (name: string) => {
-    const path = join(data, "scratch", name)
-    mkdirSync(path, { recursive: true })
-    writeFileSync(join(path, "notes.md"), "x\n")
-    return path
-  }
-  const gone = pad("qq1zzz-1700")
-  const alive = pad("aa2bbb-1701")
-  const rostered = pad("cc3ddd")
-  const ended = pad("ee4fff-1702")
-  writeFileSync(
-    join(data, "roster.json"),
-    JSON.stringify({
-      agents: [
-        { name: "cc3ddd-worker", status: "working" },
-        { name: "ee4fff-worker", status: "ended" },
-      ],
-    }),
-  )
+  writeFileSync(join(data, "roster.json"), JSON.stringify({ agents }))
+  const roots = { home, main, trash: join(data, "trash") }
   const { run } = fakeRun({
     "docker ps": "",
     "docker system df": JSON.stringify({ Volumes: [] }),
@@ -1803,21 +1788,91 @@ test("a scratch folder no live session and no roster row but an ended one names 
   const deps = {
     cleanup: async () => null,
     free: () => 100 * 1024 ** 3,
-    live: async () => ["aa2bbb-worker"],
+    live: async () => live,
     now: () => Date.now(),
     prs: async () => prsOf({}),
     roots: async () => [],
     sleep: async () => {},
-    trashRoots: () => ({ home, main, trash: join(data, "trash") }),
+    trashRoots: () => roots,
     turbo: join(root, "turbo"),
   } as NightDeps
-  await nightlyClean(deps)(ctx)
+  return {
+    roots,
+    run: async () => {
+      await nightlyClean(deps)(ctx)
+      return sent.find((s) => s.to === "ops")?.text ?? ""
+    },
+    scratch: (name: string) => join(data, "scratch", name),
+  }
+}
+
+// #1778's add: a gone session's scratch folder in the data folder, through safe-delete's quarantine with its gone option, no carve-out
+test("a scratch folder no live session and no roster row but an ended one names goes to the trash; a live session's and a working row's stay", async () => {
+  const night = goneNight(
+    [
+      { name: "cc3ddd-worker", status: "working" },
+      { name: "ee4fff-worker", status: "ended" },
+    ],
+    ["aa2bbb-worker"],
+  )
+  const pad = (name: string) => {
+    const path = night.scratch(name)
+    mkdirSync(path, { recursive: true })
+    writeFileSync(join(path, "notes.md"), "x\n")
+    return path
+  }
+  const gone = pad("qq1zzz-1700")
+  const alive = pad("aa2bbb-1701")
+  const rostered = pad("cc3ddd")
+  const ended = pad("ee4fff-1702")
+  const line = await night.run()
   expect(existsSync(gone)).toBe(false)
   expect(existsSync(ended)).toBe(false)
   expect(existsSync(alive)).toBe(true)
   expect(existsSync(rostered)).toBe(true)
-  const line = sent.find((s) => s.to === "ops")?.text ?? ""
   expect(line).toMatch(new RegExp(`scratch ${gone} as trash \\d{8}T\\d{6}Z-qq1zzz-1700/1 `))
   expect(line).not.toContain(alive)
   expect(line).not.toContain(rostered)
+})
+
+// #2088: a loose <id>-* file a gone session left in scratch/ goes the same way, restorable; a live session's file and a file with no <id>- lead stay
+test("a gone session's loose scratch file goes to the trash and comes back; a live session's file and one with no <id>- lead stay", async () => {
+  const night = goneNight([{ name: "cc3ddd-worker", status: "working" }], ["aa2bbb-worker"])
+  const loose = (name: string) => {
+    const path = night.scratch(name)
+    writeFileSync(path, "<html></html>\n")
+    return path
+  }
+  const gone = loose("qq1zzz-page.html")
+  const alive = loose("aa2bbb-page.html")
+  const rostered = loose("cc3ddd-notes.md")
+  const bare = loose("notes.txt")
+  const line = await night.run()
+  expect(existsSync(gone)).toBe(false)
+  for (const path of [alive, rostered, bare]) {
+    expect(existsSync(path)).toBe(true)
+    expect(line).not.toContain(path)
+  }
+  const id = new RegExp(`scratch ${gone} as trash (\\S+) `).exec(line)?.[1]
+  expect(id).toMatch(/^\d{8}T\d{6}Z-qq1zzz-page-html\/1$/)
+  expect(restore(id!, night.roots)).toEqual({ path: gone })
+  expect(readFileSync(gone, "utf8")).toBe("<html></html>\n")
+})
+
+// #2088's add: a gone session's scratch folder past the 5,000-file tripwire goes whole under the 2 GB cap; a live session's stays
+test("a gone session's scratch folder past 5,000 files goes to the trash whole; a live session's stays", async () => {
+  const night = goneNight([], ["aa2bbb-worker"])
+  const big = (name: string) => {
+    const path = night.scratch(name)
+    mkdirSync(join(path, "canary"), { recursive: true })
+    for (let i = 0; i <= 5000; i++) writeFileSync(join(path, "canary", String(i)), "")
+    return path
+  }
+  const gone = big("qq1zzz-worker")
+  const alive = big("aa2bbb-worker")
+  const line = await night.run()
+  expect(existsSync(gone)).toBe(false)
+  expect(existsSync(alive)).toBe(true)
+  expect(line).toMatch(new RegExp(`scratch ${gone} as trash \\d{8}T\\d{6}Z-qq1zzz-worker/1 `))
+  expect(line).not.toContain(alive)
 })
