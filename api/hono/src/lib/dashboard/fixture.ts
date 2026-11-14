@@ -547,6 +547,9 @@ export function ensureFixture(source: DashboardSource = currentSource()): string
 export type FixtureHerdr = Fixture["herdr"] & {
   // What has been typed into each pane's input and not yet sent.
   inputs: Record<string, string>
+  // The model each pane's status line names once a /model switched it, and the one its open confirm would switch to.
+  models?: Record<string, string>
+  switching?: Record<string, string>
 }
 
 const NO_HERDR: Fixture["herdr"] = {
@@ -611,11 +614,26 @@ const changed = () => {
 const str = (value: unknown): string => (typeof value === "string" ? value : "")
 
 // An input box as Claude Code draws it, between two rules: empty, or holding what has been typed.
-const inputBox = (above: string, typed: string): string => {
+const inputBox = (above: string, typed: string, model?: string): string => {
   const rule = "─".repeat(60)
   const box = typed ? typed.split("\n").map((line, i) => `${i ? "  " : "❯ "}${line}`) : ["❯"]
-  return [above, rule, ...box, rule, "  ? for shortcuts"].join("\n")
+  return [above, rule, ...box, rule, `  ${model ? `${model} · ` : ""}? for shortcuts`].join("\n")
 }
+
+const MODEL_COMMAND = /^\/model ([a-z]+)$/
+const modelLabel = (alias: string): string =>
+  `${alias[0]?.toUpperCase() ?? ""}${alias.slice(1)} 9.9`
+// The confirm Claude Code 2.1.325 draws over the box when /model switches mid-conversation, with a made-up version.
+const switchConfirm = (alias: string): string =>
+  [
+    "─".repeat(60),
+    " Switch model? Your next response will be slower and use more tokens.",
+    "",
+    ` ❯ 1. Yes, switch to ${modelLabel(alias)}`,
+    "   2. No, go back",
+    "",
+    " Enter to confirm · Esc to cancel",
+  ].join("\n")
 
 // A Vibeground's Start or Stop on a fixture stack: its made-up worktree runs on this stack's own dashboard, a path of its own so the pane tells it from `$WEB`, or stops, in the scratch copy alone.
 export function fixtureVibe(path: string, running: boolean, dir = ensureFixture()): void {
@@ -802,7 +820,10 @@ export function fixtureHerdrScreen(pane: string, dir = ensureFixture()): string 
   paneOf(state, pane)
   const above = state.screens[pane] ?? ""
   const picker = state.prompts[pane]
-  return picker === undefined ? inputBox(above, state.inputs[pane] ?? "") : `${above}\n${picker}`
+  if (state.switching?.[pane]) return `${above}\n${switchConfirm(state.switching[pane])}`
+  return picker === undefined
+    ? inputBox(above, state.inputs[pane] ?? "", state.models?.[pane])
+    : `${above}\n${picker}`
 }
 
 export type FixtureHerdrInput = { keys: string[] } | { prompt: string } | { text: string }
@@ -821,11 +842,18 @@ export function fixtureHerdrInput(
     sent(session, typed, pasted, dir, now)
     found.agent_status = "working"
   }
+  const alias = "prompt" in input ? MODEL_COMMAND.exec(input.prompt)?.[1] : undefined
   if ("prompt" in input) {
-    if (state.prompts[pane] !== undefined) {
+    if (state.prompts[pane] !== undefined || state.switching?.[pane]) {
       throw new FixtureHerdrRefusal("agent_blocked", `${pane} waits on a prompt`)
     }
-    send(input.prompt, true)
+    if (alias) state.switching = { ...state.switching, [pane]: alias }
+    else send(input.prompt, true)
+  } else if (state.switching?.[pane] && "keys" in input) {
+    const to = state.switching[pane]
+    const key = input.keys[0]
+    if (key === "enter" || key === "1") state.models = { ...state.models, [pane]: modelLabel(to) }
+    if (key === "enter" || /^\d$/.test(key ?? "") || key === "esc") delete state.switching[pane]
   } else if ("text" in input) {
     if (state.prompts[pane] === undefined)
       state.inputs[pane] = (state.inputs[pane] ?? "") + input.text
