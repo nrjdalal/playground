@@ -663,7 +663,7 @@ describe("one night's run against a fixture data folder", () => {
     )
   })
 
-  // issue 1554: rm refuses the 4th trash move in a minute ("quarantined 3 paths in the last minute, the most one session may"), and the beat counted that refusal as done, so 7 of 10 stale worktrees stayed behind with no line naming them for the next run; the beat paces under the cap, waiting out the minute on the injected sleep, under a total-wait bound, and names anything the bound leaves
+  // issue 1554: rm refuses the 4th trash move in a minute ("refused a 4th removal: <session> moved 3 paths in the last minute, the most one session may"), and the beat counted that refusal as done, so 7 of 10 stale worktrees stayed behind with no line naming them for the next run; the beat paces under the cap, waiting out the minute on the injected sleep, under a total-wait bound, and names anything the bound leaves
   test("the beat finishes its stale worktrees under rm's 3-a-minute cap", async () => {
     const root = scratch()
     const data = join(root, "data")
@@ -705,7 +705,7 @@ describe("one night's run against a fixture data folder", () => {
           refusals++
           return {
             code: 1,
-            out: "nightly-clean quarantined 3 paths in the last minute, the most one session may\n",
+            out: "refused a 4th removal: nightly-clean moved 3 paths in the last minute, the most one session may\n",
           }
         }
         accepted.push(t)
@@ -824,7 +824,7 @@ describe("one night's run against a fixture data folder", () => {
             refusals++
             return {
               ok: false,
-              out: "playground: shell quarantined 3 paths in the last minute, the most one session may",
+              out: "playground: refused a 4th removal: shell moved 3 paths in the last minute, the most one session may",
             }
           }
           accepted.push(t)
@@ -888,7 +888,7 @@ describe("one night's run against a fixture data folder", () => {
       "worktree list": porcelain,
       "--reason nightly-clean": {
         code: 1,
-        err: "nightly-clean quarantined 3 paths in the last minute, the most one session may\n",
+        err: "refused a 4th removal: nightly-clean moved 3 paths in the last minute, the most one session may\n",
       },
     }
     const { run } = fakeRun(answers)
