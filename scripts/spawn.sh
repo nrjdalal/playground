@@ -36,7 +36,7 @@ set -euo pipefail
 #      the roster's rows reading starting, waiting or working named <id>-worker, -reviewer or -tester (or worker-, reviewer-
 #      or tester- first), the starting name's own row and a row a --priority start marked (priority=1) left out, refusing at
 #      or over the cap, logged as readings.sessions and readings.session_cap; a --priority start while a priority file stands
-#      passes (readings.priority), and so does a resume of a row reading live (readings.counted), since the count holds it already
+#      passes (readings.priority), and so does a resume of a row reading live or one JUST_CLOSED names (readings.counted), since the count held it
 #   5. usage, the launching backend's own window: Claude reads usage.json
 #      (5-hour under 90%, the week within 14.3 points a day of pace, floored at one day's share, readings
 #      no older than 15 minutes; one never written, as on a fresh install before ops-usage first runs, passes,
@@ -573,10 +573,10 @@ try:
         own = next((a for a in rows if a["name"] == session), {})
         live = sorted(a["name"] for a in rows if a["name"] != session and a.get("status") in LIVE and a.get("priority") != "1" and CAPPED.fullmatch(a["name"]))
         readings.update(session_cap=cap, sessions=len(live))
-        # priority work comes first, as at the load and slots gates, and a resume of a live row brings back a session the count holds already
+        # priority work comes first, as at the load and slots gates, and a resume of a live row, or of one spawn.sh closed live in the last 15 minutes (JUST_CLOSED), brings back a session the count held
         if priority:
             readings["priority"] = priority
-        elif mode == "resume" and own.get("status") in LIVE:
+        elif mode == "resume" and (own.get("status") in LIVE or just_closed):
             readings["counted"] = True
         elif len(live) >= cap:
             refuse("sessions", f"{len(live)} live {'worker or checker' if len(live) == 1 else 'workers and checkers'} in the roster ({', '.join(live)}), and gates.sessionCap is {cap}. Wait for one to end, or close a session that is done, and run it again.")
