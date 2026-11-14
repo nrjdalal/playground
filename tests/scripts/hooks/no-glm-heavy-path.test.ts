@@ -1332,6 +1332,30 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
     }
   })
 
+  // PG-2104: a cd or env -C through a variable the line sets to a literal absolute path lands there, so an org's checkout it names is judged as a cd typed to it is
+  test.each([
+    "C=$ORG; cd $C; sed -n 1,5p README.md",
+    "C=$ORG; cd $C && cat README.md",
+    "S=$DIR; D=$S/read-org-repo; cd $D; sed -n 1,5p README.md",
+    "C=$ORG/src; cd $C; grep -n x a.py",
+    "C=$DIR; cd $C; rg -n x",
+    "C=$ORG; env -C $C sed -n 1,5p README.md",
+  ])(
+    "a read after a cd through a variable the line sets to an org's checkout, its subfolder or a folder above it is refused on GLM: %s",
+    async (form) => {
+      mkdirSync(join(ORG, "src"), { recursive: true })
+      const command = form.replace("$ORG", ORG).replace("$DIR", DIR)
+      expect(await refusal(input(command), ON_GLM, CALM)).toContain("guarded")
+    },
+  )
+
+  test.each(["C=$REPO; cd $C; sed -n 1,5p README.md", "C=$REPO; cd $C && cat README.md"])(
+    "a read after a cd through a variable the line sets to its own checkout runs on GLM: %s",
+    async (form) => {
+      expect(await refusal(input(form.replace("$REPO", REPO)), ON_GLM, CALM)).toBeUndefined()
+    },
+  )
+
   test("a read of its own checkout through the line's own variable, a pure substitution or a ~- the line sets runs on GLM", async () => {
     for (const command of [
       "D=.; cat $D/README.md",
