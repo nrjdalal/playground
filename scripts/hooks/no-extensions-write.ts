@@ -1150,9 +1150,41 @@ const SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/
 // a bare -i's suffix word: empty or a dot and letters, so a GNU sed, which reads that word as its script, reads it as no command or none it knows
 const SED_SUFFIX = /^(?:\.[\w.~-]*)?$/
 const SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
-const SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}${SED_TEXT}[gpI0-9]*)[ \t]*`
+const SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}(${SED_TEXT})[gpI0-9]*)[ \t]*`
 // an in-place sed's script read whole by its allowlist: line, $ or /regex/ addresses and their ranges, then d, p, or s/// with flags from g, p, I and digits; every other command and flag (w, W, r, R, e, s///w, s///e) is off it
 const SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`)
+// Whether a path's parts can match each of `want`'s in turn, the parts after them free: each a glob of its own, a ** matching the rest, a zsh (a|b) read as {a,b}, and a lone ( or ), a subshell's, dropped
+function follows(have: string[], want: string[]): boolean {
+  for (let k = 0; k < want.length; k++) {
+    const part = have[k]
+    if (part === "**") return true
+    if (part === undefined) return false
+    const glob =
+      part.includes("(") && part.includes(")")
+        ? part.replace(/\(/g, "{").replace(/\)/g, "}").replace(/\|/g, ",")
+        : part.replace(/[()]/g, "")
+    if (!new Bun.Glob(glob).match(want[k])) return false
+  }
+  return true
+}
+// one item of an in-place sed's script and its separator, read in turn from where the last ended
+const SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y")
+// The text each s/// of an in-place sed's script writes, as sed reads it: a backslash dropped (`\/` reads as /, `\n` as a line break) and the matched text (&, \1 to \9) read as a *, since it can be anything; the whole script read so when its items do not read in turn
+function sedWrites(script: string): string[] {
+  const read = (text: string) =>
+    text.replace(/\\(.)|&/gs, (m, c?: string) =>
+      m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? "\n" : (c ?? m),
+    )
+  const writes: string[] = []
+  SED_EDIT_STEP.lastIndex = 0
+  while (SED_EDIT_STEP.lastIndex < script.length) {
+    const at = SED_EDIT_STEP.lastIndex
+    const item = SED_EDIT_STEP.exec(script)
+    if (!item || SED_EDIT_STEP.lastIndex === at) return [read(script)]
+    if (item[1]) writes.push(read(item[1].slice(0, -1)))
+  }
+  return writes
+}
 
 // The scripts of a sed call that edits its files in place and writes nothing else, or undefined, its argv read as macOS sed reads it: sed as its own program (ownProgram) with no variable set in the call, an in-place option (SED_IN_PLACE) whose bare form takes the next word as its suffix (SED_SUFFIX), every other option on -E, -n, -r, -s, -u and -z, and every script (each -e value, else the first operand) a literal word that SED_EDIT holds, while each other operand, a file it edits, is judged as any word is
 function sedInPlace(cmd: Command, parsed: Parsed): Set<Word> | undefined {
@@ -1727,6 +1759,40 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
+  // What an in-place sed's script writes that a shell may run later (sedWrites), its quotes dropped: the root in its text, else a word, or a part of a brace list, under ~, $HOME or / that can name the root or a path in it (reaches), a relative one holding a / or a glob that can once resolved against the cwd, its .. collapsed, or one that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), so a glob or an escaped slash spells the root no other way than its literal path
+  const scriptNames = (script: string, env: Env): string | undefined => {
+    for (const text of sedWrites(script)) {
+      const plain = text.replace(/['"]/g, "")
+      if (holds(plain, env)) return `${root} in its text`
+      for (const token of plain.split(/[\s;&<>=]+/))
+        for (const word of [token, ...token.split(/[{},]/)]) {
+          const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word)
+          const value = tilde ? home + word.slice(tilde[0].length) : word
+          if (value.startsWith(sep) && reaches(value)) return value
+          if (
+            env.cwd &&
+            !value.startsWith(sep) &&
+            /[/*?[(]/.test(value) &&
+            reaches(resolve(env.cwd, value))
+          )
+            return word
+          const parts = word.split(sep)
+          const expands = (k: number) => parts.slice(0, k).some((part) => /[$~`]/.test(part))
+          if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts))) return word
+        }
+    }
+  }
+  // the root's parts as a script may spell them: from the home when the root is under it, else from /
+  const rootParts = needle.split(sep).filter(Boolean)
+  // Whether an absolute path or glob can name the root or a path in it: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any
+  const reaches = (path: string) => {
+    const parts = path.split(sep)
+    const at = parts.findIndex((part) => GLOB.test(part))
+    if (at < 0) return inRoot(path)
+    const base = real(parts.slice(0, at).join(sep) || sep)
+    const have = [...(base === sep ? [""] : base.split(sep)), ...parts.slice(at)]
+    return follows(have, root.split(sep))
+  }
   // whether the hook places a write's path, the whole word, with no folder of the shell's: absolute, under ~, or through a variable the call holds
   const placed = (word: Word, env: Env, steady: Steady) =>
     pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined
@@ -2010,6 +2076,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const tool = GNU_NAMED.exec(name)?.[1] ?? name
     const gnu = tool !== name || first.value.includes("/gnubin/")
     const remover = REMOVERS.has(tool)
+    // an in-place sed's scripts for the root reading (scriptNames): sedInPlace's, the sed half of sedScripts but on a line read whole too, else on a sed spelled off its list (-I, --in-place=, s|||) every word but the files inPlace reads, each read whole by sedWrites
+    const edited = new Set(inPlace(tool, args))
+    const sedEdit =
+      sedInPlace(cmd, parsed) ??
+      (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : [])
     // POSIXLY_CORRECT set in the call, by a prefix or on its line, makes a GNU build stop its options at the first operand
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"))
     // a line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run inside this root, whatever folder it started in
@@ -2025,9 +2096,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (inRoot(here.cwd)) return refuse(`${verb} run inside ${root}`)
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`)
-      // a value the hook cannot read under a remover, as a writer's target, or in git's -c, could name the root, so it is refused unless the call holds it
+      // a value the hook cannot read under a remover, as a writer's target, as a file an in-place sed or perl edit edits, or in git's -c, could name the root, so it is refused unless the call holds it
       const unheld = (
-        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : []
+        remover
+          ? args
+          : WRITERS.has(tool)
+            ? writeTargets(tool, args, gnu, posix)
+            : inPlace(tool, args)
       ).find((word) => !held(word, here, steady))
       if (unheld)
         return refuse(
@@ -2069,6 +2144,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       for (const value of [...parsed.local.values(), ...scope]) {
         const named = names({ ...value, quoted: false }, here, remover)
         if (named) return refuse(`${verb} with a variable on ${named}`)
+      }
+      for (const script of sedEdit) {
+        const named = scriptNames(script.value, here)
+        if (named) return refuse(`${verb} with a script that names ${named}`)
       }
       const literal = !whole && narrow(cmd, here)
       for (const word of [first, ...args].map(
@@ -2142,7 +2221,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const fromStdin = new Set<Word>(fedWords)
     const fromArgFile = new Set<Word>(argWord ? [argWord] : [])
     // xargs puts each stdin word in place of its -I or -J string
-    const inPlace = (word: Word) =>
+    const putIn = (word: Word) =>
       args.map((arg) => {
         if (!replace || !arg.value.includes(replace)) return arg
         const put = { ...arg, value: arg.value.replaceAll(replace, word.value) }
@@ -2156,7 +2235,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       ...(!xargs
         ? []
         : replace
-          ? fedWords.map(inPlace)
+          ? fedWords.map(putIn)
           : [[...args, ...fedWords], ...fedWords.map((word) => [...args, word])]),
     ]
     // a dash with more after it is an option, while a lone dash is an operand

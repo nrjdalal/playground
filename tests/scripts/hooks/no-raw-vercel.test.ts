@@ -285,8 +285,8 @@ describe("a runner started by a runner hides no production deploy (PG-2163)", ()
     expect(await as("ops", command)).toContain(REFUSED)
   })
 
-  test("a runner past the readings' cap runs on a line naming no vercel", async () => {
-    expect(await as("worker", `${DEEP} cowsay hi`)).toBeUndefined()
+  test("a runner past the readings' cap runs on a line that names vercel only inside a word", async () => {
+    expect(await as("worker", `${DEEP} cat vercel.json`)).toBeUndefined()
   })
 
   test("a deploy by one runner stays refused", async () => {
@@ -296,10 +296,76 @@ describe("a runner started by a runner hides no production deploy (PG-2163)", ()
   test.each([
     ["a whoami", "npx npx vercel whoami"],
     ["a preview deploy", "bunx npx vercel deploy"],
-    ["a runner's version", "npx npx --version"],
+    ["a runner's version beside a whoami", "npx npx --version && vercel whoami"],
     ["a harmless program", "npx bunx cowsay vercel"],
     ["npx's -c whoami", 'bunx npx -c "vercel whoami"'],
   ])("for a worker: %s under a runner a runner starts runs", async (_, command) => {
+    expect(await as("worker", command)).toBeUndefined()
+  })
+})
+
+// bun run runs a package's bin and a command on PATH by name, and bare bun a package's bin (bun.com/docs/cli/run's resolution order), so a runner either names is started
+describe("a runner started by bun's run or bare path hides no production deploy (PG-2189)", () => {
+  const started: [string, string][] = [
+    ["npx by bun run", "bun run npx vercel deploy --prod"],
+    ["npx by bare bun", "bun npx vercel deploy --prod"],
+    ["bunx by bun run", "bun run bunx vercel deploy --prod"],
+    ["bunx by bare bun", "bun bunx vercel deploy --prod"],
+    ["bun x by bun run", "bun run bun x vercel deploy --prod"],
+    ["npx by its path, by bun run", "bun run ./node_modules/.bin/npx vercel deploy --prod"],
+    ["npx in a folder built at run time, by bare bun", 'bun "$P/npx" vercel deploy --prod'],
+    ["npx by bun run past bun's --cwd", "bun --cwd /tmp run npx vercel deploy --prod"],
+    ["npx by bun run past an option's value", "bun run --shell system npx vercel deploy --prod"],
+    ["npx by bun run, by vc", "bun run npx vc --prod"],
+    ["npx's -c line, npx by bun run", 'bun run npx -c "vercel deploy --prod"'],
+    ["npx's --call= line, npx by bare bun", 'bun npx --call="vercel deploy --prod"'],
+    ["the Yard step through npx by bun run", "bun run npx bun run ship:yard v0.0.111"],
+    ["the Yard step through npx by bare bun", "bun npx bun run ship:yard v0.0.111"],
+    ["the Yard step through bunx by bun run", "bun run bunx bun run ship:yard v0.0.111"],
+    ["the Yard step through bun by bun run", "bun run bun run ship:yard v0.0.111"],
+    ["the Yard step through npm exec by bun run", "bun run npm exec bun run ship:yard v0.0.111"],
+  ]
+
+  test.each(started)("for a worker: %s", async (_, command) => {
+    expect(await as("worker", command)).toContain(REFUSED)
+  })
+
+  test.each(started)("for the Ops lead, as one runner's: %s passes", async (_, command) => {
+    expect(await as("ops", command)).toBeUndefined()
+  })
+
+  // a runner's program built at run time may be any runner, so on a line naming vercel it ends the chain as one the hook cannot read
+  test.each([
+    ["bun run's", 'bun run "$X" vercel deploy --prod'],
+    ["bare bun's", 'bun "$X" vercel deploy --prod'],
+    ["npx's", 'npx "$X" vercel deploy --prod'],
+    ["bun x's", 'bun x "$X" vercel deploy --prod'],
+    ["bunx's", 'bunx "$X" vercel deploy --prod'],
+  ])("for the Ops lead too: %s program built at run time", async (_, command) => {
+    expect(await as("ops", command)).toContain(REFUSED)
+  })
+
+  test.each([
+    ["a script that deploys nothing", "bun run build && vercel whoami"],
+    ["bare bun's script beside a whoami", "bun dev && vercel whoami"],
+    ["bun test beside a whoami", "bun test && vercel whoami"],
+    ["an install beside a whoami", "bun install && vercel whoami"],
+    ["a filtered build beside a whoami", "bun run --filter web build && vercel ls"],
+    ["bun x's preview deploy", "bun x vercel deploy"],
+    ["npx's preview deploy by bun run", "bun run npx vercel deploy"],
+    ["npx's whoami by bare bun", "bun npx vercel whoami"],
+    ["npx's -c whoami by bun run", 'bun run npx -c "vercel whoami"'],
+    ["a harmless program through npx by bun run", "bun run npx cowsay vercel"],
+    ["a literal program by npx", "npx cowsay vercel"],
+    ["a literal program by bun x", "bun x cowsay vercel"],
+    ["a literal program by bun run", "bun run cowsay vercel"],
+    [
+      "a program built at run time on a line naming vercel inside a word",
+      'npx "$X" cat vercel.json',
+    ],
+    ["a written-out file in a folder built at run time", 'bun "$P/probe.ts" && vercel whoami'],
+    ["a written-out file by bun run in such a folder", "bun run $P/probe.ts vercel deploy --prod"],
+  ])("for a worker: %s runs", async (_, command) => {
     expect(await as("worker", command)).toBeUndefined()
   })
 })
