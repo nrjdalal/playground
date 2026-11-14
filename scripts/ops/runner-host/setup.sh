@@ -77,16 +77,16 @@ for g in sudo admin wheel; do gpasswd -d runner "$g" > /dev/null 2>&1 || true; d
 rm -f /etc/sudoers.d/runner
 systemctl enable --now docker
 
-# every download lands here, as root, and only a checked one is unpacked
+# every download lands here, as root, and only a checked one is unpacked, its files alone, so the exit removes files and the empty folder
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -f "$TMP"/*; rmdir "$TMP"' EXIT
 su - runner -c 'mkdir -p ~/.bun/bin ~/.local/bin'
 
 say "bun $BUN_VERSION"
 if [ "$(su - runner -c '~/.bun/bin/bun --version' 2>/dev/null)" != "$BUN_VERSION" ]; then
   fetch "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/$BUN_ASSET.zip" "$BUN_SHA256" "$TMP/bun.zip"
-  unzip -oq "$TMP/bun.zip" -d "$TMP"
-  install -o runner -g runner -m 755 "$TMP/$BUN_ASSET/bun" "$HOME_DIR/.bun/bin/bun"
+  unzip -joq "$TMP/bun.zip" "$BUN_ASSET/bun" -d "$TMP"
+  install -o runner -g runner -m 755 "$TMP/bun" "$HOME_DIR/.bun/bin/bun"
   su - runner -c 'ln -sfn bun ~/.bun/bin/bunx'
 fi
 # node is bun, as `bun run` makes it for a script, so a tool whose shebang asks for node (turbo) runs outside a script too
@@ -95,8 +95,8 @@ su - runner -c 'ln -sfn ~/.bun/bin/bun ~/.local/bin/node'
 say "uv $UV_VERSION"
 if [ "$(su - runner -c '~/.local/bin/uv --version' 2>/dev/null | cut -d' ' -f2)" != "$UV_VERSION" ]; then
   fetch "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/$UV_ASSET.tar.gz" "$UV_SHA256" "$TMP/uv.tar.gz"
-  tar -xzf "$TMP/uv.tar.gz" -C "$TMP"
-  for t in uv uvx; do install -o runner -g runner -m 755 "$TMP/$UV_ASSET/$t" "$HOME_DIR/.local/bin/$t"; done
+  tar -xzf "$TMP/uv.tar.gz" -C "$TMP" --strip-components=1 "$UV_ASSET/uv" "$UV_ASSET/uvx"
+  for t in uv uvx; do install -o runner -g runner -m 755 "$TMP/$t" "$HOME_DIR/.local/bin/$t"; done
 fi
 
 say "the actions runners $RUNNER_VERSION"

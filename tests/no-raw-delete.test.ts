@@ -54,11 +54,6 @@ const CARVE_OUTS: Record<string, { lines: number; reason: string }> = {
     reason:
       "the live dashboard's runner removes its own staging worktree under its state folder, whose node_modules clone of about 108k files is past the trash's tripwire; its build folders go to the trash through trash-build.ts",
   },
-  "scripts/ops/runner-host/setup.sh": {
-    lines: 1,
-    reason:
-      "runs as root on the CI runner host, which has no trash: on exit it removes its own mktemp folder of downloads, each checked against its pinned sha256",
-  },
   "scripts/ops/runner-host/suite.sh": {
     lines: 5,
     reason:
