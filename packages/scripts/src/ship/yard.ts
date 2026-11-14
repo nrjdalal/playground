@@ -1,4 +1,6 @@
 // ship:yard <tag>: deploys the hosted Yard from a ship's tag, its API and then its web, checking the live host after each and recording the tag it deployed.
+import { registryName, rosterKind } from "../../../../scripts/hooks/role"
+import { claudeAbove, type Proc, procOf } from "../../../../scripts/hooks/session-state"
 
 export type Project = "api" | "web"
 
@@ -16,12 +18,34 @@ export type YardIo = {
   writeRecord: (tag: string) => Promise<void>
 }
 
-// The call's launch: its PLAYGROUND_ROLE, and the roster's kind for its session's name in Claude Code's registry.
-export type Launch = { kind?: string; role?: string }
+// The call's launch, as the claude process it runs under was started: that process's PLAYGROUND_ROLE, the roster's kind for its session's registry name, and what the walk found.
+export type Launch = { found: string; kind?: string; role?: string }
 
-// The Ops lead's launch, which no-raw-vercel's pass keys on too: the lead role and the ops kind, so a call by any other runner, copy or link of this file stops here; the guard refuses a command naming the role variable, so no call sets it on the way in.
+// The Ops lead's launch, which no-raw-vercel's pass keys on too: the lead role and the ops kind, so a call by any runner, copy or link of this file stops here unless the Ops lead's claude process runs it.
 export const opsLaunch = (launch: Launch): boolean =>
   launch.role === "lead" && launch.kind === "ops"
+
+// The launch of the claude process above this call (session-state's walk), each folder read from that process's own environment and never this one's, so a prefix, an export or env on the call changes none of it; a walk that finds no claude process, or a registry or roster it cannot read, names no kind.
+export async function launchAbove(
+  pid: number = process.ppid,
+  procs: (pid: number) => Proc | undefined = procOf,
+): Promise<Launch> {
+  const above = await claudeAbove(pid, procs)
+  if (!above) return { found: "no Claude Code process above this call" }
+  const at = `the claude process ${above.pid}`
+  if (!above.sessionId || !above.config)
+    return { found: `${at}, whose session its registry does not name`, role: above.role }
+  if (!above.env.PLAYGROUND_DATA_DIR && !above.env.HOME)
+    return { found: `${at}, which names no data folder`, role: above.role }
+  const own = {
+    CLAUDE_CONFIG_DIR: above.config,
+    HOME: above.env.HOME,
+    PLAYGROUND_DATA_DIR: above.env.PLAYGROUND_DATA_DIR,
+  }
+  const name = await registryName(above.sessionId, own).catch(() => undefined)
+  if (!name) return { found: `${at}, whose registry it cannot read`, role: above.role }
+  return { found: `${at}, session ${name}`, kind: await rosterKind(name, own), role: above.role }
+}
 
 export type YardHosts = Record<Project, string>
 
@@ -49,7 +73,7 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
   const launch = await io.launch()
   if (!opsLaunch(launch)) {
     io.err(
-      `ship:yard: the step deploys production, so it runs for the Ops lead alone (PLAYGROUND_ROLE lead, the roster's ops kind); this call's PLAYGROUND_ROLE is ${launch.role || "unset"} and its kind ${launch.kind || "unknown"}`,
+      `ship:yard: the step deploys production, so it runs for the Ops lead's claude process alone (PLAYGROUND_ROLE lead, the roster's ops kind); this call runs under ${launch.found}, whose PLAYGROUND_ROLE is ${launch.role || "unset"} and kind ${launch.kind || "unknown"}`,
     )
     return 1
   }
@@ -111,7 +135,8 @@ Deploys the hosted Yard from <tag>, the ship's tag: its API, then its web, each 
 vercel deploy --prod from a detached worktree at the tag, fetched from origin, checking
 the live host after each (/api/health answers 200, ${BOT_ROUTE} answers 401 with no
 token), then records the tag in the data folder's ops/yard-tag and removes the worktree.
-It runs for the Ops lead alone (PLAYGROUND_ROLE lead, the roster's ops kind). It stops
+It runs under the Ops lead's claude process alone (its PLAYGROUND_ROLE lead, the roster's
+ops kind), read from that process and never this call's environment. It stops
 when the tag changes packages/db's schema or migrations since the recorded tag, until
 --schema-cleared names the db-migration step 0 decision, and with no record until
 --since names the tag live now.
@@ -125,7 +150,6 @@ if (import.meta.main) {
   const { dataDir } = await import("../../../env/src/data-dir")
   const { dashboardCheckout } = await import("../playground/probe")
   const { setting } = await import("../playground/yard")
-  const { registryName, rosterKind } = await import("../../../../scripts/hooks/role")
   const { positionals, values } = parseArgs({
     allowPositionals: true,
     options: {
@@ -192,11 +216,7 @@ if (import.meta.main) {
     fetch: async (tags) => {
       git(["fetch", "--quiet", "origin", ...tags.flatMap((tag) => ["tag", tag])])
     },
-    launch: async () => {
-      const session = process.env.CLAUDE_CODE_SESSION_ID
-      const name = session ? await registryName(session) : undefined
-      return { kind: name && (await rosterKind(name)), role: process.env.PLAYGROUND_ROLE }
-    },
+    launch: () => launchAbove(),
     out: console.log,
     readRecord: async () => {
       const file = Bun.file(record)

@@ -1,14 +1,20 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import {
   BOT_ROUTE,
   type Launch,
+  launchAbove,
+  opsLaunch,
   type Project,
   schemaChanges,
   shipYard,
   type YardArgs,
   type YardIo,
 } from "../../../../../packages/scripts/src/ship/yard"
+import type { Proc } from "../../../../../scripts/hooks/session-state"
 
 const HOSTS = { api: "https://api.yard.example.com", web: "https://yard.example.com" }
 
@@ -41,7 +47,8 @@ const fake = (set: Fake = {}) => {
     fetch: async (tags) => {
       calls.push(`fetch ${tags.join(" ")}`)
     },
-    launch: async () => set.launch ?? { kind: "ops", role: "lead" },
+    launch: async () =>
+      set.launch ?? { found: "the Ops lead's claude process", kind: "ops", role: "lead" },
     out: (line) => lines.push(line),
     readRecord: async () => record,
     status: async (url) => {
@@ -167,23 +174,147 @@ describe("ship:yard's schema stop", () => {
 
 describe("ship:yard's launch", () => {
   test.each([
-    ["a worker's", { kind: "worker", role: "worker" }],
-    ["the Builder's", { kind: "builder", role: "lead" }],
-    ["an unset role's", { kind: "ops" }],
-    ["a lead role with no session name", { role: "lead" }],
+    ["a worker's", { found: "a worker's claude process", kind: "worker", role: "worker" }],
+    ["the Builder's", { found: "the Builder's claude process", kind: "builder", role: "lead" }],
+    ["an unset role's", { found: "a claude process with no role", kind: "ops" }],
+    [
+      "a lead role with no session name",
+      { found: "a claude process with no session", role: "lead" },
+    ],
   ] as [string, Launch][])(
     "%s launch is refused before any git or vercel call, naming the role",
     async (_, launch) => {
       const { calls, code, out } = await run({}, { launch, record: "v0.0.110" })
       expect(code).not.toBe(0)
       expect(calls).toEqual([])
-      expect(out()).toContain(`PLAYGROUND_ROLE is ${launch.role ?? "unset"}`)
+      expect(out()).toContain(`${launch.found}, whose PLAYGROUND_ROLE is ${launch.role ?? "unset"}`)
     },
   )
 
   test("the Ops lead's launch goes on", async () => {
-    const { code } = await run({}, { launch: { kind: "ops", role: "lead" }, record: "v0.0.110" })
+    const launch = { found: "the Ops lead's claude process", kind: "ops", role: "lead" }
+    const { code } = await run({}, { launch, record: "v0.0.110" })
     expect(code).toBe(0)
+  })
+})
+
+// Made-up sessions under a scratch folder: the claude process (pid 300) above a shell (200) above the step (100), each read through a stubbed process reader, so no real process, registry or roster is read.
+describe("ship:yard's launch, read from the claude process above", () => {
+  let scratch = ""
+  const ROSTER = [
+    { kind: "builder", name: "builder" },
+    { kind: "ops", name: "ops" },
+    { kind: "worker", name: "abc-worker" },
+  ]
+  const session = async (folder: string, entry: Record<string, unknown>) =>
+    Bun.write(join(scratch, folder, "sessions", "300.json"), JSON.stringify({ pid: 300, ...entry }))
+
+  beforeAll(async () => {
+    scratch = await mkdtemp(join(tmpdir(), "ship-yard-launch-"))
+    await Bun.write(join(scratch, "data", "roster.json"), JSON.stringify({ agents: ROSTER }))
+    await session("ops", { name: "ops", sessionId: "s-ops" })
+    await session("builder", { name: "builder", sessionId: "s-builder" })
+    await session("worker", { name: "abc-worker", sessionId: "s-worker" })
+    await session("nameless", { sessionId: "s-nameless" })
+    // a registry and a roster that name the worker's session as the Ops lead's, for the step's own environment to point at
+    await Bun.write(
+      join(scratch, "fake-config", "sessions", "1.json"),
+      JSON.stringify({ name: "ops", sessionId: "s-worker" }),
+    )
+    await Bun.write(
+      join(scratch, "fake-data", "roster.json"),
+      JSON.stringify({ agents: [{ kind: "ops", name: "abc-worker" }] }),
+    )
+  })
+
+  afterAll(async () => {
+    await rm(scratch, { force: true, recursive: true })
+  })
+
+  const procs =
+    (claude: Record<string, string> | undefined, data = "data") =>
+    (pid: number): Proc | undefined =>
+      pid === 100
+        ? { comm: "bun", env: {}, ppid: 200 }
+        : pid === 200
+          ? { comm: "/bin/zsh", env: {}, ppid: claude ? 300 : 1 }
+          : pid === 300 && claude
+            ? {
+                comm: "/opt/claude/bin/claude",
+                env: { PLAYGROUND_DATA_DIR: join(scratch, data), ...claude },
+                ppid: 1,
+              }
+            : undefined
+  const under = (folder: string, role: string) => ({
+    CLAUDE_CONFIG_DIR: join(scratch, folder),
+    PLAYGROUND_ROLE: role,
+  })
+
+  test("the Ops lead's claude process passes", async () => {
+    const launch = await launchAbove(100, procs(under("ops", "lead")))
+    expect(launch).toEqual({
+      found: "the claude process 300, session ops",
+      kind: "ops",
+      role: "lead",
+    })
+    expect(opsLaunch(launch)).toBe(true)
+  })
+
+  test("a worker's claude process is refused, whatever the step's own environment names", async () => {
+    const forged = {
+      CLAUDE_CODE_SESSION_ID: "s-ops",
+      CLAUDE_CONFIG_DIR: join(scratch, "fake-config"),
+      PLAYGROUND_DATA_DIR: join(scratch, "fake-data"),
+      PLAYGROUND_ROLE: "lead",
+    }
+    const kept = Object.fromEntries(Object.keys(forged).map((key) => [key, process.env[key]]))
+    Object.assign(process.env, forged)
+    try {
+      const launch = await launchAbove(100, procs(under("worker", "worker")))
+      expect(launch).toMatchObject({ kind: "worker", role: "worker" })
+      const f = fake({ record: "v0.0.110" })
+      const code = await shipYard({ tag: "v0.0.111" }, HOSTS, {
+        ...f.io,
+        launch: async () => launch,
+      })
+      expect(code).not.toBe(0)
+      expect(f.calls).toEqual([])
+      expect(f.out()).toContain("whose PLAYGROUND_ROLE is worker")
+    } finally {
+      for (const [key, value] of Object.entries(kept))
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+    }
+  })
+
+  test("the Builder's claude process, a lead of another kind, is refused", async () => {
+    const launch = await launchAbove(100, procs(under("builder", "lead")))
+    expect(launch.kind).toBe("builder")
+    expect(opsLaunch(launch)).toBe(false)
+  })
+
+  test("a call with no claude process above it (a detached, nohup, launchd or osascript run) is refused, naming that", async () => {
+    const launch = await launchAbove(100, procs(undefined))
+    expect(launch).toEqual({ found: "no Claude Code process above this call" })
+    expect(opsLaunch(launch)).toBe(false)
+  })
+
+  test("a claude process whose registry names no session is refused", async () => {
+    const launch = await launchAbove(100, procs(under("nowhere", "lead")))
+    expect(launch.found).toContain("whose session its registry does not name")
+    expect(opsLaunch(launch)).toBe(false)
+  })
+
+  test("a claude process whose registry entry holds no name is refused", async () => {
+    const launch = await launchAbove(100, procs(under("nameless", "lead")))
+    expect(launch.found).toContain("whose registry it cannot read")
+    expect(opsLaunch(launch)).toBe(false)
+  })
+
+  test("a claude process whose roster cannot be read names no kind and is refused", async () => {
+    const launch = await launchAbove(100, procs(under("ops", "lead"), "no-data"))
+    expect(launch.kind).toBeUndefined()
+    expect(opsLaunch(launch)).toBe(false)
   })
 })
 
