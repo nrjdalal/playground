@@ -1014,6 +1014,17 @@ describe("a GLM session's org tools", () => {
     }
   })
 
+  test("git named through a variable the line sets, reaching an org's checkout, is refused on GLM (PG-2127)", async () => {
+    for (const command of [
+      'G="git -C ../org-repo"; $G log -1',
+      "G=git; $G --git-dir=../org-repo/.git log -1",
+    ]) {
+      const { claude, glm } = await both(input(command))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain("acme-blue/demo")
+    }
+  })
+
   test("git and gh in an org's checkout are refused on GLM, naming the org, and pass on Claude", async () => {
     for (const command of ["git log -1", "gh pr list"]) {
       const { claude, glm } = await both(input(command, ORG))

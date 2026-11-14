@@ -24,7 +24,6 @@ import {
   slotWords,
   stdinFed,
   stdinOf,
-  UNKNOWN,
   unreadable,
   visible,
   type Visit,
@@ -332,19 +331,6 @@ async function inspect(raw: string, environment: Record<string, string | undefin
         lead.some((a) => hidden(a) && !a.quoted))
     )
       return refuse(`a program the hook cannot read (${shown(first)}) given -r`, "it may be rm")
-    // an unquoted variable in a program's place splits at its spaces under bash (`c="rm -rf x"; $c`), with no quote or pipe read again, so its words lead the command's own
-    const held =
-      first && !first.quoted && first.value === UNKNOWN && first.variable
-        ? at.vars.get(first.variable)
-        : undefined
-    if (held && !held.unknown && /\s/.test(held.value.trim())) {
-      const split = held.value
-        .trim()
-        .split(/\s+/)
-        .map((value) => ({ quoted: false, value }))
-      const found = await examine({ ...cmd, words: [...split, ...args] }, at, visitAs(reach), false)
-      if (found) return found
-    }
     const slot = slotWords(parsed)
     if (slot) return examine({ ...cmd, words: slot }, at, visitAs(reach), false)
     if (RM.has(name)) return judgeRm(args, xargs !== undefined || reach.appends, at, roots, reach)

@@ -16270,13 +16270,6 @@ async function inspect14(raw, environment) {
     const lead = end < 0 ? args : args.slice(0, end);
     if (first && hidden(first) && (spellsRecursive(first.value) || args.some((a) => spellsRecursive(a.value)) || lead.some((a) => hidden(a) && !a.quoted)))
       return refuse13(`a program the hook cannot read (${shown2(first)}) given -r`, "it may be rm");
-    const held = first && !first.quoted && first.value === UNKNOWN && first.variable ? at.vars.get(first.variable) : undefined;
-    if (held && !held.unknown && /\s/.test(held.value.trim())) {
-      const split = held.value.trim().split(/\s+/).map((value) => ({ quoted: false, value }));
-      const found = await examine({ ...cmd, words: [...split, ...args] }, at, visitAs(reach), false);
-      if (found)
-        return found;
-    }
     const slot = slotWords(parsed);
     if (slot)
       return examine({ ...cmd, words: slot }, at, visitAs(reach), false);
