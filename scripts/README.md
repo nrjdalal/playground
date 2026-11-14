@@ -327,4 +327,4 @@ In the repo's TypeScript, `tests/packages/scripts/src/replace-dollar.test.ts` fa
 
 ## A zsh loop's variable names
 
-In zsh, `path` is tied to `PATH`, so name loop variables `p` or `file`, never `path`: a loop that sets `path=` empties the command search, so every command after it fails as not found, and a check written `cmd && echo ok || echo MISSING` then reports every item missing.
+In zsh, `path` is tied to `PATH`, so name loop variables `p` or `file`, never `path`: a loop whose variable is `path` sets `PATH` to each item in turn, so every command after it that is not a builtin fails as not found, and a check written `cmd && echo ok || echo MISSING` then reports every item missing.
