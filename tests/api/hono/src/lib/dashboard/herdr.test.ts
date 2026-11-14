@@ -825,6 +825,26 @@ describe("switchKeys", () => {
     ).toEqual([{ key: "enter" }])
   })
 
+  // an option naming no model is taken only when the prompt's own question, between its top edge and its options, names the switch or the model
+  test("a bare Yes is taken when the prompt's question names a model switch or the model", () => {
+    expect(
+      keys(
+        confirm(
+          "Switch model? Your next response will be slower.",
+          " ❯ 1. Yes",
+          "   2. No, go back",
+        ),
+      ),
+    ).toEqual([{ key: "enter" }])
+    expect(keys(confirm("Switch model?", "   1. Yes, switch", " ❯ 2. No, go back"))).toEqual([
+      { key: "up" },
+      { key: "enter" },
+    ])
+    expect(
+      keys(confirm("Move this chat to Sonnet 9.9?", " ❯ 1. Continue", "   2. Cancel")),
+    ).toEqual([{ key: "enter" }])
+  })
+
   test("no option reading as the switch, two of them, no cursor or a multi-select gives no keys", () => {
     expect(
       keys(confirm("Change the model?", " ❯ 1. Stay on Opus 9.9", "   2. Ask me later")),
@@ -840,7 +860,7 @@ describe("switchKeys", () => {
   })
 
   // a prompt that draws over the box within the switch's read is not its confirm unless an option names the model picked
-  test("a permission prompt, a plain yes or no question, or a switch naming no model gets no keys", () => {
+  test("a permission prompt, a plain yes or no question, a switch named only outside the prompt, or a prompt with no top edge gets no keys", () => {
     expect(
       keys(
         confirm(
@@ -852,7 +872,32 @@ describe("switchKeys", () => {
       ),
     ).toBeNull()
     expect(keys(confirm("Ship it now?", " ❯ 1. Yes (Recommended)", "   2. No"))).toBeNull()
-    expect(keys(confirm("Switch model?", " ❯ 1. Yes, switch", "   2. No, go back"))).toBeNull()
+    expect(
+      keys(
+        confirm(
+          "Bash command: claude --model sonnet -p hi Do you want to proceed?",
+          " ❯ 1. Yes",
+          "   2. No",
+        ),
+      ),
+    ).toBeNull()
+    expect(
+      keys(confirm("Allow editing model.ts to switch the model?", " ❯ 1. Yes", "   2. No")),
+    ).toBeNull()
+    expect(
+      keys(
+        [
+          "⏺ I will switch the model to Sonnet next.",
+          "",
+          "─".repeat(40),
+          " Ship it now?",
+          "",
+          " ❯ 1. Yes",
+          "   2. No",
+        ].join("\n"),
+      ),
+    ).toBeNull()
+    expect(keys(" Switch model?\n\n ❯ 1. Yes\n   2. No")).toBeNull()
   })
 })
 

@@ -1243,6 +1243,23 @@ describe("deliver to a herdr session", () => {
       expect(run.keys).toEqual([{ key: "down" }, { key: "enter" }])
     })
 
+    test("a reworded confirm with a bare Yes gets it when its question names the switch", async () => {
+      const run = switchRun(
+        dialog("Switch the model? Your next response will be slower.", " ❯ 1. Yes", "   2. No"),
+      )
+      expect(await run.send()).toMatchObject({ ok: true })
+      expect(run.keys).toEqual([{ key: "enter" }])
+    })
+
+    test("a permission prompt drawn over the box gets no key", async () => {
+      const run = switchRun(
+        dialog("Bash command: bun run test Do you want to proceed?", " ❯ 1. Yes", "   2. No"),
+      )
+      expect(await run.send()).toMatchObject({ code: "INTERRUPTED", ok: false })
+      expect(run.keys).toEqual([])
+      expect(run.recorded).toEqual([])
+    })
+
     // a rule drawn earlier on the screen frames the confirm as a box would be, but its first line opens on no ❯ prompt
     test("a confirm under an earlier rule still gets its Yes", async () => {
       const run = switchRun(`${RULE}\n${TODAY}`)
