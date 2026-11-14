@@ -14841,7 +14841,7 @@ async function inspect8(raw) {
   const visit = async (cmd, parsed, env) => {
     const slot = slotWords(parsed);
     if (slot?.length)
-      return examine({ ...cmd, words: slot }, env, visit, false);
+      return examine({ ...cmd, words: slot }, env, (c, p, e) => visit(c, { ...p, xargs: p.xargs ?? parsed.xargs }, e), false);
     const { args, first, name, xargs } = parsed;
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args))
       return refuse9(name);

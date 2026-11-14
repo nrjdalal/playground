@@ -64,9 +64,15 @@ async function inspect(raw: string) {
   // a pid xargs hands a shell it starts arrives as the -I string (`xargs -I{} sh -c 'kill {}'`)
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || [])
   const visit: Visit = async (cmd, parsed, env) => {
-    // run-slot.sh runs the words after its -- as the command
+    // run-slot.sh runs the words after its -- as the command, with the input an xargs running run-slot hands it
     const slot = slotWords(parsed)
-    if (slot?.length) return examine({ ...cmd, words: slot }, env, visit, false)
+    if (slot?.length)
+      return examine(
+        { ...cmd, words: slot },
+        env,
+        (c, p, e) => visit(c, { ...p, xargs: p.xargs ?? parsed.xargs }, e),
+        false,
+      )
     const { args, first, name, xargs } = parsed
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args)) return refuse(name)
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
