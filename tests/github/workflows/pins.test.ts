@@ -60,13 +60,13 @@ const job = (uses: string): string =>
 test("a tag-only uses: line and a workflow with no top-level permissions are each found, and the rest pass", async () => {
   const root = fixture({
     "actions/local/action.yml": `runs:\n  using: composite\n  steps:\n    - uses: acme/cache-action/restore@v3\n`,
+    "workflows/docker-tag.yml": `permissions:\n  contents: read\n${job("docker://ghcr.io/acme/tool:1")}`,
     "workflows/docker.yml": `permissions:\n  contents: read\n${job(`docker://ghcr.io/acme/tool@sha256:${"a".repeat(64)}`)}`,
     "workflows/local.yml": `permissions:\n  contents: read\n${job("./.github/actions/local")}`,
     "workflows/open.yml": job(`acme/build-action@${SHA} # v2`),
     "workflows/pinned.yml": `permissions:\n  contents: read\n${job(`acme/build-action@${SHA} # v2`)}`,
     "workflows/tag.yml": `permissions:\n  contents: read\n${job("acme/build-action@v2")}`,
     "workflows/untagged.yml": `permissions:\n  contents: read\n${job(`acme/build-action@${SHA}`)}`,
-    "workflows/docker-tag.yml": `permissions:\n  contents: read\n${job("docker://ghcr.io/acme/tool:1")}`,
   })
   expect(await problems(root)).toEqual([
     "actions/local/action.yml:4: acme/cache-action/restore@v3",
@@ -85,5 +85,5 @@ test("every uses: in .github names a full commit sha with its tag, and every wor
 test("inscope runs at one pinned version, so every session takes the same one", async () => {
   const text = await Bun.file(join(GITHUB, "../AGENTS.md")).text()
   expect(text).toMatch(/`npx -y inscope@\d+\.\d+\.\d+ <command>`/)
-  expect(text).not.toContain("inscope@latest")
+  expect(text).not.toMatch(/inscope@(?!\d)/)
 })
