@@ -1291,6 +1291,86 @@ describe("who", () => {
   })
 })
 
+// #2155: a reviewer read the roster by eye, found no holder, and moved a clone another live reviewer still held
+describe("holders", () => {
+  const rows: Agent[] = [
+    {
+      name: "k3m9px-reviewer",
+      pr: "https://github.com/acme/app/pull/7",
+      status: "working",
+      task: "t",
+    },
+    {
+      name: "q8r2tx-reviewer",
+      pr: "https://github.com/acme/app/pull/5",
+      prs: ["https://github.com/acme/app/pull/5", "https://github.com/acme/app/pull/7"],
+      status: "waiting",
+      task: "t",
+    },
+    {
+      name: "x7mh4d-reviewer",
+      pr: "https://github.com/acme/app/pull/7",
+      status: "ended",
+      task: "t",
+    },
+    {
+      name: "z2w5vn-reviewer",
+      pr: "https://github.com/acme/app/pull/9",
+      status: "ended",
+      task: "t",
+    },
+  ]
+  const bytes = (config: string) => readFileSync(join(config, "playground", "roster.json"), "utf8")
+
+  test("prints each live row naming the PR in pr or prs, leaving out an ended row, exits 0 and writes nothing", async () => {
+    const config = configWith(rows)
+    const before = bytes(config)
+    for (const pr of ["7", "#7", "https://github.com/acme/app/pull/7"]) {
+      const r = await run(config, ["holders", pr])
+      expect([r.code, r.out]).toEqual([0, "k3m9px-reviewer\nq8r2tx-reviewer\n"])
+    }
+    const prs = await run(config, ["holders", "5"])
+    expect([prs.code, prs.out]).toEqual([0, "q8r2tx-reviewer\n"])
+    expect(bytes(config)).toBe(before)
+  })
+
+  test("a PR no live row names prints nothing and exits 1, writing nothing", async () => {
+    const config = configWith(rows)
+    const before = bytes(config)
+    for (const pr of ["9", "8", "https://github.com/acme/other/pull/7"]) {
+      const r = await run(config, ["holders", pr])
+      expect([r.code, r.out]).toEqual([1, ""])
+    }
+    expect(bytes(config)).toBe(before)
+  })
+
+  test("a roster that does not read exits 2, never 1, so a bad read never frees a clone", async () => {
+    const missing = await run(configWith(null), ["holders", "7"])
+    expect([missing.code, missing.out, missing.roster]).toEqual([2, "", null])
+    expect(missing.err).toContain("cannot be read")
+    const config = configWith(null)
+    writeFileSync(join(config, "playground", "roster.json"), "{")
+    const torn = Bun.spawnSync(["bun", script, "holders", "7"], {
+      env: {
+        ...process.env,
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+      },
+    })
+    expect([torn.exitCode, torn.stdout.toString()]).toEqual([2, ""])
+    expect(torn.stderr.toString()).toContain("cannot be read")
+    expect(bytes(config)).toBe("{")
+  })
+
+  test("refuses a word that is no PR, and a second one", async () => {
+    for (const argv of [["holders", "abc"], ["holders", "7", "8"], ["holders"]]) {
+      const r = await run(configWith(rows), argv)
+      expect([r.code, r.out]).toEqual([2, ""])
+      expect(r.err).toContain("holders takes one PR")
+    }
+  })
+})
+
 test("an unknown command prints the usage and writes nothing", async () => {
   const config = configWith([WITH_PR])
   const r = await run(config, ["frob", "x"])
