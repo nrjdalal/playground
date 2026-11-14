@@ -15,11 +15,14 @@ const GLOBAL: Options = {
   takes: words("--api --cwd --global-config --local-config --scope --team --token -A -Q -S -T -t"),
 }
 // The options of each command judged here, from its --help on 65.8.0; any other option is read both ways, as a flag and as taking the next word.
+// deploy's from deployCommand in the dist, its deprecated letters included: -e is --env's and -b --build-env's (DEPRECATED_SHORTHANDS), so neither names the environment.
 const DEPLOY: Options = {
   flags: words(
-    "--create-if-missing --dry --force --guidance --json --logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -f -y",
+    "--confirm --create-if-missing --dry --force --guidance --json --logs --no-clipboard --no-logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -c -f -l -y",
   ),
-  takes: words("--archive --build-env --env --environment --meta --project --regions --target -p"),
+  takes: words(
+    "--archive --build-env --env --environment --format --meta --name --project --regions --target -F -b -e -m -n -p",
+  ),
 }
 const INSTALL: Options = {
   flags: words("--claim --json --no-claim --no-connect --no-env-pull"),

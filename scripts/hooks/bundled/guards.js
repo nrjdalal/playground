@@ -16578,8 +16578,8 @@ var GLOBAL = {
   takes: words("--api --cwd --global-config --local-config --scope --team --token -A -Q -S -T -t")
 };
 var DEPLOY = {
-  flags: words("--create-if-missing --dry --force --guidance --json --logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -f -y"),
-  takes: words("--archive --build-env --env --environment --meta --project --regions --target -p")
+  flags: words("--confirm --create-if-missing --dry --force --guidance --json --logs --no-clipboard --no-logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -c -f -l -y"),
+  takes: words("--archive --build-env --env --environment --format --meta --name --project --regions --target -F -b -e -m -n -p")
 };
 var INSTALL = {
   flags: words("--claim --json --no-claim --no-connect --no-env-pull"),
