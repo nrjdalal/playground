@@ -21,11 +21,12 @@ export const ANSWER_VERBS = [
 // What a step the dashboard ran on Approve gave: its exit code and its first line.
 const ranSchema = z.strictObject({ exitCode: z.number().int(), line: z.string() })
 
-// The line's JSON: what the owner chose, what to do next and the exact command that closes the item, which an update's done or dismiss and a card its poster already closed leave out, since nothing is left to close; a relay to the dispatcher sets relay, and a step the dashboard ran on Approve (an accept, an apps change, a grant's pane, an own flag, a guard setting) rides as accepted, listed, opened, owned or set, and a secret's results carry each sink's status, never its value.
+// The line's JSON: what the owner chose, what to do next and the exact command that closes the item, which an update's done or dismiss and a card its poster already closed leave out, since nothing is left to close; a relay to the dispatcher sets relay, and a step the dashboard ran on Approve (an accept, a clone, an apps change, a grant's pane, an own flag, a guard setting) rides as accepted, cloned, listed, opened, owned or set, and a secret's results carry each sink's status, never its value.
 export const answerPayloadSchema = z.strictObject({
   accepted: ranSchema.optional(),
   at: z.iso.datetime(),
   close: z.string().min(1).optional(),
+  cloned: ranSchema.optional(),
   comment: z.string().optional(),
   go: z.boolean(),
   id: z.string().min(1),
@@ -126,6 +127,7 @@ export type ChoicePreview =
   | { key: string; kind: string; more?: unknown[]; type: "accept" }
   | { app: string; change: "add" | "remove"; type: "apps" }
   | { amount: string; type: "budget" }
+  | { repos: { repo: string }[]; type: "clone" }
   | { type: "delete" }
   | { permission: string; type: "grant" }
   | { key: string; type: "guard"; value?: unknown }
@@ -154,6 +156,13 @@ const defaultLabels = (
       ]
     case "budget":
       return [`Spend ${preview.amount}`, "Do not spend it"]
+    case "clone":
+      return [
+        preview.repos.length > 1
+          ? `Clone the ${preview.repos.length} repos`
+          : `Clone ${preview.repos[0]?.repo}`,
+        "Do not clone",
+      ]
     case "delete":
       return ["Delete it", "Keep it"]
     case "grant":
