@@ -1243,6 +1243,13 @@ describe("deliver to a herdr session", () => {
       expect(run.keys).toEqual([{ key: "down" }, { key: "enter" }])
     })
 
+    // a rule drawn earlier on the screen frames the confirm as a box would be, but its first line opens on no ❯ prompt
+    test("a confirm under an earlier rule still gets its Yes", async () => {
+      const run = switchRun(`${RULE}\n${TODAY}`)
+      expect(await run.send()).toMatchObject({ ok: true })
+      expect(run.keys).toEqual([{ key: "enter" }])
+    })
+
     test("a prompt with no option reading as the switch gets no key, and the refusal names what it shows", async () => {
       const run = switchRun(
         dialog("Change the model?", " ❯ 1. Stay on Opus 9.9", "   2. Ask me later"),
