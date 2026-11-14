@@ -107,4 +107,21 @@ export const groups: Group[] = [
       ]
     },
   },
+  // each package runner that starts another, which then starts a bun reading its own --cwd
+  {
+    folders: ["home", "checkout"],
+    guards: ["no-extensions-write"],
+    rows: ({ CLI_DIR }) =>
+      RUNNERS.flatMap((outer) =>
+        RUNNERS.map(
+          (inner) =>
+            [
+              `ext add by a bun in its own --cwd that ${inner} starts under ${outer}`,
+              `${outer} ${inner} bun --cwd=${CLI_DIR} cli.ts ext add login list x y`,
+            ] as const,
+        ),
+      ),
+  },
 ]
+
+const RUNNERS = ["bunx", "bun x", "npx", "bun run"]

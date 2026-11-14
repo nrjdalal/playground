@@ -2333,6 +2333,10 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
       `npx bun --cwd=${CLI_DIR} cli.ts ext put login list x /tmp/l.json --reason y`,
     ],
     [
+      "ext put by a bun in its own --cwd that npx starts under bunx",
+      `bunx npx bun --cwd=${CLI_DIR} cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
       "ext put by a bun that bun run starts in its own --cwd",
       `bun run bun --cwd=${CLI_DIR} cli.ts ext put login list x /tmp/l.json --reason y`,
     ],
