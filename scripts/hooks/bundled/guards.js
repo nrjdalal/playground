@@ -16572,6 +16572,7 @@ async function check21(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-raw-vercel.ts
+import { basename as basename9, isAbsolute as isAbsolute7, resolve as resolve12 } from "path";
 var NAMES2 = ["vc", "vercel"];
 var words = (text) => new Set(text.split(" "));
 var GLOBAL = {
@@ -16641,7 +16642,7 @@ var LISTS = words("dns domains integration project teams");
 var HELP2 = new Set(["--help", "--version", "-h", "-v"]);
 var API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"]);
 var READINGS2 = 64;
-var MENTION2 = /\bv(?:ercel|c)\b|\bship[:/]yard\b/i;
+var MENTION2 = /\bv(?:ercel|c)\b|\byard\b/i;
 var NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i;
 function readingsOf(args, { flags, takes }, toSub = false) {
   const out = [];
@@ -16797,12 +16798,22 @@ function judgeApi2(rest, flags, built) {
   if (/(?:^|\/)env(?:[/?#]|$)/i.test(endpoint.value))
     return { production: false, what: "a vercel api read of a project's env" };
 }
+var STEP_FILE = /(?:^|\/)packages\/scripts\/src\/ship\/yard\.ts$/;
+var STEP_HELP = new Set(["--help", "-h"]);
+var RUNNERS6 = new Set(["npm", "pnpm", "yarn"]);
 function yardStep(name, args, shell) {
+  if (RUNNERS6.has(name))
+    return args.some((a) => a.value === "ship:yard");
   if (name !== "bun")
     return false;
-  const { at, words } = bunCall(args, shell);
-  const step = words[0] === "run" && words[1] === "ship:yard" || /(?:^|\/)packages\/scripts\/src\/ship\/yard\.ts$/.test(words[0] ?? "");
-  return step && !args.slice(at + 1).some((a) => HELP2.has(a.value));
+  const { at, chained, words } = bunCall(args, shell);
+  const file = words[0] === "run" ? words[1] : words[0];
+  if (file === undefined)
+    return false;
+  const path = isAbsolute7(file) ? file : chained ? resolve12(chained, file) : undefined;
+  const step = file === "ship:yard" || (path ? STEP_FILE.test(path) : basename9(file) === "yard.ts");
+  const end = args.findIndex((a, k) => k > at && a.value === "--");
+  return step && !args.slice(at + 1, end === -1 ? undefined : end).some((a) => STEP_HELP.has(a.value));
 }
 async function check22(raw, environment = process.env) {
   const {
@@ -16853,7 +16864,7 @@ async function check22(raw, environment = process.env) {
 // scripts/hooks/no-raw-wa.ts
 import { realpathSync as realpathSync6 } from "fs";
 import { homedir as homedir5 } from "os";
-import { resolve as resolve12 } from "path";
+import { resolve as resolve13 } from "path";
 var refuse15 = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
 var refuseJob = (what) => `no-raw-wa hook refuses ${what}: the relay tags each line with its queue's job, and a line tagged [ops-wa] or [ops-dm-watch] reads as the owner's own words, so only ops-wa and ops-dm-watch queue under those jobs. Queue your line under your own job, notify.sh <your job> <text>, or tell your manager with SendMessage.`;
 var OWNER_JOBS = new Set(["dm-watch", "wa"]);
@@ -16867,10 +16878,10 @@ var RECURSIVE_WITH = {
   zip: /^-[A-Za-z]*r/
 };
 var targetsOf = (environment) => {
-  const typed = resolve12(dataDirOf(environment), "whatsapp");
+  const typed = resolve13(dataDirOf(environment), "whatsapp");
   let real = typed;
   try {
-    real = resolve12(realpathSync6(dataDirOf(environment)), "whatsapp");
+    real = resolve13(realpathSync6(dataDirOf(environment)), "whatsapp");
   } catch {}
   return [...new Set([typed, real].map((p) => p.toLowerCase()))];
 };
@@ -16881,10 +16892,10 @@ var queuesOf = (environment) => {
     real = realpathSync6(data);
   } catch {}
   return [
-    ...new Set([data, real].flatMap((d) => [...OWNER_JOBS].map((job) => resolve12(d, "ops", "outbox", `ops-${job}.jsonl`).toLowerCase())))
+    ...new Set([data, real].flatMap((d) => [...OWNER_JOBS].map((job) => resolve13(d, "ops", "outbox", `ops-${job}.jsonl`).toLowerCase())))
   ];
 };
-var segments = (path) => resolve12(path).toLowerCase().split("/").filter(Boolean);
+var segments = (path) => resolve13(path).toLowerCase().split("/").filter(Boolean);
 function reach(path, target, glob = false) {
   const p = segments(path);
   const t = segments(target);
@@ -16971,7 +16982,7 @@ async function judgeBash(command, cwd, environment) {
           continue;
         for (const raw of [word.value, word.value.slice(word.value.indexOf("=") + 1)]) {
           const value = /^~(?:\/|$)/.test(raw) ? `${homedir5()}${raw.slice(1)}` : raw;
-          const path = value.startsWith("/") ? value : place.cwd && resolve12(place.cwd, value);
+          const path = value.startsWith("/") ? value : place.cwd && resolve13(place.cwd, value);
           if (!path)
             continue;
           const stands = worst(path, targets, !!word.glob);
@@ -17014,7 +17025,7 @@ async function inspect16(raw, environment) {
     if (at === "inside" || tool === "Grep" && at === "above")
       return refuse15(`a ${tool} through ${path}, which reads whatsapp/ in the data folder`);
     const pattern = input?.pattern;
-    if (tool === "Glob" && typeof pattern === "string" && worst(resolve12(path, pattern), targets, true) === "inside")
+    if (tool === "Glob" && typeof pattern === "string" && worst(resolve13(path, pattern), targets, true) === "inside")
       return refuse15(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
   }
 }
@@ -17291,7 +17302,7 @@ if (false) {}
 // scripts/hooks/no-unslotted-run.ts
 import { existsSync as existsSync10, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync3 } from "fs";
 import { tmpdir } from "os";
-import { join as join21, resolve as resolve13, sep as sep6 } from "path";
+import { join as join21, resolve as resolve14, sep as sep6 } from "path";
 var refuse17 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var COMMIT_TAKES3 = new Set([
@@ -17412,7 +17423,7 @@ Fix the message by the gh-commit skill's Commit step, then commit again.`;
 }
 var anywhere = (what, command) => `no-unslotted-run hook refuses ${what} on a line that names more folders than the hook carries, since it cannot rule out a worktree: every heavy run goes through run-slot (playbook's **slots**). Run it as ~/.playground/ops/run-slot.sh <your name> -- ${command}, or as a line of its own after a cd to a literal path.`;
 var BUN_SCRIPTS2 = new Set(["build", "check-types", "test"]);
-var RUNNERS6 = new Set(["bunx", "npx"]);
+var RUNNERS7 = new Set(["bunx", "npx"]);
 var TEST_TAKES = new Set([
   "--conditions",
   "--console-depth",
@@ -17504,7 +17515,7 @@ function heavy2(name, args, env) {
       what: `turbo run ${task}`
     } : undefined;
   }
-  if (RUNNERS6.has(name)) {
+  if (RUNNERS7.has(name)) {
     const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES.has(args[k - 1]?.value ?? ""));
     const values = words.map((w) => w.value);
     const base = name === "bunx" ? bunCall([X, ...args], env).chained : env.cwd;
@@ -17585,7 +17596,7 @@ function inspect18(raw, environment, main) {
     join21(main, ".claude", "worktrees"),
     real(join21(main, ".claude", "worktrees"))
   ].map((w) => w + sep6);
-  const inWorktree = (dir) => dir !== undefined && [resolve13(dir), real(resolve13(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
+  const inWorktree = (dir) => dir !== undefined && [resolve14(dir), real(resolve14(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
   const directory = typeof cwd === "string" ? cwd : undefined;
   let line = [];
   let wrote = false;
@@ -17636,7 +17647,7 @@ function inspect18(raw, environment, main) {
       const line = words();
       if (line === undefined)
         return;
-      const moved = here.cwd !== undefined && (directory === undefined || resolve13(here.cwd) !== resolve13(directory));
+      const moved = here.cwd !== undefined && (directory === undefined || resolve14(here.cwd) !== resolve14(directory));
       const cd = moved ? `cd ${quotedDir(here.cwd)} && ` : "";
       return found.anywhere ? refuseDocker(found.what, cd, line, found.fix) : refuse17(found.what, cd, line);
     }
@@ -17653,7 +17664,7 @@ function inspect18(raw, environment, main) {
   line = lexed.commands;
   return run(lexed, env, visit);
 }
-async function check25(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
+async function check25(raw, environment = process.env, main = mainCheckout2(resolve14(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
     return await inspect18(raw, environment, main);
   } catch {

@@ -32,7 +32,13 @@ const fake = (set: Fake = {}) => {
       calls.push(`deploy ${project} ${dir}`)
       return set.deploys?.[project] ?? true
     },
+    drop: async (dir) => {
+      calls.push(`drop ${dir}`)
+    },
     err: (line) => lines.push(line),
+    fetch: async (tags) => {
+      calls.push(`fetch ${tags.join(" ")}`)
+    },
     out: (line) => lines.push(line),
     readRecord: async () => record,
     status: async (url) => {
@@ -60,10 +66,11 @@ const run = (args: Partial<YardArgs>, set: Fake = { record: "v0.0.110" }) => {
 }
 
 describe("ship:yard's order", () => {
-  test("it deploys the API, checks it, deploys the web, checks it, then records the tag", async () => {
+  test("it fetches both tags, deploys the API, checks it, deploys the web, checks it, records the tag, then removes the worktree", async () => {
     const { calls, code } = await run({})
     expect(code).toBe(0)
     expect(calls).toEqual([
+      "fetch v0.0.110 v0.0.111",
       "changed v0.0.110..v0.0.111",
       "worktree v0.0.111",
       "deploy api /wt/v0.0.111",
@@ -73,6 +80,7 @@ describe("ship:yard's order", () => {
       `status ${HOSTS.web}/api/health`,
       `status ${HOSTS.web}${BOT_ROUTE}`,
       "record v0.0.111",
+      "drop /wt/v0.0.111",
     ])
   })
 
@@ -82,12 +90,14 @@ describe("ship:yard's order", () => {
     expect(calls.some((c) => c.startsWith("deploy web"))).toBe(false)
     expect(calls.some((c) => c.startsWith("record"))).toBe(false)
     expect(out()).toContain("the api deploy failed")
+    expect(calls.at(-1)).toBe("drop /wt/v0.0.111")
   })
 
   test("a failed web deploy stops the step and records nothing", async () => {
     const { calls, code } = await run({}, { deploys: { web: false }, record: "v0.0.110" })
     expect(code).not.toBe(0)
     expect(calls.some((c) => c.startsWith("record"))).toBe(false)
+    expect(calls.at(-1)).toBe("drop /wt/v0.0.111")
   })
 })
 
@@ -163,8 +173,8 @@ describe("ship:yard's record", () => {
   test("--since stands in for the record on a first run", async () => {
     const { calls, code } = await run({ since: "v0.0.109" }, {})
     expect(code).toBe(0)
-    expect(calls[0]).toBe("changed v0.0.109..v0.0.111")
-    expect(calls.at(-1)).toBe("record v0.0.111")
+    expect(calls.slice(0, 2)).toEqual(["fetch v0.0.109 v0.0.111", "changed v0.0.109..v0.0.111"])
+    expect(calls.at(-2)).toBe("record v0.0.111")
   })
 
   test("the tag already recorded deploys nothing", async () => {

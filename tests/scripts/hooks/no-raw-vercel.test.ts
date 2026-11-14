@@ -14,6 +14,9 @@ const ROLE: Record<Session, string> = { builder: "lead", ops: "lead", worker: "w
 beforeAll(async () => {
   scratch = await mkdtemp(join(tmpdir(), "no-raw-vercel-"))
   await mkdir(join(scratch, "config", "sessions"), { recursive: true })
+  // the step's folder and the Yard CLI's, so a cd into either lands where it does in a checkout
+  for (const dir of ["ship", "playground"])
+    await mkdir(join(scratch, "packages", "scripts", "src", dir), { recursive: true })
   await Bun.write(
     join(scratch, "data", "roster.json"),
     JSON.stringify({
@@ -240,6 +243,23 @@ const YARD_SHIP: [string, string][] = [
   ["through run-slot", "~/.playground/ops/run-slot.sh ops-ship -- bun run ship:yard v0.0.111"],
   ["by its file", "bun packages/scripts/src/ship/yard.ts v0.0.111 --schema-cleared i123"],
   ["by its file's full path", "bun /Users/x/playground/packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["by its script with no run", "bun ship:yard v0.0.111"],
+  ["by its file after run", "bun run packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["by its file from bun's --cwd", "bun --cwd packages/scripts src/ship/yard.ts v0.0.111"],
+  ["by its file after run from --cwd=", "bun --cwd=packages/scripts run src/ship/yard.ts v0.0.111"],
+  ["by its file after a cd", "cd packages/scripts && bun src/ship/yard.ts v0.0.111"],
+  ["from its own folder", "cd packages/scripts/src/ship && bun yard.ts v0.0.111"],
+  ["by a path with ..", "bun packages/scripts/src/ship/../ship/yard.ts v0.0.111"],
+  ["by a path with a doubled slash", "bun packages//scripts/src/ship/yard.ts v0.0.111"],
+  ["from a folder the hook cannot read", 'cd "$D" && bun yard.ts v0.0.111'],
+  [
+    "with a help word after --, which bun hands the step as a tag",
+    "bun run ship:yard v0.0.111 -- --help",
+  ],
+  ["by npm", "npm run ship:yard -- v0.0.111"],
+  ["by npm with a help word", "npm run ship:yard -- --help"],
+  ["by pnpm", "pnpm ship:yard v0.0.111"],
+  ["by yarn", "yarn run ship:yard v0.0.111"],
 ]
 
 describe("the Yard ship step", () => {
@@ -259,8 +279,17 @@ describe("the Yard ship step", () => {
     expect(await as("ops", "PLAYGROUND_ROLE=lead bun run ship:yard v0.0.111")).toContain(REFUSED)
   })
 
-  test("its help passes", async () => {
-    expect(await as("worker", "bun run ship:yard --help")).toBeUndefined()
+  test.each([
+    ["its help", "bun run ship:yard --help"],
+    ["its short help by its file", "bun packages/scripts/src/ship/yard.ts -h"],
+    ["the Yard CLI's file", "bun packages/scripts/src/playground/yard.ts channels"],
+    [
+      "the Yard CLI's file from its own folder",
+      "cd packages/scripts/src/playground && bun yard.ts channels",
+    ],
+    ["a read naming the step", "grep -n ship:yard package.json"],
+  ])("passes for a worker: %s", async (_, command) => {
+    expect(await as("worker", command)).toBeUndefined()
   })
 })
 

@@ -1049,7 +1049,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 ## no-raw-vercel
 
 - Production ships from `main` through the release skill's `ship:merge`, and Ops ships the hosted build through its step 4's `bun run ship:yard <tag>` (`packages/scripts/src/ship/yard.ts`), which runs `vercel deploy --prod --yes` for each project from a detached worktree at the tag.
-  The guard reads that step's own command line, `bun run ship:yard` or its file run by `bun`, as a production move, and its `--help` as help.
+  The guard reads that step's own command line as a production move: `bun` with its script (`bun run ship:yard`, `bun ship:yard`) or its file, the file resolved against the folder `bun` runs in (a `cd`, `--cwd`) and read as any file named `yard.ts` when that folder is unknown, and `npm`, `pnpm` or `yarn` with its script.
+  A `--help` or `-h` before any `--` reads as help through `bun` alone, since `bun run` hands the step what follows `--`; the guard reads the step by its name and path, not a copy or a link.
   A production deploy of the hosted build migrates the hosted database first (`packages/scripts/src/migrate-on-deploy.ts`), so a hand production move is the Ops lead's alone.
   `scripts/hooks/no-raw-vercel.ts`, run on Bash by [guards](#guards) for a factory session, reads `vercel` and `vc` by any path or case wherever the shell walker finds a command (behind `env`, `exec`, `command`, `time`, `nohup`, `timeout`, `sudo`, `xargs`, in `sh -c`, `eval`, a subshell, a group or a substitution).
   It also reads it through `bun x`, `bunx` or `npx` (`toolWords` in `scripts/hooks/no-main-checkout.ts`), and after `run-slot.sh`'s `--` (`slotWords` in `shell.ts`); another package runner is not read.

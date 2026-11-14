@@ -5,7 +5,9 @@ export type Project = "api" | "web"
 export type YardIo = {
   changed: (from: string, to: string) => Promise<string[]>
   deploy: (project: Project, dir: string) => Promise<boolean>
+  drop: (dir: string) => Promise<void>
   err: (line: string) => void
+  fetch: (tags: string[]) => Promise<void>
   out: (line: string) => void
   readRecord: () => Promise<string | undefined>
   status: (url: string) => Promise<number>
@@ -48,6 +50,8 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
     )
     return 1
   }
+  // step 4 makes the tag on GitHub alone, so the step fetches both tags before it reads them
+  await io.fetch([since, args.tag])
   const schema = schemaChanges(await io.changed(since, args.tag))
   if (schema.length && !args.schemaCleared) {
     io.err(
@@ -56,38 +60,50 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
     return 1
   }
   const dir = await io.worktree(args.tag)
-  for (const project of ORDER) {
-    if (!(await io.deploy(project, dir))) {
-      io.err(`ship:yard: the ${project} deploy failed, so the step stops here`)
-      return 1
-    }
-    for (const [url, want] of hostChecks(hosts[project])) {
-      const got = await io.status(url)
-      if (got !== want) {
-        io.err(`ship:yard: after the ${project} deploy, ${url} answered ${got}, not ${want}`)
+  try {
+    for (const project of ORDER) {
+      if (!(await io.deploy(project, dir))) {
+        io.err(`ship:yard: the ${project} deploy failed, so the step stops here`)
         return 1
       }
+      for (const [url, want] of hostChecks(hosts[project])) {
+        const got = await io.status(url)
+        if (got !== want) {
+          io.err(`ship:yard: after the ${project} deploy, ${url} answered ${got}, not ${want}`)
+          return 1
+        }
+      }
+      io.out(`ship:yard: ${project} deployed from ${args.tag}, its live checks pass`)
     }
-    io.out(`ship:yard: ${project} deployed from ${args.tag}, its live checks pass`)
+    await io.writeRecord(args.tag)
+    return 0
+  } finally {
+    await io.drop(dir)
   }
-  await io.writeRecord(args.tag)
-  return 0
 }
+
+const KEYS = [
+  "YARD_API_URL",
+  "YARD_VERCEL_API_PROJECT_ID",
+  "YARD_VERCEL_TEAM_ID",
+  "YARD_VERCEL_WEB_PROJECT_ID",
+  "YARD_WEB_URL",
+] as const
 
 const USAGE = `usage: bun run ship:yard <tag> [--since <tag>] [--schema-cleared <Inbox id>]
 
 Deploys the hosted Yard from <tag>, the ship's tag: its API, then its web, each with
-vercel deploy --prod from a detached worktree at the tag, checking the live host after each
+vercel deploy --prod from a detached worktree at the tag, fetched from origin, checking the live host after each
 (/api/health answers 200, ${BOT_ROUTE} answers 401 with no token), then records the tag in
-the data folder's ops/yard-tag. It stops when the tag changes packages/db's schema or
+the data folder's ops/yard-tag and removes the worktree. It stops when the tag changes packages/db's schema or
 migrations since the recorded tag, until --schema-cleared names the db-migration step 0
 decision, and with no record until --since names the tag live now.
 The ids and hosts come from the environment, else the live dashboard checkout's .env:
-${["YARD_API_URL", "YARD_VERCEL_API_PROJECT_ID", "YARD_VERCEL_TEAM_ID", "YARD_VERCEL_WEB_PROJECT_ID", "YARD_WEB_URL"].join(", ")}.`
+${KEYS.join(", ")}.`
 
 if (import.meta.main) {
   const { parseArgs } = await import("node:util")
-  const { join } = await import("node:path")
+  const { dirname, join } = await import("node:path")
   const { mkdirSync } = await import("node:fs")
   const { dataDir } = await import("../../../env/src/data-dir")
   const { dashboardCheckout } = await import("../playground/probe")
@@ -107,17 +123,10 @@ if (import.meta.main) {
   }
   const repo = join(import.meta.dir, "..", "..", "..", "..")
   const live = dashboardCheckout(repo)
-  const keys = [
-    "YARD_API_URL",
-    "YARD_VERCEL_API_PROJECT_ID",
-    "YARD_VERCEL_TEAM_ID",
-    "YARD_VERCEL_WEB_PROJECT_ID",
-    "YARD_WEB_URL",
-  ] as const
   const read = Object.fromEntries(
-    await Promise.all(keys.map(async (key) => [key, await setting(key, live)] as const)),
-  ) as Record<(typeof keys)[number], string | undefined>
-  const missing = keys.filter((key) => !read[key])
+    await Promise.all(KEYS.map(async (key) => [key, await setting(key, live)] as const)),
+  ) as Record<(typeof KEYS)[number], string | undefined>
+  const missing = KEYS.filter((key) => !read[key])
   if (missing.length) {
     console.error(
       `ship:yard: ${missing.join(", ")} ${missing.length > 1 ? "are" : "is"} unset in the environment and the live dashboard checkout's .env`,
@@ -131,6 +140,12 @@ if (import.meta.main) {
     return ran.stdout.toString()
   }
   const record = join(dataDir(), "ops", "yard-tag")
+  // the main checkout's worktrees folder, beside the common git dir, so a run from a worktree nests none
+  const worktrees = join(
+    dirname(git(["rev-parse", "--path-format=absolute", "--git-common-dir"]).trim()),
+    ".claude",
+    "worktrees",
+  )
   const projects = { api: read.YARD_VERCEL_API_PROJECT_ID!, web: read.YARD_VERCEL_WEB_PROJECT_ID! }
   const io: YardIo = {
     changed: async (from, to) => git(["diff", "--name-only", from, to]).split("\n").filter(Boolean),
@@ -147,7 +162,13 @@ if (import.meta.main) {
       })
       return (await ran.exited) === 0
     },
+    drop: async (dir) => {
+      git(["worktree", "remove", "--force", dir])
+    },
     err: console.error,
+    fetch: async (tags) => {
+      git(["fetch", "--quiet", "origin", ...tags.flatMap((tag) => ["tag", tag])])
+    },
     out: console.log,
     readRecord: async () => {
       const file = Bun.file(record)
@@ -158,7 +179,7 @@ if (import.meta.main) {
         .then((response) => response.status)
         .catch(() => 0),
     worktree: async (at) => {
-      const dir = join(repo, ".claude", "worktrees", `yard-ship-${at}`)
+      const dir = join(worktrees, `yard-ship-${at}`)
       const sha = git(["rev-parse", `${at}^{commit}`]).trim()
       if (!(await Bun.file(join(dir, ".git")).exists()))
         git(["worktree", "add", "--detach", dir, sha])
