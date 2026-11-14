@@ -9,6 +9,7 @@ import {
   sampleMachine,
   sampleOf,
 } from "../../../../../packages/scripts/src/ops-machine/machine"
+import { procDir } from "../../../../scripts/fixtures/proc"
 
 const scratch = mkdtempSync(join(tmpdir(), "ops-machine-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -77,4 +78,40 @@ test("one read appends its line to the ops folder's machine.jsonl, and a failed 
   expect(readFileSync(join(ops, "machine.jsonl"), "utf8").trim().split("\n")).toHaveLength(1)
   expect(await readMachine(run, join(scratch, "unwritten"), [])).toMatchObject({ sessions: 0 })
   expect(existsSync(join(scratch, "unwritten"))).toBe(false)
+})
+
+// Linux has none of the sysctl names, so each comes from its /proc text, and one neither gives writes no line rather than a 0 (#2201).
+test("on Linux a read takes /proc's text for every sysctl name, and a missing file writes nothing", async () => {
+  const saved = process.env.PLAYGROUND_PROC
+  try {
+    const linux = async (argv: string[]) =>
+      argv[0] === "sysctl"
+        ? { code: 255, out: `sysctl: cannot stat /proc/sys/${argv[2]!.replaceAll(".", "/")}\n` }
+        : { code: 0, out: "" }
+    process.env.PLAYGROUND_PROC = procDir({
+      cores: 20,
+      free: 37,
+      load1: 6,
+      load5: 7.5,
+      some: 12,
+      swapUsedMB: 512,
+    })
+    expect(await readMachine(linux, join(scratch, "linux"), [], new Date(0))).toMatchObject({
+      cores: 20,
+      freePct: 37,
+      load1: 6,
+      load15: 3,
+      load5: 7.5,
+      pressure: 2,
+      swapUsedMB: 512,
+    })
+    process.env.PLAYGROUND_PROC = procDir({}, ["pressure/memory"])
+    const ops = join(scratch, "linux-ops")
+    await expect(sampleMachine(linux, ops, [])).rejects.toThrow(
+      "sysctl kern.memorystatus_vm_pressure_level exited 255",
+    )
+    expect(existsSync(join(ops, "machine.jsonl"))).toBe(false)
+  } finally {
+    process.env.PLAYGROUND_PROC = saved
+  }
 })

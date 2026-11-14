@@ -4,8 +4,9 @@ import { join } from "node:path"
 import { placedKindOf, ROSTER_ROLE_OF_KIND } from "@packages/config/kinds"
 
 import type { Run } from "../ops-tick/tick"
+import { procSource, type SysctlName, sysctlOf } from "./readings"
 
-// ops-machine: one line a minute of this machine's room to ops/machine.jsonl, for capacity reads and before-and-after comparisons. It reads sysctl, ps and Claude Code's session registry only, with no model call and no terminal call.
+// ops-machine: one line a minute of this machine's room to ops/machine.jsonl, for capacity reads and before-and-after comparisons. It reads sysctl (on Linux the /proc text that stands for each name, readings.ts), ps and Claude Code's session registry only, with no model call and no terminal call.
 
 const ROLES = new Set(["probe", "reviewer", "runner", "tester", "worker"])
 
@@ -68,7 +69,7 @@ export const sampleOf = (input: {
   }
 }
 
-const SYSCTLS = [
+const SYSCTLS: SysctlName[] = [
   "hw.ncpu",
   "kern.memorystatus_level",
   "kern.memorystatus_vm_pressure_level",
@@ -85,9 +86,11 @@ export const readMachine = async (
 ): Promise<Sample> => {
   const sysctl: Record<string, string> = {}
   for (const name of SYSCTLS) {
-    const { code, out } = await run(["sysctl", "-n", name])
-    if (code !== 0) throw new Error(`sysctl ${name} exited ${code}`)
-    sysctl[name] = out.trim()
+    const answer = await run(["sysctl", "-n", name])
+    const text = sysctlOf(name, answer)
+    if (text === null)
+      throw new Error(`sysctl ${name} exited ${answer.code}, and ${procSource(name)} does not read`)
+    sysctl[name] = text
   }
   const args = new Map<number, string>()
   const pids = live.flatMap(({ pid }) => (pid === undefined ? [] : [pid]))
