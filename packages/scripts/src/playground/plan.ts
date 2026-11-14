@@ -87,7 +87,7 @@ playground migrate --archive <checkout> --pre-squash <sha> --org <org> [--old <r
 playground uninstall [--purge]
                       remove the LaunchAgents that run from this checkout or the data folder, stop the Dashboard's stack and remove every link into this checkout; --purge also removes the Dashboard's database and moves the data folder aside to <data folder>-purged-<UTC time>, after asking
 playground add [--kind worker|runner] [<name>] [--title "<title>"] [--brief <file>] [--model <id>] [--backend glm|claude] [--account <email>]
-                      start a worker (or a runner) through spawn.sh, under the name given or one bun run name picks, on handoffs/new-worker.md by default; a worker needs --title, a plain title of up to 40 characters, and a runner takes its name and no --title; --account names the Claude login, which a worker needs while usage.accounts lists a Claude account
+                      start a worker (or a runner) through spawn.sh, under the name given or one bun run name picks, on handoffs/new-worker.md by default, a worker with --no-sandbox, so it starts open; a worker needs --title, a plain title of up to 40 characters, and a runner takes its name and no --title; --account names the Claude login, which a worker needs while usage.accounts lists a Claude account
 playground add --dispatcher --backend glm
                       start a second dispatcher on GLM
 playground alerts-wait <name>
@@ -377,8 +377,17 @@ export const addCommand = (
     return {
       error: `~/.playground/${NEW_WORKER_BRIEF} is missing: run scripts/link-skills.sh`,
     }
+  // An owner-added worker starts open, since its chore may run a stack, which the closed sandbox, spawn.sh's default for a fresh worker, shuts out.
+  const open = mode === "worker" ? ["--no-sandbox"] : []
   return {
-    argv: [mode, name, brief ?? NEW_WORKER_BRIEF, ...passed, ...(title ? ["--title", title] : [])],
+    argv: [
+      mode,
+      name,
+      brief ?? NEW_WORKER_BRIEF,
+      ...passed,
+      ...(title ? ["--title", title] : []),
+      ...open,
+    ],
     started: `Started ${name}`,
   }
 }

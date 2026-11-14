@@ -222,6 +222,7 @@ It writes that worktree, its `.git/worktrees` entry, and the main checkout's `.g
 It pushes with `git push origin HEAD:<branch>`, since `-u` writes the shut `.git/config`.
 It fits a worker with no stack: inside it nothing listens on loopback or reaches a stack, so a tester, which drives one, stays off it, and spawn.sh refuses `--sandbox` for every other role and mode, and `--no-sandbox` for all but a worker's start and a reviewer's column.
 So a lead starts a worker whose chore runs `bun run dev` or a browser check with `--no-sandbox`, and a Playground worker with no `--in`, since spawn.sh makes its worktree, so it takes the default.
+`playground add` starts its worker with `--no-sandbox`, since the owner's chore may need a stack.
 A stack worker started closed by mistake stops at its first `bun run dev` on `EPERM: operation not permitted, posix_spawn 'ps'`, and a listen or a loopback fetch fails on `Is port 0 in use?` or `EPERM: Was there a typo in the url or port?`, none naming the sandbox (measured under `@anthropic-ai/sandbox-runtime`): its lead starts it again under its name with `--no-sandbox`.
 Its roster row records `sandbox=on`, which a resume and `spawn.sh restore` keep, and an open start under the same name clears; a resume of a row without it stays open.
 A start from inside it leaves the `--account` and GLM key check to the new pane's shell, which runs outside the sandbox and stops on a missing item before claude runs.
