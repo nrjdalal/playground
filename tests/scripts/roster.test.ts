@@ -1291,6 +1291,112 @@ describe("who", () => {
   })
 })
 
+// #2155: a reviewer read the roster by eye, found no holder, and moved a clone another live reviewer still held
+describe("holders", () => {
+  const rows: Agent[] = [
+    {
+      name: "k3m9px-reviewer",
+      pr: "https://github.com/acme/app/pull/7",
+      status: "working",
+      task: "t",
+    },
+    {
+      name: "q8r2tx-reviewer",
+      pr: "https://github.com/acme/app/pull/5",
+      prs: ["https://github.com/acme/app/pull/5", "https://github.com/acme/app/pull/7"],
+      status: "waiting",
+      task: "t",
+    },
+    {
+      name: "x7mh4d-reviewer",
+      pr: "https://github.com/acme/app/pull/7",
+      status: "ended",
+      task: "t",
+    },
+    {
+      name: "z2w5vn-reviewer",
+      pr: "https://github.com/acme/app/pull/9",
+      status: "ended",
+      task: "t",
+    },
+  ]
+  const bytes = (config: string) => readFileSync(join(config, "playground", "roster.json"), "utf8")
+
+  const holdersOf = async (pr: string) => {
+    const config = configWith(rows)
+    const before = bytes(config)
+    const r = await run(config, ["holders", pr])
+    expect(bytes(config)).toBe(before)
+    return { code: r.code, names: r.out.split("\n").filter(Boolean) }
+  }
+
+  test("a live row naming the PR in pr holds it, by its number or its URL, exiting 0 and writing nothing", async () => {
+    for (const pr of ["7", "#7", "https://github.com/acme/app/pull/7"]) {
+      const r = await holdersOf(pr)
+      expect(r.code).toBe(0)
+      expect(r.names).toContain("k3m9px-reviewer")
+    }
+    expect(await holdersOf("5")).toEqual({ code: 0, names: ["q8r2tx-reviewer"] })
+  })
+
+  test("a live row naming the PR only in prs holds it", async () => {
+    const r = await holdersOf("7")
+    expect(r.code).toBe(0)
+    expect(r.names).toContain("q8r2tx-reviewer")
+  })
+
+  test("an ended row naming the PR holds nothing", async () => {
+    const r = await holdersOf("7")
+    expect(r.names).not.toContain("x7mh4d-reviewer")
+    expect(r.names).toEqual(["k3m9px-reviewer", "q8r2tx-reviewer"])
+  })
+
+  test("a PR no live row names prints nothing and exits 1, writing nothing", async () => {
+    const config = configWith(rows)
+    const before = bytes(config)
+    for (const pr of ["9", "8", "https://github.com/acme/other/pull/7"]) {
+      const r = await run(config, ["holders", pr])
+      expect([r.code, r.out]).toEqual([1, ""])
+    }
+    expect(bytes(config)).toBe(before)
+  })
+
+  test("a roster that does not read exits 2, never 1, so a bad read never frees a clone", async () => {
+    const missing = await run(configWith(null), ["holders", "7"])
+    expect([missing.code, missing.out, missing.roster]).toEqual([2, "", null])
+    expect(missing.err).toContain("cannot be read")
+    const config = configWith(null)
+    writeFileSync(join(config, "playground", "roster.json"), "{")
+    const torn = Bun.spawnSync(["bun", script, "holders", "7"], {
+      env: {
+        ...process.env,
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+      },
+    })
+    expect([torn.exitCode, torn.stdout.toString()]).toEqual([2, ""])
+    expect(torn.stderr.toString()).toContain("cannot be read")
+    expect(bytes(config)).toBe("{")
+  })
+
+  test("a roster holding a row that is no object exits 2, never 1", async () => {
+    const config = configWith([null as unknown as Agent, ...rows])
+    const before = bytes(config)
+    const r = await run(config, ["holders", "7"])
+    expect([r.code, r.out]).toEqual([2, ""])
+    expect(r.err).toContain("cannot read the roster")
+    expect(bytes(config)).toBe(before)
+  })
+
+  test("refuses a word that is no PR, and a second one", async () => {
+    for (const argv of [["holders", "abc"], ["holders", "7", "8"], ["holders"]]) {
+      const r = await run(configWith(rows), argv)
+      expect([r.code, r.out]).toEqual([2, ""])
+      expect(r.err).toContain("holders takes one PR")
+    }
+  })
+})
+
 test("an unknown command prints the usage and writes nothing", async () => {
   const config = configWith([WITH_PR])
   const r = await run(config, ["frob", "x"])

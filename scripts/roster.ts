@@ -32,6 +32,7 @@ export const USAGE = `Usage:
   roster.ts who <kind>                              (prints the name holding a manager kind's seat; writes nothing)
   roster.ts who dispatcher [1|2]                    (prints the dispatcher in slot 1, Alpha, by default, or 2, Bravo; writes nothing)
   roster.ts who assistant                           (prints the live session the roster gives the assistant kind, else exits 1; writes nothing)
+  roster.ts holders <pr>                            (prints each live row naming the PR, number or URL, in pr or prs, else exits 1, and exits 2 on a roster that does not read; writes nothing)
 A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, a PR not yet opened goes in as its issue's URL, and an extension item as <scope>/<kind>/<key>, which assign's item= sets as the row's item and adds to prs (pr= adds it to prs alone); a checker whose worker is unset or ended takes a new PR through assign with a live worker= alone.
 Times always come from the UTC clock; titles are capped at 40 chars.`
 
@@ -414,8 +415,41 @@ function checkRetask(
     )
 }
 
+// A reviewer moves a clone only on exit 1, so a roster that does not read exits 2, never 1.
+async function holders(pr: string | undefined, rest: string[]): Promise<void> {
+  if (!pr || rest.length || (!/^#?[1-9]\d*$/.test(pr) && !PR_URL_RE.test(pr)))
+    throw new Refusal("roster.ts: holders takes one PR, its number or its URL", 2)
+  const repo = PR_URL_RE.test(pr)
+    ? ""
+    : await factoryRepoOf().catch((error: Error) => {
+        throw new Refusal(`roster.ts: ${error.message}`, 2)
+      })
+  const url = prUrl(pr, repo)
+  const agents = await Bun.file(path)
+    .json()
+    .then((r: Roster) => (Array.isArray(r?.agents) ? r.agents : null))
+    .catch(() => null)
+  if (!agents) throw new Refusal(`roster.ts: the roster ${path} cannot be read`, 2)
+  const { rowPullRequests } = await import("../packages/safe-delete/src/index")
+  const names = agents
+    .filter(
+      (a) =>
+        STATUSES.live.includes(String(a.status)) &&
+        rowPullRequests({ pr: a.pr, prs: a.prs }).includes(url),
+    )
+    .map((a) => a.name)
+  if (!names.length) throw new Refusal(`roster.ts: no live row holds ${url}`, 1)
+  console.log(names.join("\n"))
+}
+
 async function main(argv: string[]): Promise<void> {
   const [cmd, name, ...rest] = argv
+  // any other throw exits 1 under Bun, which reads as free, so holders turns it into 2
+  if (cmd === "holders")
+    return holders(name, rest).catch((error: Error) => {
+      if (error instanceof Refusal) throw error
+      throw new Refusal(`roster.ts: holders cannot read the roster ${path}: ${error.message}`, 2)
+    })
   const known = ["assign", "backfill", "backlog", "backlog-done", "report", "set", "who"]
   if (!cmd || !known.includes(cmd) || (cmd !== "backfill" && !name)) throw new Refusal(USAGE, 2)
   if (cmd === "set" || cmd === "report" || cmd === "assign") checkName(cmd, name!)
