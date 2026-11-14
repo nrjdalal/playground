@@ -100,7 +100,7 @@ After a resume, restart any dev stack you served, then re-arm your watches: run 
 Done when the restarted stack answers its `/api/health` and each watch is armed once.
 Before a close that a resume follows (an account move), wait until the session has no run-slot run in flight, since the close kills that run.
 Before an account move, its dispatcher tells every session that serves a dev stack, so what it serves does not go down unannounced.
-A resume within 15 minutes of its close passes spawn.sh's load gate (the capacity gate, above); later resumes go about 2 minutes apart, since the gate counts recent starts and refuses a burst, and a refused resume waits and runs again.
+A resume within 15 minutes of its close passes spawn.sh's load gate and its session cap (the capacity gate, above); later resumes go about 2 minutes apart, since the gate counts recent starts and refuses a burst, and a refused resume waits and runs again.
 
 ## What it records
 

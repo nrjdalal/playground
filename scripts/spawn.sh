@@ -1224,7 +1224,7 @@ except (ValueError, KeyError, TypeError):
     refuse "herdr would not close pane $panes (${said:-no answer from herdr})"
   fi
   echo "closed $NAME (pane $panes on $server)"
-  # The close keeps its time and the row's status before it ended it, for the load gate's pass of a resume within 15 minutes (JUST_CLOSED, below).
+  # The close keeps its time and the row's status before it ended it, for the load and sessions gates' pass of a resume within 15 minutes (JUST_CLOSED, below).
   { mkdir -p "$DATA/closes" && echo "$(date -u +%s) $(date -u +%FT%TZ) ${was:-none}" > "$DATA/closes/$NAME"; } 2>/dev/null || true
   if [ -z "$ended" ]; then
     [ -n "$rostered" ] && echo "roster.ts says: $rostered" >&2
@@ -1601,7 +1601,7 @@ PRIORITY_FILE=
 if [ -n "$PRIORITY" ]; then
   PRIORITY_FILE=$(priority_file) || refuse "--priority starts only while a priority file stands in $DATA (priority.json, priority-start.json or another priority-<name>.json), and none does: playground priority on <session> --reason \"<why>\" opens one, on the owner's or the dispatcher's word"
 fi
-# A resume within 15 minutes of spawn.sh closing its row while it read live (not ended, parked, paused or done) passes the load gate, as a Claude Code update's close and resume do, since that session already counts in the load it comes back into; a new start, an older close and a close of a row that read otherwise meet it.
+# A resume within 15 minutes of spawn.sh closing its row while it read live (not ended, parked, paused or done) passes the load and sessions gates, as a Claude Code update's close and resume do, since that session already counts in the load it comes back into and the count held it; a new start, an older close and a close of a row that read otherwise meet it.
 JUST_CLOSED=
 if [ "$MODE" = resume ] && [ -f "$DATA/closes/$NAME" ] && read -r closed_at closed_iso closed_was < "$DATA/closes/$NAME"; then
   case "${closed_was:-none}" in
