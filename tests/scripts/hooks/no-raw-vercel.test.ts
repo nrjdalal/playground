@@ -242,7 +242,7 @@ describe("a runner's option the reader does not list hides no production deploy 
   })
 })
 
-// 22 runners each started by the one before, each past three unlisted options' values, so the readings pass their cap at every level
+// 22 runners each started by the one before, each past three unlisted options' values, so the readings pass their cap once six levels nest
 const DEEP = Array.from({ length: 22 }, (_, i) => `npx --a${i} a --b${i} b --c${i} c`).join(" ")
 
 describe("a runner started by a runner hides no production deploy (PG-2163)", () => {
@@ -257,6 +257,17 @@ describe("a runner started by a runner hides no production deploy (PG-2163)", ()
     ["npx started by bun x", "bun x npx vercel deploy --prod"],
     ["bun x started by npx", "npx bun x vercel deploy --prod"],
     ["bunx started by bunx, by vc", "bunx bunx vc --prod"],
+    ["npx's -c line, npx started by bunx", 'bunx npx -c "vercel deploy --prod"'],
+    ["npx's -c line, npx started by bun x", 'bun x npx -c "vercel deploy --prod"'],
+    ["npx's spaced --call line, npx started by bunx", 'bunx npx --call "vercel deploy --prod"'],
+    ["npx's --call= line, npx started by bunx", 'bunx npx --call="vercel deploy --prod"'],
+    ["npx's shell-mode line, npx started by bunx", 'bunx npx --shell-mode "vercel deploy --prod"'],
+    ["npx's --call= line, npx started by bun x", 'bun x npx --call="vercel deploy --prod"'],
+    ["npx's -c line, npx started by two bunx", 'bunx bunx npx -c "vercel deploy --prod"'],
+    ["npx's -c line by vc, npx started by bunx", 'bunx npx -c "vc --prod"'],
+    ["bun run's script, bun started by npx", "npx bun run vercel deploy --prod"],
+    ["bun's program, bun started by npx", "npx bun vercel deploy --prod"],
+    ["bun's program, bun started by bunx", "bunx bun vercel deploy --prod"],
   ]
 
   test.each(nested)("for a worker: %s", async (_, command) => {
@@ -274,6 +285,10 @@ describe("a runner started by a runner hides no production deploy (PG-2163)", ()
     expect(await as("ops", command)).toContain(REFUSED)
   })
 
+  test("a runner past the readings' cap runs on a line naming no vercel", async () => {
+    expect(await as("worker", `${DEEP} cowsay hi`)).toBeUndefined()
+  })
+
   test("a deploy by one runner stays refused", async () => {
     expect(await as("worker", "npx vercel deploy --prod")).toContain(REFUSED)
   })
@@ -283,6 +298,7 @@ describe("a runner started by a runner hides no production deploy (PG-2163)", ()
     ["a preview deploy", "bunx npx vercel deploy"],
     ["a runner's version", "npx npx --version"],
     ["a harmless program", "npx bunx cowsay vercel"],
+    ["npx's -c whoami", 'bunx npx -c "vercel whoami"'],
   ])("for a worker: %s under a runner a runner starts runs", async (_, command) => {
     expect(await as("worker", command)).toBeUndefined()
   })
