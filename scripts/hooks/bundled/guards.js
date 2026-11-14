@@ -1488,13 +1488,20 @@ function unwrap(state, inside, budget) {
   for (let wrapper = inside;; wrapper = undefined) {
     if (!wrapper) {
       const word = peek();
-      if (word && fromXargs(word, state.xargs)) {
-        const typed = splitFrom.get(word) ?? word;
-        state.xargs = { ...state.xargs, filled: [...state.xargs?.filled ?? [], typed] };
-      }
+      const held = [state.xargs?.replace ?? "", ...state.xargs?.outer ?? []];
+      for (const replace of held.filter((r) => r && word?.value.includes(r)))
+        if (word) {
+          const typed = splitFrom.get(word) ?? word;
+          state.xargs = {
+            ...state.xargs,
+            filled: [...state.xargs?.filled ?? [], [typed, replace]]
+          };
+        }
       wrapper = program(word?.value ?? "");
       if (!WRAPPERS.has(wrapper))
         break;
+      if (wrapper === "xargs" && state.xargs?.replace)
+        state.xargs = { ...state.xargs, outer: [...state.xargs.outer ?? [], state.xargs.replace] };
       if (wrapper === "xargs")
         state.xargs ??= {};
       take();
@@ -1703,25 +1710,30 @@ function stdinScript({ args, name }) {
   return !operand || !inline && STDIN_PATHS.has(operand.value);
 }
 async function xargsFilled(cmd, parsed, env) {
-  const filled = new Set(parsed.flatMap((p) => p.xargs?.filled ?? []));
-  const replace = parsed.find((p) => p.xargs?.filled?.length)?.xargs?.replace;
-  if (filled.size === 0 || replace === undefined)
+  const filled = new Map;
+  for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
+    filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
+  if (filled.size === 0)
     return [];
   const fed = await stdinOf(cmd, env);
-  const lines = fed.unknown ? [] : fed.value.split(`
-`).map((line) => line.trim());
-  const texts = [...new Set([fed.value.trim(), ...lines])].filter(Boolean);
+  const raw = fed.unknown ? [] : [fed.value, ...fed.value.split(`
+`), ...fed.value.split(/\s+/)];
+  const quoted = raw.some((text) => /["'\\]/.test(text));
+  const texts = [...new Set(raw.map((text) => text.replace(/["'\\]/g, "").trim()))].filter(Boolean);
   const fill = (text) => ({
     ...cmd,
     words: cmd.words.flatMap((w) => {
-      if (!filled.has(w))
+      const held = filled.get(w);
+      if (!held)
         return [w];
       if (text === undefined)
-        return [{ ...w, ...unknown(`the program xargs puts in place of ${replace}`) }];
-      return w.value.replaceAll(replace, text).split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
+        return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }];
+      return held.reduce((value, replace) => value.replaceAll(replace, text), w.value).split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
     })
   });
-  return fed.unknown || texts.length > READINGS ? [fill(undefined)] : texts.map(fill);
+  if (fed.unknown || texts.length > READINGS)
+    return [fill(undefined)];
+  return [...texts.map(fill), ...quoted ? [fill(undefined)] : []];
 }
 var BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line";
 function expandTilde(cmd, name, env) {

@@ -1435,8 +1435,8 @@ function mktempPath(cmd: Command, known: Record<string, string>): string | undef
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`
 }
 
-// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string, which xargs fills from stdin.
-export type Xargs = { filled?: Word[]; replace?: string } | undefined
+// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from stdin.
+export type Xargs = { filled?: [Word, string][]; outer?: string[]; replace?: string } | undefined
 
 export type Parsed = {
   // the other readings of a wrapper's option it cannot read, each judged as the command too
@@ -1515,12 +1515,19 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
   for (let wrapper = inside; ; wrapper = undefined) {
     if (!wrapper) {
       const word = peek()
-      if (word && fromXargs(word, state.xargs)) {
-        const typed = splitFrom.get(word) ?? word
-        state.xargs = { ...state.xargs, filled: [...(state.xargs?.filled ?? []), typed] }
-      }
+      const held = [state.xargs?.replace ?? "", ...(state.xargs?.outer ?? [])]
+      for (const replace of held.filter((r) => r && word?.value.includes(r)))
+        if (word) {
+          const typed = splitFrom.get(word) ?? word
+          state.xargs = {
+            ...state.xargs,
+            filled: [...(state.xargs?.filled ?? []), [typed, replace]],
+          }
+        }
       wrapper = program(word?.value ?? "")
       if (!WRAPPERS.has(wrapper)) break
+      if (wrapper === "xargs" && state.xargs?.replace)
+        state.xargs = { ...state.xargs, outer: [...(state.xargs.outer ?? []), state.xargs.replace] }
       if (wrapper === "xargs") state.xargs ??= {}
       take()
     }
@@ -1756,28 +1763,32 @@ function stdinScript({ args, name }: Parsed): boolean {
   return !operand || (!inline && STDIN_PATHS.has(operand.value))
 }
 
-// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J), which xargs fills from stdin, so it runs a program no typed word names: each such word filled with stdin's text, as a whole and line by line, and split at blanks into the words xargs runs, or unread when the hook cannot read stdin or it holds more lines than READINGS, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
+// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J) or an outer xargs' one, which xargs fills from stdin, so it runs a program no typed word names: each such word filled with stdin's text, as a whole, line by line and item by item (-n), a text holding a quote or a backslash with them stripped, as xargs strips them, and split at blanks into the words xargs runs; or unread when the hook cannot read stdin, stdin holds more texts than READINGS, or a text holds a quote or a backslash, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
 async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Command[]> {
-  const filled = new Set(parsed.flatMap((p) => p.xargs?.filled ?? []))
-  const replace = parsed.find((p) => p.xargs?.filled?.length)?.xargs?.replace
-  if (filled.size === 0 || replace === undefined) return []
+  const filled = new Map<Word, string[]>()
+  for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
+    filled.set(word, [...new Set([...(filled.get(word) ?? []), replace])])
+  if (filled.size === 0) return []
   const fed = await stdinOf(cmd, env)
-  const lines = fed.unknown ? [] : fed.value.split("\n").map((line) => line.trim())
-  const texts = [...new Set([fed.value.trim(), ...lines])].filter(Boolean)
+  const raw = fed.unknown ? [] : [fed.value, ...fed.value.split("\n"), ...fed.value.split(/\s+/)]
+  const quoted = raw.some((text) => /["'\\]/.test(text))
+  const texts = [...new Set(raw.map((text) => text.replace(/["'\\]/g, "").trim()))].filter(Boolean)
   const fill = (text: string | undefined) => ({
     ...cmd,
     words: cmd.words.flatMap((w): Word[] => {
-      if (!filled.has(w)) return [w]
+      const held = filled.get(w)
+      if (!held) return [w]
       if (text === undefined)
-        return [{ ...w, ...unknown(`the program xargs puts in place of ${replace}`) }]
-      return w.value
-        .replaceAll(replace, text)
+        return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }]
+      return held
+        .reduce((value, replace) => value.replaceAll(replace, text), w.value)
         .split(/\s+/)
         .filter(Boolean)
         .map((value) => ({ quoted: false, value }))
     }),
   })
-  return fed.unknown || texts.length > READINGS ? [fill(undefined)] : texts.map(fill)
+  if (fed.unknown || texts.length > READINGS) return [fill(undefined)]
+  return [...texts.map(fill), ...(quoted ? [fill(undefined)] : [])]
 }
 
 const BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line"
