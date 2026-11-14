@@ -6844,7 +6844,7 @@ var apart = (env) => ({
 });
 async function examineReading(cmd, parsed, env, visit, builtins) {
   const { args, chdir, local, name } = parsed;
-  const into = chdir && pathOf(chdir, env);
+  const into = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env);
   const here = chdir ? {
     ...env,
     cwd: into,
@@ -6946,10 +6946,11 @@ function ancestors(path) {
   }
 }
 var tildeSign = (name, dir, env) => (name === "cd" || name === "pushd") && env.old && dir?.tilde && !dir.unknown && !dir.reads?.length ? dir.value[1] : undefined;
-async function cdTarget(name, args, env) {
-  const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
-  if (!dir)
+async function cdTarget(name, cmd, args, env) {
+  const typedDir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
+  if (!typedDir)
     return homedir3();
+  const dir = landsHeld(typedDir, cmd, env) ?? typedDir;
   const lexical = dir.value === "-" ? undefined : pathOf(dir, env);
   const typed = await folder(lexical && physicalCd(args) ? kernelPath(dir, env.cwd, lexical) : lexical);
   const sign = typed ? undefined : tildeSign(name, dir, env);
@@ -6961,6 +6962,10 @@ async function folder(path) {
     return;
   return isFolder(path) ? path : undefined;
 }
+var landsHeld = (word, cmd, env) => {
+  const held = env.hold?.(word, cmd, env);
+  return held && isAbsolute2(held.value) && !held.glob && !/[:\s]/.test(held.value) ? held : undefined;
+};
 function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
   const [dir] = dirs;
@@ -6975,7 +6980,7 @@ function cdTargets(name, cmd, parsed, env, from) {
   let unread = dirs.length > 1;
   for (const typed of dirs.length > 1 ? dirs : [dir]) {
     const word = env.hold?.(typed, cmd, env) ?? typed;
-    if (word !== typed)
+    if (word !== typed && !landsHeld(typed, cmd, env))
       unread = true;
     for (const base of from.length > 0 ? from : [undefined]) {
       tick();
@@ -7021,7 +7026,7 @@ function tildeMove(move, name, parsed, env, from, back) {
 }
 async function chdirTo(name, cmd, parsed, env) {
   const left = env.cwd;
-  env.cwd = name === "popd" || cmd.detached ? undefined : await cdTarget(name, parsed.args, env);
+  env.cwd = name === "popd" || cmd.detached ? undefined : await cdTarget(name, cmd, parsed.args, env);
   if (env.old)
     env.old = name === "popd" ? {} : { dir: env.cwd === undefined ? undefined : left };
   if (env.old)
