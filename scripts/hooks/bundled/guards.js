@@ -2777,6 +2777,7 @@ import { join as join10 } from "path";
 
 // packages/settings/src/folder.ts
 import {
+  appendFileSync,
   chmodSync,
   existsSync as existsSync4,
   mkdirSync,
@@ -8748,7 +8749,7 @@ var slackSettings = defineSettings({
 });
 
 // scripts/hooks/no-prepare-write.ts
-import { appendFileSync, mkdirSync as mkdirSync2 } from "fs";
+import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync2 } from "fs";
 import { join as join8 } from "path";
 
 // scripts/hooks/no-stash.ts
@@ -8937,7 +8938,7 @@ var log = (environment, entry) => {
   try {
     const dir = join8(dataDirOf(environment), "ops");
     mkdirSync2(dir, { recursive: true });
-    appendFileSync(join8(dir, "no-prepare-write.log"), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}
+    appendFileSync2(join8(dir, "no-prepare-write.log"), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}
 `);
   } catch {}
 };
