@@ -488,7 +488,6 @@ describe("one night's run against a fixture data folder", () => {
     const all: Answers = {
       "docker ps": "playground-gone-db\texited\t10B\nplayground-dashboard-db\trunning\t10B",
       "docker system df": JSON.stringify({ Volumes: [] }),
-      "ask new": ID,
       "branch --merged": "PG-9-done",
       "for-each-ref refs/heads": "main m\nPG-9-done h9",
       "for-each-ref refs/remotes/origin": "HEAD x\nPG-8-gone r8",
@@ -582,7 +581,7 @@ describe("one night's run against a fixture data folder", () => {
       "docker rm -fv playground-gone-db",
       "docker rm -fv playground-gone-redis",
     ])
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(inputs).toEqual([])
     const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
     const line = sent.find((s) => s.to === "ops")?.text ?? ""
     for (const text of [log, line]) {
@@ -618,7 +617,7 @@ describe("one night's run against a fixture data folder", () => {
     }))
     await nightlyClean(deps)(ctx)
     expect(runs.some((r) => r.includes("ask") && r.includes(OLD))).toBe(false)
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(inputs).toEqual([])
     expect(JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))).toEqual({
       at: "2026-11-05T03:00:00.000Z",
     })
@@ -638,7 +637,7 @@ describe("one night's run against a fixture data folder", () => {
     )
     expect(log).toContain("branches: deleted 1 local, 1 remote; none to archive")
     expect(runs.map((r) => r.join(" "))).not.toContain("docker rm -fv playground-dashboard-db")
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(inputs).toEqual([])
     expect(JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))).toEqual({
       at: "2026-11-05T03:00:00.000Z",
     })
@@ -657,7 +656,7 @@ describe("one night's run against a fixture data folder", () => {
       `trashed ${wt("pg-2")} as 20261108T030000Z-shell/1, restorable with playground rm --restore 20261108T030000Z-shell/1`,
     )
     expect(log).not.toContain(`decision ${ID}`)
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(inputs).toEqual([])
     const line = sent.find((s) => s.to === "ops")
     expect(line?.text).toContain(
       `worktree ${wt("pg-2")} as trash 20261108T030000Z-shell/1 (playground rm --restore 20261108T030000Z-shell/1)`,
@@ -1366,7 +1365,7 @@ describe("one night's run against a fixture data folder", () => {
       `kept ${wt("pg-2")}: its trash move failed: playground: the roster cannot be read`,
     )
     expect(log).not.toContain(`trashed ${wt("pg-2")}`)
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(inputs).toEqual([])
     const line = sent.find((s) => s.to === "ops")
     expect(line?.text).toContain(`worktree ${wt("pg-2")} kept: its trash move failed`)
     expect(line?.text).toContain("removed 1, kept 1: container playground-gone-db; ")
@@ -1383,18 +1382,28 @@ describe("one night's run against a fixture data folder", () => {
     const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
     expect(log).toContain(`removed ${wt("pg-2")}`)
     expect(asked).toEqual([`${wt("pg-2")} https://github.com/acme/app/pull/2`])
-    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    expect(inputs).toEqual([])
   })
 
-  test("a night that frees under 1 GB posts no update", async () => {
-    const { ctx, deps, inputs } = night(leftovers(), undefined, 0.01)
+  // PG-2221: free disk shows on the System page, so a night that frees 18 GB posts no Inbox item, and its outbox line to ops and its log line stay
+  test("a night that frees 18 GB posts no Inbox item, and still sends ops its line and writes its log line", async () => {
+    const { ctx, deps, inputs, ops, runs, sent } = night(leftovers())
+    let reads = 0
+    deps.free = () => (reads++ === 0 ? 100 : 118) * 1024 ** 3
     await nightlyClean(deps)(ctx)
+    expect(runs.some((r) => r.includes("ask"))).toBe(false)
     expect(inputs).toEqual([])
+    const lines = sent.filter((s) => s.to === "ops").map((s) => s.text)
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toStartWith("nightly-clean removed 3, kept 2: ")
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toStartWith(
+      "2026-11-05T03:00:00Z free 100.0 GB, now 118.0 GB; ",
+    )
   })
 
   // #1346: a factory script left with parent pid 1 after its worktree went is ended by its own pid, TERM then KILL past the grace, and logged; the signals are fakeRun's, so nothing real is signalled
   test("an orphan of a gone worktree's script is ended by its pid, logged with pid, age and command, and no decision is asked", async () => {
-    const { ctx, deps, inputs, ops, runs, sent, wt } = night({}, undefined, 0.01)
+    const { ctx, deps, inputs, ops, runs, sent, wt } = night()
     const orphan = `bash ${wt("review-947")}/scripts/ops/run-slot.sh worker-a -- sleep 5`
     const listed = [
       `58523     1  1-04:05:06 ${orphan}`,
@@ -1423,7 +1432,7 @@ describe("one night's run against a fixture data folder", () => {
   })
   // #2177: a test's child left with parent pid 1 runs a relative script, so only its working folder, read from lsof for the parent-pid-1 rows alone, names the removed sandbox it ran in
   test("a test's child under a removed sandbox is ended by its pid, its working folder read from lsof for the parent-pid-1 rows alone", async () => {
-    const { ctx, deps, ops, runs } = night({}, undefined, 0.01)
+    const { ctx, deps, ops, runs } = night()
     const sandbox = join(ops, "T", "test-sandbox-ended1")
     const listed = [
       "60001     1    02:00:00 bun --no-env-file scripts/hooks/guards.ts",
