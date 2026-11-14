@@ -305,7 +305,7 @@ describe("code-review-loop's round 1 greps each changed term", () => {
   test("step 4 runs the changed-term grep in round 1, names its finding's shape and its Done when, with its measured case", async () => {
     const step = await stepFour()
     expect(step).toContain(
-      "the changed-term grep (`git grep -l <term>` over the whole repo, code and command help text included) for each term whose meaning the diff changes",
+      "the changed-term grep (`git grep -lE <term>` over the whole repo, code and command help text included) for each term whose meaning the diff changes",
     )
     expect(step).toContain(
       "file every list or doc either leaves behind as one such finding, each as `file:line`",
