@@ -80,6 +80,7 @@ const PRODUCTION: [string, string][] = [
   ["a rollback to a deployment", "vercel rollback demo-abc.vercel.app --yes"],
   ["an alias set", "vercel alias set demo-abc.vercel.app demo.example.com"],
   ["an alias by its default", "vercel alias demo-abc.vercel.app demo.example.com"],
+  ["a bare alias", "vercel alias"],
   ["a rolling release start", "vercel rolling-release start --deployment=dpl_123"],
   ["a rolling release approve", "vercel rolling-release approve"],
   ["an alias set by ln", "vercel ln set demo-abc.vercel.app demo.example.com"],
@@ -98,8 +99,25 @@ const PRODUCTION: [string, string][] = [
   ],
 ]
 
-// Each writes the project's secrets to disk, prints them, or hands them to a command.
-const SECRETS: [string, string][] = [
+// Each is no read the guard allows: it writes the project's secrets to disk, prints them or hands them to a command, or changes the project, its domains or its settings.
+const OTHERS: [string, string][] = [
+  ["a deployment remove", "vercel remove demo-abc.vercel.app --yes"],
+  ["a deployment remove by rm", "vercel rm demo-abc.vercel.app"],
+  ["a project remove", "vercel project rm demo"],
+  ["a domain remove", "vercel domains rm demo.example.com"],
+  ["a dns add", "vercel dns add example.com www A 192.0.2.1"],
+  ["a dns remove", "vercel dns rm rec_123"],
+  ["an env add", "vercel env add DEMO_KEY production"],
+  ["an env remove", "vercel env rm DEMO_KEY production --yes"],
+  ["an env update", "vercel env update DEMO_KEY production"],
+  ["a redirects promote", "vercel redirects promote"],
+  ["a redirects restore", "vercel redirects restore"],
+  ["a firewall write", "vercel firewall rules add --name demo"],
+  ["a flags write", "vercel flags create demo-flag"],
+  ["a deploy hook create", "vercel deploy-hooks create demo main"],
+  ["a made-up subcommand", "vercel frobnicate"],
+  ["a team switch", "vercel teams switch acme"],
+  ["an integration add that keeps the env off disk", "vercel integration add neon --no-env-pull"],
   ["an env pull", "vercel env pull"],
   ["an env pull of production", "vercel env pull .env.production --environment production"],
   ["a decrypted env list", "vercel env ls --json"],
@@ -153,7 +171,7 @@ const PREFIXES: [string, string][] = [
 ]
 
 describe("a factory session's Vercel call that moves production or reads its secrets is refused", () => {
-  test.each([...PRODUCTION, ...SECRETS, ...PREFIXES])("for a worker: %s", async (_, command) => {
+  test.each([...PRODUCTION, ...OTHERS, ...PREFIXES])("for a worker: %s", async (_, command) => {
     expect(await as("worker", command)).toContain(REFUSED)
   })
 
@@ -174,7 +192,7 @@ describe("a factory session's Vercel call that moves production or reads its sec
     expect(await as("ops", command)).toContain(REFUSED)
   })
 
-  test.each(SECRETS)("for the Ops lead too: %s", async (_, command) => {
+  test.each(OTHERS)("for the Ops lead too: %s", async (_, command) => {
     expect(await as("ops", command)).toContain(REFUSED)
   })
 
@@ -227,7 +245,6 @@ describe("a read, a preview and a help run", () => {
     ["a preview by its environment", "vercel deploy --environment preview"],
     ["a redeploy to preview", "vercel redeploy demo-abc.vercel.app --environment preview"],
     ["an env list", "vercel env ls"],
-    ["an integration add that keeps the env off disk", "vercel integration add neon --no-env-pull"],
     [
       "VERCEL.md's api read",
       "vercel api --raw /v6/deployments?projectId=demo | grep -o '{.*' | jq",
@@ -238,6 +255,12 @@ describe("a read, a preview and a help run", () => {
     ["a promote status", "vercel promote status"],
     ["a rollback status", "vercel rollback status demo"],
     ["an alias list", "vercel alias list"],
+    ["an alias ls", "vercel alias ls"],
+    ["a team list", "vercel teams ls"],
+    ["a domain list", "vercel domains ls"],
+    ["a dns list", "vercel dns ls"],
+    ["a project list", "vercel project ls"],
+    ["a help command", "vercel help deploy"],
     ["a rolling release inspect", "vercel rolling-release inspect"],
     ["help", "vercel --help"],
     ["a subcommand's help", "vercel deploy --prod --help"],

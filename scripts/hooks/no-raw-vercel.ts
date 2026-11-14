@@ -1,4 +1,4 @@
-// A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: refuses a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx) that moves what production serves (a production deploy, which also migrates the hosted database, a redeploy, a promote, a rollback, an alias or a rolling release), but for the Ops lead in a call that names no role variable and sources no file, and one that writes the project's secrets to disk, prints them or hands them to a command (env pull, pull, env ls with its values, env run, link, build, an integration add that pulls the env) or writes through vercel api or reads its /env, for every session; reads, previews and help run.
+// A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: lets a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx) run only as a read (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) or a preview deploy, and refuses every other call, a command a later CLI adds included; a production move (a production deploy, which also migrates the hosted database, a redeploy, a promote, a rollback, an alias or a rolling release) passes for the Ops lead alone, in a call that names no role variable and sources no file.
 import { toolWords } from "./no-main-checkout"
 import { namesRole, opsLead } from "./role"
 import { type Env, lex, run, unreadable, viaXargs, type Visit, type Word } from "./shell"
@@ -83,10 +83,10 @@ const ALIASES = new Map(
 const COMMANDS = words(
   "activity agent agent-runs ai-gateway alerts alias api bisect blob budgets build builders buy cache certs changelog ci comments config connect contract crons curl daemons deploy deploy-hooks dev dns domains drains env environments experiments feedback firewall flags git global-config guidance health help httpstat image images init inspect install integration integration-resource kms link list login logout logs mcp metrics microfrontends monitors notifications open organizations page-integrity permissions pricing project promote pull redeploy redirects remove rollback rolling-release routes sandbox schedules security setup signup skills storage tag teams telemetry tokens traces upgrade usage vcr version webhooks whoami",
 )
-// The commands judge() gives a verdict by their words; every other command passes.
-const JUDGED = words(
-  "alias api build deploy env install integration link promote pull redeploy rollback rolling-release",
-)
+// The reads that pass whatever their options; judge() reads every other command by its words.
+const READS = words("help inspect list logs whoami")
+// The commands whose ls or list subcommand is a read.
+const LISTS = words("dns domains integration project teams")
 const HELP = new Set(["--help", "--version", "-h", "-v"])
 const API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"])
 // The readings one call's options make at most, so many unknown options cost a bounded time; past them the call is refused as one the hook cannot read.
@@ -175,8 +175,8 @@ function judgeAll(args: Word[], fed: boolean): Verdict | undefined {
   if (!first) return unread
   const verdicts: (Verdict | undefined)[] = []
   for (const name of new Set(first.map((r) => commandOf(r.positionals[0])))) {
-    // a command judged by its name alone (logs, inspect, whoami) passes whatever options follow it
-    if (name !== undefined && COMMANDS.has(name) && !JUDGED.has(name)) continue
+    // a read (logs, inspect, whoami) passes whatever options follow it
+    if (name !== undefined && READS.has(name)) continue
     const own = OWN[name !== undefined && COMMANDS.has(name) ? name : "deploy"]
     const options = own
       ? {
@@ -211,7 +211,10 @@ function judge(
   }
   const next = rest[0]?.value
   const name = commandOf(sub)
-  if (name === undefined || name === "deploy" || !COMMANDS.has(name))
+  const listing = next === "ls" || next === "list"
+  // a first word that names no command is the folder deploy takes only when it reads as a path, so a command a later CLI adds is refused
+  const path = sub !== undefined && !COMMANDS.has(name!) && /[./~]/.test(sub.value)
+  if (name === undefined || name === "deploy" || path)
     return has("--prod") || toProduction(["--environment", "--target"], false) || built
       ? { production: true, what: "a production deploy" }
       : undefined
@@ -221,34 +224,22 @@ function judge(
       : undefined
   if (name === "promote" || name === "rollback")
     return next === "status" ? undefined : { production: true, what: `a ${name}` }
-  if (name === "alias")
-    return next === undefined || next === "list" || next === "ls"
-      ? undefined
-      : { production: true, what: "an alias change" }
+  if (name === "alias") return listing ? undefined : { production: true, what: "an alias change" }
   if (name === "rolling-release")
     return next === "inspect" ? undefined : { production: true, what: "a rolling release step" }
-  if (name === "link") return { production: false, what: "a vercel link, which pulls the env" }
-  if (name === "pull") return { production: false, what: "a vercel pull, which pulls the env" }
-  if (name === "build") return { production: false, what: "a vercel build, which may pull the env" }
-  const adds =
-    name === "install" || (name === "integration" && ["add", "i", "install"].includes(next ?? ""))
-  if (adds)
-    return has("--no-env-pull")
-      ? undefined
-      : { production: false, what: "an integration add without --no-env-pull" }
-  if (name === "env") {
-    if (rest[0] && unreadable(rest[0]))
-      return { production: false, what: "an env subcommand built at run time" }
-    if (next === "pull" || next === "run") return { production: false, what: `an env ${next}` }
+  if (LISTS.has(name) && listing) return
+  if (name === "env" && listing) {
     const format = flags.findLast((f) => f.name === "--format" || f.name === "-F")
     const json =
       !!format &&
       (!format.value || unreadable(format.value) || format.value.value.toLowerCase() === "json")
-    if ((next === "ls" || next === "list") && (has("--json") || json || built))
-      return { production: false, what: "an env list with its values" }
-    return
+    return has("--json") || json || built
+      ? { production: false, what: "an env list with its values" }
+      : undefined
   }
   if (name === "api") return judgeApi(rest, flags, built)
+  const words = [sub!.value, ...(next === undefined || unreadable(rest[0]!) ? [] : [next])]
+  return { production: false, what: `\`vercel ${words.join(" ")}\`` }
 }
 
 // A vercel api call: a write (a method other than GET, or any body) or a read of a project's env.
@@ -309,8 +300,8 @@ export async function check(
   await run(lex(command), env, visit)
   const always = verdicts.find((v) => !v.production)
   if (always)
-    return `no-raw-vercel hook refuses ${always.what}: it writes the project's secrets to disk, prints them or hands them to a command, or writes through the API. The reads run: whoami, ls, inspect, logs, env ls without --json and a vercel api GET outside /env; a secret reaches a project through an Inbox secret ask.`
+    return `no-raw-vercel hook refuses ${always.what}: in a factory session vercel runs its reads alone (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) and a preview deploy (vercel deploy, or vercel ./<folder>). A secret reaches a project through an Inbox secret ask, and production ships from main through the release skill's ship:merge.`
   const production = verdicts.find((v) => v.production)
   if (!production || ((await opsLead(raw, environment)) && !namesRole(command))) return
-  return `no-raw-vercel hook refuses ${production.what}: it changes what production serves, and a production deploy also migrates the hosted database. Production ships from main through the release skill's ship:merge, which Vercel deploys from git; the Ops lead alone makes a hand production move, in a call that names no role variable and sources no file. A preview deploy (vercel deploy without --prod) and the reads (whoami, ls, inspect, logs) run.`
+  return `no-raw-vercel hook refuses ${production.what}: it changes what production serves, and a production deploy also migrates the hosted database. Production ships from main through the release skill's ship:merge, which Vercel deploys from git; the Ops lead alone makes a hand production move, in a call that names no role variable and sources no file. A preview deploy (vercel deploy without --prod) and the reads (whoami, ls, inspect, logs, help) run.`
 }
