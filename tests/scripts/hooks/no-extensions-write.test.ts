@@ -2353,8 +2353,8 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
 
 describe("a call the reader parses whole keeps its verdict beside the unread-folder rule (PG-2106)", () => {
   test.each([
-    ["a relative cd after a held absolute one", `W=/tmp; cd "$W" && cd sub && ex -sc wq f`],
-    ["a held absolute cd after a cd to a variable", `W=/tmp; cd "$X" && cd "$W" && ex -sc wq f`],
+    ["a relative cd after a held absolute one", `W=/opt/w; cd "$W" && cd sub && ex -sc wq f`],
+    ["a held absolute cd after a cd to a variable", `W=/opt/w; cd "$X" && cd "$W" && ex -sc wq f`],
     ["an absolute cd after a cd to a variable", `cd "$X" && cd /tmp && ex -sc wq f`],
     ["a bare cd after a cd to a variable", `cd "$X" && cd && ex -sc wq f`],
     ["sed printing lines after a cd to a variable", `cd "$X" && sed -n 1,40p f`],
