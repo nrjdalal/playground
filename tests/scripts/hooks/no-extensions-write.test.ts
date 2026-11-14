@@ -3441,7 +3441,7 @@ describe("an xargs replace string outside the program word keeps the call's verd
     ["grep under a plain xargs", "ls /tmp | xargs grep -l x"],
     ["echo under xargs -I{}", "echo a | xargs -I{} echo {}"],
     ["cat under xargs -I %", "echo a | xargs -I % cat %"],
-    ["cp to /tmp under xargs -J %", "echo a | xargs -J % cp % /tmp/"],
+    ["cp to a folder of the worktree under xargs -J %", "echo a | xargs -J % cp % out/"],
     ["a sh -c script holding xargs' -I{} string", "echo a | xargs -I{} sh -c 'echo {}'"],
     ["cat under nice under xargs -J %", "echo a | xargs -J % nice cat %"],
     [
