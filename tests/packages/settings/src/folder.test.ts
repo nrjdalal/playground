@@ -327,22 +327,25 @@ test.skipIf(!CHFLAGS)(
   },
 )
 
-// One ops/log/ext-lock.log line per lift: its time, the lift and relock's duration, load5 and the caller.
+// One ops/log/ext-lock.log line per lift: its time, the trees it lifted (joined by ", "), the lift and relock's duration, load5 and the caller.
 const LIFT_LINE =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z lifted (\S+) in \d+ ms load5 \d+\.\d{2} by \S+/
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z lifted (.+?) in \d+ ms load5 \d+\.\d{2} by \S+/
 const liftLines = (data: string) => {
   const log = join(data, "ops", "log", "ext-lock.log")
   return existsSync(log) ? readFileSync(log, "utf8").trimEnd().split("\n") : []
 }
 
-test.skipIf(!CHFLAGS)("each lift of a locked root appends one line to ops/log/ext-lock.log", () => {
-  const data = lockedData("lift-log")
-  const v2 = revOf(putItem(data, ref, files("v2"), WORKER, false))
-  revOf(judgeItem(data, ref, v2, { kind: "score", score: 3 }, REVIEWER))
-  const lines = liftLines(data)
-  expect(lines).toHaveLength(2)
-  for (const line of lines) expect(LIFT_LINE.exec(line)?.[1]).toBe(extensionsDir(data))
-})
+test.skipIf(!CHFLAGS)(
+  "each lift of a locked root appends one line to ops/log/ext-lock.log, naming the scope folder it lifted",
+  () => {
+    const data = lockedData("lift-log")
+    const v2 = revOf(putItem(data, ref, files("v2"), WORKER, false))
+    revOf(judgeItem(data, ref, v2, { kind: "score", score: 3 }, REVIEWER))
+    const lines = liftLines(data)
+    expect(lines).toHaveLength(2)
+    for (const line of lines) expect(LIFT_LINE.exec(line)?.[1]).toBe(scopeDir(data, ME))
+  },
+)
 
 test.skipIf(!CHFLAGS)("a failed write still relocks the root and logs its lift", () => {
   const data = lockedData("lift-fail")
@@ -530,18 +533,20 @@ test.skipIf(!CHFLAGS)("a first write to a scope with no folder yet lifts the who
   ),
 )
 
-test.skipIf(!CHFLAGS)("an accepted list's put lifts the whole root, whose hooks/ it writes", () =>
-  rootLifts("list-put", (data) =>
-    revOf(
-      putItem(
-        data,
-        { key: "no-public-leak", kind: "list", scope: ME },
-        { attachments: [], body: null, files: null, value: ["made-up-term"] },
-        OWNER,
-        true,
+test.skipIf(!CHFLAGS)(
+  "an accepted list's put lifts the whole root, since it can write the root's hooks/",
+  () =>
+    rootLifts("list-put", (data) =>
+      revOf(
+        putItem(
+          data,
+          { key: "no-public-leak", kind: "list", scope: ME },
+          { attachments: [], body: null, files: null, value: ["made-up-term"] },
+          OWNER,
+          true,
+        ),
       ),
     ),
-  ),
 )
 
 test.skipIf(!CHFLAGS)("ext lock refuses a root that does not exist", () => {
