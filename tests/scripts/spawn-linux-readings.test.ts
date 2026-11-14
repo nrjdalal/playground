@@ -62,8 +62,13 @@ describe("on Linux the capacity gate reads /proc", () => {
     expect(r.err).toContain("the memory gate holds it: free is 7% (/proc/meminfo), 8% is the floor")
   })
 
+  // a fresh worker's start reads run-slot's room first, whose gauges take the first two second reads
   test("pswpin's rise over a second holds a fresh worker start", async () => {
-    const r = await spawn(worker, [], linux({ free: 62, swapins: 150 }, [], [["vmstat"]]))
+    const r = await spawn(
+      worker,
+      [],
+      linux({ free: 62, swapins: 150 }, [], [["stat"], ["vmstat"], ["vmstat"]]),
+    )
     expect(r.code).not.toBe(0)
     expect(r.err).toContain(
       "the memory gate holds it: swap-ins are 150/s (/proc/vmstat), 100/s is the line, while free reads 62% (/proc/meminfo), which counts compressible pages",

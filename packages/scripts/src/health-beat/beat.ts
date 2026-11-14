@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { parseSessionState, sessionStateDir } from "@packages/config/session-state"
 
 import { readMachine } from "../ops-machine/machine"
+import { readIdle } from "../ops-machine/readings"
 import type { Run } from "../ops-tick/tick"
 import { type Health, readRunning, type Running } from "./running"
 
@@ -119,7 +120,7 @@ const readJobs = async (
   return { down, late, ok }
 }
 
-// Reads everything the beat prints, once: what the install runs through running.ts, the Mac's load and memory through ops-machine's read, the CPU's idle share from top, and the battery from pmset.
+// Reads everything the beat prints, once: what the install runs through running.ts, the Mac's load and memory through ops-machine's read, the CPU's idle share from top or Linux's /proc/stat (readIdle, which waits `wait` between its two reads, a second unless a test passes its own), and the battery from pmset.
 export const readBeat = async (input: {
   at: Date
   data: string
@@ -128,18 +129,13 @@ export const readBeat = async (input: {
   portless: string
   repo: string
   run: Run
+  wait?: () => Promise<void>
   zone: string
 }): Promise<Reading> => {
   const { at, data, run } = input
   const ops = join(data, "ops")
   const machine = await readMachine(run, ops, [], at)
-  const top = (await run(["top", "-l", "2", "-s", "1", "-n", "0"])).out
-  const cpu =
-    top
-      .split("\n")
-      .filter((line) => line.startsWith("CPU usage"))
-      .at(-1) ?? ""
-  const idle = /([\d.]+)% idle/.exec(cpu)
+  const idle = await readIdle(run, input.wait)
   const batt = /(\d+)%; ([^;]+)/.exec((await run(["pmset", "-g", "batt"])).out)
   const jobs = await readJobs(ops, at)
   return {
@@ -149,7 +145,7 @@ export const readBeat = async (input: {
     down: jobs.down,
     freeMin: input.freeMin,
     freePct: machine.freePct,
-    idlePct: idle ? Number(idle[1]) : null,
+    idlePct: idle,
     late: jobs.late,
     load5: machine.load5,
     ok: jobs.ok,

@@ -1362,10 +1362,11 @@ CLONE_GAP=180
 CLONE_MARGIN=4
 # a clone that has waited this long passes the big-run hold, so back-to-back big runs cannot starve the lane (issue 1317, 7 Nov 10:24 to 11:55Z: about 11 clones asked and none started while a big run held a slot); 10 minutes is past a cold install's 353 s (issue 1344)
 CLONE_WAIT_MAX=${RUN_SLOT_CLONE_WAIT_MAX:-600}
-# the clones' brake, the owner's load rule of 5 Nov (load5 under 15, the owner's Mac's core count), one per core: sysctl's hw.ncpu, the count spawn.sh's load gate starts from, else 15; never load_line, whose cap shuts run-slot-2 (6 Nov, 06:52Z to 07:03Z: a cap of 1 held every clone)
+# the clones' brake, the owner's load rule of 5 Nov (load5 under 15, the owner's Mac's core count), one per core: sysctl's hw.ncpu, the count spawn.sh's load gate starts from, else the cpu<n> lines of Linux's /proc/stat, else 15; never load_line, whose cap shuts run-slot-2 (6 Nov, 06:52Z to 07:03Z: a cap of 1 held every clone)
 clone_brake() {
   local n
   n=$(sysctl -n hw.ncpu 2>/dev/null | tr -cd 0-9)
+  [ -n "$n" ] || n=$(proc_cores)
   if [ "${n:-0}" -gt 0 ]; then echo "$n"; else echo 15; fi
 }
 
@@ -1986,7 +1987,7 @@ lanes_open() {
     # every waiter's reading rewrites the verdict, so its age says how fresh it is (fresh_lanes)
     echo "$verdict" > "$OPS/run-slot.lanes.$$" && mv -f "$OPS/run-slot.lanes.$$" "$OPS/run-slot.lanes"
     if [ "$seen" != "$verdict" ]; then
-      free=$(memstat level); level=$(memstat vm_pressure_level)
+      mem_read; free=$FREE level=$LEVEL
       rlog lanes "$verdict${why:+ why=$why} idle=$idle% load1=$load free=${free:--}${free:+%} pressure=${level:--} swapins=$swap disk0_tps=${tps:--} disk0_mbs=${mbs:--}"
     fi
   fi
@@ -2112,8 +2113,47 @@ may_reserve() {
   if [ -n "${5:-}" ]; then printf -v "$5" '%s' "$rr"; else echo "$rr"; fi
 }
 
-# the load averages as `{ <1m> <5m> <15m> }`: from sysctl, else from uptime, since Claude Code's sandbox refuses the sysctl command's name lookup
-loadavg() { sysctl -n vm.loadavg 2>/dev/null || LC_ALL=C uptime 2>/dev/null | sed -nE 's/.*load averages?: *([^ ,]+),? +([^ ,]+),? +([^ ,]+).*/{ \1 \2 \3 }/p'; }
+# Linux's readings, from /proc's text where macOS's commands do not read (spawn.sh's and packages/scripts/src/ops-machine/readings.ts's sources), each nothing when it does not read, never 0; builtins alone but proc_idle's and proc_swapins' one sleep.
+# PROC is the folder that text comes from: PLAYGROUND_PROC under the test sandbox's marker alone (TEST_SANDBOX_HOME), where a test points it at recorded text, so a session that sets it cannot feed the lanes a reading; else /proc.
+PROC=/proc
+[ -n "${TEST_SANDBOX_HOME:-}" ] && [ -n "${PLAYGROUND_PROC:-}" ] && PROC=$PLAYGROUND_PROC
+# /proc/loadavg's three loads in sysctl's `{ <1m> <5m> <15m> }`
+proc_loadavg() { local a b c; read -r a b c _ 2>/dev/null < "$PROC/loadavg" && [ -n "$c" ] && echo "{ $a $b $c }"; }
+# /proc/stat's cpu<n> lines, one per core
+proc_cores() { local k n=0; while read -r k _; do case $k in cpu[0-9]*) n=$((n + 1)) ;; esac; done 2>/dev/null < "$PROC/stat"; [ "$n" -gt 0 ] && echo "$n"; }
+# /proc/stat's cpu line as `<idle and iowait> <all eight busy and idle fields>` (guest time is counted in user already)
+proc_cpu() {
+  local k u n s i w q sq st
+  read -r k u n s i w q sq st _ 2>/dev/null < "$PROC/stat" && [ "$k" = cpu ] || return 1
+  case "$u$n$s$i$w$q$sq$st" in '' | *[!0-9]*) return 1 ;; esac
+  echo "$((i + w)) $((u + n + s + i + w + q + sq + st))"
+}
+# the CPU's idle share in percent over two /proc/stat reads a second apart, two decimals
+proc_idle() {
+  local a b i1 t1 i2 t2 p
+  a=$(proc_cpu) || return; sleep 1; b=$(proc_cpu) || return
+  read -r i1 t1 <<< "$a"; read -r i2 t2 <<< "$b"
+  [ $((t2 - t1)) -gt 0 ] || return
+  p=$(((i2 - i1) * 10000 / (t2 - t1)))
+  printf '%d.%02d\n' $((p / 100)) $((p % 100))
+}
+# /proc/vmstat's pswpin, the pages swapped in since boot
+proc_pswpin() { local k v; while read -r k v; do [ "$k" = pswpin ] && case $v in '' | *[!0-9]*) return 1 ;; *) echo "$v"; return ;; esac; done 2>/dev/null < "$PROC/vmstat"; return 1; }
+# the swap-ins over a second, pswpin's rise between two reads
+proc_swapins() { local a b; a=$(proc_pswpin) || return; sleep 1; b=$(proc_pswpin) || return; [ "$b" -ge "$a" ] && echo $((b - a)); }
+# Linux's free share and pressure level into FREE and LEVEL: MemAvailable's whole share of MemTotal in /proc/meminfo, and PSI's /proc/pressure/memory on macOS's scale, 4 once full avg10 is 10% or more, 2 once some avg10 is, else 1 (spawn.sh's pressure_level, whose 10% lines are estimated)
+proc_mem() {
+  local k v total= avail= some= full=
+  FREE= LEVEL=
+  while read -r k v _; do case $k in MemTotal:) total=$v ;; MemAvailable:) avail=$v ;; esac; done 2>/dev/null < "$PROC/meminfo"
+  case "$total$avail" in *[!0-9]*) ;; *) [ -n "$avail" ] && [ "${total:-0}" -gt 0 ] && FREE=$((avail * 100 / total)) ;; esac
+  while read -r k v _; do case $k in some) some=${v#avg10=} ;; full) full=${v#avg10=} ;; esac; done 2>/dev/null < "$PROC/pressure/memory"
+  case "$some" in '' | *[!0-9.]* | .*) return 0 ;; esac
+  case "$full" in '' | *[!0-9.]* | .*) return 0 ;; esac
+  if [ "${full%%.*}" -ge 10 ]; then LEVEL=4; elif [ "${some%%.*}" -ge 10 ]; then LEVEL=2; else LEVEL=1; fi
+}
+# the load averages as `{ <1m> <5m> <15m> }`: from sysctl, else Linux's /proc/loadavg, else from uptime, since Claude Code's sandbox refuses the sysctl command's name lookup
+loadavg() { sysctl -n vm.loadavg 2>/dev/null || proc_loadavg || LC_ALL=C uptime 2>/dev/null | sed -nE 's/.*load averages?: *([^ ,]+),? +([^ ,]+),? +([^ ,]+).*/{ \1 \2 \3 }/p'; }
 load1() { loadavg | awk '{print int($2)}'; }
 load5() { loadavg | awk '{print int($3)}'; }
 # the swap-ins over vm_stat -c 2 1's one second: its second row under the header, never the first, which counts since boot; nothing when either row is missing
@@ -2142,8 +2182,10 @@ gauges() {
   if [ $((now - cached)) -ge 10 ]; then
     if took=$(gauges_lock "$now"); then
       idle=$(top -l 2 -n 0 2>/dev/null | sed -nE 's/^CPU usage:.* ([0-9.]+)% idle.*/\1/p' | awk 'END { if (NR == 2) print }')
+      [ -n "$idle" ] || idle=$(proc_idle)
       last=$swap
       swap=$(swapin_rate)
+      [ -n "$swap" ] || swap=$(proc_swapins)
       read -r tps mbs <<< "$(disk_rate)"
       printf '%s %s %s %s %s %s\n' "$now" "${idle:--}" "${swap:--}" "${tps:--}" "${mbs:--}" "${last:--}" > "$OPS/run-slot.gauges.$$" 2>/dev/null && mv -f "$OPS/run-slot.gauges.$$" "$OPS/run-slot.gauges" 2>/dev/null
       [ "$(mtime "$lock")" = "$took" ] && rmdir "$lock" 2>/dev/null
@@ -2165,6 +2207,8 @@ gauges_lock() {
 }
 # macOS's memory reading $1: level (the free share) or vm_pressure_level (1 normal, 2 warn, 4 critical)
 memstat() { sysctl -n "kern.memorystatus_$1" 2>/dev/null | tr -cd 0-9; }
+# sets FREE and LEVEL, the free share and the pressure level: macOS's (memstat), else Linux's (proc_mem), each empty when neither reads
+mem_read() { FREE=$(memstat level); LEVEL=$(memstat vm_pressure_level); [ -n "$FREE" ] && [ -n "$LEVEL" ] || proc_mem; }
 # memory room for a second suite: macOS's free share at 40% or more, its pressure level normal (1; 2 is warn, 4 critical) and swap-ins under SWAPINS_MAX a
 # second in this reading or the last, since a one-second sample spikes and falls back (5 Nov, 06:19 to 07:45Z: 17 of the 24 memory shuts came at pressure 1
 # with 70 to 80% free, from readings such as 128, 242 and 1116 between 0, 8, 20 and 44); an unread reading (Claude Code's sandbox refuses the first two) leaves no room, said once a run on stderr
@@ -2174,7 +2218,7 @@ told() { [ -e "$MEM_TOLD-$1" ] || { echo "$2" >&2; : > "$MEM_TOLD-$1"; }; }
 mem_unread() { told "$1" "run-slot.sh: cannot read the memory (sysctl kern.memorystatus_*), so $2"; }
 mem_ok() {
   local free level swap last
-  free=$(memstat level); level=$(memstat vm_pressure_level)
+  mem_read; free=$FREE level=$LEVEL
   if [ -z "$free" ] || [ -z "$level" ]; then
     mem_unread suite "no second suite runs beside this one"
     return 1
@@ -2253,8 +2297,9 @@ if [ -n "$KIND" ]; then
   # an unread memory reading (Claude Code's sandbox refuses it) holds the clone, said once a run
   clone_held() {
     [ "$KIND" = clone ] && switch_on run-slot.clone-off && ! printf "%s\n" "$WHO" | grep -qxf "$OPS/run-slot.clone-allow" 2>/dev/null || return 1
-    [ -n "$(memstat level)" ] || { mem_unread clone "run-slot.clone-off holds this clone until it expires or run-slot.clone-allow names $WHO"; return 0; }
-    ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
+    mem_read
+    [ -n "$FREE" ] || { mem_unread clone "run-slot.clone-off holds this clone until it expires or run-slot.clone-allow names $WHO"; return 0; }
+    ! { case "$LEVEL" in 1|2) true ;; *) false ;; esac && [ "$FREE" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
   }
   # a clone waiter's place, run-slot.clone-waiters/<class>-<asked second>.<nanoseconds>-<pid>-<who>, keeps its name across a reread's exec, so a new copy a gate holds drops it until the gates pass (review round 1: it held back every clone clone-allow let through), and one no gate holds keeps its place; the nanoseconds keep two clones that ask in one second in ask order, where seconds alone tied and the glob fell to the pid (issues 1619, 1688)
   CLONE_QUEUE="$OPS/run-slot.clone-waiters"

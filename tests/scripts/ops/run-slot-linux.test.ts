@@ -56,7 +56,7 @@ describe("on Linux the lanes read /proc", () => {
     const { m } = look({ free: 64, idle: 80, some: 10 })
     expect(await m.runs("worker-x")).toBe(true)
     expect(await Bun.file(join(m.ops, "run-slot.runs.log")).text()).toMatch(
-      / lanes shut why=mem idle=\d+(\.\d+)?% load1=1\.25 free=64% pressure=2 swapins=\d+/,
+      / lanes worker-x \d+ shut why=mem idle=\d+(\.\d+)?% load1=1\.25 free=64% pressure=2 swapins=\d+/,
     )
   })
 })

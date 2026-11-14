@@ -24,7 +24,8 @@ import {
 // Every case runs spawn.sh, which starts fake processes and waits on them; one took 19.9s on the loaded runner box, so each gets twice that.
 setDefaultTimeout(40_000)
 
-const temp = Bun.spawnSync(["getconf", "DARWIN_USER_TEMP_DIR"]).stdout.toString().trim()
+// macOS's user temp folder, or /tmp on Linux, whose getconf has no such name
+const temp = Bun.spawnSync(["getconf", "DARWIN_USER_TEMP_DIR"]).stdout.toString().trim() || "/tmp"
 const settingsOf = (r: { home: string }, file: string) => join(r.home, ".playground", file)
 const builtOf = (r: { home: string }, file: string) =>
   JSON.parse(readFileSync(settingsOf(r, file), "utf8"))

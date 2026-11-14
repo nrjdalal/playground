@@ -42,7 +42,7 @@ export const procText = ({
   meminfo: [
     `MemTotal:       ${TOTAL_KB} kB`,
     `MemFree:        ${Math.floor(TOTAL_KB / 10)} kB`,
-    `MemAvailable:   ${Math.floor((TOTAL_KB * free) / 100)} kB`,
+    `MemAvailable:   ${Math.ceil((TOTAL_KB * free) / 100)} kB`,
     "Buffers:          482112 kB",
     "Cached:         40123456 kB",
     "SwapCached:            0 kB",
@@ -55,16 +55,16 @@ export const procText = ({
   vmstat: `nr_free_pages 3276800\npgpgin 123456\npswpin ${PSWPIN}\npswpout 116968\n`,
 })
 
-// The second read's text, 1000 jiffies of CPU on and `swapins` more pages swapped in.
-export const laterText = ({ cores = 20, idle = 60, swapins = 0 }: Proc = {}): Record<
-  string,
-  string
-> => ({
-  stat: `cpu  ${101000 - Math.round(idle * 10)} 200 50000 ${850000 + Math.round(idle * 10)} 1000 0 300 0 0 0\n${cpus(cores)}btime 1763100000\n`,
-  vmstat: `nr_free_pages 3276800\npgpgin 123456\npswpin ${PSWPIN + swapins}\npswpout 116968\n`,
+// The text the `step`th move of a file brings in: 1000 more jiffies of CPU at `idle`, and `swapins` more pages swapped in, each step on from the last.
+export const laterText = (
+  { cores = 20, idle = 60, swapins = 0 }: Proc = {},
+  step = 1,
+): Record<string, string> => ({
+  stat: `cpu  ${100000 + step * (1000 - Math.round(idle * 10))} 200 50000 ${850000 + step * Math.round(idle * 10)} 1000 0 300 0 0 0\n${cpus(cores)}btime 1763100000\n`,
+  vmstat: `nr_free_pages 3276800\npgpgin 123456\npswpin ${PSWPIN + step * swapins}\npswpout 116968\n`,
 })
 
-// A folder of /proc text for `proc`, with each name in `omit` left out. `later` lists the second reads in the order the readings take them: the fake sleep moves later/1's files in, then later/2's.
+// A folder of /proc text for `proc`, with each name in `omit` left out. `later` lists the second reads in the order the readings take them, run-slot's gauges (stat, then vmstat) first wherever spawn.sh reads its room: the fake sleep moves later/1's files in, then later/2's.
 export const procDir = (proc: Proc = {}, omit: string[] = [], later: string[][] = []): string => {
   const dir = mkdtempSync(join(tmpdir(), "proc-"))
   const write = (path: string, text: string) => {
@@ -73,9 +73,12 @@ export const procDir = (proc: Proc = {}, omit: string[] = [], later: string[][] 
   }
   for (const [name, text] of Object.entries(procText(proc)))
     if (!omit.includes(name)) write(join(dir, name), text)
+  const steps: Record<string, number> = {}
   later.forEach((names, i) => {
-    const text = laterText(proc)
-    for (const name of names) write(join(dir, "later", String(i + 1), name), text[name]!)
+    for (const name of names) {
+      steps[name] = (steps[name] ?? 0) + 1
+      write(join(dir, "later", String(i + 1), name), laterText(proc, steps[name])[name]!)
+    }
   })
   return dir
 }

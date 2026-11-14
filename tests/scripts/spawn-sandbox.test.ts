@@ -13,7 +13,8 @@ const main = dirname(
     .stdout.toString()
     .trim(),
 )
-const temp = Bun.spawnSync(["getconf", "DARWIN_USER_TEMP_DIR"]).stdout.toString().trim()
+// macOS's user temp folder, or /tmp on Linux, whose getconf has no such name
+const temp = Bun.spawnSync(["getconf", "DARWIN_USER_TEMP_DIR"]).stdout.toString().trim() || "/tmp"
 
 const sandboxOf = (home: string, data = join(home, ".playground")) => ({
   allowUnsandboxedCommands: false,

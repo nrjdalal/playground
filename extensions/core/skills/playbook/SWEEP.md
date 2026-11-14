@@ -8,7 +8,7 @@ Work the steps in order.
 ## 1. Read what changed
 
 Run `playground sweep <your name>`.
-It prints only what changed since your last sweep, one line each: a new alert from `ops/alerts-pending.json`, the merge queue when it changes, load5 (the third field of `sysctl -n vm.loadavg`) crossing 15,
+It prints only what changed since your last sweep, one line each: a new alert from `ops/alerts-pending.json`, the merge queue when it changes, load5 (the third field of `sysctl -n vm.loadavg`, on Linux `/proc/loadavg`) crossing 15,
 the single-slot flag turning on or off or moving between held by load and lifted under the cap, each of your roster rows whose ETA has passed, and for Ops, once an hour, each ops switch on with its age and reason;
 for the Builder, it reads the factory repo's open PRs in one GitHub call and prints `merge queue missing` while the owner's PRs into `canary` are open and `merge-queue.json` is not there, or `merge queue stale` when it lists a PR no longer open or leaves out an owner's open one, its parked PRs counting as listed, which the Builder fixes by step 4's queue upkeep;
 its cursor is `sweep/<your name>.json` in the data folder.
