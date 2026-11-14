@@ -25,6 +25,7 @@ import {
   type Fixture,
   fixtureDir,
   fixtureHerdrInput,
+  fixtureHerdrScreen,
   launcherRuns,
   loadFixture,
   markLaunched,
@@ -684,6 +685,39 @@ describe("writeFixture", () => {
     expect(parseLines(readFileSync(String(session.transcript_path), "utf8")).at(-1)?.text).toBe(
       long.trim(),
     )
+  })
+
+  // the model menu's switch on a fixture stack, as Claude Code 2.1.325 does it mid-conversation: /model draws its confirm over the box, its Yes switches the model the status line names, and No keeps it
+  test("a /model prompt draws the switch confirm, its Enter switches the status line's model, and No keeps it", () => {
+    const dir = join(scratch("fixture-model"), "fixture")
+    writeFixture(shipped(), dir, ROOTS)
+    const pane = readFixtureHerdr(dir).panes.find((p) => p.transcript_path)?.pane_id ?? ""
+    const status = () => fixtureHerdrScreen(pane, dir).split("\n").at(-1) ?? ""
+    fixtureHerdrInput(pane, { prompt: "/model sonnet" }, dir)
+    expect(fixtureHerdrScreen(pane, dir)).toContain("1. Yes, switch to Sonnet")
+    fixtureHerdrInput(pane, { keys: ["enter"] }, dir)
+    expect(fixtureHerdrScreen(pane, dir)).not.toContain("Switch model?")
+    expect(status()).toContain("Sonnet")
+    fixtureHerdrInput(pane, { prompt: "/model haiku" }, dir)
+    fixtureHerdrInput(pane, { keys: ["2"] }, dir)
+    expect(fixtureHerdrScreen(pane, dir)).not.toContain("Switch model?")
+    expect(status()).toContain("Sonnet")
+  })
+
+  // a sent message's turn ends on its own, since no made-up session replies, so a later model pick does not read the pane as busy
+  test("a message sets the pane working until its turn ends, and a /model after it still draws the confirm", () => {
+    const dir = join(scratch("fixture-turn"), "fixture")
+    writeFixture(shipped(), dir, ROOTS)
+    const pane = readFixtureHerdr(dir).panes.find((p) => p.transcript_path)?.pane_id ?? ""
+    const sentAt = new Date()
+    const later = new Date(sentAt.getTime() + 60_000)
+    const status = (at: Date) =>
+      readFixtureHerdr(dir, at).panes.find((p) => p.pane_id === pane)?.agent_status
+    fixtureHerdrInput(pane, { prompt: "hello" }, dir, sentAt)
+    expect(status(sentAt)).toBe("working")
+    expect(status(later)).toBe("idle")
+    fixtureHerdrInput(pane, { prompt: "/model sonnet" }, dir, later)
+    expect(fixtureHerdrScreen(pane, dir)).toContain("1. Yes, switch to Sonnet")
   })
 
   test("types into no transcript outside its own folder, whatever its scratch state names", () => {

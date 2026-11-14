@@ -39,7 +39,7 @@ less a quarter (`gates.smallReserve`) kept for small items unless the start is s
 refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores, and the refusal names the load, the starts and the line;
 a `--priority` start passes it while `priority.json`, an org's own `priority-<name>.json`, a job's own `priority-start.json` or a session's own window (`playground priority on`, [scripts/README.md](../../../../scripts/README.md#spawnsh)) stands in the data folder, since priority work comes first, as it passes focus on any of them,
 and so does a resume within 15 minutes of `spawn.sh close` ending a row that read live, since that session already counts in the load it comes back into,
-and a manager's start or resume (role dispatcher or lead, an orchestrator's included, by every path: `spawn.sh restore`, `playground <manager>`, the Dashboard's start, switch and restart) while the CPU reads 40% idle or more (`top -l 2 -n 0`'s second sample, run-slot's bar for slots 2 to 4), its row's `readings.cpu_idle` naming the share,
+and a manager's start or resume (role dispatcher or lead, an orchestrator's included, by every path: `spawn.sh restore`, `playground <manager>`, the Dashboard's start, switch and restart) while the CPU reads 40% idle or more (`top -l 2 -n 0`'s second sample, run-slot's default bar for slots 2 to 4), its row's `readings.cpu_idle` naming the share,
 since after a reboot load5 still carries the boot's spike and each settled start still counts, which held the managers' restore at 63% idle; under 40%, or with no reading, the line holds it and its refusal names the share;
 memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`),
 and for a fresh worker start alone swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), refusing when vm_stat gives no reading, since free memory counts compressible pages and read 62% on 7 Nov while 150 pages swapped in a second; every other start keeps its pass, as at the slots gate;
@@ -75,6 +75,7 @@ from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approv
 A resume of a dispatcher, the Assistant or the hosted session keeps neither a model nor an effort the owner picked in its Dashboard composer ([SKILL.md](SKILL.md#chain)).
 Its first prompt names the session, its role and who it reports to, and has it load this skill and read `<brief>`, a file under `~/.playground`, which spawn.sh refuses to start without (a Claude worker's adds that `brief-rush.md` binds it on its Claude lane, within the lanes its own header scopes, while that file exists; a GLM worker's leaves it out).
 spawn.sh reads `<brief>` relative to `~/.playground` (`handoffs/brief-<name>.md`), so a bare file name fails with `is not a file`.
+Every start and resume makes the session's scratchpad, the data folder's `scratchpad/<name>/`, at mode 700 before the pane opens, so its first note or log lands there.
 Its skills come by `--plugin-dir` from the folder `playground orgs resolve --repo <its folder>` writes fresh from each scope's accepted copy at every start: an org's worker, in a checkout whose GitHub origin the org owns, or in a folder with no GitHub origin inside the org's own folder in the home folder (`~/<org>`), gets that org's extension's skills over core's.
 
 `--harness codex` starts the first dispatcher in Codex in place of Claude Code: `spawn.sh manager <dispatcher> <brief> --harness codex`, and its resume, alone; spawn.sh refuses it for any other session and beside `--backend`, `--account`, `--model` or `--effort`, since Codex runs on the one login and the model its `CODEX_HOME` holds.
@@ -177,6 +178,7 @@ each through `spawn.sh resume` and its gate with the `--account` its start was g
 in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, or an exec line that does not parse or that it does not run),
 `waiting <name>: <reason>` (a gate holding it over a reading that falls, or focus standing for another session) or `not restored <name>: <reason>` (any other refusal, a gate that cannot read its input or reads a bad setting included).
 The first dispatcher's record runs first, past every gate, so the owner's dispatcher is back before any other resume takes the gate's room, then every other manager's, so the managers are back before the workers, then the rest.
+A skip line takes `kind_of_name` alone and a run line takes `kind_of`, since a full `kind_of` on every skip line (608 on the live log) adds about 20 s.
 A restore whose only misses wait exits 0, since ops-herdr runs it again each cycle while a session waits; a `not restored` line exits 1.
 It is safe to run again, one at a time:
 while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
