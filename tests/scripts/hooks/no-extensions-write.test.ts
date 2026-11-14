@@ -2081,14 +2081,10 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["git show after a cd to a variable", `cd "$X" && git show HEAD`],
     ["git rev-parse after a cd to a variable", `cd "$X" && git rev-parse HEAD`],
     ["git on a literal folder after a cd to a variable", `cd "$X" && git -C /tmp/r checkout -- f`],
-    [
-      "git with a literal git folder and work tree after a cd to a variable",
-      `cd "$X" && git --git-dir=/tmp/r/.git --work-tree=/tmp/r checkout -- f`,
-    ],
     ["git rm on a literal folder after a cd to a variable", `cd "$X"; git -C /tmp/x rm -r .`],
     [
-      "git rm with a literal git folder and work tree after a cd to a variable",
-      `cd "$X"; git --git-dir=/tmp/x/.git --work-tree=/tmp/x rm -r .`,
+      "git on a literal folder with a work tree of the root after a cd to a variable",
+      `cd "$X" && git -C /tmp/r --work-tree=/ checkout -- f`,
     ],
     [
       "git on a literal folder with a git folder by it after a cd to a variable",

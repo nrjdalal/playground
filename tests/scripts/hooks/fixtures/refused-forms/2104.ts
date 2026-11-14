@@ -53,6 +53,34 @@ export const groups: Group[] = [
         "a recursive git rm with a work tree alone after a cd to a variable",
         `cd "$X"; git --work-tree=/tmp/x rm -r .`,
       ],
+      [
+        "git with a git folder and a work tree after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/r/.git --work-tree=/tmp/r checkout -- f`,
+      ],
+      [
+        "a recursive git rm with a git folder and a work tree after a cd to a variable",
+        `cd "$X"; git --git-dir=/tmp/x/.git --work-tree=/tmp/x rm -r .`,
+      ],
+      [
+        "git with a git folder and the filesystem root as its work tree after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/x/.git --work-tree=/ checkout -- f`,
+      ],
+      [
+        "git with a git folder and the root spelt with a dot as its work tree after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/x/.git --work-tree=/. checkout -- f`,
+      ],
+      [
+        "git with a git folder and the root spelt with two slashes as its work tree after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/x/.git --work-tree=// checkout -- f`,
+      ],
+      [
+        "git with a git folder and the root spelt by a climb as its work tree after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/x/.git --work-tree=/tmp/.. checkout -- f`,
+      ],
+      [
+        "git rm with a git folder and the filesystem root as its work tree after a cd to a variable",
+        `cd "$X"; git --git-dir=/tmp/x/.git --work-tree=/ rm f`,
+      ],
       ["unzip after a cd to a variable", `cd "$X" && unzip /tmp/a.zip`],
       ["bun run after a cd to a variable", `cd "$X" && bun run build`],
       [
