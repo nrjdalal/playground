@@ -16759,8 +16759,9 @@ function judge7({ flags, positionals }, unreadWord, fed) {
     if (!/[./~]/.test(next))
       return { production: false, what: `\`vercel deploy ${next}\`` };
   }
+  const envLetter = flags.some((f) => f.name === "-e" && (!f.value || unreadable(f.value) || !f.value.value.includes("=")));
   if (name === undefined || name === "deploy" || path)
-    return has("--prod") || toProduction(["--environment", "--target"], false) || built ? { production: true, what: "a production deploy" } : undefined;
+    return has("--prod") || toProduction(["--environment", "--target"], false) || envLetter || built ? { production: true, what: "a production deploy" } : undefined;
   if (name === "redeploy")
     return toProduction(["--environment", "-e", "--target"], true) || built ? { production: true, what: "a redeploy that may land in production" } : undefined;
   if (name === "promote" || name === "rollback")

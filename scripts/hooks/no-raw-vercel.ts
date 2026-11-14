@@ -224,8 +224,12 @@ function judge(
       return { production: false, what: "a word built at run time after vercel deploy" }
     if (!/[./~]/.test(next!)) return { production: false, what: `\`vercel deploy ${next}\`` }
   }
+  // deploy's -e is --env's letter in 65.8.0 but names the environment on redeploy and env, and a letter's meaning can move between versions, and a run-time env var is KEY=VALUE, so a value with no = reads as the environment
+  const envLetter = flags.some(
+    (f) => f.name === "-e" && (!f.value || unreadable(f.value) || !f.value.value.includes("=")),
+  )
   if (name === undefined || name === "deploy" || path)
-    return has("--prod") || toProduction(["--environment", "--target"], false) || built
+    return has("--prod") || toProduction(["--environment", "--target"], false) || envLetter || built
       ? { production: true, what: "a production deploy" }
       : undefined
   if (name === "redeploy")

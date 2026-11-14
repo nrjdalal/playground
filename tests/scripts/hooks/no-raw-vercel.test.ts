@@ -98,6 +98,10 @@ const PRODUCTION: [string, string][] = [
   ],
   ["a manual deploy's continue", "vercel deploy continue --deployment dpl_madeup1"],
   ["a production manual deploy", "vercel deploy init --prod"],
+  ["deploy's -e with no KEY=VALUE", "vercel deploy -e production"],
+  ["deploy's -e attached", "vercel deploy -e=production"],
+  ["deploy's -e naming production short", "vercel deploy -e prod"],
+  ["a bare deploy's -e", "vercel -e production"],
 ]
 
 // Each is no read the guard allows: it writes the project's secrets to disk, prints them or hands them to a command, or changes the project, its domains or its settings.
@@ -274,11 +278,6 @@ describe("a read, a preview and a help run", () => {
     ["a preview deploy by name's letter", "vercel deploy -n demo"],
     ["a preview deploy with meta by its letter", "vercel deploy -m k=v"],
     ["a preview deploy with a run-time env var by its letter", "vercel deploy -e K=preview"],
-    [
-      "deploy's -e, which names a run-time env var, not the environment",
-      "vercel deploy -e production",
-    ],
-    ["a bare deploy's -e", "vercel -e production"],
     [
       "a preview deploy with a build env var by its letter",
       "vercel deploy -b K=v --no-logs --no-clipboard",
