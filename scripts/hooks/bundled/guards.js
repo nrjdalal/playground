@@ -17271,22 +17271,28 @@ function runnerCalls(name, args) {
   }
   return calls;
 }
-function vercelWords(name, args, shell) {
-  if (args[1] === UNREAD_CWD)
-    return "unread";
-  const words = toolWords(NAMES2, name, args, shell);
-  if (words || !STARTED_RUNNERS.has(name))
-    return words;
-  let rest = args;
-  if (name === "bun") {
-    const { sub, words: bun } = bunCall(args, shell);
-    if (bun[0] !== "x")
-      return;
-    rest = args.slice(sub + 1);
+function chain(name, args, shell) {
+  const links = [];
+  for (;; ) {
+    if (args[1] === UNREAD_CWD)
+      return [...links, "unread"];
+    links.push({ args, name });
+    if (!STARTED_RUNNERS.has(name) || toolWords(NAMES2, name, args, shell))
+      return links;
+    let rest = args;
+    if (name === "bun") {
+      const { sub, words } = bunCall(args, shell);
+      if (words[0] !== "x")
+        return links;
+      rest = args.slice(sub + 1);
+    }
+    const at = runnerTarget(rest);
+    const started = toolName(rest[at]?.value);
+    if (!STARTED_RUNNERS.has(started))
+      return links;
+    name = started;
+    args = rest.slice(at + 1);
   }
-  const at = runnerTarget(rest);
-  const started = toolName(rest[at]?.value);
-  return STARTED_RUNNERS.has(started) ? vercelWords(started, rest.slice(at + 1), shell) : undefined;
 }
 async function check22(raw, environment = process.env) {
   const {
@@ -17311,26 +17317,32 @@ async function check22(raw, environment = process.env) {
     for (const args of runnerReadings(name, slotted ? slotted.slice(1) : parsed.args)) {
       if (yardStep(name, args, shell) || throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell)))
         verdicts.push({ production: true, what: "the Yard ship step, which deploys production" });
-      for (const call of runnerCalls(name, args))
-        if (!unreadable(call))
-          await run2(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit);
-        else if (STEP_NAMED.test(command))
-          verdicts.push({
-            production: true,
-            what: "a runner's command line built at run time on a line naming the Yard ship step"
-          });
-      const words = vercelWords(name, args, shell);
-      if (words === "unread") {
-        if (NAMED.test(command))
-          verdicts.push({
-            production: false,
-            what: "a runner call past the readings the hook makes on a line naming vercel"
-          });
-        continue;
+      let scanned = false;
+      for (const link of chain(name, args, shell)) {
+        if (link === "unread") {
+          if (NAMED.test(command))
+            verdicts.push({
+              production: false,
+              what: "a runner call past the readings the hook makes on a line naming vercel"
+            });
+          continue;
+        }
+        if (!scanned) {
+          for (const call of runnerCalls(link.name, link.args))
+            if (!unreadable(call))
+              await run2(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit);
+            else if (STEP_NAMED.test(command))
+              verdicts.push({
+                production: true,
+                what: "a runner's command line built at run time on a line naming the Yard ship step"
+              });
+        }
+        scanned ||= link.name === "npx";
+        const words = toolWords(NAMES2, link.name, link.args, shell);
+        const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
+        if (verdict)
+          verdicts.push(verdict);
       }
-      const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
-      if (verdict)
-        verdicts.push(verdict);
     }
     return;
   };

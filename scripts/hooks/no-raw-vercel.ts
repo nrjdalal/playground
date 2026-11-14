@@ -361,20 +361,27 @@ function runnerCalls(name: string, args: Word[]): Word[] {
   return calls
 }
 
-// The vercel call's words a runner reaches, through each runner it starts (npx npx, bunx npx, bun x npx), as no-main-checkout's runs() follows one; a reading past runnerReadings' cap may run any program, so it reads as unread at any depth
-function vercelWords(name: string, args: Word[], shell: Env): Word[] | "unread" | undefined {
-  if (args[1] === UNREAD_CWD) return "unread"
-  const words = toolWords(NAMES, name, args, shell)
-  if (words || !STARTED_RUNNERS.has(name)) return words
-  let rest = args
-  if (name === "bun") {
-    const { sub, words: bun } = bunCall(args, shell)
-    if (bun[0] !== "x") return
-    rest = args.slice(sub + 1)
+type Link = { args: Word[]; name: string }
+
+// Each runner a call reaches, the call's own program first, then each runner it starts (npx npx, bunx npx, bun x npx) until one runs vercel, as no-main-checkout's runs() follows one; a reading past runnerReadings' cap may run any program, so it ends the chain as unread at any depth
+function chain(name: string, args: Word[], shell: Env): (Link | "unread")[] {
+  const links: (Link | "unread")[] = []
+  for (;;) {
+    if (args[1] === UNREAD_CWD) return [...links, "unread"]
+    links.push({ args, name })
+    if (!STARTED_RUNNERS.has(name) || toolWords(NAMES, name, args, shell)) return links
+    let rest = args
+    if (name === "bun") {
+      const { sub, words } = bunCall(args, shell)
+      if (words[0] !== "x") return links
+      rest = args.slice(sub + 1)
+    }
+    const at = runnerTarget(rest)
+    const started = toolName(rest[at]?.value)
+    if (!STARTED_RUNNERS.has(started)) return links
+    name = started
+    args = rest.slice(at + 1)
   }
-  const at = runnerTarget(rest)
-  const started = toolName(rest[at]?.value)
-  return STARTED_RUNNERS.has(started) ? vercelWords(started, rest.slice(at + 1), shell) : undefined
 }
 
 export async function check(
@@ -410,32 +417,38 @@ export async function check(
         throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell))
       )
         verdicts.push({ production: true, what: "the Yard ship step, which deploys production" })
-      // a runner's -c line runs in a shell, so it is read as sh -c's is, and one the hook cannot read is the step on a line naming it
-      for (const call of runnerCalls(name, args))
-        if (!unreadable(call))
-          await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit)
-        else if (STEP_NAMED.test(command))
-          verdicts.push({
-            production: true,
-            what: "a runner's command line built at run time on a line naming the Yard ship step",
-          })
-      const words = vercelWords(name, args, shell)
-      if (words === "unread") {
-        if (NAMED.test(command))
-          verdicts.push({
-            production: false,
-            what: "a runner call past the readings the hook makes on a line naming vercel",
-          })
-        continue
+      // npx reads every word for its -c line, so the runners after it need no second read
+      let scanned = false
+      for (const link of chain(name, args, shell)) {
+        if (link === "unread") {
+          if (NAMED.test(command))
+            verdicts.push({
+              production: false,
+              what: "a runner call past the readings the hook makes on a line naming vercel",
+            })
+          continue
+        }
+        // a runner's -c line runs in a shell, so it is read as sh -c's is, and one the hook cannot read is the step on a line naming it
+        if (!scanned)
+          for (const call of runnerCalls(link.name, link.args))
+            if (!unreadable(call))
+              await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit)
+            else if (STEP_NAMED.test(command))
+              verdicts.push({
+                production: true,
+                what: "a runner's command line built at run time on a line naming the Yard ship step",
+              })
+        scanned ||= link.name === "npx"
+        const words = toolWords(NAMES, link.name, link.args, shell)
+        // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string
+        const verdict =
+          words &&
+          judgeAll(
+            words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })),
+            parsed.xargs !== undefined,
+          )
+        if (verdict) verdicts.push(verdict)
       }
-      // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string
-      const verdict =
-        words &&
-        judgeAll(
-          words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })),
-          parsed.xargs !== undefined,
-        )
-      if (verdict) verdicts.push(verdict)
     }
     return undefined
   }
