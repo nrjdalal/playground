@@ -2105,6 +2105,10 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["a shell fed a read after a cd to a variable", `cd "$X" && echo ls | sh`],
     ["a shell script after a cd to a literal path", "cd /tmp/x && bash s.sh"],
     [
+      "a build under run-slot's env -C of a variable the line sets to a literal absolute path",
+      `W=/tmp/x; ~/.playground/ops/run-slot.sh a -- /usr/bin/env -C $W bun run test`,
+    ],
+    [
       "a build after a cd to a variable the line sets to a literal absolute path",
       `W=/tmp/x; cd "$W" && bun run test`,
     ],

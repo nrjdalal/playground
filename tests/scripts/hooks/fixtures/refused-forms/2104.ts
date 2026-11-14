@@ -69,6 +69,10 @@ export const groups: Group[] = [
         "patch after a cd to a variable the line sets to the root",
         `W=${ROOT}; cd "$W" && patch -p1 < /tmp/d`,
       ],
+      [
+        "a build under run-slot's env -C of a variable the line sets by a substitution",
+        `W=$(pwd); ~/.playground/ops/run-slot.sh a -- /usr/bin/env -C $W bun run test`,
+      ],
     ],
   },
 ]
