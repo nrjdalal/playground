@@ -329,6 +329,8 @@ fi
 WHO=$1
 shift 2
 case "$WHO" in *[!A-Za-z0-9._#-]*|"") echo "run-slot.sh: <who> is a session name (letters, digits, . _ - #)" >&2; exit 2 ;; esac
+# the guards read the command after the first -- past <who> (slotWords in scripts/hooks/shell.ts), so a name that starts with - could read as that separator and they would judge other words than run here
+case "$WHO" in -*) echo "run-slot.sh: <who> is a session name, which never starts with -" >&2; exit 2 ;; esac
 # every run drops each expired switch, so the readers that only look for the file (the merge train, Checks, the leads' sweep) find it gone too
 [ -n "$KIND_ONLY" ] || for s in $SWITCHES; do switch_on "$s"; done
 # a dev stack never ends, so it would hold a slot for hours (dispatcher, 19 Oct: a tester's `bun run dev` held run-slot.single with 7 waiters)

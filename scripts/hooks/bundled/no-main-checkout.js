@@ -6185,7 +6185,7 @@ function unwrap(state, inside, budget) {
 function slotWords({ args, name }) {
   if (name !== "run-slot.sh")
     return;
-  const at = args.findIndex((a) => a.value === "--");
+  const at = args.findIndex((a, i) => i > 0 && a.value === "--");
   return at === -1 ? [] : args.slice(at + 1);
 }
 function shellSlot(args, shell) {

@@ -1562,10 +1562,10 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
   }
 }
 
-// run-slot.sh runs the words after its -- as the command: those words (none when it has no --), or undefined for any other command, so a hook that calls it reads a slotted command as the command itself.
+// run-slot.sh runs the words after the -- that follows its <who> as the command: those words (none when it has no such --), or undefined for any other command, so a hook that calls it reads a slotted command as the command itself; <who> is never the separator, even spelled --, which run-slot refuses.
 export function slotWords({ args, name }: Parsed): Word[] | undefined {
   if (name !== "run-slot.sh") return
-  const at = args.findIndex((a) => a.value === "--")
+  const at = args.findIndex((a, i) => i > 0 && a.value === "--")
   return at === -1 ? [] : args.slice(at + 1)
 }
 
