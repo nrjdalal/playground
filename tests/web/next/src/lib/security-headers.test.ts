@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
 import { secure, securityHeaders } from "../../../../../web/next/src/lib/security-headers"
+import { config, proxy } from "../../../../../web/next/src/proxy"
 
 const web = join(import.meta.dir, "../../../../../web/next")
 const { NextRequest } = (await import(Bun.resolveSync("next/server", web))) as {
@@ -25,7 +26,8 @@ describe("the hosted build's headers", () => {
     const response = secure(page(), true, false)
     const csp = response.headers.get("content-security-policy")!
     const nonce = /'nonce-([^']+)'/.exec(csp)?.[1]
-    expect(nonce).toBeString()
+    // the base64 of a UUID, with no padding, so the viewer can stamp it unquoted (viewer.ts)
+    expect(nonce).toMatch(/^[A-Za-z0-9+/]{48}$/)
     expect(csp).toBe(
       `script-src 'self' 'nonce-${nonce}'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
     )
@@ -53,5 +55,22 @@ describe("the local build's headers", () => {
     const added = [...response.headers.keys()].filter((key) => key !== "x-middleware-next")
     expect(added).toEqual([])
     expect(response.headers.get("x-middleware-next")).toBe("1")
+  })
+})
+
+describe("the wiring", () => {
+  test("next.config.ts sets securityHeaders by the hosted flag on every path", async () => {
+    const source = await Bun.file(join(web, "next.config.ts")).text()
+    expect(source).toContain("securityHeaders(env.NEXT_PUBLIC_PLAYGROUND_HOSTED)")
+    expect(source).toContain('source: "/:path*"')
+  })
+
+  test("proxy.ts runs secure on pages alone, by the build's own hosted flag", () => {
+    const response = proxy(page())
+    // this suite runs the local build, whose proxy passes the request on untouched
+    expect([...response.headers.keys()]).toEqual(["x-middleware-next"])
+    const [matcher] = config.matcher
+    expect(matcher!.source).toBe("/((?!api|_next/static|_next/image|favicon.ico).*)")
+    expect(matcher!.missing.map(({ key }) => key)).toEqual(["next-router-prefetch", "purpose"])
   })
 })

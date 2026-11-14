@@ -133,16 +133,30 @@ function page(scroll = { clientWidth: 800, scrollLeft: 0, scrollWidth: 800 }) {
   return { click, load, press, scrolled, served }
 }
 
+// a nonce as the hosted proxy makes it: the base64 of a UUID, 48 characters with no padding
+const NONCE = "MGI5YzZmMWUtMTExMS00MTExLTgxMTEtMDAwMDAwMDAwMDAx"
+
 describe("asViewerPage", () => {
   // the hosted build's page CSP reaches a srcdoc frame too, so each script in it carries the page's nonce to run; the frame's sandbox, with no same-origin (documents.test.ts), keeps the nonce from the Dashboard's storage
   test("on the hosted build, every script in the page and the keys script carries the page's nonce", () => {
     const served = asViewerPage(
       "<p>hi</p><script>a()</script><SCRIPT src=x></SCRIPT><scripts>",
-      "bm9uY2U=",
+      NONCE,
     )
     expect(served.match(/<script\b/gi)?.length).toBe(3)
-    expect(served.match(/<script nonce="bm9uY2U="/gi)?.length).toBe(3)
+    expect(served.match(new RegExp(`<script nonce=${NONCE}[ >]`, "gi"))?.length).toBe(3)
     expect(served).toContain("<scripts>")
+  })
+
+  // the nonce goes in unquoted, as base64 with no padding needs no quotes, so a script's own string that names a script tag stays one string
+  test("a script tag named inside a page's own string leaves that string whole", () => {
+    const served = asViewerPage(
+      `<script>const tag = "<script>"; const other = '<script>'</script>`,
+      NONCE,
+    )
+    expect(served).toContain(
+      `const tag = "<script nonce=${NONCE}>"; const other = '<script nonce=${NONCE}>'`,
+    )
   })
 
   test("with no nonce, as on the local build, the page is served as before", () => {

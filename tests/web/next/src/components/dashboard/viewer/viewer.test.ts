@@ -63,8 +63,14 @@ describe("Open in new tab opens a blob URL with the Dashboard's origin only for 
 
   // the blob tab takes the Dashboard page's CSP, so on the hosted build the page's scripts carry its nonce, held in the same frame with no same-origin
   test("on the hosted build, a card's page in its tab carries the page's nonce on each script, still in a frame with no same-origin", () => {
-    const tab = pageTab("demo.html", "<script>a()</script><p>hi</p>", "bm9uY2U=")
-    expect(tab).toContain('srcdoc="&lt;script nonce=&quot;bm9uY2U=&quot;&gt;a()&lt;/script&gt;')
+    const tab = pageTab(
+      "demo.html",
+      "<script>a()</script><p>hi</p>",
+      "MGI5YzZmMWUtMTExMS00MTExLTgxMTEtMDAwMDAwMDAwMDAx",
+    )
+    expect(tab).toContain(
+      'srcdoc="&lt;script nonce=MGI5YzZmMWUtMTExMS00MTExLTgxMTEtMDAwMDAwMDAwMDAx&gt;a()&lt;/script&gt;',
+    )
     expect(tab).toContain('<iframe sandbox="allow-scripts" srcdoc=')
     expect(tab).not.toContain("allow-same-origin")
     expect(tab).not.toContain("<script")
