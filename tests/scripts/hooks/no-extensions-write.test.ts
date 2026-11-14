@@ -2313,6 +2313,18 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
       `bun --cwd ${CLI_DIR} cli.ts ext put login list x /tmp/l.json --reason y`,
     ],
     [
+      "ext put by bunx bun in its --cwd",
+      `bunx --cwd=${CLI_DIR} bun cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put by bun x bun in a --cwd read from bun's own",
+      `bun --cwd=${join(CLI_DIR, "..")} x --cwd=playground bun cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put by bunx bun in a --cwd read from the one before",
+      `bunx --cwd=${join(CHECKOUT, "packages")} --cwd=scripts/src/playground bun cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
       "ext put by bun on cli with no extension",
       `bun ${CLI_DIR}/cli ext put login list x /tmp/l.json --reason y`,
     ],
