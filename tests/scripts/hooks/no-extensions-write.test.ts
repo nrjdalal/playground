@@ -3208,6 +3208,7 @@ describe("an xargs-led grep and bun -e from the data folder", () => {
     ["grep under xargs -0", `ls /tmp | xargs -0 grep -h ${PATTERN}`],
     ["grep under xargs -n 1", `ls /tmp | xargs -n 1 grep -h ${PATTERN}`],
     ["grep under xargs -I {}", `ls /tmp | xargs -I {} grep -h ${PATTERN} {}`],
+    ["grep under xargs -J %", `ls /tmp | xargs -J % grep -h ${PATTERN} %`],
     ["grep by a system path under xargs", `ls /tmp | /usr/bin/xargs /usr/bin/grep -h ${PATTERN}`],
     ["a direct grep", `grep -c ${PATTERN} /tmp/x.log`],
     [
@@ -3239,6 +3240,10 @@ describe("an xargs-led grep and bun -e from the data folder", () => {
     ["a grep of the shell's folder under xargs", `ls /tmp | xargs ./grep -h ${PATTERN}`],
     ["grep under xargs with a variable set", `ls /tmp | GREP=1 xargs grep -h ${PATTERN}`],
     ["grep under xargs piped into a shell", `ls /tmp | xargs grep -h ${PATTERN} | sh`],
+    [
+      "grep under xargs with a shortened --process-slot-var",
+      `ls /tmp | xargs --process-slot=PATH grep -h ${PATTERN}`,
+    ],
     [
       "perl -i on a file in the root, its script holding an xargs-led grep",
       `perl -0pi -e 's/(a)/ls \\/tmp | xargs grep -h x \\$HOME\\/.playground\\/extensions\\/policy.json $1/' $HOME/.playground/extensions/x.json`,
