@@ -441,19 +441,24 @@ describe("git push and gh pr create read the live branches of the remote they pu
   })
 })
 
-// three checkouts whose origin names Acme's repository while an insteadOf rule sends git's reads to an ssh remote whose ssh sleeps: the pushes of one call share one live-read budget (withLiveBudget), so the call ends inside the guard's timeout, and the last scan, past the budget, reads every commit
+// three checkouts whose origin names Acme's repository while an insteadOf rule sends git's reads to an ssh remote of its own whose ssh logs its arguments as it starts, then sleeps: the pushes of one call share one live-read budget (withLiveBudget), so the first read spends 5 s, the second the 1 s left, the third starts none and reads every commit, and the call ends inside the guard's timeout
 test("three push scans in one call on a hung remote end within the budget", async () => {
   const url = "https://github.com/acme-blue/app.git"
   const ssh = join(scratch, "hung-ssh")
-  await Bun.write(ssh, "#!/bin/sh\nexec sleep 10\n")
+  const log = join(scratch, "hung-ssh.log")
+  await Bun.write(ssh, `#!/bin/sh\necho "$*" >> '${log}'\nexec sleep 10\n`)
+  await Bun.write(log, "")
   chmodSync(ssh, 0o755)
-  const dirs = ["hung-a", "hung-b", "hung-c"].map((name) => join(scratch, name))
-  for (const dir of dirs) {
+  const names = ["hung-a", "hung-b", "hung-c"]
+  const dirs = names.map((name) => join(scratch, name))
+  for (const [i, dir] of dirs.entries()) {
     await mkdir(dir, { recursive: true })
     git(dir, "init", "-q", "-b", "main")
     git(dir, "remote", "add", "origin", url)
-    git(dir, "config", "url.ssh://git@example.invalid/app.git.insteadOf", url)
+    git(dir, "config", `url.ssh://git@example.invalid/${names[i]}.git.insteadOf`, url)
     git(dir, "config", "core.sshCommand", ssh)
+    // a set variant skips git's ssh -G probe, so each read starts the fake once, naming its remote's path
+    git(dir, "config", "ssh.variant", "ssh")
     // the test sandbox's git refuses ssh, so each checkout allows it for this fake alone
     git(dir, "config", "protocol.ssh.allow", "always")
   }
@@ -461,11 +466,12 @@ test("three push scans in one call on a hung remote end within the budget", asyn
   git(dirs[0], "commit", "-q", "--allow-empty", "-m", "Fix the export button")
   git(dirs[1], "commit", "-q", "--allow-empty", "-m", "Fix the import button")
   git(dirs[2], "commit", "-q", "--allow-empty", "-m", "Fix from worker-envy")
-  const start = performance.now()
   const reason = await bash(dirs.map((dir) => `git -C ${dir} push`).join(" && "))
-  expect(performance.now() - start).toBeLessThan(6_000 + 2_000)
   expect(reason).toContain('"worker-envy"')
-}, 20_000)
+  const started = await Bun.file(log).text()
+  expect(started).toContain("/hung-a.git")
+  expect(started).not.toContain("/hung-c.git")
+}, 12_000)
 
 describe("the roster's names are terms too, since sessions are renamed", () => {
   const slack = "mcp__slack-shared__chat_post_message"

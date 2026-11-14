@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -14,11 +14,12 @@ const git = (cwd: string, ...args: string[]) => {
   return proc.stdout.toString().trim()
 }
 
-// a repo with a fast remote, a local bare repo holding its commit, and three hung ones: ssh remotes whose ssh, the repo's core.sshCommand, sleeps past every budget
+// a repo with a fast remote, a local bare repo holding its commit, and three hung ones: ssh remotes whose ssh, the repo's core.sshCommand, logs its arguments as it starts, then sleeps past every budget
 describe("a hook call's live reads share one budget", () => {
   const dir = mkdtempSync(join(tmpdir(), "live-refs-"))
   const repo = join(dir, "repo")
   const HUNG = ["h1", "h2", "h3"]
+  const log = join(dir, "ssh.log")
   let sha = ""
 
   beforeAll(() => {
@@ -29,9 +30,12 @@ describe("a hook call's live reads share one budget", () => {
     git(repo, "remote", "add", "fast", join(dir, "fast.git"))
     git(repo, "push", "-q", "fast", "main")
     const ssh = join(dir, "hung-ssh")
-    writeFileSync(ssh, "#!/bin/sh\nexec sleep 8\n")
+    writeFileSync(ssh, `#!/bin/sh\necho "$*" >> '${log}'\nexec sleep 8\n`)
     chmodSync(ssh, 0o755)
+    writeFileSync(log, "")
     git(repo, "config", "core.sshCommand", ssh)
+    // a set variant skips git's ssh -G probe, so each read starts the fake once, naming its remote's path
+    git(repo, "config", "ssh.variant", "ssh")
     // the test sandbox's git refuses ssh, so the repo allows it for this fake alone
     git(repo, "config", "protocol.ssh.allow", "always")
     for (const name of HUNG)
@@ -40,13 +44,15 @@ describe("a hook call's live reads share one budget", () => {
 
   afterAll(() => rmSync(dir, { force: true, recursive: true }))
 
+  // the first read spends the budget, so the other two start no read and each scan reads every commit
   test("three scans on hung remotes end within the budget, each scanning every commit", () => {
-    const start = performance.now()
     const held = withLiveBudget(() => HUNG.map((remote) => heldBy(repo, remote)), 1_500)
-    const took = performance.now() - start
     expect(held).toEqual([[], [], []])
-    expect(took).toBeLessThan(1_500 + 1_000)
-  })
+    const started = readFileSync(log, "utf8")
+    expect(started).toContain("/h1.git")
+    expect(started).not.toContain("/h2.git")
+    expect(started).not.toContain("/h3.git")
+  }, 12_000)
 
   test("a scan on a fast remote under the budget keeps its live read", () => {
     expect(withLiveBudget(() => heldBy(repo, "fast"), 1_500)).toEqual([sha])
