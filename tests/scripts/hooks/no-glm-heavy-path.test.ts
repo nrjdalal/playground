@@ -1349,6 +1349,19 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
     },
   )
 
+  // PG-2104: zsh applies a modifier on an unbraced name (`$C:t`, `$C:h`) that the lexer reads as text, so such a cd stays unread
+  test.each([
+    "C=/elsewhere/read-org-repo; cd ..; cd $C:t; sed -n 1,5p README.md",
+    'C=/elsewhere/read-org-repo; cd .. && cd "$C:t" && cat README.md',
+    "C=$ORG/src; cd $C:h && cat README.md",
+  ])(
+    "a read after a cd through a modifier of a variable the line sets is refused on GLM: %s",
+    async (form) => {
+      mkdirSync(join(ORG, "src"), { recursive: true })
+      expect(await refusal(input(form.replace("$ORG", ORG)), ON_GLM, CALM)).toBeDefined()
+    },
+  )
+
   test.each(["C=$REPO; cd $C; sed -n 1,5p README.md", "C=$REPO; cd $C && cat README.md"])(
     "a read after a cd through a variable the line sets to its own checkout runs on GLM: %s",
     async (form) => {

@@ -21,6 +21,22 @@ export const groups: Group[] = [
         "git checkout under xargs after a cd to a variable",
         `cd "$X" && grep -l a f | xargs git checkout --`,
       ],
+      [
+        "git with a git folder alone after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/r/.git checkout -- f`,
+      ],
+      [
+        "git with a spaced git folder alone after a cd to a variable",
+        `cd "$X" && git --git-dir /tmp/r/.git checkout -- f`,
+      ],
+      [
+        "git apply with a git folder alone after a cd to a variable",
+        `cd "$X"; git --git-dir=/tmp/x/.git apply p.diff`,
+      ],
+      [
+        "git with a work tree alone after a cd to a variable",
+        `cd "$X" && git --work-tree=/tmp/r checkout -- f`,
+      ],
       ["unzip after a cd to a variable", `cd "$X" && unzip /tmp/a.zip`],
       ["bun run after a cd to a variable", `cd "$X" && bun run build`],
       [
@@ -72,6 +88,26 @@ export const groups: Group[] = [
       [
         "a build under run-slot's env -C of a variable the line sets by a substitution",
         `W=$(pwd); ~/.playground/ops/run-slot.sh a -- /usr/bin/env -C $W bun run test`,
+      ],
+      [
+        "a write after a cd to the tail of a variable the line sets to the root",
+        `W=${ROOT}; cd "$X" && cd $W:t && echo x > f`,
+      ],
+      [
+        "a write after a quoted cd to the tail of a variable the line sets to the root",
+        `W=${ROOT}; cd "$X" && cd "$W:t" && echo x > f`,
+      ],
+      [
+        "a write after a pushd to the tail of a variable the line sets to the root",
+        `W=${ROOT}; cd "$X" && pushd $W:t && echo x > f`,
+      ],
+      [
+        "a write after a cd to a substitution modifier of a variable the line sets",
+        `W=/tmp; cd "$X" && cd $W:s/tmp/x/ && echo x > f`,
+      ],
+      [
+        "a write after a cd to a variable set from the head of another",
+        `W=${ROOT}/hooks; T=$W:h; cd "$X" && cd $T && echo x > f`,
       ],
     ],
   },
