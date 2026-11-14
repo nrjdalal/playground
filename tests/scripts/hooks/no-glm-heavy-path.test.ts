@@ -528,7 +528,7 @@ describe("a chained commit or push", () => {
     )
   })
 
-  test("a push to a remote not fetched yet reads against every remote, so a docs commit passes", async () => {
+  test("a push to a fork reads what the fork lacks, so a docs commit on the base it holds passes", async () => {
     const dir = join(DIR, "push-fork")
     git(DIR, "init", "-q", "--bare", "-b", "canary", `${dir}.git`)
     git(DIR, "init", "-q", "--bare", "-b", "canary", `${dir}-fork.git`)
@@ -538,6 +538,8 @@ describe("a chained commit or push", () => {
     git(dir, "commit", "-q", "-m", "base")
     git(dir, "push", "-q", "origin", "HEAD:canary")
     git(dir, "remote", "add", "fork", `${dir}-fork.git`)
+    // a fork holds the branches it was made from
+    git(dir, "push", "-q", "fork", "HEAD:canary")
     await Bun.write(join(dir, "docs/a.md"), "x\n")
     git(dir, "add", ".")
     git(dir, "commit", "-q", "-m", "doc")
@@ -546,6 +548,49 @@ describe("a chained commit or push", () => {
     git(dir, "add", ".")
     git(dir, "commit", "-q", "-m", "web")
     expect(await bash("git push fork HEAD", dir)).toContain("web/next/b.ts")
+  })
+
+  // the remote it pushes to is read live; each test builds on the one before
+  describe("a push reads the live branches of the remote it pushes to, not the tracking refs", () => {
+    const dir = join(DIR, "push-live")
+
+    beforeAll(async () => {
+      git(DIR, "init", "-q", "--bare", "-b", "canary", `${dir}.git`)
+      git(DIR, "init", "-q", "--bare", "-b", "canary", `${dir}-other.git`)
+      git(DIR, "clone", "-q", `${dir}.git`, dir)
+      await Bun.write(join(dir, "docs/a.md"), "x\n")
+      git(dir, "add", ".")
+      git(dir, "commit", "-q", "-m", "base")
+      git(dir, "push", "-q", "origin", "HEAD:canary")
+      git(dir, "checkout", "-q", "-b", "gone")
+      await Bun.write(join(dir, "scripts/spawn.sh"), "x\n")
+      git(dir, "add", ".")
+      git(dir, "commit", "-q", "-m", "spawn")
+      git(dir, "push", "-q", "origin", "gone")
+      git(`${dir}.git`, "branch", "-D", "gone")
+    })
+
+    test("a commit only a stale tracking ref holds, its branch deleted on the remote, is read", async () => {
+      expect(await bash("git push origin HEAD:fresh", dir)).toContain("scripts/spawn.sh")
+      expect(await bash("git push", dir)).toContain("scripts/spawn.sh")
+    })
+
+    test("a commit another remote holds and the one it pushes to does not is read", async () => {
+      git(dir, "update-ref", "-d", "refs/remotes/origin/gone")
+      git(dir, "remote", "add", "other", `${dir}-other.git`)
+      git(dir, "push", "-q", "other", "gone")
+      expect(await bash("git push", dir)).toContain("scripts/spawn.sh")
+    })
+
+    test("a commit the live remote holds stays out", async () => {
+      git(dir, "push", "-q", "origin", "gone")
+      expect(await bash("git push origin HEAD:fresh", dir)).toBeUndefined()
+    })
+
+    test("a remote it cannot read leaves every commit in", async () => {
+      git(dir, "remote", "add", "dead", join(DIR, "nowhere.git"))
+      expect(await bash("git push dead gone", dir)).toContain("scripts/spawn.sh")
+    })
   })
 
   test("a pushed commit's path holding a non-ASCII byte is read as it is", async () => {

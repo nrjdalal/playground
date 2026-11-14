@@ -285,6 +285,21 @@ describe("a refusal names the text that held the term", () => {
     expect(reason).toContain(`an email address, in the message of commit ${sha}, which it may push`)
   })
 
+  // the scan no-playground-leak's engine shares: what gh pr create may push is read against origin's live branches, which an insteadOf rule serves from a local bare repo, so a commit only a stale tracking ref holds is read
+  test("gh pr create reads a commit only a stale tracking ref holds", async () => {
+    const dir = await checkout("stale", "Fix the import\n\nReported-by: quilla@madeup.test")
+    const bare = join(scratch, "stale.git")
+    git(scratch, "init", "-q", "--bare", "-b", "main", bare)
+    git(dir, "config", `url.${bare}.insteadOf`, "https://github.com/quillco/playground.git")
+    git(dir, "push", "-q", "origin", "HEAD:gone")
+    git(bare, "branch", "-D", "gone")
+    const stale = git(dir, "rev-parse", "--short", "HEAD")
+    const reason = await at(`gh pr create --title "Fix the import" --body ok`, dir)
+    expect(reason).toContain(
+      `an email address, in the message of commit ${stale}, which it may push`,
+    )
+  })
+
   test("a body alone holding an address names gh pr create and its body", async () => {
     const reason = await at(`${CHAIN} --body "Mail quilla@madeup.test"`, dirs.clean)
     expect(reason).toContain("no-public-leak hook refused gh pr create")

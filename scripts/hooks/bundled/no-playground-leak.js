@@ -61,6 +61,72 @@ var dataDirOf = (env, home = env.HOME || homedir()) => {
 };
 var dataDir = (env = process.env) => dataDirOf(env);
 
+// packages/safe-delete/src/live-refs.ts
+var run = (at, args, env, timeout) => {
+  const proc = Bun.spawnSync(["git", "-C", at, ...args], {
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", ...env },
+    stderr: "ignore",
+    stdin: "ignore",
+    stdout: "pipe",
+    timeout
+  });
+  return { ok: proc.exitCode === 0, out: proc.stdout.toString() };
+};
+function liveHeads(at, remote, timeout) {
+  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
+  const env = { GIT_TERMINAL_PROMPT: "0" };
+  if (command)
+    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
+  const live = run(at, ["ls-remote", "--heads", "--", remote], env, timeout);
+  if (!live.ok)
+    return null;
+  const tips = [];
+  for (const line of live.out.split(`
+`)) {
+    const [sha, name] = line.split("\t");
+    if (/^[0-9a-f]{40,64}$/.test(sha ?? "") && name?.startsWith("refs/heads/"))
+      tips.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha });
+  }
+  return tips;
+}
+function present(at, tips) {
+  if (!tips.length)
+    return [];
+  const had = run(at, ["rev-list", "--no-walk", "--ignore-missing", ...tips.map((t) => t.sha)]);
+  if (!had.ok)
+    return null;
+  const here = new Set(had.out.split(`
+`).filter(Boolean));
+  return tips.filter((t) => here.has(t.sha));
+}
+function pushRemote(at, branch = run(at, ["symbolic-ref", "-q", "--short", "HEAD"]).out.trim()) {
+  const config = (key) => run(at, ["config", "--get", key]).out.trim() || undefined;
+  return branch && config(`branch.${branch}.pushRemote`) || config("remote.pushDefault") || branch && config(`branch.${branch}.remote`) || "origin";
+}
+function heldBy(at, remote, timeout = 5000) {
+  const live = liveHeads(at, remote, timeout);
+  if (!live?.length)
+    return [];
+  const here = present(at, live) ?? [];
+  const had = new Set(here.map((t) => t.ref));
+  const tracked = new Map;
+  if (live.length > here.length && !/[:/\\]/.test(remote))
+    for (const line of run(at, [
+      "for-each-ref",
+      "--format=%(objectname) %(refname)",
+      `refs/remotes/${remote}/`
+    ]).out.split(`
+`)) {
+      const [sha, ref] = line.split(" ");
+      if (sha && ref)
+        tracked.set(ref.slice("refs/remotes/".length), sha);
+    }
+  return [
+    ...here.map((t) => t.sha),
+    ...live.flatMap((t) => had.has(t.ref) || !tracked.has(t.ref) ? [] : [tracked.get(t.ref)])
+  ];
+}
+
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
   const numericValues = Object.values(entries).filter((v) => typeof v === "number");
@@ -7523,7 +7589,7 @@ function shellSlot(args, shell) {
     return;
   return args.slice(args.indexOf(operand));
 }
-async function run(lexed, env, visit, builtins = false) {
+async function run2(lexed, env, visit, builtins = false) {
   if (running >= MAX_RUNS)
     throw new RangeError("scripts nested too deep");
   running++;
@@ -7586,7 +7652,7 @@ async function examine(cmd, env, visit, builtins) {
   if (!cmd.runsStdin || stdinScript(primary))
     return;
   for (const script of await scriptStdin(cmd, env)) {
-    const verdict = await nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins));
+    const verdict = await nested(cmd, env, () => run2(lexScript(known(script), env), subshell(env), visit, builtins));
     if (verdict)
       return verdict;
   }
@@ -7694,12 +7760,12 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
     for (const script of verdict ? [] : scripts) {
-      verdict = await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
+      verdict = await nested(cmd, env, () => run2(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
       if (verdict)
         break;
     }
   } else if (name === "eval") {
-    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
+    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run2(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record2(cmd, name, args, here);
@@ -7977,11 +8043,11 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins);
+    return run2(lexScript(script, env), subshell(env), visit, builtins);
   }
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script);
-    const verdict = await run(lexScript(text, env), subshell(env), visit, builtins);
+    const verdict = await run2(lexScript(text, env), subshell(env), visit, builtins);
     if (verdict)
       return verdict;
   }
@@ -8429,7 +8495,7 @@ async function writeOf(tool, input, cwd, environment) {
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit);
+  return run2(lex(command, env.known), env, visit);
 }
 async function marked2(sessionId, environment) {
   if (typeof sessionId !== "string")
@@ -9508,7 +9574,7 @@ async function inspect(raw, environment) {
       settled = false;
     return verdict;
   };
-  return run(lex(command, env.known), env, visit);
+  return run2(lex(command, env.known), env, visit);
 }
 async function check2(raw, environment = process.env) {
   try {
@@ -10230,7 +10296,7 @@ function prCreate2(rest, flags, env) {
   const texts = [];
   const head = flags.findLast((f) => f.name === "-H" || f.name === "--head")?.value;
   if (!head || unreadable(head) || !head.value.trim() || /[$`*?[\]'"]/.test(head.value))
-    texts.push(...commitTexts(env.cwd, ["HEAD", "--not", "--remotes"], "the commits it may push", ", which it may push"), withPlace(branch(env.cwd), "the branch it opens from"));
+    texts.push(...commitTexts(env.cwd, ["HEAD", "--not", ...env.cwd ? heldBy(env.cwd, pushRemote(env.cwd)) : []], "the commits it may push", ", which it may push"), withPlace(branch(env.cwd), "the branch it opens from"));
   if (values.some((v) => v === "-f" || v.startsWith("--fill"))) {
     const at = values.findIndex((v) => /^(?:-B|--base)(?:=|$)/.test(v));
     const base = at === -1 ? "HEAD" : values[at].includes("=") ? values[at].split("=")[1] : values[at + 1];
@@ -10774,15 +10840,17 @@ async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
   const names = new Set(flags.map((f) => f.name));
   const [remote, ...refspecs] = positionals;
   let target;
-  let remoteName;
-  if (!remote)
+  let pushTo;
+  if (!remote) {
     target = decide(env.cwd ? checkout : [undefined]);
-  else if (remote.unknown || remote.reads?.length || remote.value.includes(UNKNOWN))
+    pushTo = env.cwd && pushRemote(env.cwd);
+  } else if (remote.unknown || remote.reads?.length || remote.value.includes(UNKNOWN))
     target = decide([undefined]);
-  else if (/[:/]/.test(remote.value))
+  else if (/[:/]/.test(remote.value)) {
     target = decide([remoteRepo(remote.value)]);
-  else {
-    remoteName = remote.value;
+    pushTo = remote.value;
+  } else {
+    pushTo = remote.value;
     const url = gitText(env.cwd, ["remote", "get-url", remote.value], `the URL of remote ${remote.value}`);
     target = decide([url.unknown ? undefined : remoteRepo(url.value)]);
   }
@@ -10813,8 +10881,8 @@ async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
     sources.push("HEAD");
   }
   if (sources.length > 0) {
-    const not = remoteName ? `--remotes=${remoteName}` : "--remotes";
-    texts.push(...commitTexts(env.cwd, [...sources, "--not", not], "the messages of the commits it pushes"));
+    const held = env.cwd && pushTo ? heldBy(env.cwd, pushTo) : [];
+    texts.push(...commitTexts(env.cwd, [...sources, "--not", ...held], "the messages of the commits it pushes"));
   }
   return judge2("git push", target, texts, env);
 }
@@ -11001,7 +11069,7 @@ async function inspect2(raw, environment) {
       process: environment,
       vars: new Map
     };
-    return run(lex(command, env.known), env, leak);
+    return run2(lex(command, env.known), env, leak);
   }
   if (typeof tool === "string")
     return mcp(tool, input);

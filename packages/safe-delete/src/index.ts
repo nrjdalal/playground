@@ -19,6 +19,8 @@ import { basename, dirname, join, resolve, sep } from "node:path"
 
 import { hasManagerRole, placedKindOf } from "@packages/config/kinds"
 
+import { liveHeads, present, type Tip } from "./live-refs"
+
 // The folders a delete starts from, passed in so a test builds them on a mkdtemp root of its own.
 export type Roots = { home: string; main: string; trash: string }
 
@@ -803,49 +805,27 @@ const remoteHolding = (
   return ahead.tips.find((t) => git("merge-base", "--is-ancestor", "HEAD", t.sha).ok)?.ref ?? null
 }
 
-// The commits HEAD holds that no remote holds now, past each branch tip ls-remote reads from each remote itself, since a remote-tracking ref is only the remote's last fetch; tips names those this repo has, as <remote>/<branch> at its sha, and unread each remote ls-remote could not read in 30 s, with ssh never prompting, which holds none. Null when the commits cannot be read.
-export function unpushed(
-  at: string,
-): { shas: string[]; tips: { ref: string; sha: string }[]; unread: string[] } | null {
-  const git = (args: string[], env?: Record<string, string>, timeout?: number) => {
+// The commits HEAD holds that no remote holds now, past each branch tip ls-remote reads from each remote itself (liveHeads, live-refs.ts); tips names those this repo has, as <remote>/<branch> at its sha, and unread each remote ls-remote could not read in 30 s, which holds none. Null when the commits cannot be read.
+export function unpushed(at: string): { shas: string[]; tips: Tip[]; unread: string[] } | null {
+  const git = (args: string[]) => {
     const run = Bun.spawnSync(["git", "-C", at, ...args], {
-      env: env && { ...process.env, ...env },
       stderr: "ignore",
       stdin: "ignore",
       stdout: "pipe",
-      timeout,
     })
     return { ok: run.exitCode === 0, out: run.stdout.toString() }
   }
   const remotes = git(["remote"])
   if (!remotes.ok) return null
-  const listed: { ref: string; sha: string }[] = []
+  const listed: Tip[] = []
   const unread: string[] = []
-  // ssh's options go on the command git would run (GIT_SSH_COMMAND, else core.sshCommand, else ssh), and none under GIT_SSH alone, whose program may take no -o
-  const command =
-    process.env.GIT_SSH_COMMAND ||
-    git(["config", "--get", "core.sshCommand"]).out.trim() ||
-    (process.env.GIT_SSH ? "" : "ssh")
-  const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0" }
-  if (command) env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`
   for (const remote of remotes.out.split("\n").filter(Boolean)) {
-    const live = git(["ls-remote", "--heads", "--", remote], env, 30_000)
-    if (!live.ok) {
-      unread.push(remote)
-      continue
-    }
-    for (const line of live.out.split("\n")) {
-      const [sha, name] = line.split("\t")
-      if (/^[0-9a-f]{40,64}$/.test(sha ?? "") && name?.startsWith("refs/heads/"))
-        listed.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha: sha! })
-    }
+    const live = liveHeads(at, remote, 30_000)
+    if (live) listed.push(...live)
+    else unread.push(remote)
   }
-  const had = listed.length
-    ? git(["rev-list", "--no-walk", "--ignore-missing", ...listed.map((t) => t.sha)])
-    : { ok: true, out: "" }
-  if (!had.ok) return null
-  const here = new Set(had.out.split("\n").filter(Boolean))
-  const tips = listed.filter((t) => here.has(t.sha))
+  const tips = present(at, listed)
+  if (!tips) return null
   const past = git(["rev-list", "HEAD", "--not", ...tips.map((t) => t.sha)])
   if (!past.ok) return null
   return { shas: past.out.split("\n").filter(Boolean), tips, unread }

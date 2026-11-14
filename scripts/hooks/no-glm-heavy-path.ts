@@ -12,6 +12,7 @@ import { loadavg } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
+import { heldBy, pushRemote } from "../../packages/safe-delete/src/live-refs"
 import { guardedOrgs } from "../../packages/settings/src/ext"
 import { readPin } from "../../packages/settings/src/harnesses"
 import { readPolicy } from "../../packages/settings/src/rendered"
@@ -341,20 +342,14 @@ function rebased(
   named: string | undefined,
   source: string,
   dest: string,
-  not: string,
+  held: string[],
 ): [string, string] | undefined {
   const branch =
     dest === "HEAD"
       ? names(dir, ["symbolic-ref", "-q", "--short", "HEAD"])?.[0]
       : dest.replace(/^refs\/heads\//, "")
   if (!branch) return
-  const config = (key: string) => names(dir, ["config", "--get", key])?.[0]
-  const remote =
-    named ??
-    config(`branch.${branch}.pushRemote`) ??
-    config("remote.pushDefault") ??
-    config(`branch.${branch}.remote`) ??
-    "origin"
+  const remote = named ?? pushRemote(dir, branch)
   const old = names(dir, ["rev-parse", "-q", "--verify", `refs/remotes/${remote}/${branch}`])?.[0]
   if (!old) return
   const ancestor = Bun.spawnSync(["git", "-C", dir, "merge-base", "--is-ancestor", old, source], {
@@ -362,7 +357,14 @@ function rebased(
     stderr: "ignore",
   })
   if (ancestor.exitCode !== 1) return
-  const oldest = names(dir, ["rev-list", "--reverse", "--topo-order", source, "--not", not])?.[0]
+  const oldest = names(dir, [
+    "rev-list",
+    "--reverse",
+    "--topo-order",
+    source,
+    "--not",
+    ...held,
+  ])?.[0]
   const base = oldest && names(dir, ["rev-parse", "-q", "--verify", `${oldest}^`])?.[0]
   return base ? [old, base] : undefined
 }
@@ -401,9 +403,8 @@ function push(rest: Word[], dir: string, branchReads: (string | undefined)[]): s
   }
   if (deleting && sources.length === 0) return
   const name = remote && !/[:/]/.test(remote.value) ? remote.value : undefined
-  // a remote not fetched yet has no tracking refs, so every remote stands in for it
-  const tracked = name && names(dir, ["for-each-ref", "--count=1", `refs/remotes/${name}`])?.length
-  const not = tracked ? `--remotes=${name}` : "--remotes"
+  // what the remote it pushes to holds now, read live, since a remote-tracking ref may name a branch it no longer holds; every commit when it cannot be read
+  const held = heldBy(dir, remote?.value ?? pushRemote(dir))
   const listed = pathsOf(dir, [
     "log",
     "--name-only",
@@ -412,9 +413,9 @@ function push(rest: Word[], dir: string, branchReads: (string | undefined)[]): s
     "--format=",
     ...sources,
     "--not",
-    not,
+    ...held,
   ])
-  const merges = names(dir, ["rev-list", "--merges", ...sources, "--not", not])
+  const merges = names(dir, ["rev-list", "--merges", ...sources, "--not", ...held])
   if (listed === null || merges === null)
     return unread("git push", "the files of the commits it pushes")
   const files = new Set(listed)
@@ -453,7 +454,7 @@ function push(rest: Word[], dir: string, branchReads: (string | undefined)[]): s
   // a rebase rewrites a branch the remote holds, so what it pushes is judged by its tip against git's own merge of the tip it replaces and the base it now sits on
   const bases =
     sources.length === 1 && dests.length === 1 && (!remote || name)
-      ? rebased(dir, name, sources[0], dests[0], not)
+      ? rebased(dir, name, sources[0], dests[0], held)
       : undefined
   if (bases)
     beyondMerge(

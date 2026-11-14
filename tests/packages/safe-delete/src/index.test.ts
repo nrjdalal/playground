@@ -1219,6 +1219,8 @@ describe("worktreeRefusal", () => {
     const ssh = file(join(roots.root, "fake-ssh"), `#!/bin/sh\necho "$@" > '${said}'\nexit 1\n`)
     chmodSync(ssh, 0o755)
     git(roots.main, "config", "core.sshCommand", ssh)
+    // the test sandbox's git refuses ssh, so the repo allows it for this fake alone
+    git(roots.main, "config", "protocol.ssh.allow", "always")
     git(roots.main, "remote", "set-url", "origin", "ssh://git@example.invalid/remote.git")
     expect(unpushed(wt)).toMatchObject({ unread: ["origin"] })
     expect(readFileSync(said, "utf8")).toStartWith("-o BatchMode=yes -o ConnectTimeout=10 ")

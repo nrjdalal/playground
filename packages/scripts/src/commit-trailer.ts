@@ -1,4 +1,5 @@
-// AGENTS.md's Commits rule keeps a Co-authored-by trailer out of every commit: commit-msg runs this on the message file, which drops each such line, in any case, and says so, so the commit goes through on its first try; with `--push` pre-push refuses a pushed commit no remote holds yet whose message holds one, since a commit made with --no-verify skips commit-msg, and names the amend that drops it. The same push step refuses such a commit whose message, or a pushed ref whose name, holds a term from no-public-leak's list, by sha or ref and kind alone.
+// AGENTS.md's Commits rule keeps a Co-authored-by trailer out of every commit: commit-msg runs this on the message file, which drops each such line, in any case, and says so, so the commit goes through on its first try; with `--push <remote>` pre-push refuses a pushed commit that remote holds no live branch of yet whose message holds one, since a commit made with --no-verify skips commit-msg, and names the amend that drops it. The same push step refuses such a commit whose message, or a pushed ref whose name, holds a term from no-public-leak's list, by sha or ref and kind alone.
+import { heldBy } from "../../safe-delete/src/live-refs"
 import { listKindsIn, readList } from "./trace-count/count"
 import { type PublicList, publicListPath } from "./trace-count/kinds"
 
@@ -20,11 +21,12 @@ const pushedRefs = (stdin: string): [string, string, string][] =>
     .map((line) => line.trim().split(/\s+/) as [string, string, string])
     .filter(([, sha]) => !!sha && !ZERO.test(sha))
 
-// Each commit the push sends that no remote-tracking ref holds, newest first, as [sha, subject, message]: what is already on a remote was read when it went there.
-const newCommits = (locals: string[]): [string, string, string][] => {
+// Each commit the push sends that the remote it pushes to (pre-push's first argument, a name or a URL) holds no live branch of now (heldBy), newest first, as [sha, subject, message]: what is already there was read when it went there, and every commit is read when the remote cannot be.
+const newCommits = (locals: string[], remote: string): [string, string, string][] => {
   if (locals.length === 0) return []
+  const held = heldBy(process.cwd(), remote, 30_000)
   const log = Bun.spawnSync(
-    ["git", "log", "--no-color", "--format=%H%x00%s%x00%B%x01", ...locals, "--not", "--remotes"],
+    ["git", "log", "--no-color", "--format=%H%x00%s%x00%B%x01", ...locals, "--not", ...held],
     { stderr: "pipe", stdout: "pipe" },
   )
   if (log.exitCode !== 0) {
@@ -68,7 +70,10 @@ if (import.meta.main) {
     process.exit(0)
   }
   const refs = pushedRefs(await Bun.stdin.text())
-  const commits = newCommits(refs.map(([, sha]) => sha))
+  const commits = newCommits(
+    refs.map(([, sha]) => sha),
+    process.argv[3] ?? "",
+  )
   const list = await readList(publicListPath())
   if (typeof list === "string") console.error(`commit-trailer: ${list}`)
   const terms = typeof list === "object" ? [...new Set(listed(refs, commits, list))] : []

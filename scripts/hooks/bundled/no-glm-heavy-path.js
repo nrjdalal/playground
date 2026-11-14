@@ -68,6 +68,72 @@ var dataDirOf = (env, home = env.HOME || homedir()) => {
 };
 var dataDir = (env = process.env) => dataDirOf(env);
 
+// packages/safe-delete/src/live-refs.ts
+var run = (at, args, env, timeout) => {
+  const proc = Bun.spawnSync(["git", "-C", at, ...args], {
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", ...env },
+    stderr: "ignore",
+    stdin: "ignore",
+    stdout: "pipe",
+    timeout
+  });
+  return { ok: proc.exitCode === 0, out: proc.stdout.toString() };
+};
+function liveHeads(at, remote, timeout) {
+  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
+  const env = { GIT_TERMINAL_PROMPT: "0" };
+  if (command)
+    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
+  const live = run(at, ["ls-remote", "--heads", "--", remote], env, timeout);
+  if (!live.ok)
+    return null;
+  const tips = [];
+  for (const line of live.out.split(`
+`)) {
+    const [sha, name] = line.split("\t");
+    if (/^[0-9a-f]{40,64}$/.test(sha ?? "") && name?.startsWith("refs/heads/"))
+      tips.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha });
+  }
+  return tips;
+}
+function present(at, tips) {
+  if (!tips.length)
+    return [];
+  const had = run(at, ["rev-list", "--no-walk", "--ignore-missing", ...tips.map((t) => t.sha)]);
+  if (!had.ok)
+    return null;
+  const here = new Set(had.out.split(`
+`).filter(Boolean));
+  return tips.filter((t) => here.has(t.sha));
+}
+function pushRemote(at, branch = run(at, ["symbolic-ref", "-q", "--short", "HEAD"]).out.trim()) {
+  const config = (key) => run(at, ["config", "--get", key]).out.trim() || undefined;
+  return branch && config(`branch.${branch}.pushRemote`) || config("remote.pushDefault") || branch && config(`branch.${branch}.remote`) || "origin";
+}
+function heldBy(at, remote, timeout = 5000) {
+  const live = liveHeads(at, remote, timeout);
+  if (!live?.length)
+    return [];
+  const here = present(at, live) ?? [];
+  const had = new Set(here.map((t) => t.ref));
+  const tracked = new Map;
+  if (live.length > here.length && !/[:/\\]/.test(remote))
+    for (const line of run(at, [
+      "for-each-ref",
+      "--format=%(objectname) %(refname)",
+      `refs/remotes/${remote}/`
+    ]).out.split(`
+`)) {
+      const [sha, ref] = line.split(" ");
+      if (sha && ref)
+        tracked.set(ref.slice("refs/remotes/".length), sha);
+    }
+  return [
+    ...here.map((t) => t.sha),
+    ...live.flatMap((t) => had.has(t.ref) || !tracked.has(t.ref) ? [] : [tracked.get(t.ref)])
+  ];
+}
+
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
   const numericValues = Object.values(entries).filter((v) => typeof v === "number");
@@ -6712,7 +6778,7 @@ function shellSlot(args, shell) {
     return;
   return args.slice(args.indexOf(operand));
 }
-async function run(lexed, env, visit, builtins = false) {
+async function run2(lexed, env, visit, builtins = false) {
   if (running >= MAX_RUNS)
     throw new RangeError("scripts nested too deep");
   running++;
@@ -6775,7 +6841,7 @@ async function examine(cmd, env, visit, builtins) {
   if (!cmd.runsStdin || stdinScript(primary))
     return;
   for (const script of await scriptStdin(cmd, env)) {
-    const verdict = await nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins));
+    const verdict = await nested(cmd, env, () => run2(lexScript(known(script), env), subshell(env), visit, builtins));
     if (verdict)
       return verdict;
   }
@@ -6883,12 +6949,12 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
     for (const script of verdict ? [] : scripts) {
-      verdict = await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
+      verdict = await nested(cmd, env, () => run2(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
       if (verdict)
         break;
     }
   } else if (name === "eval") {
-    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
+    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run2(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record2(cmd, name, args, here);
@@ -7149,11 +7215,11 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins);
+    return run2(lexScript(script, env), subshell(env), visit, builtins);
   }
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script);
-    const verdict = await run(lexScript(text, env), subshell(env), visit, builtins);
+    const verdict = await run2(lexScript(text, env), subshell(env), visit, builtins);
     if (verdict)
       return verdict;
   }
@@ -8270,12 +8336,11 @@ async function commit(rest, dir, chained, forced) {
     return `no-glm-heavy-path hook refuses this git commit: ${heavyFiles.join(", ")} is on disk and not staged, and the hook cannot tell before the call runs whether the git add before it stages it, while this session runs on GLM and that is Opus work. Run git commit as its own call.`;
   return refuse("git commit", heavyFiles);
 }
-function rebased(dir, named, source, dest, not) {
+function rebased(dir, named, source, dest, held) {
   const branch = dest === "HEAD" ? names2(dir, ["symbolic-ref", "-q", "--short", "HEAD"])?.[0] : dest.replace(/^refs\/heads\//, "");
   if (!branch)
     return;
-  const config = (key) => names2(dir, ["config", "--get", key])?.[0];
-  const remote = named ?? config(`branch.${branch}.pushRemote`) ?? config("remote.pushDefault") ?? config(`branch.${branch}.remote`) ?? "origin";
+  const remote = named ?? pushRemote(dir, branch);
   const old = names2(dir, ["rev-parse", "-q", "--verify", `refs/remotes/${remote}/${branch}`])?.[0];
   if (!old)
     return;
@@ -8285,7 +8350,14 @@ function rebased(dir, named, source, dest, not) {
   });
   if (ancestor.exitCode !== 1)
     return;
-  const oldest = names2(dir, ["rev-list", "--reverse", "--topo-order", source, "--not", not])?.[0];
+  const oldest = names2(dir, [
+    "rev-list",
+    "--reverse",
+    "--topo-order",
+    source,
+    "--not",
+    ...held
+  ])?.[0];
   const base = oldest && names2(dir, ["rev-parse", "-q", "--verify", `${oldest}^`])?.[0];
   return base ? [old, base] : undefined;
 }
@@ -8318,8 +8390,7 @@ function push(rest, dir, branchReads) {
   if (deleting && sources.length === 0)
     return;
   const name = remote && !/[:/]/.test(remote.value) ? remote.value : undefined;
-  const tracked = name && names2(dir, ["for-each-ref", "--count=1", `refs/remotes/${name}`])?.length;
-  const not = tracked ? `--remotes=${name}` : "--remotes";
+  const held = heldBy(dir, remote?.value ?? pushRemote(dir));
   const listed = pathsOf(dir, [
     "log",
     "--name-only",
@@ -8328,9 +8399,9 @@ function push(rest, dir, branchReads) {
     "--format=",
     ...sources,
     "--not",
-    not
+    ...held
   ]);
-  const merges = names2(dir, ["rev-list", "--merges", ...sources, "--not", not]);
+  const merges = names2(dir, ["rev-list", "--merges", ...sources, "--not", ...held]);
   if (listed === null || merges === null)
     return unread("git push", "the files of the commits it pushes");
   const files = new Set(listed);
@@ -8363,7 +8434,7 @@ function push(rest, dir, branchReads) {
     for (const file of made)
       files.add(file);
   }
-  const bases = sources.length === 1 && dests.length === 1 && (!remote || name) ? rebased(dir, name, sources[0], dests[0], not) : undefined;
+  const bases = sources.length === 1 && dests.length === 1 && (!remote || name) ? rebased(dir, name, sources[0], dests[0], held) : undefined;
   if (bases)
     beyondMerge(files, bases[0], bases[1], (tree) => [pathsOf(dir, ["diff", "--name-only", "--no-renames", tree, sources[0]])], dir);
   const heavyFiles = [...files].filter(heavy).sort();
@@ -9494,7 +9565,7 @@ async function inspect(raw, environment, load5, limit) {
   const home = guarding ? checkoutOf(directory, orgs, roots) : undefined;
   try {
     const unset = (key) => !named.blind && !named.counts.has(key) && environment[key] === undefined;
-    return await run(lexed, env, visitor(load5, limit, orgs, roots, { own, steadyAt, unset }));
+    return await run2(lexed, env, visitor(load5, limit, orgs, roots, { own, steadyAt, unset }));
   } catch (error) {
     if (home)
       return checkoutRefusal("this call, which the hook could not read,", home);
