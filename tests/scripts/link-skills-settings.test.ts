@@ -63,10 +63,24 @@ const setup = () => {
   return { home, repo, settings: join(home, ".playground", "factory-settings.json") }
 }
 
-const run = async (repo: string, home: string) => {
+// A uname first on PATH whose -s reads the system given, so a case holds macOS's or Linux's links on either host; CI runs on Linux.
+const unameAs = (system: "Darwin" | "Linux") => {
+  const bin = join(scratch, `uname-${system}`)
+  mkdirSync(bin, { recursive: true })
+  writeFileSync(
+    join(bin, "uname"),
+    `#!/bin/bash\n[ "$1" = -s ] && echo ${system} || exec /usr/bin/uname "$@"\n`,
+  )
+  chmodSync(join(bin, "uname"), 0o755)
+  return bin
+}
+
+const run = async (repo: string, home: string, system?: "Darwin" | "Linux") => {
   const proc = Bun.spawn(["bash", join(repo, "scripts", "link-skills.sh")], {
     cwd: repo,
-    env: isolatedEnv(home),
+    env: system
+      ? { ...isolatedEnv(home), PATH: `${unameAs(system)}:${fakeBin}:${process.env.PATH}` }
+      : isolatedEnv(home),
     stderr: "pipe",
     stdout: "pipe",
   })
@@ -102,9 +116,9 @@ describe("link-skills.sh links the factory's settings", () => {
 
 // The brief templates and the `playground` command, each a link into the checkout, so a pull keeps them current.
 describe("link-skills.sh links the playground command and its brief templates", () => {
-  test("a first run links ~/.bun/bin/playground, the only command it links, and every brief in handoffs/ into the checkout", async () => {
+  test("a first run on macOS links ~/.bun/bin/playground, the only command it links, and every brief in handoffs/ into the checkout", async () => {
     const { home, repo } = setup()
-    expect((await run(repo, home)).code).toBe(0)
+    expect((await run(repo, home, "Darwin")).code).toBe(0)
     expect(readdirSync(join(home, ".bun", "bin"))).toEqual(["playground"])
     expect(readlinkSync(join(home, ".bun", "bin", "playground"))).toBe(
       join(repo, "packages", "scripts", "src", "playground", "cli.ts"),
@@ -217,6 +231,16 @@ describe("link-skills.sh links the playground command and its brief templates", 
     expect(result.code).toBe(1)
     expect(result.stderr).toContain(`${bin}: a real file`)
     expect(readFileSync(bin, "utf8")).toBe("mine")
+  })
+
+  // Linux has no Keychain, so there the secret store's `security` sits beside `playground`.
+  test("on Linux it also links ~/.bun/bin/security to the secret store", async () => {
+    const { home, repo } = setup()
+    expect((await run(repo, home, "Linux")).code).toBe(0)
+    expect(readdirSync(join(home, ".bun", "bin")).sort()).toEqual(["playground", "security"])
+    expect(readlinkSync(join(home, ".bun", "bin", "security"))).toBe(
+      join(repo, "packages", "scripts", "src", "security", "cli.ts"),
+    )
   })
 })
 
