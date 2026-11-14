@@ -635,10 +635,11 @@ function forList(cmd: Command, named: Namings): { key: string; values: string[] 
 // Every reading of a word over the values the for loops around it give its variables, the steady ones held too; undefined when one still holds a value the hook cannot read, or the readings pass LOOP_READINGS
 export function heldReadings(word: Word, env: Env, steady: Steady): Word[] | undefined {
   if (!word.raw || !marked(word.value)) return undefined
-  const known = heldVars(env, {
-    has: (key) => steady.has(key) || !!steady.exported?.(key),
-    past: steady.past,
-  })
+  const known = heldVars(
+    env,
+    { has: (key) => steady.has(key) || !!steady.exported?.(key), past: steady.past },
+    word.raw,
+  )
   let sets: Record<string, string>[] = [known]
   for (const key of new Set(word.raw.match(/[A-Za-z_]\w*/g) ?? [])) {
     const values = steady.loop?.(key)
@@ -653,7 +654,9 @@ const LOOP_READINGS = 64
 
 // A word with a value the lexer could not read, lexed again with the steady variables the call has set by now; undefined when it holds none, or still holds one the hook cannot read
 export function heldWord(word: Word, env: Env, steady: Steady): Word | undefined {
-  return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env, steady)) : undefined
+  return word.raw && marked(word.value)
+    ? relexed(word.raw, heldVars(env, steady, word.raw))
+    : undefined
 }
 
 // A raw word lexed with known variables: the one word it makes, or undefined when it still holds a value the hook cannot read
@@ -664,11 +667,14 @@ function relexed(raw: string, known: Record<string, string>): Word | undefined {
 }
 
 // The steady variables the call has set by now whose values the hook holds, an assignment that names an earlier one (`T="$S/x"`) lexed again with it, in the order they were set
-function heldVars(env: Env, steady: Steady): Record<string, string> {
+// A key held past its chain (Steady.past) reads only in a word that is its read alone (`"$f"`, `$f`, `${f}`), since the empty value a failed cd leaves turns any other word into the rest of it (`$S/c` into `/c`)
+function heldVars(env: Env, steady: Steady, raw?: string): Record<string, string> {
+  const alone = raw?.match(/^"?\$\{?([A-Za-z_]\w*)\}?"?$/)?.[1]
   const known = { ...env.known }
   for (const [key, text] of env.vars) {
     // a TMPDIR the call sets steers mktemp, so mktemp's path stays unheld
-    const held = steady.has(key) || (!!steady.past?.(key) && env.process[key] === undefined)
+    const held =
+      steady.has(key) || (key === alone && !!steady.past?.(key) && env.process[key] === undefined)
     if (key === "TMPDIR" || !held) continue
     if (!text.unknown && !marked(text.value)) known[key] = text.value
     else if ("raw" in text && typeof text.raw === "string") {

@@ -8321,10 +8321,7 @@ function forList(cmd, named) {
 function heldReadings(word, env, steady) {
   if (!word.raw || !marked(word.value))
     return;
-  const known = heldVars(env, {
-    has: (key) => steady.has(key) || !!steady.exported?.(key),
-    past: steady.past
-  });
+  const known = heldVars(env, { has: (key) => steady.has(key) || !!steady.exported?.(key), past: steady.past }, word.raw);
   let sets = [known];
   for (const key of new Set(word.raw.match(/[A-Za-z_]\w*/g) ?? [])) {
     const values = steady.loop?.(key);
@@ -8339,16 +8336,17 @@ function heldReadings(word, env, steady) {
 }
 var LOOP_READINGS = 64;
 function heldWord(word, env, steady) {
-  return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env, steady)) : undefined;
+  return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env, steady, word.raw)) : undefined;
 }
 function relexed(raw, known) {
   const words = lex(raw, known).commands.at(-1)?.words ?? [];
   return words.length === 1 && !marked(words[0].value) ? words[0] : undefined;
 }
-function heldVars(env, steady) {
+function heldVars(env, steady, raw) {
+  const alone = raw?.match(/^"?\$\{?([A-Za-z_]\w*)\}?"?$/)?.[1];
   const known = { ...env.known };
   for (const [key, text] of env.vars) {
-    const held = steady.has(key) || !!steady.past?.(key) && env.process[key] === undefined;
+    const held = steady.has(key) || key === alone && !!steady.past?.(key) && env.process[key] === undefined;
     if (key === "TMPDIR" || !held)
       continue;
     if (!text.unknown && !marked(text.value))

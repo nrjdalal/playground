@@ -7701,16 +7701,17 @@ function forList(cmd, named) {
   return { key: key.value, values: values.map((w) => w.value) };
 }
 function heldWord(word, env, steady) {
-  return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env, steady)) : undefined;
+  return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env, steady, word.raw)) : undefined;
 }
 function relexed(raw, known) {
   const words = lex(raw, known).commands.at(-1)?.words ?? [];
   return words.length === 1 && !marked(words[0].value) ? words[0] : undefined;
 }
-function heldVars(env, steady) {
+function heldVars(env, steady, raw) {
+  const alone = raw?.match(/^"?\$\{?([A-Za-z_]\w*)\}?"?$/)?.[1];
   const known = { ...env.known };
   for (const [key, text] of env.vars) {
-    const held = steady.has(key) || !!steady.past?.(key) && env.process[key] === undefined;
+    const held = steady.has(key) || key === alone && !!steady.past?.(key) && env.process[key] === undefined;
     if (key === "TMPDIR" || !held)
       continue;
     if (!text.unknown && !marked(text.value))
