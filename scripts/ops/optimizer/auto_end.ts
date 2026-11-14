@@ -41,6 +41,7 @@ export type Line = { text: string; to: string }
 
 export type EndDeps = {
   cleanup?: (target: Target) => Promise<string[]>
+  clone?: (target: Target) => Promise<string | undefined>
   close: (name: string) => Promise<{ ok: boolean; out: string }>
   report: (name: string, text: string) => Promise<void>
   unsaved: (target: Target) => Promise<string | null>
@@ -59,7 +60,7 @@ export function endsOn(row: Row): string | null {
 const leadOf = (lead?: string, worker?: string) =>
   lead ?? (managerKindOfName(worker ?? "") === "ops" ? "ops" : "builder")
 
-// One session ended, its unsaved work checked first; the line for its lead either way, and a reviewer ended idle tells its worker too, who resumes it.
+// One session ended, its unsaved work checked first; the line for its lead either way, and a reviewer ended idle tells its worker too, who resumes it in its own clone, which the line names when it has one.
 export async function endOne(target: Target, why: string, deps: EndDeps): Promise<Line[]> {
   const to = leadOf(target.lead, target.worker)
   if (!ENDABLE.has(target.kind ?? ""))
@@ -77,7 +78,8 @@ export async function endOne(target: Target, why: string, deps: EndDeps): Promis
   const cleaned = deps.cleanup && !idle ? await deps.cleanup(target) : []
   const after = cleaned.length ? `; cleanup: ${cleaned.join("; ")}` : ""
   if (!idle) return [{ text: `Ended ${target.name}: ${why}${after}`, to }]
-  const text = `Ended ${target.name}: ${why}${after}; resume it on the next push: scripts/spawn.sh resume ${target.name} <dir> --pr ${target.pr ?? "<PR url>"}`
+  const dir = (await deps.clone?.(target)) ?? "<dir>"
+  const text = `Ended ${target.name}: ${why}${after}; resume it on the next push: scripts/spawn.sh resume ${target.name} ${dir} --pr ${target.pr ?? "<PR url>"}`
   return target.worker && target.worker !== to
     ? [
         { text, to },
@@ -234,6 +236,13 @@ export async function worktreesOf(
 const CLONES: Record<string, string[]> = {
   reviewer: ["review-<n>"],
   tester: ["test-<n>", "test-<n>-before"],
+}
+
+// A checker's own clone of the main checkout's PR n that exists, its kind's first in CLONES (review-<n> for a reviewer, test-<n> for a tester), which its resume runs in; else undefined.
+export async function ownClone(target: Target, main: string): Promise<string | undefined> {
+  const leaf = CLONES[target.kind ?? ""]?.[0]
+  const n = leaf ? await ownPr(target.pr, main) : undefined
+  return leaf && n ? clonesAt([leaf], n, main)[0] : undefined
 }
 
 // The clones of PR n in <main>/.claude/worktrees that exist, one per leaf.
@@ -511,6 +520,10 @@ export const cleanupLive =
 
 export const liveDeps = (projectsDir: string): EndDeps => ({
   cleanup: cleanupLive(projectsDir),
+  clone: async (target) => {
+    const common = await git(REPO, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    return common ? ownClone(target, dirname(common)) : undefined
+  },
   close: async (name) => {
     const { code, out } = await runIn(["bash", join(REPO, "scripts", "spawn.sh"), "close", name])
     return { ok: code === 0, out: out.split("\n").at(-1) ?? "" }

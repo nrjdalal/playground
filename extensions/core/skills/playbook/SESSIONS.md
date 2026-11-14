@@ -282,7 +282,8 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
   A session saves every download inside one of its own folders, `~/.playground/scratch/<name>/` or `scratchpad/<name>/` beside it, never loose in `scratch/`, since `playground rm` clears only its folders.
   A `scratch/` folder or loose `<id>-*` file left once its session is gone, with no live session and no roster row naming it that has not ended, the nightly clean moves to the trash whole, past the 5,000-file tripwire and under its 2 GB cap ([LIFECYCLE.md](LIFECYCLE.md)).
 - Guards: only a worker, reviewer or tester, not busy for 10+ minutes, with no uncommitted or unpushed work in a worktree it used (the main checkout, where every session starts, is not one, nor a Playground worktree whose PR `playground rm` confirms merged or closed, which the cleanup discards); otherwise its lead gets a `Not ended` line saying why, and the session waits.
-- A reviewer ended idle is resumed by its worker on the next push, under the same name (**rounds**): `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir> --pr <its PR's URL>`, or its extension item as `<scope>/<kind>/<key>` (the `--pr` rule is [SPAWN.md](SPAWN.md#modes)'s); its `Ended` line goes to its worker too.
+- A reviewer ended idle is resumed by its worker on the next push, under the same name (**rounds**): `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir> --pr <its PR's URL>`, or its extension item as `<scope>/<kind>/<key>` (the `--pr` rule is [SPAWN.md](SPAWN.md#modes)'s);
+  its `Ended` line goes to its worker too, with its own `review-<n>` clone as `<dir>` when it has one (`ownClone`), since a resume run in the main checkout comes back there.
 
 A session ends by closing its pane, so the workspace's other sessions live on, by the one it reports to, through spawn.sh, since the `no-raw-spawn` hook refuses `herdr pane close` to every factory session (herdr's socket has no access control):
 

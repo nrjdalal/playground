@@ -15,6 +15,7 @@ import {
   endMerged,
   endOne,
   finishedOf,
+  ownClone,
   sweep,
   type Target,
   unsavedLive,
@@ -1332,6 +1333,15 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     ).toEqual([])
     expect(await worktreesOf({ ...target, kind: "worker" }, projects, main)).toEqual([])
     expect(await worktreesOf(target, projects)).toEqual([])
+  })
+
+  test("ownClone names a reviewer's review-<n> and a tester's test-<n> as the folder its resume runs in, and none for a missing clone, a worker or another repo's PR", async () => {
+    const { clone, main, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    expect(await ownClone(target, main)).toBe(clone)
+    expect(await ownClone({ ...target, kind: "tester" }, main)).toBe(rest[0])
+    expect(await ownClone({ ...target, pr: "https://github.com/o/r/pull/8" }, main)).toBeUndefined()
+    expect(await ownClone({ ...target, kind: "worker" }, main)).toBeUndefined()
+    expect(await ownClone({ ...target, pr: "https://github.com/x/r/pull/7" }, main)).toBeUndefined()
   })
 
   // PG-2144: an end keeps the other checker's clone of its PR while that checker is live, so the other checker's own end takes it
