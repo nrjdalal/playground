@@ -1747,13 +1747,18 @@ export const RUNS_TEXT = new Set([
 const CHANGED: Text = { ...unknown("a value a builtin may change"), vanishes: true }
 const DECLARES = new Set([...EXPORTS, "float", "integer", "private"])
 
-// Marks each held variable a command may change, wherever on the line it is, since a change the shell may make is one the reader cannot rule out: from bash 3.2's bash(1), SHELL BUILTIN COMMANDS (bash 5.3's for the nameref `declare -n`), and zsh 5.9's zshbuiltins(1) and zshmodules(1), every variable after text a RUNS_TEXT builtin runs or loads (an eval's only when the reader cannot read it, since the walk follows it otherwise) and after a setter (NAME_SETTERS) whose name word the reader cannot read; else unset's names (every one under zsh's -m), read's (REPLY when it names none), and print -v's and printf -v's but for a format of plain text, which end of input or an empty format leaves empty, a declaration's names under an option or, but for export and readonly, with no `=` (a local of its own in a function), zsh's `set -A` or `+A` name, and every name any other setter's words hold but getopts', which always takes an option letter or `?`; a program word the reader cannot read is the program a split reading resolves it to, and one none resolves is read as an eval when an argument is unread too (d-2047r)
+// Marks each held variable a command may change, wherever on the line it is, since a change the shell may make is one the reader cannot rule out: from bash 3.2's bash(1), SHELL BUILTIN COMMANDS (bash 5.3's for the nameref `declare -n`), and zsh 5.9's zshbuiltins(1) and zshmodules(1), every variable after text a RUNS_TEXT builtin runs or loads (an eval's only when the reader cannot read it, since the walk follows it otherwise) and after a setter (NAME_SETTERS) whose name word the reader cannot read; else unset's names (every one under zsh's -m), read's (REPLY when it names none), and print -v's and printf -v's but for a format of plain text, which end of input or an empty format leaves empty, a declaration's names under an option or, but for export and readonly, with no `=` (a local of its own in a function), zsh's `set -A` or `+A` name, and every name any other setter's words hold but getopts', which always takes an option letter or `?`; a program word the reader cannot read is the program a split reading resolves it to, or an array run whole its elements (arrayRun), and one none resolves is read as an eval when an argument is unread too (d-2047r)
 function change(cmd: Command, env: Env): void {
   const { args, first, name } = parse(cmd)
   const words = args.map((a) => a.value)
-  // a program word a split reading resolves (`U=unset; $U X`), or an array run whole (`A=(tool …); "${A[@]}" …`), changes what that program changes; one none resolves may be any builtin: with an argument it cannot read either, as an eval's, it may change every variable, and else the names its arguments hold
+  // a program word a split reading resolves (`U=unset; $U X`), or an array run whole (`A=(tool …); "${A[@]}" …`, `A=(unset X)`), changes what that program changes; one none resolves may be any builtin: with an argument it cannot read either, as an eval's, it may change every variable, and else the names its arguments hold
   if (marked(name)) {
     const array = arrayRun(cmd, first, env)
+    // an array's text-runner runs text the walk never follows (`A=(eval 'unset X')`), and one the reader cannot read whole may hold any builtin
+    if (array === null || (array && RUNS_TEXT.has(parse(array).name))) {
+      for (const key of env.vars.keys()) setVar(env.vars, key, CHANGED)
+      return
+    }
     const variants = array
       ? [array]
       : splitHeld(cmd, name, env).filter((variant) => !marked(parse(variant).name))
@@ -1816,16 +1821,20 @@ function change(cmd: Command, env: Env): void {
   }
 }
 
-// An array the line assigned, run whole as the program word (`"${A[@]}"`), runs its first element: the command with that element in its place, when it is a plain word and nothing has changed the array since
-function arrayRun(cmd: Command, first: Word | undefined, env: Env): Command | undefined {
+// An array the line holds, run whole as the program word (`"${A[@]}"`), runs its elements as the command's first words: the command with them in its place when each is a word the reader reads as written, null when one is not or something may have changed the array, so the program may be any; undefined for any other program word, or a name the line never set to an array
+function arrayRun(cmd: Command, first: Word | undefined, env: Env): Command | null | undefined {
   const key = (first?.raw ?? first?.source)?.match(/^"?\$\{([A-Za-z_]\w*)\[@\]\}"?$/)?.[1]
   const set = key ? env.vars.get(key) : undefined
-  if (!set || set.unknown !== undefined || set.vanishes) return
+  if (!set) return
+  if (set.unknown !== undefined || set.vanishes) return null
   // an assignment's word keeps its source in the line's variables, an array's `A=(…)` as written
-  const head = (set as Partial<Word>).source?.match(/^[A-Za-z_]\w*=\(\s*([\w./@%+:,-]+)[\s)]/)?.[1]
-  if (!head) return
-  const word: Word = { quoted: false, source: head, value: head }
-  return { ...cmd, words: cmd.words.map((w) => (w === first ? word : w)) }
+  const inner = (set as Partial<Word>).source?.match(/^[A-Za-z_]\w*=\(([\s\S]*)\)$/)?.[1]
+  if (inner === undefined) return
+  const { commands } = lex(inner)
+  const elements = commands.length === 1 ? commands[0].words : []
+  if (elements.length === 0 || commands[0].redirects.length > 0 || elements.some(unreadWord))
+    return null
+  return { ...cmd, words: cmd.words.flatMap((w) => (w === first ? elements : [w])) }
 }
 
 // A loop runs its body again after every change the pass before made, so a run of commands a loop or a count may repeat takes, before its first is read, each change its commands make and an unread value for each held variable it assigns, which a later pass reads (d-2047r); a scope the walk has not entered yet copies these from the one around it

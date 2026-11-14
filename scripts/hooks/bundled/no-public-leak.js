@@ -8397,6 +8397,11 @@ function change(cmd, env) {
   const words = args.map((a) => a.value);
   if (marked(name)) {
     const array = arrayRun(cmd, first, env);
+    if (array === null || array && RUNS_TEXT.has(parse3(array).name)) {
+      for (const key of env.vars.keys())
+        setVar(env.vars, key, CHANGED);
+      return;
+    }
     const variants = array ? [array] : splitHeld(cmd, name, env).filter((variant) => !marked(parse3(variant).name));
     for (const variant of variants)
       change(variant, env);
@@ -8430,13 +8435,18 @@ function change(cmd, env) {
 function arrayRun(cmd, first, env) {
   const key = (first?.raw ?? first?.source)?.match(/^"?\$\{([A-Za-z_]\w*)\[@\]\}"?$/)?.[1];
   const set = key ? env.vars.get(key) : undefined;
-  if (!set || set.unknown !== undefined || set.vanishes)
+  if (!set)
     return;
-  const head = set.source?.match(/^[A-Za-z_]\w*=\(\s*([\w./@%+:,-]+)[\s)]/)?.[1];
-  if (!head)
+  if (set.unknown !== undefined || set.vanishes)
+    return null;
+  const inner = set.source?.match(/^[A-Za-z_]\w*=\(([\s\S]*)\)$/)?.[1];
+  if (inner === undefined)
     return;
-  const word = { quoted: false, source: head, value: head };
-  return { ...cmd, words: cmd.words.map((w) => w === first ? word : w) };
+  const { commands } = lex(inner);
+  const elements = commands.length === 1 ? commands[0].words : [];
+  if (elements.length === 0 || commands[0].redirects.length > 0 || elements.some(unreadWord))
+    return null;
+  return { ...cmd, words: cmd.words.flatMap((w) => w === first ? elements : [w]) };
 }
 function repass(commands, envs) {
   for (const cmd of commands) {
