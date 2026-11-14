@@ -193,6 +193,31 @@ describe("uninstall", () => {
     expect(calls.some((argv) => argv[0] === "claude")).toBe(false)
   })
 
+  // #2203: Linux has no LaunchAgents; each job is a systemd user unit in ~/.config/systemd/user
+  test("on Linux disables and removes the systemd user units that run from the checkout or the data folder, and no other", async () => {
+    const { base, calls, home, repo, said } = install()
+    const units = join(home, ".config", "systemd", "user")
+    write(
+      join(units, "com.playground.ops-tick.service"),
+      `[Service]\nExecStart="/b/bun" "${repo}/packages/scripts/src/ops-tick/cli.ts"\n`,
+    )
+    write(join(units, "syncthing.service"), '[Service]\nExecStart="/usr/bin/syncthing"\n')
+    expect(
+      await uninstall({ ...base, confirm: async () => true, platform: "linux", purge: false }),
+    ).toBe(0)
+    expect(calls).toContainEqual([
+      "systemctl",
+      "--user",
+      "disable",
+      "--now",
+      "com.playground.ops-tick.service",
+    ])
+    expect(existsSync(join(units, "com.playground.ops-tick.service"))).toBe(false)
+    expect(existsSync(join(units, "syncthing.service"))).toBe(true)
+    expect(calls.some((argv) => argv[0] === "launchctl")).toBe(false)
+    expect(said).toContain(`removed ${join(units, "com.playground.ops-tick.service")}`)
+  })
+
   test("a second run finds nothing left and still exits 0", async () => {
     const { base } = install()
     await uninstall({ ...base, confirm: async () => true, purge: false })

@@ -117,6 +117,7 @@ export const restart = async (opts: {
   checkout: string
   from: string
   ops: string
+  platform?: NodeJS.Platform
   run: Run
   sleep?: (ms: number) => Promise<void>
   to: string

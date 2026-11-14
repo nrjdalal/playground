@@ -490,3 +490,143 @@ test("the command line's render runs the Dashboard's job from the Dashboard's ch
   })
   expect(rendered.find((job) => job.name === "ops-sweep")!.cwd).toBe(CHECKOUT)
 })
+
+// #2203: on Linux the same render installs each launchd job as a systemd user unit, in a HOME of the test's own whose ~/.config/systemd/user is the folder systemd reads, every systemctl --user call recorded: is-active answers whether a unit runs, enable --now starts one, stop ends one (each refusing while refusals given remain), or ends the render as systemd ends a unit that stops itself (killed).
+const unitRun = async (
+  name: string,
+  values: Record<string, unknown>,
+  systemd: { active?: string[]; killed?: boolean; refusals?: number } = {},
+) => {
+  const data = storeWith(name, values)
+  const home = join(scratch, name, "home")
+  const units = join(home, ".config", "systemd", "user")
+  mkdirSync(units, { recursive: true })
+  const calls: string[][] = []
+  const active = new Set(systemd.active ?? [])
+  let refusals = systemd.refusals ?? 0
+  const install = {
+    systemctl: async (args: string[]) => {
+      calls.push(args)
+      const unit = args.at(-1)!
+      if (args[0] === "is-active") return { code: active.has(unit) ? 0 : 3, out: "" }
+      if (refusals > 0) {
+        refusals--
+        return { code: 1, out: "nope" }
+      }
+      if (args[0] === "enable") active.add(unit)
+      if (args[0] === "stop" && systemd.killed) throw new Error("killed by its own stop")
+      if (args[0] === "stop") active.delete(unit)
+      return { code: 0, out: "" }
+    },
+    units,
+  }
+  const options = {
+    data,
+    fill,
+    install,
+    jobs: join(data, "ops", "jobs.json"),
+    roots: { home, main: CHECKOUT, trash: join(data, "trash") },
+  }
+  const render = async () => {
+    const out: string[] = []
+    const err: string[] = []
+    const exit = await renderJobsFile(
+      options,
+      (l) => out.push(l),
+      (l) => err.push(l),
+    )
+    return { code: exit, err: err.join("\n"), out: out.join("\n") }
+  }
+  const changes = () => calls.filter((args) => args[0] !== "is-active")
+  return { calls, changes, data, render, units }
+}
+
+test("on Linux a launchd job turned on is written as a user unit and enabled once, and one already there and active stays as it stands", async () => {
+  const { changes, render, units } = await unitRun(
+    "unit-on",
+    {
+      "jobs.opsHerdr": {
+        ...tick,
+        heartbeat: "ops-herdr",
+        launchd: "com.playground.ops-herdr",
+        program: ["{bun}", "{checkout}/packages/scripts/src/ops-herdr/cli.ts"],
+      },
+      "jobs.opsTick": tick,
+    },
+    { active: ["com.playground.ops-herdr.service"] },
+  )
+  const herdr = join(units, "com.playground.ops-herdr.service")
+  writeFileSync(herdr, "installed by hand")
+  const first = await render()
+  expect(first).toMatchObject({ code: 0, err: "" })
+  expect(first.out).toContain("+com.playground.ops-tick")
+  const tickUnit = join(units, "com.playground.ops-tick.service")
+  expect(readFileSync(tickUnit, "utf8")).toContain('"/c/packages/scripts/src/ops-tick/cli.ts"')
+  expect(changes()).toEqual([["enable", "--now", "com.playground.ops-tick.service"]])
+  expect(readFileSync(herdr, "utf8")).toBe("installed by hand")
+  expect((await render()).out).toBe("jobs: unchanged")
+  expect(changes()).toHaveLength(1)
+})
+
+test("on Linux a launchd job turned off is disabled, its unit moved to the trash, then stopped, and another unit left alone", async () => {
+  const { changes, data, render, units } = await unitRun(
+    "unit-off",
+    { "jobs.opsTick": { ...tick, enabled: false } },
+    { active: ["com.playground.ops-tick.service"] },
+  )
+  const tickUnit = join(units, "com.playground.ops-tick.service")
+  writeFileSync(tickUnit, "installed")
+  writeFileSync(join(units, "other.service"), "theirs")
+  const done = await render()
+  expect(done).toMatchObject({ code: 0, err: "" })
+  expect(done.out).toContain("-com.playground.ops-tick")
+  expect(changes()).toEqual([
+    ["disable", "com.playground.ops-tick.service"],
+    ["stop", "com.playground.ops-tick.service"],
+  ])
+  expect(existsSync(tickUnit)).toBe(false)
+  const [batch] = readdirSync(join(data, "trash"))
+  expect(
+    readFileSync(join(data, "trash", batch!, "1", "com.playground.ops-tick.service"), "utf8"),
+  ).toBe("installed")
+  expect(readFileSync(join(units, "other.service"), "utf8")).toBe("theirs")
+  expect((await render()).out).toBe("jobs: unchanged")
+  expect(changes()).toHaveLength(2)
+})
+
+// ops-tick runs the render through up.py inside its own unit, so stopping ops-tick ends the render inside that call.
+test("on Linux a unit whose stop ends the render is disabled and in the trash already", async () => {
+  const { changes, render, units } = await unitRun(
+    "unit-self",
+    { "jobs.opsTick": { ...tick, enabled: false } },
+    { active: ["com.playground.ops-tick.service"], killed: true },
+  )
+  const tickUnit = join(units, "com.playground.ops-tick.service")
+  writeFileSync(tickUnit, "installed")
+  await expect(render()).rejects.toThrow("killed by its own stop")
+  expect(changes()).toEqual([
+    ["disable", "com.playground.ops-tick.service"],
+    ["stop", "com.playground.ops-tick.service"],
+  ])
+  expect(existsSync(tickUnit)).toBe(false)
+})
+
+test("on Linux an enable systemctl refuses is named on stderr, exits 1, and is tried again on the next pass", async () => {
+  const { changes, render } = await unitRun(
+    "unit-refused",
+    { "jobs.opsTick": tick },
+    { refusals: 1 },
+  )
+  const first = await render()
+  expect(first.code).toBe(1)
+  expect(first.err).toBe("jobs: refused enable of com.playground.ops-tick.service, exit 1: nope")
+  expect(await render()).toMatchObject({
+    code: 0,
+    err: "",
+    out: "jobs: rendered +com.playground.ops-tick",
+  })
+  expect(changes()).toEqual([
+    ["enable", "--now", "com.playground.ops-tick.service"],
+    ["enable", "--now", "com.playground.ops-tick.service"],
+  ])
+})

@@ -134,7 +134,13 @@ export const proxyCheck = (repo: string, down: number | null): Check =>
 export const dataCheck = (data: string, exists: (path: string) => boolean): Check =>
   check("data folder", true, exists(data), `run scripts/link-skills.sh, which makes ${data}`, data)
 
-export const jobChecks = (jobsText: string | null, loaded: (label: string) => boolean) => {
+export const jobLoaded = (_platform: NodeJS.Platform) => (_label: string) => false
+
+export const jobChecks = (
+  jobsText: string | null,
+  loaded: (label: string) => boolean,
+  _platform: NodeJS.Platform = process.platform,
+) => {
   let jobs: { disabled?: boolean; launchd?: string; name?: string }[] = []
   try {
     const parsed = JSON.parse(jobsText ?? "").jobs

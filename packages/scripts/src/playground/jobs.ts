@@ -82,15 +82,17 @@ const installScripts = async (
 }
 
 // The folder launchd loads each agent from at login (HOME's LaunchAgents), its gui domain's uid and the launchctl that loads into it, which a test fakes.
-export type Install = {
-  agents: string
-  launchctl: (args: string[]) => Promise<{ code: number; out: string }>
-  uid: number
-}
+export type Install =
+  | {
+      agents: string
+      launchctl: (args: string[]) => Promise<{ code: number; out: string }>
+      uid: number
+    }
+  | { systemctl: (args: string[]) => Promise<{ code: number; out: string }>; units: string }
 
 // Each enabled launchd job launchd has not loaded gets its rendered plist in install's folder when none is there, and is bootstrapped, so a refused bootstrap is tried again on the next pass; each turned-off one has its plist there, if any, moved to the trash through the jobs-installed carve-out, then is booted out while launchd holds it, so a refused bootout is tried again too. A plist already there stays as it stands, since its PATH line differs with each shell the runner starts from and a rewrite would restart the job. A label that is not Playground's own (PLAYGROUND_AGENT) is left alone, so no other app's agent is loaded or stopped.
 const installAgents = async (
-  install: Install,
+  install: Extract<Install, { launchctl: unknown }>,
   jobs: Record<string, unknown>[],
   plists: Map<string, string>,
   roots: Roots,
@@ -208,7 +210,7 @@ export const renderJobsFile = async (
         } else changed.push(`-${file}`)
       }
   }
-  if (options.install)
+  if (options.install && "launchctl" in options.install)
     code = Math.max(
       code,
       await installAgents(options.install, jobs, plists, options.roots, changed, err),

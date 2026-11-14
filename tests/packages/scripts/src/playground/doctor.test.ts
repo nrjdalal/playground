@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -191,6 +199,16 @@ describe("jobChecks", () => {
     expect(check!.detail).toContain("com.x.ops-awake.plist")
   })
 
+  // #2203: on Linux each launchd job runs as a systemd user unit of the same label
+  test("on Linux each job turned on is checked active as its systemd user unit, with systemctl's fix", () => {
+    expect(jobChecks(jobs, () => true, "linux")).toEqual([
+      { detail: "com.x.ops-awake.service active", name: "job ops-awake", status: "ok" },
+    ])
+    const [check] = jobChecks(jobs, () => false, "linux")
+    expect(check!.status).toBe("MISSING")
+    expect(check!.detail).toContain("systemctl --user enable --now com.x.ops-awake.service")
+  })
+
   test("a turned-off job and one with no launchd label are left alone", () => {
     const labels: string[] = []
     jobChecks(jobs, (label) => (labels.push(label), true))
@@ -202,6 +220,34 @@ describe("jobChecks", () => {
       expect(jobChecks(text, () => true)).toEqual([
         { detail: "every ops job is off", name: "jobs", status: "ok" },
       ])
+  })
+})
+
+// #2203: a fake systemctl first on PATH answers is-active, exit 0 for the one unit it runs, so no real systemctl is called
+describe("jobLoaded", () => {
+  test("on Linux reads systemctl --user is-active --quiet for the label's unit", () => {
+    const bin = mkdtempSync(join(scratch, "systemctl-"))
+    const said = join(bin, "said")
+    writeFileSync(
+      join(bin, "systemctl"),
+      `#!/bin/sh\necho "$*" >> "${said}"\n[ "$4" = com.x.ops-tick.service ]\n`,
+    )
+    chmodSync(join(bin, "systemctl"), 0o755)
+    // a child of its own, since bun finds a program on the PATH it started with
+    const child = Bun.spawnSync(
+      [
+        process.execPath,
+        "--no-env-file",
+        "-e",
+        `const { jobLoaded } = await import(${JSON.stringify(DOCTOR)}); console.log(JSON.stringify(["com.x.ops-tick", "com.x.ops-off"].map(jobLoaded("linux"))))`,
+      ],
+      { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } },
+    )
+    expect(child.stderr.toString()).toBe("")
+    expect(JSON.parse(child.stdout.toString())).toEqual([true, false])
+    expect(readFileSync(said, "utf8")).toBe(
+      "--user is-active --quiet com.x.ops-tick.service\n--user is-active --quiet com.x.ops-off.service\n",
+    )
   })
 })
 

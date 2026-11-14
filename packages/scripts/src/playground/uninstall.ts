@@ -49,6 +49,7 @@ type Options = {
   database: string
   home: string
   log: (line: string) => void
+  platform?: NodeJS.Platform
   purge: boolean
   repo: string
   run: Run

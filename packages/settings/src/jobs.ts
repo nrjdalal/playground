@@ -244,8 +244,9 @@ export const renderJobs = (
   existing: { name?: unknown }[],
   fill: Fill,
   org: Record<string, OrgJob> | null = {},
-): { jobs: Record<string, unknown>[]; plists: Map<string, string> } => {
+): { jobs: Record<string, unknown>[]; plists: Map<string, string>; units: Map<string, string> } => {
   const plists = new Map<string, string>()
+  const units = new Map<string, string>()
   const row = (
     name: string,
     { command, cwd, enabled, program, ...job }: Job & { org?: string },
@@ -274,7 +275,7 @@ export const renderJobs = (
       .filter((job) => typeof job.name === "string" && !known.has(job.name))
       .map((job) => (org && typeof job.org === "string" ? { ...job, disabled: true } : job)),
   )
-  return { jobs: jobs.sort((a, b) => String(a.name).localeCompare(String(b.name))), plists }
+  return { jobs: jobs.sort((a, b) => String(a.name).localeCompare(String(b.name))), plists, units }
 }
 
 // A word an org job's command passes its script, and each segment of its paths: plain text, never a shell operator, a quote or a placeholder.
