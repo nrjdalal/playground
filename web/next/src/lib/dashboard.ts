@@ -200,7 +200,7 @@ export const rowTitle = (worker: Worker): string =>
   worker.task ??
   (worker.role === "dispatcher" ? "Hands each task to a worker" : "No task yet")
 
-// The board's groups in order, and the group every role the API gives belongs to, for the sidebar and the dashboard's table alike. A role missing from GROUP_OF, or a group GROUP_ORDER does not list, is a type error, so a new one cannot quietly drop its sessions from the board. Scripts holds no session: it is the ops jobs, which run with no Claude session behind them.
+// The board's groups in order, and the group every role the API gives belongs to, for the sidebar and the dashboard's table alike; the table keeps this order, and the sidebar starts from it until you move a group (useGroupOrder). A role missing from GROUP_OF, or a group GROUP_ORDER does not list, is a type error, so a new one cannot quietly drop its sessions from the board. Scripts holds no session: it is the ops jobs, which run with no Claude session behind them.
 export const GROUP_ORDER = [
   "Dispatchers",
   "Orchestrators",

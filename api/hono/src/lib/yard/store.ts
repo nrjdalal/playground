@@ -22,17 +22,19 @@ import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 
 import { ApiError } from "@/lib/error"
 import { live, take } from "@/lib/yard/limits"
+import { isRelayToken, sameKind, tokenSecret as secret } from "@/lib/yard/secret"
 import { HELD_KINDS, heldBecause, mentionsOf } from "@/lib/yard/tier"
 
 type YardChannel = typeof yardChannel.$inferSelect
 
-// Who is calling: a member signed in on the web, or one of their tokens, whose name is the device a post carries; bot names the member who made a bot's token's user (yard_bot), and whether the owner lets it read the dispatcher's log.
+// Who is calling: a member signed in on the web, or one of their tokens, whose name is the device a post carries; bot names the member who made a bot's token's user (yard_bot), and whether the owner lets it read the dispatcher's log; relay marks a relay-on token (createRelayToken), which writes and may hold the relay, where any other member's token reads alone.
 export type Caller = {
   bot?: { madeBy: string; readsLog?: boolean }
   device: string
   id: string
   login: string
   owner: boolean
+  relay?: true
   via: "token" | "web"
 }
 
@@ -45,9 +47,10 @@ export const JOINED_ON_REDEEM = [
 // The token, invite and channel writes a member makes in an hour.
 export const WRITES_HOUR = 20
 
-export const hashOf = (secret: string): string => createHash("sha256").update(secret).digest("hex")
+// A caller's hourly budget on the calls with no other: a bot's reads of the log, each a relay round trip to its maker's Mac, and a member's DM opens, channel joins and invite tries.
+export const CALL_LIMITS = { dmHour: 30, joinHour: 30, logReadHour: 120, redeemHour: 10 } as const
 
-const secret = (prefix: string): string => `${prefix}${randomBytes(24).toString("base64url")}`
+export const hashOf = (secret: string): string => createHash("sha256").update(secret).digest("hex")
 
 // A unique-constraint violation, which a write that can lose a race answers as 409; drizzle wraps the driver's error as its cause.
 const taken = (error: unknown): boolean => {
@@ -189,6 +192,7 @@ export const createChannel = async (
 export const joinChannel = async (db: Database, caller: Caller, id: string): Promise<Channel> => {
   const [row] = await db.select().from(yardChannel).where(eq(yardChannel.id, id))
   if (!row || row.kind !== "channel") throw notFound("Channel")
+  await take(db, `join:${caller.id}`, "hour", CALL_LIMITS.joinHour)
   await db.insert(yardMember).values({ channelId: id, userId: caller.id }).onConflictDoNothing()
   return channelFor(db, caller, id)
 }
@@ -201,6 +205,7 @@ export const openDm = async (db: Database, caller: Caller, login: string): Promi
     .where(sql`lower(${user.login}) = ${login.toLowerCase()}`)
   if (!peer || !reachesConsole(peer, "member")) throw notFound("Member")
   if (peer.id === caller.id) throw new ApiError(400, "BAD_REQUEST", "A DM is between two members")
+  await take(db, `dm:${caller.id}`, "hour", CALL_LIMITS.dmHour)
   const name = dmName(caller.id, peer.id)
   await db.transaction(async (tx) => {
     await tx
@@ -297,7 +302,7 @@ const shownAt = sql<string>`date_trunc('milliseconds', coalesce(${yardMessage.de
 
 export type Waiting = { held: boolean; message: Message; shownAt: string }
 
-// What waits on the caller past a mark, which the local Playground cards in its Inbox, oldest first by when it showed, then by id: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, every message a bot they made sends, which reaches only its DM with them, but the line each read of the log posts (kind log, which no bot posts itself), and their own posts held for their approval; the mark is a time and, from the second read on, the last item's id, so rows in that item's millisecond still wait; each list reads at most limit rows, and when one comes back full both stop at the earlier full list's last row, so the next mark skips no row either list left out.
+// What waits on the caller past a mark, which the local Playground cards in its Inbox (a bot's message told to its dispatcher instead), oldest first by when it showed, then by id: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, every message a bot they made sends, which reaches only its DM with them, but the line each read of the log posts (kind log, which no bot posts itself), and their own posts held for their approval; the mark is a time and, from the second read on, the last item's id, so rows in that item's millisecond still wait; each list reads at most limit rows, and when one comes back full both stop at the earlier full list's last row, so the next mark skips no row either list left out.
 export const waiting = async (
   db: Database,
   caller: Caller,
@@ -504,11 +509,17 @@ export const tokens = async (db: Database, caller: Caller) =>
       .orderBy(asc(yardToken.name))
   ).map(tokenOut)
 
-// A new token: its secret, yard_ and 32 random characters, is returned this once and kept only as its hash.
-export const createToken = async (db: Database, caller: Caller, name: string, now = Date.now()) => {
+// A new token: its secret, its prefix and 32 random characters, is returned this once and kept only as its hash.
+const mintToken = async (
+  db: Database,
+  caller: Caller,
+  name: string,
+  prefix: string,
+  now: number,
+) => {
   tokenNameSchema.parse(name)
   await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR, now)
-  const value = secret("yard_")
+  const value = secret(prefix)
   try {
     const [row] = await db
       .insert(yardToken)
@@ -521,6 +532,13 @@ export const createToken = async (db: Database, caller: Caller, name: string, no
   }
 }
 
+export const createToken = (db: Database, caller: Caller, name: string, now = Date.now()) =>
+  mintToken(db, caller, name, "yard_", now)
+
+// A relay-on token, a Mac's one token with its Relay switch on: it reads and posts as its member does, and the owner's alone holds the relay (relayRouter's socket).
+export const createRelayToken = (db: Database, caller: Caller, name: string, now = Date.now()) =>
+  mintToken(db, caller, name, "yard_relay_", now)
+
 export const revokeToken = async (db: Database, caller: Caller, id: string) => {
   const [row] = await db
     .update(yardToken)
@@ -531,7 +549,38 @@ export const revokeToken = async (db: Database, caller: Caller, id: string) => {
   return tokenOut(row)
 }
 
-// The member a token names, when it is live, stamping its last use, with the bot row when its user is a bot.
+// A token's swap of itself, in place: its row takes next's hash, keeping its name, its member and so its kind, which next must share (sameKind), and makes no other token; old's next call reads 401. A swap counts on the member's token writes.
+export const swapToken = async (
+  db: Database,
+  caller: Caller,
+  old: string,
+  next: string,
+  now = Date.now(),
+) => {
+  if (!sameKind(old, next))
+    throw new ApiError(400, "BAD_REQUEST", "A token swaps for a new one of its own kind")
+  await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR, now)
+  try {
+    const [row] = await db
+      .update(yardToken)
+      .set({ hash: hashOf(next) })
+      .where(
+        and(
+          eq(yardToken.hash, hashOf(old)),
+          eq(yardToken.userId, caller.id),
+          isNull(yardToken.revokedAt),
+        ),
+      )
+      .returning()
+    if (!row) throw new ApiError(401, "UNAUTHORIZED", "Unauthorized")
+    return tokenOut(row)
+  } catch (error) {
+    if (taken(error)) throw new ApiError(409, "CONFLICT", "That secret is taken")
+    throw error
+  }
+}
+
+// The member a token names, when it is live, stamping its last use, with the bot row when its user is a bot, and whether it is relay-on.
 export const tokenOwner = async (db: Database, value: string) => {
   const [row] = await db
     .select({ bot: yardBot, name: yardToken.name, tokenId: yardToken.id, user })
@@ -544,6 +593,7 @@ export const tokenOwner = async (db: Database, value: string) => {
   return {
     bot: row.bot ? { madeBy: row.bot.madeBy, readsLog: row.bot.readsLog } : null,
     device: row.name,
+    relay: isRelayToken(value),
     user: row.user,
   }
 }
@@ -667,18 +717,28 @@ export const setReadsLog = async (
   return (await bots(db, caller)).find((bot) => bot.name === name)!
 }
 
-// A bot's read of the log reaches its maker's Mac: the maker's login, which the Mac checks against its own token's, and the bot's DM, where the read's line goes.
-export const logReadOf = async (db: Database, caller: Caller & { bot: { madeBy: string } }) => {
-  const [maker] = await db
-    .select({ login: user.login })
-    .from(user)
-    .where(eq(user.id, caller.bot.madeBy))
+// A bot's one DM, with the owner who made it, found from its token alone.
+export const botDm = async (
+  db: Database,
+  caller: Caller & { bot: { madeBy: string } },
+): Promise<string> => {
   const [dm] = await db
     .select({ id: yardChannel.id })
     .from(yardChannel)
     .where(eq(yardChannel.name, dmName(caller.id, caller.bot.madeBy)))
-  if (!maker?.login || !dm) throw notFound("Bot")
-  return { dm: dm.id, login: maker.login }
+  if (!dm) throw notFound("Bot")
+  return dm.id
+}
+
+// A bot's read of the log reaches its maker's Mac: the maker's login, which the Mac checks against its own token's, and the bot's DM, where the read's line goes.
+export const logReadOf = async (db: Database, caller: Caller & { bot: { madeBy: string } }) => {
+  await take(db, `logread:${caller.id}`, "hour", CALL_LIMITS.logReadHour)
+  const [maker] = await db
+    .select({ login: user.login })
+    .from(user)
+    .where(eq(user.id, caller.bot.madeBy))
+  if (!maker?.login) throw notFound("Bot")
+  return { dm: await botDm(db, caller), login: maker.login }
 }
 
 // The line a read of the log leaves in the bot's DM, as the bot's, kind log, so its maker sees each read and the Inbox cards none (waiting).
@@ -806,6 +866,7 @@ export const decideInvite = async (
 
 // Redeems an open, unexpired invite meant for the caller (or for anyone): the caller takes the member rung, unless already above it, and joins #general and #releases.
 export const redeemInvite = async (db: Database, caller: Caller, code: string) => {
+  await take(db, `redeem:${caller.id}`, "hour", CALL_LIMITS.redeemHour)
   const now = new Date()
   await db.transaction(async (tx) => {
     const [row] = await tx

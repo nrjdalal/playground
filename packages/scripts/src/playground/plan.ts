@@ -32,11 +32,11 @@ playground planner | builder | ops | optimizer
                       start that manager as playground dispatcher starts the dispatcher, its brief from scripts/briefs/<manager>.md; the dispatcher runs it the first time it routes work there, and the optimizer at its own start
 playground status     one line each for the Dashboard, the follower, each dispatcher, GLM and each herdr server
 playground sweep <lead>
-                      what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs, its parked rows' closed or unreadable holds), or quiet
+                      what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs, its parked rows' closed or unreadable holds, and for the builder a missing or stale merge queue), or quiet
 playground focus [on --session <name> --reason "<why>" [--for <minutes>] | off]
                       give one session the Mac for up to 180 minutes (120 by default): every merge, every other session's heavy run and every new session but its own reviewer and tester and a priority start waits until off or its end, and the Inbox holds what comes in quiet but an alert; off prints how many runs queued while it stood and how long they waited, the line the Inbox's card carries once focus ends; bare, it prints the focus standing
 playground priority [on <session> --reason "<why>" | off <session> --reason "<why>"]
-                      the one way to open a priority window, and only on the owner's or the dispatcher's word: on writes the data folder's priority-<session>.json, naming the session, who opened it, the reason and the time, and while it stands a spawn.sh --priority start passes the load and slots gates and focus; off lifts it, and ops-tick's priority-lapse beat lifts one still standing after ${LAPSE_HOURS} hours; each on, off and lapse is a line in ops/priority.log; a priority file another writer keeps it leaves alone; bare, it lists the priority files standing
+                      the one way to open a priority window, and only on the owner's or the dispatcher's word: on writes the data folder's priority-<session>.json, naming the session, who opened it, the reason and the time, and while it stands a spawn.sh --priority start passes the load, slots and sessions gates and focus; off lifts it, and ops-tick's priority-lapse beat lifts one still standing after ${LAPSE_HOURS} hours; each on, off and lapse is a line in ops/priority.log; a priority file another writer keeps it leaves alone; bare, it lists the priority files standing
 playground page <file.html> --title "<title>" --by <session> [--for <session>]
                       keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, and print the copy's path for an Inbox card's html attachment (bun run ask new), opening nothing; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
 playground update [--to <tag>]
@@ -80,14 +80,14 @@ playground settings import-jobs <jobs.json> [--launch-agents <dir>] [--scope <sc
                       once, at the switch: each ops job jobs.json lists becomes its jobs.<name> setting (your login's scope by default), a launchd job's program read from its plist; a job the registry does not know stays in jobs.json
 playground ext which <skill> [--repo <dir>]
                       print the folder of the copy of <skill> a session in <dir> loads, from whichever scope holds it
-playground ext init [--yes | --dry-run] | add <name> [<owner/name>] [--yes] | order | link | unlink | remove | sync [<scope>] | list | show | put | why | diff | search | export <dir> | import <dir> [--dry-run] | import --from-tree <dir> | import-scripts <ops-dir> <job>... --org <org> | score | accept | reject | check-modes
-                      make (on your yes, typed or --yes) or reuse your private repo and clone your login's folder from it, sync each scope with its repo now, read the extensions, put an item's next revision from a file, a folder or stdin with its reason and attachments as one commit in its scope, search them, export or import every scope as a folder of clones, seed the guards' lists from a folder of list files, bring each job folder in as an org's script once at the switch, score, accept or reject a proposal, and list once the stored scripts that lost their executable bit
+playground ext init [--yes | --dry-run] | add <name> [<owner/name>] [--yes] | order | link | unlink | lock | unlock | remove | sync [<scope>] | list | show | put | why | diff | search | export <dir> | import <dir> [--dry-run] | import --from-tree <dir> | import-scripts <ops-dir> <job>... --org <org> | score | accept | reject | check-modes
+                      make (on your yes, typed or --yes) or reuse your private repo and clone your login's folder from it, sync each scope with its repo now, read the extensions, put an item's next revision from a file, a folder or stdin with its reason and attachments as one commit in its scope, search them, export or import every scope as a folder of clones, seed the guards' lists from a folder of list files, bring each job folder in as an org's script once at the switch, score, accept or reject a proposal, list once the stored scripts that lost their executable bit, and set or clear the extensions folder's file lock, which every write here lifts for itself
 playground migrate --archive <checkout> --pre-squash <sha> --org <org> [--old <rev>] [--dry-run]
                       once, at the switch: move the old data folder in ~/.claude to ~/.playground, seed your login's settings and the release owners' list from the archive checkout (its canary, or --old, and the pre-squash head), bring the hand-made skills into the org's scope unless its clone holds them, then, with the Dashboard's job stopped, make each move the migration table at the pre-squash head lists: renamed and dropped jobs, archived stale copies, moved state files, and renamed variables in your profiles and LaunchAgents, and last runs playground herdr pin; a value already set is left
 playground uninstall [--purge]
                       remove the LaunchAgents that run from this checkout or the data folder, stop the Dashboard's stack and remove every link into this checkout; --purge also removes the Dashboard's database and moves the data folder aside to <data folder>-purged-<UTC time>, after asking
-playground add [--kind worker|runner] [<name>] [--title "<title>"] [--brief <file>] [--model <id>] [--backend glm|claude]
-                      start a worker (or a runner) through spawn.sh, under the name given or one bun run name picks, on handoffs/new-worker.md by default; a worker needs --title, a plain title of up to 40 characters, and a runner takes its name and no --title
+playground add [--kind worker|runner] [<name>] [--title "<title>"] [--brief <file>] [--model <id>] [--backend glm|claude] [--account <email>]
+                      start a worker (or a runner) through spawn.sh, under the name given or one bun run name picks, on handoffs/new-worker.md by default; a worker needs --title, a plain title of up to 40 characters, and a runner takes its name and no --title; --account names the Claude login, which a worker needs while usage.accounts lists a Claude account
 playground add --dispatcher --backend glm
                       start a second dispatcher on GLM
 playground alerts-wait <name>
@@ -142,6 +142,7 @@ export const WORDS: Record<string, number | "rest"> = {
   "ext init": 0,
   "ext link": 2,
   "ext list": 0,
+  "ext lock": 0,
   "ext order": "rest",
   "ext put": 4,
   "ext reject": 4,
@@ -151,6 +152,7 @@ export const WORDS: Record<string, number | "rest"> = {
   "ext show": 3,
   "ext sync": 1,
   "ext unlink": 2,
+  "ext unlock": 0,
   "ext which": 1,
   "ext why": 3,
   focus: 0,
@@ -293,7 +295,11 @@ export const addCommand = (
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
     if (arg === "--dispatcher") dispatcher = true
-    else if (["--backend", "--brief", "--kind", "--manager", "--model", "--title"].includes(arg)) {
+    else if (
+      ["--account", "--backend", "--brief", "--kind", "--manager", "--model", "--title"].includes(
+        arg,
+      )
+    ) {
       const value = args[++i]
       if (value === undefined) return { error: `${arg} needs a value` }
       if (arg === "--manager") manager = value
@@ -310,7 +316,12 @@ export const addCommand = (
   const backend = options["--backend"]
   if (backend !== undefined && !BACKENDS.includes(backend))
     return { error: `--backend takes claude or glm, not ${backend}` }
-  const passed = [...(model ? ["--model", model] : []), ...(backend ? ["--backend", backend] : [])]
+  const account = options["--account"]
+  const passed = [
+    ...(model ? ["--model", model] : []),
+    ...(backend ? ["--backend", backend] : []),
+    ...(account ? ["--account", account] : []),
+  ]
 
   const kind = options["--kind"]
   const title = options["--title"]
@@ -319,6 +330,7 @@ export const addCommand = (
 
   if (dispatcher) {
     if (
+      account !== undefined ||
       manager !== undefined ||
       words.length ||
       brief !== undefined ||

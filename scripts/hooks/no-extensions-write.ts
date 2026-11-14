@@ -16,7 +16,16 @@ import {
 } from "../../packages/settings/src/rendered"
 import { settingFields } from "../../packages/settings/src/settings"
 import { eachInput } from "./codex"
-import { bunCall, FILE_TOOLS, gitCall, inPlace, real } from "./no-main-checkout"
+import {
+  bunCall,
+  FILE_TOOLS,
+  gitCall,
+  inPlace,
+  real,
+  runnerTarget,
+  toolName,
+  X,
+} from "./no-main-checkout"
 import { fromFactory, opsLead } from "./role"
 import {
   codeFed,
@@ -653,7 +662,7 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
   return [...new Set([...targets, ...maybe, ...logs, ...moved])]
 }
 
-// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from; every jobs.<name> is refused beside them (JOB_PREFIX).
+// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, ext.repos, which names the repository each scope syncs from, and yard.logReaders, the bots this Mac answers a read of the dispatcher's log for; every jobs.<name> is refused beside them (JOB_PREFIX).
 export const GUARD_KEYS = new Set([
   "ext.links",
   "ext.order",
@@ -668,6 +677,7 @@ export const GUARD_KEYS = new Set([
   "sessions.names",
   "slack.gatedSends",
   "usage.keychainService",
+  "yard.logReaders",
 ])
 // An ops job's setting turns it on or moves what it runs, so every jobs.<name> is refused, a name the registry lacks included, but the Ops lead's change of its interval alone (tunes()): only the owner's Approve of a guard decision, or Settings > Jobs, sets any other.
 const JOB_PREFIX = "jobs."
@@ -798,12 +808,32 @@ function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   )
 }
 
-// The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare.
+// the package runners runnerDirs follows when a runner starts one
+const STARTED_RUNNERS = new Set(["bun", "bunx", "npx"])
+
+// The folders a bun, bunx or npx call's word may land in: bun's last --cwd, for bun x and bunx also the folder their --cwd options chain to, and for a bun, bunx or npx that bunx, bun x, npx or bun run starts, its own folders read from the folder the runner starts it in, as no-main-checkout's runs() reads a bun x program.
+function runnerDirs(name: string, args: Word[], env: Env): (string | undefined)[] {
+  if (name === "bunx") return runnerDirs("bun", [X, ...args], env)
+  if (name === "npx") {
+    const at = runnerTarget(args)
+    const started = toolName(args[at]?.value)
+    return STARTED_RUNNERS.has(started) ? runnerDirs(started, args.slice(at + 1), env) : []
+  }
+  if (name !== "bun") return []
+  const { at, chained, cwd, words } = bunCall(args, env)
+  const x = words[0] === "x"
+  const own = x ? [cwd, chained] : [cwd]
+  const started = x || words[0] === "run" ? toolName(args[at]?.value) : ""
+  if (!STARTED_RUNNERS.has(started)) return own
+  return [...own, ...runnerDirs(started, args.slice(at + 1), { ...env, cwd: x ? chained : cwd })]
+}
+
+// The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare, a package runner's word read in each folder runnerDirs names too.
 function cliCalls(parsed: Parsed, env: Env): Word[][] {
   const { args, first, name } = parsed
   if (!first) return []
   const words = [first, ...args]
-  const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined]
+  const dirs = [env.cwd, ...runnerDirs(name, args, env)]
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
@@ -1620,7 +1650,15 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     }
     const slot = slotWords(parsed)
     if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
+      return slot.length === 0
+        ? undefined
+        : examine(
+            { ...cmd, words: slot },
+            // run-slot.sh runs its words in a process of its own, so a cd among them moves no folder for the commands after it
+            { ...env, files: new Map(env.files), vars: new Map(env.vars) },
+            visit,
+            false,
+          )
     const { args, first, name, xargs } = parsed
     // findutils' g names are read again as find and xargs, so every check those two take reads them; the words swap in place, keeping the Command steadyAt knows and the program's path
     const findutils = GNU_NAMED.exec(name)?.[1]
@@ -1966,9 +2004,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           ? writeTargets(tool, given, gnu, posix)
           : []
     }
-    // a program on neither list is judged on its typed words alone (unreadCdWrites)
+    // a program on neither list is judged in every call xargs may build too (unreadCdWrites), so a file an in-place edit takes from stdin counts
     const unlisted =
-      !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env, !gnu || posix) : []
+      !remover && !WRITERS.has(tool)
+        ? shapes.flatMap((typed) => unreadCdWrites(tool, typed, env, !gnu || posix))
+        : []
     const loose = [...shapes.flatMap(operandsOf), ...unlisted].find(
       (word) => !placed(word, env, steady),
     )

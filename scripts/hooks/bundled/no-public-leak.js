@@ -6303,6 +6303,11 @@ var gateSettings = defineSettings({
     description: "The share of the load gate's line a small worker keeps back for reviewers and testers, so a held review starts first; set it under gates.smallReserve, or a small worker's line falls below a medium one's.",
     schema: number2().min(0).lt(1)
   },
+  "gates.sessionCap": {
+    default: 0,
+    description: "The live workers, reviewers and testers in the roster a new one starts under, so the floor keeps to the cap the factory runs to; 0 caps nothing.",
+    schema: number2().int().min(0)
+  },
   "gates.smallReserve": {
     default: 0.25,
     description: "The share of the load gate's line kept for small items, so a big plan never blocks a small one.",
@@ -6978,8 +6983,8 @@ var WRAPPERS = new Map(Object.entries({
   ],
   timeout: ["-f -p -v --foreground --preserve-status --verbose", "-k -s --kill-after --signal"],
   xargs: [
-    "-0 -o -p -r -t -x --exit --interactive --no-run-if-empty --null --open-tty --show-limits --verbose",
-    "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-lines --max-procs --process-slot-var"
+    "-0 -o -p -r -t -x --exit --interactive --max-lines --no-run-if-empty --null --open-tty --show-limits --verbose",
+    "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-procs --process-slot-var"
   ]
 }).map(([name, [flags, values]]) => [
   name,
@@ -8110,9 +8115,10 @@ function unwrap(state, inside, budget) {
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
         state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length);
         take();
-      } else if (state.xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
+      } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
+        state.xargs ??= {};
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
       } else if (wrapper === "env" && v === "-") {
         take();
@@ -8631,7 +8637,9 @@ async function existing(path, env) {
 }
 async function outputOf(cmd, env) {
   tick();
-  const { args, name } = parse3(cmd);
+  const { args, name, xargs } = parse3(cmd);
+  if (xargs)
+    return unknown2(`the output of ${name || "echo"} under xargs`);
   if (name === "") {
     if (cmd.inner)
       return outputs(cmd.inner(), env);
@@ -8663,7 +8671,7 @@ async function outputOf(cmd, env) {
   if (hidden)
     return hidden;
   if (name === "printf")
-    return { value: printf(values.map((v) => v.value)) };
+    return { value: printf(values.slice(values[0]?.value === "--" ? 1 : 0).map((v) => v.value)) };
   let k = 0;
   while (k < values.length && /^-[neE]+$/.test(values[k].value))
     k++;
@@ -8951,6 +8959,85 @@ var WRITES2 = [
   [/linear/i, new Set(["save_comment", "save_issue"])],
   [/slack/i, new Set(["chat_post_message"])]
 ];
+var REF_MOVE = /\b(?:createCommitOnBranch|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/;
+var REF_MUTATION = new RegExp(`${REF_MOVE.source}|\\bcreatePullRequest\\b`);
+
+// scripts/hooks/no-protected-push.ts
+var PROTECTED = new Set(["canary", "main"]);
+var PUSH_TAKES = new Set([
+  "--exec",
+  "-o",
+  "--push-option",
+  "--receive-pack",
+  "--recurse-submodules",
+  "--repo"
+]);
+var PLAIN2 = new Set([
+  "--atomic",
+  "--dry-run",
+  "--exec",
+  "--follow-tags",
+  "--force",
+  "--force-if-includes",
+  "--force-with-lease",
+  "--ipv4",
+  "--ipv6",
+  "--no-atomic",
+  "--no-follow-tags",
+  "--no-force-if-includes",
+  "--no-force-with-lease",
+  "--no-progress",
+  "--no-signed",
+  "--no-thin",
+  "--no-verify",
+  "--porcelain",
+  "--progress",
+  "--push-option",
+  "--quiet",
+  "--receive-pack",
+  "--recurse-submodules",
+  "--repo",
+  "--set-upstream",
+  "--signed",
+  "--thin",
+  "--verbose",
+  "--verify",
+  "-4",
+  "-6",
+  "-f",
+  "-n",
+  "-o",
+  "-q",
+  "-u",
+  "-v"
+]);
+var KEEPS_HEAD = new Set(["cat", "date", "echo", "printf", "pwd", "true"]);
+var GIT_KEEPS_HEAD = new Set([
+  "add",
+  "commit",
+  "diff",
+  "fetch",
+  "log",
+  "ls-remote",
+  "push",
+  "rev-parse",
+  "show",
+  "status"
+]);
+var FILE_TOOLS = new Set(["create_or_update_file", "delete_file", "push_files"]);
+var MERGE_TAKES = new Set([
+  "-A",
+  "--author-email",
+  "-b",
+  "--body",
+  "-F",
+  "--body-file",
+  "--match-head-commit",
+  "-R",
+  "--repo",
+  "-t",
+  "--subject"
+]);
 
 // scripts/hooks/read-only.ts
 var READ_FILE = { count: true, operands: true, values: ["-c", "-n"] };
@@ -9282,7 +9369,7 @@ var COMMIT_TAKES = new Set([
   "--template",
   "--trailer"
 ]);
-var PUSH_TAKES = new Set(["--exec", "-o", "--push-option", "--receive-pack", "--repo"]);
+var PUSH_TAKES2 = new Set(["--exec", "-o", "--push-option", "--receive-pack", "--repo"]);
 var REPO_WRITES = new Map([
   ["repo archive", []],
   ["repo delete", []],
@@ -9973,7 +10060,7 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     if (sub === "push" || sub === "send-pack" || subtree) {
       if (carried)
         return refuse("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
-      return subtree ? push(rest.slice(1), here, [], SUBTREE_TAKES) : push(rest, here, [], PUSH_TAKES, sub === "push");
+      return subtree ? push(rest.slice(1), here, [], SUBTREE_TAKES) : push(rest, here, [], PUSH_TAKES2, sub === "push");
     }
   }
   if (sub !== "commit" && sub !== "push")
@@ -9985,7 +10072,10 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     return;
   if (state().policy.anyWrite) {
     const target = decide(dir ? checkout : [undefined]);
-    return target.where === "guarded" ? judge("git commit", target, [], env) : undefined;
+    if (target.where !== "guarded")
+      return;
+    const onBranch = state().policy.branchPush && dir && !carried && !state().movedBefore && branchHead(dir);
+    return onBranch ? undefined : judge("git commit", target, [], env);
   }
   const { flags } = parseFlags(rest, COMMIT_TAKES);
   const texts = [branch(dir)];
@@ -10122,7 +10212,24 @@ function branchOnly(flags, positionals, dir) {
     return name !== "" && !/^(?:refs\/|@$|head$|tag$)/i.test(name) && !defaults.has(name.toLowerCase());
   });
 }
-async function push(rest, env, checkout, takes = PUSH_TAKES, plain = false) {
+function branchHead(dir) {
+  const head = gitText(dir, ["symbolic-ref", "--short", "-q", "HEAD"], "the checkout's branch");
+  const name = head.value.trim().toLowerCase();
+  if (head.unknown || name === "")
+    return false;
+  const remotes = gitText(dir, ["remote"], "the checkout's remotes");
+  if (remotes.unknown)
+    return false;
+  const defaults = new Set(["main", "master"]);
+  for (const remote of remotes.value.split(`
+`).filter(Boolean)) {
+    const ref = gitText(dir, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`], "the remote's default branch");
+    if (!ref.unknown)
+      defaults.add(ref.value.trim().slice(remote.length + 1).toLowerCase());
+  }
+  return !defaults.has(name);
+}
+async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
   const { flags, positionals } = parseFlags(rest, takes);
   if (state().policy.anyWrite) {
     const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value;

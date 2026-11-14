@@ -57,21 +57,32 @@ export async function registryName(
   }
 }
 
-// Whether the hook input's session is the Ops lead: the lead role, and its name in Claude Code's registry has the roster's ops kind; a read that throws names no one.
-export async function opsLead(
+// Whether the hook input's session is the lead of that kind: the lead role, and its name in Claude Code's registry has the roster's kind; a read that throws names no one.
+async function leadOf(
   raw: string,
-  environment: Environment = process.env,
+  kind: "builder" | "ops",
+  environment: Environment,
 ): Promise<boolean> {
   try {
     const session = sessionOf(raw)
     if (typeof session !== "string" || (await sessionRole(environment, session)) !== "lead")
       return false
     const name = await registryName(session, environment)
-    return name !== undefined && (await rosterKind(name, environment)) === "ops"
+    return name !== undefined && (await rosterKind(name, environment)) === kind
   } catch {
     return false
   }
 }
+
+// Whether a command may set the role variable a lead's pass reads, or source a file that may: the pass then goes, since the hook reads the role from its own launch.
+export const namesRole = (command: string): boolean =>
+  /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command)
+
+export const opsLead = (raw: string, environment: Environment = process.env) =>
+  leadOf(raw, "ops", environment)
+
+export const builderLead = (raw: string, environment: Environment = process.env) =>
+  leadOf(raw, "builder", environment)
 
 // A Codex thread's name, the last one Codex's session index holds for its id, or undefined when CODEX_HOME is unset or the index cannot be read.
 export async function codexName(

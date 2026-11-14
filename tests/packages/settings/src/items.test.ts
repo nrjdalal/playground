@@ -3,8 +3,22 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } fr
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { mustGit, scopeDir, setSetting, type Who } from "../../../../packages/settings/src"
-import { importFrom, judgeItem, putItem, showItem } from "../../../../packages/settings/src/items"
+import {
+  extensionsDir,
+  mustGit,
+  rootLocked,
+  scopeDir,
+  setRootLock,
+  setSetting,
+  type Who,
+} from "../../../../packages/settings/src"
+import {
+  exportTo,
+  importFrom,
+  judgeItem,
+  putItem,
+  showItem,
+} from "../../../../packages/settings/src/items"
 
 process.env.PLAYGROUND_LOGIN = "made-up-me"
 const ME = "made-up-me"
@@ -161,3 +175,37 @@ test("import stores a source folder's 755 script as 100755 and keeps the stored 
   expect(mustGit(dir, ["ls-files", "-s", "scripts/run.sh"])).toContain("100755")
   expect(statSync(at).mode & 0o777).toBe(0o755)
 })
+
+// The root's file lock: an import's fetch runs under withLock, which lifts that scope's folder of a locked root for it, so an export that carries the scope's history on still fast-forwards.
+test.skipIf(!Bun.which("chflags"))(
+  "an import into a locked root fast-forwards a scope and leaves the root locked",
+  () => {
+    const data = join(scratch, "locked-import")
+    revOf(putItem(data, ref, files("v1"), OWNER, true))
+    const out = join(scratch, "locked-export")
+    exportTo(data, out)
+    writeFileSync(join(out, ME, "later.md"), "made-up later note\n")
+    mustGit(join(out, ME), ["add", "-A"])
+    mustGit(join(out, ME), [
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "-q",
+      "-m",
+      "later",
+    ])
+    setRootLock(data, true)
+    try {
+      const done = importFrom(data, out, false, OWNER)
+      expect(done.ok && done.lines[0]).toBe(`~ ${ME}: fast-forward`)
+      expect(mustGit(scopeDir(data, ME), ["rev-parse", "HEAD"])).toBe(
+        mustGit(join(out, ME), ["rev-parse", "HEAD"]),
+      )
+      expect(rootLocked(extensionsDir(data))).toBe(true)
+    } finally {
+      setRootLock(data, false)
+    }
+  },
+)

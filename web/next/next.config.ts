@@ -8,6 +8,8 @@ import { env } from "@packages/env/web-next"
 import { createMDX } from "fumadocs-mdx/next"
 import type { NextConfig } from "next"
 
+import { securityHeaders } from "./src/lib/security-headers"
+
 getSafeEnv(env, "@web/next")
 
 // @packages/scripts/src/generate-env.ts (web target) derives this before next build (next.config cannot read NEXT_PUBLIC_ vars itself); inline it as NEXT_PUBLIC_IS_PRIVATE so that on a public hosting suffix the client routes auth same-origin. Missing file (e.g. a bare next build) falls back to false.
@@ -62,6 +64,10 @@ const nextConfig: NextConfig = {
   agentRules: false,
   devIndicators: false,
   env: { NEXT_PUBLIC_IS_PRIVATE: String(isPrivate) },
+  headers: async () => {
+    const added = securityHeaders(env.NEXT_PUBLIC_PLAYGROUND_HOSTED)
+    return added.length ? [{ headers: added, source: "/:path*" }] : []
+  },
   // Standalone is the Docker runner's input only. Vercel builds through a Next adapter, and since 16.3.0 an adapter build writes no .nft.json trace files, so the standalone copy step reads next-server.js.nft.json and fails the build with ENOENT.
   ...(!process.env.VERCEL && { output: "standalone" as const }),
   ...(appDevHost && { allowedDevOrigins: [appDevHost, `*.${appDevHost}`] }),

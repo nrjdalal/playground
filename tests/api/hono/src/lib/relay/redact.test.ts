@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
-import { envValuesOf, redact } from "../../../../../../api/hono/src/lib/relay/redact"
+import {
+  envValuesOf,
+  keychainValues,
+  redact,
+} from "../../../../../../api/hono/src/lib/relay/redact"
 
 // Made-up secrets in the shapes a transcript can hold, each built from parts so no scanner reads one as real; none is a real token, key or .env value.
 const MADE_UP = {
@@ -12,6 +16,7 @@ const MADE_UP = {
     ["-----END ", "PRIVATE KEY-----"].join(""),
   ].join("\n"),
   slack: ["xox", "b-", "madeup-0000-test"].join(""),
+  yard: ["ya", "rd_", "madeUpTokenForTheTestOnly0123456"].join(""),
 }
 
 // A made-up .env as a live checkout keeps one: a long value, a quoted one, a short one, a comment and an empty one.
@@ -56,5 +61,40 @@ describe("redaction of a bot's read on this Mac (#1888)", () => {
     expect(redact(`plain ${MADE_UP.github} and madeUpSecretValue42`, envValuesOf(ENV))).toBe(
       "plain [hidden] and [hidden]",
     )
+  })
+
+  test("a JSON key that holds a token or a .env value reads [hidden], as a value does", () => {
+    const body = JSON.stringify({
+      data: { [`seen ${MADE_UP.yard}`]: 1, madeUpSecretValue42: 2, plain: MADE_UP.github },
+    })
+    expect(JSON.parse(redact(body, envValuesOf(ENV))).data).toEqual({
+      "seen [hidden]": 1,
+      "[hidden]": 2,
+      plain: "[hidden]",
+    })
+  })
+
+  test("reads each factory Keychain item and each log reader bot's own, and keeps only the long values it found", async () => {
+    const asked: string[] = []
+    const kept: Record<string, string> = {
+      "playground-yard-bot-scout": "madeUpBotTokenValue",
+      slack: "short",
+      yard: "madeUpYardTokenValue",
+    }
+    const read = async (item: string) => {
+      asked.push(item)
+      if (item === "playground-yard-bot-gone") throw new Error("no such item")
+      return kept[item] ?? null
+    }
+    expect(await keychainValues(["scout[bot]", "gone[bot]"], read)).toEqual([
+      "madeUpYardTokenValue",
+      "madeUpBotTokenValue",
+    ])
+    expect(asked).toEqual([
+      "slack",
+      "yard",
+      "playground-yard-bot-scout",
+      "playground-yard-bot-gone",
+    ])
   })
 })

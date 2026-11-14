@@ -63,6 +63,7 @@ var dataDir = (env = process.env) => dataDirOf(env);
 
 // packages/settings/src/folder.ts
 import {
+  appendFileSync,
   chmodSync,
   existsSync as existsSync2,
   mkdirSync,
@@ -6296,17 +6297,18 @@ async function registryName(sessionId, environment = process.env) {
     } catch {}
   }
 }
-async function opsLead(raw, environment = process.env) {
+async function leadOf(raw, kind, environment) {
   try {
     const session = sessionOf(raw);
     if (typeof session !== "string" || await sessionRole(environment, session) !== "lead")
       return false;
     const name = await registryName(session, environment);
-    return name !== undefined && await rosterKind(name, environment) === "ops";
+    return name !== undefined && await rosterKind(name, environment) === kind;
   } catch {
     return false;
   }
 }
+var opsLead = (raw, environment = process.env) => leadOf(raw, "ops", environment);
 async function codexName(sessionId, environment = process.env) {
   if (!environment.CODEX_HOME)
     return;
@@ -6478,8 +6480,8 @@ var WRAPPERS = new Map(Object.entries({
   ],
   timeout: ["-f -p -v --foreground --preserve-status --verbose", "-k -s --kill-after --signal"],
   xargs: [
-    "-0 -o -p -r -t -x --exit --interactive --no-run-if-empty --null --open-tty --show-limits --verbose",
-    "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-lines --max-procs --process-slot-var"
+    "-0 -o -p -r -t -x --exit --interactive --max-lines --no-run-if-empty --null --open-tty --show-limits --verbose",
+    "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-procs --process-slot-var"
   ]
 }).map(([name, [flags, values]]) => [
   name,
@@ -7614,9 +7616,10 @@ function unwrap(state, inside, budget) {
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
         state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length);
         take();
-      } else if (state.xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
+      } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
+        state.xargs ??= {};
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
       } else if (wrapper === "env" && v === "-") {
         take();
@@ -8158,7 +8161,9 @@ async function existing(path, env) {
 }
 async function outputOf(cmd, env) {
   tick();
-  const { args, name } = parse3(cmd);
+  const { args, name, xargs } = parse3(cmd);
+  if (xargs)
+    return unknown2(`the output of ${name || "echo"} under xargs`);
   if (name === "") {
     if (cmd.inner)
       return outputs(cmd.inner(), env);
@@ -8190,7 +8195,7 @@ async function outputOf(cmd, env) {
   if (hidden)
     return hidden;
   if (name === "printf")
-    return { value: printf(values.map((v) => v.value)) };
+    return { value: printf(values.slice(values[0]?.value === "--" ? 1 : 0).map((v) => v.value)) };
   let k = 0;
   while (k < values.length && /^-[neE]+$/.test(values[k].value))
     k++;
@@ -8999,6 +9004,7 @@ var FILE_TOOLS = {
 };
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
 var RUNNERS = new Set(["npx"]);
+var X = { quoted: false, value: "x" };
 var TOOLS = new Set(["lefthook", "turbo"]);
 function bunCall(args, env) {
   let cwd = env.cwd;
@@ -9112,6 +9118,13 @@ var RUNNER_TAKES = new Set([
   "--registry",
   "-p"
 ]);
+function runnerTarget(args) {
+  let k = 0;
+  while (k < args.length && args[k].value.startsWith("-"))
+    k += RUNNER_TAKES.has(args[k].value) ? 2 : 1;
+  return k;
+}
+var toolName = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""));
 var LETTERS = {
   perl: {
     "0": "digits",
@@ -9713,7 +9726,8 @@ var GUARD_KEYS = new Set([
   "sessions.aliases",
   "sessions.names",
   "slack.gatedSends",
-  "usage.keychainService"
+  "usage.keychainService",
+  "yard.logReaders"
 ]);
 var JOB_PREFIX = "jobs.";
 var NO_TUNING = () => false;
@@ -9805,12 +9819,31 @@ function isCli(word, dirs) {
   const cli = (sep2 + CLI).toLowerCase();
   return paths.some((path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
 }
+var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
+function runnerDirs(name, args, env) {
+  if (name === "bunx")
+    return runnerDirs("bun", [X, ...args], env);
+  if (name === "npx") {
+    const at = runnerTarget(args);
+    const started = toolName(args[at]?.value);
+    return STARTED_RUNNERS.has(started) ? runnerDirs(started, args.slice(at + 1), env) : [];
+  }
+  if (name !== "bun")
+    return [];
+  const { at, chained, cwd, words } = bunCall(args, env);
+  const x = words[0] === "x";
+  const own = x ? [cwd, chained] : [cwd];
+  const started = x || words[0] === "run" ? toolName(args[at]?.value) : "";
+  if (!STARTED_RUNNERS.has(started))
+    return own;
+  return [...own, ...runnerDirs(started, args.slice(at + 1), { ...env, cwd: x ? chained : cwd })];
+}
 function cliCalls(parsed, env) {
   const { args, first, name } = parsed;
   if (!first)
     return [];
   const words = [first, ...args];
-  const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined];
+  const dirs = [env.cwd, ...runnerDirs(name, args, env)];
   return words.flatMap((word, at) => isCli(word, dirs) ? [words.slice(at + 1)] : []);
 }
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];
@@ -10479,7 +10512,7 @@ async function inspect(raw, environment, unknown = false) {
     }
     const slot = slotWords(parsed);
     if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
+      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, { ...env, files: new Map(env.files), vars: new Map(env.vars) }, visit, false);
     const { args, first, name, xargs } = parsed;
     const findutils = GNU_NAMED.exec(name)?.[1];
     if (first && (findutils === "find" || findutils === "xargs")) {
@@ -10669,7 +10702,7 @@ async function inspect(raw, environment, unknown = false) {
         ...values
       ] : WRITERS.has(tool) ? writeTargets(tool, given, gnu, posix) : [];
     };
-    const unlisted = !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env, !gnu || posix) : [];
+    const unlisted = !remover && !WRITERS.has(tool) ? shapes.flatMap((typed) => unreadCdWrites(tool, typed, env, !gnu || posix)) : [];
     const loose = [...shapes.flatMap(operandsOf), ...unlisted].find((word) => !placed(word, env, steady));
     if (!loose)
       return;

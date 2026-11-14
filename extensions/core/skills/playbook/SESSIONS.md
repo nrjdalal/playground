@@ -27,9 +27,10 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    naming the script; type every program by its literal name, since one held in a variable (`$V integration add`) reads as herdr when a herdr command group follows it.
    A lead starting a checker runs `roster.ts assign <checker> "Review: <its worker's title>" <task> worker=<live worker> pr=<n>` (`Test: ` for a tester) before spawn.sh, since spawn.sh writes `worker=` only for a worker's column and roster.ts refuses a checker's PR with no live worker (step 4).
    A column start names its spawner's pane as `$HERDR_PANE_ID`, which herdr sets in every pane's shell.
-   A worker that only reads (research, a fetch, an investigation) starts with `--reads-only`, which passes a full run-slot room at the slots gate ([SPAWN.md](SPAWN.md#capacity-gate)) while the load, memory and usage gates still hold it, and its brief bars every run-slot run (a build, a suite, a type check, an install), since its start took no room.
+   `--account` takes the login's full email, never its domain alone, since one domain can match two logins, and a brief template's start resolves it into `$acct` in the start script ([SPAWN.md](SPAWN.md#--account)).
+   A worker that only reads (research, a fetch, an investigation) starts with `--reads-only`, which passes a full run-slot room at the slots gate ([SPAWN.md](SPAWN.md#capacity-gate)) while the load, memory, sessions and usage gates still hold it, and its brief bars every run-slot run (a build, a suite, a type check, an install), since its start took no room.
    Read [SPAWN.md](SPAWN.md) for the command of the mode you start (a worker, a runner, a checker's or probe's column, a manager) and for each flag you pass,
-   and before you act on a refusal: it holds the capacity gate, the launch line with its model and effort, the resume, `--account`, `--backend glm`, `--runtime herdr` with `spawn.sh restore`, `--check`, and the role and settings every launch carries.
+   and before you act on a refusal: it holds the capacity gate, the launch line with its model and effort, the resume, `--account`, `--backend glm`, `--runtime herdr` with `spawn.sh restore`, `--check`, `--sandbox`, and the role and settings every launch carries.
    Done when spawn.sh has printed herdr's `herdr pane <id> workspace <id>` line for the session, or a refusal you have acted on by its gate's section in SPAWN.md.
 
 3. Brief it with `SendMessage` once `ListAgents` lists the name, writing the brief with writing-for-agents loaded (SKILL.md's **writing** rule).
@@ -109,7 +110,7 @@ A reviewer's round sorts its findings into blocking, should-fix and nits; the wo
 
 Done when every finding of the round is fixed in the push, kept in the sort comment with its PR, or dropped there with its reason.
 
-An extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n>`, its worker pushing a branch other than `main` by remote and refspec (`git push origin HEAD:<branch>`) and its reviewer spawned for the PR's URL; done when the PR reads merged.
+An extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n>`, its worker committing on a branch other than `main` in its clone, as a `git commit` call of its own, then pushing that branch by remote and refspec (`git push origin HEAD:<branch>`) and its reviewer spawned for the PR's URL; done when the PR reads merged.
 
 An extension item's revision goes up with `playground ext put`, and its reviewer scores it with `playground ext score`.
 A put on an item whose earlier revision is still proposed moves the proposal's head, so a score on the earlier one is refused (`the proposal is at <sha>, not <rev>; read it again`): put a stacked revision once the one under it is judged.
@@ -180,6 +181,7 @@ playground picker <session> allow <key> --rule <name>
 When a standing rule settles the answer, add `--rule <name>`, the name `playground rules` lists it under with a hyphen for each space (`--rule local-page`), to either form; picker refuses a name no rules file holds and presses nothing.
 
 Allow presses Yes once in the session's herdr pane while its prompt shows that call, a subagent's command included; deny presses No (Escape), and the relay sends the session the reason.
+A hook's confirmation prompt is a permission prompt too, and so is one whose long command Claude Code clips at the pane's top: picker then matches the rows still showing to the end of the call's command.
 Each answer is a line in `ops/picker.log`: the time, the manager, the answer, the session, the command's first 120 characters and, with `--rule`, `under **<name>**`, which a deny's message to the session names too.
 Done when it prints that line; it refuses any caller but the session's manager or the primary dispatcher, a deny with no reason, a dispatcher's session, a session in no herdr pane, and a key no waiting call or shown prompt matches, which means the prompt changed: wait for its next alert.
 An ops-unstick alert that says picker cannot answer the prompt found no waiting call surely its own, and names the close and resume below.
@@ -213,6 +215,7 @@ It reads its stuck alerts first (ops-stuck-alert.jsonl, where a session's own ho
 playground alerts-wait <your name>
 ```
 
+Its line leads with its queue's `[ops-<job>]` tag, as the relay's copy does.
 Run it with Bash `run_in_background`; when it exits it has printed one line: start it again at once, then act on the line, a stuck session's alert, a job's line such as a heads-up, or a late sweep's, whose line Ops answers by running its sweep or resuming the relay, and the dispatcher by resolving the stop, posting to the owner's Inbox only if it cannot.
 A waiter started after time down skips the alerts queued over 5 minutes before it began and names how many, since the relay sent each; while none runs, each alert also goes to Ops to send on, which is fast only while Ops' own waiter runs, so each line to Ops names Ops' restart while it does not.
 A worker a probe reports to keeps no waiter, and its probe's alert comes by the relay alone.
@@ -252,6 +255,7 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
   a worker whose PRs are all merged or closed and whose PR that closed last merged, an issue's URL among them never counting, while one whose last closed unmerged is kept as `worker-pr-closed` and its lead asked to reassign or end it,
   and a reviewer idle 30+ minutes whose every head carries its verdict.
   A session's PRs are its roster `pr` and `prs` list, its open branch PRs, its worker's, and every PR its own or its worker's transcript links, so one still open keeps it.
+- On both paths a worker whose status reads `shell` (a background task of its chore still running, such as a tidy after its merge) stays until that task ends, while a checker in `shell` ends by the rules above.
 - Each end runs `spawn.sh close <name>`, then `roster.ts report <name> "ended automatically: <why>" status=ended`, the merged sha in the why, and sends its lead one line: its roster `lead`, else its worker's.
 - Then it cleans each worktree the session used, one at a time (`cleanWorktree`), and the lead's line names what went and what stayed, with why; a reviewer ended idle keeps its worktrees for its resume.
   A Playground worktree in `.claude/worktrees/` with uncommitted work, unpushed commits or work not on canary stays until `playground rm` confirms its PR has merged or closed (its own PR, by its branch or its exact head), then goes through `playground rm --worktree <path> --discard` whatever it holds, with no Inbox decision;

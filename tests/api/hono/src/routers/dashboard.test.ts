@@ -44,6 +44,7 @@ const { changeHostedMode, SDK_PROBE, SdkHost } =
 const { DELIVERY_FAILURES } = await import("../../../../../api/hono/src/lib/dashboard/deliver")
 const { Hono } = await import("../../../../../api/hono/node_modules/hono")
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
+const { refuseAgentOffFixture } = await import("../../../../../api/hono/src/middlewares/agent")
 
 const PNG = Uint8Array.from(
   Buffer.from(
@@ -487,6 +488,7 @@ describe("sendMessage", () => {
   test("every refusal becomes the API's error, with its reason and its code under delivery", async () => {
     const expected: Record<string, [number, string]> = {
       AMBIGUOUS: [409, "CONFLICT"],
+      BUSY: [409, "CONFLICT"],
       COMMAND: [400, "VALIDATION_ERROR"],
       EMPTY: [400, "VALIDATION_ERROR"],
       INPUT_NOT_EMPTY: [409, "CONFLICT"],
@@ -1353,5 +1355,14 @@ describe("the paste report route (PG-1015)", () => {
     for (let i = 0; i < 7; i++) statuses.push((await app.request("/", { method: "POST" })).status)
     expect(statuses.slice(0, 6).every((status) => status === 200)).toBe(true)
     expect(statuses[6]).toBe(429)
+  })
+})
+
+describe("a composer message refuses the agent sign-in off a fixture stack", () => {
+  test("POST /messages carries refuseAgentOffFixture", () => {
+    const handlers = dashboardRouter.routes
+      .filter((r) => r.method === "POST" && r.path === "/messages")
+      .map((r) => r.handler)
+    expect(handlers).toContain(refuseAgentOffFixture)
   })
 })

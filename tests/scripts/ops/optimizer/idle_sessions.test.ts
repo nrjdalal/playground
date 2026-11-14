@@ -552,6 +552,35 @@ describe("collect: a session's PRs, from the roster first, then its transcript",
     expect(await worker([MERGED, OPEN])).toEqual([])
     expect(await worker([])).toEqual([])
   })
+
+  test("worker-prs-done: a worker in shell, its background task still running, is kept; the same worker idle is flagged", async () => {
+    const worker = (status: string) =>
+      collect(
+        deps({
+          prState,
+          roster: { "b4t5xn-worker": { kind: "worker", name: "b4t5xn-worker", pr: MERGED } },
+          sessions: { "b4t5xn-worker": entry({ name: "b4t5xn-worker", status }) },
+          workerPrs: async () => [MERGED],
+        }),
+      )
+    expect(await worker("shell")).toEqual([])
+    expect(whys(await worker("idle"))).toEqual([["worker-prs-done (merged)"]])
+  })
+
+  test("checker-pr-done: a checker in shell is still flagged", async () => {
+    const rows = await collect(
+      deps({
+        prState,
+        roster: { "b4t5xn-reviewer": { kind: "reviewer", name: "b4t5xn-reviewer", pr: MERGED } },
+        sessions: {
+          "b4t5xn-reviewer": entry({ name: "b4t5xn-reviewer", status: "shell" }),
+          "b4t5xn-worker": entry({ name: "b4t5xn-worker", status: "busy" }),
+        },
+        workerPrs: async (name) => (name === "b4t5xn-reviewer" ? [MERGED] : []),
+      }),
+    )
+    expect(whys(rows)).toEqual([["checker-pr-done (merged)"]])
+  })
 })
 
 describe("collect: a checker's prs list (#706)", () => {

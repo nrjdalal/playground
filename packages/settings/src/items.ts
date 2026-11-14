@@ -169,6 +169,7 @@ export const putItem = (
         }
         if (state === "accepted") lists(data, ref, root)
       },
+      state === "accepted" && ref.kind === "list",
     )
   } catch (error) {
     return refused(error)
@@ -245,6 +246,7 @@ export const judgeItem = (
         renameSync(join(at, proposed), join(at, path!))
         lists(data, ref, root)
       },
+      state === "accepted" && ref.kind === "list",
     )
   } catch (error) {
     return refused(error)
@@ -508,7 +510,10 @@ export const importFrom = (
       continue
     }
     const fetched =
-      existsSync(join(from, ".git")) && extGit(into, ["fetch", "-q", from, "HEAD"]).code === 0
+      existsSync(join(from, ".git")) &&
+      withLock(data, () => extGit(into, ["fetch", "-q", from, "HEAD"]).code === 0, {
+        scopes: [scope],
+      })
     const forward =
       fetched && extGit(into, ["merge-base", "--is-ancestor", "HEAD", "FETCH_HEAD"]).code === 0
     const stat = fetched
@@ -519,7 +524,10 @@ export const importFrom = (
       ...stat.split("\n").filter(Boolean),
     )
     if (dryRun) continue
-    if (forward) withLock(data, () => mustGit(into, ["merge", "-q", "--ff-only", "FETCH_HEAD"]))
+    if (forward)
+      withLock(data, () => mustGit(into, ["merge", "-q", "--ff-only", "FETCH_HEAD"]), {
+        scopes: [scope],
+      })
     else copyTree(data, scope, from, who)
   }
   const login = dryRun ? undefined : loginOr(data)

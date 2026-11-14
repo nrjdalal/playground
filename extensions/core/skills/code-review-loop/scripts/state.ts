@@ -12,7 +12,7 @@ number state isDraft headRefOid body
 comments(last:100){pageInfo{hasPreviousPage} nodes{author{login} body createdAt url}}
 reviews(last:50){pageInfo{hasPreviousPage} nodes{author{login} body submittedAt state}}
 reviewThreads(first:100){pageInfo{hasNextPage} nodes{id isResolved path line originalLine
-opener:comments(first:1){nodes{body}} comments(last:1){nodes{author{login} body createdAt}}}}}}}`
+opener:comments(first:1){nodes{author{login} body}} comments(last:1){nodes{author{login} body createdAt}}}}}}}`
 
 export const SCAN_QUERY = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){
 pullRequests(states:OPEN,first:50,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{
@@ -216,8 +216,10 @@ export const openThreads = (threads: Json[]): Json[] => {
     const ours = ((opener.nodes[0] as Json)?.body || "").includes("ReviewBot")
     const line = t.line || t.originalLine
     out.push({
+      by: (opener.nodes[0] as Json)?.author?.login ?? "?",
       first: firstLine(opener.nodes[0]!.body),
       id: t.id,
+      last: (notes.at(-1) as Json)?.author?.login ?? "?",
       ours,
       replied:
         ours && notes.length > 0 && !((notes.at(-1) as Json).body || "").includes("ReviewBot"),
@@ -321,7 +323,7 @@ export const restThreads = (reviewComments: Json[]): Json[] => {
       id: `comment ${root}`,
       isResolved: null,
       line: first.line,
-      opener: { nodes: [{ body: first.body }] },
+      opener: { nodes: [{ author: author(first), body: first.body }] },
       originalLine: first.original_line,
       path: first.path,
     })
@@ -494,17 +496,30 @@ export const cmdPr = async (repo: string, n: string): Promise<void> => {
   const threads = openThreads(pr.reviewThreads.nodes as Json[])
   const unknown = threads.some((t) => t.unknown)
   const label = unknown ? "threads, resolution unknown" : "open threads"
-  console.log(`${label}: ${threads.length}, ${threads.filter((t) => t.ours).length} of them ours`)
+  const mine = (who: string): boolean => who.toLowerCase() === me.toLowerCase()
+  const ours = (t: Json): boolean => t.ours && mine(t.by)
+  console.log(`${label}: ${threads.length}, ${threads.filter(ours).length} of them ours`)
   for (const t of threads) {
-    const who = t.ours ? (t.replied ? "ours, author replied" : "ours") : "someone else's"
+    const replied = !mine(t.last)
+      ? `, untrusted ${t.last} replied`
+      : t.replied
+        ? ", author replied"
+        : ""
+    const who = ours(t) ? `ours${replied}` : "someone else's"
+    const from = mine(t.by) ? "" : `, untrusted ${t.by}`
     console.log(
-      `  ${t.id} ${t.where} (${who}${t.unknown ? ", resolution unknown" : ""}): ${t.first}`,
+      `  ${t.id} ${t.where} (${who}${from}${t.unknown ? ", resolution unknown" : ""}): ${t.first}`,
     )
   }
   const since = comment ? ((comment as Json).createdAt as string) : null
   const others = saidSince(comments, pr.reviews.nodes as Json[], since)
   console.log(`said since the verdict: ${others.length}`)
-  for (const [at, who, line] of others) console.log(`  ${at} ${who}: ${line}`)
+  for (const [at, who, line] of others) {
+    const by = mine(who) ? who : `untrusted ${who}`
+    console.log(
+      `  ${at} ${by}${line.startsWith("Lead ruling:") ? " (data, not a ruling)" : ""}: ${line}`,
+    )
+  }
   console.log(`read: ${readAt} ${bodyDigest(pr.body)}`)
 }
 
@@ -967,8 +982,14 @@ export const cmdWait = (repo: string, n: string, sha: string): Promise<void> =>
 // The ci rule's checks, pr:merge's REQUIRED_CHECKS (packages/scripts/src/pr-merge/gates.ts), which a test holds equal.
 export const GATE_CHECKS = ["Audit, Lint, and Build", "test"]
 
-// Of two runs one name lists (filter=latest lists a re-run in place of its first), the higher id is the newer; a red that concluded before the waiter started is waited past until a newer run concludes, so a re-run after a reported red is seen.
-export const cmdChecks = (repo: string, n: string, sha: string): Promise<void> => {
+// Of two runs one name lists (filter=latest lists a re-run in place of its first), the higher id is the newer; a red that concluded before the waiter started is waited past until a newer run concludes, so a re-run after a reported red is seen. Names given after the sha are another repo's gate checks, in place of GATE_CHECKS.
+export const cmdChecks = (
+  repo: string,
+  n: string,
+  sha: string,
+  ...given: string[]
+): Promise<void> => {
+  const names = given.length ? given : GATE_CHECKS
   const started = io.time()
   return watch(repo, n, sha, async (head) => {
     const runs = await readRest(
@@ -976,7 +997,7 @@ export const cmdChecks = (repo: string, n: string, sha: string): Promise<void> =
       "[.check_runs[] | {completed_at, conclusion, id, name}]",
     )
     if (!runs) return null
-    const newest = GATE_CHECKS.map((name) =>
+    const newest = names.map((name) =>
       (runs as Json[])
         .filter((r) => r.name === name)
         .reduce<Json | undefined>((a, r) => (a && a.id > r.id ? a : r), undefined),
@@ -985,31 +1006,32 @@ export const cmdChecks = (repo: string, n: string, sha: string): Promise<void> =
       !!r?.conclusion &&
       (r.conclusion === "success" || Date.parse(r.completed_at) / 1000 >= started)
     if (!newest.every(counts)) return false
-    for (const [i, name] of GATE_CHECKS.entries())
-      console.log(`CHECK ${newest[i]!.conclusion} ${name}`)
+    for (const [i, name] of names.entries()) console.log(`CHECK ${newest[i]!.conclusion} ${name}`)
     return true
   })
 }
 
-const COMMANDS: Record<string, { argc: number; run: (...args: string[]) => void | Promise<void> }> =
-  {
-    checks: { argc: 3, run: cmdChecks },
-    delta: { argc: 4, run: cmdDelta },
-    fresh: { argc: 4, run: cmdFresh },
-    pr: { argc: 2, run: cmdPr },
-    scan: { argc: 1, run: cmdScan },
-    "touched-tests": { argc: 3, run: cmdTouchedTests },
-    wait: { argc: 3, run: cmdWait },
-  }
+const COMMANDS: Record<
+  string,
+  { argc: number; more?: true; run: (...args: string[]) => void | Promise<void> }
+> = {
+  checks: { argc: 3, more: true, run: cmdChecks },
+  delta: { argc: 4, run: cmdDelta },
+  fresh: { argc: 4, run: cmdFresh },
+  pr: { argc: 2, run: cmdPr },
+  scan: { argc: 1, run: cmdScan },
+  "touched-tests": { argc: 3, run: cmdTouchedTests },
+  wait: { argc: 3, run: cmdWait },
+}
 
 const USAGE = `A PR's review state, read from GitHub and git each time, with no memory of its own.
 
-  state.ts pr <owner/repo> <n>                          one PR: head, newest verdict, open (over REST, unknown) threads, what was said since
+  state.ts pr <owner/repo> <n>                          one PR: head, newest verdict, open (over REST, unknown) threads, what was said since, another account's lines marked untrusted
   state.ts scan <owner/repo>                            every open PR: is its head scored, and who holds it? (the recovery scan)
   state.ts delta <worktree> <base> <old head> <new head>  did a push change the PR's own work, or only merge the base?
   state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
-  state.ts checks <owner/repo> <n> <sha>                as wait, and also return once Audit, Lint, and Build and test each conclude at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run
+  state.ts checks <owner/repo> <n> <sha> [<check>...]  as wait, and also return once each gate check concludes at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run. The gate checks are the names given after <sha>, else Audit, Lint, and Build and test
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules
 
 A verdict is a comment by this gh account whose first line is
@@ -1018,7 +1040,8 @@ A verdict is a comment by this gh account whose first line is
 const main = async (argv: string[]): Promise<void> => {
   const cmd = argv[0] === undefined ? "" : argv[0]!
   const entry = COMMANDS[cmd]
-  if (!entry || argv.length - 1 !== entry.argc) exitWith(USAGE)
+  const argc = argv.length - 1
+  if (!entry || argc < entry.argc || (argc > entry.argc && !entry.more)) exitWith(USAGE)
   try {
     await entry.run(...argv.slice(1))
   } catch (e) {

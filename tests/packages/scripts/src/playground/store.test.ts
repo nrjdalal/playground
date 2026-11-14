@@ -60,6 +60,19 @@ describe("playground ext", () => {
   }
   const git = (at: string, scope: string, args: string[]) => mustGit(scopeDir(at, scope), args)
 
+  test.skipIf(!Bun.which("chflags"))(
+    "lock sets the extensions root's file lock and unlock clears it",
+    async () => {
+      const at = folder("lock")
+      const root = join(at, "extensions")
+      const flags = () => Bun.spawnSync(["stat", "-f", "%Sf", root]).stdout.toString().trim()
+      expect(await ext(at, ["lock"])).toEqual({ code: 0, err: "", out: `locked ${root}` })
+      expect(flags()).toBe("uchg")
+      expect(await ext(at, ["unlock"])).toEqual({ code: 0, err: "", out: `unlocked ${root}` })
+      expect(flags()).toBe("-")
+    },
+  )
+
   test("put writes a rule's body as a proposal and each attachment by its hash, one commit with the reason, which a 5 accepts", async () => {
     const at = folder("put")
     writeFileSync(join(scratch, "rule.md"), "Keep it short.\n")

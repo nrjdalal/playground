@@ -158,6 +158,10 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["git -C a scope checkout", `git -C ${SCOPE} checkout HEAD~1 -- lists`],
     ["git diff --output into the root", `git diff --output=${LIST}`],
     ["through run-slot", `~/.playground/ops/run-slot.sh w -- rm ${LIST}`],
+    [
+      "a write inside run-slot's words, in the scope its own cd names",
+      `~/.playground/ops/run-slot.sh w -- bash -c 'cd ${SCOPE} && touch f'`,
+    ],
     ["through bash -c", `bash -c "rm ${LIST}"`],
     ["through env", `env FOO=1 rm ${LIST}`],
   ])("%s", async (_, command) => {
@@ -482,6 +486,16 @@ describe("a direct write into the extensions root is refused, naming the owner's
 
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
+  })
+
+  test("a write after a run-slot call whose words cd away lands in the shell's own folder", async () => {
+    const slot = "~/.playground/ops/run-slot.sh w --"
+    expect(await bash(`${slot} cd /tmp; touch f`, SCOPE)).toContain(
+      "no-extensions-write hook refuses",
+    )
+    expect(await bash(`${slot} pushd /tmp; touch f`, SCOPE)).toContain(
+      "no-extensions-write hook refuses",
+    )
   })
 
   // zsh's ~- is the folder it last left, so an OLDPWD assignment keeps it in the root, and a popd that lands back leaves it unread
@@ -2031,6 +2045,36 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "a writer under xargs fed a program's output with no -a or cd, as on canary",
       "git ls-files | xargs sed -i s/a/b/",
     ],
+    // PG-2094: a program on neither list under xargs after a cd to a variable, writing nothing or only absolute paths
+    [
+      "an in-place sed under xargs fed an absolute path after a cd to a variable",
+      `cd "$X" && echo /tmp/f | xargs sed -i s/a/b/`,
+    ],
+    [
+      "perl -pi under xargs fed an absolute path after a cd to a variable",
+      `cd "$X" && echo /tmp/f | xargs perl -pi -e s/a/b/`,
+    ],
+    [
+      "chmod under xargs fed absolute paths after a cd to a variable",
+      `cd "$X" && echo /tmp/f /tmp/g | xargs chmod +x`,
+    ],
+    [
+      "a sed that only prints under xargs after a cd to a variable",
+      `cd "$X" && grep -l a f | xargs sed -n p`,
+    ],
+    [
+      "a sed with no -i under xargs after a cd to a variable",
+      `cd "$X" && grep -l a f | xargs sed s/a/b/`,
+    ],
+    [
+      "a perl that only prints under xargs after a cd to a variable",
+      `cd "$X" && grep -l a f | xargs perl -ne print`,
+    ],
+    ["git add under xargs after a cd to a variable", `cd "$X" && grep -l a f | xargs git add`],
+    [
+      "an in-place sed under xargs after a cd to a literal path",
+      "cd /tmp && grep -l a f | xargs sed -i s/a/b/",
+    ],
     ["cp of a relative file to an absolute path after a cd to a variable", `cd "$X"; cp a /tmp/b`],
     [
       "a redirect to a file the line holds after a cd to a variable",
@@ -2217,7 +2261,7 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["a bare mktemp", `cd "$X"; mktemp`],
     ["mktemp of a template in the temp folder", `cd "$X"; mktemp -t x.XXXX`],
     ["mktemp of a template in an absolute folder", `cd "$X"; mktemp -p /tmp/scratch x.XXXX`],
-    ["chmod under xargs of an absolute file", `cd "$X"; xargs chmod 644 /tmp/p`],
+    ["chmod under xargs of an absolute file", `cd "$X"; echo /tmp/q | xargs chmod 644 /tmp/p`],
     ["GNU chmod of an absolute file", `cd "$X"; gchmod 644 /tmp/p`],
     ["sort's shortened --output to an absolute file", `cd "$X"; sort --outp /tmp/p /tmp/a`],
     ["tar's -f before its -C", `cd "$X"; tar -x -f /tmp/a.tar -C /tmp/out`],
@@ -2297,6 +2341,34 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
     [
       "ext put by bun --cwd to its folder",
       `bun --cwd ${CLI_DIR} cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put by bunx bun in its --cwd",
+      `bunx --cwd=${CLI_DIR} bun cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put by bun x bun in a --cwd read from bun's own",
+      `bun --cwd=${join(CLI_DIR, "..")} x --cwd=playground bun cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put by bunx bun in a --cwd read from the one before",
+      `bunx --cwd=${join(CHECKOUT, "packages")} --cwd=scripts/src/playground bun cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put by a bun that bunx starts, its --cwd read from the runner's",
+      `bunx --cwd=${join(CHECKOUT, "packages")} bun --cwd=scripts/src/playground cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put by a bun that npx starts in its own --cwd",
+      `npx bun --cwd=${CLI_DIR} cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put by a bun in its own --cwd that npx starts under bunx",
+      `bunx npx bun --cwd=${CLI_DIR} cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put by a bun that bun run starts in its own --cwd",
+      `bun run bun --cwd=${CLI_DIR} cli.ts ext put login list x /tmp/l.json --reason y`,
     ],
     [
       "ext put by bun on cli with no extension",
@@ -2584,6 +2656,13 @@ describe("the gated keys are every key the guards read", () => {
   test("spawn.sh's code root is gated", async () => {
     expect(await read("scripts/spawn.sh")).toContain("setting_text paths.codeRoot")
     expect(GUARD_KEYS.has("paths.codeRoot")).toBe(true)
+  })
+
+  test("yard.logReaders, the bots this Mac answers a read of the dispatcher's log for, is gated (#2032)", async () => {
+    expect(GUARD_KEYS.has("yard.logReaders")).toBe(true)
+    expect(
+      await bash(`playground settings set yard.logReaders '{"x[bot]":"dm"}' --reason r`),
+    ).toContain("no-extensions-write hook refuses")
   })
 })
 

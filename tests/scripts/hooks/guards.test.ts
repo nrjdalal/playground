@@ -20,6 +20,7 @@ const BASH_GUARDS = [
   "no-headless-login",
   "no-kill-by-name",
   "no-linear-ticket",
+  "no-live-sign-in",
   "no-mac-web-build",
   "no-main-checkout",
   "no-off-palette-label",
@@ -27,17 +28,19 @@ const BASH_GUARDS = [
   "no-playground-leak",
   "no-prepare-write",
   "no-prompt-stop",
+  "no-protected-push",
   "no-public-leak",
   "no-raw-delete",
   "no-raw-spawn",
+  "no-raw-vercel",
   "no-raw-wa",
   "no-release-comment",
   "no-stash",
   "no-unslotted-run",
 ]
 
-// A check module guards.ts runs that has no process of its own, so no main block: no-playground-leak's process runs it on the MCP tools.
-const MODULES = new Set(["no-prepare-write"])
+// A check module guards.ts runs that has no process of its own, so no main block: no-playground-leak's process runs no-prepare-write and no-protected-push on the MCP tools, and no-raw-vercel guards Bash alone.
+const MODULES = new Set(["no-prepare-write", "no-protected-push", "no-raw-vercel"])
 const MAIN_GUARDS = BASH_GUARDS.filter((name) => !MODULES.has(name))
 
 // A guard's main block, the lines its own process runs.
