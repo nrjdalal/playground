@@ -251,13 +251,19 @@ export async function list(path: string): Promise<{ list: PublicList } | { refus
   return { list: value }
 }
 
-// The commit's count of the list-fed kinds, from the list at path, which the sandboxed tree test cannot see: nothing with no list there (the runner box, a machine with no org), else the refusal when one of them is over counts.json; an empty key counts nothing, so a partial list still gates the kinds it holds.
-export async function listGate(root: string, path: string): Promise<string> {
-  if (!existsSync(path)) return ""
+// The list file at path for the list checks (commit, push, CI): undefined with none, so a machine with no list checks nothing; the refusal for a file that is not the list.
+export async function readList(path: string): Promise<PublicList | string | undefined> {
+  if (!existsSync(path)) return undefined
   const value: unknown = await Bun.file(path)
     .json()
     .catch(() => undefined)
-  if (!isPublicList(value)) return `trace-count: ${path} is not no-public-leak's list`
+  return isPublicList(value) ? value : `trace-count: ${path} is not no-public-leak's list`
+}
+
+// The commit's count of the list-fed kinds, from the list at path, which the sandboxed tree test cannot see: nothing with no list there (the runner box, a machine with no org), else the refusal when one of them is over counts.json; an empty key counts nothing, so a partial list still gates the kinds it holds.
+export async function listGate(root: string, path: string): Promise<string> {
+  const value = await readList(path)
+  if (value === undefined || typeof value === "string") return value ?? ""
   const files = await tree(root)
   const kept = (await Bun.file(KEPT).json()) as Kept[]
   const counted = count(files, value, UNSET_REPOS, kept)
@@ -265,5 +271,58 @@ export async function listGate(root: string, path: string): Promise<string> {
   const over = risen(now, (await Bun.file(COUNTS).json()) as Counts)
   return over.length
     ? refusal(over, located(files, risenKinds(over), value, UNSET_REPOS, kept, changedFiles(root)))
+    : ""
+}
+
+// The list kinds a text holds (a commit's message, a branch's name), by kind alone, so a refusal never prints the term.
+export const listKindsIn = (text: string, list: PublicList): Kind[] => {
+  const counted = count([{ path: "", text }], list)
+  return LIST_KEYS.filter((kind) => (counted[kind] ?? 0) > 0)
+}
+
+const gitIn = (root: string, args: string[]) =>
+  Bun.spawnSync(["git", ...args], { cwd: root, env: { ...process.env } })
+
+// The pull request's list gate, as CI runs it: each list kind a changed file holds more of than at its merge-base with base, a new file's path, each commit message since that merge-base and the branch's name hold, by place and kind alone; nothing with no list at path.
+export async function listSince(
+  root: string,
+  base: string,
+  path: string,
+  branch = "",
+): Promise<string> {
+  const value = await readList(path)
+  if (value === undefined || typeof value === "string") return value ?? ""
+  const merged = gitIn(root, ["merge-base", base, "HEAD"])
+  if (merged.exitCode !== 0) return `trace-count: ${base} and HEAD have no merge-base`
+  const from = merged.stdout.toString().trim()
+  const kept = (await Bun.file(KEPT).json()) as Kept[]
+  const at = (rev: string, file: string): File | undefined => {
+    const shown = gitIn(root, ["show", `${rev}:${file}`])
+    if (shown.exitCode !== 0) return undefined
+    return { path: file, text: shown.stdout.includes(0) ? "" : shown.stdout.toString() }
+  }
+  const hits: string[] = []
+  const changed = gitIn(root, ["diff", "--name-only", "-z", "--no-renames", from, "HEAD"])
+  for (const file of changed.stdout.toString().split("\0").filter(Boolean)) {
+    const now = at("HEAD", file)
+    if (!now) continue
+    const was = at(from, file)
+    const inPath = listKindsIn(file, value)
+    const place = inPath.length ? "a changed file's path" : file
+    if (!was) hits.push(...inPath.map((kind) => `${place}: ${kind}`))
+    const before = was ? count([was], value, UNSET_REPOS, kept) : {}
+    const after = count([now], value, UNSET_REPOS, kept)
+    for (const kind of LIST_KEYS)
+      if ((after[kind] ?? 0) > (before[kind] ?? 0)) hits.push(`${place}: ${kind}`)
+  }
+  const log = gitIn(root, ["log", "--format=%H%x00%B%x01", `${from}..HEAD`])
+  for (const entry of log.stdout.toString().split("\x01")) {
+    const [sha, body] = entry.replace(/^\n/, "").split("\0")
+    if (sha && body !== undefined)
+      hits.push(...listKindsIn(body, value).map((kind) => `${sha.slice(0, 9)}'s message: ${kind}`))
+  }
+  hits.push(...listKindsIn(branch, value).map((kind) => `the branch's name: ${kind}`))
+  return hits.length
+    ? `trace-count: the pull request adds a term from no-public-leak's list, named here by place and kind alone; reword each in plain words:\n${[...new Set(hits)].join("\n")}`
     : ""
 }
