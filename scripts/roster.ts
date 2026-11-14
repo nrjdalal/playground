@@ -444,7 +444,12 @@ async function holders(pr: string | undefined, rest: string[]): Promise<void> {
 
 async function main(argv: string[]): Promise<void> {
   const [cmd, name, ...rest] = argv
-  if (cmd === "holders") return holders(name, rest)
+  // any other throw exits 1 under Bun, which reads as free, so holders turns it into 2
+  if (cmd === "holders")
+    return holders(name, rest).catch((error: Error) => {
+      if (error instanceof Refusal) throw error
+      throw new Refusal(`roster.ts: holders cannot read the roster ${path}: ${error.message}`, 2)
+    })
   const known = ["assign", "backfill", "backlog", "backlog-done", "report", "set", "who"]
   if (!cmd || !known.includes(cmd) || (cmd !== "backfill" && !name)) throw new Refusal(USAGE, 2)
   if (cmd === "set" || cmd === "report" || cmd === "assign") checkName(cmd, name!)
