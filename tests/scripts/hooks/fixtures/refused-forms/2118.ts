@@ -15,6 +15,42 @@ export const groups: Group[] = [
         "bash ~/.playground/ops/run-slot.sh -- -- killall node",
       ],
       [
+        "a kill by pattern through run-slot named as its separator in single quotes",
+        "~/.playground/ops/run-slot.sh '--' -- pkill -f watcher",
+      ],
+      [
+        "a kill by pattern through run-slot named as its separator in double quotes",
+        '~/.playground/ops/run-slot.sh "--" -- pkill -f watcher',
+      ],
+      [
+        "a kill by pattern through run-slot named as its separator behind a backslash",
+        "~/.playground/ops/run-slot.sh \\-- -- pkill -f watcher",
+      ],
+      [
+        "a kill by pattern through run-slot named as its separator around an empty quote",
+        '~/.playground/ops/run-slot.sh -""- -- pkill -f watcher',
+      ],
+      [
+        "a kill by pattern through run-slot named as its separator before --model-bound",
+        "~/.playground/ops/run-slot.sh -- --model-bound -- pkill -f watcher",
+      ],
+      [
+        "a kill by pattern through run-slot named as its separator before --after",
+        "~/.playground/ops/run-slot.sh -- --after 4242 -- pkill -f watcher",
+      ],
+      [
+        "a kill by pattern through run-slot named as its separator behind env",
+        "env ~/.playground/ops/run-slot.sh -- -- pkill -f watcher",
+      ],
+      [
+        "a kill by pattern through run-slot named as its separator as xargs' command",
+        "xargs ~/.playground/ops/run-slot.sh -- -- pkill -f <<< watcher",
+      ],
+      [
+        "a kill by pattern through run-slot named as its separator in bash -c",
+        "bash -c '~/.playground/ops/run-slot.sh -- -- pkill -f watcher'",
+      ],
+      [
         "a kill by pattern through run-slot after its --after option",
         "~/.playground/ops/run-slot.sh w --after 4242 -- pkill -f watcher",
       ],
