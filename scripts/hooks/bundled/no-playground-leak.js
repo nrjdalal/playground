@@ -7655,7 +7655,7 @@ var apart = (env) => ({
 });
 async function examineReading(cmd, parsed, env, visit, builtins) {
   const { args, chdir, local, name } = parsed;
-  const into = chdir && pathOf(chdir, env);
+  const into = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env);
   const here = chdir ? {
     ...env,
     cwd: into,
@@ -7789,6 +7789,10 @@ async function folder(path) {
     return;
   return isFolder(path) ? path : undefined;
 }
+var landsHeld = (word, cmd, env) => {
+  const held = env.hold?.(word, cmd, env);
+  return held && isAbsolute2(held.value) && !held.glob ? held : undefined;
+};
 function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
   const [dir] = dirs;
@@ -7803,7 +7807,7 @@ function cdTargets(name, cmd, parsed, env, from) {
   let unread = dirs.length > 1;
   for (const typed of dirs.length > 1 ? dirs : [dir]) {
     const word = env.hold?.(typed, cmd, env) ?? typed;
-    if (word !== typed)
+    if (word !== typed && !landsHeld(typed, cmd, env))
       unread = true;
     for (const base of from.length > 0 ? from : [undefined]) {
       tick();

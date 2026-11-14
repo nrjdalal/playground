@@ -2097,6 +2097,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // the line starts in the folder the tool names, which the reader has proved by the payload itself
     cwdSure: directory,
     files: new Map(),
+    // a cd or env -C through a steady variable holding a literal absolute path is read by that path (landsHeld in shell.ts)
+    hold: (word, cmd, here) => heldWord(word, here, steadyAt(cmd)),
     known,
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },
