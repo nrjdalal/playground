@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { extname, join } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 
@@ -32,6 +32,7 @@ import {
   readSetting,
   resetSetting,
   SCOPE_NAME,
+  scopeDir,
   setSetting,
   settingRows,
   slackSettings,
@@ -45,7 +46,7 @@ import { ID_PATTERN } from "./attachments"
 import { checkoutRoot, currentSource, type DashboardSource } from "./fixture"
 import { OWNER_APPS } from "./owner-apps"
 
-// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, an apps change's, a grant's, a guard setting's or an own account change's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
+// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, a clone's, an apps change's, a grant's, a guard setting's or an own account change's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
 
 const LIMITS = { line: 200, name: 120, prs: 50, text: 4000 }
 
@@ -421,6 +422,81 @@ const ownSchema = z.strictObject({
 
 export type InboxOwn = z.infer<typeof ownSchema>
 
+// One private repo a clone card clones: its owner/name, the scope it becomes and that scope's folder in this machine's extensions, which the post and Approve check against the data folder, so the card shows the very folder Approve fills.
+const cloneRepoSchema = z.strictObject({
+  folder: z.string().max(LIMITS.line).startsWith("/", "Must be a full path"),
+  repo: z
+    .string()
+    .max(LIMITS.name)
+    .regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, "Must be a repo as owner/name"),
+  scope: extScopeSchema,
+})
+
+// The extensions' first clone on a new machine, which only the owner may write: the login's repo first, through ext init, then each further one through ext add, in order. Each scope once.
+const cloneSchema = z.strictObject({
+  repos: z
+    .array(cloneRepoSchema)
+    .min(1)
+    .max(20)
+    .refine((repos) => new Set(repos.map((repo) => repo.scope)).size === repos.length, {
+      error: "A clone card names each scope once",
+    }),
+  type: z.literal("clone"),
+  why: words,
+})
+
+export type InboxClone = z.infer<typeof cloneSchema>
+
+// Pure: why a clone card cannot run on the machine whose data folder this is, or undefined: a folder that is not its scope's in this machine's extensions, or one already there, since the clone is a new machine's first alone.
+const cloneHeld = (data: string, preview: InboxClone): string | undefined => {
+  const elsewhere = preview.repos.filter((repo) => repo.folder !== scopeDir(data, repo.scope))
+  if (elsewhere.length)
+    return elsewhere
+      .map(
+        (repo) => `${repo.folder} is not where ${repo.scope} goes: ${scopeDir(data, repo.scope)}`,
+      )
+      .join("; ")
+  const held = preview.repos.filter((repo) => existsSync(repo.folder))
+  if (held.length)
+    return `This machine's extensions already hold ${held.map((repo) => repo.folder).join(", ")}, so nothing is cloned`
+}
+
+// Clones each repo in order through `playground ext`, stopping at the first that fails: ext init --dry-run first, so the login's repo it clones is the card's first, then ext init, then ext add for each further one. Neither runs with --yes, so off a terminal neither makes a repo.
+async function cloneAll(clone: ExtRun, preview: InboxClone): Promise<RunResult> {
+  const first = preview.repos[0]!
+  const name = (repo: InboxClone["repos"][number]) => `${repo.repo} into ${repo.folder}`
+  const checked = await clone(["init", "--dry-run"])
+  if (checked.code !== 0) return runResult(checked)
+  const found = JSON.parse(checked.out) as { exists: boolean; login: string; repo: string }
+  if (found.repo !== first.repo || found.login !== first.scope)
+    return {
+      exitCode: 1,
+      line: `ext init clones ${found.repo} for ${found.login}, not ${first.repo}, so nothing was cloned`,
+    }
+  if (!found.exists)
+    return { exitCode: 1, line: `${first.repo} is not on GitHub, so nothing was cloned` }
+  const cloned: string[] = []
+  for (const [at, repo] of preview.repos.entries()) {
+    const ran = runResult(
+      await clone(at === 0 ? ["init"] : ["add", repo.scope, repo.repo]).catch((error: unknown) => ({
+        code: 1,
+        err: error instanceof Error ? error.message : String(error),
+        out: "",
+      })),
+    )
+    if (ran.exitCode !== 0) {
+      const done = cloned.length ? `cloned ${cloned.join(", ")}; ` : ""
+      const untried = preview.repos.slice(at + 1).map((next) => next.repo)
+      return {
+        exitCode: ran.exitCode,
+        line: `${done}${repo.repo} failed: ${ran.line}${untried.length ? `; not tried: ${untried.join(", ")}` : ""}`,
+      }
+    }
+    cloned.push(name(repo))
+  }
+  return { exitCode: 0, line: cloned.join(", ") }
+}
+
 const ACCOUNTS = "usage.accounts"
 
 // usage.accounts as it is stored at one scope: undefined when that scope sets none.
@@ -477,7 +553,7 @@ const askQuestion = z
     path: ["recommended"],
   })
 
-// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change, a grant's System Settings pane, a guard setting or an own account change, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in plain words (the plain-words skill), one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere. A reveal shows the owner a Keychain item's value on the owner's click instead, kept nowhere either.
+// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an extensions clone, an apps change, a grant's System Settings pane, a guard setting or an own account change, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in plain words (the plain-words skill), one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere. A reveal shows the owner a Keychain item's value on the owner's click instead, kept nowhere either.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
@@ -546,6 +622,7 @@ export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({ service: playgroundService, type: z.literal("reveal"), why: words }),
   acceptSchema,
   appsSchema,
+  cloneSchema,
   grantSchema,
   guardSchema,
   ownSchema,
@@ -670,12 +747,13 @@ export type InboxAction = (typeof ACTIONS)[number]
 // What an answer holds: every action but Archive and Move back, which answer nothing, and Dismiss, which a waiting item records as clear.
 export type InboxChoice = Exclude<InboxAction, "archive" | "dismiss" | "unarchive">
 
-// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, listed, opened, owned and set: what the dashboard ran on an accept's, an apps change's, a grant's, an own card's and a guard setting's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, a draft's words going with them, so a retry shares none twice and its poster posts no words again.
+// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, cloned, listed, opened, owned and set: what the dashboard ran on an accept's, a clone's, an apps change's, a grant's, an own card's and a guard setting's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, a draft's words going with them, so a retry shares none twice and its poster posts no words again.
 export type InboxAnswer = {
   accepted?: RunResult
   ackedAt?: string
   at: string
   choice: InboxChoice
+  cloned?: RunResult
   dismissed?: true
   dismissedAt?: string
   editedText?: string
@@ -987,6 +1065,7 @@ function answerOf(
     }
     if (
       (item.preview.type === "apps" ||
+        item.preview.type === "clone" ||
         item.preview.type === "grant" ||
         item.preview.type === "guard" ||
         item.preview.type === "own" ||
@@ -1103,16 +1182,25 @@ export function answerPayload(
     case "approve":
     case "edit":
       // a step the dashboard ran on Approve leaves only its close, and a grant's recheck once its pane opened (asks.md)
-      if (answer.accepted || answer.listed || answer.opened || answer.owned || answer.set) {
+      if (
+        answer.accepted ||
+        answer.cloned ||
+        answer.listed ||
+        answer.opened ||
+        answer.owned ||
+        answer.set
+      ) {
         const ran = answer.accepted
           ? { accepted: answer.accepted }
-          : answer.listed
-            ? { listed: answer.listed }
-            : answer.owned
-              ? { owned: answer.owned }
-              : answer.set
-                ? { set: answer.set }
-                : { opened: answer.opened! }
+          : answer.cloned
+            ? { cloned: answer.cloned }
+            : answer.listed
+              ? { listed: answer.listed }
+              : answer.owned
+                ? { owned: answer.owned }
+                : answer.set
+                  ? { set: answer.set }
+                  : { opened: answer.opened! }
         return {
           ...head,
           ...comment,
@@ -1437,7 +1525,10 @@ export async function postItem(
   if (!parsed.success) {
     return { code: "VALIDATION_ERROR", message: zodMessage(parsed.error), ok: false }
   }
-  const refused = ownRefused(parsed.data, settingsData) ?? voiceRefused(parsed.data, settingsData)
+  const refused =
+    ownRefused(parsed.data, settingsData) ??
+    cloneRefused(parsed.data, settingsData) ??
+    voiceRefused(parsed.data, settingsData)
   if (refused) return refused
   if (threadId !== undefined) {
     const [found] = await db.select({ id: thread.id }).from(thread).where(eq(thread.id, threadId))
@@ -1503,6 +1594,18 @@ const ownRefused = (
   return message ? { code: "VALIDATION_ERROR", message, ok: false } : undefined
 }
 
+// A clone card refused as it is posted or edited, so the card never offers an Approve that cannot run: no data folder to read, a folder that is not its scope's there, or one this machine's extensions already hold.
+const cloneRefused = (
+  input: z.infer<typeof inboxInputSchema>,
+  data?: string,
+): Refused | undefined => {
+  if (input.kind !== "decision" || input.preview.type !== "clone") return
+  const message = data
+    ? cloneHeld(data, input.preview)
+    : "This dashboard cannot read its extensions, so a clone card is refused"
+  return message ? { code: "VALIDATION_ERROR", message, ok: false } : undefined
+}
+
 // Pure: an item its poster can no longer edit: done or dismissed by the owner, settled, resolved, or closed by its poster's ack; editItem still takes an update the owner sent to Done (ownerDone).
 const closed = (item: InboxItem): boolean => {
   const answer = item.answer
@@ -1544,7 +1647,10 @@ export async function editItem(
   if (!parsed.success) {
     return { code: "VALIDATION_ERROR", message: zodMessage(parsed.error), ok: false }
   }
-  const refused = ownRefused(parsed.data, settingsData) ?? voiceRefused(parsed.data, settingsData)
+  const refused =
+    ownRefused(parsed.data, settingsData) ??
+    cloneRefused(parsed.data, settingsData) ??
+    voiceRefused(parsed.data, settingsData)
   if (refused) return refused
   const item = await getItem(db, key)
   if (!item) return NOT_FOUND
@@ -1707,6 +1813,7 @@ export async function answerItem(
     accept,
     actor,
     apps,
+    clone,
     deliver,
     dispatcher,
     grant,
@@ -1720,6 +1827,7 @@ export async function answerItem(
     accept?: ExtRun
     actor: ActivityActor
     apps?: OwnerApps
+    clone?: ExtRun
     deliver?: Deliver
     dispatcher?: string
     grant?: ArgvRun
@@ -1769,13 +1877,14 @@ export async function answerItem(
     input.action === "dismiss"
       ? { ...checked.answer, at, dismissed: true, dismissedAt: at }
       : { ...checked.answer, at, ...(via && { via }) }
-  // an accept's, an apps change's, a grant's, a guard setting's or an own account change's Approve runs its step, so one with nothing to run it is refused before it is recorded
+  // an accept's, a clone's, an apps change's, a grant's, a guard setting's or an own account change's Approve runs its step, so one with nothing to run it is refused before it is recorded
   const step =
     current.kind === "decision" && answer.choice === "approve"
       ? stepOf(current.preview, current.ref, {
           accept,
           actor: "id" in actor ? actor.id : actor.label,
           apps,
+          clone,
           grant,
           settingsData,
         })
@@ -1849,8 +1958,9 @@ const carrying = (item: InboxItem): boolean => {
   if (item.kind === "update" || !answer || !("choice" in answer)) return false
   if (answer.choice === "provided") return !("results" in answer && answer.results)
   if (!isGo(answer.choice)) return false
-  const { accepted, ackedAt, link, listed, noLink, opened, owned, set } = answer as InboxAnswer
-  if (accepted ?? listed ?? owned ?? set) return false
+  const { accepted, ackedAt, cloned, link, listed, noLink, opened, owned, set } =
+    answer as InboxAnswer
+  if (accepted ?? cloned ?? listed ?? owned ?? set) return false
   if (opened && opened.exitCode !== 0) return false
   const unstamped =
     item.delivery?.status === "delivered" && Date.parse(answer.at) < ACKS_STAMPED_FROM.getTime()
@@ -1906,7 +2016,7 @@ async function archive(
   return row ? { item: toItem(row), ok: true } : CHANGED
 }
 
-// The step an Approve runs, by the decision's kind, and the answer key its result is kept under: an accept's `ext accept`, an apps change's write of the owner's list, a grant's System Settings pane, a guard setting's write at its scope, an own account change's write of usage.accounts; undefined for a decision whose poster carries it out, and a refusal when this dashboard has nothing to run it with.
+// The step an Approve runs, by the decision's kind, and the answer key its result is kept under: an accept's `ext accept`, a clone's `ext init` and `ext add`, an apps change's write of the owner's list, a grant's System Settings pane, a guard setting's write at its scope, an own account change's write of usage.accounts; undefined for a decision whose poster carries it out, and a refusal when this dashboard has nothing to run it with.
 function stepOf(
   preview: InboxPreview,
   ref: number,
@@ -1914,22 +2024,37 @@ function stepOf(
     accept,
     actor,
     apps,
+    clone,
     grant,
     settingsData,
   }: {
     accept?: ExtRun
     actor: string
     apps?: OwnerApps
+    clone?: ExtRun
     grant?: ArgvRun
     settingsData?: string
   },
 ):
-  | { key: "accepted" | "listed" | "opened" | "owned" | "set"; run: () => Promise<RunResult> }
+  | {
+      key: "accepted" | "cloned" | "listed" | "opened" | "owned" | "set"
+      run: () => Promise<RunResult>
+    }
   | { refusal: string }
   | undefined {
   if (preview.type === "accept") {
     if (!accept) return { refusal: "This dashboard cannot run an accept" }
     return { key: "accepted", run: () => acceptAll(accept, preview, ref) }
+  }
+  // checked again as it runs, since the stored card or the machine may have changed since it was posted
+  if (preview.type === "clone") {
+    const parsed = cloneSchema.safeParse(preview)
+    if (!parsed.success) return { refusal: zodMessage(parsed.error) }
+    if (!settingsData) return { refusal: "This dashboard cannot read its extensions" }
+    const held = cloneHeld(settingsData, parsed.data)
+    if (held) return { refusal: held }
+    if (!clone) return { refusal: "This dashboard clones nothing: it shows test data" }
+    return { key: "cloned", run: () => cloneAll(clone, parsed.data) }
   }
   if (preview.type === "apps") {
     if (!apps)

@@ -34,6 +34,7 @@ import {
   inboxCount,
   inboxInputSchema,
   type Delivery,
+  type ExtRun,
   grantArgv,
   type InboxApps,
   type InboxItem,
@@ -1112,7 +1113,7 @@ describe("an answer", () => {
       ],
       [
         cloning,
-        { at: AT, choice: "approve", cloned: { exitCode: 0, line: "cloned" } } as never,
+        { at: AT, choice: "approve", cloned: { exitCode: 0, line: "cloned" } },
         {
           cloned: { exitCode: 0, line: "cloned" },
           close: 'playground ask ack #i45 --no-link "<why>"',
@@ -6345,12 +6346,17 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       }
       return { calls, clone, data, ghCalls }
     }
-    const approveWith = (id: string, clone: unknown, data: string) =>
-      store.answerItem(db, id, { action: "approve" }, {
-        actor,
-        clone,
-        settingsData: data,
-      } as Parameters<typeof store.answerItem>[3])
+    const approveWith = (id: string, clone: ExtRun, data: string) =>
+      store.answerItem(
+        db,
+        id,
+        { action: "approve" },
+        {
+          actor,
+          clone,
+          settingsData: data,
+        },
+      )
     const made = (ghCalls: string[]) => ghCalls.filter((call) => call.startsWith("gh repo create"))
     const NO = async () => false
     const card = (data: string, scopes = [ME, "made-up-tools"]) => ({
@@ -6402,11 +6408,16 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       process.env.PATH = linuxPath()
       let answered: Awaited<ReturnType<typeof store.answerItem>>
       try {
-        answered = await store.answerItem(db, posted.id, { action: "approve" }, {
-          actor,
-          clone,
-          settingsData: data,
-        } as Parameters<typeof store.answerItem>[3])
+        answered = await store.answerItem(
+          db,
+          posted.id,
+          { action: "approve" },
+          {
+            actor,
+            clone,
+            settingsData: data,
+          },
+        )
       } finally {
         process.env.PATH = path
       }
@@ -6434,11 +6445,16 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const refused = await store.postItem(db, decision(card(data)), undefined, undefined, data)
       expect(refused).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
       expect(!refused.ok && refused.message).toContain(scopeDir(data, "made-up-tools"))
-      const approved = await store.answerItem(db, posted.id, { action: "approve" }, {
-        actor,
-        clone,
-        settingsData: data,
-      } as Parameters<typeof store.answerItem>[3])
+      const approved = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve" },
+        {
+          actor,
+          clone,
+          settingsData: data,
+        },
+      )
       expect(approved).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
       expect(!approved.ok && approved.message).toContain(scopeDir(data, "made-up-tools"))
       expect(calls).toEqual([])
@@ -6449,11 +6465,16 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     test("a first repo other than the one ext init would clone for gh's login clones nothing, its line saying why", async () => {
       const { calls, clone, data } = machine([`${ME}/playground-made-up-tools`])
       const posted = await postClone(card(data, ["made-up-tools"]), data)
-      await store.answerItem(db, posted.id, { action: "approve" }, {
-        actor,
-        clone,
-        settingsData: data,
-      } as Parameters<typeof store.answerItem>[3])
+      await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve" },
+        {
+          actor,
+          clone,
+          settingsData: data,
+        },
+      )
       expect(calls).toEqual([["init", "--dry-run"]])
       expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
         cloned: { exitCode: 1 },
@@ -6528,17 +6549,27 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     test("Deny and Later run nothing, and a dashboard with no runner refuses Approve", async () => {
       const { calls, clone, data } = machine()
       const denied = await postClone(card(data), data)
-      await store.answerItem(db, denied.id, { action: "deny" }, {
-        actor,
-        clone,
-        settingsData: data,
-      } as Parameters<typeof store.answerItem>[3])
+      await store.answerItem(
+        db,
+        denied.id,
+        { action: "deny" },
+        {
+          actor,
+          clone,
+          settingsData: data,
+        },
+      )
       const later = await postClone(card(data), data)
-      await store.answerItem(db, later.id, { action: "clear" }, {
-        actor,
-        clone,
-        settingsData: data,
-      } as Parameters<typeof store.answerItem>[3])
+      await store.answerItem(
+        db,
+        later.id,
+        { action: "clear" },
+        {
+          actor,
+          clone,
+          settingsData: data,
+        },
+      )
       const bare = await postClone(card(data), data)
       expect(
         await store.answerItem(db, bare.id, { action: "approve" }, { actor, settingsData: data }),
