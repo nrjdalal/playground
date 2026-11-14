@@ -827,6 +827,12 @@ describe("switchKeys", () => {
 
   // an option naming no model is taken only when the prompt's own question, between its top edge and its options, names the switch or the model
   test("a bare Yes is taken when the prompt's question names a model switch or the model", () => {
+    expect(keys(confirm("Switch from Opus 9.9 to Sonnet 9.9?", " ❯ 1. Yes", "   2. No"))).toEqual([
+      { key: "enter" },
+    ])
+    expect(keys(confirm("Opus 9.9 → Sonnet 9.9?", " ❯ 1. Yes", "   2. No"))).toEqual([
+      { key: "enter" },
+    ])
     expect(
       keys(
         confirm(
@@ -900,6 +906,12 @@ describe("switchKeys", () => {
     expect(keys(" Switch model?\n\n ❯ 1. Yes\n   2. No")).toBeNull()
     expect(keys(confirm("Switch model to Opus 9.9?", " ❯ 1. Yes", "   2. No"))).toBeNull()
     expect(keys(confirm("Switch to Opus 9.9?", " ❯ 1. Yes", "   2. No"))).toBeNull()
+    expect(keys(confirm("Switch from Sonnet 9.9 to Opus 9.9?", " ❯ 1. Yes", "   2. No"))).toBeNull()
+    expect(
+      keys(
+        confirm("Switch from Opus 9.9 to Sonnet 9.9, or to Haiku 9.9?", " ❯ 1. Yes", "   2. No"),
+      ),
+    ).toBeNull()
   })
 })
 
