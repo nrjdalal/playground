@@ -164,6 +164,33 @@ describe("check", () => {
     expect(seen).toEqual(["worker", "worker"])
   })
 
+  // #2170: the hook refuses at its own deadline, so no runner's timeout decides the call
+  test("a guard that never answers is refused at the deadline, naming it, with the others' verdicts", async () => {
+    const guards = [
+      fake("a", false, async () => "a hook refuses"),
+      fake("stuck", false, () => new Promise(() => {})),
+      fake("b", false, async () => undefined),
+    ]
+    const reason = await check(input("x"), worker, guards, 50)
+    expect(reason).toContain("a hook refuses")
+    expect(reason).toContain("guards hook: stuck did not answer by its deadline")
+  })
+
+  test("a guard that reaches the deadline is refused, not allowed", async () => {
+    const late = fake("late", false, async () => (await Bun.sleep(200), undefined))
+    expect(await check(input("x"), worker, [late], 50)).toContain(
+      "guards hook: late did not answer by its deadline",
+    )
+  })
+
+  test("a fast guard's verdict is unchanged by the deadline", async () => {
+    const fast = [fake("a", false, async () => "a hook refuses")]
+    expect(await check(input("x"), worker, fast, 1_000)).toBe("a hook refuses")
+    expect(await check(input("x"), worker, [fake("b", false, async () => undefined)], 1_000)).toBe(
+      undefined,
+    )
+  })
+
   test("the real guards refuse a bare stash for a factory session and pass a plain call", async () => {
     const env = { ...process.env, ...worker }
     expect(await check(input("git stash"), env)).toContain("no-stash hook ")
