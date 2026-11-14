@@ -139,6 +139,10 @@ var readPolicySync = (data, org) => {
     }
   };
 };
+var readPolicyOrDefaults = (data, org) => {
+  const read = readPolicySync(data, org);
+  return read.refusal !== undefined && !existsSync2(join3(extensionsDir(data), "policy.json")) ? { settings: { schemaVersion: 1, values: {} } } : read;
+};
 
 // scripts/hooks/lists.ts
 var storeMarker = (environment = process.env) => markerPath(dataDir(environment));
@@ -2660,6 +2664,18 @@ async function registryName(sessionId, environment = process.env) {
     } catch {}
   }
 }
+async function leadOf(raw, kind, environment) {
+  try {
+    const session = sessionOf(raw);
+    if (typeof session !== "string" || await sessionRole(environment, session) !== "lead")
+      return false;
+    const name = await registryName(session, environment);
+    return name !== undefined && await rosterKind(name, environment) === kind;
+  } catch {
+    return false;
+  }
+}
+var builderLead = (raw, environment = process.env) => leadOf(raw, "builder", environment);
 async function codexName(sessionId, environment = process.env) {
   if (!environment.CODEX_HOME)
     return;
@@ -2761,6 +2777,7 @@ import { join as join10 } from "path";
 
 // packages/settings/src/folder.ts
 import {
+  appendFileSync,
   chmodSync,
   existsSync as existsSync4,
   mkdirSync,
@@ -8732,7 +8749,7 @@ var slackSettings = defineSettings({
 });
 
 // scripts/hooks/no-prepare-write.ts
-import { appendFileSync, mkdirSync as mkdirSync2 } from "fs";
+import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync2 } from "fs";
 import { join as join8 } from "path";
 
 // scripts/hooks/no-stash.ts
@@ -8921,7 +8938,7 @@ var log = (environment, entry) => {
   try {
     const dir = join8(dataDirOf(environment), "ops");
     mkdirSync2(dir, { recursive: true });
-    appendFileSync(join8(dir, "no-prepare-write.log"), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}
+    appendFileSync2(join8(dir, "no-prepare-write.log"), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}
 `);
   } catch {}
 };
@@ -8934,7 +8951,8 @@ var prCreate = (args) => {
   return head[0] === "pr" && head[1] === "create";
 };
 var pushes = (args) => gitCommand(args).sub?.value === "push";
-var REF_MUTATION = /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/;
+var REF_MOVE = /\b(?:createCommitOnBranch|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/;
+var REF_MUTATION = new RegExp(`${REF_MOVE.source}|\\bcreatePullRequest\\b`);
 var REF_ENDPOINT = /^repos\/[^/]+\/[^/]+\/(?:contents\/.+|git\/refs(?:\/.+)?|merges|pulls|pulls\/\d+\/(?:merge|update-branch))$/;
 async function apiWrite(rest, cmd, env, xargs) {
   const request = await ghApi(rest, cmd, env, xargs);
@@ -9015,6 +9033,1047 @@ async function check4(raw, environment = process.env) {
   } catch (error) {
     log(environment, { error: String(error), session, tool, write });
     return;
+  }
+}
+
+// packages/scripts/src/playground/setting.ts
+import { resolve as resolve4 } from "path";
+
+// packages/settings/src/accounts.ts
+var email2 = string2().email();
+var label = string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a label of lowercase letters, digits, dots, dashes and underscores");
+var claudeAccount = strictObject({
+  email: email2,
+  ends: string2().datetime({ offset: true }).nullable().optional(),
+  endsFirst: boolean2().optional(),
+  label: label.optional(),
+  nearLimit: boolean2().optional(),
+  own: boolean2().optional(),
+  parkedUntil: string2().datetime({ offset: true }).optional(),
+  provider: literal("claude").optional(),
+  renews: number2().int().min(1).max(31).nullable().optional(),
+  weekReset: strictObject({ hour: number2().min(0).lt(24), weekday: number2().int().min(0).max(6) }).optional()
+});
+var glmAccount = strictObject({ label, provider: literal("glm") });
+var account = union([claudeAccount, glmAccount]);
+var providerOf = (row) => row.provider === "glm" ? "glm" : "claude";
+var accountKey = (row) => (providerOf(row) === "glm" ? row.label : row.email) ?? "";
+var accountsOf = (rows, provider) => rows.filter((row) => providerOf(row) === provider);
+var accountSettings = defineSettings({
+  "models.probe": {
+    default: "claude-haiku-4-5",
+    description: "The model the usage scripts send one 1-token call to, as an account's own token, to read its 5-hour and week use from the reply's rate-limit headers.",
+    schema: string2().min(1)
+  },
+  "usage.accounts": {
+    default: [],
+    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), the time until which no new session starts on it (parkedUntil), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
+    schema: array(account).refine((rows) => new Set(rows.map((row) => `${providerOf(row)}:${accountKey(row)}`)).size === rows.length, "each account is listed once")
+  },
+  "usage.keychainService": {
+    default: "playground-claude-oauth",
+    description: "The macOS Keychain service each account's long-lived token is kept under, one item an account by its email: spawn.sh's --account and the usage probes read it.",
+    schema: string2().regex(/^[A-Za-z0-9._-]+$/, "a Keychain service name")
+  },
+  "usage.switchAccount": {
+    default: "",
+    description: "The account whose full week the ops tick tells the dispatchers and leads about, so the factory moves off it; empty for none.",
+    schema: union([email2, literal("")])
+  }
+});
+// packages/settings/src/channel.ts
+var channelSettings = defineSettings({
+  "channel.skipUser": {
+    default: "",
+    description: "The Slack member id whose own posts the channel watch skips, the account it posts as; none until set.",
+    schema: string2().regex(/^(?:[UW][A-Z0-9]+)?$/, "a Slack member id")
+  },
+  "channel.slackId": {
+    default: "",
+    description: "The Slack channel id of the shared channel the channel watch relays to the dispatcher; the watch reads nothing until it is set.",
+    schema: string2().regex(/^(?:[CG][A-Z0-9]+)?$/, "a Slack channel id")
+  }
+});
+// packages/settings/src/content.ts
+var contentFields = {
+  body: string2().nullable(),
+  files: record2(string2(), string2()).nullable(),
+  meta: record2(string2(), unknown2()).nullable(),
+  value: union([array(unknown2()), record2(string2(), unknown2())]).nullable()
+};
+// packages/settings/src/items.ts
+var ATTACHMENT_LIMIT = 50 * 1024 * 1024;
+
+// packages/settings/src/jobs.ts
+var jobSchema = strictObject({
+  callsModel: boolean2(),
+  command: string2().min(1).optional(),
+  config: record2(string2(), unknown2()).optional(),
+  cwd: string2().min(1).optional(),
+  description: string2().min(1),
+  disabledWhy: string2().optional(),
+  enabled: boolean2(),
+  heartbeat: string2().min(1),
+  launchd: string2().min(1).optional(),
+  model: string2().min(1).optional(),
+  neverPause: boolean2().optional(),
+  pausedFor: string2().optional(),
+  program: array(string2().min(1)).min(1).optional(),
+  runtime: _enum(["herdr"]).optional(),
+  schedule: union([
+    strictObject({ always: literal(true) }),
+    strictObject({ every: number2().int().positive() })
+  ]),
+  stop: string2().min(1).optional()
+});
+var fromStored = (row) => {
+  if (!row || typeof row !== "object" || Array.isArray(row))
+    return row;
+  const kept = Object.fromEntries(Object.entries(row).filter(([key]) => Object.hasOwn(jobSchema.shape, key)));
+  return kept.runtime === undefined ? kept : { ...kept, runtime: "herdr" };
+};
+var jobRowSchema = jobSchema.partial();
+var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
+var terminal = (name, command, job) => ({
+  callsModel: false,
+  command,
+  cwd: "{checkout}",
+  enabled: false,
+  heartbeat: name,
+  runtime: "herdr",
+  ...job
+});
+var launchd = (name, job) => ({
+  callsModel: false,
+  cwd: "{checkout}",
+  enabled: false,
+  heartbeat: name,
+  launchd: `com.playground.${name}`,
+  program: ["{bun}", "--no-env-file", `{checkout}/packages/scripts/src/${name}/cli.ts`],
+  ...job
+});
+var bunJob = (name, root = "{checkout}") => `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`;
+var JOBS = {
+  "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
+    description: "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
+    schedule: { always: true }
+  }),
+  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
+    cwd: "{dashboard}",
+    description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
+    schedule: { every: 300 }
+  }),
+  "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
+    cwd: "{dashboard}",
+    description: "Keeps the live dashboard running on its branch's latest head.",
+    enabled: true,
+    schedule: { every: 60 },
+    stop: "dashboard"
+  }),
+  "ops-dm-watch": terminal("ops-dm-watch", bunJob("ops-dm-watch"), {
+    description: "In Slack mode, hands each message in the owner's DM to the dispatcher, the session in the assistant seat too when no reply lands in 3 minutes.",
+    schedule: { every: 60 }
+  }),
+  "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
+    description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
+    schedule: { every: 86400 }
+  }),
+  "ops-flow": launchd("ops-flow", {
+    description: "Tells the leads when a session holds a run slot over 15 minutes, or a model slot over 120.",
+    schedule: { every: 60 }
+  }),
+  "ops-herdr": launchd("ops-herdr", {
+    description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
+    schedule: { every: 60 }
+  }),
+  "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
+    description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
+    schedule: { every: 60 }
+  }),
+  "ops-merge-train": terminal("ops-merge-train", "python3 -I {checkout}/scripts/ops/merge-train/run.py", {
+    description: "Runs the merge train: builds a train of ready PRs and checks each step.",
+    neverPause: true,
+    schedule: { every: 60 }
+  }),
+  "ops-restore": {
+    ...launchd("ops-restore", {
+      description: "Restores a lost main checkout by the playbook's steps once a guard is gone on two looks 5 minutes apart.",
+      schedule: { every: 60 }
+    }),
+    cwd: "{dashboard}",
+    program: [
+      "{bun}",
+      "--no-env-file",
+      "{dashboard}/packages/scripts/src/ops-restore/cli.ts",
+      "--main",
+      "{checkout}"
+    ]
+  },
+  "ops-session-resume": launchd("ops-session-resume", {
+    description: "Queues a carry-on line for each factory session once its usage limit resets.",
+    schedule: { every: 60 }
+  }),
+  "ops-sweep": terminal("ops-sweep", bunJob("ops-sweep"), {
+    description: "The Ops lead's sweep: runners, probes, asks, heartbeats and the forecast.",
+    schedule: { every: 300 }
+  }),
+  "ops-tick": launchd("ops-tick", {
+    description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
+    schedule: { every: 60 }
+  }),
+  "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
+    description: "Reads every live session's screen and clears a factory session stuck on a prompt.",
+    neverPause: true,
+    schedule: { every: 120 }
+  }),
+  "ops-usage": terminal("ops-usage", "python3 -I {checkout}/scripts/ops/usage/run.py", {
+    description: "Reads the account's usage windows into usage.json every 5 minutes.",
+    enabled: true,
+    neverPause: true,
+    schedule: { every: 300 }
+  }),
+  "ops-wa": terminal("ops-wa", `${bunJob("ops-wa")} --data {data}`, {
+    description: "Holds the WhatsApp link on the spare number: hands each owner message to the dispatcher, sends its replies, and drops every other message.",
+    schedule: { always: true }
+  }),
+  "ops-zai-usage": launchd("ops-zai-usage", {
+    description: "Reads the GLM plan's credits into zai-usage.json, which the spawn gate reads.",
+    schedule: { every: 300 }
+  })
+};
+var OLD_KEYS = { "ops-dashboard": ["jobs.opsDesk"] };
+var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([name, job]) => [
+  jobKey(name),
+  {
+    aliases: OLD_KEYS[name],
+    default: job,
+    description: `The ${name} ops job: ${job.description}`,
+    merge: true,
+    schema: jobRowSchema,
+    stored: fromStored
+  }
+])));
+var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
+// packages/settings/src/factory.ts
+var repo = string2().regex(/^(?:[A-Za-z0-9-]+\/[A-Za-z0-9._-]+)?$/, "a repository as owner/name, or empty for unset");
+var factorySettings = defineSettings({
+  "factory.archiveRepo": {
+    default: "",
+    description: "The archive repository: a link to it is private history, so the trace ratchet counts it and no-public-leak refuses it in a public write.",
+    schema: repo
+  },
+  "factory.publicRepo": {
+    default: "",
+    description: "The public repository, or a list of them, the checkout's origin when unset: no-public-leak refuses a write to one that holds private text, and the trace ratchet reads past each one's own name.",
+    schema: union([repo, array(repo)])
+  },
+  "factory.repo": {
+    default: "",
+    description: "The repository the factory's pull requests land in, the checkout's origin when unset: pr:merge needs GitGuardian's check there, Checks reads its PRs, and the roster links a bare PR number into it.",
+    schema: repo
+  }
+});
+// packages/settings/src/gates.ts
+var gateSettings = defineSettings({
+  "gates.glmLoad5Max": {
+    default: 30,
+    description: "The load5 a GLM session starts under.",
+    schema: number2().positive()
+  },
+  "gates.glmSwapinsMax": {
+    default: 100,
+    description: "The swap-ins a second a GLM session, and a fresh Claude worker, starts under.",
+    schema: number2().int().positive()
+  },
+  "gates.memoryFreeMin": {
+    default: 8,
+    description: "The free memory share, in percent, a Claude session starts at or over.",
+    schema: number2().int().min(0).max(100)
+  },
+  "gates.reviewReserve": {
+    default: 0.125,
+    description: "The share of the load gate's line a small worker keeps back for reviewers and testers, so a held review starts first; set it under gates.smallReserve, or a small worker's line falls below a medium one's.",
+    schema: number2().min(0).lt(1)
+  },
+  "gates.smallReserve": {
+    default: 0.25,
+    description: "The share of the load gate's line kept for small items, so a big plan never blocks a small one.",
+    schema: number2().min(0).lt(1)
+  },
+  "gates.startsWindow": {
+    default: 300,
+    description: "The seconds a start counts toward the load gate, since the load average lags a session's start.",
+    schema: number2().int().positive()
+  }
+});
+// packages/settings/src/harnesses.ts
+var HARNESSES = [
+  { backends: ["claude", "glm"], id: "claude-code" },
+  { backends: ["openai"], id: "codex" }
+];
+var GLM_MODEL = "glm";
+var readPin = (text) => {
+  const words = text.trim().split(/\s+/);
+  const [harnessId, backend] = words.length === 1 ? ["claude-code", words[0]] : words;
+  if (words.length > 2)
+    return null;
+  const harness = HARNESSES.find((h) => h.id === harnessId);
+  const found = harness?.backends.find((b) => b === backend);
+  return harness && found ? { backend: found, harness: harness.id } : null;
+};
+
+// packages/settings/src/harness-alpha.ts
+var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
+var harnessSettings = defineSettings({
+  "harness.alpha": {
+    default: "claude-code",
+    description: "The harness the first dispatcher starts on: claude-code or codex. First run's pick and Settings' Switch write it, and the Dashboard's Start runs spawn.sh --harness with it.",
+    schema: _enum(HARNESS_IDS)
+  }
+});
+// packages/settings/src/models.ts
+var id = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id, such as claude-opus-5-5");
+var modelSettings = defineSettings({
+  "models.checker": {
+    default: "claude-opus-5-5",
+    description: "The Claude model a reviewer or a tester runs on, and the one --model it takes, since its verdict gates a merge.",
+    schema: id
+  },
+  "models.claude": {
+    default: ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-5-5"],
+    description: "The Claude models spawn.sh and playground add take with --model.",
+    schema: array(id).min(1)
+  },
+  "models.default": {
+    default: "claude-opus-5-5",
+    description: "The Claude model a session runs on when its start names no --model.",
+    schema: id
+  },
+  "models.glm": {
+    default: "glm-5.3-flash",
+    description: "The GLM model a --backend glm session runs on, every model Claude Code asks for mapped to it.",
+    schema: id
+  },
+  "models.glmKeychainService": {
+    default: "playground-glm",
+    description: "The Keychain service a --backend glm session's Z.ai key is kept under, one item a usage.accounts GLM row by its label.",
+    schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a Keychain service name, such as playground-glm")
+  }
+});
+// packages/settings/src/live.ts
+var liveSettings = defineSettings({
+  "live.branch": {
+    default: "live/dashboard",
+    description: "The branch the live dashboard's checkout stays on: a stack on it reads the live machine, and ops-desk's roll resets it to canary.",
+    schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/, "a git branch name")
+  },
+  "live.container": {
+    default: "playground-dashboard-db",
+    description: "The Docker container holding the live dashboard's database, which every stack off the live checkout refuses.",
+    schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/, "a Docker container name")
+  }
+});
+// packages/settings/src/owner.ts
+var ownerSettings = defineSettings({
+  "owner.names": {
+    default: [],
+    description: "The owner's first name and handles as chat writes them, lowercase: the inbox gate refuses a manager's stop on a line that addresses one of them and asks for an action, and never reads @<handle> as an agent.",
+    schema: array(string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a name or handle, lowercase"))
+  },
+  "owner.voice": {
+    default: "",
+    description: "The voice a draft or a slack decision speaks in as the owner: singular has bun run ask refuse one that says we, us, our, ours or ourselves; empty checks none.",
+    schema: _enum(["", "singular"])
+  }
+});
+// packages/settings/src/paths.ts
+var pathsSettings = defineSettings({
+  "paths.codeRoot": {
+    default: "",
+    description: "The folder that holds your code, the folder that holds the checkout when unset: spawn.sh answers Claude's folder trust prompt there and moves a session off the Desktop into it.",
+    schema: string2().regex(/^(?:\/.*)?$/, "an absolute path, or empty for unset")
+  }
+});
+// packages/settings/src/rules.ts
+var percent = number2().int().min(1).max(100);
+var ruleSettings = defineSettings({
+  "battery.alert": {
+    default: 5,
+    description: "The battery percent, while the charge falls on battery or on a charger losing to the load, at which the battery check posts its red alert and the heavy runs wait in run-slot.",
+    schema: percent
+  },
+  "battery.ask": {
+    default: 10,
+    description: "The battery percent, while the Mac discharges on battery, at which the battery check posts its orange ask.",
+    schema: percent
+  },
+  "clock.ownerZone": {
+    default: "UTC",
+    description: "The time zone, by its IANA name, a time shown to the owner reads in.",
+    schema: string2().refine((zone) => {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: zone });
+        return true;
+      } catch {
+        return false;
+      }
+    }, "an IANA time zone, such as UTC or America/New_York")
+  },
+  "context.window": {
+    default: 400000,
+    description: "The context window, in tokens, every session compacts itself in.",
+    schema: number2().int().positive()
+  },
+  "github.pollMinutes": {
+    default: 5,
+    description: "The fewest minutes between two polls of one pull request by a session.",
+    schema: number2().int().positive()
+  },
+  "glm.readOnlyLoad5": {
+    default: 15,
+    description: "The 5-minute load average above which a GLM session may not install, commit or push.",
+    schema: number2().positive()
+  },
+  "release.hours": {
+    default: 4,
+    description: "The hours of merging after which Ops ships canary to main, whatever the count.",
+    schema: number2().positive()
+  },
+  "release.merges": {
+    default: 3,
+    description: "The user-facing merges since the last ship at which Ops ships canary to main.",
+    schema: number2().int().positive()
+  },
+  "tickets.tracker": {
+    default: "the tracker",
+    description: "The issue tracker the tickets rule names, read inside its sentence, such as Linear.",
+    schema: string2().min(1)
+  },
+  "unstick.escalateMinutes": {
+    default: 5,
+    description: "The minutes a session stays stuck with no turn before ops-session-resume tells the primary dispatcher.",
+    schema: number2().int().positive()
+  }
+});
+// packages/settings/src/sessions.ts
+var name = string2().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "a session name, lowercase words joined by hyphens");
+var manager = _enum(["builder", "dispatcher", "ops", "planner"]);
+var TEMPLATE_KINDS = [
+  "assistant",
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "orchestrator",
+  "planner"
+];
+var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+var BRIEF_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+var sessionTemplate = strictObject({
+  account: string2().email().optional(),
+  brief: string2().regex(BRIEF_NAME, "a brief is a file name, with no /").refine((brief) => !brief.includes(".."), "a brief is a file name, with no .."),
+  effort: _enum(EFFORTS).optional(),
+  harness: literal("claude-code"),
+  id: name,
+  kind: _enum(TEMPLATE_KINDS),
+  label: string2().min(1).max(40),
+  model: string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id").optional()
+}).refine((t) => t.model !== GLM_MODEL || t.account === undefined && t.effort === undefined, {
+  message: "a GLM template runs on models.glm and its first GLM row, so it takes no account or effort"
+});
+var storedTemplates = (value) => Array.isArray(value) ? value.map((row) => {
+  if (typeof row !== "object" || row === null || !("backend" in row) || "harness" in row)
+    return row;
+  const { backend, ...rest } = row;
+  const { model, ...modelless } = rest;
+  if (backend === "glm")
+    return { ...rest, harness: "claude-code", model: GLM_MODEL };
+  if (backend !== "claude")
+    return { ...rest, backend, harness: "claude-code" };
+  return { ...model === GLM_MODEL ? modelless : rest, harness: "claude-code" };
+}) : value;
+var sessionTemplates = array(sessionTemplate).refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "each id is listed once");
+var unknownAccounts = (templates, accounts) => {
+  const known = new Set(accountsOf(accounts, "claude").map(accountKey));
+  return templates.flatMap((template, at) => template.account && !known.has(template.account) ? [
+    {
+      message: `${template.account} is not in usage.accounts: add it in Settings > Accounts`,
+      path: [at, "account"]
+    }
+  ] : []);
+};
+var sessionSettings = defineSettings({
+  "sessions.aliases": {
+    default: {},
+    description: "Old names of the managers' sessions, each mapped to its kind, so a session or a stored row under one still reads as that kind.",
+    schema: record2(name, manager)
+  },
+  "sessions.names": {
+    default: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" },
+    description: "The session name each manager kind starts under; the second dispatcher takes the dispatcher's with -2.",
+    schema: strictObject({ builder: name, dispatcher: name, ops: name, planner: name })
+  },
+  "sessions.templates": {
+    against: (templates, read) => unknownAccounts(templates, read("usage.accounts")),
+    default: [
+      {
+        brief: "assistant.md",
+        harness: "claude-code",
+        id: "assistant",
+        kind: "assistant",
+        label: "Assistant"
+      },
+      {
+        brief: "orchestrator.md",
+        harness: "claude-code",
+        id: "orchestrator",
+        kind: "orchestrator",
+        label: "Orchestrator"
+      },
+      {
+        brief: "dispatcher-2.md",
+        harness: "claude-code",
+        id: "second-dispatcher-claude",
+        kind: "dispatcher",
+        label: "Second dispatcher on Claude"
+      },
+      {
+        brief: "dispatcher-2.md",
+        harness: "claude-code",
+        id: "second-dispatcher-glm",
+        kind: "dispatcher",
+        label: "Second dispatcher on GLM",
+        model: GLM_MODEL
+      }
+    ],
+    description: "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, harness, model (a Claude id, or glm), effort, account (a Claude row of usage.accounts) and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
+    schema: sessionTemplates,
+    stored: storedTemplates
+  }
+});
+// packages/settings/src/slots.ts
+var slotSettings = defineSettings({
+  "slots.modelBound": {
+    default: 2,
+    description: "How many runs that mostly wait on a model (run-slot.sh <who> --model-bound -- <command>, such as a parity replay) hold a slot at once, counted apart from the CPU slots, so one never holds a CPU slot while its CPU idles.",
+    schema: number2().int().min(1).max(16)
+  },
+  "slots.peers": {
+    default: [],
+    description: "The ops folders of other factories on this machine, each an absolute path: run-slot counts each live holder of their run slots against this factory's load units, and spawn.sh's load gate counts their starts beside its own, both reading only.",
+    schema: array(string2().regex(/^\/.+/, "an absolute path"))
+  }
+});
+// packages/settings/src/whatsapp.ts
+var e1642 = string2().regex(/^(?:\+[1-9]\d{7,14})?$/, "a phone number is + and 8 to 15 digits, as +15550100001");
+var whatsappSettings = defineSettings({
+  "wa.device": {
+    default: "",
+    description: "The spare number ops-wa links to as a device, in E.164: its pairing code is for this number. Never the owner's own number; ops-wa does not run until it is set.",
+    masked: true,
+    schema: e1642
+  },
+  "wa.owner": {
+    default: "",
+    description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages and sends only to it; ops-wa does not run until it is set.",
+    masked: true,
+    schema: e1642
+  }
+});
+// packages/settings/src/yard.ts
+var yardSettings = defineSettings({
+  "yard.logReaders": {
+    default: {},
+    description: "The bots whose read of the dispatcher's log this Mac answers through the relay, each Yard login to the DM it was made with; a bot Yard lets read the log reads nothing until its login and its DM are here.",
+    schema: record2(string2().regex(/^[a-z\d][a-z\d-]{0,29}\[bot\]$/, "a bot's login, <name>[bot]"), string2().min(1).max(64))
+  }
+});
+// packages/scripts/src/playground/setting.ts
+var CHECKOUT = resolve4(__CHECKOUT + "/packages/scripts/src/playground", "../../../..");
+var origins = new Map;
+var originRepo = (checkout = CHECKOUT) => {
+  if (!origins.has(checkout)) {
+    const run = Bun.spawnSync(["git", "-C", checkout, "remote", "get-url", "origin"], {
+      stderr: "ignore"
+    });
+    const url = run.stdout.toString().trim();
+    const slug = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(url)?.[1] ?? "";
+    origins.set(checkout, slug.toLowerCase());
+  }
+  return origins.get(checkout);
+};
+var factoryRepo = (settings, checkout = CHECKOUT) => factorySettings.get(settings, "factory.repo").toLowerCase() || originRepo(checkout);
+if (false)
+  ;
+
+// scripts/hooks/no-protected-push.ts
+var PROTECTED = new Set(["canary", "main"]);
+var PUSH_TAKES = new Set([
+  "--exec",
+  "-o",
+  "--push-option",
+  "--receive-pack",
+  "--recurse-submodules",
+  "--repo"
+]);
+var PLAIN2 = new Set([
+  "--atomic",
+  "--dry-run",
+  "--exec",
+  "--follow-tags",
+  "--force",
+  "--force-if-includes",
+  "--force-with-lease",
+  "--ipv4",
+  "--ipv6",
+  "--no-atomic",
+  "--no-follow-tags",
+  "--no-force-if-includes",
+  "--no-force-with-lease",
+  "--no-progress",
+  "--no-signed",
+  "--no-thin",
+  "--no-verify",
+  "--porcelain",
+  "--progress",
+  "--push-option",
+  "--quiet",
+  "--receive-pack",
+  "--recurse-submodules",
+  "--repo",
+  "--set-upstream",
+  "--signed",
+  "--thin",
+  "--verbose",
+  "--verify",
+  "-4",
+  "-6",
+  "-f",
+  "-n",
+  "-o",
+  "-q",
+  "-u",
+  "-v"
+]);
+var KEEPS_HEAD = new Set(["cat", "date", "echo", "printf", "pwd", "true"]);
+var GIT_KEEPS_HEAD = new Set([
+  "add",
+  "commit",
+  "diff",
+  "fetch",
+  "log",
+  "ls-remote",
+  "push",
+  "rev-parse",
+  "show",
+  "status"
+]);
+var ROUTE = "canary takes a pull request only through bun run pr:merge <n> or merge-on-ready, and main moves only through the release skill's ship:merge.";
+var FIX = "Push your work branch as a call of its own, a bare git push from it or git push origin HEAD:<branch>, then land it through its pull request.";
+var git = (dir, args) => {
+  const out = Bun.spawnSync(["git", "-C", dir, ...args], {
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    stderr: "ignore"
+  });
+  return out.exitCode === 0 ? out.stdout.toString() : undefined;
+};
+var lines = (text) => (text ?? "").split(`
+`).filter(Boolean);
+var builtins;
+var builtin = (sub) => (builtins ??= new Set(lines(Bun.spawnSync(["git", "--list-cmds=builtins"], { stderr: "ignore" }).stdout.toString()))).has(sub);
+function branchOf(name) {
+  const bare = name.replace(/^(?:refs\/)?heads\//, "");
+  return bare.startsWith("refs/") ? undefined : bare.toLowerCase();
+}
+function writes(rest, dir, settled) {
+  const { flags, positionals } = parseFlags(rest, PUSH_TAKES);
+  const odd = flags.find((f) => !PLAIN2.has(f.name) && !["--tags", "--delete", "-d"].includes(f.name));
+  if (odd)
+    return {
+      names: [],
+      unread: `it carries ${odd.name}, which may push more branches than it names`
+    };
+  const [, ...specs] = positionals;
+  const head = () => {
+    if (!dir || !settled)
+      return {
+        names: [],
+        unread: "it pushes the checked-out branch, which this call may switch before the push runs"
+      };
+    const branch = lines(git(dir, ["symbolic-ref", "--short", "-q", "HEAD"]))[0];
+    return { branch, names: branch ? [branch.toLowerCase()] : [] };
+  };
+  if (specs.length === 0) {
+    if (flags.some((f) => f.name === "--tags"))
+      return { names: [] };
+    const base = head();
+    if (base.unread || !dir)
+      return base;
+    const config = lines(git(dir, ["config", "--list"]));
+    if (config.some((l) => /^remote\..*\.push=/.test(l)))
+      return {
+        names: [],
+        unread: "a push refspec in the checkout's config picks the branches it writes"
+      };
+    if (config.findLast((l) => l.startsWith("push.default=")) === "push.default=matching")
+      return {
+        names: [],
+        unread: "push.default is matching, which pushes every branch the remote holds"
+      };
+    const upstream = base.branch && config.findLast((l) => l.startsWith(`branch.${base.branch}.merge=`));
+    const tracked = upstream ? branchOf(upstream.slice(upstream.indexOf("=") + 1)) : undefined;
+    return { names: tracked ? [...base.names, tracked] : base.names };
+  }
+  const names = [];
+  for (const spec of specs) {
+    if (unreadable(spec))
+      return { names: [], unread: "it names a ref built at run time" };
+    const text = spec.value.replace(/^\+/, "");
+    if (/[*?[\\\s]/.test(text) || text === ":" || text === "")
+      return { names: [], unread: `its refspec ${spec.value} may match many branches` };
+    const parts = text.split(":");
+    if (parts.length > 2)
+      return { names: [], unread: `its refspec ${spec.value} does not read` };
+    const destination = parts.length === 2 ? parts[1] : parts[0];
+    if (/^(?:@|head)$/i.test(destination)) {
+      if (parts.length === 2)
+        return { names: [], unread: `its refspec ${spec.value} writes the remote's HEAD` };
+      const current = head();
+      if (current.unread)
+        return current;
+      names.push(...current.names);
+      continue;
+    }
+    const branch = branchOf(destination);
+    if (branch !== undefined)
+      names.push(branch);
+  }
+  return { names };
+}
+function lands(remote, dir, factory, carried) {
+  if (!factory)
+    return "the factory's repository does not read (factory.repo is unset and the checkout has no GitHub origin)";
+  if (carried)
+    return "it carries -c, --config-env, --git-dir, --work-tree or a GIT_ variable, which can change where it pushes";
+  if (remote && unreadable(remote))
+    return "its remote is built at run time";
+  const named = (url) => {
+    const repo = remoteRepo(url);
+    return !!repo && `${repo.owner}/${repo.repo}`.toLowerCase() === factory;
+  };
+  if (!dir)
+    return remote && /[:/]/.test(remote.value) && !remote.value.startsWith(".") ? named(remote.value) : "the folder it runs in does not read";
+  const listed = lines(git(dir, ["remote", "-v"])).filter((l) => l.endsWith(" (push)"));
+  const configured = new Set(listed.map((l) => l.split("\t")[0]));
+  if (!remote || configured.has(remote.value))
+    return listed.some((l) => (!remote || l.startsWith(`${remote.value}	`)) && named(l.slice(l.indexOf("\t") + 1, -" (push)".length)));
+  const rules = lines(git(dir, ["config", "--get-regexp", "^url\\..*\\.pushinsteadof$"]));
+  if (rules.some((l) => remote.value.startsWith(l.slice(l.indexOf(" ") + 1))))
+    return "a pushInsteadOf rule in the checkout's config rewrites its remote";
+  return named(lines(git(dir, ["ls-remote", "--get-url", remote.value]))[0] ?? remote.value);
+}
+function globals(args, env) {
+  let dir = env.cwd;
+  let carried = false;
+  for (let k = 0;k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value;
+    if (v === "-C")
+      dir = dir === undefined ? undefined : pathOf(args[++k] ?? { value: "" }, { ...env, cwd: dir });
+    else if (/^(?:-c|--config-env|--git-dir|--work-tree|--namespace)(?:=|$)/.test(v) || /^-c./.test(v)) {
+      carried = true;
+      if (GIT_TAKES.has(v))
+        k++;
+    } else if (GIT_TAKES.has(v))
+      k++;
+  }
+  return { carried, dir };
+}
+var gitVariable = (key) => /^GIT_(?:COMMON_DIR|CONFIG(?:_\w+)?|DIR|NAMESPACE|WORK_TREE)$/.test(key);
+function signingOff(environment) {
+  const count = environment.GIT_CONFIG_COUNT;
+  if (count === undefined || !/^[1-9]\d*$/.test(count))
+    return false;
+  const expected = new Set(["GIT_CONFIG_COUNT"]);
+  for (let n = 0;n < Number(count); n++) {
+    const key = `GIT_CONFIG_KEY_${n}`;
+    const value = `GIT_CONFIG_VALUE_${n}`;
+    if (environment[key] !== "commit.gpgsign" || environment[value] !== "false")
+      return false;
+    expected.add(key).add(value);
+  }
+  return Object.keys(environment).filter(gitVariable).every((name) => expected.has(name));
+}
+function aliasOf(sub, args, dir) {
+  if (builtin(sub))
+    return false;
+  const inline = gitCommand(args).aliases.findLast((a) => a.startsWith(`alias.${sub}=`));
+  const body = inline === undefined ? dir && git(dir, ["config", "--get", `alias.${sub}`]) : inline.slice(inline.indexOf("=") + 1);
+  if (body === undefined)
+    return dir === undefined;
+  return /push/i.test(body);
+}
+function judge2(args, parsed, env, factory, settled) {
+  const { sub, rest } = gitCommand(args);
+  if (!sub)
+    return;
+  const { carried: optioned, dir } = globals(args, env);
+  const carried = optioned || [...parsed.local.keys(), ...env.vars.keys()].some(gitVariable) || !signingOff(env.process) && Object.keys(env.process).some(gitVariable);
+  if (sub.value !== "push") {
+    const other = sub.value === "send-pack" || sub.value === "subtree" && rest[0]?.value === "push";
+    const alias = other || marked(sub.value) ? undefined : aliasOf(sub.value, args, dir);
+    if (alias === false)
+      return;
+    const where = lands(undefined, dir, factory, carried);
+    if (where === false)
+      return;
+    return refuse4(other ? `it runs git ${sub.value}, a push the hook does not read` : alias ? `it runs git ${sub.value}, an alias that may push` : "it runs a git command the hook cannot read", where);
+  }
+  const { positionals, flags } = parseFlags(rest, PUSH_TAKES);
+  const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value;
+  const written = parsed.xargs ? { names: [], unread: "xargs adds refs it reads at run time" } : writes(rest, carried ? undefined : dir, settled && !carried);
+  const hit = written.names.find((n) => PROTECTED.has(n));
+  if (!written.unread && !hit)
+    return;
+  const where = lands(remote, dir, factory, carried);
+  if (where === false)
+    return;
+  if (hit && where === true)
+    return `no-protected-push hook refuses this git push: it writes ${hit} of ${factory}. ${ROUTE} ${FIX}`;
+  return refuse4(written.unread ?? `it writes ${hit}`, where);
+}
+var refuse4 = (what, where) => `no-protected-push hook refuses this git push: ${what}, ${where === true ? "in the factory's repository" : `and ${where}`}, so it may write main or canary there. ${ROUTE} ${FIX}`;
+var MCP_TOOL2 = /^mcp__(.+?)__(.+)$/;
+var FILE_TOOLS = new Set(["create_or_update_file", "delete_file", "push_files"]);
+var MERGE_TAKES = new Set([
+  "-A",
+  "--author-email",
+  "-b",
+  "--body",
+  "-F",
+  "--body-file",
+  "--match-head-commit",
+  "-R",
+  "--repo",
+  "-t",
+  "--subject"
+]);
+var MERGE_FIX = "Land it with bun run pr:merge <n>, or let merge-on-ready land it.";
+var BUILDER_FORM = "The Builder alone merges by hand, as gh pr merge <n> --squash --body-file <file> --match-head-commit <head> in a call that names no role variable and sources no file, the body passed by file since its text counts as the call's.";
+var UNREAD_FIX = "Spell the query file's path or the endpoint out literally, with no shell variable or substitution, or put the query inline in single quotes, and a read, a thread reply or a resolve runs.";
+var named = (repo, factory) => !!repo && `${repo.owner}/${repo.repo}`.toLowerCase() === factory;
+var mayBe = (repos, factory) => !factory || repos.some((repo) => repo === undefined || named(repo, factory));
+var GH_DEFAULT = (env, local) => env.cwd || local.has("GH_REPO") || env.vars.has("GH_REPO") || env.process.GH_REPO ? implicitRepos(env, local) : [undefined];
+function judgeTool(tool, input, factory) {
+  const [, server, name] = MCP_TOOL2.exec(tool) ?? [];
+  if (!server || !name || !/github/i.test(server))
+    return;
+  if (name !== "merge_pull_request" && !FILE_TOOLS.has(name))
+    return;
+  const { branch, owner, repo } = input;
+  const repos = [
+    typeof owner === "string" && typeof repo === "string" ? { owner, repo } : undefined
+  ];
+  if (!mayBe(repos, factory))
+    return;
+  const place = factory || "the factory's repository";
+  if (name === "merge_pull_request")
+    return `no-protected-push hook refuses ${tool}: it merges a pull request of ${place}, whose base is main or canary. ${ROUTE} ${MERGE_FIX}`;
+  if (typeof branch === "string" && branch !== "") {
+    const target = branchOf(branch);
+    if (target === undefined || !PROTECTED.has(target))
+      return;
+  }
+  const what = typeof branch === "string" && branch !== "" ? branch : "the default branch, canary";
+  return `no-protected-push hook refuses ${tool}: it writes ${what} of ${place}. ${ROUTE} ${FIX}`;
+}
+var namesRole = (command) => /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command);
+async function judgeMerge(rest, repos, parsed, env, factory, builder, command) {
+  const { flags, positionals } = parseFlags(rest, MERGE_TAKES);
+  if (flags.some((f) => f.name === "--help" || f.name === "-h"))
+    return;
+  const given = [
+    ...repos,
+    ...flags.filter((f) => (f.name === "-R" || f.name === "--repo") && f.value).map((f) => f.value)
+  ];
+  const [target] = positionals;
+  const url = target && !unreadable(target) ? /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\//i.exec(target.value) : null;
+  const candidates = url ? [{ owner: url[1], repo: url[2] }] : given.length > 0 ? [repoOf(given.at(-1))] : GH_DEFAULT(env, parsed.local);
+  if (target && unreadable(target))
+    candidates.push(undefined);
+  if (!mayBe(candidates, factory))
+    return;
+  const head = flags.findLast((f) => f.name === "--match-head-commit")?.value;
+  const squash = flags.some((f) => f.name === "--squash" || f.name === "-s");
+  const pinned = !!head && !unreadable(head) && /^[0-9a-f]{7,40}$/i.test(head.value);
+  if (squash && pinned && !namesRole(command) && await builder())
+    return;
+  return `no-protected-push hook refuses this gh pr merge: it merges a pull request of ${factory || "the factory's repository"}, whose base is main or canary. ${ROUTE} ${MERGE_FIX} ${BUILDER_FORM}`;
+}
+function fieldOf(request, key) {
+  const field = request.fields.findLast((f) => f.key === key);
+  if (field)
+    return field.text;
+  for (const input of request.inputs) {
+    if (unreadable(input))
+      return { unknown: "an --input the hook cannot read", value: "" };
+    try {
+      const value = JSON.parse(input.value)[key];
+      if (typeof value === "string")
+        return { value };
+      if (value !== undefined)
+        return { unknown: `a ${key} that is no string`, value: "" };
+    } catch {
+      return { unknown: "an --input that is no JSON object", value: "" };
+    }
+  }
+}
+function restWrite(tail, request) {
+  if (/^pulls\/[^/]+\/merge$/.test(tail))
+    return "it merges a pull request, whose base is main or canary";
+  const protectedBy = (key, absent) => {
+    const text = fieldOf(request, key);
+    if (!text)
+      return absent;
+    if (unreadable(text))
+      return `its ${key} is built at run time`;
+    const target = branchOf(text.value);
+    return target !== undefined && PROTECTED.has(target) ? `it writes ${target}` : undefined;
+  };
+  if (tail === "git/refs")
+    return protectedBy("ref");
+  const ref = /^git\/refs\/(.+)$/.exec(tail)?.[1];
+  if (ref !== undefined) {
+    const target = branchOf(ref);
+    return target !== undefined && PROTECTED.has(target) ? `it writes ${target}` : undefined;
+  }
+  if (/^contents\/./.test(tail))
+    return protectedBy("branch", "it names no branch, so it writes the default branch, canary");
+  if (tail === "merges")
+    return protectedBy("base");
+}
+async function judgeApi(rest, cmd, parsed, env, factory) {
+  const request = await ghApi(rest, cmd, env, parsed.xargs);
+  if (!request)
+    return;
+  const { endpoint, method } = request;
+  const path = decodeURIComponent(endpoint.value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "").split("?")[0]).replace(/\/+$/, "");
+  if (path === "graphql" || path === "api/graphql") {
+    const texts = [
+      ...request.fields.filter((f) => f.key === "query" || f.key === "body").map((f) => f.text),
+      ...request.inputs
+    ];
+    const blind = texts.some(unreadable);
+    const mutation = texts.map((t) => REF_MOVE.exec(t.value)?.[0]).find(Boolean);
+    if (mutation)
+      return `no-protected-push hook refuses this gh api graphql call: it runs ${mutation}, which merges a pull request or moves a branch, and a node id names no repository, so the hook cannot tell it from a write to main or canary. Merge through gh pr merge's own route, bun run pr:merge <n>, and move a branch with git push.`;
+    if (!blind)
+      return;
+    return `no-protected-push hook refuses this gh api graphql call: it sends a query the hook cannot read, which may merge a pull request or move a branch. ${UNREAD_FIX}`;
+  }
+  if (method === "GET" || method === "HEAD")
+    return;
+  const place = factory || "the factory's repository";
+  if (unreadable(endpoint))
+    return `no-protected-push hook refuses this gh api ${method} call: its endpoint is built at run time, so it may write main or canary of ${place}. ${UNREAD_FIX}`;
+  const m = /^repos\/([^/]+)\/([^/]+)\/(.+)$/.exec(path);
+  if (!m)
+    return;
+  const repos = m[1] === "{owner}" || m[2] === "{repo}" ? GH_DEFAULT(env, parsed.local) : [{ owner: m[1], repo: m[2] }];
+  if (!mayBe(repos, factory))
+    return;
+  const what = restWrite(m[3], request);
+  if (!what)
+    return;
+  const fix = /^pulls\/[^/]+\/merge$/.test(m[3]) ? MERGE_FIX : FIX;
+  return `no-protected-push hook refuses this gh api ${method} call: ${what} of ${place}. ${ROUTE} ${fix}`;
+}
+var isPush = (args) => gitCommand(args).sub?.value === "push";
+async function inspect3(raw, environment) {
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (typeof payload !== "object" || payload === null)
+    return;
+  const { cwd, tool_input: input, tool_name: tool } = payload;
+  const factoryOf = () => {
+    const read = readPolicyOrDefaults(dataDir(environment));
+    return read.refusal === undefined ? factoryRepo(read.settings) : "";
+  };
+  if (typeof tool === "string" && MCP_TOOL2.test(tool))
+    return judgeTool(tool, input ?? {}, factoryOf());
+  if (tool !== "Bash")
+    return;
+  const command = input?.command;
+  if (typeof command !== "string" || !/git|push|\bgh\b|\$|`/i.test(command.replace(/[\\'"]/g, "")))
+    return;
+  const factory = factoryOf();
+  const builder = () => builderLead(raw, environment);
+  const directory = typeof cwd === "string" ? cwd : undefined;
+  const env = {
+    cwd: directory,
+    cwdSure: directory,
+    files: new Map,
+    known: knownVariables(command, environment, directory),
+    process: environment,
+    vars: new Map
+  };
+  let settled = true;
+  const visit = async (cmd, parsed, at) => {
+    const { args, first, name } = parsed;
+    let ghArgs;
+    if (name === "gh")
+      ghArgs = args;
+    else if (!PRINTERS.has(name)) {
+      const nested = args.findIndex((a) => program(a.value) === "gh");
+      if (nested !== -1)
+        ghArgs = args.slice(nested + 1);
+    }
+    if (ghArgs) {
+      const { head, repos, rest } = ghCommand(ghArgs);
+      const folders = places(at);
+      if (at.cwdUnread || at.cwdAnywhere)
+        folders.push({ ...at, cwd: undefined, cwdSure: undefined });
+      for (const place of folders) {
+        const verdict = head[0] === "pr" && head[1] === "merge" ? await judgeMerge(rest, repos, parsed, place, factory, builder, command) : head[0] === "api" ? await judgeApi(rest, cmd, parsed, place, factory) : undefined;
+        if (verdict)
+          return verdict;
+      }
+    }
+    let gitArgs;
+    if (name === "git")
+      gitArgs = args;
+    else if (first && (first.unknown || marked(first.value)) && isPush(args))
+      gitArgs = args;
+    else if (!PRINTERS.has(name)) {
+      const nested = args.findIndex((a, j) => program(a.value) === "git" && isPush(args.slice(j + 1)));
+      if (nested !== -1)
+        gitArgs = args.slice(nested + 1);
+    }
+    let verdict;
+    if (gitArgs) {
+      const folders = places(at);
+      if (at.cwdUnread || at.cwdAnywhere)
+        folders.push({ ...at, cwd: undefined, cwdSure: undefined });
+      for (const place of folders)
+        verdict ??= judge2(gitArgs, parsed, place, factory, settled);
+    }
+    const sub = gitArgs && gitCommand(gitArgs).sub?.value;
+    if (!(name === "git" && sub && GIT_KEEPS_HEAD.has(sub)) && !KEEPS_HEAD.has(name))
+      settled = false;
+    return verdict;
+  };
+  return run(lex(command, env.known), env, visit);
+}
+async function check5(raw, environment = process.env) {
+  try {
+    return await inspect3(raw, environment);
+  } catch (error) {
+    if (!/push|merge|refs|contents|graphql|_file/i.test(raw))
+      return;
+    return `no-protected-push hook could not read this call (${error}), which names a route onto main or canary, so it refuses it. ${FIX}`;
   }
 }
 
@@ -9259,7 +10318,7 @@ function chipsSigned(blocks, signature) {
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var HANDLE = /^[a-z\d][\w.-]{1,63}$/i;
 var MAX_ROSTER_BYTES = 1048576;
-var CHECKOUT = join9(__CHECKOUT + "/scripts/hooks", "..", "..");
+var CHECKOUT2 = join9(__CHECKOUT + "/scripts/hooks", "..", "..");
 function rosterNames(environment) {
   const path = join9(dataDirOf(environment), "roster.json");
   try {
@@ -9277,7 +10336,7 @@ function rosterNames(environment) {
   }
 }
 var notEveryday = (name) => HANDLE.test(name) && !terms.everyday.some((w) => w.toLowerCase() === name.toLowerCase());
-function skillNames(checkout = CHECKOUT) {
+function skillNames(checkout = CHECKOUT2) {
   const ours = join9(checkout, "skills", "playground");
   try {
     return readdirSync2(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync5(join9(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
@@ -9285,7 +10344,7 @@ function skillNames(checkout = CHECKOUT) {
     return [];
   }
 }
-function pattern(environment, checkout = CHECKOUT) {
+function pattern(environment, checkout = CHECKOUT2) {
   const sources = [
     ...[...terms.names, ...terms.aliases, ...rosterNames(environment), ...skillNames(checkout)].map((n) => escape(n).replace(/ /g, "[\\s_-]+") + (n.endsWith("_") ? "[a-z\\d_]*" : "")),
     ...terms.paths.map(escape),
@@ -9400,7 +10459,7 @@ var COMMIT_TAKES = new Set([
   "--template",
   "--trailer"
 ]);
-var PUSH_TAKES = new Set(["--exec", "-o", "--push-option", "--receive-pack", "--repo"]);
+var PUSH_TAKES2 = new Set(["--exec", "-o", "--push-option", "--receive-pack", "--repo"]);
 var REPO_WRITES = new Map([
   ["repo archive", []],
   ["repo delete", []],
@@ -9461,8 +10520,8 @@ var GIT_CONFIG_PATH = /(?:^|\/)\.git(?:\/|$)|\.gitconfig|(?:^|\/)git\/config$/;
 var CONFIG_WRITE = /^--(?:add|edit|remove-section|rename-section|replace-all|unset|unset-all)$|^-e$/;
 var CONFIG_READ = /^--(?:get|get-all|get-color|get-colorbool|get-regexp|get-urlmatch|list)$|^-l$/;
 var CONFIG_TAKES = new Set(["--blob", "--default", "-f", "--file", "--type"]);
-var builtins;
-var MCP_TOOL2 = /^mcp__(.+?)__(.+)$/;
+var builtins2;
+var MCP_TOOL3 = /^mcp__(.+?)__(.+)$/;
 var READ_TOOL = /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$/;
 var INNER = new Set(["curl", "gh", "git"]);
 var MAYBE = /curl|gh|git/i;
@@ -9491,13 +10550,13 @@ var IDLE = {
 };
 var state = () => calls.getStore() ?? IDLE;
 var lower = (text) => text[0].toLowerCase() + text.slice(1);
-function refuse4(what, target, detail, fix) {
+function refuse5(what, target, detail, fix) {
   return `${state().policy.guard} hook refused ${what} to ${target.label}: ${detail}. ${state().policy.why} ${fix}`;
 }
 function refuseAny(what, target, fix = NOT_RUN) {
-  return target.where === "guarded" ? refuse4(what, target, `it writes to ${state().policy.place}`, fix) : refuse4(what, target, `the hook cannot tell whether it writes to ${state().policy.place}`, PLACE_FIX);
+  return target.where === "guarded" ? refuse5(what, target, `it writes to ${state().policy.place}`, fix) : refuse5(what, target, `the hook cannot tell whether it writes to ${state().policy.place}`, PLACE_FIX);
 }
-async function judge2(what, target, texts, env, extras = []) {
+async function judge3(what, target, texts, env, extras = []) {
   if (target.where === "other")
     return;
   if (state().policy.anyWrite && !target.byText)
@@ -9513,13 +10572,13 @@ async function judge2(what, target, texts, env, extras = []) {
   if (target.where === "unknown") {
     if (!hit)
       return;
-    return refuse4(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${holds}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(fix ?? "")} ${NOT_RUN}`);
+    return refuse5(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${holds}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(fix ?? "")} ${NOT_RUN}`);
   }
   if (hit)
-    return refuse4(what, target, `its text holds ${holds}`, fix ?? hit.fix);
+    return refuse5(what, target, `its text holds ${holds}`, fix ?? hit.fix);
   const hidden = resolved.find((t) => t.unknown);
   if (hidden) {
-    return refuse4(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`, READABLE);
+    return refuse5(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`, READABLE);
   }
 }
 function decide(candidates) {
@@ -9554,7 +10613,7 @@ var leak = async (cmd, parsed, env) => {
   }
   const pusher = state().policy.anyWrite && (head === "send-pack" || head === "subtree");
   if (name === "git" || first?.unknown && (head === "commit" || head === "push" || pusher))
-    return state().policy.git ? git(args, cmd, env, parsed.local) : undefined;
+    return state().policy.git ? git2(args, cmd, env, parsed.local) : undefined;
   if (name === "curl")
     return curl(args, cmd, env, xargs);
   if (PRINTERS.has(name))
@@ -9614,7 +10673,7 @@ async function gh(args, cmd, env, local, xargs) {
   const key = head.join(" ");
   if (state().policy.anyWrite) {
     if (key === "alias import" || key === "alias set") {
-      return refuse4(`gh ${key}`, decide([]), "an alias can run any gh write under a name the hook does not read", `Run the gh command itself, in a call of its own. ${NOT_RUN}`);
+      return refuse5(`gh ${key}`, decide([]), "an alias can run any gh write under a name the hook does not read", `Run the gh command itself, in a call of its own. ${NOT_RUN}`);
     }
     if (head[0] === "issue" || head[0] === "label" || CONVERSATION.has(key))
       return;
@@ -9671,7 +10730,7 @@ async function gh(args, cmd, env, local, xargs) {
   const target = decide(named.length > 0 ? named : fallback);
   if (key === "pr create" && target.where !== "other")
     texts.push(...prCreate2(rest, flags, env));
-  return judge2(`gh ${key}`, target, texts.map((t) => viaXargs(t, xargs)), env, positionals);
+  return judge3(`gh ${key}`, target, texts.map((t) => viaXargs(t, xargs)), env, positionals);
 }
 function destination(what, owner, name, fix) {
   if (owner === undefined || name === undefined)
@@ -9713,15 +10772,15 @@ function repoWrite(key, rest, repos, env, local, xargs, takes) {
   if (key === "repo sync" && named.length === 0)
     return Promise.resolve(undefined);
   const given = (named.length > 0 ? named : repos).map((w) => fromXargs(w, xargs) || marked(w.value) ? undefined : repoOf(w));
-  return judge2(`gh ${key}`, decide(given.length > 0 ? given : implicit(env, local)), [], env);
+  return judge3(`gh ${key}`, decide(given.length > 0 ? given : implicit(env, local)), [], env);
 }
 function unplaced(what, source, env) {
   const lost = source.length === 0 && !env.cwd;
   if (!lost && source.every(Boolean))
     return;
   if (state().policy.anyWrite && state().changed)
-    return refuse4(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
-  return refuse4(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
+    return refuse5(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
+  return refuse5(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
 }
 function prCreate2(rest, flags, env) {
   const values = rest.map((w) => w.value);
@@ -9762,12 +10821,12 @@ async function api2(args, cmd, env, local, xargs) {
       label: "a repository named only by a GraphQL node id",
       where: "unknown"
     };
-    return judge2("gh api graphql", target, texts, env, extras);
+    return judge3("gh api graphql", target, texts, env, extras);
   }
   const value = endpoint.value;
   const host = hostTarget(value);
   if (host)
-    return judge2(`gh api ${host.label}`, host, texts, env, extras);
+    return judge3(`gh api ${host.label}`, host, texts, env, extras);
   const typed = value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "");
   const path = state().policy.anyWrite ? dotless(typed) : typed;
   const repo = /^repos\/([^/]+)\/([^/]+)/.exec(path);
@@ -9781,7 +10840,7 @@ async function api2(args, cmd, env, local, xargs) {
   if (state().policy.anyWrite && repo && conversation(path.slice(repo[0].length)))
     return;
   if (state().policy.anyWrite && path.startsWith("repositories/"))
-    return judge2(what, { label: "a repository named only by its id", where: "unknown" }, [], env);
+    return judge3(what, { label: "a repository named only by its id", where: "unknown" }, [], env);
   let candidates;
   if (fromXargs(endpoint, xargs))
     candidates = [undefined];
@@ -9799,10 +10858,10 @@ async function api2(args, cmd, env, local, xargs) {
   else if (marked(value) && (/^(repos|orgs)\//.test(path) || marked(path.split("/")[0])))
     candidates = [undefined];
   else if (marked(value))
-    return judge2(what, decide([undefined]), texts, env, extras);
+    return judge3(what, decide([undefined]), texts, env, extras);
   else
     return;
-  return unplaced(what, candidates, env) ?? judge2(what, decide(candidates), texts, env, extras);
+  return unplaced(what, candidates, env) ?? judge3(what, decide(candidates), texts, env, extras);
 }
 async function apiDestination(what, request, path, env) {
   const { fields, inputs, method } = request;
@@ -9881,7 +10940,7 @@ async function curl(args, cmd, env, xargs) {
   if (state().policy.anyWrite) {
     const redirect = args.some((a, i) => /^--(?:connect-to|request-target|resolve)(?:=|$)/.test(a.value) || (a.value === "-H" || a.value === "--header") && /^\s*host\s*:/i.test(args[i + 1]?.value ?? "") || /^(?:-H|--header=)\s*host\s*:/i.test(a.value));
     if (redirect && args.some((a) => /github/i.test(a.value)))
-      return judge2("curl", { label: "a host the call redirects to", where: "unknown" }, [], env);
+      return judge3("curl", { label: "a host the call redirects to", where: "unknown" }, [], env);
   }
   const targets = urls.map((u) => {
     if (u.unknown === XARGS_INPUT.unknown || state().policy.anyWrite && fromXargs(u, xargs))
@@ -9924,7 +10983,7 @@ async function curl(args, cmd, env, xargs) {
   }
   if (xargs && !xargs.replace)
     data.push(unknown("the arguments xargs appends"));
-  return judge2("curl", target, data.map((t) => viaXargs(t, xargs)), env, urls);
+  return judge3("curl", target, data.map((t) => viaXargs(t, xargs)), env, urls);
 }
 function curlWrites(flags) {
   const method = flags.find((f) => f.name === "-X" || f.name === "--request")?.value;
@@ -10014,7 +11073,7 @@ function gitText(dir, args, what) {
   });
   return proc.exitCode === 0 ? { value: proc.stdout.toString() } : unknown(what);
 }
-async function git(args, cmd, env, local = new Map, depth = 0) {
+async function git2(args, cmd, env, local = new Map, depth = 0) {
   let dir = env.cwd;
   let k = 0;
   let carried = [...local.keys(), ...env.vars.keys()].some((name) => name.startsWith("GIT_"));
@@ -10058,21 +11117,21 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
   const rest = args.slice(k + 1);
   const here = { ...env, cwd: dir };
   const maybeAlias = anyAlias || aliasSet && !!sub && marked(sub);
-  if (!state().policy.anyWrite && sub && (maybeAlias || aliases.has(sub.toLowerCase())) && !builtin(sub)) {
+  if (!state().policy.anyWrite && sub && (maybeAlias || aliases.has(sub.toLowerCase())) && !builtin2(sub)) {
     const value = aliases.get(sub.toLowerCase());
     const words = value === undefined || value.trim().startsWith("!") ? undefined : splitCmdline(value);
     const head = words?.[0]?.value;
     if (!words || !head || aliases.has(head.toLowerCase()) || depth > 8)
-      return refuse4("git", decide([]), `its alias ${sub}, set with -c or --config-env, runs a command, holds a value the hook cannot read, or names another alias`, `Write the git command out in full in place of the alias, then run it again. ${NOT_RUN}`);
-    return git([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1);
+      return refuse5("git", decide([]), `its alias ${sub}, set with -c or --config-env, runs a command, holds a value the hook cannot read, or names another alias`, `Write the git command out in full in place of the alias, then run it again. ${NOT_RUN}`);
+    return git2([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1);
   }
   if (state().policy.anyWrite) {
-    const cannot = (detail) => refuse4("git", decide([]), detail, PLACE_FIX);
+    const cannot = (detail) => refuse5("git", decide([]), detail, PLACE_FIX);
     if (aliasSet)
       return cannot("it sets a git alias with -c or --config-env, which can run a push under a name the hook does not read");
     if (sub && marked(sub))
       return cannot("its subcommand is a value the hook cannot read");
-    if (sub && !["commit", "push", "send-pack", "subtree"].includes(sub) && !builtin(sub)) {
+    if (sub && !["commit", "push", "send-pack", "subtree"].includes(sub) && !builtin2(sub)) {
       if (carried)
         return cannot(`it runs ${sub}, which -c, --config-env, --git-dir or a GIT_ variable may define as an alias`);
       if (state().changed)
@@ -10084,14 +11143,14 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
         const words = splitCmdline(alias.value);
         if (!words)
           return cannot(`its alias ${sub} has an unclosed quote or a trailing backslash`);
-        return git([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1);
+        return git2([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1);
       }
     }
     const subtree = sub === "subtree" && rest[0]?.value === "push";
     if (sub === "push" || sub === "send-pack" || subtree) {
       if (carried)
-        return refuse4("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
-      return subtree ? push(rest.slice(1), here, [], SUBTREE_TAKES) : push(rest, here, [], PUSH_TAKES, sub === "push");
+        return refuse5("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
+      return subtree ? push(rest.slice(1), here, [], SUBTREE_TAKES) : push(rest, here, [], PUSH_TAKES2, sub === "push");
     }
   }
   if (sub !== "commit" && sub !== "push")
@@ -10106,7 +11165,7 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     if (target.where !== "guarded")
       return;
     const onBranch = state().policy.branchPush && dir && !carried && !state().movedBefore && branchHead(dir);
-    return onBranch ? undefined : judge2("git commit", target, [], env);
+    return onBranch ? undefined : judge3("git commit", target, [], env);
   }
   const { flags } = parseFlags(rest, COMMIT_TAKES);
   const texts = [branch(dir)];
@@ -10123,12 +11182,12 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     } else
       extras.push(value);
   }
-  return judge2("git commit", decide(dir ? checkout : [undefined]), texts, env, extras);
+  return judge3("git commit", decide(dir ? checkout : [undefined]), texts, env, extras);
 }
-function builtin(sub) {
-  builtins ??= new Set(Bun.spawnSync(["git", "--list-cmds=builtins"], { stderr: "ignore" }).stdout.toString().split(`
+function builtin2(sub) {
+  builtins2 ??= new Set(Bun.spawnSync(["git", "--list-cmds=builtins"], { stderr: "ignore" }).stdout.toString().split(`
 `).filter(Boolean));
-  return builtins.has(sub);
+  return builtins2.has(sub);
 }
 function splitCmdline(body) {
   const words = [];
@@ -10260,14 +11319,14 @@ function branchHead(dir) {
   }
   return !defaults.has(name);
 }
-async function push(rest, env, checkout, takes = PUSH_TAKES, plain = false) {
+async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
   const { flags, positionals } = parseFlags(rest, takes);
   if (state().policy.anyWrite) {
     const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value;
     const target = pushTarget(remote, env.cwd);
     if (plain && state().policy.branchPush && target.where === "guarded" && env.cwd && branchOnly(flags, positionals, env.cwd))
       return;
-    return judge2("git push", target, [], env);
+    return judge3("git push", target, [], env);
   }
   const names = new Set(flags.map((f) => f.name));
   const [remote, ...refspecs] = positionals;
@@ -10314,7 +11373,7 @@ async function push(rest, env, checkout, takes = PUSH_TAKES, plain = false) {
     const not = remoteName ? `--remotes=${remoteName}` : "--remotes";
     texts.push(...commitTexts(env.cwd, [...sources, "--not", not], "the messages of the commits it pushes"));
   }
-  return judge2("git push", target, texts, env);
+  return judge3("git push", target, texts, env);
 }
 var GATED_READS = new Set(["usergroups_me", "users_conversations"]);
 function gatedPost(tool, server, name, input) {
@@ -10370,7 +11429,7 @@ function strings(node) {
   return [];
 }
 function mcp(tool, input) {
-  const [, server = "", name = ""] = MCP_TOOL2.exec(tool) ?? [];
+  const [, server = "", name = ""] = MCP_TOOL3.exec(tool) ?? [];
   const gated = gatedPost(tool, server, name, input);
   if (gated)
     return gated;
@@ -10380,7 +11439,7 @@ function mcp(tool, input) {
   const what = tool.replace(/^mcp__/, "");
   let target = { label: surface, where: "guarded" };
   if (!input)
-    return refuse4(what, target, "its input is not an object the hook can read", MCP_READABLE);
+    return refuse5(what, target, "its input is not an object the hook can read", MCP_READABLE);
   if (surface === "Slack" && (CHAT_TOOL.test(name) || name === CONNECTOR_TOOL)) {
     const connector = name === CONNECTOR_TOOL;
     const verdict = clearedPost(what, input, connector ? CONNECTOR_KEYS : POST_KEYS, connector);
@@ -10397,7 +11456,7 @@ function mcp(tool, input) {
     if (owner === undefined)
       return;
     if (typeof owner !== "string") {
-      return refuse4(what, { label: "GitHub", where: "unknown" }, "its owner is not text the hook can read", MCP_READABLE);
+      return refuse5(what, { label: "GitHub", where: "unknown" }, "its owner is not text the hook can read", MCP_READABLE);
     }
     const repo = { owner, repo: typeof input.repo === "string" ? input.repo : "*" };
     if (!state().policy.guarded(repo))
@@ -10408,20 +11467,20 @@ function mcp(tool, input) {
   }
   const hit = strings(input).map(state().policy.find).find(Boolean);
   if (hit)
-    return refuse4(what, target, `its text holds ${hit.detail}`, hit.fix);
+    return refuse5(what, target, `its text holds ${hit.detail}`, hit.fix);
 }
 function candidate2(command) {
   const maybe = state().policy.anyWrite ? MAYBE_ANY : MAYBE;
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""));
 }
-async function factoryTerms(environment = process.env, checkout = CHECKOUT, lists = join9(coreDir(), "lists")) {
+async function factoryTerms(environment = process.env, checkout = CHECKOUT2, lists = join9(coreDir(), "lists")) {
   const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join9(lists, "playground-terms.json"));
   if (loaded.refusal !== undefined)
     return { refusal: loaded.refusal };
   terms = loaded.list;
   return { pattern: pattern(environment, checkout) };
 }
-async function check5(raw, environment = process.env, checkout = CHECKOUT, lists = join9(coreDir(), "lists")) {
+async function check6(raw, environment = process.env, checkout = CHECKOUT2, lists = join9(coreDir(), "lists")) {
   const loadedTerms = await factoryTerms(environment, checkout, lists);
   if (loadedTerms.refusal !== undefined)
     return refusedList(raw, loadedTerms.refusal);
@@ -10452,7 +11511,7 @@ async function inspectAs(given, raw, environment, cleared = {}) {
   const call = { changed: false, cleared, moved: false, movedBefore: false, policy: given };
   return await calls.run(call, async () => {
     try {
-      return await inspect3(raw, environment);
+      return await inspect4(raw, environment);
     } catch (error) {
       const subject = subjectOf(raw);
       const writes = WRITE_CALL.test(subject) || given.anyWrite && candidate2(subject);
@@ -10474,7 +11533,7 @@ function subjectOf(raw) {
     return raw;
   }
 }
-async function inspect3(raw, environment) {
+async function inspect4(raw, environment) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -10570,7 +11629,7 @@ var policy = (repos) => ({
   what: "a write to an extension repository",
   why: `The sync renders each extension repository's main into every session's store. A session commits in its clone on a branch other than the default, as a git commit call of its own, pushes that branch by its remote and refspec (git push origin HEAD:<branch>), opens a pull request, and lands it with bun run ext:merge <owner>/<repo> <n> at the review's 5/5. For anything else: ${OWNER_ROUTE}`
 });
-async function check6(raw, environment = process.env, budget = 8000) {
+async function check7(raw, environment = process.env, budget = 8000) {
   const data = dataDir(environment);
   if (!existsSync6(extensionsDir(data)))
     return;
@@ -10590,161 +11649,10 @@ async function check6(raw, environment = process.env, budget = 8000) {
 if (false) {}
 
 // scripts/hooks/no-extensions-write.ts
-import { dirname as dirname5, join as join12, resolve as resolve6, sep as sep2 } from "path";
-
-// packages/settings/src/jobs.ts
-var jobSchema = strictObject({
-  callsModel: boolean2(),
-  command: string2().min(1).optional(),
-  config: record2(string2(), unknown2()).optional(),
-  cwd: string2().min(1).optional(),
-  description: string2().min(1),
-  disabledWhy: string2().optional(),
-  enabled: boolean2(),
-  heartbeat: string2().min(1),
-  launchd: string2().min(1).optional(),
-  model: string2().min(1).optional(),
-  neverPause: boolean2().optional(),
-  pausedFor: string2().optional(),
-  program: array(string2().min(1)).min(1).optional(),
-  runtime: _enum(["herdr"]).optional(),
-  schedule: union([
-    strictObject({ always: literal(true) }),
-    strictObject({ every: number2().int().positive() })
-  ]),
-  stop: string2().min(1).optional()
-});
-var fromStored = (row) => {
-  if (!row || typeof row !== "object" || Array.isArray(row))
-    return row;
-  const kept = Object.fromEntries(Object.entries(row).filter(([key]) => Object.hasOwn(jobSchema.shape, key)));
-  return kept.runtime === undefined ? kept : { ...kept, runtime: "herdr" };
-};
-var jobRowSchema = jobSchema.partial();
-var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
-var terminal = (name, command, job) => ({
-  callsModel: false,
-  command,
-  cwd: "{checkout}",
-  enabled: false,
-  heartbeat: name,
-  runtime: "herdr",
-  ...job
-});
-var launchd = (name, job) => ({
-  callsModel: false,
-  cwd: "{checkout}",
-  enabled: false,
-  heartbeat: name,
-  launchd: `com.playground.${name}`,
-  program: ["{bun}", "--no-env-file", `{checkout}/packages/scripts/src/${name}/cli.ts`],
-  ...job
-});
-var bunJob = (name, root = "{checkout}") => `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`;
-var JOBS = {
-  "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
-    description: "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
-    schedule: { always: true }
-  }),
-  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
-    cwd: "{dashboard}",
-    description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
-    schedule: { every: 300 }
-  }),
-  "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
-    cwd: "{dashboard}",
-    description: "Keeps the live dashboard running on its branch's latest head.",
-    enabled: true,
-    schedule: { every: 60 },
-    stop: "dashboard"
-  }),
-  "ops-dm-watch": terminal("ops-dm-watch", bunJob("ops-dm-watch"), {
-    description: "In Slack mode, hands each message in the owner's DM to the dispatcher, the session in the assistant seat too when no reply lands in 3 minutes.",
-    schedule: { every: 60 }
-  }),
-  "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
-    description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
-    schedule: { every: 86400 }
-  }),
-  "ops-flow": launchd("ops-flow", {
-    description: "Tells the leads when a session holds a run slot over 15 minutes, or a model slot over 120.",
-    schedule: { every: 60 }
-  }),
-  "ops-herdr": launchd("ops-herdr", {
-    description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
-    schedule: { every: 60 }
-  }),
-  "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
-    description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
-    schedule: { every: 60 }
-  }),
-  "ops-merge-train": terminal("ops-merge-train", "python3 -I {checkout}/scripts/ops/merge-train/run.py", {
-    description: "Runs the merge train: builds a train of ready PRs and checks each step.",
-    neverPause: true,
-    schedule: { every: 60 }
-  }),
-  "ops-restore": {
-    ...launchd("ops-restore", {
-      description: "Restores a lost main checkout by the playbook's steps once a guard is gone on two looks 5 minutes apart.",
-      schedule: { every: 60 }
-    }),
-    cwd: "{dashboard}",
-    program: [
-      "{bun}",
-      "--no-env-file",
-      "{dashboard}/packages/scripts/src/ops-restore/cli.ts",
-      "--main",
-      "{checkout}"
-    ]
-  },
-  "ops-session-resume": launchd("ops-session-resume", {
-    description: "Queues a carry-on line for each factory session once its usage limit resets.",
-    schedule: { every: 60 }
-  }),
-  "ops-sweep": terminal("ops-sweep", bunJob("ops-sweep"), {
-    description: "The Ops lead's sweep: runners, probes, asks, heartbeats and the forecast.",
-    schedule: { every: 300 }
-  }),
-  "ops-tick": launchd("ops-tick", {
-    description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
-    schedule: { every: 60 }
-  }),
-  "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
-    description: "Reads every live session's screen and clears a factory session stuck on a prompt.",
-    neverPause: true,
-    schedule: { every: 120 }
-  }),
-  "ops-usage": terminal("ops-usage", "python3 -I {checkout}/scripts/ops/usage/run.py", {
-    description: "Reads the account's usage windows into usage.json every 5 minutes.",
-    enabled: true,
-    neverPause: true,
-    schedule: { every: 300 }
-  }),
-  "ops-wa": terminal("ops-wa", `${bunJob("ops-wa")} --data {data}`, {
-    description: "Holds the WhatsApp link on the spare number: hands each owner message to the dispatcher, sends its replies, and drops every other message.",
-    schedule: { always: true }
-  }),
-  "ops-zai-usage": launchd("ops-zai-usage", {
-    description: "Reads the GLM plan's credits into zai-usage.json, which the spawn gate reads.",
-    schedule: { every: 300 }
-  })
-};
-var OLD_KEYS = { "ops-dashboard": ["jobs.opsDesk"] };
-var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([name, job]) => [
-  jobKey(name),
-  {
-    aliases: OLD_KEYS[name],
-    default: job,
-    description: `The ${name} ops job: ${job.description}`,
-    merge: true,
-    schema: jobRowSchema,
-    stored: fromStored
-  }
-])));
-var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
+import { dirname as dirname5, join as join12, resolve as resolve7, sep as sep2 } from "path";
 
 // scripts/hooks/codex.ts
-import { isAbsolute as isAbsolute3, resolve as resolve4 } from "path";
+import { isAbsolute as isAbsolute3, resolve as resolve5 } from "path";
 var HEADERS = ["*** Add File: ", "*** Delete File: ", "*** Update File: ", "*** Move to: "];
 var SHELL_PATCH = /(?:^|[\n;&|(`]|\$\()\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:\S*\/)?(?:apply_patch|applypatch)(?=$|[\s;&|)<>'"`])/;
 var patchPaths = (text) => text.split(`
@@ -10757,7 +11665,7 @@ var writeOf2 = (input, path, patch) => {
   const cwd = typeof input.cwd === "string" ? input.cwd : "/";
   return JSON.stringify({
     ...input,
-    tool_input: { content: patch, file_path: isAbsolute3(path) ? path : resolve4(cwd, path) },
+    tool_input: { content: patch, file_path: isAbsolute3(path) ? path : resolve5(cwd, path) },
     tool_name: "Write"
   });
 };
@@ -10794,21 +11702,7 @@ async function eachInput(raw, guard, judge) {
 
 // scripts/hooks/no-main-checkout.ts
 import { existsSync as existsSync7, readdirSync as readdirSync3, readFileSync as readFileSync4, realpathSync as realpathSync3 } from "fs";
-import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute4, join as join11, normalize, resolve as resolve5, sep } from "path";
-
-// packages/settings/src/live.ts
-var liveSettings = defineSettings({
-  "live.branch": {
-    default: "live/dashboard",
-    description: "The branch the live dashboard's checkout stays on: a stack on it reads the live machine, and ops-desk's roll resets it to canary.",
-    schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/, "a git branch name")
-  },
-  "live.container": {
-    default: "playground-dashboard-db",
-    description: "The Docker container holding the live dashboard's database, which every stack off the live checkout refuses.",
-    schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/, "a Docker container name")
-  }
-});
+import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute4, join as join11, normalize, resolve as resolve6, sep } from "path";
 
 // scripts/hooks/steady.ts
 var unquoted = (text) => text.replace(/\\\n|\$(?=["'])|["'\\]/g, "");
@@ -11428,7 +12322,7 @@ function heldVars(env, steady) {
 function mainCheckout2(dir) {
   try {
     const gitdir = /^gitdir: (.+)$/m.exec(readFileSync4(join11(dir, ".git"), "utf8"))?.[1];
-    const main = gitdir && /^(.+)\/\.git\/worktrees\/[^/]+$/.exec(resolve5(dir, gitdir.trim()))?.[1];
+    const main = gitdir && /^(.+)\/\.git\/worktrees\/[^/]+$/.exec(resolve6(dir, gitdir.trim()))?.[1];
     if (main)
       return main;
   } catch {}
@@ -11451,7 +12345,7 @@ function liveCheckout(main, environment) {
     try {
       if (readFileSync4(join11(worktrees, name, "HEAD"), "utf8").trim() !== head)
         continue;
-      return dirname4(resolve5(join11(worktrees, name), readFileSync4(join11(worktrees, name, "gitdir"), "utf8").trim()));
+      return dirname4(resolve6(join11(worktrees, name), readFileSync4(join11(worktrees, name, "gitdir"), "utf8").trim()));
     } catch {}
   }
 }
@@ -11495,14 +12389,14 @@ function nearest(path) {
     rest.push(basename4(dir));
   }
 }
-var FILE_TOOLS = {
+var FILE_TOOLS2 = {
   Edit: "file_path",
   MultiEdit: "file_path",
   NotebookEdit: "notebook_path",
   Write: "file_path"
 };
 var INSTEAD2 = `the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under the main checkout's .claude/worktrees/, made by absolute path so it nests in no other worktree (git worktree add --no-track "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.`;
-var refuse5 = (what, fix = INSTEAD2) => `no-main-checkout hook refuses ${what}: ${fix}`;
+var refuse6 = (what, fix = INSTEAD2) => `no-main-checkout hook refuses ${what}: ${fix}`;
 var UNKNOWN_FIX = "the hook cannot tell which folder it runs in, since a cd before it may not run, may run many times, or names a path it cannot read, so it reads every folder the shell may be in. Name the folder instead: git -C <your worktree>, bun --cwd <your worktree>, or cd by a literal path.";
 var ANYWHERE_FIX = "the line names more folders than the hook carries, so it cannot rule out the main checkout. Name the folder on the command instead: git -C <your worktree>, bun --cwd <your worktree>, or run it as a line of its own after a cd to a literal path.";
 var fixFor2 = (sure, own = INSTEAD2) => sure ? own : UNKNOWN_FIX;
@@ -11578,7 +12472,7 @@ function bunCall(args, env) {
 var landing = (word, env, from) => {
   if (!word || pathOf(word, { ...env, cwd: from }) === undefined)
     return;
-  return kernelPath(word, from, real(resolve5(from ?? "", word.value)));
+  return kernelPath(word, from, real(resolve6(from ?? "", word.value)));
 };
 function gitCall(args, env, local) {
   let cwd = env.cwd;
@@ -11888,7 +12782,7 @@ function inPlace(name, args) {
     return [];
   return scripted ? positionals : positionals.slice(1);
 }
-function writes(name, args) {
+function writes2(name, args) {
   const positionals = args.filter((a) => !a.value.startsWith("-"));
   if (name === "sed" || name === "perl")
     return inPlace(name, args);
@@ -11923,7 +12817,7 @@ function browserPathless(args, env) {
 function writeTargets(cmd, name, args) {
   const targets = [
     ...cmd.redirects.filter((r) => [">", ">>", ">|"].includes(r.op) || r.op === ">&" && !DUPLICATE.test(r.target?.value ?? "")).flatMap((r) => r.target ? [r.target] : []),
-    ...writes(name, args)
+    ...writes2(name, args)
   ];
   return targets.filter((t) => !["-", "/dev/null"].includes(t.value));
 }
@@ -11931,7 +12825,7 @@ async function unreadScript(shell, here, sure, inMain) {
   const script = await stdinOf(shell, here);
   if (!script.unknown || !inMain(here.cwd))
     return;
-  return refuse5(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor2(sure));
+  return refuse6(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor2(sure));
 }
 var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 async function fedScript(cmd, here, sure, inMain, visit) {
@@ -11946,24 +12840,24 @@ async function fedScript(cmd, here, sure, inMain, visit) {
   if (unread) {
     if (!inMain(here.cwd))
       return;
-    return refuse5(`a shell whose script (${unread}) the hook cannot read`, fixFor2(sure));
+    return refuse6(`a shell whose script (${unread}) the hook cannot read`, fixFor2(sure));
   }
   if (kind === "root" && !cmd.bareOf)
     return run(lex(script.value, here.known), { ...here, vars: new Map }, visit, true);
 }
-async function inspect4(raw, environment, main) {
+async function inspect5(raw, environment, main) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   const input = toolInput ?? {};
   const directory = typeof cwd === "string" ? cwd : undefined;
   const checkout = real(main);
   const worktrees = join11(checkout, ".claude", "worktrees") + sep;
   const inMain = (raw) => {
-    const path = raw === undefined ? undefined : real(resolve5(directory ?? "", raw));
+    const path = raw === undefined ? undefined : real(resolve6(directory ?? "", raw));
     return path !== undefined && (path === checkout || path.startsWith(checkout + sep)) && !inWorktree(path, worktrees);
   };
   let live;
   const inLive = (raw) => {
-    const path = raw === undefined ? undefined : real(resolve5(directory ?? "", raw));
+    const path = raw === undefined ? undefined : real(resolve6(directory ?? "", raw));
     return live !== undefined && path !== undefined && (path === live || path.startsWith(live + sep));
   };
   let writer;
@@ -11973,11 +12867,11 @@ async function inspect4(raw, environment, main) {
       return;
     if (await (writer ??= liveWriter(raw, environment)))
       return;
-    return refuse5(`${move.what} in the live Dashboard's checkout`, fix);
+    return refuse6(`${move.what} in the live Dashboard's checkout`, fix);
   };
-  const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
+  const file = typeof tool === "string" ? input[FILE_TOOLS2[tool]] : undefined;
   if (typeof file === "string")
-    return inMain(file) ? refuse5(`a write to ${file}`) : undefined;
+    return inMain(file) ? refuse6(`a write to ${file}`) : undefined;
   if (tool !== "Bash")
     return;
   const { command } = input;
@@ -11996,7 +12890,7 @@ async function inspect4(raw, environment, main) {
   const visit = async (cmd, parsed, env) => {
     const pathless = browserOnly.has(cmd) ? browserPathless(parsed.args, env) : undefined;
     if (pathless)
-      return refuse5(`agent-browser ${pathless} with a relative path or none`, BROWSER_FIX);
+      return refuse6(`agent-browser ${pathless} with a relative path or none`, BROWSER_FIX);
     if (parsed.name === "" && !cmd.feedsShell || EXPORTS2.has(parsed.name)) {
       for (const here of places(env, directory)) {
         const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure;
@@ -12008,19 +12902,19 @@ async function inspect4(raw, environment, main) {
     }
     const slot = slotWords(parsed);
     if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
+      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, { ...env, files: new Map(env.files), vars: new Map(env.vars) }, visit, false);
     const { args, local, name } = parsed;
     if (env.cwdAnywhere) {
       const blind = { ...env, cwd: undefined };
       const ran = runs(name, args, local, blind);
       if (ran && ranIn(ran.cwd, ran.also).some((dir) => dir === undefined || inMain(dir)))
-        return refuse5(ran.what, ANYWHERE_FIX);
+        return refuse6(ran.what, ANYWHERE_FIX);
       const blindWrite = writeTargets(cmd, name, args).find((t) => {
         const path = pathOf(t, blind);
         return path === undefined || inMain(path);
       });
       if (blindWrite)
-        return refuse5(`a write to ${blindWrite.value}`, ANYWHERE_FIX);
+        return refuse6(`a write to ${blindWrite.value}`, ANYWHERE_FIX);
       const blindLive = name === "git" ? await liveRefusal(args, local, blind, (cwd) => cwd === undefined || inLive(cwd), ANYWHERE_FIX) : undefined;
       if (blindLive)
         return blindLive;
@@ -12029,7 +12923,7 @@ async function inspect4(raw, environment, main) {
       const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure;
       const pipedTo = fed.get(cmd);
       if (pipedTo?.kind === "code" && inMain(here.cwd))
-        return refuse5(`a pipe into an interpreter whose script, the piped input, the hook cannot read`, fixFor2(sure));
+        return refuse6(`a pipe into an interpreter whose script, the piped input, the hook cannot read`, fixFor2(sure));
       if (pipedTo) {
         const verdict = await unreadScript(pipedTo.consumer, here, sure, inMain);
         if (verdict)
@@ -12040,13 +12934,13 @@ async function inspect4(raw, environment, main) {
         return script;
       const ran = runs(name, args, local, here);
       if (ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)))
-        return refuse5(ran.what, fixFor2(sure, ran.fix));
+        return refuse6(ran.what, fixFor2(sure, ran.fix));
       const moved = name === "git" ? await liveRefusal(args, local, here, inLive, fixFor2(sure, LIVE_FIX)) : undefined;
       if (moved)
         return moved;
       const wrote = writeTargets(cmd, name, args).find((t) => inMain(pathOf(t, here)));
       if (wrote)
-        return refuse5(`a write to ${pathOf(wrote, here)}`, fixFor2(sure));
+        return refuse6(`a write to ${pathOf(wrote, here)}`, fixFor2(sure));
     }
   };
   const steadyAt = steadyNames(namings(command), lexed.commands);
@@ -12062,9 +12956,9 @@ async function inspect4(raw, environment, main) {
   };
   return run(lexed, env, visit, true);
 }
-async function check7(raw, environment = process.env, main = mainCheckout2(resolve5(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
+async function check8(raw, environment = process.env, main = mainCheckout2(resolve6(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
-    return await eachInput(raw, "no-main-checkout", (one) => inspect4(one, environment, main));
+    return await eachInput(raw, "no-main-checkout", (one) => inspect5(one, environment, main));
   } catch {
     return;
   }
@@ -12073,11 +12967,11 @@ if (false) {}
 
 // scripts/hooks/no-extensions-write.ts
 var WHY_ROOT = "every guard reads its list and policy.json from there, so a session's write would change what a guard allows.";
-var ROUTE = `${WHY_ROOT} A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand.`;
+var ROUTE2 = `${WHY_ROOT} A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand.`;
 var PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"]);
 var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves";
 var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
-var refuse6 = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
+var refuse7 = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE2}`;
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS2 = new Set([
   "[",
@@ -12147,7 +13041,8 @@ var GUARD_KEYS = new Set([
   "sessions.aliases",
   "sessions.names",
   "slack.gatedSends",
-  "usage.keychainService"
+  "usage.keychainService",
+  "yard.logReaders"
 ]);
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
@@ -12187,7 +13082,7 @@ async function guarded(raw, environment = process.env, wait = 12000, url = new U
         worker.postMessage({ environment, raw });
       }),
       new Promise((done) => {
-        timer = setTimeout(() => done(refuse6(TOO_LONG)), wait);
+        timer = setTimeout(() => done(refuse7(TOO_LONG)), wait);
       })
     ]);
   } finally {
@@ -12296,7 +13191,7 @@ var KEEPS_STATUS = {
   zsh: (s) => setsPipefail(s) || setoptPipefail(s) || /\$\{?pipestatus\[[1-9]/.test(s)
 };
 var dialect = (shell) => program(shell) === "zsh" ? "zsh" : "bash";
-function judge3(script, shell) {
+function judge4(script, shell) {
   const guarded = KEEPS_STATUS[shell](script);
   for (const cmd of lex(script).commands) {
     const reason = judgeCommand(cmd, guarded);
@@ -12315,7 +13210,7 @@ function judgeCommand(cmd, guarded) {
     if (script)
       return judgeCommand({ ...cmd, scope: 0, words: script }, guarded);
     const { inline, operand } = shellOperand(args, name);
-    const reason = inline && operand ? judge3(operand.value, dialect(name)) : undefined;
+    const reason = inline && operand ? judge4(operand.value, dialect(name)) : undefined;
     if (reason)
       return reason;
   }
@@ -12327,7 +13222,7 @@ function judgeCommand(cmd, guarded) {
   if (!guarded && cmd.stdin && pushes2(cmd.stdin))
     return `no-false-green hook refuses a git push piped into ${name || "a command group"} with no pipefail: a pipeline's exit status is its last command's, so a failed push reads 0. Push bare (the Bash tool keeps its output), then check it with git ls-remote origin refs/heads/<branch>, which prints the local head's sha once the push has landed.`;
 }
-async function inspect5(raw, shell) {
+async function inspect6(raw, shell) {
   const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
@@ -12335,11 +13230,11 @@ async function inspect5(raw, shell) {
   const words = /\b(?:bun|bunx|git|jest|npm|npx|pnpm|pnpx|pytest|ruff|ty|vitest|yarn)\b/;
   if (!words.test(command.replace(/["'\\]/g, "")))
     return;
-  return judge3(command, dialect(shell));
+  return judge4(command, dialect(shell));
 }
-async function check8(raw, shell = process.env.SHELL ?? "zsh") {
+async function check9(raw, shell = process.env.SHELL ?? "zsh") {
   try {
-    return await inspect5(raw, shell);
+    return await inspect6(raw, shell);
   } catch {
     return;
   }
@@ -12356,85 +13251,7 @@ import {
   statSync as statSync4
 } from "fs";
 import { loadavg } from "os";
-import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute5, join as join14, relative as relative2, resolve as resolve7 } from "path";
-
-// packages/settings/src/harnesses.ts
-var HARNESSES = [
-  { backends: ["claude", "glm"], id: "claude-code" },
-  { backends: ["openai"], id: "codex" }
-];
-var GLM_MODEL = "glm";
-var readPin = (text) => {
-  const words = text.trim().split(/\s+/);
-  const [harnessId, backend] = words.length === 1 ? ["claude-code", words[0]] : words;
-  if (words.length > 2)
-    return null;
-  const harness = HARNESSES.find((h) => h.id === harnessId);
-  const found = harness?.backends.find((b) => b === backend);
-  return harness && found ? { backend: found, harness: harness.id } : null;
-};
-
-// packages/settings/src/rules.ts
-var percent = number2().int().min(1).max(100);
-var ruleSettings = defineSettings({
-  "battery.alert": {
-    default: 5,
-    description: "The battery percent, while the charge falls on battery or on a charger losing to the load, at which the battery check posts its red alert and the heavy runs wait in run-slot.",
-    schema: percent
-  },
-  "battery.ask": {
-    default: 10,
-    description: "The battery percent, while the Mac discharges on battery, at which the battery check posts its orange ask.",
-    schema: percent
-  },
-  "clock.ownerZone": {
-    default: "UTC",
-    description: "The time zone, by its IANA name, a time shown to the owner reads in.",
-    schema: string2().refine((zone) => {
-      try {
-        new Intl.DateTimeFormat("en", { timeZone: zone });
-        return true;
-      } catch {
-        return false;
-      }
-    }, "an IANA time zone, such as UTC or America/New_York")
-  },
-  "context.window": {
-    default: 400000,
-    description: "The context window, in tokens, every session compacts itself in.",
-    schema: number2().int().positive()
-  },
-  "github.pollMinutes": {
-    default: 5,
-    description: "The fewest minutes between two polls of one pull request by a session.",
-    schema: number2().int().positive()
-  },
-  "glm.readOnlyLoad5": {
-    default: 15,
-    description: "The 5-minute load average above which a GLM session may not install, commit or push.",
-    schema: number2().positive()
-  },
-  "release.hours": {
-    default: 4,
-    description: "The hours of merging after which Ops ships canary to main, whatever the count.",
-    schema: number2().positive()
-  },
-  "release.merges": {
-    default: 3,
-    description: "The user-facing merges since the last ship at which Ops ships canary to main.",
-    schema: number2().int().positive()
-  },
-  "tickets.tracker": {
-    default: "the tracker",
-    description: "The issue tracker the tickets rule names, read inside its sentence, such as Linear.",
-    schema: string2().min(1)
-  },
-  "unstick.escalateMinutes": {
-    default: 5,
-    description: "The minutes a session stays stuck with no turn before ops-session-resume tells the primary dispatcher.",
-    schema: number2().int().positive()
-  }
-});
+import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute5, join as join14, relative as relative2, resolve as resolve8 } from "path";
 
 // scripts/hooks/no-headless-login.ts
 import { join as join13 } from "path";
@@ -12464,7 +13281,7 @@ var sets = (key, { local }, env) => {
   const value = local.get(key) ?? env.vars.get(key);
   return value !== undefined && value.value !== "";
 };
-async function check9(raw, environment = process.env) {
+async function check10(raw, environment = process.env) {
   try {
     const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
     if (tool !== "Bash" || typeof toolInput?.command !== "string")
@@ -12527,7 +13344,7 @@ var COMMIT_TAKES2 = new Set([
 ]);
 var EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 var ADD_TAKES = new Set(["--chmod", "--pathspec-from-file"]);
-var PUSH_TAKES2 = new Set(["--exec", "-o", "--push-option", "--receive-pack", "--repo"]);
+var PUSH_TAKES3 = new Set(["--exec", "-o", "--push-option", "--receive-pack", "--repo"]);
 var loadLimit = async (environment) => {
   const read = await readPolicy(dataDir(environment)).catch(() => {
     return;
@@ -12586,7 +13403,7 @@ async function onGlm(raw, environment = process.env) {
     return false;
   }
 }
-var refuse7 = (what, files) => `no-glm-heavy-path hook refuses this ${what}: it touches ${files.join(", ")}, which is Opus work, and this session runs on GLM. Stop, report to your lead with this file list, and the lead moves the change to a Claude worker.`;
+var refuse8 = (what, files) => `no-glm-heavy-path hook refuses this ${what}: it touches ${files.join(", ")}, which is Opus work, and this session runs on GLM. Stop, report to your lead with this file list, and the lead moves the change to a Claude worker.`;
 var unread2 = (what, why) => `no-glm-heavy-path hook refuses this ${what}: it cannot read ${why}, and this session runs on GLM, whose commits and pushes must stay off Opus paths. Run it again from your own worktree with a literal path, or report to your lead.`;
 var loaded = (what, load5, limit) => `no-glm-heavy-path hook refuses this ${what}: load5 is ${load5.toFixed(1)}, and a GLM session goes read-only while load5 is over ${limit} (no install, node_modules clone, commit or push). Wait until load5 is ${limit} or under (the middle figure of sysctl -n vm.loadavg), then run it again, or report to your lead.`;
 function installOrClone(name, args) {
@@ -12657,7 +13474,7 @@ async function mergeHeads(dir) {
   const path = names2(dir, ["rev-parse", "--git-path", "MERGE_HEAD"])?.[0];
   if (!path)
     return null;
-  const file = Bun.file(resolve7(dir, path));
+  const file = Bun.file(resolve8(dir, path));
   if (!await file.exists())
     return [];
   return (await file.text()).split(`
@@ -12667,7 +13484,7 @@ var STAGING = new Set(["add", "diff", "log", "show", "status"]);
 var BRANCH_READS = new Set(["branch --show-current", "rev-parse --abbrev-ref HEAD"]);
 var SUBSTITUTION = unknown("a command substitution");
 var PURE = new Set(["cat", "date", "echo", "printf", "pwd", "true"]);
-var writes2 = (cmd) => cmd.redirects.some((r) => r.op.includes(">") && !/^(?:\d+|-|\/dev\/null)$/.test(r.target?.value ?? ""));
+var writes3 = (cmd) => cmd.redirects.some((r) => r.op.includes(">") && !/^(?:\d+|-|\/dev\/null)$/.test(r.target?.value ?? ""));
 var chainRefusal = (what, made) => `no-glm-heavy-path hook refuses this ${what}: it runs after another command in the same call, which may make ${made} before it runs, and the hook reads the checkout before the call starts, while this session runs on GLM. Run ${what} as its own call${what === "git commit" ? ", or after git add alone" : ""}.`;
 async function commit(rest, dir, chained, forced) {
   const { flags, positionals } = parseFlags(rest, COMMIT_TAKES2);
@@ -12731,7 +13548,7 @@ async function commit(rest, dir, chained, forced) {
   const staged = new Set(lists[0]);
   if (chained && !all && paths.length === 0 && heavyFiles.every((f) => !staged.has(f)))
     return `no-glm-heavy-path hook refuses this git commit: ${heavyFiles.join(", ")} is on disk and not staged, and the hook cannot tell before the call runs whether the git add before it stages it, while this session runs on GLM and that is Opus work. Run git commit as its own call.`;
-  return refuse7("git commit", heavyFiles);
+  return refuse8("git commit", heavyFiles);
 }
 function rebased(dir, named, source, dest, not) {
   const branch = dest === "HEAD" ? names2(dir, ["symbolic-ref", "-q", "--short", "HEAD"])?.[0] : dest.replace(/^refs\/heads\//, "");
@@ -12753,7 +13570,7 @@ function rebased(dir, named, source, dest, not) {
   return base ? [old, base] : undefined;
 }
 function push2(rest, dir, branchReads) {
-  const { flags, positionals } = parseFlags(rest, PUSH_TAKES2);
+  const { flags, positionals } = parseFlags(rest, PUSH_TAKES3);
   const given = new Set(flags.map((f) => f.name));
   const reads = branchReads.filter((d) => d === dir);
   const [remote, ...refspecs] = positionals.map((w, i) => i > 0 && w.unknown === SUBSTITUTION.unknown && w.value === SUBSTITUTION.value && reads.pop() ? { quoted: w.quoted, value: "HEAD" } : w);
@@ -12830,7 +13647,7 @@ function push2(rest, dir, branchReads) {
   if (bases)
     beyondMerge(files, bases[0], bases[1], (tree) => [pathsOf(dir, ["diff", "--name-only", "--no-renames", tree, sources[0]])], dir);
   const heavyFiles = [...files].filter(heavy).sort();
-  return heavyFiles.length > 0 ? refuse7("git push", heavyFiles) : undefined;
+  return heavyFiles.length > 0 ? refuse8("git push", heavyFiles) : undefined;
 }
 function forcedPaths(rest, dir) {
   const { flags, positionals } = parseFlags(rest, ADD_TAKES);
@@ -12839,7 +13656,7 @@ function forcedPaths(rest, dir) {
   const named = !dir || flags.some((f) => f.name === "--pathspec-from-file") ? [] : positionals;
   if (named.length === 0 || named.some((w) => !plain(w) || w.value.startsWith(":")))
     return [":(top)"];
-  return named.map((w) => resolve7(dir, w.value));
+  return named.map((w) => resolve8(dir, w.value));
 }
 var guardedOf = async (environment) => {
   try {
@@ -12954,7 +13771,7 @@ function orgScript(parsed, env) {
     if (a.value.startsWith("-") || unreadValue(a))
       continue;
     const script = scripts.get(a.value);
-    const hit = scriptDir(pathOf(a, { ...env, cwd: at })) ?? script?.command.split(/\s+/).map((word) => scriptDir(resolve7(script.at, word))).find(Boolean);
+    const hit = scriptDir(pathOf(a, { ...env, cwd: at })) ?? script?.command.split(/\s+/).map((word) => scriptDir(resolve8(script.at, word))).find(Boolean);
     if (hit)
       return { why: `it runs ${hit}` };
   }
@@ -12969,11 +13786,11 @@ var GITHUB_URL = /(?:github\.com|githubusercontent\.com)[/:](?:(?:repos|orgs|use
 var REST_PATH = /^\/?(?:repos|orgs|users)\/([\w.-]+)(?:\/([\w.-]+))?/i;
 var SCOPED = /^(?:--owner|--repo|-R)(?:=|$)|(?:^|\s)(?:org|owner|repo|user):\S/;
 var isGuarded = (orgs, owner) => orgs.some((org) => org.toLowerCase() === owner.toLowerCase());
-var label = (owner, repo) => repo ? `${owner}/${repo.replace(/\.git$/, "")}` : owner;
+var label2 = (owner, repo) => repo ? `${owner}/${repo.replace(/\.git$/, "")}` : owner;
 var namedOrg = (orgs, text) => orgs.find((org) => new RegExp(`(?:^|[^a-z\\d])${org.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[^a-z\\d])`, "i").test(text));
 var urlOrg = (orgs, value, rest = false) => {
   const m = GITHUB_URL.exec(value) ?? (rest ? REST_PATH.exec(value) : null);
-  return m && isGuarded(orgs, m[1]) ? label(m[1], m[2]) : undefined;
+  return m && isGuarded(orgs, m[1]) ? label2(m[1], m[2]) : undefined;
 };
 var unreadValue = (w) => w.unknown !== undefined || Boolean(w.reads?.length) || marked(w.value);
 var GRAPHQL_FIX = `Use a REST endpoint under repos/<owner>/<name>/ (gh api repos/<owner>/<name>/..., gh pr, gh issue), and reply to a review thread by REST, or report to your lead.`;
@@ -12993,7 +13810,7 @@ function ghOrg(parsed, env, orgs) {
       return orgRefusal(what, "the hook cannot tell which repository it reaches, since a value it cannot read names it", PLACE_FIX2);
     const named = repoOf(repo);
     if (named && isGuarded(orgs, named.owner))
-      return orgRefusal(what, `it reaches ${label(named.owner, named.repo)}, a guarded org's repository`);
+      return orgRefusal(what, `it reaches ${label2(named.owner, named.repo)}, a guarded org's repository`);
     placed = true;
   }
   if (ACCOUNT_WIDE.has(words[0] ?? ""))
@@ -13028,7 +13845,7 @@ function ghOrg(parsed, env, orgs) {
   if (implicit.some((r) => r === undefined) || !env.cwd && implicit.length === 0)
     return orgRefusal(what, "the hook cannot tell which repository it reaches, since it names none and runs where the hook cannot read GH_REPO or the checkout", PLACE_FIX2);
   const fallback = implicit.find((r) => r && isGuarded(orgs, r.owner));
-  return fallback ? orgRefusal(what, `it falls back to ${label(fallback.owner, fallback.repo)}, a guarded org's repository`) : undefined;
+  return fallback ? orgRefusal(what, `it falls back to ${label2(fallback.owner, fallback.repo)}, a guarded org's repository`) : undefined;
 }
 function gitPlaces(parsed, env, dir) {
   const places = [dir];
@@ -13065,7 +13882,7 @@ function gitOrg(parsed, env, dir, sub, orgs) {
   if (places.includes(undefined))
     return orgRefusal(what, "the hook cannot tell which repository it reads, since a value it cannot read names it", "Name the checkout by its literal path, in a call of its own, or report to your lead.");
   const remote = places.flatMap((place) => remotes(place)).find((r) => isGuarded(orgs, r.owner));
-  return remote ? orgRefusal(what, `it runs in a checkout of ${label(remote.owner, remote.repo)}, a guarded org's repository`) : undefined;
+  return remote ? orgRefusal(what, `it runs in a checkout of ${label2(remote.owner, remote.repo)}, a guarded org's repository`) : undefined;
 }
 var realOf2 = (path, depth = 0) => {
   try {
@@ -13074,7 +13891,7 @@ var realOf2 = (path, depth = 0) => {
   if (depth > 40)
     return path;
   try {
-    return realOf2(resolve7(dirname6(path), readlinkSync(path)), depth + 1);
+    return realOf2(resolve8(dirname6(path), readlinkSync(path)), depth + 1);
   } catch {}
   const parent = dirname6(path);
   return parent === path ? path : join14(realOf2(parent, depth + 1), basename5(path));
@@ -13084,7 +13901,7 @@ function checkoutOf(path, orgs, roots) {
     return;
   const walked = [];
   let found;
-  for (let at = realOf2(resolve7(path));; at = dirname6(at)) {
+  for (let at = realOf2(resolve8(path));; at = dirname6(at)) {
     if (roots.has(at)) {
       found = roots.get(at);
       break;
@@ -13101,12 +13918,12 @@ function checkoutOf(path, orgs, roots) {
     roots.set(at, found);
   return found;
 }
-var checkoutRefusal = (what, repo) => orgRefusal(what, `it reads the checkout of ${label(repo.owner, repo.repo)}, a guarded org's repository`);
+var checkoutRefusal = (what, repo) => orgRefusal(what, `it reads the checkout of ${label2(repo.owner, repo.repo)}, a guarded org's repository`);
 var BELOW_DEPTH = 4;
 var BELOW_FOLDERS = 5000;
 var UNWALKED = new Set([".git", "node_modules"]);
 function checkoutBelow(path, orgs, roots) {
-  let level = [realOf2(resolve7(path))];
+  let level = [realOf2(resolve8(path))];
   let walked = 0;
   for (let depth = 0;depth < BELOW_DEPTH && level.length > 0; depth++) {
     const next = [];
@@ -13474,9 +14291,9 @@ function pureFilled(raw, cwd) {
     out = out.replace(GIT_FOLDER, (m, at, flags) => {
       if (!cwd)
         return m;
-      const dir = resolve7(cwd, at ? at.replace(/^["']|["']$/g, "") : ".");
+      const dir = resolve8(cwd, at ? at.replace(/^["']|["']$/g, "") : ".");
       const answer = names2(dir, ["rev-parse", ...flags.trim().split(/\s+/)])?.[0];
-      return answer && QUIET_PATH.test(answer) ? resolve7(dir, answer) : m;
+      return answer && QUIET_PATH.test(answer) ? resolve8(dir, answer) : m;
     }).replace(PATH_NAME, (m, program, word) => {
       const path = word.replace(/^["']|["']$/g, "");
       if (!QUIET_PATH.test(path))
@@ -13819,7 +14636,7 @@ var visitor = (load5, limit, orgs, roots, held = UNHELD) => {
   const visit = async (cmd, parsed, env) => {
     const slot = slotWords(parsed);
     if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
+      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, { ...env, files: new Map(env.files), vars: new Map(env.vars) }, visit, false);
     const { args, name } = parsed;
     let blind;
     if (Array.isArray(orgs) && orgs.length > 0) {
@@ -13842,7 +14659,7 @@ var visitor = (load5, limit, orgs, roots, held = UNHELD) => {
     const busyRun = busy ? installOrClone(name, args) : undefined;
     if (busyRun)
       return loaded(busyRun, load5, limit);
-    if (PURE.has(name) && !writes2(cmd))
+    if (PURE.has(name) && !writes3(cmd))
       return blind;
     const before = earlier;
     const isGit = name === "git";
@@ -13862,7 +14679,7 @@ var visitor = (load5, limit, orgs, roots, held = UNHELD) => {
     const org = orgCall(parsed, env, dir, sub, orgs) ?? dbCall(parsed, env) ?? await dbInput(cmd, parsed, env) ?? blind;
     if (org)
       return org;
-    if (isGit && !writes2(cmd) && BRANCH_READS.has(args.slice(k).map((a) => a.value).join(" "))) {
+    if (isGit && !writes3(cmd) && BRANCH_READS.has(args.slice(k).map((a) => a.value).join(" "))) {
       branchReads = [...reads, dir];
       return;
     }
@@ -13883,7 +14700,7 @@ var visitor = (load5, limit, orgs, roots, held = UNHELD) => {
   };
   return visit;
 };
-async function inspect6(raw, environment, load5, limit) {
+async function inspect7(raw, environment, load5, limit) {
   const {
     cwd,
     tool_input: toolInput,
@@ -13894,16 +14711,16 @@ async function inspect6(raw, environment, load5, limit) {
   const directory = typeof cwd === "string" ? cwd : undefined;
   if (typeof tool === "string" && tool in EDIT_TOOLS) {
     const given = toolInput?.[EDIT_TOOLS[tool]];
-    const file = typeof given !== "string" || given === "" ? undefined : isAbsolute5(given) ? given : directory && resolve7(directory, given);
+    const file = typeof given !== "string" || given === "" ? undefined : isAbsolute5(given) ? given : directory && resolve8(directory, given);
     const path = file ? fromCheckout(file) : undefined;
-    return path && heavy(path) ? refuse7(`${tool} call`, [path]) : undefined;
+    return path && heavy(path) ? refuse8(`${tool} call`, [path]) : undefined;
   }
   if (typeof tool === "string" && tool in READ_TOOLS) {
     const orgs = await guardedOf(environment);
     if (!Array.isArray(orgs))
       return;
     const given = toolInput?.[READ_TOOLS[tool]];
-    const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join14(environment.HOME, given.slice(2)) : isAbsolute5(given) ? given : directory && resolve7(directory, given);
+    const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join14(environment.HOME, given.slice(2)) : isAbsolute5(given) ? given : directory && resolve8(directory, given);
     if (orgs.length === 0)
       return;
     const roots = new Map;
@@ -13965,10 +14782,10 @@ async function inspect6(raw, environment, load5, limit) {
   }
 }
 var mayRefuse = (text, load5, limit) => GIT_CALL.test(text) || ORG_CALL.test(text) || load5 > limit && BUSY_RUN.test(text);
-async function check10(raw, environment = process.env, load5 = currentLoad5()) {
+async function check11(raw, environment = process.env, load5 = currentLoad5()) {
   const limit = await loadLimit(environment);
   try {
-    return await inspect6(raw, environment, load5, limit);
+    return await inspect7(raw, environment, load5, limit);
   } catch (error) {
     if (!mayRefuse(raw, load5, limit))
       return;
@@ -13976,7 +14793,7 @@ async function check10(raw, environment = process.env, load5 = currentLoad5()) {
   }
 }
 async function refusal(raw, environment = process.env, load5 = currentLoad5()) {
-  return await onGlm(raw, environment) ? check10(raw, environment, load5) : undefined;
+  return await onGlm(raw, environment) ? check11(raw, environment, load5) : undefined;
 }
 if (false) {}
 
@@ -13985,13 +14802,13 @@ var BY_NAME = new Set(["killall", "pkill"]);
 var SEARCHES = new Set(["fuser", "lsof", "pgrep", "pidof", "ps"]);
 var READS_ONLY2 = new Set(["--help", "--version", "-V", "-h"]);
 var WAY_OUT = "Stop a background task with TaskStop, a dev stack with bun run dev:stop in its worktree, and a process you spawned with kill <pid> on the pid you hold ($! or its pid file).";
-var refuse8 = (what, beside = "") => `no-kill-by-name hook refuses ${what}: a name, pattern or port matches the live dashboard and every worker's stack, not only your own process. ${WAY_OUT}${beside}`;
+var refuse9 = (what, beside = "") => `no-kill-by-name hook refuses ${what}: a name, pattern or port matches the live dashboard and every worker's stack, not only your own process. ${WAY_OUT}${beside}`;
 var readsOnly = (cmd, first, args) => {
   const before = cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0);
   return before.some((w, i) => program(w.value) === "command" && /^-[vV]$/.test(before[i + 1]?.value ?? "")) || args.length > 0 && args.every((a) => READS_ONLY2.has(a.value));
 };
 var isSearch = (name, args) => SEARCHES.has(name) && !(name === "ps" && args.some((a) => /^-[A-Za-z]*[pq]$|^-[pq]\d|^--(?:quick-)?pid\b/.test(a.value)));
-async function inspect7(raw) {
+async function inspect8(raw) {
   const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
@@ -14008,20 +14825,20 @@ async function inspect7(raw) {
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || []);
   const visit = async (cmd, { args, first, name, xargs }) => {
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args))
-      return refuse8(name);
+      return refuse9(name);
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
-      return refuse8("fuser -k");
+      return refuse9("fuser -k");
     if (name !== "kill" || !search)
       return;
     const fed = xargs || args.some((a) => a.value.includes(UNKNOWN) || handed.some((h) => a.value.includes(h)));
     if (fed)
-      return refuse8(`a kill in a call that searches with ${search}`, ` Run a kill of a pid you hold in a Bash call of its own, apart from the search.`);
+      return refuse9(`a kill in a call that searches with ${search}`, ` Run a kill of a pid you hold in a Bash call of its own, apart from the search.`);
   };
   return run(lexed, fresh(), visit);
 }
-async function check11(raw) {
+async function check12(raw) {
   try {
-    return await inspect7(raw);
+    return await inspect8(raw);
   } catch {
     return;
   }
@@ -14030,14 +14847,14 @@ if (false) {}
 
 // scripts/hooks/no-linear-ticket.ts
 import { realpath } from "fs/promises";
-import { basename as basename6, dirname as dirname7, isAbsolute as isAbsolute6, join as join15, resolve as resolve8, sep as sep3 } from "path";
+import { basename as basename6, dirname as dirname7, isAbsolute as isAbsolute6, join as join15, resolve as resolve9, sep as sep3 } from "path";
 var CREATE = /\bissue(?:batch)?create\b/i;
 var LINEAR = /linear\.app/i;
 var GITHUB = /^https?:\/\/(?:[\w-]+\.)*github\.com(?:[/:?#]|$)/i;
 var URL_SCHEME = /^[a-z][a-z\d+.-]*:\/\//i;
-var MCP_TOOL3 = /^mcp__(.+?)__(.+)$/;
+var MCP_TOOL4 = /^mcp__(.+?)__(.+)$/;
 var CREATE_TOOL = /^(?:\w+_)?create_?issues?$|^issues?_?create$/i;
-var FILE_TOOLS2 = new Map([
+var FILE_TOOLS3 = new Map([
   ["Edit", "file_path"],
   ["MultiEdit", "file_path"],
   ["NotebookEdit", "notebook_path"],
@@ -14060,7 +14877,7 @@ var slug = (team) => team.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+
 var day = (now) => now.toISOString().slice(0, 10);
 var RULE = "A new Linear ticket needs the owner's yes first, and the factory's own work never goes in Linear.";
 var ASK_UP = "Ask up the chain with the team and the exact title; once the owner says yes, the dispatcher records it, and the same save_issue call then runs.";
-function refuse9(what, detail, next) {
+function refuse10(what, detail, next) {
   return `no-linear-ticket hook refused ${what}: ${detail}. ${RULE} ${next}`;
 }
 async function real2(path) {
@@ -14074,7 +14891,7 @@ var within = (path, dir) => path === dir || path.startsWith(`${dir}${sep3}`);
 async function inApprovals(path, environment) {
   const dir = approvalsDir(environment);
   const dirs = [dir, await real2(dir)];
-  const target = resolve8(path);
+  const target = resolve9(path);
   const targets = [target, join15(await real2(dirname7(target)), basename6(target))];
   return targets.some((t) => dirs.some((d) => within(t, d)));
 }
@@ -14139,7 +14956,7 @@ async function curl2(args, cmd, env, xargs) {
     sent.push(unknown(`what xargs puts in place of ${xargs?.replace}`));
   }
   const texts = await Promise.all([...urls, ...sent].map((t) => resolveText(viaXargs(t, xargs), env)));
-  return judge4("curl", texts, urls.some((u) => LINEAR.test(visible(u.value))), env.process, urls.length);
+  return judge5("curl", texts, urls.some((u) => LINEAR.test(visible(u.value))), env.process, urls.length);
 }
 async function gh2(args, cmd, env, xargs) {
   const { head, rest } = ghCommand(args);
@@ -14153,7 +14970,7 @@ async function gh2(args, cmd, env, xargs) {
   if (!open && !(URL_SCHEME.test(where.value) && !GITHUB.test(where.value)))
     return;
   const texts = await Promise.all([where, ...request.fields.map((f) => f.text), ...request.inputs].map((t) => resolveText(t, env)));
-  return judge4("gh api", texts, open || LINEAR.test(visible(where.value)), env.process, 1);
+  return judge5("gh api", texts, open || LINEAR.test(visible(where.value)), env.process, 1);
 }
 async function script2(language, args, cmd, env, stdin) {
   const takes = CODE_FLAGS.get(language) ?? new Set;
@@ -14186,11 +15003,11 @@ async function script2(language, args, cmd, env, stdin) {
     code.push(await stdinOf(cmd, env));
   }
   const texts = await Promise.all(code.map((c) => resolveText(c, env)));
-  return judge4(language, texts, false, env.process);
+  return judge5(language, texts, false, env.process);
 }
-function judge4(what, texts, toLinear, environment, targets = 0) {
+function judge5(what, texts, toLinear, environment, targets = 0) {
   if (texts.some((t) => CREATE.test(visible(t.value)))) {
-    return refuse9(what, "it sends Linear's issueCreate, which files a new ticket", isDispatcher(environment) ? "Once he says yes, record it and file the ticket with the Linear MCP's save_issue, which the hook matches to the approval; a GraphQL create matches none." : ASK_UP);
+    return refuse10(what, "it sends Linear's issueCreate, which files a new ticket", isDispatcher(environment) ? "Once he says yes, record it and file the ticket with the Linear MCP's save_issue, which the hook matches to the approval; a GraphQL create matches none." : ASK_UP);
   }
   if (!toLinear)
     return;
@@ -14199,14 +15016,14 @@ function judge4(what, texts, toLinear, environment, targets = 0) {
     return;
   const hidden = texts[at];
   if (at < targets) {
-    return refuse9(what, `the hook cannot read where it goes (it comes from ${hidden.unknown}), so it may be Linear's API and file a ticket`, `Name the endpoint or URL by its literal value in the command itself (gh api https://api.linear.app/graphql, or curl https://api.linear.app/graphql). ${NOT_RUN}`);
+    return refuse10(what, `the hook cannot read where it goes (it comes from ${hidden.unknown}), so it may be Linear's API and file a ticket`, `Name the endpoint or URL by its literal value in the command itself (gh api https://api.linear.app/graphql, or curl https://api.linear.app/graphql). ${NOT_RUN}`);
   }
-  return refuse9(what, `it goes to Linear's API, and the hook cannot read what it sends before it runs (it comes from ${hidden.unknown}), so it may file a ticket`, `To read Linear, put the query in the command itself, or write the query to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (curl -d @/abs/query.json, or gh api --input /abs/query.json). ${NOT_RUN}`);
+  return refuse10(what, `it goes to Linear's API, and the hook cannot read what it sends before it runs (it comes from ${hidden.unknown}), so it may file a ticket`, `To read Linear, put the query in the command itself, or write the query to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (curl -d @/abs/query.json, or gh api --input /abs/query.json). ${NOT_RUN}`);
 }
 var hasId = (input) => typeof input.id === "string" && input.id.trim() !== "";
 var textOf = (value) => typeof value === "string" ? value.trim() : "";
 function creates(tool, input) {
-  const [, server = "", name = ""] = MCP_TOOL3.exec(tool) ?? [];
+  const [, server = "", name = ""] = MCP_TOOL4.exec(tool) ?? [];
   if (name === "save_issue")
     return !input || !hasId(input);
   return CREATE_TOOL.test(name) && /linear/i.test(server);
@@ -14218,7 +15035,7 @@ async function mcp2(tool, input, environment, now) {
   const team = textOf(input?.team ?? input?.teamId ?? input?.teamKey);
   const title = textOf(input?.title);
   if (slug(team) === "" || title === "") {
-    return refuse9(what, "it files a new Linear ticket, and the hook cannot read its team and title to match an approval", "Name the team and the title as the owner approved them.");
+    return refuse10(what, "it files a new Linear ticket, and the hook cannot read its team and title to match an approval", "Name the team and the title as the owner approved them.");
   }
   const path = join15(approvalsDir(environment), `${slug(team)}-${day(now)}.json`);
   const approval = await readApproval(path);
@@ -14226,7 +15043,7 @@ async function mcp2(tool, input, environment, now) {
     return;
   const problem = approval.problem ?? `today's approval does not name ${JSON.stringify(title)}`;
   const shape = `{"ask": "<the Inbox decision he approved>", "titles": [${JSON.stringify(title)}]}`;
-  return refuse9(what, `it files a new Linear ticket in ${JSON.stringify(team)}, and ${problem}`, isDispatcher(environment) ? `Once he says yes, write ${path} as ${shape}, and the same call then runs. An approval holds for the UTC day in its name.` : ASK_UP);
+  return refuse10(what, `it files a new Linear ticket in ${JSON.stringify(team)}, and ${problem}`, isDispatcher(environment) ? `Once he says yes, write ${path} as ${shape}, and the same call then runs. An approval holds for the UTC day in its name.` : ASK_UP);
 }
 async function readApproval(path) {
   const file = Bun.file(path);
@@ -14257,7 +15074,7 @@ async function readApproval(path) {
 async function fileTool(tool, path, cwd, environment) {
   if (isDispatcher(environment) || typeof path !== "string" || path === "")
     return;
-  const absolute = isAbsolute6(path) ? path : resolve8(typeof cwd === "string" ? cwd : "/", path);
+  const absolute = isAbsolute6(path) ? path : resolve9(typeof cwd === "string" ? cwd : "/", path);
   if (await inApprovals(absolute, environment))
     return refuseApprovals(tool, environment);
 }
@@ -14267,12 +15084,12 @@ function candidate3(command) {
 function createCall(subject) {
   return CREATE.test(subject) || /save_issue|create_?issue|issues?_?create/i.test(subject);
 }
-async function check12(raw, environment = process.env, now = new Date) {
+async function check13(raw, environment = process.env, now = new Date) {
   const role = await sessionRole(environment, sessionOf(raw));
   if (!role)
     return;
   try {
-    return await eachInput(raw, "no-linear-ticket", (one) => inspect8(one, { ...environment, PLAYGROUND_ROLE: role }, now));
+    return await eachInput(raw, "no-linear-ticket", (one) => inspect9(one, { ...environment, PLAYGROUND_ROLE: role }, now));
   } catch (error) {
     if (!createCall(subjectOf2(raw)))
       return;
@@ -14289,7 +15106,7 @@ function subjectOf2(raw) {
     return raw;
   }
 }
-async function inspect8(raw, environment, now) {
+async function inspect9(raw, environment, now) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -14317,15 +15134,80 @@ async function inspect8(raw, environment, now) {
   }
   if (typeof tool !== "string")
     return;
-  const key = FILE_TOOLS2.get(tool);
+  const key = FILE_TOOLS3.get(tool);
   if (key)
     return fileTool(tool, input?.[key], cwd, environment);
   return mcp2(tool, input, environment, now);
 }
 if (false) {}
 
+// scripts/hooks/no-live-sign-in.ts
+import { join as join17 } from "path";
+
+// api/hono/src/lib/dev/proxy.ts
+import { existsSync as existsSync9, mkdirSync as mkdirSync3, readFileSync as readFileSync6, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "fs";
+import { homedir as homedir4 } from "os";
+import { basename as basename7, dirname as dirname8, join as join16 } from "path";
+var serving = (dir) => {
+  try {
+    const pid = Number(readFileSync6(join16(dir, "proxy.pid"), "utf8").trim());
+    if (!(pid > 0))
+      return false;
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+};
+var portlessDir = (env = process.env) => {
+  if (env.PORTLESS_STATE_DIR)
+    return env.PORTLESS_STATE_DIR;
+  const dir = join16(env.HOME || homedir4(), ".portless");
+  return !serving(dir) && serving(fallbackDir(dir)) ? fallbackDir(dir) : dir;
+};
+var fallbackDir = (dir) => join16(dir, "fallback");
+
+// scripts/hooks/no-live-sign-in.ts
+var SIGN_IN = /\/api\/(?:v1\/onboard\/(?:sign-in|finish)|agents\/sign-in-as)\b/;
+var BARE2 = ["api.playground.localhost", "playground.localhost"];
+var LOOPBACK = /(?<![\w.-])(?:127(?:\.\d{1,3}){3}|localhost|\[::1\]|0\.0\.0\.0):(\d+)/g;
+async function liveOf(environment) {
+  const hosts = new Set(BARE2);
+  const ports = new Set;
+  try {
+    const routes = await Bun.file(join17(portlessDir(environment), "routes.json")).json();
+    for (const { hostname, port } of routes)
+      if (typeof port === "number" && BARE2.includes(String(hostname)))
+        ports.add(port);
+    for (const { hostname, port } of routes)
+      if (typeof hostname === "string" && typeof port === "number" && ports.has(port))
+        hosts.add(hostname);
+  } catch {}
+  return { hosts, ports };
+}
+var names3 = (text, host) => new RegExp(`(?<![\\w.-])${host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`).test(text);
+async function check14(raw, environment = process.env) {
+  try {
+    const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
+    if (tool !== "Bash" || typeof toolInput?.command !== "string")
+      return;
+    const text = toolInput.command.replace(/["'\\]/g, "");
+    if (!SIGN_IN.test(text))
+      return;
+    const live = await liveOf(environment);
+    const host = [...live.hosts].find((name) => names3(text, name));
+    const port = [...text.matchAll(LOOPBACK)].map((m) => Number(m[1])).find((p) => live.ports.has(p));
+    if (!host && port === undefined)
+      return;
+    return `no-live-sign-in hook refuses a sign-in call to the live dashboard (${host ?? `loopback port ${port}`}): the owner sign-in, first run's finish and the agent sign-in each mint a session holding the owner rung there. Sign in on your own worktree's stack instead, by the dev skill's Agent login, whose names \`bunx portless get api.playground\` prints in your worktree.`;
+  } catch {
+    return;
+  }
+}
+if (false) {}
+
 // scripts/hooks/no-mac-web-build.ts
-import { join as join16 } from "path";
+import { join as join18 } from "path";
 
 // scripts/hooks/docker-build.ts
 var DOCKERS = new Set(["docker", "docker-compose"]);
@@ -14500,7 +15382,7 @@ var API_HERE = "The api image still builds here (docker compose build api).";
 var BOX_ROUTE = `Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. ${API_HERE}`;
 var NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on, and the live dashboard's Postgres stays up: set one up (scripts/ops/runner-host/host.sh setup <ip>, then write its address to that ip file), or build the web image on a machine with no live dashboard running. ${API_HERE}`;
 async function hasRunnerHost(environment) {
-  const ip = environment.RUNNER_HOST || (await Bun.file(join16(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
+  const ip = environment.RUNNER_HOST || (await Bun.file(join18(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
   return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip);
 }
 function composeBuild2({ rest, sub }) {
@@ -14539,7 +15421,7 @@ async function dashboardRuns(what, environment) {
   const cannot = async (why) => `no-mac-web-build hook refuses ${what}: ${why}, so it cannot tell whether the live dashboard's Postgres runs in this Mac's Docker VM, where a web image build's memory takes the VM's out-of-memory killer to the dashboard's database. ${await route()}`;
   let name;
   try {
-    name = (await Bun.file(join16(dataDirOf(environment), "ops", "dashboard", "dashboard-db")).text()).trim();
+    name = (await Bun.file(join18(dataDirOf(environment), "ops", "dashboard", "dashboard-db")).text()).trim();
   } catch (error) {
     if (error.code === "ENOENT")
       return cannot("there is no dashboard-db in the dashboard supervisor's state folder");
@@ -14589,11 +15471,11 @@ var visit4 = async (_cmd, { args, first, name }, env) => {
   if (nested !== -1)
     return judge(args.slice(nested + 1), program(args[nested].value) === "docker-compose");
 };
-var BARE2 = (command) => command.replace(/[\\'"]/g, "");
+var BARE3 = (command) => command.replace(/[\\'"]/g, "");
 var BUILDS = /build|compose/;
-var candidate4 = (command) => command.includes("$'") || BUILDS.test(BARE2(command));
-var buildCall = (command) => /\bdocker/i.test(BARE2(command)) && BUILDS.test(BARE2(command));
-async function inspect9(raw, environment) {
+var candidate4 = (command) => command.includes("$'") || BUILDS.test(BARE3(command));
+var buildCall = (command) => /\bdocker/i.test(BARE3(command)) && BUILDS.test(BARE3(command));
+async function inspect10(raw, environment) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -14618,9 +15500,9 @@ async function inspect9(raw, environment) {
   };
   return run(lex(command, env.known), env, visit4);
 }
-async function check13(raw, environment = process.env) {
+async function check15(raw, environment = process.env) {
   try {
-    return await inspect9(raw, environment);
+    return await inspect10(raw, environment);
   } catch (error) {
     let command = raw;
     try {
@@ -14668,14 +15550,14 @@ var SPECS = new Map([
 ]);
 var LABELS = /^repos\/[^/]+\/[^/]+\/labels(\/[^/]+)?$/;
 var MCP_LABEL = /^mcp__.+__label_write$/;
-var refuse10 = (what, detail) => `no-off-palette-label hook refused ${what}: ${detail}. Every label is a Tailwind 500: ${PALETTE}. Give one of them as the color, written literally, and leave existing labels as they are.`;
-function judge5(what, color, create) {
+var refuse11 = (what, detail) => `no-off-palette-label hook refused ${what}: ${detail}. Every label is a Tailwind 500: ${PALETTE}. Give one of them as the color, written literally, and leave existing labels as they are.`;
+function judge6(what, color, create) {
   if (!color || color.value === "" && !unreadable(color))
-    return create ? refuse10(what, "it sets no color, so GitHub picks one") : undefined;
+    return create ? refuse11(what, "it sets no color, so GitHub picks one") : undefined;
   if (unreadable(color))
-    return refuse10(what, `the hook cannot read its color (it comes from ${color.unknown ?? "a variable"})`);
+    return refuse11(what, `the hook cannot read its color (it comes from ${color.unknown ?? "a variable"})`);
   if (!HEXES.has(color.value.replace(/^#/, "").toLowerCase()))
-    return refuse10(what, `its color ${color.value} is not a Tailwind 500`);
+    return refuse11(what, `its color ${color.value} is not a Tailwind 500`);
 }
 var visit5 = async (cmd, { args, first, name }, env) => {
   if (name === "gh" || first?.unknown && ["api", "label"].includes(args[0]?.value ?? ""))
@@ -14694,7 +15576,7 @@ async function gh3(args, cmd, env) {
     return;
   const { flags } = parseFlags(rest, takes);
   const color = flags.findLast((f) => f.name === "-c" || f.name === "--color")?.value;
-  return judge5(`gh ${key}`, color && await resolveText(color, env), key === "label create");
+  return judge6(`gh ${key}`, color && await resolveText(color, env), key === "label create");
 }
 async function api3(args, cmd, env) {
   const request = await ghApi(args, cmd, env, undefined);
@@ -14708,7 +15590,7 @@ async function api3(args, cmd, env) {
   let color = request.fields.findLast((f) => f.key === "color")?.text;
   for (const input of request.inputs)
     color = colorOf(await resolveText(input, env)) ?? color;
-  return judge5(`gh api ${request.method} ${path}`, color && await resolveText(color, env), create);
+  return judge6(`gh api ${request.method} ${path}`, color && await resolveText(color, env), create);
 }
 function colorOf(body) {
   if (body.unknown)
@@ -14728,9 +15610,9 @@ function mcp3(input) {
     return;
   const { color } = input;
   const text = color === undefined || color === "" ? undefined : typeof color === "string" ? { value: color } : { unknown: "a color that is not text", value: "" };
-  return judge5(`label_write ${method}`, text, method === "create");
+  return judge6(`label_write ${method}`, text, method === "create");
 }
-async function inspect10(raw) {
+async function inspect11(raw) {
   const {
     cwd,
     tool_input: toolInput,
@@ -14754,9 +15636,9 @@ async function inspect10(raw) {
   };
   return run(lex(command, env.known), env, visit5);
 }
-async function check14(raw) {
+async function check16(raw) {
   try {
-    return await inspect10(raw);
+    return await inspect11(raw);
   } catch {
     return;
   }
@@ -14835,10 +15717,10 @@ var visit6 = async (_cmd, { args, first, name }) => {
   if (nested !== -1)
     return judgeGit2(args.slice(nested + 1));
 };
-var BARE3 = (command) => command.replace(/[\\'"]/g, "");
-var candidate5 = (command) => command.includes("$'") || /ours/.test(BARE3(command));
-var mergeCall = (command) => /\bgit\b/i.test(BARE3(command)) && /\b(?:merge|pull)\b/.test(BARE3(command)) && /ours/.test(BARE3(command));
-async function inspect11(raw, environment) {
+var BARE4 = (command) => command.replace(/[\\'"]/g, "");
+var candidate5 = (command) => command.includes("$'") || /ours/.test(BARE4(command));
+var mergeCall = (command) => /\bgit\b/i.test(BARE4(command)) && /\b(?:merge|pull)\b/.test(BARE4(command)) && /ours/.test(BARE4(command));
+async function inspect12(raw, environment) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -14863,9 +15745,9 @@ async function inspect11(raw, environment) {
   };
   return run(lex(command, env.known), env, visit6);
 }
-async function check15(raw, environment = process.env) {
+async function check17(raw, environment = process.env) {
   try {
-    return await inspect11(raw, environment);
+    return await inspect12(raw, environment);
   } catch (error) {
     let command = raw;
     try {
@@ -14886,11 +15768,11 @@ var GUARD3 = "__guarded__";
 var VARIABLES_TO_STOP = 2;
 var variables = (path) => path.split("/").filter((part) => part.startsWith(UNKNOWN)).length;
 var shown = (path) => path.replaceAll(UNKNOWN, "$\u2026").replaceAll(GUARD3, "${\u2026:?}");
-var FIX = {
+var FIX2 = {
   rm: "Name each path literally: a file in your worktree or scratchpad with rm, anything else with playground rm <literal path> (in a script, removeScratch for a folder makeScratch made), and run it again.",
   rmdir: 'Guard each one as ${VAR:?} ("${S:?}/${m:?}"), or name a literal path, and run it again.'
 };
-var refuse11 = (name, path) => `no-prompt-stop hook refuses ${name} ${shown(path)}: Claude Code stops on a removal whose target has two or more parts that start with a variable and waits for a person, who is not there. ${FIX[name]}`;
+var refuse12 = (name, path) => `no-prompt-stop hook refuses ${name} ${shown(path)}: Claude Code stops on a removal whose target has two or more parts that start with a variable and waits for a person, who is not there. ${FIX2[name]}`;
 var AT_ROOT = /^\/[^/\u0000]+\/?$/;
 var AT_ROOT_FIX = {
   rm: "Write and remove in the session's scratchpad, a folder there with playground rm <literal path>, and run it again.",
@@ -14903,12 +15785,12 @@ var visit7 = async (_cmd, { args, name }) => {
   const operands = args.filter((a) => !a.value.startsWith("-"));
   const path = operands.find((a) => variables(a.value) >= VARIABLES_TO_STOP);
   if (path)
-    return refuse11(name, path.value);
+    return refuse12(name, path.value);
   const atRoot = operands.find((a) => AT_ROOT.test(a.value));
   if (atRoot)
     return refuseAtRoot(name, atRoot.value);
 };
-async function inspect12(raw) {
+async function inspect13(raw) {
   const {
     cwd,
     tool_input: toolInput,
@@ -14929,9 +15811,9 @@ async function inspect12(raw) {
   };
   return run(lex(command, env.known), env, visit7);
 }
-async function check16(raw) {
+async function check18(raw) {
   try {
-    return await inspect12(raw);
+    return await inspect13(raw);
   } catch {
     return;
   }
@@ -14949,332 +15831,6 @@ function ownerWords(name, login, owner) {
     return [];
   return name.split(/\s+/).filter((word) => own.has(word.toLowerCase()));
 }
-
-// packages/settings/src/accounts.ts
-var email2 = string2().email();
-var label2 = string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a label of lowercase letters, digits, dots, dashes and underscores");
-var claudeAccount = strictObject({
-  email: email2,
-  ends: string2().datetime({ offset: true }).nullable().optional(),
-  endsFirst: boolean2().optional(),
-  label: label2.optional(),
-  nearLimit: boolean2().optional(),
-  own: boolean2().optional(),
-  parkedUntil: string2().datetime({ offset: true }).optional(),
-  provider: literal("claude").optional(),
-  renews: number2().int().min(1).max(31).nullable().optional(),
-  weekReset: strictObject({ hour: number2().min(0).lt(24), weekday: number2().int().min(0).max(6) }).optional()
-});
-var glmAccount = strictObject({ label: label2, provider: literal("glm") });
-var account = union([claudeAccount, glmAccount]);
-var providerOf = (row) => row.provider === "glm" ? "glm" : "claude";
-var accountKey = (row) => (providerOf(row) === "glm" ? row.label : row.email) ?? "";
-var accountsOf = (rows, provider) => rows.filter((row) => providerOf(row) === provider);
-var accountSettings = defineSettings({
-  "models.probe": {
-    default: "claude-haiku-4-5",
-    description: "The model the usage scripts send one 1-token call to, as an account's own token, to read its 5-hour and week use from the reply's rate-limit headers.",
-    schema: string2().min(1)
-  },
-  "usage.accounts": {
-    default: [],
-    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), the time until which no new session starts on it (parkedUntil), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
-    schema: array(account).refine((rows) => new Set(rows.map((row) => `${providerOf(row)}:${accountKey(row)}`)).size === rows.length, "each account is listed once")
-  },
-  "usage.keychainService": {
-    default: "playground-claude-oauth",
-    description: "The macOS Keychain service each account's long-lived token is kept under, one item an account by its email: spawn.sh's --account and the usage probes read it.",
-    schema: string2().regex(/^[A-Za-z0-9._-]+$/, "a Keychain service name")
-  },
-  "usage.switchAccount": {
-    default: "",
-    description: "The account whose full week the ops tick tells the dispatchers and leads about, so the factory moves off it; empty for none.",
-    schema: union([email2, literal("")])
-  }
-});
-// packages/settings/src/channel.ts
-var channelSettings = defineSettings({
-  "channel.skipUser": {
-    default: "",
-    description: "The Slack member id whose own posts the channel watch skips, the account it posts as; none until set.",
-    schema: string2().regex(/^(?:[UW][A-Z0-9]+)?$/, "a Slack member id")
-  },
-  "channel.slackId": {
-    default: "",
-    description: "The Slack channel id of the shared channel the channel watch relays to the dispatcher; the watch reads nothing until it is set.",
-    schema: string2().regex(/^(?:[CG][A-Z0-9]+)?$/, "a Slack channel id")
-  }
-});
-// packages/settings/src/content.ts
-var contentFields = {
-  body: string2().nullable(),
-  files: record2(string2(), string2()).nullable(),
-  meta: record2(string2(), unknown2()).nullable(),
-  value: union([array(unknown2()), record2(string2(), unknown2())]).nullable()
-};
-// packages/settings/src/items.ts
-var ATTACHMENT_LIMIT = 50 * 1024 * 1024;
-// packages/settings/src/factory.ts
-var repo = string2().regex(/^(?:[A-Za-z0-9-]+\/[A-Za-z0-9._-]+)?$/, "a repository as owner/name, or empty for unset");
-var factorySettings = defineSettings({
-  "factory.archiveRepo": {
-    default: "",
-    description: "The archive repository: a link to it is private history, so the trace ratchet counts it and no-public-leak refuses it in a public write.",
-    schema: repo
-  },
-  "factory.publicRepo": {
-    default: "",
-    description: "The public repository, or a list of them, the checkout's origin when unset: no-public-leak refuses a write to one that holds private text, and the trace ratchet reads past each one's own name.",
-    schema: union([repo, array(repo)])
-  },
-  "factory.repo": {
-    default: "",
-    description: "The repository the factory's pull requests land in, the checkout's origin when unset: pr:merge needs GitGuardian's check there, Checks reads its PRs, and the roster links a bare PR number into it.",
-    schema: repo
-  }
-});
-// packages/settings/src/gates.ts
-var gateSettings = defineSettings({
-  "gates.glmLoad5Max": {
-    default: 30,
-    description: "The load5 a GLM session starts under.",
-    schema: number2().positive()
-  },
-  "gates.glmSwapinsMax": {
-    default: 100,
-    description: "The swap-ins a second a GLM session, and a fresh Claude worker, starts under.",
-    schema: number2().int().positive()
-  },
-  "gates.memoryFreeMin": {
-    default: 8,
-    description: "The free memory share, in percent, a Claude session starts at or over.",
-    schema: number2().int().min(0).max(100)
-  },
-  "gates.reviewReserve": {
-    default: 0.125,
-    description: "The share of the load gate's line a small worker keeps back for reviewers and testers, so a held review starts first; set it under gates.smallReserve, or a small worker's line falls below a medium one's.",
-    schema: number2().min(0).lt(1)
-  },
-  "gates.smallReserve": {
-    default: 0.25,
-    description: "The share of the load gate's line kept for small items, so a big plan never blocks a small one.",
-    schema: number2().min(0).lt(1)
-  },
-  "gates.startsWindow": {
-    default: 300,
-    description: "The seconds a start counts toward the load gate, since the load average lags a session's start.",
-    schema: number2().int().positive()
-  }
-});
-// packages/settings/src/harness-alpha.ts
-var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
-var harnessSettings = defineSettings({
-  "harness.alpha": {
-    default: "claude-code",
-    description: "The harness the first dispatcher starts on: claude-code or codex. First run's pick and Settings' Switch write it, and the Dashboard's Start runs spawn.sh --harness with it.",
-    schema: _enum(HARNESS_IDS)
-  }
-});
-// packages/settings/src/models.ts
-var id = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id, such as claude-opus-5-5");
-var modelSettings = defineSettings({
-  "models.checker": {
-    default: "claude-opus-5-5",
-    description: "The Claude model a reviewer or a tester runs on, and the one --model it takes, since its verdict gates a merge.",
-    schema: id
-  },
-  "models.claude": {
-    default: ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-5-5"],
-    description: "The Claude models spawn.sh and playground add take with --model.",
-    schema: array(id).min(1)
-  },
-  "models.default": {
-    default: "claude-opus-5-5",
-    description: "The Claude model a session runs on when its start names no --model.",
-    schema: id
-  },
-  "models.glm": {
-    default: "glm-5.3-flash",
-    description: "The GLM model a --backend glm session runs on, every model Claude Code asks for mapped to it.",
-    schema: id
-  },
-  "models.glmKeychainService": {
-    default: "playground-glm",
-    description: "The Keychain service a --backend glm session's Z.ai key is kept under, one item a usage.accounts GLM row by its label.",
-    schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a Keychain service name, such as playground-glm")
-  }
-});
-// packages/settings/src/owner.ts
-var ownerSettings = defineSettings({
-  "owner.names": {
-    default: [],
-    description: "The owner's first name and handles as chat writes them, lowercase: the inbox gate refuses a manager's stop on a line that addresses one of them and asks for an action, and never reads @<handle> as an agent.",
-    schema: array(string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a name or handle, lowercase"))
-  },
-  "owner.voice": {
-    default: "",
-    description: "The voice a draft or a slack decision speaks in as the owner: singular has bun run ask refuse one that says we, us, our, ours or ourselves; empty checks none.",
-    schema: _enum(["", "singular"])
-  }
-});
-// packages/settings/src/paths.ts
-var pathsSettings = defineSettings({
-  "paths.codeRoot": {
-    default: "",
-    description: "The folder that holds your code, the folder that holds the checkout when unset: spawn.sh answers Claude's folder trust prompt there and moves a session off the Desktop into it.",
-    schema: string2().regex(/^(?:\/.*)?$/, "an absolute path, or empty for unset")
-  }
-});
-// packages/settings/src/sessions.ts
-var name = string2().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "a session name, lowercase words joined by hyphens");
-var manager = _enum(["builder", "dispatcher", "ops", "planner"]);
-var TEMPLATE_KINDS = [
-  "assistant",
-  "builder",
-  "dispatcher",
-  "ops",
-  "optimizer",
-  "orchestrator",
-  "planner"
-];
-var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
-var BRIEF_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-var sessionTemplate = strictObject({
-  account: string2().email().optional(),
-  brief: string2().regex(BRIEF_NAME, "a brief is a file name, with no /").refine((brief) => !brief.includes(".."), "a brief is a file name, with no .."),
-  effort: _enum(EFFORTS).optional(),
-  harness: literal("claude-code"),
-  id: name,
-  kind: _enum(TEMPLATE_KINDS),
-  label: string2().min(1).max(40),
-  model: string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id").optional()
-}).refine((t) => t.model !== GLM_MODEL || t.account === undefined && t.effort === undefined, {
-  message: "a GLM template runs on models.glm and its first GLM row, so it takes no account or effort"
-});
-var storedTemplates = (value) => Array.isArray(value) ? value.map((row) => {
-  if (typeof row !== "object" || row === null || !("backend" in row) || "harness" in row)
-    return row;
-  const { backend, ...rest } = row;
-  const { model, ...modelless } = rest;
-  if (backend === "glm")
-    return { ...rest, harness: "claude-code", model: GLM_MODEL };
-  if (backend !== "claude")
-    return { ...rest, backend, harness: "claude-code" };
-  return { ...model === GLM_MODEL ? modelless : rest, harness: "claude-code" };
-}) : value;
-var sessionTemplates = array(sessionTemplate).refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "each id is listed once");
-var unknownAccounts = (templates, accounts) => {
-  const known = new Set(accountsOf(accounts, "claude").map(accountKey));
-  return templates.flatMap((template, at) => template.account && !known.has(template.account) ? [
-    {
-      message: `${template.account} is not in usage.accounts: add it in Settings > Accounts`,
-      path: [at, "account"]
-    }
-  ] : []);
-};
-var sessionSettings = defineSettings({
-  "sessions.aliases": {
-    default: {},
-    description: "Old names of the managers' sessions, each mapped to its kind, so a session or a stored row under one still reads as that kind.",
-    schema: record2(name, manager)
-  },
-  "sessions.names": {
-    default: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" },
-    description: "The session name each manager kind starts under; the second dispatcher takes the dispatcher's with -2.",
-    schema: strictObject({ builder: name, dispatcher: name, ops: name, planner: name })
-  },
-  "sessions.templates": {
-    against: (templates, read) => unknownAccounts(templates, read("usage.accounts")),
-    default: [
-      {
-        brief: "assistant.md",
-        harness: "claude-code",
-        id: "assistant",
-        kind: "assistant",
-        label: "Assistant"
-      },
-      {
-        brief: "orchestrator.md",
-        harness: "claude-code",
-        id: "orchestrator",
-        kind: "orchestrator",
-        label: "Orchestrator"
-      },
-      {
-        brief: "dispatcher-2.md",
-        harness: "claude-code",
-        id: "second-dispatcher-claude",
-        kind: "dispatcher",
-        label: "Second dispatcher on Claude"
-      },
-      {
-        brief: "dispatcher-2.md",
-        harness: "claude-code",
-        id: "second-dispatcher-glm",
-        kind: "dispatcher",
-        label: "Second dispatcher on GLM",
-        model: GLM_MODEL
-      }
-    ],
-    description: "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, harness, model (a Claude id, or glm), effort, account (a Claude row of usage.accounts) and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
-    schema: sessionTemplates,
-    stored: storedTemplates
-  }
-});
-// packages/settings/src/slots.ts
-var slotSettings = defineSettings({
-  "slots.modelBound": {
-    default: 2,
-    description: "How many runs that mostly wait on a model (run-slot.sh <who> --model-bound -- <command>, such as a parity replay) hold a slot at once, counted apart from the CPU slots, so one never holds a CPU slot while its CPU idles.",
-    schema: number2().int().min(1).max(16)
-  },
-  "slots.peers": {
-    default: [],
-    description: "The ops folders of other factories on this machine, each an absolute path: run-slot counts each live holder of their run slots against this factory's load units, and spawn.sh's load gate counts their starts beside its own, both reading only.",
-    schema: array(string2().regex(/^\/.+/, "an absolute path"))
-  }
-});
-// packages/settings/src/whatsapp.ts
-var e1642 = string2().regex(/^(?:\+[1-9]\d{7,14})?$/, "a phone number is + and 8 to 15 digits, as +15550100001");
-var whatsappSettings = defineSettings({
-  "wa.device": {
-    default: "",
-    description: "The spare number ops-wa links to as a device, in E.164: its pairing code is for this number. Never the owner's own number; ops-wa does not run until it is set.",
-    masked: true,
-    schema: e1642
-  },
-  "wa.owner": {
-    default: "",
-    description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages and sends only to it; ops-wa does not run until it is set.",
-    masked: true,
-    schema: e1642
-  }
-});
-// packages/settings/src/yard.ts
-var yardSettings = defineSettings({
-  "yard.logReaders": {
-    default: {},
-    description: "The bots whose read of the dispatcher's log this Mac answers through the relay, each Yard login to the DM it was made with; a bot Yard lets read the log reads nothing until its login and its DM are here.",
-    schema: record2(string2().regex(/^[a-z\d][a-z\d-]{0,29}\[bot\]$/, "a bot's login, <name>[bot]"), string2().min(1).max(64))
-  }
-});
-// packages/scripts/src/playground/setting.ts
-import { resolve as resolve9 } from "path";
-var CHECKOUT2 = resolve9(__CHECKOUT + "/packages/scripts/src/playground", "../../../..");
-var origins = new Map;
-var originRepo = (checkout = CHECKOUT2) => {
-  if (!origins.has(checkout)) {
-    const run = Bun.spawnSync(["git", "-C", checkout, "remote", "get-url", "origin"], {
-      stderr: "ignore"
-    });
-    const url = run.stdout.toString().trim();
-    const slug = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(url)?.[1] ?? "";
-    origins.set(checkout, slug.toLowerCase());
-  }
-  return origins.get(checkout);
-};
-if (false)
-  ;
 
 // packages/scripts/src/trace-count/kinds.ts
 var reposOf = (settings, checkout) => {
@@ -15410,7 +15966,7 @@ var shipWrite = (raw) => {
     return false;
   }
 };
-async function check17(raw, environment = process.env) {
+async function check19(raw, environment = process.env) {
   const loaded = await guardList("no-public-leak", "no-public-leak", isPublicList, EMPTY_LIST, environment);
   if (loaded.refusal)
     return refusedList(raw, `${loaded.refusal} The list is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`);
@@ -15423,10 +15979,10 @@ if (false) {}
 
 // scripts/hooks/no-raw-delete.ts
 import { realpathSync as realpathSync5 } from "fs";
-import { basename as basename7, dirname as dirname8, resolve as resolve10, sep as sep4 } from "path";
+import { basename as basename8, dirname as dirname9, resolve as resolve10, sep as sep4 } from "path";
 var INSTEAD4 = "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
 var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it, it holds no uncommitted change and its work has landed on canary.";
-var refuse12 = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD4) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
+var refuse13 = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD4) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
 var shown2 = (word) => word.variable ? `$${word.variable}` : visible(word.value);
 var DATA = new Set([
   ...PRINTERS,
@@ -15507,8 +16063,8 @@ function real3(path) {
   try {
     return realpathSync5(path);
   } catch {
-    const parent = dirname8(path);
-    return parent === path ? path : resolve10(real3(parent), basename7(path));
+    const parent = dirname9(path);
+    return parent === path ? path : resolve10(real3(parent), basename8(path));
   }
 }
 function rootsOf(cwd, session) {
@@ -15525,7 +16081,7 @@ var inside = (path, { scratch, worktree }) => {
 var OWN = { appends: false, nested: false };
 function judgeRm(args, xargs, env, roots, { nested }) {
   if (xargs)
-    return refuse12("rm under xargs", "the hook cannot read the paths xargs hands it");
+    return refuse13("rm under xargs", "the hook cannot read the paths xargs hands it");
   let options = true;
   const targets = [];
   for (const a of args) {
@@ -15535,10 +16091,10 @@ function judgeRm(args, xargs, env, roots, { nested }) {
     }
     const option = options && a.value.startsWith("-") && a.value !== "-";
     if (option && recursive3(a.value))
-      return refuse12(`a recursive rm (${a.value})`);
+      return refuse13(`a recursive rm (${a.value})`);
     const spread = marked(a.value) && (!nested || !a.quoted);
     if (spread || options && spellsRecursive(a.value) || option && hidden(a))
-      return refuse12(`an rm with a word the hook cannot read (${shown2(a)})`, "it may be -r or any path");
+      return refuse13(`an rm with a word the hook cannot read (${shown2(a)})`, "it may be -r or any path");
     if (!option)
       targets.push(a);
   }
@@ -15549,7 +16105,7 @@ function judgeRm(args, xargs, env, roots, { nested }) {
     return !path || !inside(path, roots);
   });
   if (outside)
-    return refuse12(`an rm of ${visible(outside.value)}`, "it is outside your own worktree and scratchpad, where a plain rm runs");
+    return refuse13(`an rm of ${visible(outside.value)}`, "it is outside your own worktree and scratchpad, where a plain rm runs");
 }
 function judgeGit3(args) {
   const { rest, sub } = gitCommand(args);
@@ -15560,12 +16116,12 @@ function judgeGit3(args) {
     if (cluster("n") || words.some((v) => prefixOf(v, "--dry-run", 3)))
       return;
     if (cluster("d") || cluster("x") || cluster("X"))
-      return refuse12("git clean with -d or -x", "it deletes untracked folders or ignored files for good");
+      return refuse13("git clean with -d or -x", "it deletes untracked folders or ignored files for good");
   }
   if (sub?.value === "worktree" && words[0] === "remove" && force)
-    return refuse12("git worktree remove --force", "it deletes a worktree's uncommitted work for good", WORKTREE);
+    return refuse13("git worktree remove --force", "it deletes a worktree's uncommitted work for good", WORKTREE);
 }
-async function inspect13(raw, environment) {
+async function inspect14(raw, environment) {
   const payload = JSON.parse(raw);
   const { cwd, session_id: session, tool_input: input, tool_name: tool } = payload;
   if (tool !== "Bash")
@@ -15602,7 +16158,7 @@ async function inspect13(raw, environment) {
       for (const [k, a] of args.entries()) {
         if (hidden(a)) {
           if (!isData(name) && args.slice(k).some((w) => spellsRecursive(w.value)))
-            return refuse12(`a program the hook cannot read (${shown2(a)}) given -r`, "it may be rm");
+            return refuse13(`a program the hook cannot read (${shown2(a)}) given -r`, "it may be rm");
           continue;
         }
         const named = unversioned(program(a.value));
@@ -15630,7 +16186,7 @@ async function inspect13(raw, environment) {
     const end = args.findIndex((a) => !a.value.startsWith("-") && !hidden(a));
     const lead = end < 0 ? args : args.slice(0, end);
     if (first && hidden(first) && (spellsRecursive(first.value) || args.some((a) => spellsRecursive(a.value)) || lead.some((a) => hidden(a) && !a.quoted)))
-      return refuse12(`a program the hook cannot read (${shown2(first)}) given -r`, "it may be rm");
+      return refuse13(`a program the hook cannot read (${shown2(first)}) given -r`, "it may be rm");
     const held = first && !first.quoted && first.value === UNKNOWN && first.variable ? at.vars.get(first.variable) : undefined;
     if (held && !held.unknown && /\s/.test(held.value.trim())) {
       const split = held.value.trim().split(/\s+/).map((value) => ({ quoted: false, value }));
@@ -15646,23 +16202,23 @@ async function inspect13(raw, environment) {
     if (name === "git")
       return judgeGit3(args);
     if (DELETER_PROGRAMS.has(name))
-      return refuse12(name);
+      return refuse13(name);
     if (name === "rsync" && args.some(({ value }) => value === "--del" || value.startsWith("--delete")))
-      return refuse12("rsync --delete", "it deletes every file its source lacks, for good");
+      return refuse13("rsync --delete", "it deletes every file its source lacks, for good");
     if (name === "rsync" && args.some(({ value }) => /^--remove-s(?:ent|ource)-files$/.test(value)))
-      return refuse12("rsync --remove-source-files", "it deletes every source file it sends");
+      return refuse13("rsync --remove-source-files", "it deletes every source file it sends");
     if (SHRED.has(name) && args.some(({ value }) => /^-[a-z]*u/.test(value) || prefixOf(value.split("=")[0], "--remove", 4)))
-      return refuse12(`${name} -u`, "it overwrites each file and then deletes it, past any recovery");
+      return refuse13(`${name} -u`, "it overwrites each file and then deletes it, past any recovery");
     if (TAR.has(name) && args.some(({ value }) => prefixOf(value, "--remove-files", 5)))
-      return refuse12(`${name} --remove-files`, "it deletes every file it adds to the archive");
+      return refuse13(`${name} --remove-files`, "it deletes every file it adds to the archive");
     if (name === "chflags")
-      return refuse12("chflags", "it lifts the flags that keep a file from deletion");
+      return refuse13("chflags", "it lifts the flags that keep a file from deletion");
     if (name === "chmod" && args.some((a) => /^-[A-Za-z]*[aN]/.test(a.value)))
-      return refuse12("chmod -a or -N", "it strips the access entries that keep a file from deletion");
+      return refuse13("chmod -a or -N", "it strips the access entries that keep a file from deletion");
     const runs = Object.hasOwn(RUNS2, name) ? RUNS2[name] : undefined;
     if (runs) {
       if (args.some((a) => a.value === "-delete"))
-        return refuse12(`${name} -delete`);
+        return refuse13(`${name} -delete`);
       for (const [k, a] of args.entries()) {
         const attached = name === "fd" ? ATTACHED.exec(a.value) : null;
         if (!runs.has(a.value) && !attached)
@@ -15674,7 +16230,7 @@ async function inspect13(raw, environment) {
           ...args.slice(k + 1, end === -1 ? undefined : end)
         ];
         if (RM.has(parse({ ...cmd, words }).name))
-          return refuse12(value === undefined ? `${name} ${a.value} rm` : `${name} ${a.value}`, `it deletes every path ${name} reaches`);
+          return refuse13(value === undefined ? `${name} ${a.value} rm` : `${name} ${a.value}`, `it deletes every path ${name} reaches`);
         const found = await examine({ ...cmd, words }, at, visitAs({ appends: true, nested: true }), false);
         if (found)
           return found;
@@ -15686,7 +16242,7 @@ async function inspect13(raw, environment) {
       if (fed) {
         const script = await (file === -1 ? stdinOf(cmd, at) : readPath(args[file + 1] ?? { value: "" }, at)).catch((error) => ({ unknown: `a read that failed: ${error}`, value: "" }));
         if (script.unknown)
-          return refuse12(`${name} given a job it cannot read (${script.unknown})`, "it may queue a recursive delete");
+          return refuse13(`${name} given a job it cannot read (${script.unknown})`, "it may queue a recursive delete");
         return line(script.value, at);
       }
     }
@@ -15712,20 +16268,20 @@ function commandOf2(raw) {
     return;
   }
 }
-async function check18(raw, environment = process.env) {
+async function check20(raw, environment = process.env) {
   try {
-    return await withDeadline(1e4, async () => inspect13(raw, environment));
+    return await withDeadline(1e4, async () => inspect14(raw, environment));
   } catch (error) {
     if (!DELETES.test(bare(commandOf2(raw) ?? raw)))
       return;
-    return refuse12(`a call it could not read (${error})`, "it reads as a delete").concat(" Split it into plain commands and run them again.");
+    return refuse13(`a call it could not read (${error})`, "it reads as a delete").concat(" Split it into plain commands and run them again.");
   }
 }
 if (false) {}
 
 // scripts/hooks/no-raw-spawn.ts
-import { join as join17, resolve as resolve11, sep as sep5 } from "path";
-var SPAWN = join17(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
+import { join as join19, resolve as resolve11, sep as sep5 } from "path";
+var SPAWN = join19(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
 var HEADS = new Set([
   "agent",
   "agent-hibernation",
@@ -15810,7 +16366,7 @@ function unixTarget(name, args) {
   }
 }
 var EXPORTS4 = new Set(["declare", "export", "local", "readonly", "typeset"]);
-var refuse13 = (what) => `no-raw-spawn hook refuses ${what}: a factory session starts another only through ${SPAWN}, which refuses unless the machine has room, its gate naming the reading that failed. Run it instead (worker, runner, column, manager, resume or restore; with no arguments it prints how).`;
+var refuse14 = (what) => `no-raw-spawn hook refuses ${what}: a factory session starts another only through ${SPAWN}, which refuses unless the machine has room, its gate naming the reading that failed. Run it instead (worker, runner, column, manager, resume or restore; with no arguments it prints how).`;
 var refuseHerdr = (what) => `no-raw-spawn hook refuses ${what}: herdr's socket has no access control, so a factory session runs only herdr's reads (current, edges, get, layout, list, neighbor, process-info, read and status, agent explain, agent wait, api snapshot, pane wait-output and the like) on herdr's own socket. Talk to another session with SendMessage; start, resume or restore one only through ${SPAWN} (with no arguments it prints how).`;
 var beforeDashes = (args) => {
   const dashes = args.findIndex((a) => a.value === "--");
@@ -15832,7 +16388,7 @@ function judgeCmux(args) {
   if (args.length === 1 && CMUX_READS.has(args[0].value))
     return;
   const [head] = positionals3(beforeDashes(args));
-  return refuse13(`a cmux ${head ?? "call"}, since every session runs in herdr and no factory session calls cmux (only \`cmux --help\`, \`-h\`, \`--version\` and \`version\` run)`);
+  return refuse14(`a cmux ${head ?? "call"}, since every session runs in herdr and no factory session calls cmux (only \`cmux --help\`, \`-h\`, \`--version\` and \`version\` run)`);
 }
 function herdrArgs(args) {
   const found = [];
@@ -15964,13 +16520,13 @@ var visit8 = async (cmd, { args, first, local, name }, env) => {
     return head && HEADS.has(head) ? judgeCmux(args) : undefined;
   }
   if (name === "claude" && reopens(args))
-    return refuse13("a claude --resume or --continue");
+    return refuse14("a claude --resume or --continue");
 };
-var BARE4 = (command) => command.replace(/[\\'"]/g, "");
+var BARE5 = (command) => command.replace(/[\\'"]/g, "");
 var OPENS3 = new RegExp(`\\b(?:cmux|hc|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH|${[...HEADS, ...HERDR_HEADS, ...HC_HEADS].join("|")})\\b`, "i");
 var REOPEN = /\bclaude\b[\s\S]*(?:\s-[cr]\b|--resume|--continue)/i;
-var candidate6 = (command) => command.includes("$'") || OPENS3.test(BARE4(command)) || /\bcmux\b/i.test(BARE4(command)) || REOPEN.test(BARE4(command)) || UNIX.test(BARE4(command));
-var spawnCall = (command) => /\b(?:hc|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/i.test(BARE4(command)) || /\bcmux\b/i.test(BARE4(command)) && /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(BARE4(command)) || REOPEN.test(BARE4(command));
+var candidate6 = (command) => command.includes("$'") || OPENS3.test(BARE5(command)) || /\bcmux\b/i.test(BARE5(command)) || REOPEN.test(BARE5(command)) || UNIX.test(BARE5(command));
+var spawnCall = (command) => /\b(?:hc|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/i.test(BARE5(command)) || /\bcmux\b/i.test(BARE5(command)) && /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(BARE5(command)) || REOPEN.test(BARE5(command));
 function commandOf3(raw) {
   try {
     const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
@@ -15979,7 +16535,7 @@ function commandOf3(raw) {
     return;
   }
 }
-async function inspect14(raw, environment) {
+async function inspect15(raw, environment) {
   const {
     cwd,
     tool_input: toolInput,
@@ -16001,23 +16557,25 @@ async function inspect14(raw, environment) {
   };
   return run(lex(command, env.known), env, visit8, true);
 }
-async function check19(raw, environment = process.env) {
+async function check21(raw, environment = process.env) {
   try {
-    return await inspect14(raw, environment);
+    return await inspect15(raw, environment);
   } catch (error) {
     const command = commandOf3(raw);
     if (!command || !spawnCall(command))
       return;
-    return `no-raw-spawn hook could not read this call (${error}), which reads as a session spawn, so it refuses it. ${refuse13("it")}`;
+    return `no-raw-spawn hook could not read this call (${error}), which reads as a session spawn, so it refuses it. ${refuse14("it")}`;
   }
 }
 if (false) {}
 
 // scripts/hooks/no-raw-wa.ts
 import { realpathSync as realpathSync6 } from "fs";
-import { homedir as homedir4 } from "os";
+import { homedir as homedir5 } from "os";
 import { resolve as resolve12 } from "path";
-var refuse14 = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
+var refuse15 = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
+var refuseJob = (what) => `no-raw-wa hook refuses ${what}: the relay tags each line with its queue's job, and a line tagged [ops-wa] or [ops-dm-watch] reads as the owner's own words, so only ops-wa and ops-dm-watch queue under those jobs. Queue your line under your own job, notify.sh <your job> <text>, or tell your manager with SendMessage.`;
+var OWNER_JOBS = new Set(["dm-watch", "wa"]);
 var RECURSIVE = new Set(["ack", "ag", "ditto", "find", "rg", "rsync", "tar"]);
 var RECURSIVE_WITH = {
   cp: /^-[A-Za-z]*[rRa]|^--(?:recursive|archive)$/,
@@ -16034,6 +16592,16 @@ var targetsOf = (environment) => {
     real = resolve12(realpathSync6(dataDirOf(environment)), "whatsapp");
   } catch {}
   return [...new Set([typed, real].map((p) => p.toLowerCase()))];
+};
+var queuesOf = (environment) => {
+  const data = dataDirOf(environment);
+  let real = data;
+  try {
+    real = realpathSync6(data);
+  } catch {}
+  return [
+    ...new Set([data, real].flatMap((d) => [...OWNER_JOBS].map((job) => resolve12(d, "ops", "outbox", `ops-${job}.jsonl`).toLowerCase())))
+  ];
 };
 var segments = (path) => resolve12(path).toLowerCase().split("/").filter(Boolean);
 function reach(path, target, glob = false) {
@@ -16055,6 +16623,10 @@ var namesTarget = (command, targets) => {
   const text = command.replace(/["'\\]/g, "").toLowerCase();
   return targets.some((t) => text.includes(t)) || /(?:\.playground|playground_data_dir\}?)\/+whatsapp(?![\w.-])/.test(text);
 };
+var namesOwnerJob = (command) => {
+  const text = command.replace(/["'\\]/g, "").toLowerCase();
+  return /notify\.sh\s+(?:dm-watch|wa)(?![\w.-])/.test(text) || /outbox\/+ops-(?:dm-watch|wa)\.jsonl/.test(text);
+};
 var readOf = (word, at) => {
   if (!marked(word.value))
     return word;
@@ -16068,18 +16640,42 @@ var readOf = (word, at) => {
   return again && !marked(again.value) ? again : undefined;
 };
 var recursive4 = (name, args) => RECURSIVE.has(name) || args.some((a) => RECURSIVE_WITH[name]?.test(a.value));
+var ownerJob = (name, args, at) => {
+  let rest = args;
+  if (SHELLS.has(name)) {
+    const { inline, operand } = shellOperand(args, name);
+    if (inline || !operand || program(operand.value) !== "notify.sh")
+      return;
+    rest = args.slice(args.indexOf(operand) + 1);
+  } else if (program(name) !== "notify.sh")
+    return;
+  if (!rest[0])
+    return;
+  const job = readOf(rest[0], at);
+  if (!job)
+    return refuseJob("a notify.sh call whose job it cannot read");
+  if (OWNER_JOBS.has(job.value))
+    return refuseJob(`a notify.sh call as ops-${job.value}`);
+};
 async function judgeBash(command, cwd, environment) {
   const targets = targetsOf(environment);
   if (namesTarget(command, targets))
-    return refuse14("a command naming whatsapp/ in the data folder");
+    return refuse15("a command naming whatsapp/ in the data folder");
+  if (namesOwnerJob(command))
+    return refuseJob("a command naming an owner-word job's queue");
+  const queues = queuesOf(environment);
   const env = {
     cwd,
     files: new Map,
     known: knownVariables(command, environment, cwd),
     process: environment,
-    vars: new Map
+    vars: new Map,
+    visitShells: true
   };
   const visit = async (cmd, { args, first, name }, at) => {
+    const job = ownerJob(name, args, at);
+    if (job || SHELLS.has(name))
+      return job;
     const words = [
       ...first ? [first] : [],
       ...args,
@@ -16087,29 +16683,31 @@ async function judgeBash(command, cwd, environment) {
     ];
     for (const place of places(at)) {
       if (place.cwd && worst(place.cwd, targets) === "inside")
-        return refuse14(`a command run inside whatsapp/ in the data folder`);
+        return refuse15(`a command run inside whatsapp/ in the data folder`);
       for (const typed of words) {
         const word = readOf(typed, at);
         if (!word?.value)
           continue;
         for (const raw of [word.value, word.value.slice(word.value.indexOf("=") + 1)]) {
-          const value = /^~(?:\/|$)/.test(raw) ? `${homedir4()}${raw.slice(1)}` : raw;
+          const value = /^~(?:\/|$)/.test(raw) ? `${homedir5()}${raw.slice(1)}` : raw;
           const path = value.startsWith("/") ? value : place.cwd && resolve12(place.cwd, value);
           if (!path)
             continue;
           const stands = worst(path, targets, !!word.glob);
           if (stands === "inside")
-            return refuse14(`${visible(word.value)}, which reaches whatsapp/ in the data folder`);
+            return refuse15(`${visible(word.value)}, which reaches whatsapp/ in the data folder`);
+          if (worst(path, queues, !!word.glob) === "inside")
+            return refuseJob(`${visible(word.value)}, an owner-word job's queue`);
           if (stands === "above" && recursive4(program(name), args))
-            return refuse14(`${name} through ${visible(word.value)}, which reads whatsapp/ in the data folder on its way down`);
+            return refuse15(`${name} through ${visible(word.value)}, which reads whatsapp/ in the data folder on its way down`);
         }
       }
     }
   };
   return run(lex(command, env.known), env, visit, true);
 }
-var FILE_TOOLS3 = new Set(["Edit", "MultiEdit", "NotebookEdit", "Read", "Write"]);
-async function inspect15(raw, environment) {
+var FILE_TOOLS4 = new Set(["Edit", "MultiEdit", "NotebookEdit", "Read", "Write"]);
+async function inspect16(raw, environment) {
   const {
     cwd,
     tool_input: input,
@@ -16119,10 +16717,12 @@ async function inspect15(raw, environment) {
   const targets = targetsOf(environment);
   if (tool === "Bash" && typeof input?.command === "string")
     return judgeBash(input.command, folder, environment);
-  if (typeof tool === "string" && FILE_TOOLS3.has(tool)) {
+  if (typeof tool === "string" && FILE_TOOLS4.has(tool)) {
     const path = input?.file_path ?? input?.notebook_path;
     if (typeof path === "string" && worst(path, targets) === "inside")
-      return refuse14(`a ${tool} of ${path}`);
+      return refuse15(`a ${tool} of ${path}`);
+    if (typeof path === "string" && worst(path, queuesOf(environment)) === "inside")
+      return refuseJob(`a ${tool} of ${path}, an owner-word job's queue`);
     return;
   }
   if (tool === "Grep" || tool === "Glob") {
@@ -16131,15 +16731,15 @@ async function inspect15(raw, environment) {
       return;
     const at = worst(path, targets);
     if (at === "inside" || tool === "Grep" && at === "above")
-      return refuse14(`a ${tool} through ${path}, which reads whatsapp/ in the data folder`);
+      return refuse15(`a ${tool} through ${path}, which reads whatsapp/ in the data folder`);
     const pattern = input?.pattern;
     if (tool === "Glob" && typeof pattern === "string" && worst(resolve12(path, pattern), targets, true) === "inside")
-      return refuse14(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
+      return refuse15(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
   }
 }
-async function check20(raw, environment = process.env) {
+async function check22(raw, environment = process.env) {
   try {
-    return await eachInput(raw, "no-raw-wa", (one) => inspect15(one, environment));
+    return await eachInput(raw, "no-raw-wa", (one) => inspect16(one, environment));
   } catch {
     return;
   }
@@ -16147,7 +16747,7 @@ async function check20(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-release-comment.ts
-import { join as join18 } from "path";
+import { join as join20 } from "path";
 var guardedOwners = new Set;
 var WORD2 = /release/i;
 var UNRESOLVED = "a repository the hook cannot resolve";
@@ -16230,7 +16830,7 @@ async function gh4(args, cmd, env, local, xargs) {
     ...xargs && !xargs.replace ? [undefined] : []
   ];
   const target = decide2(named.length > 0 ? named : implicitRepos(env, local));
-  return judge6(`gh ${key}`, target, bodies.map((b) => viaXargs(b, xargs)), env);
+  return judge7(`gh ${key}`, target, bodies.map((b) => viaXargs(b, xargs)), env);
 }
 function altText(value) {
   const tail = Math.max(value.value.lastIndexOf(UNKNOWN), value.value.lastIndexOf(READ)) + 1;
@@ -16249,7 +16849,7 @@ async function api4(args, cmd, env, local, xargs) {
     const resolved = await Promise.all(documents.map((d) => resolveText(d, env)));
     if (!resolved.some((d) => d.unknown || COMMENT_MUTATION.test(d.value)))
       return;
-    return judge6("gh api graphql", { guarded: true, label: "a repository named only by a GraphQL node id" }, [...fields.map((f) => f.text), ...inputs], env, INLINE_QUERY);
+    return judge7("gh api graphql", { guarded: true, label: "a repository named only by a GraphQL node id" }, [...fields.map((f) => f.text), ...inputs], env, INLINE_QUERY);
   }
   const path = endpoint.value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "").split("?")[0];
   const match = /^repos\/([^/]+)\/([^/]+)\/(.+)$/.exec(path);
@@ -16267,7 +16867,7 @@ async function api4(args, cmd, env, local, xargs) {
     ...fields.filter((f) => marked(f.key) || BODY_KEY.test(f.key)).map((f) => f.text),
     ...await Promise.all(inputs.map((i) => bodyOf2(i, env)))
   ];
-  return judge6(`gh api ${path.replaceAll(UNKNOWN, "*").replaceAll(READ, "*")}`, decide2(candidates), bodies, env);
+  return judge7(`gh api ${path.replaceAll(UNKNOWN, "*").replaceAll(READ, "*")}`, decide2(candidates), bodies, env);
 }
 async function bodyOf2(payload, env) {
   const text = await resolveText(payload, env);
@@ -16304,7 +16904,7 @@ async function curl3(args, cmd, env) {
   if (data.length === 0)
     return;
   const owner = marked(url[1]) ? undefined : { owner: url[1], repo: url[2] };
-  return judge6(`curl to api.github.com/repos/${url[1]}/${url[2]}`, decide2([owner]), await Promise.all(data.map((d) => bodyOf2(d, env))), env);
+  return judge7(`curl to api.github.com/repos/${url[1]}/${url[2]}`, decide2([owner]), await Promise.all(data.map((d) => bodyOf2(d, env))), env);
 }
 function decide2(candidates) {
   if (candidates.length === 0)
@@ -16315,27 +16915,27 @@ function decide2(candidates) {
   const repo = candidates[hit];
   return { guarded: true, label: repo ? `${repo.owner}/${repo.repo}` : UNRESOLVED };
 }
-function refuse15(what, target, detail, fix) {
+function refuse16(what, target, detail, fix) {
   return `no-release-comment hook refused ${what} on ${target.label}: ${detail}. On a guarded owner's repos an owner comment containing "release" in any case publishes to npm, and gh and the GitHub MCP post as that owner. ${fix}`;
 }
 var READABLE2 = "Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md).";
 var INLINE_QUERY = "Write the query and each of its fields in the command itself, not in a variable: gh api graphql -f query='query { viewer { login } }'. For a long one, write it to a file with the Write tool first and pass it by its literal absolute path (-F query=@/abs/query.graphql, -F body=@/abs/body.md).";
 var REWORD = 'Write "ship" or "publish step" instead, or leave the comment out. For a file or rule whose name holds the word, name it by what it is, such as "the ship rule" or "the comment hook", with its line number; for a patch that holds it, write the patch to a file in your scratchpad, send its absolute path to the PR\'s worker by SendMessage, and say in the comment that a patch went to the author, since gh\'s `--attach` uploads only images and video.';
-async function judge6(what, target, bodies, env, fix = READABLE2) {
+async function judge7(what, target, bodies, env, fix = READABLE2) {
   if (!target.guarded)
     return;
   const texts = await Promise.all(bodies.map((b) => resolveText(b, env)));
   if (texts.some((t) => WORD2.test(visible(t.value))))
-    return refuse15(what, target, 'its text contains "release"', REWORD);
+    return refuse16(what, target, 'its text contains "release"', REWORD);
   const hidden = texts.find((t) => t.unknown);
   if (hidden) {
-    return refuse15(what, target, `the hook cannot read its text before the command runs (it comes from ${hidden.unknown})`, fix);
+    return refuse16(what, target, `the hook cannot read its text before the command runs (it comes from ${hidden.unknown})`, fix);
   }
 }
 function mcp4(tool, input) {
   const what = tool.replace(/^mcp__/, "");
   if (!input)
-    return refuse15(what, { guarded: true, label: UNRESOLVED }, "its input is not an object", REWORD);
+    return refuse16(what, { guarded: true, label: UNRESOLVED }, "its input is not an object", REWORD);
   const { body, owner, repo } = input;
   if (body === undefined || body === null)
     return;
@@ -16344,22 +16944,22 @@ function mcp4(tool, input) {
   if (!target.guarded)
     return;
   if (typeof body !== "string")
-    return refuse15(what, target, "its body is not text the hook can read", REWORD);
+    return refuse16(what, target, "its body is not text the hook can read", REWORD);
   if (WORD2.test(body))
-    return refuse15(what, target, 'its text contains "release"', REWORD);
+    return refuse16(what, target, 'its text contains "release"', REWORD);
 }
 var commentCall = (raw) => GH2.test(raw) && COMMENT_CALL.test(raw);
 function candidate7(command) {
   const bare = command.replace(/[\\'"]/g, "");
   return command.includes("$'") || GH2.test(bare) && MAYBE_COMMENT.test(bare);
 }
-async function check21(raw, environment = process.env, lists = join18(coreDir(), "lists")) {
-  const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join18(lists, "release-owners.json"));
+async function check23(raw, environment = process.env, lists = join20(coreDir(), "lists")) {
+  const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join20(lists, "release-owners.json"));
   if (owners.refusal)
     return commentCall(subjectOf3(raw)) ? owners.refusal : undefined;
   guardedOwners = new Set((owners.list ?? []).map((owner) => owner.toLowerCase()));
   try {
-    return await inspect16(raw, environment);
+    return await inspect17(raw, environment);
   } catch (error) {
     if (!commentCall(subjectOf3(raw)))
       return;
@@ -16376,7 +16976,7 @@ function subjectOf3(raw) {
     return raw;
   }
 }
-async function inspect16(raw, environment) {
+async function inspect17(raw, environment) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -16408,10 +17008,10 @@ async function inspect16(raw, environment) {
 if (false) {}
 
 // scripts/hooks/no-unslotted-run.ts
-import { existsSync as existsSync9, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync2 } from "fs";
+import { existsSync as existsSync10, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync3 } from "fs";
 import { tmpdir } from "os";
-import { join as join19, resolve as resolve13, sep as sep6 } from "path";
-var refuse16 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
+import { join as join21, resolve as resolve13, sep as sep6 } from "path";
+var refuse17 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var COMMIT_TAKES3 = new Set([
   "--author",
@@ -16488,11 +17088,11 @@ async function commitLint(cmd, args, env, wrote) {
     stderr: "ignore"
   });
   const root = top.success ? top.stdout.toString().trim() : "";
-  const lint = join19(root, "node_modules", ".bin", "commitlint");
-  if (!root || !existsSync9(lint))
+  const lint = join21(root, "node_modules", ".bin", "commitlint");
+  if (!root || !existsSync10(lint))
     return;
-  const folder = mkdtempSync(join19(tmpdir(), "commit-msg-"));
-  const file = join19(folder, "COMMIT_EDITMSG");
+  const folder = mkdtempSync(join21(tmpdir(), "commit-msg-"));
+  const file = join21(folder, "COMMIT_EDITMSG");
   let out = "";
   let err = "";
   let code;
@@ -16514,7 +17114,7 @@ async function commitLint(cmd, args, env, wrote) {
     ]);
     signal = proc.signalCode;
   } finally {
-    rmSync2(file, { force: true });
+    rmSync3(file, { force: true });
     rmdirSync2(folder);
   }
   if (code === 0 || signal)
@@ -16693,7 +17293,7 @@ var shown3 = (word) => {
   return word.quoted ? `'${value.replaceAll("'", "'\\''")}'` : value;
 };
 var quotedDir = (dir) => /^[\w@%+=:,./~-]+$/.test(dir) ? dir : `'${dir.replaceAll("'", "'\\''")}'`;
-function inspect17(raw, environment, main) {
+function inspect18(raw, environment, main) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   if (tool !== "Bash")
     return;
@@ -16701,8 +17301,8 @@ function inspect17(raw, environment, main) {
   if (typeof command !== "string")
     return;
   const worktrees = [
-    join19(main, ".claude", "worktrees"),
-    real(join19(main, ".claude", "worktrees"))
+    join21(main, ".claude", "worktrees"),
+    real(join21(main, ".claude", "worktrees"))
   ].map((w) => w + sep6);
   const inWorktree = (dir) => dir !== undefined && [resolve13(dir), real(resolve13(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
   const directory = typeof cwd === "string" ? cwd : undefined;
@@ -16757,7 +17357,7 @@ function inspect17(raw, environment, main) {
         return;
       const moved = here.cwd !== undefined && (directory === undefined || resolve13(here.cwd) !== resolve13(directory));
       const cd = moved ? `cd ${quotedDir(here.cwd)} && ` : "";
-      return found.anywhere ? refuseDocker(found.what, cd, line, found.fix) : refuse16(found.what, cd, line);
+      return found.anywhere ? refuseDocker(found.what, cd, line, found.fix) : refuse17(found.what, cd, line);
     }
   };
   const env = {
@@ -16772,9 +17372,9 @@ function inspect17(raw, environment, main) {
   line = lexed.commands;
   return run(lexed, env, visit);
 }
-async function check22(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
+async function check24(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
-    return await inspect17(raw, environment, main);
+    return await inspect18(raw, environment, main);
   } catch {
     return;
   }
@@ -16788,31 +17388,33 @@ var GUARDS = [
   {
     factory: true,
     name: "no-extension-repo-write",
-    run: (raw, env) => check6(raw, env)
+    run: (raw, env) => check7(raw, env)
   },
   { factory: true, name: "no-extensions-write", run: (raw, env) => guarded(raw, env) },
-  { factory: true, name: "no-false-green", run: (raw, env) => check8(raw, env.SHELL ?? "zsh") },
+  { factory: true, name: "no-false-green", run: (raw, env) => check9(raw, env.SHELL ?? "zsh") },
   { factory: true, name: "no-glm-heavy-path", run: (raw, env) => refusal(raw, env) },
-  { factory: false, name: "no-headless-login", run: (raw, env) => check9(raw, env) },
-  { factory: true, name: "no-kill-by-name", run: (raw) => check11(raw) },
-  { factory: false, name: "no-linear-ticket", run: (raw, env) => check12(raw, env) },
-  { factory: true, name: "no-mac-web-build", run: (raw, env) => check13(raw, env) },
-  { factory: true, name: "no-main-checkout", run: (raw, env) => check7(raw, env) },
-  { factory: false, name: "no-off-palette-label", run: (raw) => check14(raw) },
-  { factory: true, name: "no-ours-merge", run: (raw, env) => check15(raw, env) },
-  { factory: true, name: "no-playground-leak", run: (raw, env) => check5(raw, env) },
+  { factory: false, name: "no-headless-login", run: (raw, env) => check10(raw, env) },
+  { factory: true, name: "no-kill-by-name", run: (raw) => check12(raw) },
+  { factory: false, name: "no-linear-ticket", run: (raw, env) => check13(raw, env) },
+  { factory: true, name: "no-live-sign-in", run: (raw, env) => check14(raw, env) },
+  { factory: true, name: "no-mac-web-build", run: (raw, env) => check15(raw, env) },
+  { factory: true, name: "no-main-checkout", run: (raw, env) => check8(raw, env) },
+  { factory: false, name: "no-off-palette-label", run: (raw) => check16(raw) },
+  { factory: true, name: "no-ours-merge", run: (raw, env) => check17(raw, env) },
+  { factory: true, name: "no-playground-leak", run: (raw, env) => check6(raw, env) },
   { factory: true, name: "no-prepare-write", run: (raw, env) => check4(raw, env) },
-  { factory: true, name: "no-prompt-stop", run: (raw) => check16(raw) },
-  { factory: true, name: "no-public-leak", run: (raw, env) => check17(raw, env) },
-  { factory: false, name: "no-raw-delete", run: (raw, env) => check18(raw, env) },
-  { factory: true, name: "no-raw-spawn", run: (raw, env) => check19(raw, env) },
-  { factory: true, name: "no-raw-wa", run: (raw, env) => check20(raw, env) },
-  { factory: false, name: "no-release-comment", run: (raw, env) => check21(raw, env) },
+  { factory: true, name: "no-prompt-stop", run: (raw) => check18(raw) },
+  { factory: true, name: "no-protected-push", run: (raw, env) => check5(raw, env) },
+  { factory: true, name: "no-public-leak", run: (raw, env) => check19(raw, env) },
+  { factory: false, name: "no-raw-delete", run: (raw, env) => check20(raw, env) },
+  { factory: true, name: "no-raw-spawn", run: (raw, env) => check21(raw, env) },
+  { factory: true, name: "no-raw-wa", run: (raw, env) => check22(raw, env) },
+  { factory: false, name: "no-release-comment", run: (raw, env) => check23(raw, env) },
   { factory: true, name: "no-stash", run: (raw, env) => check3(raw, env) },
-  { factory: true, name: "no-unslotted-run", run: (raw, env) => check22(raw, env) }
+  { factory: true, name: "no-unslotted-run", run: (raw, env) => check24(raw, env) }
 ];
 var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`;
-async function check23(raw, environment = process.env, guards = GUARDS) {
+async function check25(raw, environment = process.env, guards = GUARDS) {
   let factory;
   const reasons = await Promise.all(guards.map(async ({ factory: gated, name, run }) => {
     try {
@@ -16828,7 +17430,7 @@ async function check23(raw, environment = process.env, guards = GUARDS) {
 `) || undefined;
 }
 async function hook() {
-  const reason = await check23(await Bun.stdin.text());
+  const reason = await check25(await Bun.stdin.text());
   if (!reason)
     return 0;
   console.error(reason);
@@ -16838,6 +17440,6 @@ if (import.meta.main)
   process.exit(await hook());
 export {
   GUARDS,
-  check23 as check,
+  check25 as check,
   hook
 };

@@ -8052,7 +8052,7 @@ async function inspect(raw, environment, main) {
     }
     const slot = slotWords(parsed);
     if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
+      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, { ...env, files: new Map(env.files), vars: new Map(env.vars) }, visit, false);
     const { args, local, name } = parsed;
     if (env.cwdAnywhere) {
       const blind = { ...env, cwd: undefined };

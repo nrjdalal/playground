@@ -1,6 +1,6 @@
 // auto_end.ts: ends a worker, reviewer or tester once its work is done, by SESSIONS.md#end (spawn.sh close, then its roster report), so no finished session sits idle.
 // Two callers: ops-tick's auto-end beat every 5 minutes (sweep, over idle_sessions.ts's flags), and pr:merge and the train's land right after a merge (endMerged, over the PR's roster rows).
-// Guards: only a worker, reviewer or tester is ever ended, never a manager, the dispatcher, a runner, the optimizer or a probe; it must be not busy for 10+ minutes; uncommitted or unpushed work in a worktree it used keeps it open, told to its lead.
+// Guards: only a worker, reviewer or tester is ever ended, never a manager, the dispatcher, a runner, the optimizer or a probe; it must be not busy for 10+ minutes, and a worker not in `shell`, since its background task is a step of its chore; uncommitted or unpushed work in a worktree it used keeps it open, told to its lead.
 // After a close, each worktree the session used is cleaned (cleanWorktree): its dev stack stopped, the worktree moved to the trash, its containers and branch removed, or kept with the reason.
 // Every end and every refusal is one line for its lead; it signals nothing itself but through bun run dev:stop, which signals only the process groups that worktree's stack recorded.
 
@@ -113,7 +113,7 @@ export async function sweep(input: CollectInput, deps: EndDeps): Promise<Line[]>
   return out
 }
 
-// Right after a merge: the PR's worker, reviewer and tester by their roster pr. A worker the roster gave a next task holds no pr of this PR (assign clears it), and a checker whose worker's row names another PR may serve it, so neither is ended, nor is one with another of its PRs open, as the sweep holds it, nor one whose roster prs list holds a PR or issue not merged or closed. One with no live session has its row ended; a busy one, or one quiet under 10 minutes, is left to the sweep.
+// Right after a merge: the PR's worker, reviewer and tester by their roster pr. A worker the roster gave a next task holds no pr of this PR (assign clears it), and a checker whose worker's row names another PR may serve it, so neither is ended, nor is one with another of its PRs open, as the sweep holds it, nor one whose roster prs list holds a PR or issue not merged or closed. One with no live session has its row ended; a busy one, one quiet under 10 minutes or a worker in `shell` is left to the sweep.
 export async function endMerged(
   url: string,
   sha: string,
@@ -147,6 +147,7 @@ export async function endMerged(
     }
     const quiet = (input.now - (d.statusUpdatedAt || d.updatedAt || input.now * 1000) / 1000) / 60
     if (d.status === "busy" || !(quiet >= QUIET_MINUTES)) continue
+    if (kind === "worker" && d.status === "shell") continue
     const others = (await sessionPrs(input, name, worker, d.sessionId)).filter((u) => u !== url)
     const states = await Promise.all(others.map((u) => input.prState(u)))
     // A failed read (null) holds too, as collect holds on it: a rate limit is no proof a PR closed.

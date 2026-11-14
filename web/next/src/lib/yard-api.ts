@@ -79,8 +79,11 @@ export const yardApi = {
     yard<{ invite: YardInvite }>(`/invites/${segment(id)}/approve`, { method: "POST" }),
   bots: () => yard<{ bots: YardBot[] }>("/bots"),
   channels: () => yard<{ channels: YardChannel[] }>("/channels"),
-  createToken: (name: string) =>
-    yard<{ token: YardToken & { secret: string } }>("/tokens", { body: { name }, method: "POST" }),
+  createToken: (name: string, relay = false) =>
+    yard<{ token: YardToken & { secret: string } }>("/tokens", {
+      body: { name, relay },
+      method: "POST",
+    }),
   deny: (id: string) =>
     yard<{ message: YardMessage }>(`/messages/${segment(id)}/deny`, { method: "POST" }),
   denyInvite: (id: string) =>
@@ -128,7 +131,7 @@ export const useYardChannels = (enabled = true) =>
       (error as { code?: string }).code !== "NOT_FOUND" && queryRetry(count, error),
   })
 
-// How long the sidebar's nav waits on Yard's first read before it draws without Yard's groups, which then arrive above Orchestrators: a hosted Yard read can run to its 15s timeout.
+// How long the sidebar's nav waits on Yard's first read before it draws without Yard's groups, which then arrive at their place in the group order: a hosted Yard read can run to its 15s timeout.
 export const YARD_HOLD_MS = 1_000
 
 // Pure: whether the nav waits on Yard's channels read: its first try alone (holdsForFirstTry), and never once YARD_HOLD_MS has passed (late).

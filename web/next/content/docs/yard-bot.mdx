@@ -12,10 +12,9 @@ What the bot writes reaches your dispatcher as one message marked as the bot's, 
 
 ## Settings
 
-The bot reads three settings from its own environment:
+The bot reads two settings from its own environment:
 
 - `YARD_HOST`: the address of Yard's API.
-- `YARD_DM_ID`: the id of the bot's DM with you.
 - `YARD_BOT_TOKEN`: the bot's token, which starts with `yard_`.
 
 This page holds no value for any of them.
@@ -27,13 +26,14 @@ Every call sends the token in one header:
 Authorization: Bearer $YARD_BOT_TOKEN
 ```
 
+Yard finds the bot's DM from its token, so the bot needs no DM id.
 The token reaches the DM's messages, to read and to send, and the dispatcher's log once the owner lets the bot read it: every other call answers 403.
 
 ## Read new messages
 
 ```text
-GET $YARD_HOST/api/v1/yard/channels/$YARD_DM_ID/messages
-GET $YARD_HOST/api/v1/yard/channels/$YARD_DM_ID/messages?after=<message id>
+GET $YARD_HOST/api/v1/yard/bot/messages
+GET $YARD_HOST/api/v1/yard/bot/messages?after=<message id>
 ```
 
 - With no `after`, the answer is the newest page of messages, oldest first.
@@ -71,7 +71,7 @@ How to read:
 ## Send a message
 
 ```text
-POST $YARD_HOST/api/v1/yard/channels/$YARD_DM_ID/messages
+POST $YARD_HOST/api/v1/yard/bot/messages
 Content-Type: application/json
 
 { "kind": "question", "text": "<words>" }
@@ -94,7 +94,7 @@ GET $YARD_HOST/api/v1/yard/bot/log?after=<seq>
 - Each line has a `seq`, a number that is its place in the log. `after=<seq>` answers the lines after it, oldest first; `after=0` starts at the log's first line.
 - A page holds at most 100 lines. `hasMore` is true when more lines wait: read again with `after` set to the page's last `seq`.
 - `session` names the dispatcher's session the seqs belong to. When it changes, a new dispatcher runs: start again from `after=0`.
-- The Mac hides every secret before the page leaves it: a token, a key or a value of its `.env` reads `[hidden]`.
+- The Mac hides every secret before the page leaves it: a token, a key, a value of its `.env` or of Playground's own Keychain items reads `[hidden]`, in a key as in a value.
 - Each read leaves one line in the DM, from the bot, of the kind `log`, saying when it read and which lines: skip those lines as your own.
 
 The answer:

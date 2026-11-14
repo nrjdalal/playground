@@ -140,8 +140,10 @@ Click the sidebar's right edge, or press Cmd+B (Ctrl+B), to collapse or expand i
 
 Below the header are your threads, then the live sessions in groups.
 Click a group's label to close or open it: the sidebar keeps each group as you left it across reloads, and a closed group still shows a session waiting on you or open in the view.
+Every group below your threads moves into any place: drag its label, or focus the label and press Space, the arrows and Space, or use Move up and Move down in its menu (a right click, or Shift+F10).
+This browser keeps the order for your account across reloads, and a new group joins at the end.
 
-- **Channels** and **Direct messages**: your Yard channels and DMs, above Orchestrators, each with its unread count, shown while this Mac reaches Yard (`YARD_API_URL` set and a token from `playground yard login`, in [the playground command](/docs/cli#yard-playground-yard)) and the group has a row.
+- **Channels** and **Direct messages**: your Yard channels and DMs, above Orchestrators until you move them, each with its unread count, shown while this Mac reaches Yard (`YARD_API_URL` set and a token from `playground yard login`, in [the playground command](/docs/cli#yard-playground-yard)) and the group has a row.
 - **Orchestrators**: the sessions that lead the others, each by its role (Builder, Ops, Planner, Optimizer, Assistant, Orchestrator), A to Z by title until you drag them into an order of your own.
   Drag a row, or focus it and press Space, the arrows and Space, or use Move up and Move down in its menu (a right click, a long press, or Shift+F10).
   Reset order to A to Z, in the Orchestrators label's own menu, brings the default back.
@@ -219,7 +221,7 @@ Click the volume button to mute, or hover it a moment to drag the volume up or d
 
 Signed in to the hosted Yard as its owner, you land on `/dashboard` there, this Mac's own Dashboard read from anywhere, the same pages with the same data.
 A Yard channel or DM opens there beside your sessions, as it does on this Mac, and its unread counts update live; Yard's own pages keep a Dashboard item in their footer menu to come back.
-This Mac dials out to Yard, so nothing here listens beyond this machine: it holds the connection while its Dashboard reads your own machine, `YARD_API_URL` is set and `playground yard login` has put a token in the Keychain ([the playground command](/docs/cli#yard-playground-yard)).
+This Mac dials out to Yard, so nothing here listens beyond this machine: it holds the connection while its Dashboard reads your own machine, `YARD_API_URL` is set and `playground yard login` has put a token made with its Relay switch on in the Keychain ([the playground command](/docs/cli#yard-playground-yard)); a token made with the switch off only reads, and holds no connection.
 Yard keeps nothing this Mac sends, and only the owner reaches the page; anyone else gets the 404.
 The board refreshes every 5 seconds there, and the Inbox's Preview row shows no preview.
 From a browser you paired under Settings' [Remote](/docs/settings#remote), you can send a message, its words alone, and answer an Inbox card, with its comment, Later and Done: each one is signed in that browser, and this Mac runs it only once the signature checks out.

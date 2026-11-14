@@ -14,6 +14,7 @@ export type Guard =
   | "no-main-checkout"
   | "no-outside-pr-code"
   | "no-playground-leak"
+  | "no-protected-push"
   | "no-public-leak"
   | "no-raw-delete"
   | "no-raw-spawn"

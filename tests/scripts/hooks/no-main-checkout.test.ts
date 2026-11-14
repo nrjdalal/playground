@@ -142,6 +142,10 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
       "lefthook through bunx past its ignored --cwd",
       "bunx --cwd=.claude/worktrees/a lefthook run pre-commit",
     ],
+    [
+      "a commit after a run-slot call whose words cd away, which runs here",
+      "~/.playground/ops/run-slot.sh w -- cd /tmp; git commit -m x",
+    ],
   ])("%s", async (_name, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-main-checkout hook refuses")
@@ -216,6 +220,10 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ],
     ["a function whose body holds no cd", `function f { :; }; cd ${WORKTREE} && bun run build`],
     ["a brace group that holds no cd", `{ echo hi; }; cd ${WORKTREE} && bun run build`],
+    [
+      "a build inside run-slot's words, in the worktree its own cd names",
+      `~/.playground/ops/run-slot.sh w -- bash -c 'cd ${WORKTREE} && bun run build'`,
+    ],
   ])("from the main checkout, %s runs", async (_name, command) => {
     expect(await bash(command)).toBeUndefined()
   })

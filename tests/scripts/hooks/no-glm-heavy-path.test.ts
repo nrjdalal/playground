@@ -588,6 +588,14 @@ describe("a chained commit or push", () => {
     expect(await bash(`bash ${slot} git status`, dir)).toBeUndefined()
     expect(await bash("bash scripts/other.sh worker-x -- git commit -a -m x", dir)).toBeUndefined()
   })
+
+  test("a commit after a run-slot call whose words cd away is read in the shell's own folder", async () => {
+    const dir = await fresh("chain-slot-cd")
+    const slot = "~/.playground/ops/run-slot.sh worker-x --"
+    await Bun.write(join(dir, "web/next/a.ts"), "y\n")
+    expect(await bash(`${slot} cd ${DIR}; git commit -a -m x`, dir)).toContain("web/next/a.ts")
+    expect(await bash(`${slot} pushd ${DIR}; git commit -a -m x`, dir)).toContain("web/next/a.ts")
+  })
 })
 
 describe("what it passes and how it fails", () => {

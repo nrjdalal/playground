@@ -682,7 +682,7 @@ exit 0`)
       const audit = (calls: string[]) =>
         calls.find((c) => c.startsWith("bun packages/scripts/src/audit.ts"))
       const strict =
-        "bun packages/scripts/src/audit.ts --audit-level high --ignore GHSA-vfj7-8cjw-p6xm"
+        "bun packages/scripts/src/audit.ts --audit-level moderate --ignore GHSA-67mh-4wv8-2f99 --ignore GHSA-g3hv-75wg-m249"
       const over = suiteExec([], undefined, "suite", "{}")
       expect(audit(over.calls)).toBe(`${strict} --new-over ${join(over.root, "run.base")}`)
       expect(audit(suiteExec([], undefined, "suite").calls)).toBe(strict)
