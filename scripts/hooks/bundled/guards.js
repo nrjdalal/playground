@@ -16578,7 +16578,7 @@ var GLOBAL = {
   takes: words("--api --cwd --global-config --local-config --scope --team --token -A -Q -S -T -t")
 };
 var DEPLOY = {
-  flags: words("--create-if-missing --dry --force --guidance --json --logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -y"),
+  flags: words("--create-if-missing --dry --force --guidance --json --logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -f -y"),
   takes: words("--archive --build-env --env --environment --meta --project --regions --target -p")
 };
 var INSTALL = {
@@ -16751,6 +16751,14 @@ function judge7({ flags, positionals }, unreadWord, fed) {
   const name = commandOf4(sub);
   const listing = next === "ls" || next === "list";
   const path = sub !== undefined && !COMMANDS2.has(name) && /[./~]/.test(sub.value);
+  if (name === "deploy" && rest[0] !== undefined && next !== "init") {
+    if (next === "continue")
+      return { production: true, what: "a manual deploy's continue" };
+    if (unreadable(rest[0]))
+      return { production: false, what: "a word built at run time after vercel deploy" };
+    if (!/[./~]/.test(next))
+      return { production: false, what: `\`vercel deploy ${next}\`` };
+  }
   if (name === undefined || name === "deploy" || path)
     return has("--prod") || toProduction(["--environment", "--target"], false) || built ? { production: true, what: "a production deploy" } : undefined;
   if (name === "redeploy")
@@ -16821,7 +16829,7 @@ async function check22(raw, environment = process.env) {
   await run(lex(command), env, visit);
   const always = verdicts.find((v) => !v.production);
   if (always)
-    return `no-raw-vercel hook refuses ${always.what}: in a factory session vercel runs its reads alone (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) and a preview deploy (vercel deploy, or vercel ./<folder>). A secret reaches a project through an Inbox secret ask, and production ships from main through the release skill's ship:merge.`;
+    return `no-raw-vercel hook refuses ${always.what}: in a factory session vercel runs its reads alone (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) and a preview deploy (vercel deploy, vercel deploy init, or vercel ./<folder>). A secret reaches a project through an Inbox secret ask, and production ships from main through the release skill's ship:merge.`;
   const production = verdicts.find((v) => v.production);
   if (!production || await opsLead(raw, environment) && !namesRole(command))
     return;

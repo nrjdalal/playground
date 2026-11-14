@@ -72,7 +72,6 @@ const PRODUCTION: [string, string][] = [
   ["a global option first", "vercel --cwd web deploy --prod"],
   ["a scope first", "vercel -S acme-labs deploy --prod"],
   ["an environment built at run time", 'vercel deploy --environment "$E"'],
-  ["a flag built at run time", 'vercel deploy "$FLAG"'],
   ["a redeploy into the original's environment", "vercel redeploy demo-abc.vercel.app"],
   ["a redeploy to production", "vercel redeploy demo-abc.vercel.app -e production"],
   ["a promote", "vercel promote demo-abc.vercel.app"],
@@ -95,8 +94,10 @@ const PRODUCTION: [string, string][] = [
   ["a production target after the force letter", "vercel deploy -f --target production"],
   [
     "a production deploy after an option the hook does not know",
-    "vercel deploy --made-up x --prod",
+    "vercel deploy --made-up=x --prod",
   ],
+  ["a manual deploy's continue", "vercel deploy continue --deployment dpl_madeup1"],
+  ["a production manual deploy", "vercel deploy init --prod"],
 ]
 
 // Each is no read the guard allows: it writes the project's secrets to disk, prints them or hands them to a command, or changes the project, its domains or its settings.
@@ -154,6 +155,10 @@ const OTHERS: [string, string][] = [
   ["an api GET with a field", "vercel api /v2/user -X GET -F a=b"],
   ["an api GET with a string field", "vercel api /v2/user -X GET -f a=b"],
   ["an api GET with an input file", "vercel api /v2/user -X GET --input x"],
+  ["a deploy describe", "vercel deploy describe --deployment dpl_madeup1"],
+  ["a deploy subcommand the hook does not know", "vercel deploy madeupsub"],
+  ["a word after an option of deploy's the hook does not know", "vercel deploy --made-up x --prod"],
+  ["a word built at run time after deploy", 'vercel deploy "$WORD"'],
 ]
 
 // The prefixes a call can come behind.
@@ -264,6 +269,8 @@ describe("a read, a preview and a help run", () => {
     ["an integration list", "vercel integration ls"],
     ["a bare preview deploy", "vercel"],
     ["a preview deploy", "vercel deploy --yes"],
+    ["a manual preview deploy", "vercel deploy init"],
+    ["a preview deploy of a folder", "vercel deploy ./web"],
     ["a preview by its environment", "vercel deploy --environment preview"],
     ["a redeploy to preview", "vercel redeploy demo-abc.vercel.app --environment preview"],
     ["an env list", "vercel env ls"],

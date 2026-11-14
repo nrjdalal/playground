@@ -1,4 +1,4 @@
-// A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: lets a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx) run only as a read (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) or a preview deploy, and refuses every other call, a command a later CLI adds included; a production move (a production deploy, which also migrates the hosted database, a redeploy, a promote, a rollback, an alias or a rolling release) passes for the Ops lead alone, in a call that names no role variable and sources no file.
+// A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: lets a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx) run only as a read (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) or a preview deploy, and refuses every other call, a command or deploy subcommand a later CLI adds included; a production move (a production deploy, which also migrates the hosted database, a deploy continue, a redeploy, a promote, a rollback, an alias or a rolling release) passes for the Ops lead alone, in a call that names no role variable and sources no file.
 import { toolWords } from "./no-main-checkout"
 import { namesRole, opsLead } from "./role"
 import { type Env, lex, run, unreadable, viaXargs, type Visit, type Word } from "./shell"
@@ -17,7 +17,7 @@ const GLOBAL: Options = {
 // The options of each command judged here, from its --help on 65.8.0; any other option is read both ways, as a flag and as taking the next word.
 const DEPLOY: Options = {
   flags: words(
-    "--create-if-missing --dry --force --guidance --json --logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -y",
+    "--create-if-missing --dry --force --guidance --json --logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -f -y",
   ),
   takes: words("--archive --build-env --env --environment --meta --project --regions --target -p"),
 }
@@ -214,6 +214,13 @@ function judge(
   const listing = next === "ls" || next === "list"
   // a first word that names no command is the folder deploy takes only when it reads as a path, so a command a later CLI adds is refused
   const path = sub !== undefined && !COMMANDS.has(name!) && /[./~]/.test(sub.value)
+  // deploy's own subcommands: continue lands a deployment whose target the hook cannot read, init keeps deploy's rules, and any other word but a path is refused, so one a later CLI adds stays closed
+  if (name === "deploy" && rest[0] !== undefined && next !== "init") {
+    if (next === "continue") return { production: true, what: "a manual deploy's continue" }
+    if (unreadable(rest[0]))
+      return { production: false, what: "a word built at run time after vercel deploy" }
+    if (!/[./~]/.test(next!)) return { production: false, what: `\`vercel deploy ${next}\`` }
+  }
   if (name === undefined || name === "deploy" || path)
     return has("--prod") || toProduction(["--environment", "--target"], false) || built
       ? { production: true, what: "a production deploy" }
@@ -300,7 +307,7 @@ export async function check(
   await run(lex(command), env, visit)
   const always = verdicts.find((v) => !v.production)
   if (always)
-    return `no-raw-vercel hook refuses ${always.what}: in a factory session vercel runs its reads alone (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) and a preview deploy (vercel deploy, or vercel ./<folder>). A secret reaches a project through an Inbox secret ask, and production ships from main through the release skill's ship:merge.`
+    return `no-raw-vercel hook refuses ${always.what}: in a factory session vercel runs its reads alone (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) and a preview deploy (vercel deploy, vercel deploy init, or vercel ./<folder>). A secret reaches a project through an Inbox secret ask, and production ships from main through the release skill's ship:merge.`
   const production = verdicts.find((v) => v.production)
   if (!production || ((await opsLead(raw, environment)) && !namesRole(command))) return
   return `no-raw-vercel hook refuses ${production.what}: it changes what production serves, and a production deploy also migrates the hosted database. Production ships from main through the release skill's ship:merge; the Ops lead alone makes a hand production move, in a call that names no role variable and sources no file. A preview deploy (vercel deploy without --prod) and the reads (whoami, ls, inspect, logs, help) run.`
