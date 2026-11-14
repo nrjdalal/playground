@@ -417,9 +417,14 @@ describe("the closed sandbox lets a session work in its own worktree", () => {
     expect(under(denyWrite)(join(main, ".git", "refs", "heads", "live", "dashboard"))).toBe(false)
   })
 
-  test("a start without --sandbox makes no worktree", async () => {
+  test("a start with --no-sandbox makes no worktree", async () => {
     const { env, main, spawnSh } = checkout()
-    const r = await spawn(["worker", "worker-x", "b.md", "--reads-only"], [], env, spawnSh)
+    const r = await spawn(
+      ["worker", "worker-x", "b.md", "--reads-only", "--no-sandbox"],
+      [],
+      env,
+      spawnSh,
+    )
     expect(r.code, r.err).toBe(0)
     expect(existsSync(treeOf(main, "worker-x"))).toBe(false)
   })
@@ -451,6 +456,134 @@ describe("the closed sandbox lets a session work in its own worktree", () => {
 })
 
 // The closed sandbox refuses every Keychain read, so a start from inside it cannot tell an --account's item is there; the new pane's shell, outside the sandbox, still stops on a missing one before claude runs.
+// issue 2059: a fresh worker's or reviewer's start that works in this checkout takes the closed sandbox with no flag, and --no-sandbox, which a stack worker gives, opts it out.
+describe("the closed sandbox is the default for a worker or reviewer with no stack", () => {
+  // SANDBOX_DEFAULT keeps spawn-fake from opting the case out, so spawn.sh's own default decides.
+  const fresh = { SANDBOX_DEFAULT: "1" }
+  const reviewer = ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"]
+
+  test.each([
+    [
+      "a worker",
+      "worker-brave-otter",
+      "worker-brave-otter",
+      ["worker", "worker-brave-otter", "b.md", "--reads-only"],
+    ],
+    [
+      "a reviewer's column of this checkout's PR",
+      "reviewer-x",
+      "review-1",
+      [...reviewer, "--pr", "1"],
+    ],
+  ])(
+    "%s with no flag starts on the closed sandbox's file in a worktree made for it",
+    async (_, name, leaf, args) => {
+      const { env, main, spawnSh } = checkout()
+      const r = await spawn(args, [], { ...env, ...fresh }, spawnSh)
+      expect(r.code, r.err).toBe(0)
+      expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, closedFile(name))} `)
+      expect(builtOf(r, closedFile(name)).sandbox).toEqual(closedOf(r.home, workOf(main, leaf)))
+      expect(existsSync(treeOf(main, leaf))).toBe(true)
+      expect(r.roster).toContain("sandbox=on")
+    },
+  )
+
+  test.each([
+    [
+      "a worker",
+      "worker-brave-otter",
+      ["worker", "worker-brave-otter", "b.md", "--reads-only", "--no-sandbox"],
+    ],
+    ["a reviewer's column", "review-1", [...reviewer, "--pr", "1", "--no-sandbox"]],
+  ])(
+    "%s with --no-sandbox starts on the open file, with no worktree made",
+    async (_, leaf, args) => {
+      const { env, main, spawnSh } = checkout()
+      const r = await spawn(args, [], { ...env, ...fresh }, spawnSh)
+      expect(r.code, r.err).toBe(0)
+      expect(launchAfterRm(r)).toContain(
+        ` --settings ${settingsOf(r, "factory-settings-400k.json")} `,
+      )
+      expect(existsSync(treeOf(main, leaf))).toBe(false)
+      expect(r.roster?.some((word) => word.startsWith("sandbox="))).toBe(false)
+    },
+  )
+
+  // A tester drives a stack, a worker's --in names a folder the lead picked, and another repository's PR is no worktree of this checkout, so each keeps the open file.
+  test.each([
+    [
+      "a tester's column",
+      "tester-x",
+      ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1"],
+    ],
+    [
+      "a worker with --in",
+      "worker-brave-otter",
+      ["worker", "worker-brave-otter", "b.md", "--in", "{home}/code", "--reads-only"],
+    ],
+    [
+      "a reviewer of another repository's PR",
+      "reviewer-x",
+      [...reviewer, "--pr", "https://github.com/acme/other/pull/7"],
+    ],
+  ])("%s with no flag starts on the open file", async (_, name, args) => {
+    const { env, main, spawnSh } = checkout()
+    const r = await spawn(args, [], { ...env, ...fresh }, spawnSh)
+    expect(r.code, r.err).toBe(0)
+    expect(launchAfterRm(r)).toContain(
+      ` --settings ${settingsOf(r, "factory-settings-400k.json")} `,
+    )
+    expect(existsSync(treeOf(main, name))).toBe(false)
+  })
+
+  test("a resume of a row that records no sandbox stays on the open file", async () => {
+    const name = "worker-brave-otter"
+    const r = await spawn(
+      ["resume", name, root, "b8f48a29-2ab2-4dc3-b37f-5a0525fe5c38"],
+      [],
+      {
+        ...fresh,
+        ROSTER_JSON: JSON.stringify({
+          agents: [{ kind: "worker", name, role: "worker", status: "working" }],
+        }),
+      },
+      undefined,
+      { name, backend: "claude" },
+    )
+    expect(r.code, r.err).toBe(0)
+    expect(launchAfterRm(r)).toContain(
+      ` --settings ${settingsOf(r, "factory-settings-400k.json")} `,
+    )
+  })
+
+  test.each([
+    [
+      "a tester",
+      ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md", "--pr", "1", "--no-sandbox"],
+      "not a tester's",
+    ],
+    ["a probe", ["probe", "probe-x", "ops", "p.md", "--no-sandbox"], "not a probe's"],
+    ["a runner", ["runner", "runner-calm-heron", "b.md", "--no-sandbox"], "not a runner's"],
+    ["a manager", ["manager", "optimizer", "b.md", "--no-sandbox"], "not a manager's"],
+  ])("--no-sandbox is refused for %s before herdr runs", async (_, args, which) => {
+    const r = await spawn(args, [], fresh)
+    expect(r.code).toBe(2)
+    expect(r.err).toContain(`--no-sandbox is for a worker's or a reviewer's start, ${which}`)
+    expect(r.roster).toBeUndefined()
+  })
+
+  test("--sandbox beside --no-sandbox is refused before herdr runs", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md", "--sandbox", "--no-sandbox"],
+      [],
+      fresh,
+    )
+    expect(r.code).toBe(2)
+    expect(r.err).toContain("--sandbox and --no-sandbox are each other's opposite; give one")
+    expect(r.roster).toBeUndefined()
+  })
+})
+
 describe("a start from inside the sandbox leaves the Keychain check to the new pane", () => {
   const inside = { FAKE_NO_ITEM: "1", SANDBOX_RUNTIME: "1" }
 
