@@ -18205,8 +18205,16 @@ async function check26(raw, environment = process.env, guards = GUARDS, wait = D
 
 `) || undefined;
 }
-async function hook(guards = GUARDS) {
-  const reason = await check26(await Bun.stdin.text(), process.env, guards, DEADLINE - performance.now());
+var unread3 = `guards hook: the call's input did not arrive by its deadline, about ${DEADLINE / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`;
+async function hook(guards = GUARDS, deadline = DEADLINE) {
+  let timer;
+  const raw = await Promise.race([
+    Bun.stdin.text(),
+    new Promise((done) => {
+      timer = setTimeout(() => done(undefined), deadline - performance.now());
+    })
+  ]).finally(() => clearTimeout(timer));
+  const reason = raw === undefined ? unread3 : await check26(raw, process.env, guards, deadline - performance.now());
   if (!reason)
     return 0;
   console.error(reason);
