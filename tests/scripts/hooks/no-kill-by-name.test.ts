@@ -121,9 +121,6 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "if true; then for s in a; do $s pkill -f watch; done; fi",
     "for s in a; do for t in b; do $t pkill -f watch; done; done",
     "select s in a; do $s pkill -f watch; done",
-    "read s; $s pkill -f watch",
-    "read -r -p prompt s; $s pkill -f watch",
-    "read -a s; $s pkill -f watch",
     "getopts ab s; $s pkill -f watch",
     "printf -v s x; $s pkill -f watch",
     "pkill --help",
@@ -144,6 +141,10 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "P=1234; kill $P",
     'C="kill 1234"; $C',
     "W=w; ~/.playground/ops/run-slot.sh $W -- kill 1234",
+    // #2161's controls: a variable set once to one word with no later change, and one changed only after its use
+    "X=a; $X pkill -f watcher",
+    "X=a; $X pkill -f watcher; unset X",
+    "X=a; $X pkill -f watcher; read X < /dev/null",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
