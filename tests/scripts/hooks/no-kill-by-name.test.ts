@@ -55,12 +55,15 @@ describe("a signal sent by name or pattern is refused, with the way out", () => 
     "~/.playground/ops/run-slot.sh w -- kill $(lsof -ti :3000)",
     "~/.playground/ops/run-slot.sh w -- pgrep -f watch | xargs kill",
     "bash ~/.playground/ops/run-slot.sh w -- pkill node",
+    "sh ~/.playground/ops/run-slot.sh w -- killall node",
+    "zsh ~/.playground/ops/run-slot.sh w -- kill $(lsof -ti :3000)",
     "pgrep -f watch | xargs ~/.playground/ops/run-slot.sh w -- kill",
     "lsof -ti :3000 | xargs ~/.playground/ops/run-slot.sh w -- kill -9",
     "pgrep -f watch | xargs -n1 ~/.playground/ops/run-slot.sh w -- kill",
     "pgrep -f watch | xargs bash ~/.playground/ops/run-slot.sh w -- kill",
     "pgrep -f watch | xargs sh ~/.playground/ops/run-slot.sh w -- kill",
     "pgrep -f watch | xargs -n1 bash ~/.playground/ops/run-slot.sh w -- kill",
+    "pgrep -f watch | xargs zsh ~/.playground/ops/run-slot.sh w -- kill",
   ])("%s", async (command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-kill-by-name hook refuses")
