@@ -66,6 +66,7 @@ A stacked child retargeted to canary after its parent merges pushes a merge of c
 A stack held at 5/5 until the owner's try syncs with canary only on a conflict, plus once before the try, and each sync's round cites CI where CI can stand in for the local run, since every sync re-scores every PR in the stack.
 A worker that merges canary or a stack's parent in keeps that merge plain and commits each edit after it on its own, since review scores an edit inside a merge as blocking.
 A lane's item aims at about 1,000 changed lines or fewer, and a bigger diff splits off canary as a new PR, since a diff too big to read whole finds new blocking issues every round.
+A premise in a brief or a plan about how a tool behaves carries the file:line it was read at, and the lead's plan review sends back a premise with no cite, since a folded change once rested on an unread premise about where `spawn.sh resume` runs and cost a round.
 Every new guard or gate states its shape in its plan before round 1: an allow list or a list of refused forms, that it fails closed, and which roles pass (for a command one role alone runs, an allow list of its subcommands checked against the launching process's role, as `launchAbove` in `packages/scripts/src/ship/yard.ts` reads it);
 the lead's plan review checks that line before the worker builds,
 since two guard PRs that reserved a command for one role each took 6 rounds, 4 to 5 of their 12 spent on lists of refused spellings that the final allow list or launch check made moot.
