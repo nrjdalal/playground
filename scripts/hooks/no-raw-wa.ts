@@ -5,6 +5,7 @@ import { resolve } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
 import { eachInput } from "./codex"
+import { input } from "./input"
 import { fromFactory } from "./role"
 import {
   knownVariables,
@@ -236,7 +237,7 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-raw-wa", "guard")
   const reason = (await fromFactory(raw)) ? await check(raw) : undefined
   if (reason) {
     console.error(reason)

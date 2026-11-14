@@ -362,7 +362,7 @@ main() {
   [ "$OS" = Darwin ] && service=$'\n'"  $PORTLESS_PLIST  portless's proxy service, installed with sudo, and its certificate in the System keychain"
   cat <<EOF
 Playground installs into $DIR. Outside it, it writes only in:
-  $HOME/.bun/bin             the playground command
+  $HOME/.bun/bin             the playground command, and on Linux the secret store as security
   $HOME/.playground          the data folder: your extensions, the brief templates, the ops scripts and the skill sets
   Claude Code's user settings  the home skill set, installed with claude plugin install
   $startup  a PATH line for each tool it installs off your PATH, once$service

@@ -1,5 +1,6 @@
 // PreToolUse hook: refuses a git merge or git pull with the ours strategy or the ours strategy option, since the PR's squash onto canary then deletes whatever canary added that the merge ignored, while canary reads as merged in and every gate stays green.
 
+import { input } from "./input"
 import { gitCommand } from "./no-stash"
 import { fromFactory } from "./role"
 import {
@@ -141,7 +142,7 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-ours-merge", "guard")
   const reason = (await fromFactory(raw)) ? await check(raw) : undefined
   if (reason) {
     console.error(reason)
