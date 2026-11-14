@@ -22,17 +22,19 @@ import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 
 import { ApiError } from "@/lib/error"
 import { live, take } from "@/lib/yard/limits"
+import { isRelayToken, sameKind, tokenSecret as secret } from "@/lib/yard/secret"
 import { HELD_KINDS, heldBecause, mentionsOf } from "@/lib/yard/tier"
 
 type YardChannel = typeof yardChannel.$inferSelect
 
-// Who is calling: a member signed in on the web, or one of their tokens, whose name is the device a post carries; bot names the member who made a bot's token's user (yard_bot), and whether the owner lets it read the dispatcher's log.
+// Who is calling: a member signed in on the web, or one of their tokens, whose name is the device a post carries; bot names the member who made a bot's token's user (yard_bot), and whether the owner lets it read the dispatcher's log; relay marks a relay-on token (createRelayToken), which writes and may hold the relay, where any other member's token reads alone.
 export type Caller = {
   bot?: { madeBy: string; readsLog?: boolean }
   device: string
   id: string
   login: string
   owner: boolean
+  relay?: true
   via: "token" | "web"
 }
 
@@ -46,8 +48,6 @@ export const JOINED_ON_REDEEM = [
 export const WRITES_HOUR = 20
 
 export const hashOf = (secret: string): string => createHash("sha256").update(secret).digest("hex")
-
-const secret = (prefix: string): string => `${prefix}${randomBytes(24).toString("base64url")}`
 
 // A unique-constraint violation, which a write that can lose a race answers as 409; drizzle wraps the driver's error as its cause.
 const taken = (error: unknown): boolean => {
@@ -504,11 +504,17 @@ export const tokens = async (db: Database, caller: Caller) =>
       .orderBy(asc(yardToken.name))
   ).map(tokenOut)
 
-// A new token: its secret, yard_ and 32 random characters, is returned this once and kept only as its hash.
-export const createToken = async (db: Database, caller: Caller, name: string, now = Date.now()) => {
+// A new token: its secret, its prefix and 32 random characters, is returned this once and kept only as its hash.
+const mintToken = async (
+  db: Database,
+  caller: Caller,
+  name: string,
+  prefix: string,
+  now: number,
+) => {
   tokenNameSchema.parse(name)
   await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR, now)
-  const value = secret("yard_")
+  const value = secret(prefix)
   try {
     const [row] = await db
       .insert(yardToken)
@@ -521,6 +527,13 @@ export const createToken = async (db: Database, caller: Caller, name: string, no
   }
 }
 
+export const createToken = (db: Database, caller: Caller, name: string, now = Date.now()) =>
+  mintToken(db, caller, name, "yard_", now)
+
+// A relay-on token, a Mac's one token with its Relay switch on: it reads and posts as its member does, and the owner's alone holds the relay (relayRouter's socket).
+export const createRelayToken = (db: Database, caller: Caller, name: string, now = Date.now()) =>
+  mintToken(db, caller, name, "yard_relay_", now)
+
 export const revokeToken = async (db: Database, caller: Caller, id: string) => {
   const [row] = await db
     .update(yardToken)
@@ -531,7 +544,38 @@ export const revokeToken = async (db: Database, caller: Caller, id: string) => {
   return tokenOut(row)
 }
 
-// The member a token names, when it is live, stamping its last use, with the bot row when its user is a bot.
+// A token's swap of itself, in place: its row takes next's hash, keeping its name, its member and so its kind, which next must share (sameKind), and makes no other token; old's next call reads 401. A swap counts on the member's token writes.
+export const swapToken = async (
+  db: Database,
+  caller: Caller,
+  old: string,
+  next: string,
+  now = Date.now(),
+) => {
+  if (!sameKind(old, next))
+    throw new ApiError(400, "BAD_REQUEST", "A token swaps for a new one of its own kind")
+  await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR, now)
+  try {
+    const [row] = await db
+      .update(yardToken)
+      .set({ hash: hashOf(next) })
+      .where(
+        and(
+          eq(yardToken.hash, hashOf(old)),
+          eq(yardToken.userId, caller.id),
+          isNull(yardToken.revokedAt),
+        ),
+      )
+      .returning()
+    if (!row) throw new ApiError(401, "UNAUTHORIZED", "Unauthorized")
+    return tokenOut(row)
+  } catch (error) {
+    if (taken(error)) throw new ApiError(409, "CONFLICT", "That secret is taken")
+    throw error
+  }
+}
+
+// The member a token names, when it is live, stamping its last use, with the bot row when its user is a bot, and whether it is relay-on.
 export const tokenOwner = async (db: Database, value: string) => {
   const [row] = await db
     .select({ bot: yardBot, name: yardToken.name, tokenId: yardToken.id, user })
@@ -544,6 +588,7 @@ export const tokenOwner = async (db: Database, value: string) => {
   return {
     bot: row.bot ? { madeBy: row.bot.madeBy, readsLog: row.bot.readsLog } : null,
     device: row.name,
+    relay: isRelayToken(value),
     user: row.user,
   }
 }

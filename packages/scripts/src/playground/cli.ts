@@ -151,15 +151,24 @@ const managerAlone = async (kind: ManagerVerb, words: string[]): Promise<number>
   return 1
 }
 
-// Loaded only for sweep, since sweep.ts reaches past this folder into ops-tick; its holds read through gh and the Dashboard's checkout.
+// Loaded only for sweep, since sweep.ts reaches past this folder into ops-tick; its holds read through gh and the Dashboard's checkout, and the Builder's open PRs through one gh call.
 const sweep = async (lead: string): Promise<number> => {
-  const { readHold, runSweep } = await import("./sweep")
+  const { readHold, readOpenPrs, runSweep } = await import("./sweep")
   const { factoryRepoOf } = await import("./setting")
   try {
-    // with no factory.repo to read, each issue or PR hold reads as unreadable rather than stopping the sweep
+    // with no factory.repo to read, each issue or PR hold reads as unreadable and the open PRs as unread, rather than stopping the sweep
     const factory = await factoryRepoOf().catch(() => "")
     console.log(
-      (await runSweep(lead, dataDir(), undefined, undefined, readHold(REPO, factory))).join("\n"),
+      (
+        await runSweep(
+          lead,
+          dataDir(),
+          undefined,
+          undefined,
+          readHold(REPO, factory),
+          readOpenPrs(factory),
+        )
+      ).join("\n"),
     )
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error))

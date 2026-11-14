@@ -1,0 +1,321 @@
+// A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: lets a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx) run only as a read (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) or a preview deploy, and refuses every other call, a command or deploy subcommand a later CLI adds included; a production move (a production deploy, which also migrates the hosted database, a deploy continue, a redeploy, a promote, a rollback, an alias or a rolling release) passes for the Ops lead alone, in a call that names no role variable and sources no file.
+import { toolWords } from "./no-main-checkout"
+import { namesRole, opsLead } from "./role"
+import { type Env, lex, run, unreadable, viaXargs, type Visit, type Word } from "./shell"
+
+type Environment = Record<string, string | undefined>
+type Verdict = { production: boolean; what: string }
+
+const NAMES = ["vc", "vercel"]
+const words = (text: string) => new Set(text.split(" "))
+type Options = { flags: Set<string>; takes: Set<string> }
+// vercel 65.8.0's global options (`vercel --help` and globalCommandOptions in its dist), which every command takes.
+const GLOBAL: Options = {
+  flags: words("--debug --help --no-color --non-interactive --version -d -h -v"),
+  takes: words("--api --cwd --global-config --local-config --scope --team --token -A -Q -S -T -t"),
+}
+// The options of each command judged here, from its --help on 65.8.0; any other option is read both ways, as a flag and as taking the next word.
+// deploy's from deployCommand in the dist, its deprecated letters included: -e is --env's and -b --build-env's (DEPRECATED_SHORTHANDS), so neither names the environment.
+const DEPLOY: Options = {
+  flags: words(
+    "--confirm --create-if-missing --dry --force --guidance --json --logs --no-clipboard --no-logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -c -f -l -y",
+  ),
+  takes: words(
+    "--archive --build-env --env --environment --format --meta --name --project --regions --target -F -b -e -m -n -p",
+  ),
+}
+const INSTALL: Options = {
+  flags: words("--claim --json --no-claim --no-connect --no-env-pull"),
+  takes: words("--billing-plan --environment --installation --meta --name --prefix -e"),
+}
+const OWN: Record<string, Options> = {
+  api: {
+    flags: words(
+      "--dangerously-skip-permissions --include --paginate --raw --refresh --silent --verbose -i",
+    ),
+    takes: words("--field --generate --header --input --method --raw-field --spec-url -F -H -X -f"),
+  },
+  deploy: DEPLOY,
+  env: {
+    flags: words("--guidance --json --yes -y"),
+    takes: words("--environment --format --git-branch --project -F -e -p"),
+  },
+  install: INSTALL,
+  integration: INSTALL,
+  promote: { flags: words("--yes -y"), takes: words("--timeout") },
+  redeploy: { flags: words("--no-wait"), takes: words("--environment --target -e") },
+  rollback: { flags: words("--yes -y"), takes: words("--timeout") },
+}
+// Each command alias vercel 65.8.0 registers (commandsStructs' aliases in its dist), read as its command.
+const ALIASES = new Map(
+  Object.entries({
+    aliases: "alias",
+    budget: "budgets",
+    cert: "certs",
+    cron: "crons",
+    daemon: "daemons",
+    "deploy-hook": "deploy-hooks",
+    develop: "dev",
+    domain: "domains",
+    drain: "drains",
+    "edge-config": "global-config",
+    environment: "environments",
+    i: "install",
+    image: "images",
+    ir: "integration-resource",
+    ln: "alias",
+    log: "logs",
+    ls: "list",
+    mf: "microfrontends",
+    organization: "organizations",
+    permission: "permissions",
+    projects: "project",
+    rm: "remove",
+    rr: "rolling-release",
+    "status-page": "health",
+    switch: "teams",
+    tags: "tag",
+    target: "environments",
+    targets: "environments",
+    team: "teams",
+    versions: "version",
+    webhook: "webhooks",
+  }),
+)
+// vercel 65.8.0's commands (commandsStructs' names in its dist); any other first word is the path the default command, deploy, takes.
+const COMMANDS = words(
+  "activity agent agent-runs ai-gateway alerts alias api bisect blob budgets build builders buy cache certs changelog ci comments config connect contract crons curl daemons deploy deploy-hooks dev dns domains drains env environments experiments feedback firewall flags git global-config guidance health help httpstat image images init inspect install integration integration-resource kms link list login logout logs mcp metrics microfrontends monitors notifications open organizations page-integrity permissions pricing project promote pull redeploy redirects remove rollback rolling-release routes sandbox schedules security setup signup skills storage tag teams telemetry tokens traces upgrade usage vcr version webhooks whoami",
+)
+// The reads that pass whatever their options; judge() reads every other command by its words.
+const READS = words("help inspect list logs whoami")
+// The commands whose ls or list subcommand is a read.
+const LISTS = words("dns domains integration project teams")
+const HELP = new Set(["--help", "--version", "-h", "-v"])
+const API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"])
+// The readings one call's options make at most, so many unknown options cost a bounded time; past them the call is refused as one the hook cannot read.
+const READINGS = 64
+
+const MENTION = /\bv(?:ercel|c)\b/i
+// vercel or vc as a word of its own (an assignment's value, a tool at a version), so a program built at run time on such a line may be it.
+const NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i
+
+type Flag = { name: string; value?: Word }
+type Reading = { flags: Flag[]; positionals: Word[] }
+
+// Every reading of a call's words under these options, each up to its first positional when toSub is set: an option on neither list is read both as a flag and as taking the next word (or the rest of its cluster), or undefined past READINGS.
+function readingsOf(args: Word[], { flags, takes }: Options, toSub = false): Reading[] | undefined {
+  const out: Reading[] = []
+  const walk = (k: number, read: Reading): boolean => {
+    if (out.length >= READINGS) return false
+    for (; k < args.length; k++) {
+      const v = args[k]!.value
+      if (v === "--") {
+        out.push({ ...read, positionals: [...read.positionals, ...args.slice(k + 1)] })
+        return true
+      }
+      if (v.startsWith("--")) {
+        const eq = v.indexOf("=")
+        const name = eq === -1 ? v : v.slice(0, eq)
+        if (eq !== -1)
+          read = {
+            ...read,
+            flags: [...read.flags, { name, value: { ...args[k]!, value: v.slice(eq + 1) } }],
+          }
+        else if (takes.has(name))
+          read = { ...read, flags: [...read.flags, { name, value: args[++k] }] }
+        else if (flags.has(name)) read = { ...read, flags: [...read.flags, { name }] }
+        else {
+          if (!walk(k + 2, { ...read, flags: [...read.flags, { name, value: args[k + 1] }] }))
+            return false
+          read = { ...read, flags: [...read.flags, { name }] }
+        }
+        continue
+      }
+      if (v.startsWith("-") && v.length > 1) {
+        for (let c = 1; c < v.length; c++) {
+          const name = `-${v[c]}`
+          const attached =
+            c + 1 < v.length
+              ? { ...args[k]!, value: v.slice(v[c + 1] === "=" ? c + 2 : c + 1) }
+              : undefined
+          if (flags.has(name)) {
+            read = { ...read, flags: [...read.flags, { name }] }
+            continue
+          }
+          const taken = {
+            ...read,
+            flags: [...read.flags, { name, value: attached ?? args[k + 1] }],
+          }
+          if (takes.has(name)) {
+            read = taken
+            if (!attached) k++
+            break
+          }
+          if (!walk(attached ? k + 1 : k + 2, taken)) return false
+          read = { ...read, flags: [...read.flags, { name }] }
+        }
+        continue
+      }
+      read = { ...read, positionals: [...read.positionals, args[k]!] }
+      if (toSub) break
+    }
+    out.push(read)
+    return true
+  }
+  return walk(0, { flags: [], positionals: [] }) ? out : undefined
+}
+
+const commandOf = (word: Word | undefined): string | undefined =>
+  word === undefined ? undefined : (ALIASES.get(word.value) ?? word.value)
+
+// What one vercel call does that the hook refuses, or undefined when it reads, deploys a preview or prints help: the gravest verdict over every reading of its options, first by the global ones alone, then by its command's own.
+function judgeAll(args: Word[], fed: boolean): Verdict | undefined {
+  const unread: Verdict = {
+    production: false,
+    what: "a vercel call with more options than the hook reads",
+  }
+  const first = readingsOf(args, GLOBAL, true)
+  if (!first) return unread
+  const verdicts: (Verdict | undefined)[] = []
+  for (const name of new Set(first.map((r) => commandOf(r.positionals[0])))) {
+    // a read (logs, inspect, whoami) passes whatever options follow it
+    if (name !== undefined && READS.has(name)) continue
+    const own = OWN[name !== undefined && COMMANDS.has(name) ? name : "deploy"]
+    const options = own
+      ? {
+          flags: new Set([...GLOBAL.flags, ...own.flags]),
+          takes: new Set([...GLOBAL.takes, ...own.takes]),
+        }
+      : GLOBAL
+    const readings = readingsOf(args, options)
+    if (!readings) return unread
+    for (const reading of readings) verdicts.push(judge(reading, args.some(unreadable), fed))
+  }
+  return verdicts.find((v) => v && !v.production) ?? verdicts.find(Boolean)
+}
+
+function judge(
+  { flags, positionals }: Reading,
+  unreadWord: boolean,
+  fed: boolean,
+): Verdict | undefined {
+  if (flags.some((f) => HELP.has(f.name))) return
+  const [sub, ...rest] = positionals
+  if (sub && unreadable(sub)) return { production: false, what: "a subcommand built at run time" }
+  // xargs puts words from stdin among its words, which the hook cannot read, so a fed call it judges is refused for every session
+  if (fed) return { production: false, what: "a vercel call whose words xargs feeds" }
+  const built = unreadWord
+  const has = (...names: string[]) => flags.some((f) => names.includes(f.name))
+  // whether the last of these flags names production, or one it cannot read; absent, the command's own default
+  const toProduction = (names: string[], absent: boolean) => {
+    const flag = flags.findLast((f) => names.includes(f.name))
+    if (!flag) return absent
+    return !flag.value || unreadable(flag.value) || flag.value.value.toLowerCase() === "production"
+  }
+  const next = rest[0]?.value
+  const name = commandOf(sub)
+  const listing = next === "ls" || next === "list"
+  // a first word that names no command is the folder deploy takes only when it reads as a path, so a command a later CLI adds is refused
+  const path = sub !== undefined && !COMMANDS.has(name!) && /[./~]/.test(sub.value)
+  // deploy's own subcommands: continue lands a deployment whose target the hook cannot read, init keeps deploy's rules, and any other word but a path is refused, so one a later CLI adds stays closed
+  if (name === "deploy" && rest[0] !== undefined && next !== "init") {
+    if (next === "continue") return { production: true, what: "a manual deploy's continue" }
+    if (unreadable(rest[0]))
+      return { production: false, what: "a word built at run time after vercel deploy" }
+    if (!/[./~]/.test(next!)) return { production: false, what: `\`vercel deploy ${next}\`` }
+  }
+  // deploy's -e is --env's letter in 65.8.0 but names the environment on redeploy and env, and a letter's meaning can move between versions, and a run-time env var is KEY=VALUE, so a value with no = reads as the environment
+  const envLetter = flags.some(
+    (f) => f.name === "-e" && (!f.value || unreadable(f.value) || !f.value.value.includes("=")),
+  )
+  if (name === undefined || name === "deploy" || path)
+    return has("--prod") || toProduction(["--environment", "--target"], false) || envLetter || built
+      ? { production: true, what: "a production deploy" }
+      : undefined
+  if (name === "redeploy")
+    return toProduction(["--environment", "-e", "--target"], true) || built
+      ? { production: true, what: "a redeploy that may land in production" }
+      : undefined
+  if (name === "promote" || name === "rollback")
+    return next === "status" ? undefined : { production: true, what: `a ${name}` }
+  if (name === "alias") return listing ? undefined : { production: true, what: "an alias change" }
+  if (name === "rolling-release")
+    return next === "inspect" ? undefined : { production: true, what: "a rolling release step" }
+  if (LISTS.has(name) && listing) return
+  if (name === "env" && listing) {
+    const format = flags.findLast((f) => f.name === "--format" || f.name === "-F")
+    const json =
+      !!format &&
+      (!format.value || unreadable(format.value) || format.value.value.toLowerCase() === "json")
+    return has("--json") || json || built
+      ? { production: false, what: "an env list with its values" }
+      : undefined
+  }
+  if (name === "api") return judgeApi(rest, flags, built)
+  const words = [sub!.value, ...(next === undefined || unreadable(rest[0]!) ? [] : [next])]
+  return { production: false, what: `\`vercel ${words.join(" ")}\`` }
+}
+
+// A vercel api call: a write (a method other than GET, or any body) or a read of a project's env.
+function judgeApi(rest: Word[], flags: Flag[], built: boolean): Verdict | undefined {
+  const [endpoint] = rest
+  if (!endpoint || endpoint.value === "list") return
+  if (built) return { production: false, what: "a vercel api call built at run time" }
+  const method = flags.findLast((f) => f.name === "-X" || f.name === "--method")
+  if (method && (!method.value || method.value.value.toUpperCase() !== "GET"))
+    return { production: false, what: "a vercel api write" }
+  if (flags.some((f) => API_BODY.has(f.name)))
+    return { production: false, what: "a vercel api call with a body" }
+  if (/(?:^|\/)env(?:[/?#]|$)/i.test(endpoint.value))
+    return { production: false, what: "a vercel api read of a project's env" }
+}
+
+export async function check(
+  raw: string,
+  environment: Environment = process.env,
+): Promise<string | undefined> {
+  const {
+    cwd,
+    tool_input: toolInput,
+    tool_name: tool,
+  } = JSON.parse(raw) as {
+    cwd?: unknown
+    tool_input?: { command?: unknown }
+    tool_name?: unknown
+  }
+  if (tool !== "Bash" || typeof toolInput?.command !== "string") return
+  const command = toolInput.command
+  if (!MENTION.test(command.replace(/["'\\]/g, ""))) return
+  const verdicts: Verdict[] = []
+  const visit: Visit = async (_cmd, parsed, shell) => {
+    if (parsed.first && unreadable(parsed.first) && NAMED.test(command))
+      verdicts.push({
+        production: false,
+        what: "a program built at run time on a line naming vercel",
+      })
+    const words = toolWords(NAMES, parsed.name, parsed.args, shell)
+    // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string
+    const verdict =
+      words &&
+      judgeAll(
+        words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })),
+        parsed.xargs !== undefined,
+      )
+    if (verdict) verdicts.push(verdict)
+    return undefined
+  }
+  const env: Env = {
+    cwd: typeof cwd === "string" ? cwd : undefined,
+    files: new Map(),
+    known: {},
+    process: {},
+    vars: new Map(),
+  }
+  await run(lex(command), env, visit)
+  const always = verdicts.find((v) => !v.production)
+  if (always)
+    return `no-raw-vercel hook refuses ${always.what}: in a factory session vercel runs its reads alone (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) and a preview deploy (vercel deploy, vercel deploy init, or vercel ./<folder>). A secret reaches a project through an Inbox secret ask, and production ships from main through the release skill's ship:merge.`
+  const production = verdicts.find((v) => v.production)
+  if (!production || ((await opsLead(raw, environment)) && !namesRole(command))) return
+  return `no-raw-vercel hook refuses ${production.what}: it changes what production serves, and a production deploy also migrates the hosted database. Production ships from main through the release skill's ship:merge; the Ops lead alone makes a hand production move, in a call that names no role variable and sources no file. A preview deploy (vercel deploy without --prod) and the reads (whoami, ls, inspect, logs, help) run.`
+}

@@ -101,6 +101,14 @@ function cleanRegex(source) {
   const end = source.endsWith("$") ? source.length - 1 : source.length;
   return source.slice(start, end);
 }
+function floatSafeRemainder(val, step) {
+  const ratio = val / step;
+  const roundedRatio = Math.round(ratio);
+  const tolerance = 4 * Number.EPSILON * Math.max(Math.abs(ratio), 1);
+  if (Math.abs(ratio - roundedRatio) < tolerance)
+    return 0;
+  return ratio - roundedRatio;
+}
 function assignProp(target, prop, value) {
   Object.defineProperty(target, prop, {
     value,
@@ -1057,6 +1065,136 @@ var _whenHasLength = (payload) => {
   const val = payload.value;
   return !nullish(val) && val.length !== undefined;
 };
+var numericOriginMap = {
+  number: "number",
+  bigint: "bigint",
+  object: "date"
+};
+var $ZodCheckLessThan = /* @__PURE__ */ $constructor("$ZodCheckLessThan", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const origin = numericOriginMap[typeof def.value];
+  inst._zod.check = (payload) => {
+    if (def.inclusive ? payload.value <= def.value : payload.value < def.value) {
+      return;
+    }
+    payload.issues.push({
+      origin: numericOriginMap[typeof payload.value] ?? origin,
+      code: "too_big",
+      maximum: typeof def.value === "object" ? def.value.getTime() : def.value,
+      input: payload.value,
+      inclusive: def.inclusive,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckGreaterThan = /* @__PURE__ */ $constructor("$ZodCheckGreaterThan", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const origin = numericOriginMap[typeof def.value];
+  inst._zod.check = (payload) => {
+    if (def.inclusive ? payload.value >= def.value : payload.value > def.value) {
+      return;
+    }
+    payload.issues.push({
+      origin: numericOriginMap[typeof payload.value] ?? origin,
+      code: "too_small",
+      minimum: typeof def.value === "object" ? def.value.getTime() : def.value,
+      input: payload.value,
+      inclusive: def.inclusive,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckMultipleOf = /* @__PURE__ */ $constructor("$ZodCheckMultipleOf", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  inst._zod.check = (payload) => {
+    if (typeof payload.value !== typeof def.value)
+      throw new Error("Cannot mix number and bigint in multiple_of check.");
+    const isMultiple = typeof payload.value === "bigint" ? def.value !== BigInt(0) && payload.value % def.value === BigInt(0) : floatSafeRemainder(payload.value, def.value) === 0;
+    if (isMultiple)
+      return;
+    payload.issues.push({
+      origin: typeof payload.value,
+      code: "not_multiple_of",
+      divisor: def.value,
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckNumberFormat = /* @__PURE__ */ $constructor("$ZodCheckNumberFormat", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  def.format = def.format || "float64";
+  const isInt = def.format?.includes("int");
+  const origin = isInt ? "int" : "number";
+  const [minimum, maximum] = NUMBER_FORMAT_RANGES[def.format];
+  inst._zod.check = (payload) => {
+    const input = payload.value;
+    if (isInt) {
+      if (!Number.isInteger(input)) {
+        payload.issues.push({
+          expected: origin,
+          format: def.format,
+          code: "invalid_type",
+          continue: false,
+          input,
+          inst
+        });
+        return;
+      }
+      if (!Number.isSafeInteger(input)) {
+        if (input > 0) {
+          payload.issues.push({
+            input,
+            code: "too_big",
+            maximum: Number.MAX_SAFE_INTEGER,
+            note: "Integers must be within the safe integer range.",
+            inst,
+            origin,
+            inclusive: true,
+            continue: !def.abort
+          });
+        } else {
+          payload.issues.push({
+            input,
+            code: "too_small",
+            minimum: Number.MIN_SAFE_INTEGER,
+            note: "Integers must be within the safe integer range.",
+            inst,
+            origin,
+            inclusive: true,
+            continue: !def.abort
+          });
+        }
+        return;
+      }
+    }
+    if (input < minimum) {
+      payload.issues.push({
+        origin: "number",
+        input,
+        code: "too_small",
+        minimum,
+        inclusive: true,
+        inst,
+        continue: !def.abort
+      });
+    }
+    if (input > maximum) {
+      payload.issues.push({
+        origin: "number",
+        input,
+        code: "too_big",
+        maximum,
+        inclusive: true,
+        inst,
+        continue: !def.abort
+      });
+    }
+  };
+});
 var $ZodCheckMaxLength = /* @__PURE__ */ $constructor("$ZodCheckMaxLength", (inst, def) => {
   var _a;
   $ZodCheck.init(inst, def);
@@ -1766,6 +1904,33 @@ var $ZodJWT = /* @__PURE__ */ $constructor("$ZodJWT", (inst, def) => {
       continue: !def.abort
     });
   };
+});
+var $ZodNumber = /* @__PURE__ */ $constructor("$ZodNumber", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.pattern = number;
+  inst._zod.parse = (payload, _ctx) => {
+    if (def.coerce)
+      try {
+        payload.value = Number(payload.value);
+      } catch (_) {}
+    const input = payload.value;
+    if (typeof input === "number" && !Number.isNaN(input) && Number.isFinite(input)) {
+      return payload;
+    }
+    const received = typeof input === "number" ? Number.isNaN(input) ? "NaN" : !Number.isFinite(input) ? String(input) : undefined : undefined;
+    payload.issues.push({
+      expected: "number",
+      code: "invalid_type",
+      input,
+      inst,
+      ...received ? { received } : {}
+    });
+    return payload;
+  };
+});
+var $ZodNumberFormat = /* @__PURE__ */ $constructor("$ZodNumberFormat", (inst, def) => {
+  $ZodCheckNumberFormat.init(inst, def);
+  $ZodNumber.init(inst, def);
 });
 var $ZodBoolean = /* @__PURE__ */ $constructor("$ZodBoolean", (inst, def) => {
   $ZodType.init(inst, def);
@@ -3491,6 +3656,18 @@ function _isoDuration(Class, params) {
     ...normalizeParams(params)
   });
 }
+function _number(Class, params) {
+  return new Class(snapshotChecks({ type: "number", checks: [], ...normalizeParams(params) }));
+}
+function _int(Class, params) {
+  return new Class({
+    type: "number",
+    check: "number_format",
+    abort: false,
+    format: "safeint",
+    ...normalizeParams(params)
+  });
+}
 function _boolean(Class, params) {
   return new Class({
     type: "boolean",
@@ -3506,6 +3683,45 @@ function _never(Class, params) {
   return new Class({
     type: "never",
     ...normalizeParams(params)
+  });
+}
+function _lt(value, params) {
+  return new $ZodCheckLessThan({
+    check: "less_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: false
+  });
+}
+function _lte(value, params) {
+  return new $ZodCheckLessThan({
+    check: "less_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: true
+  });
+}
+function _gt(value, params) {
+  return new $ZodCheckGreaterThan({
+    check: "greater_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: false
+  });
+}
+function _gte(value, params) {
+  return new $ZodCheckGreaterThan({
+    check: "greater_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: true
+  });
+}
+function _multipleOf(value, params) {
+  return new $ZodCheckMultipleOf({
+    check: "multiple_of",
+    ...normalizeParams(params),
+    value
   });
 }
 function _maxLength(maximum, params) {
@@ -4296,6 +4512,48 @@ var stringProcessor = (schema, ctx, _json, _params) => {
         }))
       ];
     }
+  }
+};
+var numberProcessor = (schema, ctx, _json, params) => {
+  const json = _json;
+  const { minimum, maximum, multipleOf, exclusiveMaximum, exclusiveMinimum, isInt } = aggregateChecks(schema);
+  json.type = isInt ? "integer" : "number";
+  const exMin = typeof exclusiveMinimum === "number" && exclusiveMinimum >= (minimum ?? Number.NEGATIVE_INFINITY);
+  const exMax = typeof exclusiveMaximum === "number" && exclusiveMaximum <= (maximum ?? Number.POSITIVE_INFINITY);
+  const legacy = ctx.target === "draft-04" || ctx.target === "openapi-3.0";
+  if (exMin) {
+    if (legacy) {
+      json.minimum = exclusiveMinimum;
+      json.exclusiveMinimum = true;
+    } else {
+      json.exclusiveMinimum = exclusiveMinimum;
+    }
+  } else if (typeof minimum === "number") {
+    json.minimum = minimum;
+  }
+  if (exMax) {
+    if (legacy) {
+      json.maximum = exclusiveMaximum;
+      json.exclusiveMaximum = true;
+    } else {
+      json.exclusiveMaximum = exclusiveMaximum;
+    }
+  } else if (typeof maximum === "number") {
+    json.maximum = maximum;
+  }
+  if (multipleOf) {
+    const divisors = new Set;
+    for (const divisor of multipleOf) {
+      if (Number.isFinite(divisor) && divisor !== 0)
+        divisors.add(Math.abs(divisor));
+      else
+        handleUnrepresentable(schema, ctx, json, params, `A multipleOf divisor of ${divisor} cannot be represented in JSON Schema`);
+    }
+    const [first, ...rest] = divisors;
+    if (first !== undefined)
+      json.multipleOf = first;
+    if (rest.length)
+      json.allOf = [...json.allOf ?? [], ...rest.map((m) => ({ multipleOf: m }))];
   }
 };
 var booleanProcessor = (_schema, _ctx, json, _params) => {
@@ -5124,6 +5382,82 @@ var ZodJWT = /* @__PURE__ */ $constructor("ZodJWT", (inst, def) => {
   $ZodJWT.init(inst, def);
   ZodStringFormat.init(inst, def);
 });
+var ZodNumber = /* @__PURE__ */ $constructor("ZodNumber", (inst, def) => {
+  $ZodNumber.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => numberProcessor(inst, ctx, json, params);
+  inst.isFinite = true;
+}, /* @__PURE__ */ derived({
+  minValue: (inst) => {
+    const { minimum, exclusiveMinimum } = aggregateChecks(inst);
+    return Math.max(minimum ?? Number.NEGATIVE_INFINITY, exclusiveMinimum ?? Number.NEGATIVE_INFINITY);
+  },
+  maxValue: (inst) => {
+    const { maximum, exclusiveMaximum } = aggregateChecks(inst);
+    return Math.min(maximum ?? Number.POSITIVE_INFINITY, exclusiveMaximum ?? Number.POSITIVE_INFINITY);
+  },
+  isInt: (inst) => {
+    const { isInt, multipleOf } = aggregateChecks(inst);
+    return !!isInt || !!multipleOf?.some(Number.isSafeInteger);
+  },
+  format: (inst) => aggregateChecks(inst).format ?? null
+}, {
+  gt(value, params) {
+    return this.check(_gt(value, params));
+  },
+  gte(value, params) {
+    return this.check(_gte(value, params));
+  },
+  min(value, params) {
+    return this.check(_gte(value, params));
+  },
+  lt(value, params) {
+    return this.check(_lt(value, params));
+  },
+  lte(value, params) {
+    return this.check(_lte(value, params));
+  },
+  max(value, params) {
+    return this.check(_lte(value, params));
+  },
+  int(params) {
+    return this.check(int(params));
+  },
+  safe(params) {
+    return this.check(int(params));
+  },
+  positive(params) {
+    return this.check(_gt(0, params));
+  },
+  nonnegative(params) {
+    return this.check(_gte(0, params));
+  },
+  negative(params) {
+    return this.check(_lt(0, params));
+  },
+  nonpositive(params) {
+    return this.check(_lte(0, params));
+  },
+  multipleOf(value, params) {
+    return this.check(_multipleOf(value, params));
+  },
+  step(value, params) {
+    return this.check(_multipleOf(value, params));
+  },
+  finite() {
+    return this;
+  }
+}));
+function number2(params) {
+  return _number(ZodNumber, params);
+}
+var ZodNumberFormat = /* @__PURE__ */ $constructor("ZodNumberFormat", (inst, def) => {
+  $ZodNumberFormat.init(inst, def);
+  ZodNumber.init(inst, def);
+});
+function int(params) {
+  return _int(ZodNumberFormat, params);
+}
 var ZodBoolean = /* @__PURE__ */ $constructor("ZodBoolean", (inst, def) => {
   $ZodBoolean.init(inst, def);
   ZodType.init(inst, def);
@@ -5566,6 +5900,10 @@ var readPolicySync = (data, org) => {
     }
   };
 };
+var readPolicyOrDefaults = (data, org) => {
+  const read = readPolicySync(data, org);
+  return read.refusal !== undefined && !existsSync(join2(extensionsDir(data), "policy.json")) ? { settings: { schemaVersion: 1, values: {} } } : read;
+};
 
 // packages/settings/src/settings.ts
 var KINDS = ["doc", "learning", "list", "rule", "script", "skill", "template"];
@@ -5828,6 +6166,19 @@ async function registryName(sessionId, environment = process.env) {
     } catch {}
   }
 }
+async function leadOf(raw, kind, environment) {
+  try {
+    const session = sessionOf(raw);
+    if (typeof session !== "string" || await sessionRole(environment, session) !== "lead")
+      return false;
+    const name = await registryName(session, environment);
+    return name !== undefined && await rosterKind(name, environment) === kind;
+  } catch {
+    return false;
+  }
+}
+var namesRole = (command) => /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command);
+var builderLead = (raw, environment = process.env) => leadOf(raw, "builder", environment);
 async function codexName(sessionId, environment = process.env) {
   if (!environment.CODEX_HOME)
     return;
@@ -7395,6 +7746,23 @@ var startFolders = (env) => [
   ...env.cwdSure === undefined ? [] : [env.cwdSure],
   ...env.cwdMaybe ?? []
 ];
+function places(env, fallback) {
+  const folders = [
+    ...startFolders(env),
+    ...env.cwdHeld ?? [],
+    ...env.cwdUnread && fallback !== undefined ? [fallback] : []
+  ];
+  const out = [];
+  const seen = new Set;
+  for (const cwd of folders) {
+    tick();
+    if (seen.has(cwd))
+      continue;
+    seen.add(cwd);
+    out.push({ ...env, cwd, cwdSure: cwd });
+  }
+  return out.length > 0 ? out : [{ ...env, cwd: undefined, cwdSure: undefined }];
+}
 function ancestors(path) {
   const out = [];
   for (let dir = dirname(path);; dir = dirname(dir)) {
@@ -8001,7 +8369,8 @@ var prCreate = (args) => {
   return head[0] === "pr" && head[1] === "create";
 };
 var pushes = (args) => gitCommand(args).sub?.value === "push";
-var REF_MUTATION = /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/;
+var REF_MOVE = /\b(?:createCommitOnBranch|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/;
+var REF_MUTATION = new RegExp(`${REF_MOVE.source}|\\bcreatePullRequest\\b`);
 var REF_ENDPOINT = /^repos\/[^/]+\/[^/]+\/(?:contents\/.+|git\/refs(?:\/.+)?|merges|pulls|pulls\/\d+\/(?:merge|update-branch))$/;
 async function apiWrite(rest, cmd, env, xargs) {
   const request = await ghApi(rest, cmd, env, xargs);
@@ -8082,6 +8451,1059 @@ async function check(raw, environment = process.env) {
   } catch (error) {
     log(environment, { error: String(error), session, tool, write });
     return;
+  }
+}
+
+// packages/scripts/src/playground/setting.ts
+import { resolve as resolve3 } from "path";
+
+// packages/settings/src/accounts.ts
+var email2 = string2().email();
+var label = string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a label of lowercase letters, digits, dots, dashes and underscores");
+var claudeAccount = strictObject({
+  email: email2,
+  ends: string2().datetime({ offset: true }).nullable().optional(),
+  endsFirst: boolean2().optional(),
+  label: label.optional(),
+  nearLimit: boolean2().optional(),
+  own: boolean2().optional(),
+  parkedUntil: string2().datetime({ offset: true }).optional(),
+  provider: literal("claude").optional(),
+  renews: number2().int().min(1).max(31).nullable().optional(),
+  weekReset: strictObject({ hour: number2().min(0).lt(24), weekday: number2().int().min(0).max(6) }).optional()
+});
+var glmAccount = strictObject({ label, provider: literal("glm") });
+var account = union([claudeAccount, glmAccount]);
+var providerOf = (row) => row.provider === "glm" ? "glm" : "claude";
+var accountKey = (row) => (providerOf(row) === "glm" ? row.label : row.email) ?? "";
+var accountsOf = (rows, provider) => rows.filter((row) => providerOf(row) === provider);
+var accountSettings = defineSettings({
+  "models.probe": {
+    default: "claude-haiku-4-5",
+    description: "The model the usage scripts send one 1-token call to, as an account's own token, to read its 5-hour and week use from the reply's rate-limit headers.",
+    schema: string2().min(1)
+  },
+  "usage.accounts": {
+    default: [],
+    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), the time until which no new session starts on it (parkedUntil), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
+    schema: array(account).refine((rows) => new Set(rows.map((row) => `${providerOf(row)}:${accountKey(row)}`)).size === rows.length, "each account is listed once")
+  },
+  "usage.keychainService": {
+    default: "playground-claude-oauth",
+    description: "The macOS Keychain service each account's long-lived token is kept under, one item an account by its email: spawn.sh's --account and the usage probes read it.",
+    schema: string2().regex(/^[A-Za-z0-9._-]+$/, "a Keychain service name")
+  },
+  "usage.switchAccount": {
+    default: "",
+    description: "The account whose full week the ops tick tells the dispatchers and leads about, so the factory moves off it; empty for none.",
+    schema: union([email2, literal("")])
+  }
+});
+// packages/settings/src/channel.ts
+var channelSettings = defineSettings({
+  "channel.skipUser": {
+    default: "",
+    description: "The Slack member id whose own posts the channel watch skips, the account it posts as; none until set.",
+    schema: string2().regex(/^(?:[UW][A-Z0-9]+)?$/, "a Slack member id")
+  },
+  "channel.slackId": {
+    default: "",
+    description: "The Slack channel id of the shared channel the channel watch relays to the dispatcher; the watch reads nothing until it is set.",
+    schema: string2().regex(/^(?:[CG][A-Z0-9]+)?$/, "a Slack channel id")
+  }
+});
+// packages/settings/src/content.ts
+var contentFields = {
+  body: string2().nullable(),
+  files: record(string2(), string2()).nullable(),
+  meta: record(string2(), unknown()).nullable(),
+  value: union([array(unknown()), record(string2(), unknown())]).nullable()
+};
+// packages/safe-delete/src/index.ts
+var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
+var PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/;
+var CARVE_OUTS = {
+  "dashboard-supervisor": {
+    bytes: 256 * 1024 ** 2,
+    files: 4000,
+    folder: "ops/dashboard/builds"
+  },
+  jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" },
+  "jobs-installed": {
+    bytes: 64 * 1024,
+    files: 1,
+    folder: "Library/LaunchAgents",
+    home: true,
+    name: PLAYGROUND_AGENT
+  }
+};
+
+// packages/settings/src/folder.ts
+var STALE_MS = 5 * 60000;
+
+// packages/settings/src/items.ts
+var ATTACHMENT_LIMIT = 50 * 1024 * 1024;
+
+// packages/settings/src/jobs.ts
+var jobSchema = strictObject({
+  callsModel: boolean2(),
+  command: string2().min(1).optional(),
+  config: record(string2(), unknown()).optional(),
+  cwd: string2().min(1).optional(),
+  description: string2().min(1),
+  disabledWhy: string2().optional(),
+  enabled: boolean2(),
+  heartbeat: string2().min(1),
+  launchd: string2().min(1).optional(),
+  model: string2().min(1).optional(),
+  neverPause: boolean2().optional(),
+  pausedFor: string2().optional(),
+  program: array(string2().min(1)).min(1).optional(),
+  runtime: _enum(["herdr"]).optional(),
+  schedule: union([
+    strictObject({ always: literal(true) }),
+    strictObject({ every: number2().int().positive() })
+  ]),
+  stop: string2().min(1).optional()
+});
+var fromStored = (row) => {
+  if (!row || typeof row !== "object" || Array.isArray(row))
+    return row;
+  const kept = Object.fromEntries(Object.entries(row).filter(([key]) => Object.hasOwn(jobSchema.shape, key)));
+  return kept.runtime === undefined ? kept : { ...kept, runtime: "herdr" };
+};
+var jobRowSchema = jobSchema.partial();
+var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
+var terminal = (name, command, job) => ({
+  callsModel: false,
+  command,
+  cwd: "{checkout}",
+  enabled: false,
+  heartbeat: name,
+  runtime: "herdr",
+  ...job
+});
+var launchd = (name, job) => ({
+  callsModel: false,
+  cwd: "{checkout}",
+  enabled: false,
+  heartbeat: name,
+  launchd: `com.playground.${name}`,
+  program: ["{bun}", "--no-env-file", `{checkout}/packages/scripts/src/${name}/cli.ts`],
+  ...job
+});
+var bunJob = (name, root = "{checkout}") => `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`;
+var JOBS = {
+  "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
+    description: "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
+    schedule: { always: true }
+  }),
+  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
+    cwd: "{dashboard}",
+    description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
+    schedule: { every: 300 }
+  }),
+  "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
+    cwd: "{dashboard}",
+    description: "Keeps the live dashboard running on its branch's latest head.",
+    enabled: true,
+    schedule: { every: 60 },
+    stop: "dashboard"
+  }),
+  "ops-dm-watch": terminal("ops-dm-watch", bunJob("ops-dm-watch"), {
+    description: "In Slack mode, hands each message in the owner's DM to the dispatcher, the session in the assistant seat too when no reply lands in 3 minutes.",
+    schedule: { every: 60 }
+  }),
+  "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
+    description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
+    schedule: { every: 86400 }
+  }),
+  "ops-flow": launchd("ops-flow", {
+    description: "Tells the leads when a session holds a run slot over 15 minutes, or a model slot over 120.",
+    schedule: { every: 60 }
+  }),
+  "ops-herdr": launchd("ops-herdr", {
+    description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
+    schedule: { every: 60 }
+  }),
+  "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
+    description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
+    schedule: { every: 60 }
+  }),
+  "ops-merge-train": terminal("ops-merge-train", "python3 -I {checkout}/scripts/ops/merge-train/run.py", {
+    description: "Runs the merge train: builds a train of ready PRs and checks each step.",
+    neverPause: true,
+    schedule: { every: 60 }
+  }),
+  "ops-restore": {
+    ...launchd("ops-restore", {
+      description: "Restores a lost main checkout by the playbook's steps once a guard is gone on two looks 5 minutes apart.",
+      schedule: { every: 60 }
+    }),
+    cwd: "{dashboard}",
+    program: [
+      "{bun}",
+      "--no-env-file",
+      "{dashboard}/packages/scripts/src/ops-restore/cli.ts",
+      "--main",
+      "{checkout}"
+    ]
+  },
+  "ops-session-resume": launchd("ops-session-resume", {
+    description: "Queues a carry-on line for each factory session once its usage limit resets.",
+    schedule: { every: 60 }
+  }),
+  "ops-sweep": terminal("ops-sweep", bunJob("ops-sweep"), {
+    description: "The Ops lead's sweep: runners, probes, asks, heartbeats and the forecast.",
+    schedule: { every: 300 }
+  }),
+  "ops-tick": launchd("ops-tick", {
+    description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
+    schedule: { every: 60 }
+  }),
+  "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
+    description: "Reads every live session's screen and clears a factory session stuck on a prompt.",
+    neverPause: true,
+    schedule: { every: 120 }
+  }),
+  "ops-usage": terminal("ops-usage", "python3 -I {checkout}/scripts/ops/usage/run.py", {
+    description: "Reads the account's usage windows into usage.json every 5 minutes.",
+    enabled: true,
+    neverPause: true,
+    schedule: { every: 300 }
+  }),
+  "ops-wa": terminal("ops-wa", `${bunJob("ops-wa")} --data {data}`, {
+    description: "Holds the WhatsApp link on the spare number: hands each owner message to the dispatcher, sends its replies, and drops every other message.",
+    schedule: { always: true }
+  }),
+  "ops-zai-usage": launchd("ops-zai-usage", {
+    description: "Reads the GLM plan's credits into zai-usage.json, which the spawn gate reads.",
+    schedule: { every: 300 }
+  })
+};
+var OLD_KEYS = { "ops-dashboard": ["jobs.opsDesk"] };
+var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([name, job]) => [
+  jobKey(name),
+  {
+    aliases: OLD_KEYS[name],
+    default: job,
+    description: `The ${name} ops job: ${job.description}`,
+    merge: true,
+    schema: jobRowSchema,
+    stored: fromStored
+  }
+])));
+var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
+// packages/settings/src/factory.ts
+var repo = string2().regex(/^(?:[A-Za-z0-9-]+\/[A-Za-z0-9._-]+)?$/, "a repository as owner/name, or empty for unset");
+var factorySettings = defineSettings({
+  "factory.archiveRepo": {
+    default: "",
+    description: "The archive repository: a link to it is private history, so the trace ratchet counts it and no-public-leak refuses it in a public write.",
+    schema: repo
+  },
+  "factory.publicRepo": {
+    default: "",
+    description: "The public repository, or a list of them, the checkout's origin when unset: no-public-leak refuses a write to one that holds private text, and the trace ratchet reads past each one's own name.",
+    schema: union([repo, array(repo)])
+  },
+  "factory.repo": {
+    default: "",
+    description: "The repository the factory's pull requests land in, the checkout's origin when unset: pr:merge needs GitGuardian's check there, Checks reads its PRs, and the roster links a bare PR number into it.",
+    schema: repo
+  }
+});
+// packages/settings/src/gates.ts
+var gateSettings = defineSettings({
+  "gates.glmLoad5Max": {
+    default: 30,
+    description: "The load5 a GLM session starts under.",
+    schema: number2().positive()
+  },
+  "gates.glmSwapinsMax": {
+    default: 100,
+    description: "The swap-ins a second a GLM session, and a fresh Claude worker, starts under.",
+    schema: number2().int().positive()
+  },
+  "gates.memoryFreeMin": {
+    default: 8,
+    description: "The free memory share, in percent, a Claude session starts at or over.",
+    schema: number2().int().min(0).max(100)
+  },
+  "gates.reviewReserve": {
+    default: 0.125,
+    description: "The share of the load gate's line a small worker keeps back for reviewers and testers, so a held review starts first; set it under gates.smallReserve, or a small worker's line falls below a medium one's.",
+    schema: number2().min(0).lt(1)
+  },
+  "gates.smallReserve": {
+    default: 0.25,
+    description: "The share of the load gate's line kept for small items, so a big plan never blocks a small one.",
+    schema: number2().min(0).lt(1)
+  },
+  "gates.startsWindow": {
+    default: 300,
+    description: "The seconds a start counts toward the load gate, since the load average lags a session's start.",
+    schema: number2().int().positive()
+  }
+});
+// packages/settings/src/harnesses.ts
+var HARNESSES = [
+  { backends: ["claude", "glm"], id: "claude-code" },
+  { backends: ["openai"], id: "codex" }
+];
+var GLM_MODEL = "glm";
+
+// packages/settings/src/harness-alpha.ts
+var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
+var harnessSettings = defineSettings({
+  "harness.alpha": {
+    default: "claude-code",
+    description: "The harness the first dispatcher starts on: claude-code or codex. First run's pick and Settings' Switch write it, and the Dashboard's Start runs spawn.sh --harness with it.",
+    schema: _enum(HARNESS_IDS)
+  }
+});
+// packages/settings/src/models.ts
+var id = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id, such as claude-opus-5-5");
+var modelSettings = defineSettings({
+  "models.checker": {
+    default: "claude-opus-5-5",
+    description: "The Claude model a reviewer or a tester runs on, and the one --model it takes, since its verdict gates a merge.",
+    schema: id
+  },
+  "models.claude": {
+    default: ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-5-5"],
+    description: "The Claude models spawn.sh and playground add take with --model.",
+    schema: array(id).min(1)
+  },
+  "models.default": {
+    default: "claude-opus-5-5",
+    description: "The Claude model a session runs on when its start names no --model.",
+    schema: id
+  },
+  "models.glm": {
+    default: "glm-5.3-flash",
+    description: "The GLM model a --backend glm session runs on, every model Claude Code asks for mapped to it.",
+    schema: id
+  },
+  "models.glmKeychainService": {
+    default: "playground-glm",
+    description: "The Keychain service a --backend glm session's Z.ai key is kept under, one item a usage.accounts GLM row by its label.",
+    schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a Keychain service name, such as playground-glm")
+  }
+});
+// packages/settings/src/live.ts
+var liveSettings = defineSettings({
+  "live.branch": {
+    default: "live/dashboard",
+    description: "The branch the live dashboard's checkout stays on: a stack on it reads the live machine, and ops-desk's roll resets it to canary.",
+    schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/, "a git branch name")
+  },
+  "live.container": {
+    default: "playground-dashboard-db",
+    description: "The Docker container holding the live dashboard's database, which every stack off the live checkout refuses.",
+    schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/, "a Docker container name")
+  }
+});
+// packages/settings/src/owner.ts
+var ownerSettings = defineSettings({
+  "owner.names": {
+    default: [],
+    description: "The owner's first name and handles as chat writes them, lowercase: the inbox gate refuses a manager's stop on a line that addresses one of them and asks for an action, and never reads @<handle> as an agent.",
+    schema: array(string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a name or handle, lowercase"))
+  },
+  "owner.voice": {
+    default: "",
+    description: "The voice a draft or a slack decision speaks in as the owner: singular has bun run ask refuse one that says we, us, our, ours or ourselves; empty checks none.",
+    schema: _enum(["", "singular"])
+  }
+});
+// packages/settings/src/paths.ts
+var pathsSettings = defineSettings({
+  "paths.codeRoot": {
+    default: "",
+    description: "The folder that holds your code, the folder that holds the checkout when unset: spawn.sh answers Claude's folder trust prompt there and moves a session off the Desktop into it.",
+    schema: string2().regex(/^(?:\/.*)?$/, "an absolute path, or empty for unset")
+  }
+});
+// packages/settings/src/rules.ts
+var percent = number2().int().min(1).max(100);
+var ruleSettings = defineSettings({
+  "battery.alert": {
+    default: 5,
+    description: "The battery percent, while the charge falls on battery or on a charger losing to the load, at which the battery check posts its red alert and the heavy runs wait in run-slot.",
+    schema: percent
+  },
+  "battery.ask": {
+    default: 10,
+    description: "The battery percent, while the Mac discharges on battery, at which the battery check posts its orange ask.",
+    schema: percent
+  },
+  "clock.ownerZone": {
+    default: "UTC",
+    description: "The time zone, by its IANA name, a time shown to the owner reads in.",
+    schema: string2().refine((zone) => {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: zone });
+        return true;
+      } catch {
+        return false;
+      }
+    }, "an IANA time zone, such as UTC or America/New_York")
+  },
+  "context.window": {
+    default: 400000,
+    description: "The context window, in tokens, every session compacts itself in.",
+    schema: number2().int().positive()
+  },
+  "github.pollMinutes": {
+    default: 5,
+    description: "The fewest minutes between two polls of one pull request by a session.",
+    schema: number2().int().positive()
+  },
+  "glm.readOnlyLoad5": {
+    default: 15,
+    description: "The 5-minute load average above which a GLM session may not install, commit or push.",
+    schema: number2().positive()
+  },
+  "release.hours": {
+    default: 4,
+    description: "The hours of merging after which Ops ships canary to main, whatever the count.",
+    schema: number2().positive()
+  },
+  "release.merges": {
+    default: 3,
+    description: "The user-facing merges since the last ship at which Ops ships canary to main.",
+    schema: number2().int().positive()
+  },
+  "tickets.tracker": {
+    default: "the tracker",
+    description: "The issue tracker the tickets rule names, read inside its sentence, such as Linear.",
+    schema: string2().min(1)
+  },
+  "unstick.escalateMinutes": {
+    default: 5,
+    description: "The minutes a session stays stuck with no turn before ops-session-resume tells the primary dispatcher.",
+    schema: number2().int().positive()
+  }
+});
+// packages/settings/src/sessions.ts
+var name = string2().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "a session name, lowercase words joined by hyphens");
+var manager = _enum(["builder", "dispatcher", "ops", "planner"]);
+var TEMPLATE_KINDS = [
+  "assistant",
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "orchestrator",
+  "planner"
+];
+var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+var BRIEF_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+var sessionTemplate = strictObject({
+  account: string2().email().optional(),
+  brief: string2().regex(BRIEF_NAME, "a brief is a file name, with no /").refine((brief) => !brief.includes(".."), "a brief is a file name, with no .."),
+  effort: _enum(EFFORTS).optional(),
+  harness: literal("claude-code"),
+  id: name,
+  kind: _enum(TEMPLATE_KINDS),
+  label: string2().min(1).max(40),
+  model: string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id").optional()
+}).refine((t) => t.model !== GLM_MODEL || t.account === undefined && t.effort === undefined, {
+  message: "a GLM template runs on models.glm and its first GLM row, so it takes no account or effort"
+});
+var storedTemplates = (value) => Array.isArray(value) ? value.map((row) => {
+  if (typeof row !== "object" || row === null || !("backend" in row) || "harness" in row)
+    return row;
+  const { backend, ...rest } = row;
+  const { model, ...modelless } = rest;
+  if (backend === "glm")
+    return { ...rest, harness: "claude-code", model: GLM_MODEL };
+  if (backend !== "claude")
+    return { ...rest, backend, harness: "claude-code" };
+  return { ...model === GLM_MODEL ? modelless : rest, harness: "claude-code" };
+}) : value;
+var sessionTemplates = array(sessionTemplate).refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "each id is listed once");
+var unknownAccounts = (templates, accounts) => {
+  const known = new Set(accountsOf(accounts, "claude").map(accountKey));
+  return templates.flatMap((template, at) => template.account && !known.has(template.account) ? [
+    {
+      message: `${template.account} is not in usage.accounts: add it in Settings > Accounts`,
+      path: [at, "account"]
+    }
+  ] : []);
+};
+var sessionSettings = defineSettings({
+  "sessions.aliases": {
+    default: {},
+    description: "Old names of the managers' sessions, each mapped to its kind, so a session or a stored row under one still reads as that kind.",
+    schema: record(name, manager)
+  },
+  "sessions.names": {
+    default: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" },
+    description: "The session name each manager kind starts under; the second dispatcher takes the dispatcher's with -2.",
+    schema: strictObject({ builder: name, dispatcher: name, ops: name, planner: name })
+  },
+  "sessions.templates": {
+    against: (templates, read) => unknownAccounts(templates, read("usage.accounts")),
+    default: [
+      {
+        brief: "assistant.md",
+        harness: "claude-code",
+        id: "assistant",
+        kind: "assistant",
+        label: "Assistant"
+      },
+      {
+        brief: "orchestrator.md",
+        harness: "claude-code",
+        id: "orchestrator",
+        kind: "orchestrator",
+        label: "Orchestrator"
+      },
+      {
+        brief: "dispatcher-2.md",
+        harness: "claude-code",
+        id: "second-dispatcher-claude",
+        kind: "dispatcher",
+        label: "Second dispatcher on Claude"
+      },
+      {
+        brief: "dispatcher-2.md",
+        harness: "claude-code",
+        id: "second-dispatcher-glm",
+        kind: "dispatcher",
+        label: "Second dispatcher on GLM",
+        model: GLM_MODEL
+      }
+    ],
+    description: "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, harness, model (a Claude id, or glm), effort, account (a Claude row of usage.accounts) and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
+    schema: sessionTemplates,
+    stored: storedTemplates
+  }
+});
+// packages/settings/src/slots.ts
+var slotSettings = defineSettings({
+  "slots.modelBound": {
+    default: 2,
+    description: "How many runs that mostly wait on a model (run-slot.sh <who> --model-bound -- <command>, such as a parity replay) hold a slot at once, counted apart from the CPU slots, so one never holds a CPU slot while its CPU idles.",
+    schema: number2().int().min(1).max(16)
+  },
+  "slots.peers": {
+    default: [],
+    description: "The ops folders of other factories on this machine, each an absolute path: run-slot counts each live holder of their run slots against this factory's load units, and spawn.sh's load gate counts their starts beside its own, both reading only.",
+    schema: array(string2().regex(/^\/.+/, "an absolute path"))
+  }
+});
+// packages/settings/src/whatsapp.ts
+var e1642 = string2().regex(/^(?:\+[1-9]\d{7,14})?$/, "a phone number is + and 8 to 15 digits, as +15550100001");
+var whatsappSettings = defineSettings({
+  "wa.device": {
+    default: "",
+    description: "The spare number ops-wa links to as a device, in E.164: its pairing code is for this number. Never the owner's own number; ops-wa does not run until it is set.",
+    masked: true,
+    schema: e1642
+  },
+  "wa.owner": {
+    default: "",
+    description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages and sends only to it; ops-wa does not run until it is set.",
+    masked: true,
+    schema: e1642
+  }
+});
+// packages/settings/src/yard.ts
+var yardSettings = defineSettings({
+  "yard.logReaders": {
+    default: {},
+    description: "The bots whose read of the dispatcher's log this Mac answers through the relay, each Yard login to the DM it was made with; a bot Yard lets read the log reads nothing until its login and its DM are here.",
+    schema: record(string2().regex(/^[a-z\d][a-z\d-]{0,29}\[bot\]$/, "a bot's login, <name>[bot]"), string2().min(1).max(64))
+  }
+});
+// packages/scripts/src/playground/setting.ts
+var CHECKOUT = resolve3(__CHECKOUT + "/packages/scripts/src/playground", "../../../..");
+var origins = new Map;
+var originRepo = (checkout = CHECKOUT) => {
+  if (!origins.has(checkout)) {
+    const run = Bun.spawnSync(["git", "-C", checkout, "remote", "get-url", "origin"], {
+      stderr: "ignore"
+    });
+    const url = run.stdout.toString().trim();
+    const slug = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(url)?.[1] ?? "";
+    origins.set(checkout, slug.toLowerCase());
+  }
+  return origins.get(checkout);
+};
+var factoryRepo = (settings, checkout = CHECKOUT) => factorySettings.get(settings, "factory.repo").toLowerCase() || originRepo(checkout);
+if (false)
+  ;
+
+// scripts/hooks/no-protected-push.ts
+var PROTECTED = new Set(["canary", "main"]);
+var PUSH_TAKES = new Set([
+  "--exec",
+  "-o",
+  "--push-option",
+  "--receive-pack",
+  "--recurse-submodules",
+  "--repo"
+]);
+var PLAIN2 = new Set([
+  "--atomic",
+  "--dry-run",
+  "--exec",
+  "--follow-tags",
+  "--force",
+  "--force-if-includes",
+  "--force-with-lease",
+  "--ipv4",
+  "--ipv6",
+  "--no-atomic",
+  "--no-follow-tags",
+  "--no-force-if-includes",
+  "--no-force-with-lease",
+  "--no-progress",
+  "--no-signed",
+  "--no-thin",
+  "--no-verify",
+  "--porcelain",
+  "--progress",
+  "--push-option",
+  "--quiet",
+  "--receive-pack",
+  "--recurse-submodules",
+  "--repo",
+  "--set-upstream",
+  "--signed",
+  "--thin",
+  "--verbose",
+  "--verify",
+  "-4",
+  "-6",
+  "-f",
+  "-n",
+  "-o",
+  "-q",
+  "-u",
+  "-v"
+]);
+var KEEPS_HEAD = new Set(["cat", "date", "echo", "printf", "pwd", "true"]);
+var GIT_KEEPS_HEAD = new Set([
+  "add",
+  "commit",
+  "diff",
+  "fetch",
+  "log",
+  "ls-remote",
+  "push",
+  "rev-parse",
+  "show",
+  "status"
+]);
+var ROUTE = "canary takes a pull request only through bun run pr:merge <n> or merge-on-ready, and main moves only through the release skill's ship:merge.";
+var FIX = "Push your work branch as a call of its own, a bare git push from it or git push origin HEAD:<branch>, then land it through its pull request.";
+var git = (dir, args) => {
+  const out = Bun.spawnSync(["git", "-C", dir, ...args], {
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    stderr: "ignore"
+  });
+  return out.exitCode === 0 ? out.stdout.toString() : undefined;
+};
+var lines = (text) => (text ?? "").split(`
+`).filter(Boolean);
+var builtins;
+var builtin = (sub) => (builtins ??= new Set(lines(Bun.spawnSync(["git", "--list-cmds=builtins"], { stderr: "ignore" }).stdout.toString()))).has(sub);
+function branchOf(name) {
+  const bare = name.replace(/^(?:refs\/)?heads\//, "");
+  return bare.startsWith("refs/") ? undefined : bare.toLowerCase();
+}
+function writes(rest, dir, settled) {
+  const { flags, positionals } = parseFlags(rest, PUSH_TAKES);
+  const odd = flags.find((f) => !PLAIN2.has(f.name) && !["--tags", "--delete", "-d"].includes(f.name));
+  if (odd)
+    return {
+      names: [],
+      unread: `it carries ${odd.name}, which may push more branches than it names`
+    };
+  const [, ...specs] = positionals;
+  const head = () => {
+    if (!dir || !settled)
+      return {
+        names: [],
+        unread: "it pushes the checked-out branch, which this call may switch before the push runs"
+      };
+    const branch = lines(git(dir, ["symbolic-ref", "--short", "-q", "HEAD"]))[0];
+    return { branch, names: branch ? [branch.toLowerCase()] : [] };
+  };
+  if (specs.length === 0) {
+    if (flags.some((f) => f.name === "--tags"))
+      return { names: [] };
+    const base = head();
+    if (base.unread || !dir)
+      return base;
+    const config = lines(git(dir, ["config", "--list"]));
+    if (config.some((l) => /^remote\..*\.push=/.test(l)))
+      return {
+        names: [],
+        unread: "a push refspec in the checkout's config picks the branches it writes"
+      };
+    if (config.findLast((l) => l.startsWith("push.default=")) === "push.default=matching")
+      return {
+        names: [],
+        unread: "push.default is matching, which pushes every branch the remote holds"
+      };
+    const upstream = base.branch && config.findLast((l) => l.startsWith(`branch.${base.branch}.merge=`));
+    const tracked = upstream ? branchOf(upstream.slice(upstream.indexOf("=") + 1)) : undefined;
+    return { names: tracked ? [...base.names, tracked] : base.names };
+  }
+  const names = [];
+  for (const spec of specs) {
+    if (unreadable(spec))
+      return { names: [], unread: "it names a ref built at run time" };
+    const text = spec.value.replace(/^\+/, "");
+    if (/[*?[\\\s]/.test(text) || text === ":" || text === "")
+      return { names: [], unread: `its refspec ${spec.value} may match many branches` };
+    const parts = text.split(":");
+    if (parts.length > 2)
+      return { names: [], unread: `its refspec ${spec.value} does not read` };
+    const destination = parts.length === 2 ? parts[1] : parts[0];
+    if (/^(?:@|head)$/i.test(destination)) {
+      if (parts.length === 2)
+        return { names: [], unread: `its refspec ${spec.value} writes the remote's HEAD` };
+      const current = head();
+      if (current.unread)
+        return current;
+      names.push(...current.names);
+      continue;
+    }
+    const branch = branchOf(destination);
+    if (branch !== undefined)
+      names.push(branch);
+  }
+  return { names };
+}
+function lands(remote, dir, factory, carried) {
+  if (!factory)
+    return "the factory's repository does not read (factory.repo is unset and the checkout has no GitHub origin)";
+  if (carried)
+    return "it carries -c, --config-env, --git-dir, --work-tree or a GIT_ variable, which can change where it pushes";
+  if (remote && unreadable(remote))
+    return "its remote is built at run time";
+  const named = (url) => {
+    const repo = remoteRepo(url);
+    return !!repo && `${repo.owner}/${repo.repo}`.toLowerCase() === factory;
+  };
+  if (!dir)
+    return remote && /[:/]/.test(remote.value) && !remote.value.startsWith(".") ? named(remote.value) : "the folder it runs in does not read";
+  const listed = lines(git(dir, ["remote", "-v"])).filter((l) => l.endsWith(" (push)"));
+  const configured = new Set(listed.map((l) => l.split("\t")[0]));
+  if (!remote || configured.has(remote.value))
+    return listed.some((l) => (!remote || l.startsWith(`${remote.value}	`)) && named(l.slice(l.indexOf("\t") + 1, -" (push)".length)));
+  const rules = lines(git(dir, ["config", "--get-regexp", "^url\\..*\\.pushinsteadof$"]));
+  if (rules.some((l) => remote.value.startsWith(l.slice(l.indexOf(" ") + 1))))
+    return "a pushInsteadOf rule in the checkout's config rewrites its remote";
+  return named(lines(git(dir, ["ls-remote", "--get-url", remote.value]))[0] ?? remote.value);
+}
+function globals(args, env) {
+  let dir = env.cwd;
+  let carried = false;
+  for (let k = 0;k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value;
+    if (v === "-C")
+      dir = dir === undefined ? undefined : pathOf(args[++k] ?? { value: "" }, { ...env, cwd: dir });
+    else if (/^(?:-c|--config-env|--git-dir|--work-tree|--namespace)(?:=|$)/.test(v) || /^-c./.test(v)) {
+      carried = true;
+      if (GIT_TAKES.has(v))
+        k++;
+    } else if (GIT_TAKES.has(v))
+      k++;
+  }
+  return { carried, dir };
+}
+var gitVariable = (key) => /^GIT_(?:COMMON_DIR|CONFIG(?:_\w+)?|DIR|NAMESPACE|WORK_TREE)$/.test(key);
+function signingOff(environment) {
+  const count = environment.GIT_CONFIG_COUNT;
+  if (count === undefined || !/^[1-9]\d*$/.test(count))
+    return false;
+  const expected = new Set(["GIT_CONFIG_COUNT"]);
+  for (let n = 0;n < Number(count); n++) {
+    const key = `GIT_CONFIG_KEY_${n}`;
+    const value = `GIT_CONFIG_VALUE_${n}`;
+    if (environment[key] !== "commit.gpgsign" || environment[value] !== "false")
+      return false;
+    expected.add(key).add(value);
+  }
+  return Object.keys(environment).filter(gitVariable).every((name) => expected.has(name));
+}
+function aliasOf(sub, args, dir) {
+  if (builtin(sub))
+    return false;
+  const inline = gitCommand(args).aliases.findLast((a) => a.startsWith(`alias.${sub}=`));
+  const body = inline === undefined ? dir && git(dir, ["config", "--get", `alias.${sub}`]) : inline.slice(inline.indexOf("=") + 1);
+  if (body === undefined)
+    return dir === undefined;
+  return /push/i.test(body);
+}
+function judge(args, parsed, env, factory, settled) {
+  const { sub, rest } = gitCommand(args);
+  if (!sub)
+    return;
+  const { carried: optioned, dir } = globals(args, env);
+  const carried = optioned || [...parsed.local.keys(), ...env.vars.keys()].some(gitVariable) || !signingOff(env.process) && Object.keys(env.process).some(gitVariable);
+  if (sub.value !== "push") {
+    const other = sub.value === "send-pack" || sub.value === "subtree" && rest[0]?.value === "push";
+    const alias = other || marked(sub.value) ? undefined : aliasOf(sub.value, args, dir);
+    if (alias === false)
+      return;
+    const where = lands(undefined, dir, factory, carried);
+    if (where === false)
+      return;
+    return refuse2(other ? `it runs git ${sub.value}, a push the hook does not read` : alias ? `it runs git ${sub.value}, an alias that may push` : "it runs a git command the hook cannot read", where);
+  }
+  const { positionals, flags } = parseFlags(rest, PUSH_TAKES);
+  const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value;
+  const written = parsed.xargs ? { names: [], unread: "xargs adds refs it reads at run time" } : writes(rest, carried ? undefined : dir, settled && !carried);
+  const hit = written.names.find((n) => PROTECTED.has(n));
+  if (!written.unread && !hit)
+    return;
+  const where = lands(remote, dir, factory, carried);
+  if (where === false)
+    return;
+  if (hit && where === true)
+    return `no-protected-push hook refuses this git push: it writes ${hit} of ${factory}. ${ROUTE} ${FIX}`;
+  return refuse2(written.unread ?? `it writes ${hit}`, where);
+}
+var refuse2 = (what, where) => `no-protected-push hook refuses this git push: ${what}, ${where === true ? "in the factory's repository" : `and ${where}`}, so it may write main or canary there. ${ROUTE} ${FIX}`;
+var MCP_TOOL2 = /^mcp__(.+?)__(.+)$/;
+var FILE_TOOLS = new Set(["create_or_update_file", "delete_file", "push_files"]);
+var MERGE_TAKES = new Set([
+  "-A",
+  "--author-email",
+  "-b",
+  "--body",
+  "-F",
+  "--body-file",
+  "--match-head-commit",
+  "-R",
+  "--repo",
+  "-t",
+  "--subject"
+]);
+var MERGE_FIX = "Land it with bun run pr:merge <n>, or let merge-on-ready land it.";
+var BUILDER_FORM = "The Builder alone merges by hand, as gh pr merge <n> --squash --body-file <file> --match-head-commit <head> in a call that names no role variable and sources no file, the body passed by file since its text counts as the call's.";
+var UNREAD_FIX = "Spell the query file's path or the endpoint out literally, with no shell variable or substitution, or put the query inline in single quotes, and a read, a thread reply or a resolve runs.";
+var named = (repo, factory) => !!repo && `${repo.owner}/${repo.repo}`.toLowerCase() === factory;
+var mayBe = (repos, factory) => !factory || repos.some((repo) => repo === undefined || named(repo, factory));
+var GH_DEFAULT = (env, local) => env.cwd || local.has("GH_REPO") || env.vars.has("GH_REPO") || env.process.GH_REPO ? implicitRepos(env, local) : [undefined];
+function judgeTool(tool, input, factory) {
+  const [, server, name] = MCP_TOOL2.exec(tool) ?? [];
+  if (!server || !name || !/github/i.test(server))
+    return;
+  if (name !== "merge_pull_request" && !FILE_TOOLS.has(name))
+    return;
+  const { branch, owner, repo } = input;
+  const repos = [
+    typeof owner === "string" && typeof repo === "string" ? { owner, repo } : undefined
+  ];
+  if (!mayBe(repos, factory))
+    return;
+  const place = factory || "the factory's repository";
+  if (name === "merge_pull_request")
+    return `no-protected-push hook refuses ${tool}: it merges a pull request of ${place}, whose base is main or canary. ${ROUTE} ${MERGE_FIX}`;
+  if (typeof branch === "string" && branch !== "") {
+    const target = branchOf(branch);
+    if (target === undefined || !PROTECTED.has(target))
+      return;
+  }
+  const what = typeof branch === "string" && branch !== "" ? branch : "the default branch, canary";
+  return `no-protected-push hook refuses ${tool}: it writes ${what} of ${place}. ${ROUTE} ${FIX}`;
+}
+async function judgeMerge(rest, repos, parsed, env, factory, builder, command) {
+  const { flags, positionals } = parseFlags(rest, MERGE_TAKES);
+  if (flags.some((f) => f.name === "--help" || f.name === "-h"))
+    return;
+  const given = [
+    ...repos,
+    ...flags.filter((f) => (f.name === "-R" || f.name === "--repo") && f.value).map((f) => f.value)
+  ];
+  const [target] = positionals;
+  const url = target && !unreadable(target) ? /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\//i.exec(target.value) : null;
+  const candidates = url ? [{ owner: url[1], repo: url[2] }] : given.length > 0 ? [repoOf(given.at(-1))] : GH_DEFAULT(env, parsed.local);
+  if (target && unreadable(target))
+    candidates.push(undefined);
+  if (!mayBe(candidates, factory))
+    return;
+  const head = flags.findLast((f) => f.name === "--match-head-commit")?.value;
+  const squash = flags.some((f) => f.name === "--squash" || f.name === "-s");
+  const pinned = !!head && !unreadable(head) && /^[0-9a-f]{7,40}$/i.test(head.value);
+  if (squash && pinned && !namesRole(command) && await builder())
+    return;
+  return `no-protected-push hook refuses this gh pr merge: it merges a pull request of ${factory || "the factory's repository"}, whose base is main or canary. ${ROUTE} ${MERGE_FIX} ${BUILDER_FORM}`;
+}
+function fieldOf(request, key) {
+  const field = request.fields.findLast((f) => f.key === key);
+  if (field)
+    return field.text;
+  for (const input of request.inputs) {
+    if (unreadable(input))
+      return { unknown: "an --input the hook cannot read", value: "" };
+    try {
+      const value = JSON.parse(input.value)[key];
+      if (typeof value === "string")
+        return { value };
+      if (value !== undefined)
+        return { unknown: `a ${key} that is no string`, value: "" };
+    } catch {
+      return { unknown: "an --input that is no JSON object", value: "" };
+    }
+  }
+}
+function restWrite(tail, request) {
+  if (/^pulls\/[^/]+\/merge$/.test(tail))
+    return "it merges a pull request, whose base is main or canary";
+  const protectedBy = (key, absent) => {
+    const text = fieldOf(request, key);
+    if (!text)
+      return absent;
+    if (unreadable(text))
+      return `its ${key} is built at run time`;
+    const target = branchOf(text.value);
+    return target !== undefined && PROTECTED.has(target) ? `it writes ${target}` : undefined;
+  };
+  if (tail === "git/refs")
+    return protectedBy("ref");
+  const ref = /^git\/refs\/(.+)$/.exec(tail)?.[1];
+  if (ref !== undefined) {
+    const target = branchOf(ref);
+    return target !== undefined && PROTECTED.has(target) ? `it writes ${target}` : undefined;
+  }
+  if (/^contents\/./.test(tail))
+    return protectedBy("branch", "it names no branch, so it writes the default branch, canary");
+  if (tail === "merges")
+    return protectedBy("base");
+}
+async function judgeApi(rest, cmd, parsed, env, factory) {
+  const request = await ghApi(rest, cmd, env, parsed.xargs);
+  if (!request)
+    return;
+  const { endpoint, method } = request;
+  const path = decodeURIComponent(endpoint.value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "").split("?")[0]).replace(/\/+$/, "");
+  if (path === "graphql" || path === "api/graphql") {
+    const texts = [
+      ...request.fields.filter((f) => f.key === "query" || f.key === "body").map((f) => f.text),
+      ...request.inputs
+    ];
+    const blind = texts.some(unreadable);
+    const mutation = texts.map((t) => REF_MOVE.exec(t.value)?.[0]).find(Boolean);
+    if (mutation)
+      return `no-protected-push hook refuses this gh api graphql call: it runs ${mutation}, which merges a pull request or moves a branch, and a node id names no repository, so the hook cannot tell it from a write to main or canary. Merge through gh pr merge's own route, bun run pr:merge <n>, and move a branch with git push.`;
+    if (!blind)
+      return;
+    return `no-protected-push hook refuses this gh api graphql call: it sends a query the hook cannot read, which may merge a pull request or move a branch. ${UNREAD_FIX}`;
+  }
+  if (method === "GET" || method === "HEAD")
+    return;
+  const place = factory || "the factory's repository";
+  if (unreadable(endpoint))
+    return `no-protected-push hook refuses this gh api ${method} call: its endpoint is built at run time, so it may write main or canary of ${place}. ${UNREAD_FIX}`;
+  const m = /^repos\/([^/]+)\/([^/]+)\/(.+)$/.exec(path);
+  if (!m)
+    return;
+  const repos = m[1] === "{owner}" || m[2] === "{repo}" ? GH_DEFAULT(env, parsed.local) : [{ owner: m[1], repo: m[2] }];
+  if (!mayBe(repos, factory))
+    return;
+  const what = restWrite(m[3], request);
+  if (!what)
+    return;
+  const fix = /^pulls\/[^/]+\/merge$/.test(m[3]) ? MERGE_FIX : FIX;
+  return `no-protected-push hook refuses this gh api ${method} call: ${what} of ${place}. ${ROUTE} ${fix}`;
+}
+var isPush = (args) => gitCommand(args).sub?.value === "push";
+async function inspect(raw, environment) {
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (typeof payload !== "object" || payload === null)
+    return;
+  const { cwd, tool_input: input, tool_name: tool } = payload;
+  const factoryOf = () => {
+    const read = readPolicyOrDefaults(dataDir(environment));
+    return read.refusal === undefined ? factoryRepo(read.settings) : "";
+  };
+  if (typeof tool === "string" && MCP_TOOL2.test(tool))
+    return judgeTool(tool, input ?? {}, factoryOf());
+  if (tool !== "Bash")
+    return;
+  const command = input?.command;
+  if (typeof command !== "string" || !/git|push|\bgh\b|\$|`/i.test(command.replace(/[\\'"]/g, "")))
+    return;
+  const factory = factoryOf();
+  const builder = () => builderLead(raw, environment);
+  const directory = typeof cwd === "string" ? cwd : undefined;
+  const env = {
+    cwd: directory,
+    cwdSure: directory,
+    files: new Map,
+    known: knownVariables(command, environment, directory),
+    process: environment,
+    vars: new Map
+  };
+  let settled = true;
+  const visit = async (cmd, parsed, at) => {
+    const { args, first, name } = parsed;
+    let ghArgs;
+    if (name === "gh")
+      ghArgs = args;
+    else if (!PRINTERS.has(name)) {
+      const nested = args.findIndex((a) => program(a.value) === "gh");
+      if (nested !== -1)
+        ghArgs = args.slice(nested + 1);
+    }
+    if (ghArgs) {
+      const { head, repos, rest } = ghCommand(ghArgs);
+      const folders = places(at);
+      if (at.cwdUnread || at.cwdAnywhere)
+        folders.push({ ...at, cwd: undefined, cwdSure: undefined });
+      for (const place of folders) {
+        const verdict = head[0] === "pr" && head[1] === "merge" ? await judgeMerge(rest, repos, parsed, place, factory, builder, command) : head[0] === "api" ? await judgeApi(rest, cmd, parsed, place, factory) : undefined;
+        if (verdict)
+          return verdict;
+      }
+    }
+    let gitArgs;
+    if (name === "git")
+      gitArgs = args;
+    else if (first && (first.unknown || marked(first.value)) && isPush(args))
+      gitArgs = args;
+    else if (!PRINTERS.has(name)) {
+      const nested = args.findIndex((a, j) => program(a.value) === "git" && isPush(args.slice(j + 1)));
+      if (nested !== -1)
+        gitArgs = args.slice(nested + 1);
+    }
+    let verdict;
+    if (gitArgs) {
+      const folders = places(at);
+      if (at.cwdUnread || at.cwdAnywhere)
+        folders.push({ ...at, cwd: undefined, cwdSure: undefined });
+      for (const place of folders)
+        verdict ??= judge(gitArgs, parsed, place, factory, settled);
+    }
+    const sub = gitArgs && gitCommand(gitArgs).sub?.value;
+    if (!(name === "git" && sub && GIT_KEEPS_HEAD.has(sub)) && !KEEPS_HEAD.has(name))
+      settled = false;
+    return verdict;
+  };
+  return run(lex(command, env.known), env, visit);
+}
+async function check2(raw, environment = process.env) {
+  try {
+    return await inspect(raw, environment);
+  } catch (error) {
+    if (!/push|merge|refs|contents|graphql|_file/i.test(raw))
+      return;
+    return `no-protected-push hook could not read this call (${error}), which names a route onto main or canary, so it refuses it. ${FIX}`;
   }
 }
 
@@ -8326,7 +9748,7 @@ function chipsSigned(blocks, signature) {
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var HANDLE = /^[a-z\d][\w.-]{1,63}$/i;
 var MAX_ROSTER_BYTES = 1048576;
-var CHECKOUT = join6(__CHECKOUT + "/scripts/hooks", "..", "..");
+var CHECKOUT2 = join6(__CHECKOUT + "/scripts/hooks", "..", "..");
 function rosterNames(environment) {
   const path = join6(dataDirOf(environment), "roster.json");
   try {
@@ -8344,7 +9766,7 @@ function rosterNames(environment) {
   }
 }
 var notEveryday = (name) => HANDLE.test(name) && !terms.everyday.some((w) => w.toLowerCase() === name.toLowerCase());
-function skillNames(checkout = CHECKOUT) {
+function skillNames(checkout = CHECKOUT2) {
   const ours = join6(checkout, "skills", "playground");
   try {
     return readdirSync(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync3(join6(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
@@ -8352,7 +9774,7 @@ function skillNames(checkout = CHECKOUT) {
     return [];
   }
 }
-function pattern(environment, checkout = CHECKOUT) {
+function pattern(environment, checkout = CHECKOUT2) {
   const sources = [
     ...[...terms.names, ...terms.aliases, ...rosterNames(environment), ...skillNames(checkout)].map((n) => escape(n).replace(/ /g, "[\\s_-]+") + (n.endsWith("_") ? "[a-z\\d_]*" : "")),
     ...terms.paths.map(escape),
@@ -8467,7 +9889,7 @@ var COMMIT_TAKES = new Set([
   "--template",
   "--trailer"
 ]);
-var PUSH_TAKES = new Set(["--exec", "-o", "--push-option", "--receive-pack", "--repo"]);
+var PUSH_TAKES2 = new Set(["--exec", "-o", "--push-option", "--receive-pack", "--repo"]);
 var REPO_WRITES = new Map([
   ["repo archive", []],
   ["repo delete", []],
@@ -8528,8 +9950,8 @@ var GIT_CONFIG_PATH = /(?:^|\/)\.git(?:\/|$)|\.gitconfig|(?:^|\/)git\/config$/;
 var CONFIG_WRITE = /^--(?:add|edit|remove-section|rename-section|replace-all|unset|unset-all)$|^-e$/;
 var CONFIG_READ = /^--(?:get|get-all|get-color|get-colorbool|get-regexp|get-urlmatch|list)$|^-l$/;
 var CONFIG_TAKES = new Set(["--blob", "--default", "-f", "--file", "--type"]);
-var builtins;
-var MCP_TOOL2 = /^mcp__(.+?)__(.+)$/;
+var builtins2;
+var MCP_TOOL3 = /^mcp__(.+?)__(.+)$/;
 var READ_TOOL = /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$/;
 var INNER = new Set(["curl", "gh", "git"]);
 var MAYBE = /curl|gh|git/i;
@@ -8558,13 +9980,13 @@ var IDLE = {
 };
 var state = () => calls.getStore() ?? IDLE;
 var lower = (text) => text[0].toLowerCase() + text.slice(1);
-function refuse2(what, target, detail, fix) {
+function refuse3(what, target, detail, fix) {
   return `${state().policy.guard} hook refused ${what} to ${target.label}: ${detail}. ${state().policy.why} ${fix}`;
 }
 function refuseAny(what, target, fix = NOT_RUN) {
-  return target.where === "guarded" ? refuse2(what, target, `it writes to ${state().policy.place}`, fix) : refuse2(what, target, `the hook cannot tell whether it writes to ${state().policy.place}`, PLACE_FIX);
+  return target.where === "guarded" ? refuse3(what, target, `it writes to ${state().policy.place}`, fix) : refuse3(what, target, `the hook cannot tell whether it writes to ${state().policy.place}`, PLACE_FIX);
 }
-async function judge(what, target, texts, env, extras = []) {
+async function judge2(what, target, texts, env, extras = []) {
   if (target.where === "other")
     return;
   if (state().policy.anyWrite && !target.byText)
@@ -8580,13 +10002,13 @@ async function judge(what, target, texts, env, extras = []) {
   if (target.where === "unknown") {
     if (!hit)
       return;
-    return refuse2(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${holds}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(fix ?? "")} ${NOT_RUN}`);
+    return refuse3(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${holds}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(fix ?? "")} ${NOT_RUN}`);
   }
   if (hit)
-    return refuse2(what, target, `its text holds ${holds}`, fix ?? hit.fix);
+    return refuse3(what, target, `its text holds ${holds}`, fix ?? hit.fix);
   const hidden = resolved.find((t) => t.unknown);
   if (hidden) {
-    return refuse2(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`, READABLE);
+    return refuse3(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`, READABLE);
   }
 }
 function decide(candidates) {
@@ -8621,7 +10043,7 @@ var leak = async (cmd, parsed, env) => {
   }
   const pusher = state().policy.anyWrite && (head === "send-pack" || head === "subtree");
   if (name === "git" || first?.unknown && (head === "commit" || head === "push" || pusher))
-    return state().policy.git ? git(args, cmd, env, parsed.local) : undefined;
+    return state().policy.git ? git2(args, cmd, env, parsed.local) : undefined;
   if (name === "curl")
     return curl(args, cmd, env, xargs);
   if (PRINTERS.has(name))
@@ -8681,7 +10103,7 @@ async function gh(args, cmd, env, local, xargs) {
   const key = head.join(" ");
   if (state().policy.anyWrite) {
     if (key === "alias import" || key === "alias set") {
-      return refuse2(`gh ${key}`, decide([]), "an alias can run any gh write under a name the hook does not read", `Run the gh command itself, in a call of its own. ${NOT_RUN}`);
+      return refuse3(`gh ${key}`, decide([]), "an alias can run any gh write under a name the hook does not read", `Run the gh command itself, in a call of its own. ${NOT_RUN}`);
     }
     if (head[0] === "issue" || head[0] === "label" || CONVERSATION.has(key))
       return;
@@ -8738,7 +10160,7 @@ async function gh(args, cmd, env, local, xargs) {
   const target = decide(named.length > 0 ? named : fallback);
   if (key === "pr create" && target.where !== "other")
     texts.push(...prCreate2(rest, flags, env));
-  return judge(`gh ${key}`, target, texts.map((t) => viaXargs(t, xargs)), env, positionals);
+  return judge2(`gh ${key}`, target, texts.map((t) => viaXargs(t, xargs)), env, positionals);
 }
 function destination(what, owner, name, fix) {
   if (owner === undefined || name === undefined)
@@ -8780,15 +10202,15 @@ function repoWrite(key, rest, repos, env, local, xargs, takes) {
   if (key === "repo sync" && named.length === 0)
     return Promise.resolve(undefined);
   const given = (named.length > 0 ? named : repos).map((w) => fromXargs(w, xargs) || marked(w.value) ? undefined : repoOf(w));
-  return judge(`gh ${key}`, decide(given.length > 0 ? given : implicit(env, local)), [], env);
+  return judge2(`gh ${key}`, decide(given.length > 0 ? given : implicit(env, local)), [], env);
 }
 function unplaced(what, source, env) {
   const lost = source.length === 0 && !env.cwd;
   if (!lost && source.every(Boolean))
     return;
   if (state().policy.anyWrite && state().changed)
-    return refuse2(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
-  return refuse2(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
+    return refuse3(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
+  return refuse3(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
 }
 function prCreate2(rest, flags, env) {
   const values = rest.map((w) => w.value);
@@ -8829,12 +10251,12 @@ async function api2(args, cmd, env, local, xargs) {
       label: "a repository named only by a GraphQL node id",
       where: "unknown"
     };
-    return judge("gh api graphql", target, texts, env, extras);
+    return judge2("gh api graphql", target, texts, env, extras);
   }
   const value = endpoint.value;
   const host = hostTarget(value);
   if (host)
-    return judge(`gh api ${host.label}`, host, texts, env, extras);
+    return judge2(`gh api ${host.label}`, host, texts, env, extras);
   const typed = value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "");
   const path = state().policy.anyWrite ? dotless(typed) : typed;
   const repo = /^repos\/([^/]+)\/([^/]+)/.exec(path);
@@ -8848,7 +10270,7 @@ async function api2(args, cmd, env, local, xargs) {
   if (state().policy.anyWrite && repo && conversation(path.slice(repo[0].length)))
     return;
   if (state().policy.anyWrite && path.startsWith("repositories/"))
-    return judge(what, { label: "a repository named only by its id", where: "unknown" }, [], env);
+    return judge2(what, { label: "a repository named only by its id", where: "unknown" }, [], env);
   let candidates;
   if (fromXargs(endpoint, xargs))
     candidates = [undefined];
@@ -8866,10 +10288,10 @@ async function api2(args, cmd, env, local, xargs) {
   else if (marked(value) && (/^(repos|orgs)\//.test(path) || marked(path.split("/")[0])))
     candidates = [undefined];
   else if (marked(value))
-    return judge(what, decide([undefined]), texts, env, extras);
+    return judge2(what, decide([undefined]), texts, env, extras);
   else
     return;
-  return unplaced(what, candidates, env) ?? judge(what, decide(candidates), texts, env, extras);
+  return unplaced(what, candidates, env) ?? judge2(what, decide(candidates), texts, env, extras);
 }
 async function apiDestination(what, request, path, env) {
   const { fields, inputs, method } = request;
@@ -8948,7 +10370,7 @@ async function curl(args, cmd, env, xargs) {
   if (state().policy.anyWrite) {
     const redirect = args.some((a, i) => /^--(?:connect-to|request-target|resolve)(?:=|$)/.test(a.value) || (a.value === "-H" || a.value === "--header") && /^\s*host\s*:/i.test(args[i + 1]?.value ?? "") || /^(?:-H|--header=)\s*host\s*:/i.test(a.value));
     if (redirect && args.some((a) => /github/i.test(a.value)))
-      return judge("curl", { label: "a host the call redirects to", where: "unknown" }, [], env);
+      return judge2("curl", { label: "a host the call redirects to", where: "unknown" }, [], env);
   }
   const targets = urls.map((u) => {
     if (u.unknown === XARGS_INPUT.unknown || state().policy.anyWrite && fromXargs(u, xargs))
@@ -8991,7 +10413,7 @@ async function curl(args, cmd, env, xargs) {
   }
   if (xargs && !xargs.replace)
     data.push(unknown2("the arguments xargs appends"));
-  return judge("curl", target, data.map((t) => viaXargs(t, xargs)), env, urls);
+  return judge2("curl", target, data.map((t) => viaXargs(t, xargs)), env, urls);
 }
 function curlWrites(flags) {
   const method = flags.find((f) => f.name === "-X" || f.name === "--request")?.value;
@@ -9081,7 +10503,7 @@ function gitText(dir, args, what) {
   });
   return proc.exitCode === 0 ? { value: proc.stdout.toString() } : unknown2(what);
 }
-async function git(args, cmd, env, local = new Map, depth = 0) {
+async function git2(args, cmd, env, local = new Map, depth = 0) {
   let dir = env.cwd;
   let k = 0;
   let carried = [...local.keys(), ...env.vars.keys()].some((name) => name.startsWith("GIT_"));
@@ -9125,21 +10547,21 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
   const rest = args.slice(k + 1);
   const here = { ...env, cwd: dir };
   const maybeAlias = anyAlias || aliasSet && !!sub && marked(sub);
-  if (!state().policy.anyWrite && sub && (maybeAlias || aliases.has(sub.toLowerCase())) && !builtin(sub)) {
+  if (!state().policy.anyWrite && sub && (maybeAlias || aliases.has(sub.toLowerCase())) && !builtin2(sub)) {
     const value = aliases.get(sub.toLowerCase());
     const words = value === undefined || value.trim().startsWith("!") ? undefined : splitCmdline(value);
     const head = words?.[0]?.value;
     if (!words || !head || aliases.has(head.toLowerCase()) || depth > 8)
-      return refuse2("git", decide([]), `its alias ${sub}, set with -c or --config-env, runs a command, holds a value the hook cannot read, or names another alias`, `Write the git command out in full in place of the alias, then run it again. ${NOT_RUN}`);
-    return git([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1);
+      return refuse3("git", decide([]), `its alias ${sub}, set with -c or --config-env, runs a command, holds a value the hook cannot read, or names another alias`, `Write the git command out in full in place of the alias, then run it again. ${NOT_RUN}`);
+    return git2([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1);
   }
   if (state().policy.anyWrite) {
-    const cannot = (detail) => refuse2("git", decide([]), detail, PLACE_FIX);
+    const cannot = (detail) => refuse3("git", decide([]), detail, PLACE_FIX);
     if (aliasSet)
       return cannot("it sets a git alias with -c or --config-env, which can run a push under a name the hook does not read");
     if (sub && marked(sub))
       return cannot("its subcommand is a value the hook cannot read");
-    if (sub && !["commit", "push", "send-pack", "subtree"].includes(sub) && !builtin(sub)) {
+    if (sub && !["commit", "push", "send-pack", "subtree"].includes(sub) && !builtin2(sub)) {
       if (carried)
         return cannot(`it runs ${sub}, which -c, --config-env, --git-dir or a GIT_ variable may define as an alias`);
       if (state().changed)
@@ -9151,14 +10573,14 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
         const words = splitCmdline(alias.value);
         if (!words)
           return cannot(`its alias ${sub} has an unclosed quote or a trailing backslash`);
-        return git([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1);
+        return git2([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1);
       }
     }
     const subtree = sub === "subtree" && rest[0]?.value === "push";
     if (sub === "push" || sub === "send-pack" || subtree) {
       if (carried)
-        return refuse2("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
-      return subtree ? push(rest.slice(1), here, [], SUBTREE_TAKES) : push(rest, here, [], PUSH_TAKES, sub === "push");
+        return refuse3("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
+      return subtree ? push(rest.slice(1), here, [], SUBTREE_TAKES) : push(rest, here, [], PUSH_TAKES2, sub === "push");
     }
   }
   if (sub !== "commit" && sub !== "push")
@@ -9173,7 +10595,7 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     if (target.where !== "guarded")
       return;
     const onBranch = state().policy.branchPush && dir && !carried && !state().movedBefore && branchHead(dir);
-    return onBranch ? undefined : judge("git commit", target, [], env);
+    return onBranch ? undefined : judge2("git commit", target, [], env);
   }
   const { flags } = parseFlags(rest, COMMIT_TAKES);
   const texts = [branch(dir)];
@@ -9190,12 +10612,12 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     } else
       extras.push(value);
   }
-  return judge("git commit", decide(dir ? checkout : [undefined]), texts, env, extras);
+  return judge2("git commit", decide(dir ? checkout : [undefined]), texts, env, extras);
 }
-function builtin(sub) {
-  builtins ??= new Set(Bun.spawnSync(["git", "--list-cmds=builtins"], { stderr: "ignore" }).stdout.toString().split(`
+function builtin2(sub) {
+  builtins2 ??= new Set(Bun.spawnSync(["git", "--list-cmds=builtins"], { stderr: "ignore" }).stdout.toString().split(`
 `).filter(Boolean));
-  return builtins.has(sub);
+  return builtins2.has(sub);
 }
 function splitCmdline(body) {
   const words = [];
@@ -9327,14 +10749,14 @@ function branchHead(dir) {
   }
   return !defaults.has(name);
 }
-async function push(rest, env, checkout, takes = PUSH_TAKES, plain = false) {
+async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
   const { flags, positionals } = parseFlags(rest, takes);
   if (state().policy.anyWrite) {
     const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value;
     const target = pushTarget(remote, env.cwd);
     if (plain && state().policy.branchPush && target.where === "guarded" && env.cwd && branchOnly(flags, positionals, env.cwd))
       return;
-    return judge("git push", target, [], env);
+    return judge2("git push", target, [], env);
   }
   const names = new Set(flags.map((f) => f.name));
   const [remote, ...refspecs] = positionals;
@@ -9381,7 +10803,7 @@ async function push(rest, env, checkout, takes = PUSH_TAKES, plain = false) {
     const not = remoteName ? `--remotes=${remoteName}` : "--remotes";
     texts.push(...commitTexts(env.cwd, [...sources, "--not", not], "the messages of the commits it pushes"));
   }
-  return judge("git push", target, texts, env);
+  return judge2("git push", target, texts, env);
 }
 var GATED_READS = new Set(["usergroups_me", "users_conversations"]);
 function gatedPost(tool, server, name, input) {
@@ -9437,7 +10859,7 @@ function strings(node) {
   return [];
 }
 function mcp(tool, input) {
-  const [, server = "", name = ""] = MCP_TOOL2.exec(tool) ?? [];
+  const [, server = "", name = ""] = MCP_TOOL3.exec(tool) ?? [];
   const gated = gatedPost(tool, server, name, input);
   if (gated)
     return gated;
@@ -9447,7 +10869,7 @@ function mcp(tool, input) {
   const what = tool.replace(/^mcp__/, "");
   let target = { label: surface, where: "guarded" };
   if (!input)
-    return refuse2(what, target, "its input is not an object the hook can read", MCP_READABLE);
+    return refuse3(what, target, "its input is not an object the hook can read", MCP_READABLE);
   if (surface === "Slack" && (CHAT_TOOL.test(name) || name === CONNECTOR_TOOL)) {
     const connector = name === CONNECTOR_TOOL;
     const verdict = clearedPost(what, input, connector ? CONNECTOR_KEYS : POST_KEYS, connector);
@@ -9464,7 +10886,7 @@ function mcp(tool, input) {
     if (owner === undefined)
       return;
     if (typeof owner !== "string") {
-      return refuse2(what, { label: "GitHub", where: "unknown" }, "its owner is not text the hook can read", MCP_READABLE);
+      return refuse3(what, { label: "GitHub", where: "unknown" }, "its owner is not text the hook can read", MCP_READABLE);
     }
     const repo = { owner, repo: typeof input.repo === "string" ? input.repo : "*" };
     if (!state().policy.guarded(repo))
@@ -9475,20 +10897,20 @@ function mcp(tool, input) {
   }
   const hit = strings(input).map(state().policy.find).find(Boolean);
   if (hit)
-    return refuse2(what, target, `its text holds ${hit.detail}`, hit.fix);
+    return refuse3(what, target, `its text holds ${hit.detail}`, hit.fix);
 }
 function candidate(command) {
   const maybe = state().policy.anyWrite ? MAYBE_ANY : MAYBE;
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""));
 }
-async function factoryTerms(environment = process.env, checkout = CHECKOUT, lists = join6(coreDir(), "lists")) {
+async function factoryTerms(environment = process.env, checkout = CHECKOUT2, lists = join6(coreDir(), "lists")) {
   const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join6(lists, "playground-terms.json"));
   if (loaded.refusal !== undefined)
     return { refusal: loaded.refusal };
   terms = loaded.list;
   return { pattern: pattern(environment, checkout) };
 }
-async function check2(raw, environment = process.env, checkout = CHECKOUT, lists = join6(coreDir(), "lists")) {
+async function check3(raw, environment = process.env, checkout = CHECKOUT2, lists = join6(coreDir(), "lists")) {
   const loadedTerms = await factoryTerms(environment, checkout, lists);
   if (loadedTerms.refusal !== undefined)
     return refusedList(raw, loadedTerms.refusal);
@@ -9519,7 +10941,7 @@ async function inspectAs(given, raw, environment, cleared = {}) {
   const call = { changed: false, cleared, moved: false, movedBefore: false, policy: given };
   return await calls.run(call, async () => {
     try {
-      return await inspect(raw, environment);
+      return await inspect2(raw, environment);
     } catch (error) {
       const subject = subjectOf(raw);
       const writes = WRITE_CALL.test(subject) || given.anyWrite && candidate(subject);
@@ -9541,7 +10963,7 @@ function subjectOf(raw) {
     return raw;
   }
 }
-async function inspect(raw, environment) {
+async function inspect2(raw, environment) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -9573,7 +10995,7 @@ async function inspect(raw, environment) {
 }
 if (import.meta.main) {
   const raw = await Bun.stdin.text();
-  const reason = await fromFactory(raw) ? await check(raw) ?? await check2(raw) : undefined;
+  const reason = await fromFactory(raw) ? await check(raw) ?? await check2(raw) ?? await check3(raw) : undefined;
   if (reason) {
     console.error(reason);
     process.exit(2);
@@ -9581,7 +11003,7 @@ if (import.meta.main) {
 }
 export {
   REPHRASE,
-  check2 as check,
+  check3 as check,
   factoryTerms,
   inspectAs,
   refusedList,

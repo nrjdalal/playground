@@ -71,9 +71,9 @@ export const yardClient = (base: string, token: string, request: YardFetch = fet
     return parsed.data
   }
   return {
-    addBot: (name: string, { log = false }: { log?: boolean } = {}) =>
+    addBot: (name: string) =>
       call("/bots", z.object({ bot: botSchema, secret: z.string() }), {
-        body: { log, name },
+        body: { name },
         method: "POST",
       }),
     channels: async () =>
@@ -116,6 +116,12 @@ export const yardClient = (base: string, token: string, request: YardFetch = fet
           method: "DELETE",
         })
       ).bot,
+    // this token's swap of itself for secret, a new one of its own kind the Mac made (rotate.ts)
+    swapToken: (secret: string) =>
+      call("/tokens/swap", z.object({ token: z.object({ id: z.string(), name: z.string() }) }), {
+        body: { secret },
+        method: "POST",
+      }),
     waiting: async ({ after, since }: { after?: string; since: string }) =>
       (
         await call(

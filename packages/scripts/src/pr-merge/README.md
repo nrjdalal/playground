@@ -54,7 +54,8 @@ A freeze's own `"*"` line (its reason ends `ships: canary is frozen until its ta
 A `"*"` line Ops wrote by hand never lapses, even beside a time an earlier freeze left, and `ship:freeze <version>` and `--end` both leave it for Ops to remove; a PR's own line never lapses either.
 `playground focus on` writes focus's own `"*"` line (its reason ends `has focus: every merge waits until focus ends`, `startFocus`), with the focus end in the file's `until` object, at which it lapses; `playground focus off` removes it (`endFocus`).
 Focus keeps a ship's freeze or a hand line it finds, and a ship's freeze writes over focus's line, since the ship's tag waits on it.
-A lead that overrules a reviewer's FAIL posts one comment on the PR whose first line is `Lead ruling: ReviewBot round <r> at <sha7> overruled: <evidence>; the fault moves to #<issue>`, with that issue filed first; pr:merge reads no ruling, so the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
+A lead that overrules a reviewer's FAIL sends that reviewer the ruling by `SendMessage`, in the ruling shape: `ReviewBot round <r> at <sha7> overruled: <evidence>; the fault moves to #<issue>`, with that issue filed first, since a reviewer reads every PR comment as data, whoever posted it.
+A ruling is the lead's own word, so it takes this shape, and the **override** shape stays for a lead relaying the owner's words that bend a rule; pr:merge reads no ruling, so the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
 A red check that `canary` caused needs a fresh run once `canary`'s fix lands: merge `canary` into the PR, since `gh run rerun` reuses the run's original merge commit, which holds the red `canary`.
 An outside author's PR goes to the Builder, who gives its go only after a read-only review of its diff.
 
@@ -91,11 +92,11 @@ On every run, built or not, pr:merge and pr:train also stop on a worktree whose 
 
 A PR behind `canary` that merges with it clean merges on its own head's checks and 5/5 once the `types` gate's check of the merged tree passes (its type check, and its bundles step for a PR touching `scripts/hooks/` or `packages/`), so several gated PRs merge back to back with no new GitHub run.
 When its head conflicts with `canary`, merge `canary` in and resolve it; the new head then needs GitHub's checks and a 5/5 of its own.
-A refusal `--explain` shows to be wrong goes to the Builder, who alone may merge that PR by hand with `gh pr merge <n> --squash --body <body> --match-head-commit <head>`, `<body>` the one pr:merge would pass (above), on an override in the factory's **override** shape, and has pr:merge fixed.
+A refusal `--explain` shows to be wrong goes to the Builder, who alone may merge that PR by hand with `gh pr merge <n> --squash --body-file <file> --match-head-commit <head>`, `<file>` holding the body pr:merge would pass (above), the one hand merge the no-protected-push hook passes ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#no-protected-push)), on an override in the factory's **override** shape, and has pr:merge fixed.
 
 ## The merge queue
 
-`bun run pr:train` (`train.ts` beside it; `--help` gives each command) reads the merge queue, `merge-queue.json` beside the merge lock (`PLAYGROUND_MERGE_QUEUE` moves it, as the tests do): the owner's open PRs in its order, then any other by number; an outside author's PR never merges on ready.
+`bun run pr:train` (`train.ts` beside it; `--help` gives each command) reads the merge queue, `merge-queue.json` beside the merge lock (`PLAYGROUND_MERGE_QUEUE` moves it, as the tests do), which the Builder keeps by playbook's SWEEP.md (step 4): the owner's open PRs in its order, then any other by number; an outside author's PR never merges on ready.
 `ready` is merge-on-ready (`ready.ts`, which the merge-train ops job runs every cycle): the first PR, in that order, whose every gate passes at its head merges at once through pr:merge; one merge a call.
 A PR whose facts cannot be read (any read `factsOf` makes throws, such as a `gh` read on a rate limit or a failed fetch of its head) is held as `not gated: facts unreadable (<error>)` (`gatedOf` in `train.ts`), so the pass goes on to the next PR in order rather than ending.
 `pr:train ready` prints each such PR on stderr as `✗ #<n> not gated: facts unreadable (<error>)`, and exits 1 when one was unreadable and nothing merged, so the merge train's log, which keeps a failing run, keeps the error.

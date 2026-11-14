@@ -63,9 +63,10 @@ set -euo pipefail
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
 #   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
+#   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, holds outbound hosts to the ones a worker's loop needs, and a worker or reviewer with no --in starts in a detached worktree made for it (review-<n> for this checkout's PR n, else <name>), whose folder, git entry and the main checkout's FETCH_HEAD, objects, refs and logs it writes, canary's, main's and live.branch's refs left shut; its roster row records sandbox=on, which a resume keeps and a start without it clears
 #   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate; the load, memory and usage gates still hold it
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
-#   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
+#   --account <email>  with any mode but restore or close, anywhere among its words, and on a worker's, reviewer's or tester's Claude start while usage.accounts lists a Claude row, which the refusal lists in order: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
 #   --harness codex    with the first dispatcher's manager start or its resume alone, on a scratch data folder (PLAYGROUND_DATA_DIR naming one) until phase 3 lifts that, and no --backend, --account, --model or --effort: the session runs in Codex (the codex on PATH), its CODEX_HOME the data folder's codex/, whose config.toml, hooks.json (the factory's guards and the beat) and app-server-daemon/settings.json each launch writes; its hooks always run trusted (--dangerously-bypass-hook-trust), and it fails closed: a session whose SessionStart hook writes no beat within 60 seconds has its pane closed and the start refused, with no new pin, record or roster row (a resume keeps its earlier ones), and a pane herdr will not close is named for you to close; a Codex start also stops when PowerShell is installed (a pwsh or powershell on PATH, or /usr/local/bin/pwsh), which the beat names. The beat names its thread, which takes the session's name through codex app-server's thread/name/set.
@@ -826,7 +827,7 @@ PY
   esac
 }
 
-# --account, --backend, --harness, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check, --priority and --reads-only may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --harness, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check, --priority, --reads-only and --sandbox may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -861,6 +862,7 @@ MEMORY_OFF=
 CHECK=
 PRIORITY=
 READS_ONLY=
+SANDBOX_ARG=
 NAME_PROJECT=
 SIZE=
 RUNTIME=
@@ -940,6 +942,9 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = --reads-only ]; then
     READS_ONLY=1
     shift
+  elif [ "$1" = --sandbox ]; then
+    SANDBOX_ARG=1
+    shift
   elif [ "$1" = --brief ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RESUME_BRIEF" ] || usage
     case "$2" in --*) usage "--brief needs a value; \"$2\" starts with --" ;; esac
@@ -991,6 +996,8 @@ MODE=${1:-}
 [ -z "$REPORTS_TO" ] || [ "$MODE" = worker ] || usage "--reports-to is for a worker, not ${MODE:-no mode}"
 [ -z "$IN_DIR" ] || [ "$MODE" = worker ] || usage "--in is for a worker, not ${MODE:-no mode}"
 [ -z "$READS_ONLY" ] || [ "$MODE" = worker ] || usage "--reads-only is for a worker, not ${MODE:-no mode}"
+SANDBOX_ONLY="--sandbox is for a worker's, a reviewer's or a probe's start"
+[ -z "$SANDBOX_ARG" ] || [[ $MODE =~ ^(worker|column|probe)$ ]] || usage "$SANDBOX_ONLY, not a ${MODE:-session}'s"
 [ -z "$PR_ARG" ] || [[ $MODE =~ ^(column|resume)$ ]] || usage "--pr is for a reviewer's or tester's column or resume, not ${MODE:-no mode}"
 [ -z "$TITLE_ARG" ] || [[ $MODE =~ ^(worker|column|resume)$ ]] || usage "--title is for a worker or a reviewer's or tester's column, not ${MODE:-no mode}"
 # herdr 0.9.5 keeps a resume command only from a source that holds the pane through report-agent, and then shows that source's state in place of its own (measured: a 14s turn read idle throughout), so restore reruns the sessions spawn.sh itself listed, with ops-herdr's resume_agents_on_restore off. Each goes through resume, so the gate and the live-name check judge it, and a live one is left as it is.
@@ -1328,6 +1335,22 @@ case "$MODE" in
     ;;
   *) NAME=${MODE:-session}; usage ;;
 esac
+[ -z "$SANDBOX_ARG" ] || [[ $ROLE =~ ^(worker|reviewer|probe)$ ]] || usage "$SANDBOX_ONLY, not a $ROLE's"
+# A worker or checker names its login while usage.accounts lists a Claude row, since the account split ranks logins by week left per hour and cannot follow which login takes which work; a fresh install lists none, so its bare start stays on this machine's own login.
+if [ -z "$ACCOUNT" ] && [ "$MODE" != resume ] && [ "$BACKEND" != glm ] && [[ $ROLE =~ ^(worker|reviewer|tester)$ ]]; then
+  ORDER=$(python3 -I -c 'import datetime as dt, json, sys
+now = dt.datetime.now(dt.timezone.utc)
+def named(row):
+    until = row.get("parkedUntil")
+    try:
+        parked = isinstance(until, str) and dt.datetime.fromisoformat(until.replace("Z", "+00:00")) > now
+    except ValueError:
+        parked = False
+    return row["email"] + (" (parked until " + until + ")" if parked else "")
+rows = [r for r in json.loads(sys.argv[1]) if isinstance(r, dict) and r.get("provider", "claude") == "claude" and isinstance(r.get("email"), str)]
+print(", ".join(named(r) for r in rows))' "${USAGE_ACCOUNTS:-[]}") || refuse "it cannot read usage.accounts to check that a $ROLE names its login"
+  [ -z "$ORDER" ] || refuse "a $ROLE names its login with --account <email>, since the account split cannot follow which login takes which work: usage.accounts lists $ORDER"
+fi
 word "$NAME" || refuse "a name is lowercase words joined by hyphens"
 # A new name gives its kind, since a reader of the name alone would show and place it as another; a lead or manager may take its kind from the roster instead, and a resume keeps the name it has.
 NAMED=$(kind_of_name "$NAME")
@@ -1419,14 +1442,18 @@ except Exception:
 sys.exit(0 if isinstance(email, str) and email.lower() == sys.argv[2].lower() else 1)
 PY
 }
+# Whether the Keychain holds service $1's item for account $2: only that it exists, with no -w, so the token is never read here. Claude Code's sandbox (SANDBOX_RUNTIME=1 in its shell) can close the Keychain, which then reads as no item, so a start from inside it names the check it leaves to the new pane's shell, which runs outside the sandbox and stops on a missing item before claude runs.
+keychain_has() {
+  security find-generic-password -s "$1" -a "$2" >/dev/null 2>&1 && return
+  [ "${SANDBOX_RUNTIME:-}" = 1 ] || return 1
+  echo "spawn.sh: the sandbox closes the Keychain to this shell, so the new pane checks the $1 item for $2" >&2
+}
 # An --account, or the login the usage gate picks for a bare spawn, is a second login whose Keychain item exists.
 check_account() {
   # The email goes into the pane's command, so it is a plain local@domain: no quote, space or $.
   [[ $ACCOUNT =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || refuse "--account takes a plain email, not $ACCOUNT"
   ! own_login || refuse "--account $ACCOUNT is this machine's own Claude login, whose usage the session would share unchecked: name a second account"
-  # Only that the item exists: no -w, so the token is never read here.
-  security find-generic-password -s "$KEYCHAIN" -a "$ACCOUNT" >/dev/null 2>&1 ||
-    refuse "the Keychain holds no $KEYCHAIN item for $ACCOUNT"
+  keychain_has "$KEYCHAIN" "$ACCOUNT" || refuse "the Keychain holds no $KEYCHAIN item for $ACCOUNT"
 }
 # --account naming this machine's own login starts on it with no token, as a bare start does, its usage judged by that login's reading and the split skipped.
 OWN_LOGIN=
@@ -1486,8 +1513,7 @@ if [ "$BACKEND" = glm ]; then
     GLM_ACCOUNT=$(head -n 1 <<<"$GLM_LABELS") GLM_GIVEN=
     [ -n "$GLM_ACCOUNT" ] || refuse "usage.accounts lists no GLM key: add one with playground accounts add --provider glm --label <label>"
   fi
-  security find-generic-password -s "$GLM_KEYCHAIN" -a "$GLM_ACCOUNT" >/dev/null 2>&1 ||
-    refuse "the Keychain holds no $GLM_KEYCHAIN item for $GLM_ACCOUNT"
+  keychain_has "$GLM_KEYCHAIN" "$GLM_ACCOUNT" || refuse "the Keychain holds no $GLM_KEYCHAIN item for $GLM_ACCOUNT"
 fi
 
 holders=$(live_holders "$NAME") || refuse "it cannot read the live sessions in $REGISTRY"
@@ -1608,21 +1634,43 @@ fi
 # The window reaches the session through its one settings file, built here from the factory's on every launch so the two never drift, one file per backend. On GLM: the user settings may turn on telemetry to an org's usage collector, which counts Claude usage alone, so a GLM session exports none. Claude Code keeps only the last --settings, and the user settings' env beats a variable on the launch line (both measured by a reviewer, 16 Oct), so the session's one settings file also turns the telemetry off (measured from a folder outside any checkout, 16 Oct: a SessionStart hook ran, no-env-dump refused printenv, and no metric left).
 TAG=
 [ "$BACKEND" = glm ] && TAG=glm-
-# A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own. Workers and testers join once the worker git flow runs inside it, as run-slot and spawn.sh do.
+# A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own.
 SANDBOX=
 [ "$ROLE" = probe ] && SANDBOX=sandbox-
+# --sandbox, or a resumed row that records it, takes the closed sandbox in a file of its own: a probe's, with loopback, the Keychain and the data folder's secret files closed too (scripts/README.md, spawn.sh).
+CLOSED=
+{ [ -n "$SANDBOX_ARG" ] || { [ "$MODE" = resume ] && [ "$(roster_field "$NAME" sandbox)" = on ]; }; } && CLOSED=1 SANDBOX=sandbox-closed-
 # A manager hands every build, read or research to a worker session (playbook's **workers**), so its file of its own denies the Agent and Workflow tools, which a bare deny takes out of its tools; every other session keeps both, a reviewer's code-review sub-agents among them.
 MANAGER=
 case "$ROLE" in dispatcher | lead) MANAGER=manager- ;; esac
 BUILT="$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k.json"
+# The closed sandbox's file holds the session's own worktree, so each session builds its own, and a later start never rewrites the file a live one runs on.
+[ -n "$CLOSED" ] && BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k-$NAME.json"
 # A --memory launch builds a file of its own, so the shared one every other session reads keeps the factory's memory off.
 [ -n "$MEMORY_DIR" ] && BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k-memory-$NAME.json"
+# A fresh --sandbox worker or reviewer with no --in starts in a worktree of its own, made here outside the sandbox, since Claude Code's sandbox keeps the repository's .git/worktrees read-only but for the folder a session starts in (SPAWN.md, --sandbox).
+# A reviewer of this checkout's own PR takes code-review-loop's review-<n> clone, which nightly-clean removes once the PR closes; any other session a folder by its own name.
+TREE=
+if [ -n "$SANDBOX_ARG" ] && [ -z "$IN_DIR" ] && [[ $ROLE =~ ^(worker|reviewer)$ ]]; then
+  leaf=$NAME first=${PR_ARG%%,*}
+  origin=$(git -C "$MAIN" remote get-url origin 2>/dev/null) || origin=
+  [[ $origin =~ github\.com[:/]([^/]+/[^/]+)$ ]] && origin=${BASH_REMATCH[1]%.git} || origin=
+  if [[ $first =~ ^#?([1-9][0-9]*)$ ]] || { [ -n "$origin" ] && [[ $first =~ ^https://github\.com/$origin/pull/([1-9][0-9]*)$ ]]; }; then leaf=review-${BASH_REMATCH[1]}; fi
+  TREE="$MAIN/.claude/worktrees/$leaf"
+  if [ ! -e "$TREE" ]; then
+    made=$(git -C "$MAIN" worktree add -q --detach "$TREE" 2>&1) || refuse "git worktree add $TREE failed, so $NAME has no worktree to start in: ${made%%$'\n'*}"
+  fi
+  DIR=$(cd -P "$TREE" && pwd -P)
+fi
+# The live dashboard's branch, live.branch, which a closed session's refs stay shut to beside canary and main; its default when the setting reads empty, so the deny never drops.
+LIVE=
+[ -n "$CLOSED" ] && { LIVE=$(setting_text live.branch); LIVE=${LIVE:-live/dashboard}; }
 # The folder the session runs in, as the launch below moves to it.
 OWN=${DIR:-$REPO}
-[ "$MODE" = column ] && OWN=$REPO
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" "$MANAGER" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+[ "$MODE" = column ] && [ -z "$TREE" ] && OWN=$REPO
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" "$MANAGER" "$CLOSED" "$LIVE" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
-src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager = sys.argv[1:13]
+src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager, closed, live = sys.argv[1:15]
 settings = json.load(open(src))
 settings["autoCompactWindow"] = int(window)
 if manager:
@@ -1635,11 +1683,26 @@ if backend == "glm":
 if sandbox:
     # The sandbox lets a session write its own folder, the main checkout or a worktree in it; a deny wins over that, so every entry of the main checkout is denied, .git and every other worktree included, but the path down to a worktree the session runs in.
     own = os.path.realpath(own)
+    git = os.path.join(main, ".git")
+    # The closed sandbox lets a session fetch, commit and push in the worktree it runs in: that worktree and its .git/worktrees entry, and what git writes in the common dir.
+    work = set()
+    if closed:
+        work = {os.path.join(git, entry) for entry in ("FETCH_HEAD", "logs", "objects", "refs")}
+        link = os.path.join(own, ".git")
+        if os.path.isfile(link):
+            entry = os.path.realpath(os.path.join(own, open(link).read().split("gitdir:", 1)[-1].strip()))
+            if entry.startswith(os.path.join(git, "worktrees") + os.sep):
+                work |= {own, entry}
+    kept = work | {own}
     def denied(folder):
-        paths = [os.path.join(folder, name) for name in sorted(os.listdir(folder))]
-        return [d for p in paths if p != own for d in (denied(p) if own.startswith(p + os.sep) else [p])]
+        paths = [os.path.join(folder, entry) for entry in sorted(os.listdir(folder))]
+        return [d for p in paths if p not in kept for d in (denied(p) if any(k.startswith(p + os.sep) for k in kept) else [p])]
     # The extensions root, the data folder's extensions folder, which every guard reads its lists from, is denied too, so a sandboxed session writes the rest of the data folder alone.
     deny = denied(main) + [os.path.join(data, "extensions")]
+    # The branches the main checkout, the merge flow and the live dashboard follow stay shut inside the refs and logs a closed session writes, and so does packed-refs, which git makes only when it packs.
+    if closed:
+        shut = [os.path.join(git, *parts, branch) for parts in (("refs", "heads"), ("logs", "refs", "heads")) for branch in ("canary", "main", live)] + [os.path.join(git, "packed-refs")]
+        deny += [path for path in shut if path not in deny]
     home = os.path.expanduser("~")
     settings["sandbox"] = {
         # Bypass mode would run the unsandboxed retry with no prompt, and a sandbox that cannot start would run every command unsandboxed.
@@ -1651,11 +1714,23 @@ if sandbox:
         "excludedCommands": ["docker ps", "docker ps *"],
         "failIfUnavailable": True,
         "filesystem": {
-            "allowWrite": sorted({data, os.path.join(home, ".agent-browser"), os.path.join(home, ".bun", "install", "cache"), os.path.join(home, ".cache", "turbo"), os.path.join(home, ".portless")} | ({temp.rstrip("/")} if temp else set())),
+            "allowWrite": sorted({data, os.path.join(home, ".agent-browser"), os.path.join(home, ".bun", "install", "cache"), os.path.join(home, ".cache", "turbo"), os.path.join(home, ".portless")} | ({temp.rstrip("/")} if temp else set()) | work),
             "denyWrite": deny,
         },
         "network": {"allowLocalBinding": True, "allowUnixSockets": sorted({herdr, os.path.join(home, ".agent-browser")})},
     }
+    if closed:
+        # Claude Code's sandbox opens loopback whole or not at all (allowLocalBinding gives every localhost port), and portless's proxy serves the live API's name on the same port as every other stack's, so loopback closes whole; a strict list keeps outbound hosts to the ones a worker's loop reads, since bypass mode lets any other pass. The Keychain's login items are files the client reads itself, so a read deny on its folder refuses them.
+        secrets = [os.path.join(data, name) for name in ("dumps", "remote-key.json", "whatsapp")]
+        settings["sandbox"]["filesystem"]["denyRead"] = sorted([os.path.join(home, "Library", "Keychains")] + secrets)
+        settings["sandbox"]["filesystem"]["denyWrite"] = deny + secrets
+        settings["sandbox"]["network"] = {
+            "allowedDomains": ["api.github.com", "github.com", "registry.npmjs.org"],
+            "allowUnixSockets": settings["sandbox"]["network"]["allowUnixSockets"],
+            "strictAllowlist": True,
+        }
+        # gpg writes its home folder to sign, which stays shut since gpg-agent runs the programs its config there names outside the sandbox, so a closed session's commits go unsigned; pr:merge's squash is GitHub's own commit.
+        settings["env"] = {**settings.get("env", {}), "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "commit.gpgsign", "GIT_CONFIG_VALUE_0": "false"}
 if memory:
     settings["autoMemoryEnabled"] = True
     settings["autoMemoryDirectory"] = memory
@@ -1772,7 +1847,7 @@ mkdir -p "$SCRATCHPAD" && chmod 700 "$SCRATCHPAD" || refuse "it cannot prepare $
 HEAD_LINES=
 if [ "$RUNTIME" = herdr ]; then
   CWD=${DIR:-}
-  [ "$MODE" = column ] && CWD=$REPO
+  [ "$MODE" = column ] && [ -z "$TREE" ] && CWD=$REPO
   mkdir -p "$RESUME_DIR" && chmod 700 "$RESUME_DIR" || refuse "it cannot prepare $RESUME_DIR"
   # A pane herdr restored keeps the folder it had, so the launch moves to the session's own; a resume stamps each run in <name>.ran, so you can see when a restore ran it.
   HEAD_LINES="cd $(printf %q "$CWD") || exit 1"$'\n'
@@ -1958,6 +2033,12 @@ PY
   [ -z "$TITLE_ARG" ] || set -- "$@" "title=$TITLE_ARG"
   [ "${held:1:1}" = 1 ] || set -- "$@" "task=$TASK"
   set -- "$@" "memory=$MEMORY"
+  # A start without the flag clears a row's sandbox=on, so a later resume or restore keeps the settings this start took.
+  if [ -n "$CLOSED" ]; then
+    set -- "$@" sandbox=on
+  elif [ "$MODE" != resume ] && [ "$(roster_field "$NAME" sandbox)" = on ]; then
+    set -- "$@" sandbox=
+  fi
   [ -z "${ARM:-}" ] || { mkdir -p "$DATA/memory" && printf '%s\n' "$MEMORY" > "$ARM"; } || echo "spawn.sh: $NAME $WHEN, but the memory trial's turn could not be written to $ARM" >&2
   said=
   if ! roster "$@"; then

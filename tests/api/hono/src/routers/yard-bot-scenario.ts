@@ -98,6 +98,13 @@ out.refused = {
   tokens: await status("/tokens", bot),
   waiting: await status("/waiting?since=2026-01-01T00:00:00.000Z", bot),
 }
+// a bot's token holds no relay
+out.botSocket = await new Promise<number>((done) => {
+  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/yard/relay/socket`, {
+    headers: { authorization: bot.authorization },
+  } as never)
+  socket.addEventListener("close", (event) => done(event.code))
+})
 // a bot's login is no GitHub login, so a new DM cannot name it
 out.dmToBot = await status("/dms", member, { login: "grok[bot]" })
 // a bot's login with no yard_bot row, its maker gone, is no one

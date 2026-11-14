@@ -22,7 +22,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | File a Linear ticket                                                                                                     | the **tickets** rule                                                                                                  |
 | Write anything an org sees                                                                                               | the **classified** rule                                                                                               |
 | Post in the factory's channel, or take an ask from there                                                                 | the org's `doc channel` (`playground ext show`)                                                                       |
-| Run a `vercel` command, a deploy among them                                                                              | the Vercel CLI's three traps (`VERCEL.md`)                                                                            |
+| Run a `vercel` command, a deploy among them                                                                              | the no-raw-vercel guard and the Vercel CLI's three traps (`VERCEL.md`)                                                |
 | Stop a process                                                                                                           | the **signal** rule                                                                                                   |
 | Hand off a build, a read or research                                                                                     | the **workers** rule                                                                                                  |
 | Run long, spawn a reviewer again, or wait on something                                                                   | the **context**, **rounds** and **polling** rules                                                                     |
@@ -103,7 +103,8 @@ A finished worker, reviewer or tester also ends by itself: right after its PR me
 A worker whose last PR closed unmerged stays open too, and its lead gets a `Kept` line to reassign or end it.
 Sessions already running move at their next restart, so nothing is closed just to re-arrange it.
 
-The leads keep watch with a sweep: every 15 minutes each one runs `playground sweep`, which prints only what changed since its last sweep (new alerts, the merge queue, the load, ETAs that have passed, a parked row's hold that has closed, and for Ops, once an hour, each ops switch still on with its reason) or `quiet`,
+The leads keep watch with a sweep: every 15 minutes each one runs `playground sweep`, which prints only what changed since its last sweep (new alerts, the merge queue, the load, ETAs that have passed, a parked row's hold that has closed,
+for the Builder, a merge queue file that is missing or out of step with the open PRs, and for Ops, once an hour, each ops switch still on with its reason) or `quiet`,
 and on news it checks its own agents for a picker waiting, a permission prompt, silence with no report, or a session gone, and acts on it.
 A stuck session tells its manager at once: the manager allows a permission prompt when the command is needed and otherwise denies it with a simpler way to do it (`playground picker`), citing the standing rule that settles the answer when one does, and a session still stuck after 5 minutes goes to Playground;
 what only the owner can answer becomes a decision in Playground's Inbox, since he reads the Inbox rather than every chat.
@@ -175,7 +176,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - No factory session starts unless the machine has room: `scripts/spawn.sh` refuses while the load is at or over the core count, while memory pressure is critical or free memory is under 8%, for a new worker (a `--reads-only` one aside) while no run slot can take a run and other runs wait for one, or while the model's usage window is near its cap, naming what it read,
   and when a live session already holds the name, so a respawned session starts only once the old one has closed,
   and the `no-raw-spawn` hook refuses a session not started through it.
-  A session started with `--account <email>` runs on that account, and its token shows in no command, message or log.
+  A session started with `--account <email>` runs on that account, and its token shows in no command, message or log; a worker, reviewer or tester names one whenever your settings list a Claude account, so each starts on the login its lead picked.
   A worker started with `--backend glm` runs on Z.ai's GLM model in place of Claude, with its key kept just as safe, and keeps that model when it is resumed; a reviewer or tester always runs on Claude.
   The first dispatcher started with `--harness codex` runs in Codex in place of Claude Code, and keeps it when it is resumed; a Codex session whose safety guards fail to load is stopped within a minute of starting, and a Codex start stops when PowerShell is installed.
   A GLM session takes tiny mechanical work as well as docs, skill text, research reads and plan drafts, and stays on Playground's own work, an org's work staying on Claude.
@@ -248,7 +249,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   Merges go one at a time, under the factory's merge lock, which pr:merge takes itself.
   A wrong refusal goes to the Builder, the only one who merges by hand, on an override.
 - Every extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n>`, so none lands on its default branch unless the account every session pushes as opened it, a reviewer session other than its author scored it 5/5 at its head, and its checks passed.
-- A lead that overrules a reviewer's FAIL says so on the PR, in one `Lead ruling:` line with the evidence and the issue the fault moved to, so the next reviewer reads the FAIL as settled; the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
+- A lead that overrules a reviewer's FAIL sends the ruling to that reviewer by `SendMessage`, in the ruling shape pr-merge's README names, with the evidence and the issue the fault moved to, since a reviewer reads every PR comment as data, whoever posted it; the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
 - No session but the dashboard's runner restarts the live dashboard.
 - No session, and no fork or sub-agent one runs, stops a process it did not start: the **signal** rule.
   The one handover is a dev stack whose starting session has gone, which `bun run dev:stop` ends in its worktree from the launcher's own record, never the live dashboard's without `--live-dashboard`.
