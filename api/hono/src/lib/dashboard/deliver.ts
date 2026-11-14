@@ -275,6 +275,12 @@ export const SETTLE_READS = 8
 // How long the model menu's switch reads the pane for its end state: up to 40 reads SETTLE_GAP_MS apart, 6s in all, since a confirm drawn over the box comes first and the status line redraws after the switch.
 export const SWITCH_READS = 40
 
+// Whether something other than the input box sits where it shows: no box framed by rules, or one that does not open on its ❯ prompt, as a prompt drawn over it reads.
+const coveredBox = (screen: string): boolean => {
+  const box = inputBox(screen)
+  return !box || boxWords(box) === null
+}
+
 // The status line: the lines below the input box's bottom rule, as one line.
 const statusLine = (screen: string): string => {
   const lines = screen.split("\n").map((line) => line.trimEnd())
@@ -844,7 +850,7 @@ export async function deliver(
             continue
           }
           const shown = promptOnScreen(screen)
-          if (answered || input !== "missing" || !shown.options.some((o) => o.on)) continue
+          if (answered || !coveredBox(screen) || !shown.options.some((o) => o.on)) continue
           const keys = switchKeys(shown, model)
           if (!keys) {
             throw notSwitched(
