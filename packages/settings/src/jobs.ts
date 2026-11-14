@@ -242,7 +242,7 @@ const plistOf = (name: string, job: Job, fill: Fill): string => {
   ].join("\n")
 }
 
-// The same job as a systemd user unit, for Linux, which has no launchd: its plist's program, folder and log, its PATH with ~/.bun/bin (%h, the home folder) first, restarted always 10 s apart as launchd throttles, so systemd's start limit never parks it, and started at login; a stop ends its own process alone, as launchd's does, so a server it started detached (ops-herdr's herdr servers) outlives it. % is systemd's specifier and $ its variable sign, so each is doubled where systemd reads it.
+// The same job as a systemd user unit, for Linux, which has no launchd: its plist's program, folder and log, its PATH with ~/.bun/bin (%h, the home folder) first, restarted always 10 s apart as launchd throttles, so systemd's start limit never parks it, and started at login; a stop ends its own process alone, so a server it started detached (ops-herdr's herdr servers) outlives it, as under launchd. % is systemd's specifier and $ its variable sign, so each is doubled where systemd reads it.
 const unitOf = (name: string, job: Job, fill: Fill): string => {
   const spec = (text: string) => text.replaceAll("%", "%%")
   const quoted = (text: string) => `"${text.replace(/["\\]/g, "\\$&")}"`
