@@ -1392,6 +1392,22 @@ describe("one night's run against a fixture data folder", () => {
     expect(inputs).toEqual([])
   })
 
+  // PG-2221: free disk shows on the System page, so a night that frees 18 GB posts no Inbox item, and its outbox line to ops and its log line stay
+  test("a night that frees 18 GB posts no Inbox item, and still sends ops its line and writes its log line", async () => {
+    const { ctx, deps, inputs, ops, runs, sent } = night(leftovers())
+    let reads = 0
+    deps.free = () => (reads++ === 0 ? 100 : 118) * 1024 ** 3
+    await nightlyClean(deps)(ctx)
+    expect(runs.some((r) => r.includes("ask"))).toBe(false)
+    expect(inputs).toEqual([])
+    const lines = sent.filter((s) => s.to === "ops").map((s) => s.text)
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toStartWith("nightly-clean removed 3, kept 2: ")
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toStartWith(
+      "2026-11-05T03:00:00Z free 100.0 GB, now 118.0 GB; ",
+    )
+  })
+
   // #1346: a factory script left with parent pid 1 after its worktree went is ended by its own pid, TERM then KILL past the grace, and logged; the signals are fakeRun's, so nothing real is signalled
   test("an orphan of a gone worktree's script is ended by its pid, logged with pid, age and command, and no decision is asked", async () => {
     const { ctx, deps, inputs, ops, runs, sent, wt } = night({}, undefined, 0.01)
