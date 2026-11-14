@@ -155,15 +155,19 @@ const rows = ({ DATA }: Paths): Row[] => [
     "an in-place sed whose a\\ text writes the root's path",
     "sed -i '' '1a\\\ntouch ~/.playground/extensions/x' .git/hooks/pre-commit",
   ],
-  ["an in-place sed whose a\\ text writes plain words", "sed -i '' '1a\\ hello world' notes.md"],
-  ["an in-place sed whose i\\ text writes a shebang", "sed -i '' '1i\\ #!/bin/sh' run.sh"],
+  ["an in-place sed whose a\\ text writes plain words", "sed -i '' '1a\\\nhello world' notes.md"],
+  ["an in-place sed whose i\\ text writes a shebang", "sed -i '' '1i\\\n#!/bin/sh' run.sh"],
   [
     "an in-place sed whose a\\ text writes a relative glob",
-    "sed -i '' '$a\\ src/**/*.ts' .gitignore",
+    "sed -i '' '$a\\\nsrc/**/*.ts' .gitignore",
   ],
   [
     "an in-place sed whose c\\ text writes a glob outside the root",
-    "sed -i '' '1c\\ /tmp/*.log' notes.md",
+    "sed -i '' '1c\\\n/tmp/*.log' notes.md",
+  ],
+  [
+    "an in-place sed whose a\\ text writes plain words after a space",
+    "sed -i '' '1a\\ hello world' notes.md",
   ],
   [
     "an in-place sed whose s/// writes a relative ** glob after ..",
@@ -256,6 +260,7 @@ export const groups: Group[] = [
 
 const allowedCalls = [
   "an in-place sed whose a\\ text writes plain words",
+  "an in-place sed whose a\\ text writes plain words after a space",
   "an in-place sed whose i\\ text writes a shebang",
   "an in-place sed whose a\\ text writes a relative glob",
   "an in-place sed whose c\\ text writes a glob outside the root",
