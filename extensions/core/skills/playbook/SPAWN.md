@@ -72,6 +72,7 @@ so a resume takes `--model` afresh and one without it runs on Opus) or with `--b
 from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approved #i492, 17 Oct; on GLM the alias maps to GLM), so a brief or subagent call that needs Opus names `model: opus`; a scheduled ops job that calls a model keeps its own.
 A resume of a dispatcher, the Assistant or the hosted session keeps neither a model nor an effort the owner picked in its Dashboard composer ([SKILL.md](SKILL.md#chain)).
 Its first prompt names the session, its role and who it reports to, and has it load this skill and read `<brief>`, a file under `~/.playground`, which spawn.sh refuses to start without (a Claude worker's adds that `brief-rush.md` binds it on its Claude lane, within the lanes its own header scopes, while that file exists; a GLM worker's leaves it out).
+spawn.sh reads `<brief>` relative to `~/.playground` (`handoffs/brief-<name>.md`), so a bare file name fails with `is not a file`.
 Its skills come by `--plugin-dir` from the folder `playground orgs resolve --repo <its folder>` writes fresh from each scope's accepted copy at every start: an org's worker, in a checkout whose GitHub origin the org owns, or in a folder with no GitHub origin inside the org's own folder in the home folder (`~/<org>`), gets that org's extension's skills over core's.
 
 `--harness codex` starts the first dispatcher in Codex in place of Claude Code: `spawn.sh manager <dispatcher> <brief> --harness codex`, and its resume, alone; spawn.sh refuses it for any other session and beside `--backend`, `--account`, `--model` or `--effort`, since Codex runs on the one login and the model its `CODEX_HOME` holds.
@@ -112,7 +113,11 @@ On a Mac whose inscope exports a workspace's own `CLAUDE_CONFIG_DIR` (its `insco
 ## --account
 
 `--account <email>`, with any mode and anywhere among its words, has the session log in as that Claude account: the lead names it to pin a login (`spawn.sh resume dispatcher <dir> <session-id> --account <email>`, `spawn.sh worker <name> <brief> --title "<title>" --in <dir> --account <email>`), and a running session never switches accounts by itself.
-A worker's, reviewer's or tester's Claude start names its login by full email: while `usage.accounts` lists a Claude row, spawn.sh refuses one with no `--account`, listing those rows in their order, a parked one with its `parkedUntil`, since the account split below ranks logins by week left per hour and cannot follow which login takes which work.
+A start script resolves the login into `$acct` first, `acct=$(bun packages/scripts/src/playground/cli.ts accounts list | grep -o "<pattern>" | head -1)`, and passes `--account "$acct"`,
+so no call's input holds a full email address, which makes the privacy hook ask the owner to confirm.
+`<pattern>` matches the whole address while it spells only the login's local part, such as `<local part>@[^:]*`, since `grep -o` prints only the text it matches and a domain alone can match two logins.
+A worker's, reviewer's or tester's Claude start names its login by full email, never its domain alone, since one domain can match two logins: while `usage.accounts` lists a Claude row, spawn.sh refuses one with no `--account`, listing those rows in their order, a parked one with its `parkedUntil`,
+since the account split below ranks logins by week left per hour and cannot follow which login takes which work.
 A fresh install lists no Claude row, so its bare start stays on the machine's own login; a runner, probe, manager, resume or restore starts bare as below, a probe's `--account` being optional.
 spawn.sh refuses, before it opens a pane, an email that is not a plain `local@domain`, and one with no item in the Keychain under `usage.keychainService`, checking only that the item exists.
 An `--account` naming the machine's own login (`oauthAccount.emailAddress` in Claude Code's `.claude.json`, under `$CLAUDE_CONFIG_DIR` else in `~`, matched in any case) starts on it as a bare start that stays there does, with no token and the account split skipped, so a lead steers a start onto the own login by naming it:

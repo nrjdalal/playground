@@ -75,6 +75,8 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
 - A stacked child is scored on its own lines, read from its parent's branch, and a child that fails playbook's stack test is a blocking finding.
 - The touched tests run in one form, `bun --cwd=<clone> run test:file <files>` through run-slot with no `NODE_ENV`, which reads the same on the runner box as on the Mac.
   `test:file` builds every shared package whose `dist` is missing, beside the unbuilt packages the files import, before it runs, so a fresh clone runs it directly.
+- When the touched tests are the whole suite (a change to the root `package.json` or `bun.lock`), the reviewer runs them in chunks of 200 files a call, since one call misses the sandbox's deadline, and CI does not stand in for that run; a wait on a run's log ends on its `Ran N tests` summary line.
+- A pnpm repo's package installs and runs its tests from its own folder (`/usr/bin/env -C <clone>/<pkg> pnpm ...`), since pnpm's `--dir` from a Bun checkout fails.
 - Neither side of a review queues a run the other side has already measured at the same head: the result is asked for and cited.
   A box run's id is `ci-<first 12 of the tree>-<random>`, so a cited run's prefix is checked against the first 12 characters of `git -C <clone> rev-parse <head>^{tree}` before citing.
 - When a merge with canary moves a path a test fixture uses, the reviewer points the fixture's reader at a missing path and checks each fixture-reading case goes red, since a reader that fails open passes a fixture left at the old path.
@@ -97,7 +99,7 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
 - A finding that asks for a behaviour states the behaviour wanted, not only the defect.
 - On a collaborator's org PR whose review ask came to you, the session that posts your review turns at once to the work org's ticket skill, in its extension, for what follows a review you were asked for.
 - A reviewer agrees with an author's reply only once it has reproduced the author's reason with one command, named in its reply.
-- An extension item's fresh full read runs before `playground ext score … 5`, since a 5 accepts the item at once.
+- An extension item's fresh full read runs before `playground ext score … 5`, since a 5 accepts the item at once, on a scratch repo of the base revision then the proposed one, since an item has no git clone.
 - A 5/5 verdict says the fresh full read found nothing blocking or should-fix and `bun run check-types` ran green, or green CI at the head stood in for it; a red run is a blocking finding.
 - Before a 5/5 posts, `bun run pr:merge <n> --explain`, bare and unpiped, reads ✓ on every gate but ready, ci and review, since the body gate also needs a doc that a reviewer's patch or the last commit changed named in the Evidence; a ✗ is a finding for the worker.
   For an extension repository's PR, `bun run ext:merge <owner>/<repo> <n> --explain` runs in its place and reads ✓ on every gate of its own but ready, ci and review.

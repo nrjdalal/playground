@@ -29,3 +29,27 @@ describe("brief-rush.md scopes itself to the lanes it binds (#2235)", () => {
     )
   })
 })
+
+// issue 2030: the merge-tree line runs as written, pr:merge runs from the PR's own worktree, and logs stay inside the scratch folder
+describe("brief-rush.md's merge and scratch lines run as written", () => {
+  test("the before-each-round merge-tree check takes two commits", async () => {
+    const text = await read(join("scripts/briefs", "brief-rush.md"))
+    const line = text.split("\n").find((l) => l.startsWith("- Before each review round,")) ?? ""
+    expect(line).toContain("`git merge-tree --write-tree <head> HEAD`")
+    expect(line).toContain("exits 0 on a clean pair and 1 on a conflict")
+    expect(text).not.toContain("--write-tree origin/canary <head> HEAD")
+  })
+
+  test("pr:merge runs from the PR's own worktree, never a checkout of origin/canary", async () => {
+    const text = await read(join("scripts/briefs", "brief-rush.md"))
+    expect(text).not.toContain("from a checkout of current origin/canary")
+    expect(text).toContain("run from your PR's own worktree")
+  })
+
+  test("every log goes inside the session's own scratch folder", async () => {
+    const text = await read(join("scripts/briefs", "brief-rush.md"))
+    const line = text.split("\n").find((l) => l.startsWith("Plan: ")) ?? ""
+    expect(line).toContain("Write every log inside that folder")
+    expect(line).toContain("`scratch/<session>-x.log`")
+  })
+})
