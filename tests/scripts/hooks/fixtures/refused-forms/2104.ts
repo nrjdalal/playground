@@ -1,11 +1,11 @@
 import type { Group } from "./_shared"
 
-// #2104: after a cd the hook cannot read, a program off every list the hook judges (an editor in script mode, a patch applier, a git subcommand that moves, restores or stages files, a build tool) was let run, though it may write the shell's folder; rows are data, as refused-forms.ts says.
+// #2104: after a cd the hook cannot read, a program off every list the hook judges (an editor in script mode, a patch applier, a git subcommand that moves, restores or stages files, a build tool) was let run, though it may write the shell's folder; a cd through a variable the line sets to anything but a literal absolute path stays unread; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
   {
     folders: ["home", "process worktree"],
     guards: ["no-extensions-write"],
-    rows: () => [
+    rows: ({ ROOT }) => [
       ["ex in script mode after a cd to a variable", `cd "$X" && ex -sc 'wq' f`],
       ["vim running a write after a cd to a variable", `cd "$X" && vim -c wq f`],
       ["patch from an absolute diff after a cd to a variable", `cd "$X" && patch -p1 < /tmp/d`],
@@ -39,6 +39,35 @@ export const groups: Group[] = [
       [
         "a program after a cd to the checkout's top",
         `cd "$(git rev-parse --show-toplevel)" && bun test`,
+      ],
+      [
+        "patch after a cd to a variable the line sets to a relative path",
+        `W=sub; cd "$W" && patch -p1 < /tmp/d`,
+      ],
+      [
+        "patch after a cd to a variable the line sets by a substitution",
+        `W=$(pwd); cd "$W" && patch -p1 < /tmp/d`,
+      ],
+      ["patch after a cd to a variable read from stdin", `read W; cd "$W" && patch -p1 < /tmp/d`],
+      [
+        "patch after a cd to a variable the line sets to a glob",
+        `W=/tmp/*; cd $W && patch -p1 < /tmp/d`,
+      ],
+      [
+        "patch after a cd to a variable the line sets twice, the second time unread",
+        `W=/tmp; W=$X; cd "$W" && patch -p1 < /tmp/d`,
+      ],
+      [
+        "patch after a cd to a held path joined to an unread part",
+        `W=/tmp; cd "$W/$X" && patch -p1 < /tmp/d`,
+      ],
+      [
+        "patch under env -C of a variable the line sets by a substitution",
+        `W=$(pwd); env -C "$W" patch -p1 < /tmp/d`,
+      ],
+      [
+        "patch after a cd to a variable the line sets to the root",
+        `W=${ROOT}; cd "$W" && patch -p1 < /tmp/d`,
       ],
     ],
   },

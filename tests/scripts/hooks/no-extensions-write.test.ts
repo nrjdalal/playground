@@ -2070,7 +2070,7 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "an in-place sed under xargs after a cd to a literal path",
       "cd /tmp && grep -l a f | xargs sed -i s/a/b/",
     ],
-    // PG-2104: after a cd to a variable, a program that writes nothing (a reader, a printer, a builtin, a read of git or portless, a shell whose script is a read), git on a literal folder, and a writer after a cd to a literal path or with no cd
+    // PG-2104: after a cd to a variable, a program that writes nothing (a reader, a printer, a builtin, a read of git or portless, a shell whose script is a read), git on a literal folder, a writer after a cd to a literal path or with no cd, and any program after a cd or env -C through a variable the line sets to a literal absolute path
     ["cat after a cd to a variable", `cd "$X" && cat f`],
     ["grep after a cd to a variable", `cd "$X" && grep -rn a .`],
     ["head and wc after a cd to a variable", `cd "$X" && head -5 f && wc -l f`],
@@ -2104,6 +2104,26 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["a shell's inline read after a cd to a variable", `cd "$X" && bash -c "ls"`],
     ["a shell fed a read after a cd to a variable", `cd "$X" && echo ls | sh`],
     ["a shell script after a cd to a literal path", "cd /tmp/x && bash s.sh"],
+    [
+      "a build after a cd to a variable the line sets to a literal absolute path",
+      `W=/tmp/x; cd "$W" && bun run test`,
+    ],
+    [
+      "patch after an unquoted cd to a variable the line sets to a literal absolute path",
+      `W=/tmp/x; cd $W && patch -p1 < /tmp/d`,
+    ],
+    [
+      "a build under env -C of a variable the line sets to a literal absolute path",
+      `W=/tmp/x; env -C "$W" bun run test`,
+    ],
+    [
+      "cp after a cd to a variable the line sets to a literal absolute path",
+      `W=/tmp/x; cd "$W" && cp a b`,
+    ],
+    [
+      "a build after a cd to a variable built from a literal absolute one",
+      `W=/tmp/x; T="$W/sub"; cd "$T" && bun test`,
+    ],
     ["cp of a relative file to an absolute path after a cd to a variable", `cd "$X"; cp a /tmp/b`],
     [
       "a redirect to a file the line holds after a cd to a variable",
