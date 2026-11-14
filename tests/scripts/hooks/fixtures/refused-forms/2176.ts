@@ -109,6 +109,49 @@ const rows = ({ DATA }: Paths): Row[] => [
     "process worktree",
   ],
   [
+    "an in-place sed whose s/// writes a relative glob that climbs to the root by ..",
+    String.raw`sed -i '' 's/a/rm -rf ..\/..\/..\/..\/.play*\/extensions\/x/' .git/hooks/pre-commit`,
+    "process worktree",
+  ],
+  [
+    "an in-place sed whose s/// writes the root's relative path that climbs to it by ..",
+    String.raw`sed -i '' 's/a/rm -rf ..\/..\/..\/..\/.playground\/extensions\/x/' .git/hooks/pre-commit`,
+    "process worktree",
+  ],
+  [
+    "an in-place sed whose s/// writes a relative glob that climbs above the home and globs it",
+    String.raw`sed -i '' 's/a/rm -rf ..\/..\/..\/..\/..\/*\/.play*\/ext*/' .git/hooks/pre-commit`,
+    "process worktree",
+  ],
+  [
+    "an in-place sed whose s/// writes a relative glob that climbs by .. through a folder",
+    String.raw`sed -i '' 's/a/rm -rf a\/..\/..\/..\/..\/..\/.play*\/ext*/' .git/hooks/pre-commit`,
+    "process worktree",
+  ],
+  [
+    "an in-place sed whose s/// writes the root's relative path that climbs by .. through a folder",
+    String.raw`sed -i '' 's/a/rm -rf a\/..\/..\/..\/..\/..\/.playground\/extensions/' .git/hooks/pre-commit`,
+    "process worktree",
+  ],
+  [
+    "an in-place sed whose s/// writes a relative glob that climbs by .. through a glob folder",
+    String.raw`sed -i '' 's/a/rm -rf *\/..\/..\/..\/..\/..\/.play*\/ext*/' .git/hooks/pre-commit`,
+    "process worktree",
+  ],
+  [
+    "an in-place sed whose s/// writes the root's relative path that climbs by .. through a glob folder",
+    String.raw`sed -i '' 's/a/rm -rf *\/..\/..\/..\/..\/..\/.playground\/extensions/' .git/hooks/pre-commit`,
+    "process worktree",
+  ],
+  [
+    "an in-place sed whose s/// writes a relative ** glob after ..",
+    String.raw`sed -i '' 's/a/..\/src\/**\/*.ts/' tsconfig.json`,
+  ],
+  [
+    "an in-place sed whose s/// writes a relative glob after two ..",
+    String.raw`sed -i '' 's/a/..\/..\/packages\/*\/*/' package.json`,
+  ],
+  [
     "an in-place sed whose s/// writes a relative ** glob",
     String.raw`sed -i '' 's/a/src\/**\/*.ts/' tsconfig.json`,
   ],
@@ -190,6 +233,8 @@ export const groups: Group[] = [
 ]
 
 const allowedCalls = [
+  "an in-place sed whose s/// writes a relative ** glob after ..",
+  "an in-place sed whose s/// writes a relative glob after two ..",
   "an in-place sed whose s/// writes a relative ** glob",
   "an in-place sed whose s/// turns a quoted glob into a ** glob",
   "an in-place sed whose s/// writes a trailing ** glob",
