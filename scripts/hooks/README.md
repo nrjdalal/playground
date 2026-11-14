@@ -67,7 +67,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 - A PreToolUse guard fails closed, since Claude Code blocks a call only on exit 2: its wrapper turns any other exit but 0 (a crash, a damaged bundle, Bun missing) into exit 2, its refusal naming the hook, the code and `bun install` in the checkout,
   and under `PLAYGROUND_ROLE` a missing script or an unresolved checkout refuses too, naming the restore route (ops-restore puts the checkout back, else Ops by playbook's LIFECYCLE.md, Restoring the main checkout); with no role it runs nothing and exits 0, as above.
   A timeout lets the call run, since Claude Code treats a hook timeout as a non-blocking error.
-  On Bash, guards' `onFailure: "block"` refuses a call whose guards time out or fail to start ([guards](#guards)).
+  On Bash, guards refuses at its own 13 s deadline, and its `onFailure: "block"` refuses a call whose guards fail to start or time out under Claude Code ([guards](#guards)).
   Every other wrapper (SessionStart, Stop, PostToolUse and the rest) stays open on a crash, since a Stop hook at exit 2 keeps its session going and a crashing one would loop it.
   `tests/scripts/hooks-abs-path.test.ts` holds both shapes and runs them over stub guards.
 - A PreToolUse guard's wrapper runs its bundle, `scripts/hooks/bundled/<hook>.js`, which `bun run hooks:bundle` (`packages/scripts/src/hooks-bundle.ts`) builds from `scripts/hooks/<hook>.ts` with everything it imports, so the guard starts with a missing or damaged `node_modules`; every other hook runs its source.
@@ -220,7 +220,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   The scans are commit-trailer's pre-push step, no-glm-heavy-path's and no-playground-leak's `git push`, and `gh pr create`'s commits, which no-public-leak reads through no-playground-leak's engine.
   The remote is the one the push names, a configured name or a URL, else git's push remote for the branch (`branch.<b>.pushRemote`, `remote.pushDefault`, `branch.<b>.remote`, `origin`), so a commit only another remote holds is read too.
   A remote it cannot read leaves every local commit in the scan.
-  Every read in one hook call shares one 6 s budget (`withLiveBudget`, held in `AsyncLocalStorage` as `withDeadline` holds its deadline, so a long-lived process never shares it), and each remote is read once a call, so a chain of scans on a hung remote ends inside the guards' 15 s timeout; once the budget is spent, a scan reads every local commit.
+  Every read in one hook call shares one 6 s budget (`withLiveBudget`, held in `AsyncLocalStorage` as `withDeadline` holds its deadline, so a long-lived process never shares it), and each remote is read once a call, so a chain of scans on a hung remote ends inside the guards' 13 s deadline; once the budget is spent, a scan reads every local commit.
   A live branch whose tip this repo lacks stands in by its own remote-tracking ref until a fetch, so a first push after `canary` moves reads only its own commits; the residual is a commit that branch dropped in a force-push this repo has not fetched, which stays out.
   The guards import the file by its relative source path, since `@packages/safe-delete`'s index reads `@packages/config`'s built kinds (`role.ts`); `unpushed` there reads through the same `liveHeads`.
   A test's remote is a local bare repo, since the test sandbox's git reaches no network ([.agents/testing.md](../../.agents/testing.md#the-sandbox)), placed as a GitHub one through an `insteadOf` rule where the guard places it by the raw URL.
@@ -260,8 +260,10 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
   Both settings files register it once on Bash, with `onFailure: "block"`, in place of each Bash guard's own Bash entry, and a guard that also guards another tool keeps its own entry for that tool.
   A test holds each file to that one Bash entry, so a guard a later PR registers on Bash fails it until the guard joins `GUARDS`.
-  A Codex session loads the same entry with no `onFailure`, since `codexHooks()` drops that key, which Codex's hook handler lacks (`HookHandlerConfig::Command`, codex-cli 0.167.1), so there a timeout lets the call run ([A Codex session's calls](#a-codex-sessions-calls)).
-  Its tests are `bun run test:file tests/scripts/hooks/guards.test.ts tests/scripts/hooks/refused-forms.test.ts`, the second feeding each Bash row of a guard it runs through its `check()`.
+  A Codex session loads the same entry with no `onFailure`, since `codexHooks()` drops that key, which Codex's hook handler lacks (`HookHandlerConfig::Command`, codex-cli 0.167.1), so there the runner's timeout would let the call run ([A Codex session's calls](#a-codex-sessions-calls)).
+- So the hook decides at its own deadline, `DEADLINE` in `guards.ts`, 13 s from its process's start (imports included), inside the runner's 15 s timeout: each guard that has not answered by then refuses the call, named in one paragraph after the others' refusals, so a late allow reads as a refusal under either runner.
+  The deadline is a timer, which fires only while the event loop is free, so a guard that does synchronous work long enough to reach it runs that work in a Worker, as no-extensions-write's `guarded()` does, and keeps its own wait under the deadline (12 s there).
+  Its tests are `bun run test:file tests/scripts/hooks/guards.test.ts tests/scripts/hooks/refused-forms.test.ts tests/scripts/hooks-abs-path.test.ts`, the second feeding each Bash row of a guard it runs through its `check()`, the third running a stub guard that never answers under each runner's command at the real deadline.
 
 ## no-bare-slack-link
 
@@ -894,7 +896,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   an `ssh` call, a printed command and `--help` pass.
   For a web build alone it reads the container's name from the dashboard supervisor's `dashboard-db` (`ops/dashboard/dashboard-db` in the data folder, the `$S` of `scripts/ops/dashboard/supervisor.sh`) and asks `docker inspect` whether it runs.
   The build runs only when dashboard-db names a container Docker reports as stopped or gone, whether or not a runner host is set.
-  A dashboard-db that is missing, empty (the supervisor writes it empty both when the dashboard has no container and when its lookup failed) or unreadable refuses, as do a running container, any other answer from Docker and no answer in 8s (well inside the hook's 15s, since a hook past its limit lets the call through), since a wrong guess costs the dashboard's database.
+  A dashboard-db that is missing, empty (the supervisor writes it empty both when the dashboard has no container and when its lookup failed) or unreadable refuses, as do a running container, any other answer from Docker and no answer in 8s (inside the guards hook's 13 s deadline, so its own reason comes first), since a wrong guess costs the dashboard's database.
   It reads the runner host as `ci.sh` does: `RUNNER_HOST`, else the data folder's `ops/runner-host/ip`, holding an IPv4 address.
   With a host set, its reason names the box route, `bash ~/.playground/ops/runner-host/ci.sh web HEAD` from a commit ([scripts/ops/README.md](../ops/README.md)), and the api image, which still builds on the Mac.
   With none set, `ci.sh` exits 255 with no box to reach, so the reason says the live dashboard's Postgres stays up and names the routes that exist: set one up (`scripts/ops/runner-host/host.sh setup <ip>`, then write its address to that ip file), or build the web image on a machine with no live dashboard running, and the api image.
