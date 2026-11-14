@@ -990,7 +990,7 @@ function awkPrograms(words: Word[]): Word[] | undefined {
   return programs.length ? programs : undefined
 }
 
-// awk's program words as text, or none: every program a literal word holding no | (a pipe, which awkPipe would weigh against a regex's alternation), no " (a string, so it prints its input alone, never a command line of its own into a file that runs) and nothing awkRuns finds
+// awk's program words as text, or none: every program a literal word holding no | (a pipe, which awkPipe would weigh against a regex's alternation), no " (a string, so it prints only what it reads, never a command line of its own into a file that runs) and nothing awkRuns finds
 function awkTexts(args: Word[]): Word[] {
   const programs = awkPrograms(args) ?? []
   return programs.every((w) => literal(w) && !/[|"]/.test(w.value) && !awkRuns(w.value))
@@ -1871,7 +1871,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one, or grep that xargs starts as its own first word (xargsGrep)
     const reader =
       !rootLine && ((ownFirst(cmd, first) && reads(parsed, env)) || xargsGrep(cmd, parsed, env))
-    // on a line read whole with no root shell and no variable set that makes a program run another (TEXT_RUNS), a read-only gh call's jq filter, agent-browser's eval script or wait --fn expression, an awk program holding no | and nothing awkRuns finds, a read-only sed's script, an in-place sed's script whose every other word the hook holds (no substitution, no variable it cannot read) and a playground text flag's value stay text, as on a line read call by call, since no program runs them as a shell line; each is still refused when it names the root, and the awk's and sed's files are judged as any word is
+    // on a line read whole with no root shell and no variable set that makes a program run another (TEXT_RUNS), a read-only gh call's jq filter, agent-browser's eval script or wait --fn expression, an awk program holding no ", no | and nothing awkRuns finds, a read-only sed's script, an in-place sed's script whose every other word the hook holds (no substitution, no variable it cannot read) and a playground text flag's value stay text, as on a line read call by call, since no program runs them as a shell line; each is still refused when it names the root, and the awk's and sed's files are judged as any word is
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined
     const edits = SEDS.has(program(name)) ? sedInPlace(cmd, parsed) : undefined
     const editsHeld =
