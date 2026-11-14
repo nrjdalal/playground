@@ -80,6 +80,7 @@ for (const dir of [
   join(ROOT, "hooks", "~+"),
   join(DATA, "handoffs"),
   join(PATHS.WORK, "playground"),
+  join(HOME, ".bun", "bin"),
   join(PATHS.MAIN, ".claude", "worktrees", "a"),
   PATHS.BARE,
 ])
@@ -96,6 +97,8 @@ mkdirSync(join(PATHS.MAIN, ".claude", "worktrees", "plain"))
 symlinkSync(ROOT, join(DATA, "store"))
 symlinkSync(DATA, join(HOME, "pg"))
 symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, "pc"))
+// the CLI linked by its name in bun's bin folder, beside a work folder that holds one of that name, for #2098's rows
+symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, ".bun", "bin", "playground"))
 git(SCRATCH, "init", "-q", OTHER)
 git(OTHER, "remote", "add", "origin", "https://github.com/acme-labs/demo.git")
 // Two clones of the synced extension repository, one on the default branch and one on another, for #2004's commit rows.
@@ -901,6 +904,11 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1887 a commit by -C to another folder whose message holds a folder change | git -C, it moves folders",
       "#1887 a commit by -c whose message holds a folder change into the root | git -C, it moves folders",
       // the row's cd moves the shell to a folder the hook cannot read, so no spelling of its git folder flag is read from a folder the hook knows
+      "#2097 ext add by bun under env that bunx starts in a --cwd above the CLI's | bun --cwd, no folder",
+      "#2097 ext add by bun under env that bunx starts in a --cwd above the CLI's | bunx --cwd, no folder",
+      "#2098 ext add by bun of a CLI link in its --cwd | bun --cwd, it moves folders",
+      "#2098 ext add by bun x bun of a CLI link in its --cwd | bun --cwd, it moves folders",
+      "#2098 ext add by bunx bun of a CLI link in its --cwd | bunx --cwd, it moves folders",
       "#2104 a recursive git rm with a git folder alone after a cd to a variable | git --git-dir, it moves folders",
       "#2104 a recursive git rm with a git folder and a work tree after a cd to a variable | git --git-dir, it moves folders",
       "#2104 a recursive git rm with a git folder and a work tree after a cd to a variable | git --work-tree, it moves folders",
@@ -938,6 +946,7 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#2104 git with a git folder and the root spelt with two slashes as its work tree after a cd to a variable | git --work-tree, it moves folders",
       "#2104 git with a spaced git folder alone after a cd to a variable | git --git-dir, it moves folders",
       "#2104 git with a work tree alone after a cd to a variable | git --work-tree, it moves folders",
+      "#2106 a write under env with two -C options, the second relative | env -C, no folder",
       "#466 git --work-tree with a subcommand for its value | git --work-tree, no folder",
       "#466 git -C with a subcommand for its value | git -C, no folder",
     ])
@@ -1006,6 +1015,9 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1747 ext add by bunx bun in a --cwd read from the one before | --cwd",
       "#1747 ext put by a bun that bunx starts, its --cwd read from the runner's | --cwd",
       // an option that takes no value, followed by an operand
+      "#2097 ext add by bun under env that bunx starts in a --cwd above the CLI's | --cwd",
+      "#2103 turbo's build by npx past a user config option's value | --cwd",
+      "#2103 turbo's build in the main checkout by npx past a user config option's value | --cwd",
       "#2104 a recursive git rm with a git folder alone after a cd to a variable | -r",
       "#2104 a recursive git rm with a git folder and a work tree after a cd to a variable | -r",
       "#2104 a recursive git rm with a work tree alone after a cd to a variable | -r",
