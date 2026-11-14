@@ -148,6 +148,24 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     ])
   })
 
+  // PG-2120: the sweep's row carries the roster pr, so a checker it ends hands its cleanup the PR its review-<n> clone is found by
+  test("a checker the sweep ends hands its cleanup its roster pr", async () => {
+    const handed: (string | undefined)[] = []
+    const { deps } = fakes({ cleanup: async (target) => (handed.push(target.pr), []) })
+    await sweep(
+      input({
+        roster: { "m4tqzr-reviewer": { kind: "reviewer", name: "m4tqzr-reviewer", pr: URL } },
+        sessions: {
+          "m4tqzr-reviewer": live("m4tqzr-reviewer"),
+          "m4tqzr-worker": live("m4tqzr-worker", { status: "busy" }),
+        },
+        workerPrs: async (name) => (name === "m4tqzr-reviewer" ? [URL] : []),
+      }),
+      deps,
+    )
+    expect(handed).toEqual([URL])
+  })
+
   test("a reviewer idle 30+ minutes on a scored head ends with its resume named and its worktrees left for that resume; a tester does not", async () => {
     const scored: PrState = { head: "abc1234567", state: "open", verdicts: ["abc1234"] }
     const cleaned: string[] = []
@@ -1176,11 +1194,11 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
   })
 
   // PG-2120: a reviewer reads its review-<n> clone from outside it, so no transcript cwd names the clone
-  const cloned = () => {
+  const cloned = (names = ["review-7"]) => {
     const { main, root } = machine()
     run(main, "git", "remote", "set-url", "origin", "https://github.com/o/r.git")
-    const clone = join(main, ".claude", "worktrees", "review-7")
-    run(main, "git", "worktree", "add", "-q", "--detach", clone)
+    const [clone, ...rest] = names.map((n) => join(main, ".claude", "worktrees", n))
+    for (const dir of [clone!, ...rest]) run(main, "git", "worktree", "add", "-q", "--detach", dir)
     const projects = join(root, "projects")
     mkdirSync(join(projects, "-scratch"), { recursive: true })
     writeFileSync(
@@ -1194,17 +1212,25 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
       refs: [],
       sessionId: "sess-1",
     }
-    return { clone, main, projects, target }
+    return { clone: clone!, main, projects, rest, target }
   }
 
-  test("a checker whose row names the main checkout's PR n has its review-<n> clone found and cleaned, though its transcript never ran there", async () => {
+  test("a reviewer whose row names the main checkout's PR n has its review-<n> clone found and cleaned, though its transcript never ran there", async () => {
     const { clone, main, projects, target } = cloned()
     expect(await worktreesOf(target, projects, main)).toEqual([clone])
-    expect(await worktreesOf({ ...target, kind: "tester" }, projects, main)).toEqual([clone])
     const { calls, deps } = fakes(main, [])
     expect(await cleanupLive(projects, async () => deps)(target)).toEqual([`removed ${clone}`])
     expect(calls).toEqual([`rm ${clone} (k3m9px-reviewer ended)`])
     expect(existsSync(clone)).toBe(false)
+  })
+
+  test("a tester whose row names PR n has its test-<n> and test-<n>-before clones found, and never the reviewer's review-<n>", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const tester: Target = { ...target, kind: "tester", name: "k3m9px-tester" }
+    expect(await worktreesOf(tester, projects, main)).toEqual(rest)
+    expect(await worktreesOf(target, projects, main)).toEqual([clone])
+    const lone = cloned(["test-7"])
+    expect(await worktreesOf(tester, lone.projects, lone.main)).toEqual([lone.clone])
   })
 
   test("a transcript that cannot be read cleans nothing, the review clone included, and says so", async () => {
