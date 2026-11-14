@@ -1134,6 +1134,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   The guard reads that step's own command line as a production move: `bun` with its script (`bun run ship:yard`, `bun ship:yard`) or its file, and `npm`, `pnpm` or `yarn` with its script.
   It resolves the file against the folder `bun` runs in (a `cd`, `--cwd`), and reads any file named `yard.ts` when that folder is unknown.
   It also reads `bun` that a package runner hands words to (`bunx`, `bun x`, `npx`, and `npm`, `pnpm` or `yarn` by `exec`, `x`, `dlx` or bun's name), a chain of them included, as the words after each word naming bun, since one may be an option's value (`npx -p bun bun`), behind the shell walker's prefixes and after run-slot's `--`.
+  It reads `bun` and such a runner started by `bun`'s run or bare path too (`bun run npx bun run ship:yard`), as below.
   A runner's word that may move its folder (`--cwd`, `-C`, `--dir`, `--filter`, `-F`, `--prefix`, a workspace, yarn's `workspace`) makes the file read as any `yard.ts`.
   A runner's command line (`npm exec -c`, `npx --call`, pnpm's shell mode), that of a runner a runner starts included, is read as `sh -c`'s is, and one the hook cannot read is the step on a line naming `yard`.
   A `--help` or `-h` before any `--` reads as help through `bun` alone, since `bun run` hands the step what follows `--`.
@@ -1142,6 +1143,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A production deploy of the hosted build migrates the hosted database first (`packages/scripts/src/migrate-on-deploy.ts`), so a hand production move is the Ops lead's alone.
   `scripts/hooks/no-raw-vercel.ts`, run on Bash by [guards](#guards) for a factory session, reads `vercel` and `vc` by any path or case wherever the shell walker finds a command (behind `env`, `exec`, `command`, `time`, `nohup`, `timeout`, `sudo`, `xargs`, in `sh -c`, `eval`, a subshell, a group or a substitution).
   It also reads it through `bun x`, `bunx` or `npx` (`toolWords` in `scripts/hooks/no-main-checkout.ts`), through each such runner one of them starts (`npx npx`, `bunx npx`, `npx bun x`) by [no-main-checkout](#no-main-checkout)'s runner readings and their cap, and after `run-slot.sh`'s `--` (`slotWords` in `shell.ts`); another package runner is not read.
+  It follows the runner `bun run` or bare `bun` names as its target, by name or path (`bun run npx`, `bun bunx`, `bun run bun x`), since bun.com/docs/cli/run's resolution order runs "Binaries from project packages" for both and "(`bun run` only) System commands" from `PATH`: a probe measured `bun run npx` reaching an `npx` on `PATH` and bare `bun npx` reaching only a package's own bin.
 - It judges each call by vercel 65.8.0's own commands, each alias it registers read as its command (`ln` and `aliases` as `alias`, `rr` as `rolling-release`, `i` as `install`, `log` as `logs`), and by the options its `--help` lists, global (`--team`, `--api`, `--scope` and the rest) and of each command it judges.
   An option on neither list is read both ways, as a flag and as taking the next word, and the graver verdict stands, so an option the hook does not know never hides a word; one letter reads by its command (deploy's `-f` is its force flag; api's `-f` takes a field).
   A read that passes whatever its options (`help`, `inspect`, `logs`, `ls`, `whoami`) is read up to its name alone; any other call with more such readings than 64 is refused.
@@ -1156,6 +1158,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A word after `deploy` that is no path and no `init` or `continue` reads as a subcommand and is refused too, `describe` or one a later CLI adds.
   A secret reaches a project through an Inbox secret ask instead (`.agents/dashboard/asks.md`).
 - It refuses what it cannot read where the word decides: a subcommand built at run time, any word built at run time on a deploy, a `redeploy`, an `env ls` or a `vercel api` call, and a program built at run time on a line that names `vercel` or `vc` as a word.
+  A runner's program (`npx "$X"`, `bun run "$X"`) is one when its own name after its last `/` is built at run time, and a written-out name in a folder built at run time (`bun "$P/probe.ts"`) names itself.
   A call `xargs` feeds to a command other than a read is refused for every session, whatever its words, since xargs puts stdin's words among them, appended or in place of its `-I` or `-J` string.
 - It is a check with no process of its own, which [guards](#guards) runs, so it goes live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
   Its tests are `bun run test:file tests/scripts/hooks/no-raw-vercel.test.ts`.
