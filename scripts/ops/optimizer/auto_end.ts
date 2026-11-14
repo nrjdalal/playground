@@ -1,7 +1,7 @@
 // auto_end.ts: ends a worker, reviewer or tester once its work is done, by SESSIONS.md#end (spawn.sh close, then its roster report), so no finished session sits idle.
 // Two callers: ops-tick's auto-end beat every 5 minutes (sweep, over idle_sessions.ts's flags), and pr:merge and the train's land right after a merge (endMerged, over the PR's roster rows).
 // Guards: only a worker, reviewer or tester is ever ended, never a manager, the dispatcher, a runner, the optimizer or a probe; it must be not busy for 10+ minutes, and a worker not in `shell`, since its background task is a step of its chore; uncommitted or unpushed work in a worktree it used keeps it open, told to its lead.
-// After a close, each worktree the session used is cleaned (cleanWorktree): its dev stack stopped, the worktree moved to the trash, its containers and branch removed, or kept with the reason.
+// After a close, each worktree the session used is cleaned (cleanWorktree): its dev stack stopped, the worktree moved to the trash, its containers and branch removed, or kept with the reason; a checker's end cleans the other kind's clones of its PR an earlier end kept the same way, once no other checker of that PR is live.
 // Every end and every refusal is one line for its lead; it signals nothing itself but through bun run dev:stop, which signals only the process groups that worktree's stack recorded.
 
 import { existsSync } from "node:fs"
@@ -198,7 +198,7 @@ async function cwdsOf(sessionId: string, projectsDir: string): Promise<string[] 
   return [...cwds]
 }
 
-// The worktrees a session used: each linked worktree its transcript ran in, for a worker each worktree on its PRs' branches, and, given the main checkout, a checker's clones of that checkout's PR n, a reviewer's review-<n> and a tester's test-<n> and test-<n>-before, which no cwd names when read from outside; null when its transcript cannot be read.
+// The worktrees a session used: each linked worktree its transcript ran in, for a worker each worktree on its PRs' branches, and, given the main checkout, a checker's clones of that checkout's PR n, a reviewer's review-<n> and a tester's test-<n> and test-<n>-before, which no cwd names when read from outside (the other kind's clones of PR n are cleanupLive's, once no other checker of it is live); null when its transcript cannot be read.
 export async function worktreesOf(
   target: Target,
   projectsDir: string,
@@ -226,11 +226,7 @@ export async function worktreesOf(
   }
   const leaves = CLONES[target.kind ?? ""]
   const n = main && leaves ? await ownPr(target.pr, main) : undefined
-  if (main && leaves && n)
-    for (const leaf of leaves) {
-      const clone = join(main, ".claude", "worktrees", leaf.replace("<n>", n))
-      if (existsSync(clone)) dirs.add(clone)
-    }
+  if (main && leaves && n) for (const clone of clonesAt(leaves, n, main)) dirs.add(clone)
   return [...dirs]
 }
 
@@ -238,6 +234,43 @@ export async function worktreesOf(
 const CLONES: Record<string, string[]> = {
   reviewer: ["review-<n>"],
   tester: ["test-<n>", "test-<n>-before"],
+}
+
+// The clones of PR n in <main>/.claude/worktrees that exist, one per leaf.
+const clonesAt = (leaves: string[], n: string, main: string): string[] =>
+  leaves
+    .map((leaf) => join(main, ".claude", "worktrees", leaf.replace("<n>", n)))
+    .filter(existsSync)
+
+// A checker's PR n and the other checker kinds' clones of it that exist, which an earlier end kept while this checker held them; none for a worker or another repo's PR.
+async function otherClones(
+  target: Target,
+  main: string,
+): Promise<{ clones: string[]; n: string; pr: string } | null> {
+  const n = CLONES[target.kind ?? ""] ? await ownPr(target.pr, main) : undefined
+  if (!n || !target.pr) return null
+  const leaves = Object.entries(CLONES).flatMap(([kind, l]) => (kind === target.kind ? [] : l))
+  return { clones: clonesAt(leaves, n, main), n, pr: target.pr }
+}
+
+// Pure: the live reviewer and tester rows a roster's text has on a PR, by name; null when the text holds no agents list.
+export const checkersOf = (text: string, pr: string): string[] | null => {
+  try {
+    const { agents } = JSON.parse(text) as { agents: unknown }
+    if (!Array.isArray(agents)) return null
+    return agents.flatMap(
+      (a: { kind?: unknown; name?: unknown; pr?: unknown; status?: unknown }) =>
+        a &&
+        typeof a.name === "string" &&
+        a.pr === pr &&
+        STATUSES.live.includes(String(a.status)) &&
+        CLONES[kindOf(a.name, a.kind) ?? ""]
+          ? [a.name]
+          : [],
+    )
+  } catch {
+    return null
+  }
 }
 
 // The number of a PR on the main checkout's own origin repository, else undefined.
@@ -278,8 +311,9 @@ export async function unsavedLive(
   return null
 }
 
-// What one worktree's cleanup reads and runs, so a test hands it fakes: git in a folder, the main checkout, the live dashboard's branch, whether a worktree's PR has merged or closed, the live session or clone holding a worktree, its dev stack's stop, playground rm --worktree with or without --discard, the containers docker lists and its remove, and whether a name is the live dashboard's database.
+// What one worktree's cleanup reads and runs, so a test hands it fakes: the live reviewer and tester roster rows on a PR (null when the roster cannot be read), which cleanupLive alone reads, git in a folder, the main checkout, the live dashboard's branch, whether a worktree's PR has merged or closed, the live session or clone holding a worktree, its dev stack's stop, playground rm --worktree with or without --discard, the containers docker lists and its remove, and whether a name is the live dashboard's database.
 export type CleanupDeps = {
+  checkers?: (pr: string) => Promise<string[] | null>
   containers: () => Promise<string[] | null>
   devStop: (dir: string) => Promise<{ ok: boolean; out: string }>
   finished: (path: string, pr?: string) => Promise<boolean>
@@ -414,6 +448,13 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
   const pair = livePair()
   const rm = rmDeps(REPO)
   return {
+    checkers: async (pr) =>
+      checkersOf(
+        await Bun.file(join(rm.data, "roster.json"))
+          .text()
+          .catch(() => ""),
+        pr,
+      ),
     containers: async () => {
       const { code, out } = await runIn(["docker", "ps", "-a", "--format", "{{.Names}}"])
       return code === 0 ? out.split("\n").filter(Boolean) : null
@@ -440,18 +481,31 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
   }
 }
 
-// After a session closes, each worktree it used, one at a time.
+// After a session closes, each worktree it used, one at a time; then, for a checker, each other checker kind's clone of its PR an earlier end kept, while no other reviewer or tester row on that PR is live.
 export const cleanupLive =
   (projectsDir: string, depsOf: () => Promise<CleanupDeps | null> = cleanupDeps) =>
   async (target: Target): Promise<string[]> => {
     const deps = await depsOf()
     const dirs = await worktreesOf(target, projectsDir, deps?.main)
     if (!dirs) return [`could not read its transcript in ${projectsDir}, so nothing was cleaned`]
-    if (!dirs.length) return []
+    if (!dirs.length && !deps?.checkers) return []
     if (!deps) return ["could not find the main checkout, so nothing was cleaned"]
+    const reason = `${target.name} ended`
     const lines: string[] = []
-    for (const dir of dirs)
-      lines.push(await cleanWorktree(dir, `${target.name} ended`, deps, { pr: target.pr }))
+    for (const dir of dirs) lines.push(await cleanWorktree(dir, reason, deps, { pr: target.pr }))
+    const { checkers } = deps
+    const kept = checkers && (await otherClones(target, deps.main))
+    if (!checkers || !kept?.clones.length) return lines
+    const { clones, n, pr } = kept
+    const others = (await checkers(pr))?.filter((name) => name !== target.name)
+    for (const dir of clones)
+      lines.push(
+        !others
+          ? `kept ${dir}: the roster could not be read`
+          : others.length
+            ? `kept ${dir}: ${others.join(", ")} still checks #${n}`
+            : await cleanWorktree(dir, reason, deps, { pr: target.pr }),
+      )
     return lines
   }
 

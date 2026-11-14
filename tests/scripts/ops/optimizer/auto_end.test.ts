@@ -6,6 +6,7 @@ import { join } from "node:path"
 import type { RmDeps } from "../../../../packages/scripts/src/playground/rm"
 import {
   type CleanupDeps,
+  checkersOf,
   cleanWorktree,
   cleanupHeld,
   cleanupLive,
@@ -81,6 +82,25 @@ test("finishedOf reads rm's reader shape, a PR beside its head, number and state
   expect(finishedOf({ head: "h", number: 7, state: "CLOSED" })).toBe(true)
   expect(finishedOf({ head: "h", number: 7, state: "OPEN" })).toBe(false)
   expect(finishedOf(null)).toBe(false)
+})
+
+// PG-2144: the roster reader the kept-clone step asks, a reviewer or tester by its row's kind or its name
+test("checkersOf names each live reviewer and tester row on the PR alone, and reads null off a roster with no agents list", () => {
+  const pr = "https://github.com/o/r/pull/7"
+  const agents = [
+    { name: "k3m9px-reviewer", pr, status: "working" },
+    { kind: "tester", name: "tester-calm-otter", pr, status: "waiting" },
+    { name: "q7wz2b-tester", pr, status: "ended" },
+    { name: "k3m9px-worker", pr, status: "working" },
+    { name: "h8rt4d-reviewer", pr: "https://github.com/o/r/pull/8", status: "working" },
+    null,
+  ]
+  expect(checkersOf(JSON.stringify({ agents }), pr)).toEqual([
+    "k3m9px-reviewer",
+    "tester-calm-otter",
+  ])
+  expect(checkersOf("", pr)).toBeNull()
+  expect(checkersOf(JSON.stringify({ agents: {} }), pr)).toBeNull()
 })
 
 describe("sweep: ops-tick ends what the detector flags", () => {

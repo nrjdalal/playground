@@ -85,9 +85,9 @@ export const worktreesIn = (porcelain: string, main: string): Worktree[] =>
     return [{ branch: /^branch refs\/heads\/(.+)$/m.exec(block)?.[1] ?? null, path }]
   })
 
-// Pure: the PR number a review-<n> or test-<n> clone's folder names, else undefined.
+// Pure: the PR number a review-<n>, test-<n> or test-<n>-before clone's folder names, else undefined.
 const cloneOf = (path: string): number | undefined => {
-  const n = /^(?:review|test)-(\d+)$/.exec(basename(path))?.[1]
+  const n = /^(?:review|test)-(\d+)(?:-before)?$/.exec(basename(path))?.[1]
   return n ? Number(n) : undefined
 }
 
