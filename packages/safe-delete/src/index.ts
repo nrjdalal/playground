@@ -227,6 +227,17 @@ const endedPadOf = (path: string, home: string, ended: Ended): string | undefine
   return live ? undefined : folder
 }
 
+// The entry directly in scratch/ that path is, a real file or folder (not a symlink), for the nightly clean, which has found its session gone.
+const goneScratchOf = (path: string, home: string): string | undefined => {
+  const abs = resolve(path)
+  const own = join(real(dirname(abs)), basename(abs))
+  const stat = lstat(own)
+  return dirname(own) === real(join(home, ".playground", "scratch")) &&
+    (stat?.isFile() || stat?.isDirectory())
+    ? own
+    : undefined
+}
+
 const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string | null => {
   const held = whyHolds(path, roots)
   if (held) return held
@@ -411,6 +422,7 @@ export function quarantine(
   opts: {
     carveOut?: string
     ended?: Ended
+    gone?: true
     git?: WorktreeGit
     reason: string
     session: string
@@ -423,7 +435,9 @@ export function quarantine(
   if (!SESSION.test(opts.session))
     return refused(`the session name ${opts.session} is not a word of letters, digits and hyphens`)
   if (!lstat(abs)) return refused(`no such path ${abs}`)
-  const ended = opts.ended && endedPadOf(abs, roots.home, opts.ended)
+  const ended =
+    (opts.ended && endedPadOf(abs, roots.home, opts.ended)) ||
+    (opts.gone && goneScratchOf(abs, roots.home))
   const carve = carveOutOf(
     abs,
     opts.carveOut,
@@ -450,7 +464,7 @@ export function quarantine(
       `${opts.session} quarantined ${recent.length} paths in the last minute, the most one session may`,
       firstOfBurst(trash, opts.session, recent) ? "tripwire" : "refused",
     )
-  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratchpad folder skips the file count, keeping the byte cap.
+  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratchpad folder, or with gone a gone session's entry directly in scratch/, skips the file count, keeping the byte cap.
   const whole = ended && join(real(dirname(abs)), basename(abs)) === ended
   const cap = carve ?? (whole ? { ...LIMITS, files: Infinity } : LIMITS)
   const { files, size } = measure(abs, {
@@ -546,20 +560,20 @@ export function restore(
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
-  // an ended session's item comes back only into its folder directly in scratchpad/, reached through no symlink (at the folder or between), and is refused anywhere else
+  // an ended session's item comes back only into its folder directly in scratchpad/, or a gone session's entry directly in scratch/ back to its own place, reached through no symlink (at the folder or between), and is refused anywhere else
   let back: string[] = []
   if (entry.ended) {
-    const pad = real(join(roots.home, ".playground", "scratchpad"))
+    const pads = ["scratchpad", "scratch"].map((dir) => real(join(roots.home, ".playground", dir)))
     const parent = dirname(entry.path)
     const at = existsSync(parent) ? join(real(parent), basename(entry.path)) : entry.path
     const stands = lstat(entry.ended)
     if (
-      dirname(entry.ended) !== pad ||
+      !pads.includes(dirname(entry.ended)) ||
       !inside(at, entry.ended) ||
-      (stands && !stands.isDirectory())
+      (at !== entry.ended && stands && !stands.isDirectory())
     )
       return refused(
-        `${entry.path} came from ${entry.ended}, an ended session's folder, which no longer reaches it as a real folder in ${pad}`,
+        `${entry.path} came from ${entry.ended}, an ended session's folder, which no longer reaches it as a real folder in ${pads.join(" or ")}`,
       )
     back = [entry.ended]
   }

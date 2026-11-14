@@ -18,7 +18,7 @@ import { writeAtomic } from "../write-atomic"
 import { endOrphans, orphansOf, procsOf, PS } from "./orphans"
 import type { Context } from "./tick"
 
-// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, and an Inbox update when 1 GB or more was freed. It asks no decision: each container or volume no rule removes is kept and named as kept.
+// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders and loose scratch files of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, and an Inbox update when 1 GB or more was freed. It asks no decision: each container or volume no rule removes is kept and named as kept.
 
 const GB = 1024 ** 3
 // The freed-space finding's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
@@ -530,7 +530,7 @@ export const nightlyClean =
       }
       return out.join("; ")
     })
-    // Each folder in the data folder's scratch/ whose session is gone: no live session and no roster row whose status is not ended shares its leading id, so a session's scratch/<id>-<task> stays while it lives or its row is not ended. It goes to the trash through quarantine under that session's own name, the route safe-delete gives a session for its own scratch, so the data folder stays protected and playground rm --restore brings it back.
+    // Each folder, and each loose <id>-* file, in the data folder's scratch/ whose session is gone: no live session and no roster row whose status is not ended shares its leading id, so a session's scratch/<id>-<task> stays while it lives or its row is not ended, and a file with no <id>- lead stays. It goes to the trash whole through quarantine's gone option, past the 5,000-file tripwire and under its 2 GB cap, so the rest of the data folder stays protected and playground rm --restore brings it back.
     await step("gone sessions", async () => {
       const dir = join(data, "scratch")
       const entries = await readdir(dir, { withFileTypes: true }).catch(() => null)
@@ -543,14 +543,19 @@ export const nightlyClean =
       let gone = 0
       for (const entry of entries) {
         const id = idOf(entry.name)
-        if (!entry.isDirectory() || live.has(id) || roster.texts.some((t) => t.includes(id)))
-          continue
+        const kind = entry.isDirectory()
+          ? "folder"
+          : entry.isFile() && /^[A-Za-z0-9]+-/.test(entry.name)
+            ? "file"
+            : null
+        if (!kind || live.has(id) || roster.texts.some((t) => t.includes(id))) continue
         const path = join(dir, entry.name)
         const moved = quarantine(
           path,
           {
-            reason: "nightly-clean: the scratch folder of a session that is gone",
-            session: entry.name,
+            gone: true,
+            reason: `nightly-clean: the scratch ${kind} of a session that is gone`,
+            session: entry.name.replace(/[^A-Za-z0-9-]/g, "-"),
           },
           deps.trashRoots(),
         )

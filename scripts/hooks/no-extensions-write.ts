@@ -535,6 +535,72 @@ function remoteName(v: string): boolean {
   return false
 }
 
+// Programs on neither REMOVERS nor WRITERS that unreadCdWrites judges by the words they write; after a cd the hook cannot read, any other program but a reader (reads()) or one of NO_WRITES is refused, since it may write in the shell's folder
+const UNREAD_CD_JUDGED = new Set([
+  "chmod",
+  "curl",
+  "mktemp",
+  "perl",
+  "sed",
+  "shred",
+  "sort",
+  "tar",
+  "truncate",
+])
+// Programs and builtins that write no file but through a redirect, each by its macOS man page or zsh's builtins (a for opener runs no command of its own)
+const NO_WRITES = new Set([
+  ":",
+  "basename",
+  "break",
+  "cd",
+  "continue",
+  "cut",
+  "date",
+  "dirname",
+  "exit",
+  "false",
+  "for",
+  "id",
+  "popd",
+  "printenv",
+  "pushd",
+  "pwd",
+  "read",
+  "return",
+  "set",
+  "shift",
+  "sleep",
+  "sysctl",
+  "tr",
+  "true",
+  "type",
+  "uname",
+  "unset",
+  "wait",
+  "which",
+  "whoami",
+])
+// portless's subcommands that print its routes (`portless --help`), run bare or by bunx
+const PORTLESS_READS = new Set(["get", "list"])
+const portlessRead = (tool: string, args: Word[]): boolean => {
+  const words = tool === "bunx" && args[0]?.value === "portless" ? args.slice(1) : args
+  return (tool === "portless" || words !== args) && PORTLESS_READS.has(words[0]?.value ?? "")
+}
+
+// The folder git works in by its -C options alone, each read from the one before it; undefined when it has none or one the hook cannot read, since git reads its paths from the shell's folder for every other option, a --git-dir or --work-tree included (a --work-tree holding the shell's folder places nothing)
+const gitPlaced = (args: Word[], env: Env): string | undefined => {
+  let cwd: string | undefined
+  for (let k = 0; k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value
+    if (v === "-C") {
+      const word = args[++k]
+      cwd = word && pathOf(word, { ...env, cwd })
+      if (cwd === undefined) return undefined
+    } else if (GIT_TAKES.has(v)) k++
+  }
+  return cwd
+}
+
 // a word macOS chmod takes as a dash-led mode (-w, -go+x) rather than an option
 const CHMOD_DASH_MODE = /^-[gorstuwXx]/
 
@@ -562,8 +628,9 @@ function unreadCdWrites(tool: string, args: Word[], env: Env, stopsAtOperand: bo
   }
   if (tool === "sort") return optionValues(args, "o", "koStT", ["--output"])
   if (tool === "git") {
-    const { cwd, rest, sub } = gitCall(args, { ...env, cwd: undefined })
+    const { rest, sub } = gitCall(args, { ...env, cwd: undefined })
     if (sub !== "rm") return []
+    const cwd = gitPlaced(args, env)
     const words = args.slice(args.length - rest.length)
     // a pathspec file names paths the hook does not read, each from git's own folder
     const listed = words.some((w) => longOf(w.value.split("=")[0], ["--pathspec-from-file"]))
@@ -1598,6 +1665,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`
   const seen = new Set<string>()
   let steadyAt: (cmd: Command) => Steady = () => NONE
+  // the typed command each run-slot.sh call's own words came from, so a cd or env -C among them holds the steady variables the line set before that call
+  const slotOf = new WeakMap<Command, Command>()
   let whole = false
   let rootLine = false
   let patterns = new Set<Command>()
@@ -1646,19 +1715,37 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         return refuse(
           `${parsed.name} ${shown(operand!)}, a script this line wrote with text the hook cannot read; run its commands as calls of their own`,
         )
+      // a script file a shell runs, or stdin it reads that the hook cannot, after a cd the hook cannot read may write in the shell's folder, as any program off every list may (below)
+      if (shellCall && !inline && env.cwdUnread && textDepth === 0) {
+        const fed = operand ? undefined : await stdinOf(cmd, env)
+        const script = operand
+          ? shown(operand)
+          : fed && (fed.unknown || marked(fed.value))
+            ? "stdin it cannot read"
+            : undefined
+        if (script)
+          return refuse(
+            afterUnreadCd(
+              `${parsed.name} running ${script}, a script that may write in the shell's folder,`,
+            ),
+          )
+      }
       if (shellCall) return
     }
     const slot = slotWords(parsed)
-    if (slot)
+    if (slot) {
+      const inner = { ...cmd, words: slot }
+      slotOf.set(inner, slotOf.get(cmd) ?? cmd)
       return slot.length === 0
         ? undefined
         : examine(
-            { ...cmd, words: slot },
+            inner,
             // run-slot.sh runs its words in a process of its own, so a cd among them moves no folder for the commands after it
             { ...env, files: new Map(env.files), vars: new Map(env.vars) },
             visit,
             false,
           )
+    }
     const { args, first, name, xargs } = parsed
     // findutils' g names are read again as find and xargs, so every check those two take reads them; the words swap in place, keeping the Command steadyAt knows and the program's path
     const findutils = GNU_NAMED.exec(name)?.[1]
@@ -1925,6 +2012,22 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     }
     // after a cd the hook cannot read, a remover's operand or a writer's target the hook can place only by the shell's own folder may be in the root
     if (!env.cwdUnread) return
+    // a typed program off every list may write in the shell's folder, and git but a read, git rm or a call that an absolute -C places (gitPlaced) may write its clone there; a command read out of a quoted text is judged by the lists alone, since its words are most often no program
+    const git = tool === "git" ? gitCall(args, { ...env, cwd: undefined }) : undefined
+    if (
+      textDepth === 0 &&
+      !remover &&
+      !WRITERS.has(tool) &&
+      !NO_WRITES.has(tool) &&
+      !portlessRead(tool, args) &&
+      !reads(parsed, env) &&
+      (git ? git.sub !== "rm" && gitPlaced(args, env) === undefined : !UNREAD_CD_JUDGED.has(tool))
+    )
+      return refuse(
+        afterUnreadCd(
+          `${git ? `git ${git.sub && !marked(git.sub) ? git.sub : "with a subcommand it cannot read"}, which may write in the shell's folder (an absolute git -C places it),` : `${verb}, which may write in the shell's folder,`}`,
+        ),
+      )
     // stdin xargs splits where the hook cannot see (a NUL, a part it cannot read, GNU's -d delimiter, a quote left open) is read as one value it cannot read
     const unsplit = fed && !fed.unknown && (marked(fed.value) || delimiter || !fedSplit)
     const fedWords: Word[] = unsplit
@@ -2043,6 +2146,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // the line starts in the folder the tool names, which the reader has proved by the payload itself
     cwdSure: directory,
     files: new Map(),
+    // a cd or env -C through a steady variable holding a literal absolute path is read by that path (landsHeld in shell.ts)
+    hold: (word, cmd, here) => heldWord(word, here, steadyAt(slotOf.get(cmd) ?? cmd)),
     known,
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },

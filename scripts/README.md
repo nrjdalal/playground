@@ -211,7 +211,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   Tests: `bun run test:file tests/scripts/ops/run-slot-nested-clone.test.ts tests/packages/scripts/src/playground/rm.test.ts tests/packages/safe-delete/src/index.test.ts`.
   A review worktree that only reads (no test run, no commit) takes no install at all.
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
-- A worker, reviewer or tester that ends automatically takes its worktrees with it, one at a time: dev stack, worktree, `playground-<worktree>-db` and `-redis` containers and branch (`cleanWorktree` in `scripts/ops/optimizer/auto_end.ts`; the factory's SESSIONS.md End holds the rules).
+- A worker, reviewer or tester that ends automatically takes its worktrees with it, one at a time, a reviewer's `review-<n>` clone or a tester's `test-<n>` and `test-<n>-before` of its roster PR n among them: dev stack, worktree, `playground-<worktree>-db` and `-redis` containers and branch (`cleanWorktree` in `scripts/ops/optimizer/auto_end.ts`; the factory's SESSIONS.md End holds the rules).
 - After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.
 - Spotlight skips any path under a dot folder, so a new factory path under `.claude/` or `.playground/` stays out of its index with no setting, while a `.metadata_never_index` file does nothing at folder level on this macOS (measured: a plain folder holding one was indexed anyway).
   The main checkout itself stays out through System Settings > Spotlight > Search Privacy.

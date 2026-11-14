@@ -98,7 +98,7 @@ export type Env = {
   // Set once a cd's landing folder cannot be named at all (`cd "$X"`, a popd, zsh's two-operand cd), so each hook reads it by its own fail-closed rule, through `places`'s fallback
   cwdUnread?: boolean
   files: Map<string, Text>
-  // Set by a hook that holds the line's steady variables (`steady.ts`): a cd's folder word with those it reads put in, else undefined, so a cd through one is read by the folder it names
+  // Set by a hook that holds the line's steady variables (`steady.ts`): a cd's folder word with those it reads put in, else undefined, so a cd through one is read by the folder it names, and one through a literal absolute path (`landsHeld`) is read as a cd to that path
   hold?: (word: Word, cmd: Command, env: Env) => Word | undefined
   known: Record<string, string>
   old?: { dir?: string }
@@ -1750,8 +1750,8 @@ async function examineReading(
   builtins: boolean,
 ): Promise<string | undefined> {
   const { args, chdir, local, name } = parsed
-  // env -C runs the command in the folder it names, wherever the shell is, so its own reading of the folder replaces every other
-  const into = chdir && pathOf(chdir, env)
+  // env -C runs the command in the folder it names, wherever the shell is, so its own reading of the folder, or the literal absolute path a steady variable there holds, replaces every other
+  const into = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env)
   const here: Env = chdir
     ? {
         ...env,
@@ -1936,9 +1936,16 @@ const tildeSign = (name: string, dir: Word | undefined, env: Env): string | unde
     : undefined
 
 // The one folder a cd names, taken as the shell's own wherever the reader reads it: `Env.cwd`'s own rule, which every hook read before the proven folder arrived and a hook outside `places` reads still.
-async function cdTarget(name: string, args: Word[], env: Env): Promise<string | undefined> {
-  const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
-  if (!dir) return homedir()
+async function cdTarget(
+  name: string,
+  cmd: Command,
+  args: Word[],
+  env: Env,
+): Promise<string | undefined> {
+  const typedDir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
+  if (!typedDir) return homedir()
+  // a steady variable holding a literal absolute path reads as that path typed (landsHeld), so a hook that reads `cwd` alone judges the folder it lands in
+  const dir = landsHeld(typedDir, cmd, env) ?? typedDir
   const lexical = dir.value === "-" ? undefined : pathOf(dir, env)
   const typed = await folder(
     lexical && physicalCd(args) ? kernelPath(dir, env.cwd, lexical) : lexical,
@@ -1957,6 +1964,14 @@ async function folder(path: string | undefined): Promise<string | undefined> {
 // Where a cd or pushd may leave the shell: each folder its own words name, whether its target names a folder the reader cannot read at all, and `back` for a form that returns to a folder the line named before, so every one of those is a candidate too. `cd -` and a bare `pushd` are such forms, and so is zsh's two-operand cd, which replaces part of the path the shell is in: its operands go in as candidates, since one of them is the folder a one-operand reading would reach. A bare `pushd` takes the home as well, which zsh's PUSHD_TO_HOME makes it reach.
 type Move = { back?: boolean; paths: string[]; unread: boolean }
 
+// The folder word a steady variable holds as a literal absolute path with no glob, colon or blank (`W=/abs; cd "$W"`), which a cd or env -C lands in as if typed; undefined for any other value, a relative one included, which stays unread, and so for one holding a colon, which is what the lexer leaves of a zsh modifier on an unbraced name (`$W:t`, `$W:h`), read as text where zsh applies it, and so for one holding a blank, which sh_word_split splits into zsh's two-operand cd
+const landsHeld = (word: Word, cmd: Command, env: Env): Word | undefined => {
+  const held = env.hold?.(word, cmd, env)
+  return held && isAbsolute(held.value) && !held.glob && !/[:\s]/.test(held.value)
+    ? held
+    : undefined
+}
+
 function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: string[]): Move {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1))
   const [dir] = dirs
@@ -1971,9 +1986,9 @@ function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: s
   const physical = physicalCd(parsed.args)
   let unread = dirs.length > 1
   for (const typed of dirs.length > 1 ? dirs : [dir]) {
-    // a steady variable's value is read in, so its target, and whether it climbs, is the folder it names; the unread reading the cd had stays beside it, so it is never read looser than before
+    // a steady variable's value is read in, so its target, and whether it climbs, is the folder it names; the unread reading the cd had stays beside it, so it is never read looser than before, unless that value is a literal absolute path
     const word = env.hold?.(typed, cmd, env) ?? typed
-    if (word !== typed) unread = true
+    if (word !== typed && !landsHeld(typed, cmd, env)) unread = true
     for (const base of from.length > 0 ? from : [undefined]) {
       tick()
       const path = pathOf(word, { ...env, cwd: base })
@@ -2034,7 +2049,8 @@ function tildeMove(
 async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Promise<void> {
   // `cwd` moves by the reading every hook had before the proven folder arrived, so a hook that reads it alone keeps its verdicts; it is read first, since it resolves a relative target against the folder this cd leaves
   const left = env.cwd
-  env.cwd = name === "popd" || cmd.detached ? undefined : await cdTarget(name, parsed.args, env)
+  env.cwd =
+    name === "popd" || cmd.detached ? undefined : await cdTarget(name, cmd, parsed.args, env)
   if (env.old) env.old = name === "popd" ? {} : { dir: env.cwd === undefined ? undefined : left }
   // a word's ~- names a folder only after a cd the reader is sure of, set below
   if (env.old) env.oldFrom = []
