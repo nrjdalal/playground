@@ -963,9 +963,46 @@ describe("the comment box and Reply on every card", () => {
 
   test("the box reads optional where it rides an answer as its note, and plain where Reply alone sends it", () => {
     expect(opened(decision)).toContain('placeholder="Add an optional comment"')
-    for (const item of [answered, update, secret]) {
+    for (const item of [answered, update]) {
       expect(opened(item)).toContain('placeholder="Add a comment"')
     }
+  })
+
+  // #2038: a secret ask's or a reveal card's empty-box Reply only focuses its own box, so the box and a muted line say how Reply works there
+  const reveal = {
+    ...decision,
+    preview: { service: "playground-demo", type: "reveal", why: "To check the demo token" },
+    title: "Show the demo token",
+  } as InboxItem
+  const HINT = "Type your note in the box above, then press Reply. The token goes in its own field"
+
+  test("a secret ask's and a reveal card's box says to type a note, then press Reply; every other card keeps its own (#2038)", () => {
+    for (const item of [secret, reveal]) {
+      expect(opened(item), item.title).toContain(
+        'placeholder="Type a note to Playground, then press Reply"',
+      )
+      expect(opened(item), item.title).not.toContain(HINT)
+    }
+    expect(opened(decision)).toContain('placeholder="Add an optional comment"')
+    for (const item of [answered, update]) {
+      expect(opened(item)).toContain('placeholder="Add a comment"')
+      expect(opened(item)).not.toContain("then press Reply")
+    }
+  })
+
+  test("an empty-box Reply on a secret ask or a reveal card shows one muted line under the box, gone for good once the box holds text (#2038)", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const reply = source.slice(source.indexOf("const onReply = () => {"))
+    // set by an empty box's Reply alone, and cleared once the box holds text, so a sent note or a cleared box never brings it back
+    expect(reply).toContain('if (keepsReply && text === "") setHinted(true)')
+    const box = source.slice(source.indexOf("const noteContent ="))
+    expect(box).toContain('if (event.target.value.trim() !== "") setHinted(false)')
+    expect(box).toContain("{hinted && (")
+    const line = box.slice(box.indexOf("{hinted && ("))
+    expect(line).toMatch(
+      /^[^}]*<p className="text-muted-foreground mt-2 text-xs">\s+Type your note/,
+    )
+    expect(line).toContain(HINT)
   })
 
   test("every card offers Reply, folded or open, and none offers Chat about it", () => {
