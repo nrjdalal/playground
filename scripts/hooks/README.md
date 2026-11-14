@@ -543,6 +543,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   and for a `bun`, `bunx` or `npx` that `bunx`, `bun x`, `npx` or `bun run` starts, behind a wrapper the shared reader parses too (`env`, `nice`, an `env -C` moving it), that started runner's own folders, read from the folder the outer runner starts it in.
   A runner behind a wrapper the reader does not parse (`find -exec`, `arch`, `watch`) has its folders read from every folder found before it, the shell's and an outer runner's (unread past 16 of them), `find`'s `-execdir` and `-okdir` add a folder the hook cannot read, and a shell's `-c` script a runner starts is walked in the runner's folders beside the shell's.
   A runner option but bun's own `--cwd`, `--filter` and `-F` (`runnerReadings`) is read both ways, as below.
+  A runner started straight by a runner is read from the outer runner's readings, which hold its own, and one behind a wrapper is read again only to `RUNNER_DEPTH` runners deep, past which its folder is unread, so a deep chain is judged in linear time and fails closed.
   A word is the CLI when any one folder reads it so (`playground` by a path that is no folder in one of them), and in a folder the hook cannot read a relative word is the CLI by its last part alone (`playground`, `cli` or `cli.ts`).
   Its words split as that command's own parse splits them (`--dry-run` and `--yes` are bare for `ext`, `--dry-run` alone for `settings`):
   `ext accept`, the owner's own call, whatever its words (the role cleared in the same call included);
