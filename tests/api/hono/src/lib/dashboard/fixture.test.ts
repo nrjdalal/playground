@@ -704,6 +704,22 @@ describe("writeFixture", () => {
     expect(status()).toContain("Sonnet")
   })
 
+  // a sent message's turn ends on its own, since no made-up session replies, so a later model pick does not read the pane as busy
+  test("a message sets the pane working until its turn ends, and a /model after it still draws the confirm", () => {
+    const dir = join(scratch("fixture-turn"), "fixture")
+    writeFixture(shipped(), dir, ROOTS)
+    const pane = readFixtureHerdr(dir).panes.find((p) => p.transcript_path)?.pane_id ?? ""
+    const sentAt = new Date()
+    const later = new Date(sentAt.getTime() + 60_000)
+    const status = (at: Date) =>
+      readFixtureHerdr(dir, at).panes.find((p) => p.pane_id === pane)?.agent_status
+    fixtureHerdrInput(pane, { prompt: "hello" }, dir, sentAt)
+    expect(status(sentAt)).toBe("working")
+    expect(status(later)).toBe("idle")
+    fixtureHerdrInput(pane, { prompt: "/model sonnet" }, dir, later)
+    expect(fixtureHerdrScreen(pane, dir)).toContain("1. Yes, switch to Sonnet")
+  })
+
   test("types into no transcript outside its own folder, whatever its scratch state names", () => {
     const dir = join(scratch("fixture-outside"), "fixture")
     writeFixture(shipped(), dir, ROOTS)

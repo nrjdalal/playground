@@ -860,7 +860,7 @@ describe("switchKeys", () => {
   })
 
   // a prompt that draws over the box within the switch's read is not its confirm unless an option names the model picked
-  test("a permission prompt, a plain yes or no question, a switch named only outside the prompt, or a prompt with no top edge gets no keys", () => {
+  test("a permission prompt, a plain yes or no question, a switch named only outside the prompt, a question naming another model, or a prompt with no top edge gets no keys", () => {
     expect(
       keys(
         confirm(
@@ -898,6 +898,8 @@ describe("switchKeys", () => {
       ),
     ).toBeNull()
     expect(keys(" Switch model?\n\n ❯ 1. Yes\n   2. No")).toBeNull()
+    expect(keys(confirm("Switch model to Opus 9.9?", " ❯ 1. Yes", "   2. No"))).toBeNull()
+    expect(keys(confirm("Switch to Opus 9.9?", " ❯ 1. Yes", "   2. No"))).toBeNull()
   })
 })
 

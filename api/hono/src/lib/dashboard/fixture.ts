@@ -577,7 +577,7 @@ export type FixtureMachine = {
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, "utf8")) as T
 
 // A fixture written before herdr.json was runs no herdr server.
-export const readFixtureHerdr = (dir = ensureFixture()): FixtureHerdr => {
+export const readFixtureHerdr = (dir = ensureFixture(), _now = new Date()): FixtureHerdr => {
   const path = join(dir, "herdr.json")
   return existsSync(path) ? readJson<FixtureHerdr>(path) : { ...NO_HERDR, inputs: {} }
 }
