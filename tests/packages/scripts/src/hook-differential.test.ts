@@ -698,7 +698,7 @@ describe("a GLM replay", () => {
   })
 })
 
-// A hook whose check() takes the main checkout reads it from its own folder when none is given, and canary's unpacked tree is no git checkout, so the differential hands both sides the head's (PG-996)
+// A hook whose check() takes the main checkout reads it from its own folder when none is given, and canary's unpacked tree is no checkout of the repository, so the differential hands both sides the head's (PG-996)
 describe("a hook that takes the main checkout", () => {
   // refuses a command that names its main checkout; with none given, main is the folder it would read from its own tree
   const guard =
