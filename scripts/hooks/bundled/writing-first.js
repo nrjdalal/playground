@@ -123,6 +123,10 @@ function roleOfName(name) {
 }
 var SEATLESS = new Set(["ended", "parked"]);
 
+// packages/safe-delete/src/live-refs.ts
+import { AsyncLocalStorage } from "async_hooks";
+var budget = new AsyncLocalStorage;
+
 // packages/safe-delete/src/index.ts
 var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
 var PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/;
@@ -4884,7 +4888,7 @@ var liveSettings = defineSettings({
 });
 
 // scripts/hooks/shell.ts
-import { AsyncLocalStorage } from "async_hooks";
+import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
 import { realpathSync, statSync } from "fs";
 import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute3, resolve as resolve3 } from "path";
@@ -4893,7 +4897,7 @@ var READ = "\x01";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
-var deadlines = new AsyncLocalStorage;
+var deadlines = new AsyncLocalStorage2;
 async function withDeadline(budget, body) {
   return await deadlines.run(performance.now() + budget, body);
 }
