@@ -149,6 +149,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `spawn.sh restore` after a herdr restart refills the panes herdr kept, each resumed through `spawn.sh resume`, so a shared workspace, the column's or one arranged by hand, survives a restart as herdr restores it.
   A shared workspace comes from `spawn.sh column` or the owner's own arranging.
   Tests: `bun run test:file tests/scripts/spawn*.test.ts tests/scripts/hooks`.
+  Leave `scripts/spawn.sh` as it stands while a spawn test run goes, since bash reads the script as it runs, so an edit mid-run breaks it (seen as `ARM: unbound variable`).
 
 ## The herdr servers
 
@@ -211,6 +212,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
 - A worker, reviewer or tester that ends automatically takes its worktrees with it, one at a time: dev stack, worktree, `playground-<worktree>-db` and `-redis` containers and branch (`cleanWorktree` in `scripts/ops/optimizer/auto_end.ts`; the factory's SESSIONS.md End holds the rules).
 - After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.
+- Spotlight skips any path under a dot folder, so a new factory path under `.claude/` or `.playground/` stays out of its index with no setting, while a `.metadata_never_index` file does nothing at folder level on this macOS (measured: a plain folder holding one was indexed anyway).
+  The main checkout itself stays out through System Settings > Spotlight > Search Privacy.
 
 ## Shared git hooks and the turbo cache
 

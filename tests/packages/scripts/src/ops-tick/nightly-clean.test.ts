@@ -16,6 +16,8 @@ import { basename, dirname, join } from "node:path"
 import {
   bytesOf,
   discardable,
+  isCopy,
+  issueOf,
   nightlyClean,
   type NightDeps,
   type Pr,
@@ -125,7 +127,7 @@ describe("worktrees", () => {
     expect(discardable("kept /w: could not count its unpushed commits")).toBe(false)
     expect(
       discardable(
-        "kept /w: /w's HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree /w --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved",
+        "kept /w: /w's HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree /w --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash",
       ),
     ).toBe(true)
     expect(
@@ -166,9 +168,153 @@ test("branches: merged ones and a done PR's still at its head go, the rest are a
   })
   expect(plan).toEqual({
     archive: ["PG-3-ahead", "scratch"],
+    bundle: [],
     local: ["PG-1-merged", "PG-2-squashed"],
     remote: ["PG-7-remote"],
   })
+})
+
+// #i446's 33 branches as the card of 6 Nov listed them: each name, its newest subject, and the branch whose head it shares (rule 4); the issues they name and their PRs as GitHub read them.
+const I446: { name: string; same?: string; subject: string }[] = [
+  { name: "PG-448-glob-rule-1", subject: "fix(PG-448): no-extensions-write reads a glob rule" },
+  { name: "PG-461-sed-reader", subject: "fix(PG-461): a read-only sed with a glob passes" },
+  { name: "PG-539-cwd-history", subject: "fix(PG-539): run-slot reads a --cwd path once" },
+  {
+    name: "PG-652-sudo-abbrev",
+    subject: "fix(PG-652): the shell reader reads sudo's abbreviations",
+  },
+  { name: "PG-664-d3-on-reads", subject: "refactor(PG-664): the dashboard reads herdr alone" },
+  { name: "PG-665-delete-cmux", subject: "refactor(PG-665): delete the cmux code" },
+  { name: "PG-780-after", subject: "fix(PG-780): the after shots" },
+  { name: "PG-892-yard-hour-cap", subject: "test(PG-892): the hour's cap test" },
+  { name: "pr-104", subject: "fix: pr 104's head" },
+  { name: "pr-116", subject: "fix: pr 116's head" },
+  { name: "k4vt2m-t104", same: "pr-104", subject: "" },
+  { name: "k4vt2m-t116", same: "pr-116", subject: "" },
+  { name: "pg435-backup", subject: "wip: 435 backup" },
+  { name: "pg435-backup2", subject: "wip: 435 backup 2" },
+  { name: "pg452-backup-54f56539", subject: "wip: 452 backup a" },
+  { name: "pg452-backup-8dcdc866", subject: "wip: 452 backup b" },
+  { name: "pg452-backup-e21fbd40", subject: "wip: 452 backup c" },
+  { name: "pg501-backup-131a43c3", subject: "wip: 501 backup a" },
+  { name: "pg501-backup-e4e2c606", subject: "wip: 501 backup b" },
+  { name: "pg505-backup-041b3a84", subject: "wip: 505 backup a" },
+  { name: "pg505-backup-d41179c2", subject: "wip: 505 backup b" },
+  { name: "qz282w-after", subject: "fix: after shots" },
+  { name: "review-358", subject: "fix: review of 358" },
+  { name: "review-798", subject: "fix: review of 798" },
+  { name: "test-54", subject: "test: 54" },
+  { name: "test-64", subject: "test: 64" },
+  { name: "test-65", subject: "test: 65" },
+  { name: "test-79", subject: "test: 79" },
+  { name: "trial-411f", subject: "trial: 411f" },
+  { name: "trial-quiet-commit", subject: "trial: a quiet commit" },
+  { name: "wip-501-own", subject: "wip: 501 own" },
+  { name: "xf45ns-test-886", subject: "test: 886" },
+  {
+    name: "PG-493-spec-inline",
+    subject: "fix(PG-493): code-review reads a spec by scratchpad path",
+  },
+]
+const I446_ISSUES = new Map<number, "CLOSED" | "OPEN">([
+  ...[448, 461, 539, 652, 664, 665, 892].map((n) => [n, "CLOSED"] as const),
+  [493, "OPEN"],
+  [780, "OPEN"],
+])
+const I446_PRS = {
+  "PG-652-sudo-abbrev": pr("MERGED", "squashed-681", 681),
+  "PG-665-delete-cmux": pr("MERGED", "squashed-1096", 1096),
+}
+
+// #1332
+test("a branch name marks a copy by a backup, trial, wip or test word, a review- or pr-<n> start, or an -after or -before end", () => {
+  for (const b of I446.filter((b) => !b.same && !/^PG-\d+-(?!after$)/.test(b.name)))
+    expect([b.name, isCopy(b.name)]).toEqual([b.name, true])
+  for (const name of ["PG-1-x-before", "PG-2-wip", "PG-3-test"]) expect(isCopy(name)).toBe(true)
+  for (const name of [
+    "PG-493-spec-inline",
+    "PG-448-glob-rule-1",
+    "k4vt2m-t104",
+    "PG-1200-latest-fix",
+    "PG-12-tests-flake",
+    "preview-1",
+    "scratch",
+  ])
+    expect([name, isCopy(name)]).toEqual([name, false])
+})
+
+test("a branch's issue is the PG-<n> its name leads with, else its newest subject's scope", () => {
+  expect(issueOf({ name: "PG-493-spec-inline", sha: "s" })).toBe(493)
+  expect(issueOf({ name: "pg-12", sha: "s" })).toBe(12)
+  expect(issueOf({ name: "k9-fix", sha: "s", subject: "fix(PG-51): a thing" })).toBe(51)
+  expect(issueOf({ name: "k9-fix", sha: "s", subject: "feat!(PG-52): a thing" })).toBe(52)
+  expect(issueOf({ name: "pg435-backup", sha: "s", subject: "wip: 435 backup" })).toBeUndefined()
+  expect(issueOf({ name: "scratch", sha: "s", subject: "see PG-9" })).toBeUndefined()
+})
+
+// #1332: #i446's 33 branches, of which the owner's rules judge 32 not useful and keep one
+test("branches: #i446's 33 go to the bundle list but PG-493-spec-inline, whose issue is open and which is no copy, and none to the archive list", () => {
+  const plan = staleBranches({
+    checkedOut: new Set(),
+    issues: I446_ISSUES,
+    keep: new Set(["canary", "main"]),
+    local: I446.map((b) => ({ name: b.name, sha: `s-${b.same ?? b.name}`, subject: b.subject })),
+    merged: new Set(),
+    prs: new Map(Object.entries(I446_PRS)),
+    remote: [],
+  })
+  expect(plan.bundle).toHaveLength(32)
+  expect(plan.bundle).not.toContain("PG-493-spec-inline")
+  expect(plan.bundle).toContain("k4vt2m-t104")
+  expect(plan.archive).toEqual([])
+  expect(plan.local).toEqual([])
+})
+
+test("branches: a superseded subject, a closed issue a subject names, and a merged branch's head each mark one not useful; an open issue keeps one, and one no rule judges is archived", () => {
+  const plan = staleBranches({
+    checkedOut: new Set(),
+    issues: new Map([
+      [51, "CLOSED"],
+      [53, "OPEN"],
+    ]),
+    keep: new Set(["canary"]),
+    local: [
+      { name: "PG-50-old", sha: "a", subject: "chore(PG-50): superseded by #60" },
+      { name: "k9-fix", sha: "b", subject: "fix(PG-51): a thing" },
+      { name: "PG-52-done", sha: "c" },
+      { name: "copy-of-52", sha: "c" },
+      { name: "PG-53-live", sha: "d", subject: "fix(PG-53): live work" },
+      { name: "PG-54-unread", sha: "e" },
+      { name: "scratch", sha: "f" },
+    ],
+    merged: new Set(["PG-52-done"]),
+    prs: new Map(),
+    remote: [],
+  })
+  expect(plan).toEqual({
+    archive: ["PG-54-unread", "scratch"],
+    bundle: ["PG-50-old", "k9-fix", "copy-of-52"],
+    local: ["PG-52-done"],
+    remote: [],
+  })
+})
+
+test("branches: a branch whose issue is open and which is no copy stays, though its subject says superseded or its head is a merged branch's; a copy of it still goes", () => {
+  const plan = staleBranches({
+    checkedOut: new Set(),
+    issues: new Map([[70, "OPEN"]]),
+    keep: new Set(["canary"]),
+    local: [
+      { name: "PG-70-old", sha: "a", subject: "chore(PG-70): superseded by #71" },
+      { name: "PG-70-done", sha: "b" },
+      { name: "PG-70-same", sha: "b" },
+      { name: "PG-70-backup", sha: "c" },
+    ],
+    merged: new Set(["PG-70-done"]),
+    prs: new Map(),
+    remote: [],
+  })
+  expect(plan).toEqual({ archive: [], bundle: ["PG-70-backup"], local: ["PG-70-done"], remote: [] })
 })
 
 test("containers: an exited worktree container whose folder is gone goes; the live dashboard's, pglaunch's, a Vibeground copy, a running one and one whose folder stands stay", () => {
@@ -230,6 +376,20 @@ test("gh's PR answer reads from its stdout alone, a number that is no PR skipped
     [12, { headRefOid: "h2", state: "CLOSED", url: "https://github.com/acme/app/pull/12" }],
   ])
   expect(readPrs("gh: HTTP 502", [], [], prsOf({}))).toBe(false)
+})
+
+test("gh's answer reads each issue's state by its i<n> alias, a number that is no issue skipped", async () => {
+  const prs = prsOf({})
+  const { out } = await fakeRun({
+    graphql: ghErrors({ i0: { state: "CLOSED" }, i1: null, i2: { state: "OPEN" } }, [
+      "Could not resolve to an Issue with the number of 681.",
+    ]),
+  }).run(["gh", "api", "graphql", "-f", "query=..."])
+  expect(readPrs(out, [], [], prs, [652, 681, 493])).toBe(true)
+  expect([...(prs.byIssue ?? [])]).toEqual([
+    [652, "CLOSED"],
+    [493, "OPEN"],
+  ])
 })
 
 test("the trash count adds each purge line's batches after the last run", () => {
@@ -1080,6 +1240,99 @@ describe("one night's run against a fixture data folder", () => {
     const line = sent.find((s) => s.to === "ops")
     expect(line?.text).toContain("branch scratch as tag archive/scratch at s")
     expect(inputs.map((i) => JSON.parse(i).kind)).not.toContain("decision")
+  })
+
+  // #1332 and #1348: the night's branch step on a real repo holding #i446's 33 branches, git run for real but its pushes, every other command answered by night()'s fakes
+  test("#i446's 33 branches: 32 go into one bundle in the trash and are deleted, PG-493-spec-inline stays, no decision is asked, and the bundle brings one back at its old sha", async () => {
+    const { ctx, deps, inputs, ops, runs, sent } = night()
+    const main = ctx.repo
+    const sh = (...args: string[]) => {
+      const run = Bun.spawnSync([
+        "git",
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=t",
+        "-C",
+        main,
+        ...args,
+      ])
+      if (run.exitCode !== 0) throw new Error(run.stderr.toString())
+      return run.stdout.toString().trim()
+    }
+    sh("init", "-q", "-b", "main")
+    sh("commit", "-q", "--allow-empty", "-m", "base")
+    const base = sh("rev-parse", "HEAD")
+    sh("update-ref", "refs/remotes/origin/canary", base)
+    const tree = sh("rev-parse", "HEAD^{tree}")
+    const shas = new Map<string, string>()
+    for (const b of I446) {
+      const sha = b.same
+        ? shas.get(b.same)!
+        : sh("commit-tree", tree, "-p", base, "-m", b.subject || b.name)
+      shas.set(b.name, sha)
+      sh("update-ref", `refs/heads/${b.name}`, sha)
+    }
+    // test-54's origin copy is at the head the bundle holds, so it goes on origin too; review-358's is at another head, so it stays there
+    sh("update-ref", "refs/remotes/origin/test-54", shas.get("test-54")!)
+    sh("update-ref", "refs/remotes/origin/review-358", base)
+    const fake = ctx.run
+    ctx.run = async (argv, timeout, stdin) => {
+      if (argv[0] !== "git" || argv.includes("push")) return fake(argv, timeout, stdin)
+      runs.push(argv)
+      const run = Bun.spawnSync(argv, { stderr: "pipe", stdout: "pipe" })
+      return { code: run.exitCode, out: run.stdout.toString() + run.stderr.toString() }
+    }
+    const trash = join(dirname(ops), "trash")
+    deps.trashRoots = () => ({ home: "/nowhere", main: "/nowhere", trash })
+    deps.prs = async () => ({
+      ...prsOf(I446_PRS),
+      byIssue: I446_ISSUES,
+      repo: "https://github.com/acme/app",
+    })
+    await nightlyClean(deps)(ctx)
+    expect(sh("for-each-ref", "refs/heads", "--format=%(refname:short)").split("\n")).toEqual([
+      "PG-493-spec-inline",
+      "main",
+    ])
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.filter((r) => r.includes("push"))).toEqual([
+      `git -C ${main} push -q origin --delete test-54`,
+    ])
+    expect(ran.some((r) => r.includes("git/refs"))).toBe(false)
+    expect(inputs.map((i) => JSON.parse(i).kind)).not.toContain("decision")
+    const bundle = join(trash, "20261105T030000Z-nightly-clean", "branches.bundle")
+    expect(readFileSync(join(dirname(bundle), "branches.shas"), "utf8").split("\n")).toHaveLength(
+      33,
+    )
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain(
+      `bundled 32 not useful at ${bundle}, each brought back by git -C ${main} fetch ${bundle} refs/heads/<branch>:refs/heads/<branch>`,
+    )
+    const line = sent.find((s) => s.to === "ops")?.text ?? ""
+    expect(line).toContain(`branch k4vt2m-t104 at ${shas.get("k4vt2m-t104")} in bundle ${bundle}`)
+    expect(line).toContain(
+      `branch review-358 at ${shas.get("review-358")} in bundle ${bundle}, origin's ${base} kept`,
+    )
+    expect(line).not.toContain("PG-493-spec-inline")
+    sh("fetch", "-q", bundle, "refs/heads/k4vt2m-t104:refs/heads/k4vt2m-t104")
+    expect(sh("rev-parse", "k4vt2m-t104")).toBe(shas.get("k4vt2m-t104")!)
+  })
+
+  test("a bundle that cannot be written keeps every branch it would hold, named in the ops line", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "for-each-ref refs/heads": "main m\ntest-54 t54",
+    })
+    deps.trashRoots = () => ({
+      home: "/nowhere",
+      main: "/nowhere",
+      trash: join(dirname(ops), "trash"),
+    })
+    await nightlyClean(deps)(ctx)
+    expect(runs.some((r) => r.join(" ").endsWith("branch -D test-54"))).toBe(false)
+    expect(sent.find((s) => s.to === "ops")?.text).toContain(
+      "branch test-54 kept: its bundle failed",
+    )
   })
 
   // #1515
