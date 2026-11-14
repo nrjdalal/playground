@@ -1144,7 +1144,7 @@ function textFlagValues({ args, name }: Parsed): Word[] {
   )
 }
 
-// sed's in-place option as macOS sed reads it: -i after any of -E, -n, -r, -s, -u and -z, its backup suffix attached (holding no / or *, which GNU writes into another folder) or, when nothing is attached, the next word
+// sed's in-place option as macOS sed reads it: -i after any of -E, -n, -r, -s, -u and -z, its backup suffix attached (holding no / or *, which GNU writes into another folder) or, when nothing is attached, the next word, which GNU sed, Linux's, reads as no suffix (sedEdits)
 const SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/
 // a bare -i's suffix word: empty or a dot and letters, so a GNU sed, which reads that word as its script, reads it as no command or none it knows
 const SED_SUFFIX = /^(?:\.[\w.~-]*)?$/
