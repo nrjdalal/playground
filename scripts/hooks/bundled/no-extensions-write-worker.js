@@ -8998,6 +8998,7 @@ var FILE_TOOLS = {
 };
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
 var RUNNERS = new Set(["npx"]);
+var X = { quoted: false, value: "x" };
 var TOOLS = new Set(["lefthook", "turbo"]);
 function bunCall(args, env) {
   let cwd = env.cwd;
@@ -9810,7 +9811,8 @@ function cliCalls(parsed, env) {
   if (!first)
     return [];
   const words = [first, ...args];
-  const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined];
+  const call = name === "bun" ? bunCall(args, env) : name === "bunx" ? bunCall([X, ...args], env) : undefined;
+  const dirs = [env.cwd, call?.cwd, call?.chained];
   return words.flatMap((word, at) => isCli(word, dirs) ? [words.slice(at + 1)] : []);
 }
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];

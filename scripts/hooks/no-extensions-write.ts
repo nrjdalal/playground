@@ -16,7 +16,7 @@ import {
 } from "../../packages/settings/src/rendered"
 import { settingFields } from "../../packages/settings/src/settings"
 import { eachInput } from "./codex"
-import { bunCall, FILE_TOOLS, gitCall, inPlace, real } from "./no-main-checkout"
+import { bunCall, FILE_TOOLS, gitCall, inPlace, real, X } from "./no-main-checkout"
 import { fromFactory, opsLead } from "./role"
 import {
   codeFed,
@@ -799,12 +799,14 @@ function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   )
 }
 
-// The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare.
+// The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare, a bun or bunx word read from bun's last --cwd and from the folder its --cwd options chain to, where bun x runs a program.
 function cliCalls(parsed: Parsed, env: Env): Word[][] {
   const { args, first, name } = parsed
   if (!first) return []
   const words = [first, ...args]
-  const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined]
+  const call =
+    name === "bun" ? bunCall(args, env) : name === "bunx" ? bunCall([X, ...args], env) : undefined
+  const dirs = [env.cwd, call?.cwd, call?.chained]
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
