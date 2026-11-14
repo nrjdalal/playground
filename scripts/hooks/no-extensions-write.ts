@@ -1735,18 +1735,31 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
-  // What an in-place sed's script writes that a shell may run later (sedWrites): the root in it, else each word under ~, $HOME or / judged as a path or a glob is, so a glob or an escaped slash spells the root no other way than its literal path
+  // What an in-place sed's script writes that a shell may run later (sedWrites): the root in its text, else a word under ~, $HOME or / that can name the root or a path in it (reaches), so a glob or an escaped slash spells the root no other way than its literal path
   const scriptNames = (script: string, env: Env): string | undefined => {
     for (const text of sedWrites(script)) {
       if (holds(text, env)) return `${root} in its text`
       for (const token of text.split(/[\s;|&'"`<>=:]+/)) {
         const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(token)
         const value = tilde ? home + token.slice(tilde[0].length) : token
-        if (!value.startsWith(sep)) continue
-        const named = names({ quoted: false, value }, env, false)
-        if (named) return named
+        if (value.startsWith(sep) && reaches(value)) return value
       }
     }
+  }
+  // Whether an absolute path or glob can name the root or a path in it: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any
+  const reaches = (path: string) => {
+    const parts = path.split(sep)
+    const at = parts.findIndex((part) => GLOB.test(part))
+    if (at < 0) return inRoot(path)
+    const base = real(parts.slice(0, at).join(sep) || sep)
+    const have = [...(base === sep ? [""] : base.split(sep)), ...parts.slice(at)]
+    const want = root.split(sep)
+    for (let k = 0; k < want.length; k++) {
+      const part = have[k]
+      if (part === "**" || part?.includes("(")) return true
+      if (part === undefined || !new Bun.Glob(part).match(want[k])) return false
+    }
+    return true
   }
   // whether the hook places a write's path, the whole word, with no folder of the shell's: absolute, under ~, or through a variable the call holds
   const placed = (word: Word, env: Env, steady: Steady) =>

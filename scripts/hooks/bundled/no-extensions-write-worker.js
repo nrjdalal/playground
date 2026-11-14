@@ -10729,13 +10729,27 @@ async function inspect(raw, environment, unknown = false) {
       for (const token of text.split(/[\s;|&'"`<>=:]+/)) {
         const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(token);
         const value = tilde ? home + token.slice(tilde[0].length) : token;
-        if (!value.startsWith(sep2))
-          continue;
-        const named = names({ quoted: false, value }, env, false);
-        if (named)
-          return named;
+        if (value.startsWith(sep2) && reaches(value))
+          return value;
       }
     }
+  };
+  const reaches = (path) => {
+    const parts = path.split(sep2);
+    const at = parts.findIndex((part) => GLOB.test(part));
+    if (at < 0)
+      return inRoot(path);
+    const base = real(parts.slice(0, at).join(sep2) || sep2);
+    const have = [...base === sep2 ? [""] : base.split(sep2), ...parts.slice(at)];
+    const want = root.split(sep2);
+    for (let k = 0;k < want.length; k++) {
+      const part = have[k];
+      if (part === "**" || part?.includes("("))
+        return true;
+      if (part === undefined || !new Bun.Glob(part).match(want[k]))
+        return false;
+    }
+    return true;
   };
   const placed = (word, env, steady) => pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined;
   const afterUnreadCd = (write) => `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`;
