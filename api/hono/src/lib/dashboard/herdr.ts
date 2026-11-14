@@ -649,13 +649,15 @@ export const promptOutcome = (error: unknown): "gone" | "picker" | "typed" | "un
 
 // A picker Claude Code draws in a pane, as answerKeys() reads it: the words above its options, flattened to single spaces, and the rows the cursor (❯) moves over, in order, each with its number, its words, whether the cursor stands on it, and a multi-select's box, checked or not (null with none). A multi-select's Submit row has no number (0). No numbered list from 1 on the screen is no prompt (`options` empty).
 export type ScreenOption = { checked: boolean | null; label: string; number: number; on: boolean }
-export type ScreenPrompt = { options: ScreenOption[]; text: string }
+export type ScreenPrompt = { options: ScreenOption[]; question: string; text: string }
 
 const OPTION_LINE = /^\s*([❯›>])?\s*(\d{1,2})\.\s+(?:\[([ xX✔✓])\]\s*)?(.*?)\s*$/
 const SUBMIT_LINE = /^\s*([❯›>])?\s*(Submit|Next)\s*$/
 const flat = (text: string): string => text.replace(/\s+/g, " ").trim()
+// A prompt's top edge, as Claude Code draws it: a rule, or the `▔` line over its switch confirm.
+const EDGE = /[─━═▔]{10,}/
 
-// Pure: the last numbered list on the screen that counts up from 1 (a description, a rule or a multi-select's Submit row may sit between two options), and the words above it.
+// Pure: the last numbered list on the screen that counts up from 1 (a description, a rule or a multi-select's Submit row may sit between two options), the words above it, and its question: the words between it and the nearest top edge above, or none with no edge.
 export function promptOnScreen(screen: string): ScreenPrompt {
   const lines = screen.split("\n")
   let start = -1
@@ -684,9 +686,13 @@ export function promptOnScreen(screen: string): ScreenPrompt {
       last = option.number
     }
   }
-  return start < 0
-    ? { options: [], text: "" }
-    : { options, text: flat(lines.slice(0, start).join(" ")) }
+  if (start < 0) return { options: [], question: "", text: "" }
+  const edge = lines.slice(0, start).findLastIndex((line) => EDGE.test(line))
+  return {
+    options,
+    question: edge < 0 ? "" : flat(lines.slice(edge + 1, start).join(" ")),
+    text: flat(lines.slice(0, start).join(" ")),
+  }
 }
 
 // One key a request, by herdr's key names, or words typed as they are (`pane.send_text`).
@@ -763,14 +769,28 @@ export function answerKeys(screen: ScreenPrompt, ask: Ask): Keys {
 
 // Words that turn a switch down, as a choice prompt's option reads them.
 const STAYS = /\b(?:back|cancel|don't|keep|no|not|stay)\b/i
+// Words that carry a switch out, as an option naming no model reads them.
+const GOES = /\b(?:confirm|continue|ok|switch|yes)\b/i
+// A question about a switch of model, as a confirm's own words read it.
+const SWITCH_QUESTION =
+  /\b(?:(?:change|move|switch)(?:ing)?\s+(?:the\s+|this\s+)?model|model\s+(?:change|switch))\b/i
+// A question about a tool, a file or a permission, which never reads as the switch.
+const TOOL_QUESTION =
+  /\b(?:allow|bash|command|edit|editing|fetch|file|permission|proceed|run|tool)\b/i
 
-// Pure: the keys that take the one option of a single-select prompt with a cursor that carries out a switch to `model`, read by meaning, never by position or exact words: its own words name the model by its alias, and none turn it down, so a permission prompt or any other question drawn over the box gets nothing. Null when no option or more than one reads so, or the screen shows no live single-select, so nothing is pressed.
+// Pure: the keys that take the one option of a single-select prompt with a cursor that carries out a switch to `model`, read by meaning, never by position or exact words: its own words name the model by its alias and none turn it down, or, with no such option, the prompt's own question names a model switch or the model and none of a tool's, a file's or a permission's words, and the option reads as going ahead. So a permission prompt or any other question drawn over the box gets nothing. Null when no option or more than one reads so, or the screen shows no live single-select, so nothing is pressed.
 export function switchKeys(screen: ScreenPrompt, model: string): KeyStep[] | null {
   const { options } = screen
   const cursor = options.findIndex((o) => o.on)
   if (cursor < 0 || options.some((o) => o.checked !== null)) return null
-  const named = new RegExp(`\\b${model}\\b`, "i")
-  const goes = options.flatMap((o, i) => (named.test(o.label) && !STAYS.test(o.label) ? [i] : []))
+  const names = new RegExp(`\\b${model}\\b`, "i")
+  const pick = (reads: RegExp) =>
+    options.flatMap((o, i) => (reads.test(o.label) && !STAYS.test(o.label) ? [i] : []))
+  const asks =
+    (SWITCH_QUESTION.test(screen.question) || names.test(screen.question)) &&
+    !TOOL_QUESTION.test(screen.question)
+  const naming = pick(names)
+  const goes = naming.length || !asks ? naming : pick(GOES)
   return goes.length === 1 ? [...moves(cursor, goes[0] ?? 0), { key: "enter" }] : null
 }
 
