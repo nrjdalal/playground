@@ -10,7 +10,7 @@ import {
   settingHistory,
 } from "@packages/settings"
 
-import { type Io, need, one, parseWords, print, Usage, valueOf } from "./store"
+import { type Io, need, one, type Out, parseWords, print, Usage, valueOf } from "./store"
 
 // playground settings: reads and writes the settings files in the extensions folder itself, with no dashboard needed; a write is one commit in its scope's clone, under the lock every writer takes.
 
@@ -23,7 +23,7 @@ const done = <T>(result: Result<T>): T => {
   return data as T
 }
 
-export async function settingsCommand(words: string[], io: Io): Promise<number> {
+export async function settingsCommand(words: string[], io: Io, err: Out): Promise<number> {
   const [verb, ...rest] = words
   const { options, positional } = parseWords(rest, ["--dry-run"])
   const who = () => ({
@@ -48,6 +48,12 @@ export async function settingsCommand(words: string[], io: Io): Promise<number> 
   else if (verb === "set") {
     const value = valueOf(need(positional[1], "a value"))
     print(io.out, done(setSetting(io.data, { key: key(), scope: scope(), value }, who())))
+    if (key() === "owner.names") {
+      // loaded only here, since trace-count reads the whole tree, which no other settings call needs
+      const { oneWords, warning } = await import("../trace-count/one-word")
+      for (const hit of await oneWords(value as string[], io.data, io.checkout))
+        err(`playground settings: ${warning(hit).join("\n")}`)
+    }
   } else if (verb === "reset")
     print(io.out, done(resetSetting(io.data, { key: key(), scope: scope() }, who())))
   else if (verb === "import-jobs") {
