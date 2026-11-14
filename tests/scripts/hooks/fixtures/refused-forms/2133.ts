@@ -93,6 +93,14 @@ export const groups: Group[] = [
         "a kill by pattern behind an unset variable in a shell's script",
         'bash -c "$X pkill -f watcher"',
       ],
+      [
+        "a kill by pattern behind a variable the line names only as an argument",
+        "echo s; $s pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable the line names only as read's prompt",
+        "read -p s t; $s pkill -f watcher",
+      ],
     ],
   },
   {
