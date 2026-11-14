@@ -23,7 +23,8 @@ Each `withDeadline` call holds its own deadline in its async context (an `AsyncL
 Each `inspectAs` call in `scripts/hooks/no-playground-leak.ts` (no-extension-repo-write, no-playground-leak, no-public-leak) holds its policy, Slack's cleared conversations and its move state in its own async context too, so checks that overlap in one process keep their own verdicts.
 `run()`'s count of scripts held open (`MAX_RUNS`) stays one per process, since overlapping checks can only add toward its cap, which refuses a call and never lets one through.
 Every hook reads a command's stdin through `stdinOf`: the last file, here-string, heredoc or process substitution on fd 0 of its own, else its pipe, else text it cannot read, so a hook that refuses stdin it cannot read keeps that refusal.
-The output of a program xargs runs (`xargs echo | xargs rm`) is text a hook cannot read, since xargs builds that program's words from its stdin, and printf's leading `--` ends its options, so its format is the word after it.
+The output of a program xargs runs (`xargs echo | xargs rm`) is text a hook cannot read, since xargs builds that program's words from its stdin.
+printf's leading `--` ends its options, so its format is the word after it.
 Every hook reads an unquoted heredoc's body as the shell expands it: each command substitution there (`$(…)`, a backquoted command, one inside `${…}` or `$((…))`) is lexed as a command of the line and visited as a word's `$(…)` is, so a guard judges a call the shell runs while it reads the body,
 whatever strips the body's tabs (`<<-`), however many heredocs the command holds, and whichever command or descriptor the heredoc feeds (`cat 3<<EOF`, a loop's `done <<EOF`);
 a quoted delimiter (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) expands nothing, and a backslash keeps a `$` or a backquote literal, so those stay text.
