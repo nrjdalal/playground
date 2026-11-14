@@ -169,14 +169,14 @@ describe("--sandbox starts a worker, a reviewer or a probe in the closed sandbox
     expect(r.roster).toContain("sandbox=on")
   })
 
-  test("a start without it records nothing new on its row", async () => {
+  test("an open start, --no-sandbox here as spawn-fake gives, records nothing new on its row", async () => {
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [])
     expect(r.code, r.err).toBe(0)
     expect(r.roster?.some((word) => word.startsWith("sandbox="))).toBe(false)
   })
 
-  // a respawn under the same name without the flag clears the row's sandbox=on, so a later resume or restore keeps the settings this start took
-  test("a start without it over a row that records it clears the key and starts on the open file", async () => {
+  // an open respawn under the same name clears the row's sandbox=on, so a later resume or restore keeps the settings this start took
+  test("an open start over a row that records it clears the key and starts on the open file", async () => {
     const name = "worker-brave-otter"
     const r = await spawn(["worker", name, "b.md"], [], {
       ROSTER_JSON: JSON.stringify({
