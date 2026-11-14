@@ -69,9 +69,10 @@ const prCreate = (args: Word[]): boolean => {
 
 const pushes = (args: Word[]): boolean => gitCommand(args).sub?.value === "push"
 
-// The GraphQL mutations that open or merge a pull request or move a ref, and the REST endpoints a write method does the same at.
-const REF_MUTATION =
-  /\b(?:createCommitOnBranch|createPullRequest|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/
+// The GraphQL mutations that merge a pull request or move a ref, which no-protected-push refuses too; with createPullRequest, the ones that open or merge a pull request or move a ref, and the REST endpoints a write method does the same at.
+export const REF_MOVE =
+  /\b(?:createCommitOnBranch|createRef|deleteRef|mergeBranch|mergePullRequest|updatePullRequestBranch|updateRef|updateRefs)\b/
+const REF_MUTATION = new RegExp(`${REF_MOVE.source}|\\bcreatePullRequest\\b`)
 const REF_ENDPOINT =
   /^repos\/[^/]+\/[^/]+\/(?:contents\/.+|git\/refs(?:\/.+)?|merges|pulls|pulls\/\d+\/(?:merge|update-branch))$/
 

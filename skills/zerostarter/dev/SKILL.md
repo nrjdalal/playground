@@ -101,6 +101,7 @@ Done when verify passes. When the pull exits non-zero once it reset to that head
 ## Agent login
 
 Sign in as `LocalAgent` (local only, trusted Origin required). The route is gated on `AGENT_SIGNIN_ENABLED`: set it to `true` in `.env` first, or the route 404s. It is off by default, so a fresh clone and any deploy expose no session-minting route.
+Off a fixture stack its account is refused on the writes that act as the owner (`.agents/dashboard/writes.md`), and `no-live-sign-in` refuses a factory session's sign-in call to the live dashboard, so sign in on your own worktree's stack.
 
 ```bash
 WEB=$(bunx portless get playground); API=$(bunx portless get api.playground)

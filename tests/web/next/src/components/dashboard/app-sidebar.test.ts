@@ -13,6 +13,7 @@ import {
   ThreadsGroup,
 } from "../../../../../../web/next/src/components/dashboard/app-sidebar"
 import { SidebarMenu, SidebarProvider } from "../../../../../../web/next/src/components/ui/sidebar"
+import { groupOrder } from "../../../../../../web/next/src/lib/sidebar-groups"
 import { iconTone, STATES, statusIcon } from "../../../../../../web/next/src/lib/status-icons"
 import { tipsOf } from "../../tooltips"
 
@@ -1281,22 +1282,34 @@ describe("ThreadsGroup", () => {
   const badges = (html: string) =>
     [...html.matchAll(/data-sidebar="menu-badge"[^>]*>([^<]*)</g)].map(([, text]) => text)
 
-  // the dispatchers' rows sit in the header, so Threads leads the nav, and Yard's Channels and Direct messages follow it, above Orchestrators
-  test("is the nav's first group once the threads are read, and is left out before; Yard's groups next; no Dispatchers group", () => {
-    expect(navGroups(true, []).map(({ label }) => label)).toEqual([
+  // the dispatchers' rows sit in the header, so Threads leads the nav, and Yard's Channels and Direct messages follow it while each has rows, above Orchestrators
+  test("is the nav's first group once the threads are read, and is left out before; Yard's groups next while each has rows; no Dispatchers group", () => {
+    expect(navGroups(true, [], ["Channels", "Direct messages"]).map(({ label }) => label)).toEqual([
       "Threads",
-      "Yard",
+      "Channels",
+      "Direct messages",
       "Orchestrators",
       "Subagents",
       "AI Runners",
       "Scripts",
     ])
     expect(navGroups(false, []).map(({ label }) => label)).toEqual([
-      "Yard",
       "Orchestrators",
       "Subagents",
       "AI Runners",
       "Scripts",
+    ])
+  })
+
+  test("draws the other groups in the order you left them, Threads still first", () => {
+    const order = groupOrder(JSON.stringify(["Scripts", "Subagents", "Channels"]))
+    expect(navGroups(true, [], ["Channels"], order).map(({ label }) => label)).toEqual([
+      "Threads",
+      "Scripts",
+      "Subagents",
+      "Channels",
+      "Orchestrators",
+      "AI Runners",
     ])
   })
 

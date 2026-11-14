@@ -28,6 +28,6 @@ jobs:
 
       - name: Audit and keep the bump issue
         # the same level and ignore list as the Audit step in auto-check-build.yml
-        run: bun packages/scripts/src/audit-canary.ts --audit-level high --ignore GHSA-vfj7-8cjw-p6xm
+        run: bun packages/scripts/src/audit-canary.ts --audit-level moderate --ignore GHSA-67mh-4wv8-2f99 --ignore GHSA-g3hv-75wg-m249
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

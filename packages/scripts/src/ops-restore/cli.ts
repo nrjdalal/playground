@@ -29,6 +29,13 @@ type Modified = { last: string; since: Record<string, string> }
 // The file a healthy look keeps origin's URL in, since a lost .git takes the URL with it, and the Dashboard's checkout, a worktree of the main checkout, reads its git through that .git too.
 export const originPath = (ops: string): string => join(ops, "restore", "origin.txt")
 
+const keptOrigin = async (ops: string): Promise<string> =>
+  (
+    await Bun.file(originPath(ops))
+      .text()
+      .catch(() => "")
+  ).trim()
+
 // The registered guards whose bundle and source are both gone from the main checkout.
 export const missingGuards = (main: string, guards: string[]): string[] =>
   guards.filter(
@@ -176,20 +183,21 @@ export const restoreSteps = async (
     await writeAtomic(statusFile, `${lines.join("\n")}\n`)
     return `${lines.length - other.length} files deleted and ${other.length ? `also held ${other.slice(0, 5).join("; ")}${other.length > 5 ? ` and ${other.length - 5} more` : ""}` : "nothing else"} (git status in ${statusFile})`
   }
+  // the checkout's git status lines, or a stop when git status fails
+  const status = async (): Promise<string[] | Stopped> => {
+    const read = await git("status", "--porcelain")
+    return read.code === 0 ? read.out.split("\n").filter(Boolean) : stop("git status", read.out)
+  }
   let held = ""
   if (existsSync(join(main, ".git"))) {
-    const status = await git("status", "--porcelain")
-    if (status.code !== 0) return stop("git status", status.out)
-    held = `had ${await keep(status.out.split("\n").filter(Boolean))}`
+    const lines = await status()
+    if (!Array.isArray(lines)) return lines
+    held = `had ${await keep(lines)}`
     // from HEAD, since a loss already staged (a `git rm`, or a `git add -A` after a wipe) is gone from the index too
     const back = await git("checkout", "HEAD", "--", ".")
     if (back.code !== 0) return stop("git checkout HEAD -- .", back.out)
   } else {
-    const url = (
-      await Bun.file(originPath(ctx.ops))
-        .text()
-        .catch(() => "")
-    ).trim()
+    const url = await keptOrigin(ctx.ops)
     if (!url) return stop("reading origin's URL", `none kept in ${originPath(ctx.ops)}`)
     for (const args of [
       ["init"],
@@ -201,10 +209,9 @@ export const restoreSteps = async (
       if (step.code !== 0) return stop(`git ${args.join(" ")}`, step.out)
     }
     // read against origin/main's tree, a file the same as origin's reads `A  `, so only a change, a loss or a stray file is kept
-    const status = await git("status", "--porcelain")
-    if (status.code !== 0) return stop("git status", status.out)
-    const lines = status.out.split("\n").filter((line) => line && !line.startsWith("A  "))
-    held = `had no .git and was restored in place; against origin/main it had ${await keep(lines)}; every worktree of the lost .git, the Dashboard's included, has lost its link to it, which a fresh .git cannot repair, so Ops reattaches each`
+    const lines = await status()
+    if (!Array.isArray(lines)) return lines
+    held = `had no .git and was restored in place; against origin/main it had ${await keep(lines.filter((line) => !line.startsWith("A  ")))}; every worktree of the lost .git, the Dashboard's included, has lost its link to it, which a fresh .git cannot repair, so Ops reattaches each`
     const back = await git("checkout", "-f", "-B", "main", "origin/main")
     if (back.code !== 0) return stop("git checkout -f -B main origin/main", back.out)
   }
@@ -248,10 +255,7 @@ export const restoreBeat =
     if (!missing.length) {
       if (state) await Bun.file(statePath).delete()
       const url = await ctx.run(gitIn(main, "remote", "get-url", "origin"), 30_000)
-      const kept = await Bun.file(originPath(ctx.ops))
-        .text()
-        .catch(() => "")
-      if (url.code === 0 && url.out.trim() && kept.trim() !== url.out.trim()) {
+      if (url.code === 0 && url.out.trim() && (await keptOrigin(ctx.ops)) !== url.out.trim()) {
         await mkdir(dir, { recursive: true })
         await writeAtomic(originPath(ctx.ops), `${url.out.trim()}\n`)
       }

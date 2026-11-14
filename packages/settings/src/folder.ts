@@ -159,23 +159,30 @@ export const rootLocked = (root: string): boolean =>
   Boolean(chflags()) &&
   existsSync(root) &&
   Bun.spawnSync(["stat", "-f", "%Sf", root]).stdout.toString().trim().split(",").includes("uchg")
-const flagRoot = (root: string, locked: boolean): number => {
+// A tree's flag set or cleared, and the time it took: a path inside the tree gone by the time the walk reaches it is skipped, since git maintenance can remove a file of a scope's .git mid-walk, and a missing tree or any other failure throws.
+const flagTree = (tree: string, locked: boolean): number => {
+  if (!existsSync(tree))
+    throw new Error(`chflags could not ${locked ? "lock" : "unlock"} ${tree}: it does not exist`)
   const start = performance.now()
-  const run = Bun.spawnSync([chflags()!, "-R", locked ? "uchg" : "nouchg", root], {
+  const run = Bun.spawnSync([chflags()!, "-R", locked ? "uchg" : "nouchg", tree], {
     stderr: "pipe",
   })
-  if (run.exitCode !== 0)
-    throw new Error(`chflags could not ${locked ? "lock" : "unlock"} ${root}: ${run.stderr}`)
+  const said = run.stderr.toString().split("\n").filter(Boolean)
+  if (
+    run.exitCode !== 0 &&
+    (!said.length || said.some((line) => !line.endsWith(": No such file or directory")))
+  )
+    throw new Error(`chflags could not ${locked ? "lock" : "unlock"} ${tree}: ${run.stderr}`)
   return performance.now() - start
 }
 
-// One line per lift in the data folder's ops/log/ext-lock.log, beside the ops tick's relocks: its time, the lift and relock's duration, load5 and the caller (the entry script, and the session's role when it has one), so the log measures the lock on the live root.
-const logLift = (data: string, root: string, took: number) => {
+// One line per lift in the data folder's ops/log/ext-lock.log, beside the ops tick's relocks: its time, the trees it lifted, the lift and relock's duration, load5 and the caller (the entry script, and the session's role when it has one), so the log measures the lock on the live root.
+const logLift = (data: string, trees: readonly string[], took: number) => {
   const at = new Date().toISOString().replace(/\.\d{3}Z$/, "Z")
   const entry = process.argv[1] ?? process.argv0
   const role = process.env.PLAYGROUND_ROLE
   const by = `${basename(dirname(entry))}/${basename(entry)}${role ? ` (${role})` : ""}`
-  const line = `${at} lifted ${root} in ${Math.round(took)} ms load5 ${loadavg()[1].toFixed(2)} by ${by}\n`
+  const line = `${at} lifted ${trees.join(", ")} in ${Math.round(took)} ms load5 ${loadavg()[1].toFixed(2)} by ${by}\n`
   try {
     mkdirSync(join(data, "ops", "log"), { recursive: true })
     appendFileSync(join(data, "ops", "log", "ext-lock.log"), line)
@@ -184,24 +191,31 @@ const logLift = (data: string, root: string, took: number) => {
   }
 }
 
-// A write under the one lock: a locked root is lifted for it and locked again after it, each lift logged (logLift).
-export const withLock = <T>(data: string, run: () => T, wait = 30_000): T =>
+// A write under the one lock: a locked root has the scope folders the write names lifted for it and locked again after, or the whole root when it names none, so a write to one scope leaves every other locked; each lift and relock's time is logged (logLift), so the ops tick's log measures it on the live root.
+export const withLock = <T>(
+  data: string,
+  run: () => T,
+  { scopes, wait = 30_000 }: { scopes?: readonly string[]; wait?: number } = {},
+): T =>
   holdLock(
     data,
     () => {
       const root = extensionsDir(data)
       if (!rootLocked(root)) return run()
+      const trees = scopes ? scopes.map((scope) => scopeDir(data, scope)) : [root]
       let took = 0
       let lifted = false
       try {
-        took += flagRoot(root, false)
+        for (const tree of trees) took += flagTree(tree, false)
         lifted = true
         return run()
       } finally {
-        took += flagRoot(root, true)
+        for (const tree of trees) took += flagTree(tree, true)
         if (lifted) {
-          console.error(`extensions' lock: lifted and relocked ${root} in ${Math.round(took)} ms`)
-          logLift(data, root, took)
+          console.error(
+            `extensions' lock: lifted and relocked ${trees.join(", ")} in ${Math.round(took)} ms`,
+          )
+          logLift(data, trees, took)
         }
       }
     },
@@ -212,13 +226,15 @@ export const withLock = <T>(data: string, run: () => T, wait = 30_000): T =>
 export const setRootLock = (data: string, locked: boolean): void => {
   if (!chflags())
     throw new Error("this machine has no chflags, so the extensions root takes no lock")
-  holdLock(data, () => void flagRoot(extensionsDir(data), locked), 30_000)
+  holdLock(data, () => void flagTree(extensionsDir(data), locked), 30_000)
 }
 
-// The ops tick's relock: true when it locked a root that stood unlocked, false where it is locked already, missing, or the machine has no chflags.
+// The ops tick's relock: true when it locked a root that stood unlocked, at its top or at a scope folder a write killed mid-way left lifted, false where all of it is locked already, it is missing, or the machine has no chflags.
 export const relockRoot = (data: string): boolean => {
   const root = extensionsDir(data)
-  if (!chflags() || !existsSync(root) || rootLocked(root)) return false
+  if (!chflags() || !existsSync(root)) return false
+  if (rootLocked(root) && scopesIn(data).every((scope) => rootLocked(scopeDir(data, scope))))
+    return false
   setRootLock(data, true)
   return true
 }
@@ -276,45 +292,52 @@ const pruneEmpty = (dir: string, at: string) => {
     }
 }
 
-// One write to a scope: its folder made a repository on its first write, the change run under the lock with the scope's folder and the root, then everything it changed in the scope committed there as one commit; the new commit's sha, or undefined when nothing changed and allowEmpty is not set. Core ships with the checkout, so it is refused.
+// One write to a scope: its folder made a repository on its first write, the change run under the lock with the scope's folder and the root, then everything it changed in the scope committed there as one commit; the new commit's sha, or undefined when nothing changed and allowEmpty is not set. A change that leaves the root's own files alone says so with writesRoot false, and then lifts its scope alone once the scope exists. Core ships with the checkout, so it is refused.
 export const commitExt = (
   data: string,
   scope: string,
   commit: Commit,
   change: (dir: string, root: string) => void,
+  writesRoot = true,
 ): string | undefined => {
   if (scope === CORE)
     throw new Error("core is Playground's own and read-only here: change it in the app repo")
-  return withLock(data, () => {
-    const dir = scopeDir(data, scope)
-    if (!existsSync(join(dir, ".git"))) {
-      mkdirSync(dir, { recursive: true })
-      mustGit(dir, ["init", "-q", "-b", "main"])
-    }
-    change(dir, extensionsDir(data))
-    mustGit(dir, ["add", "-A"])
-    const changed = mustGit(dir, ["status", "--porcelain"]) !== ""
-    if (!changed && !commit.allowEmpty) return undefined
-    const who = { email: "playground", name: commit.author }
-    mustGit(
-      dir,
-      [
-        "commit",
-        "-q",
-        ...(changed ? [] : ["--allow-empty"]),
-        "-m",
-        commit.reason,
-        ...(commit.trailers ?? []).flatMap(([key, value]) => ["--trailer", `${key}: ${value}`]),
-      ],
-      {
-        GIT_AUTHOR_EMAIL: who.email,
-        GIT_AUTHOR_NAME: who.name,
-        GIT_COMMITTER_EMAIL: who.email,
-        GIT_COMMITTER_NAME: "Playground",
-      },
-    )
-    return mustGit(dir, ["rev-parse", "HEAD"])
-  })
+  const scopes =
+    !writesRoot && existsSync(join(scopeDir(data, scope), ".git")) ? [scope] : undefined
+  return withLock(
+    data,
+    () => {
+      const dir = scopeDir(data, scope)
+      if (!existsSync(join(dir, ".git"))) {
+        mkdirSync(dir, { recursive: true })
+        mustGit(dir, ["init", "-q", "-b", "main"])
+      }
+      change(dir, extensionsDir(data))
+      mustGit(dir, ["add", "-A"])
+      const changed = mustGit(dir, ["status", "--porcelain"]) !== ""
+      if (!changed && !commit.allowEmpty) return undefined
+      const who = { email: "playground", name: commit.author }
+      mustGit(
+        dir,
+        [
+          "commit",
+          "-q",
+          ...(changed ? [] : ["--allow-empty"]),
+          "-m",
+          commit.reason,
+          ...(commit.trailers ?? []).flatMap(([key, value]) => ["--trailer", `${key}: ${value}`]),
+        ],
+        {
+          GIT_AUTHOR_EMAIL: who.email,
+          GIT_AUTHOR_NAME: who.name,
+          GIT_COMMITTER_EMAIL: who.email,
+          GIT_COMMITTER_NAME: "Playground",
+        },
+      )
+      return mustGit(dir, ["rev-parse", "HEAD"])
+    },
+    { scopes },
+  )
 }
 
 // A scope's files made exactly these, as one commit: each written in place by rename, then every other file removed but those keep names; a file written over keeps the mode of the file it replaces, and executable says which source files run, so an import never strips a stored script's bit.
@@ -326,16 +349,22 @@ export const writeTree = (
   keep: (path: string) => boolean = () => false,
   executable?: (path: string) => boolean,
 ): string | undefined =>
-  commitExt(data, scope, commit, (dir) => {
-    for (const [path, text] of files) {
-      const at = join(dir, path)
-      const ran = existsSync(at) && (statSync(at).mode & 0o111) !== 0
-      writeAtomically(at, text)
-      if (executable?.(path) || ran) chmodSync(at, 0o755)
-    }
-    for (const path of filesIn(dir)) if (!files.has(path) && !keep(path)) rmSync(join(dir, path))
-    pruneEmpty(dir, dir)
-  })
+  commitExt(
+    data,
+    scope,
+    commit,
+    (dir) => {
+      for (const [path, text] of files) {
+        const at = join(dir, path)
+        const ran = existsSync(at) && (statSync(at).mode & 0o111) !== 0
+        writeAtomically(at, text)
+        if (executable?.(path) || ran) chmodSync(at, 0o755)
+      }
+      for (const path of filesIn(dir)) if (!files.has(path) && !keep(path)) rmSync(join(dir, path))
+      pruneEmpty(dir, dir)
+    },
+    false,
+  )
 
 // These files of a scope written, or removed where the value is null, as one commit, with the root's derived files given written in the same lock.
 export const writeFiles = (
@@ -345,13 +374,19 @@ export const writeFiles = (
   commit: Commit,
   root: Map<string, string | null> = new Map(),
 ): string | undefined =>
-  commitExt(data, scope, commit, (dir, at) => {
-    for (const [path, text] of files)
-      if (text === null) rmSync(join(dir, path), { force: true })
-      else writeAtomically(join(dir, path), text)
-    pruneEmpty(dir, dir)
-    writeRoot(at, root)
-  })
+  commitExt(
+    data,
+    scope,
+    commit,
+    (dir, at) => {
+      for (const [path, text] of files)
+        if (text === null) rmSync(join(dir, path), { force: true })
+        else writeAtomically(join(dir, path), text)
+      pruneEmpty(dir, dir)
+      writeRoot(at, root)
+    },
+    root.size > 0,
+  )
 
 // Lists union across scopes: arrays join without repeats, objects join key by key, and a scalar keeps the first scope's value.
 export const unionLists = (values: unknown[]): unknown =>

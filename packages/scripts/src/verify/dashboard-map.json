@@ -361,11 +361,11 @@
     },
     {
       "label": "Channels",
-      "shows": "After Threads, above Orchestrators, the nav waiting up to 1 second for its first read so its arrival moves no row: the Yard channels you belong to, from GET /api/v1/yard/channels, in the API's order, its label the toggle that opens and closes it, open to start and kept across reloads as every group's; absent with none, and both Yard groups absent on a stack with no Yard. Each row a # icon (RiHashtag), then the bare name, the icon its one hash, cut at its end, #name as its tooltip, and its unread count as a badge, 99+ past 99, in the mention colour while any names you, none once read; a click opens /dashboard/yard/<id>, which marks it read. Owner rung only."
+      "shows": "After Threads, above Orchestrators until its label moves it as every group's below Threads moves (dragged, or Move up and Move down in its menu, kept in this browser per account), the nav waiting up to 1 second for its first read so its arrival moves no row: the Yard channels you belong to, from GET /api/v1/yard/channels, in the API's order, its label the toggle that opens and closes it, open to start and kept across reloads as every group's; absent with none, and both Yard groups absent on a stack with no Yard. Each row a # icon (RiHashtag), then the bare name, the icon its one hash, cut at its end, #name as its tooltip, and its unread count as a badge, 99+ past 99, in the mention colour while any names you, none once read; a click opens /dashboard/yard/<id>, which marks it read. Owner rung only."
     },
     {
       "label": "Direct messages",
-      "shows": "After Channels, above Orchestrators: your Yard direct messages, each row a person icon (RiUserLine) and the other member's GitHub login, with the same toggle, badge and click as Channels. Owner rung only."
+      "shows": "After Channels, above Orchestrators until moved as Channels is: your Yard direct messages, each row a person icon (RiUserLine) and the other member's GitHub login, with the same toggle, badge and click as Channels. Owner rung only."
     },
     {
       "label": "Orchestrators",

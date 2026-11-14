@@ -9,7 +9,7 @@
 //   worker-prs-done      a worker whose roster holds a pr, whose PRs are all merged or closed, and whose /pull/ PR that closed last merged
 //   worker-pr-closed     a worker whose /pull/ PR that closed last closed unmerged; its lead is asked to reassign or end it
 //   roster-says-<status> any session whose roster entry reads paused or ended
-// A session whose status is `shell` (a background command still running) is not busy, and is marked `+bg`, since its watcher keeps waking it.
+// A session whose status is `shell` (a background command still running) is not busy, and is marked `+bg`, since its watcher keeps waking it; worker-prs-done alone skips a worker in `shell`, whose background task is a step of its chore.
 // Prints one line per flagged session and a total; reads only, signals nothing.
 
 import { mkdirSync } from "node:fs"
@@ -255,8 +255,9 @@ export async function collect(input: CollectInput): Promise<Row[]> {
       // A worker only while its roster holds a pr: one with none sits between chores, since assign clears it.
       if (states.length > 0 && done && (checker || r.pr)) {
         if (checker) why.push(`checker-pr-done (${how})`)
-        else if (how === "merged") why.push("worker-prs-done (merged)")
-        else why.push(`worker-pr-closed (closed${donePr ? ` #${donePr}` : ""})`)
+        else if (how === "closed")
+          why.push(`worker-pr-closed (closed${donePr ? ` #${donePr}` : ""})`)
+        else if (status !== "shell") why.push("worker-prs-done (merged)")
       } else if (
         checker &&
         quiet >= 30 &&

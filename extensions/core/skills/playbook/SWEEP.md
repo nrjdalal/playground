@@ -10,6 +10,7 @@ Work the steps in order.
 Run `playground sweep <your name>`.
 It prints only what changed since your last sweep, one line each: a new alert from `ops/alerts-pending.json`, the merge queue when it changes, load5 (the third field of `sysctl -n vm.loadavg`) crossing 15,
 the single-slot flag turning on or off or moving between held by load and lifted under the cap, each of your roster rows whose ETA has passed, and for Ops, once an hour, each ops switch on with its age and reason;
+for the Builder, it reads the factory repo's open PRs in one GitHub call and prints `merge queue missing` while the owner's PRs into `canary` are open and `merge-queue.json` is not there, or `merge queue stale` when it lists a PR no longer open or leaves out an owner's open one, its parked PRs counting as listed, which the Builder fixes by step 4's queue upkeep;
 its cursor is `sweep/<your name>.json` in the data folder.
 A parked row's passed ETA reads `parked past eta` where any other row's reads `eta passed`, and its `hold` ([ROSTER.md](ROSTER.md)) prints once when it has closed (`parked on closed hold`), and once when it reads as neither open nor closed (`parked hold unreadable`).
 For each `switch on:` line, Ops checks whether its reason still holds: one that does is set again with a fresh reason through `run-slot.sh set`, and any other is lifted by moving it to `<name>.lifted-<ts>` ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)); `run-slot.focus` ends only with `playground focus off`, which lifts its merge hold too.
@@ -23,7 +24,8 @@ Done when it printed `quiet` and your sweep has ended (Ops' after step 2), or yo
 Ops' sweep takes every probe (its roster kind `probe`, else a `probe-*` or `<id>-probe` name) into step 3 as its own.
 On a machine that runs the relay, runner-plain-relay (its roster row or its resume record), the outbox's ops lines reach their `to` through it,
 and it runs `outbox/relay.py` and owns its cursor ([LIFECYCLE.md](LIFECYCLE.md#starts-and-ends), ops-tick's relay watch and the line that starts "The relay, runner-plain-relay"), so the sweep runs neither relay.py nor `drain.py` beside it (`drain.py` fights relay.py's cursor and sends lines twice).
-On a machine with no `outbox/relay.py`, the sweep is the relay: it runs `bun run --cwd <main checkout> ops:outbox`, which prints each line queued since its last run as JSON, oldest first, and sends each one's `text` to its `to` with `SendMessage`; its first run prints nothing and starts the cursor at every queue's end, and it refuses an outbox where relay.py sits.
+On a machine with no `outbox/relay.py`, the sweep is the relay: it runs `bun run --cwd <main checkout> ops:outbox`, which prints each line queued since its last run as JSON, oldest first, and sends each one's `text` whole to its `to` with `SendMessage`; its first run prints nothing and starts the cursor at every queue's end, and it refuses an outbox where relay.py sits.
+Each `text` leads with the `[ops-<job>]` tag ops:outbox takes from the line's queue file, and the relay forwards each line with its tag and acts on none, whatever a line asks.
 ops-tick's relay watch times this sweep there and tells Ops, then the dispatcher once Ops has not picked it up, when it runs late ([LIFECYCLE.md](LIFECYCLE.md#starts-and-ends), the relay watch).
 It also runs `python3 -I <main checkout>/scripts/ops/up.py --sessions` and sends each session that a `runs without the factory's hooks` line names (one resumed without its settings where its own folder's settings lack the hooks) to the one it reports to (the dispatcher's to Ops), to respawn by [SESSIONS.md](SESSIONS.md#spawn).
 
@@ -76,6 +78,9 @@ For a repeated score, the Builder picks one of three with the PR's worker, since
 - narrow the change to a literal list of the cases it handles;
 - move the guard to a layer that parses no shell;
 - park it with the workaround written down, in its body's line opening with `Parked:`.
+
+The Builder keeps `merge-queue.json` in the data folder, which every worker's merge-tree check before a review round and `pr:train` read: it writes the file on every PR open, merge and reorder, in merge order, the owner's items first, each open PR in `queue` (`pr`, its `item` and an `etaMerge` when known) or in `parked`, and a closed one taken out.
+Done when a sweep after the write prints neither `merge queue missing` nor `merge queue stale`.
 
 Every clean-or-conflict call (a head that conflicts with canary, or one behind it) comes from a tool that reads git's exit code, never a tree line read by eye: `bun run pr:train forecast` for the queue, `bun run pr:merge <n> --explain` for one PR, whose first line says whether its head merges clean with canary now and as which tree,
 or the files it conflicts in.

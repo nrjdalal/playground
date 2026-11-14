@@ -1,7 +1,8 @@
-// playground alerts-wait <name>: a session's background wait on the outbox, so it wakes within a second or two rather than after the relay's own turn (74s measured on 26 Oct, against the owner's 30s). It reads every job queue in the outbox (ops-<job>.jsonl, where notify.sh and each job queue their lines, a session's own hook its stuck alerts and ops-tick's relay watch its late-stop line), the stuck alerts first, from byte cursors of its own per name, prints the first new line addressed to the name, and exits; Ops' drain still sends every line from its own cursor.json, as the backstop. It keeps its pid in alerts-wait/<name>.pid while it waits, so stuck-alert can tell a manager with no waiter from one with.
+// playground alerts-wait <name>: a session's background wait on the outbox, so it wakes within a second or two rather than after the relay's own turn (74s measured on 26 Oct, against the owner's 30s). It reads every job queue in the outbox (ops-<job>.jsonl, where notify.sh and each job queue their lines, a session's own hook its stuck alerts and ops-tick's relay watch its late-stop line), the stuck alerts first, from byte cursors of its own per name, prints the first new line addressed to the name, led by its queue's `[ops-<job>]` tag as the drain's is, and exits; Ops' drain still sends every line from its own cursor.json, as the backstop. It keeps its pid in alerts-wait/<name>.pid while it waits, so stuck-alert can tell a manager with no waiter from one with.
 import { mkdir, readdir, unlink } from "node:fs/promises"
 import { join } from "node:path"
 
+import { tagged } from "../ops-outbox/drain"
 import { ALERT_JOB, WAITER_GRACE_MS, waiterPidPath } from "../stuck-alert"
 
 const ALERTS = `ops-${ALERT_JOB}.jsonl`
@@ -80,7 +81,7 @@ export async function alertsWait(
         const note = skipped
           ? `(skipped ${skipped} older alert${skipped === 1 ? "" : "s"}, queued over ${WAITER_GRACE_MS / 60_000} minutes before this wait began; the relay sent each) `
           : ""
-        return `${note}${entry.at ?? ""} ${entry.text ?? ""}`
+        return tagged(file, `${note}${entry.at ?? ""} ${entry.text ?? ""}`)
       }
       at[file] = offset
       if (skipped) await Bun.write(cursorPath, JSON.stringify(at))

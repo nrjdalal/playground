@@ -580,6 +580,7 @@ describe("unknown keys (#1290)", () => {
       reportsTo: "builder",
       repo: "acme/app",
       role: "worker",
+      sandbox: "on",
       schedule: "always",
       size: "medium",
       slot: "2",
