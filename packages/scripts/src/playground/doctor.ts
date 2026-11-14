@@ -172,6 +172,8 @@ export const registryJobsText = (policyText: string): string => {
   return JSON.stringify({ jobs })
 }
 
+export const tunnelChecks = (_jobs: string | null, _beat: string | null, _now: Date): Check[] => []
+
 export const line = ({ detail, name, status }: Check): string =>
   `${status.padEnd(8)} ${name.padEnd(22)} ${detail}`
 
