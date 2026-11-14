@@ -5,7 +5,8 @@ Each leads with a picture of the point and a short note, then a few bullets in [
 The **talk** rule makes this the one shape for every word to the owner.
 It holds the words and pictures alone; the item's shape, its kinds and the `playground ask` commands stay in [.agents/dashboard/asks.md](../../.agents/dashboard/asks.md), which it points at rather than copies.
 
-The defining constraint is the card itself: it sits in the aside's narrow column and is read in seconds, so every drawing keeps within the card's width (`ASK_CODE_COLUMNS`), every sentence passes [plain-words](./plain-words.md)' two rules, and a UI to be built goes in as a sketch, or as a page to click, never a paragraph about it.
+The defining constraint is the card itself: it sits in the aside's narrow column and is read in seconds, so every sentence passes [plain-words](./plain-words.md)' two rules, and a UI to be built goes in as a sketch, or as a page to click, never a paragraph about it.
+Every drawing keeps within the owner's chosen drawing width (`ASK_CODE_COLUMNS`, 72 columns), and several items go in one compact table, one row per item, over a tall chain of one event per line.
 
 ## When to reach for it
 
@@ -58,7 +59,7 @@ A whole patch can ride along as a file: a `.diff` or `.patch` attachment (`git d
 
 - You can say what an item asks from its picture and note, and what Approve does, before you read its bullets.
 - Every PR, ticket, commit, thread, doc and page a card names opens from the card in one click.
-- No drawing on a card shrinks or scrolls sideways.
+- No drawing on a card runs past 72 columns, and several items read as one compact table.
 - An item from any session reads like one from any other.
 - Every clock time on a card reads in your own time zone, the `clock.ownerZone` setting, and names it ("9:30 pm UTC").
 
@@ -66,6 +67,6 @@ A whole patch can ride along as a file: a `.diff` or `.patch` attachment (`git d
 
 Every factory session uses it under [playbook](./playbook.md)'s **ask** rule, which decides when an item goes to the owner; `to-inbox` decides how it reads.
 Before it posts, `playground ask open` lists the items already open, so a session names one on the same thing rather than posting it twice.
-`playground ask new` checks the shape and prints a hint when the text runs long with no list, code block or attachment, when a line names a PR, a ticket or a commit with no link on it, or when a line in a code block other than a `diff` one runs past the card's width (`ASK_CODE_COLUMNS`), since a `diff` block wraps.
+`playground ask new` checks the shape and prints a hint when the text runs long with no list, code block or attachment, when a line names a PR, a ticket or a commit with no link on it, or when a line in a code block other than a `diff` one runs past the drawing width (`ASK_CODE_COLUMNS`), since a `diff` block wraps.
 It and `edit` refuse a public post's draft, one with no link, whose words hold a work figure or an internal name, naming the kind and never the words, so what reaches your card is in your own words alone ([playbook](./playbook.md)'s **public** rule).
 Once you answer, the session that posted gets your answer as one `[inbox-answer]` line: it does what the line's `next` says, the way its `verb` names, then runs its `close` ([asks.md](../../.agents/dashboard/asks.md)).

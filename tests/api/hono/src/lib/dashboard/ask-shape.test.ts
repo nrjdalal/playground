@@ -73,13 +73,21 @@ describe("shapeHints", () => {
     expect(shapeHints(null)).toEqual([])
   })
 
-  test("hints at a code or ASCII line wider than the card, and not at a wide line outside code", () => {
+  test("hints at a code or ASCII line past the drawing width, and not at a wide line outside code", () => {
     const wide = "─".repeat(ASK_CODE_COLUMNS + 1)
     expect(shapeHints(ask(`\`\`\`\n${wide}\n\`\`\`\n\n- One line.`))).toEqual([
       { kind: "wide", longest: ASK_CODE_COLUMNS + 1 },
     ])
     expect(shapeHints(ask(`\`\`\`\n${"─".repeat(ASK_CODE_COLUMNS)}\n\`\`\``))).toEqual([])
     expect(shapeHints(ask(`- ${"word ".repeat(ASK_CODE_COLUMNS)}`))).toEqual([])
+  })
+
+  test("takes a drawing up to 72 columns, so a 60-column line posts quiet and a 73-column one still hints (#2050)", () => {
+    const drawing = (columns: number) =>
+      ask(`\`\`\`\n${"─".repeat(columns)}\n\`\`\`\n\n- One line.`)
+    expect(shapeHints(drawing(60))).toEqual([])
+    expect(shapeHints(drawing(72))).toEqual([])
+    expect(shapeHints(drawing(73))).toEqual([{ kind: "wide", longest: 73 }])
   })
 
   test("skips a diff block's lines, which wrap on the card, and still hints at the same line in any other code block", () => {
