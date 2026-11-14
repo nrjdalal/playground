@@ -1601,13 +1601,24 @@ var CHANGED = { ...unknown("a value a builtin may change"), vanishes: true };
 var DECLARES = new Set([...EXPORTS, "float", "integer", "private"]);
 function change(cmd, env) {
   const { args, name } = parse(cmd);
+  const words = args.map((a) => a.value);
   if (marked(name)) {
-    for (const variant of splitHeld(cmd, name, env))
-      if (!marked(parse(variant).name))
-        change(variant, env);
+    const known = heldKnown(env);
+    const unread = args.some((a) => {
+      const value = marked(a.value) && a.raw ? relexedValue(a.raw, known) : a.value;
+      return value === undefined || marked(value);
+    });
+    const variants = unread ? [] : splitHeld(cmd, name, env).filter((variant) => !marked(parse(variant).name));
+    for (const variant of variants)
+      change(variant, env);
+    if (variants.length > 0)
+      return;
+    const names = unread ? [...env.vars.keys()] : words.filter((w) => NAME.test(w));
+    for (const key of names)
+      if (env.vars.has(key))
+        setVar(env.vars, key, CHANGED);
     return;
   }
-  const words = args.map((a) => a.value);
   const options = words.filter((w) => /^[-+]./.test(w) && w !== "--");
   const all = name === "." || name === "source" || name === "eval" && args.some(unreadWord) || name === "unset" && options.some((w) => w.includes("m"));
   const names = all ? [...env.vars.keys()] : name === "unset" ? options.some((w) => w.includes("f")) ? [] : words : name === "read" || name === "printf" && !printsText(words) ? binds(cmd) : DECLARES.has(name) ? words.filter((w) => options.length > 0 || !ASSIGN.test(w) && name !== "export" && name !== "readonly") : name === "set" ? words.flatMap((w, k) => /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : []) : [];

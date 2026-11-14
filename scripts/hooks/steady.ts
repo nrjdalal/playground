@@ -499,7 +499,7 @@ const CLOSES = new Set(["done", "esac", "fi", "}"])
 const LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"])
 
 // For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs text or loads code in its own shell (a RUNS_TEXT builtin, or a command whose name the hook cannot read, which may be any of them or a builtin that sets a variable), sets a variable by a name the hook cannot read whole (a name-indirection assignment, a bash nameref, an integer attribute or text the shell evaluates among them), or names IFS, holds none, and holdable() is the rest of the allow-list
-// With past, an assignment of one literal word (LITERAL) on an `&&` chain whose every command before it is a cd or a pushd is held past that chain too, as a writer's file alone (a hook holds a folder with past left out): when the cd fails the shell skips it, and the name, set nowhere else on the line, is then empty or the session's own, which the hook's process holds
+// With past, an assignment of one absolute literal word (LITERAL) on an `&&` chain whose every command before it is a cd or a pushd is held past that chain too, as a writer's file alone (a hook holds a folder with past left out): when the cd fails the shell skips it, and the name, set nowhere else on the line, is then empty or the session's own, which the hook's process holds
 export function steadyNames(
   named: Namings,
   commands: Command[],
@@ -589,7 +589,13 @@ export function steadyNames(
     for (const key of parses[at].local.keys())
       if (holdable(key, named, counts)) set.set(key, always ? { at } : { at, chain })
     const literal = first.source?.slice(first.source.indexOf("=") + 1) ?? ""
-    if (past && moved && cmd.words.length === 1 && LITERAL.test(literal))
+    if (
+      past &&
+      moved &&
+      cmd.words.length === 1 &&
+      LITERAL.test(literal) &&
+      /^["']?\//.test(literal)
+    )
       for (const key of parses[at].local.keys())
         if (holdable(key, named, counts)) pasts.set(key, at)
   }
@@ -607,7 +613,7 @@ export function steadyNames(
   }
 }
 
-// One literal word as an assignment writes its value: plain characters, or a quoted span holding no expansion, with no glob, ~ or blank
+// One literal word as an assignment writes its value: plain characters, or a quoted span holding no expansion, with no glob, ~ or blank; past holds an absolute one alone, since a relative one names a file in each folder the shell may be in, the starting one too
 const LITERAL = /^(?:[\w./:@%+,-]|'[^'\s]*'|"[^"$`\\\s]*")+$/
 
 // An export with no option whose every word is a plain unquoted NAME=value, so each name it sets is counted once, by its own spelling

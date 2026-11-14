@@ -1650,16 +1650,26 @@ async function runAll(
 const CHANGED: Text = { ...unknown("a value a builtin may change"), vanishes: true }
 const DECLARES = new Set([...EXPORTS, "float", "integer", "private"])
 
-// Marks each held variable a command may change, wherever on the line it is, since a change the shell may make is one the reader cannot rule out: from bash 3.2's bash(1), SHELL BUILTIN COMMANDS (bash 5.3's for the nameref `declare -n`), and zsh 5.9's zshbuiltins(1) and zshmodules(1) (zsh/param/private): unset's names (every one under zsh's -m), read's and printf -v's (`binds`), which end of input or an empty format leaves empty, a declaration's names under an option or, but for export and readonly, with no `=` (a local of its own in a function), zsh's `set -A` or `+A` name, and every variable after an eval the reader cannot read, a source or a `.`; a program word the reader cannot read is read as its split reading names it
+// Marks each held variable a command may change, wherever on the line it is, since a change the shell may make is one the reader cannot rule out: from bash 3.2's bash(1), SHELL BUILTIN COMMANDS (bash 5.3's for the nameref `declare -n`), and zsh 5.9's zshbuiltins(1) and zshmodules(1) (zsh/param/private): unset's names (every one under zsh's -m), read's and printf -v's (`binds`), which end of input or an empty format leaves empty, a declaration's names under an option or, but for export and readonly, with no `=` (a local of its own in a function), zsh's `set -A` or `+A` name, and every variable after an eval the reader cannot read, a source or a `.`; a program word the reader cannot read is read as an eval when an argument is unread too, and else as its split reading names it
 function change(cmd: Command, env: Env): void {
   const { args, name } = parse(cmd)
-  // a program word the reader cannot read changes what its split reading names (`U=unset; $U X`), each reading's change marked
+  const words = args.map((a) => a.value)
+  // a program word the reader cannot read may be any builtin: with an argument it cannot read either, as an eval's or a source's, it may change every variable; else it changes what its split reading names (`U=unset; $U X`), or the names its arguments hold
   if (marked(name)) {
-    for (const variant of splitHeld(cmd, name, env))
-      if (!marked(parse(variant).name)) change(variant, env)
+    const known = heldKnown(env)
+    const unread = args.some((a) => {
+      const value = marked(a.value) && a.raw ? relexedValue(a.raw, known) : a.value
+      return value === undefined || marked(value)
+    })
+    const variants = unread
+      ? []
+      : splitHeld(cmd, name, env).filter((variant) => !marked(parse(variant).name))
+    for (const variant of variants) change(variant, env)
+    if (variants.length > 0) return
+    const names = unread ? [...env.vars.keys()] : words.filter((w) => NAME.test(w))
+    for (const key of names) if (env.vars.has(key)) setVar(env.vars, key, CHANGED)
     return
   }
-  const words = args.map((a) => a.value)
   const options = words.filter((w) => /^[-+]./.test(w) && w !== "--")
   const all =
     name === "." ||
