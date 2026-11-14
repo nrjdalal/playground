@@ -198,11 +198,11 @@ async function cwdsOf(sessionId: string, projectsDir: string): Promise<string[] 
   return [...cwds]
 }
 
-// The worktrees a session used: each linked worktree its transcript ran in, and for a worker each worktree on its PRs' branches; null when its transcript cannot be read.
+// The worktrees a session used: each linked worktree its transcript ran in, for a worker each worktree on its PRs' branches, and, given the main checkout, a checker's review-<n> clone of that checkout's PR n, which code-review-loop reads from outside so no cwd names it; null when its transcript cannot be read.
 export async function worktreesOf(
   target: Target,
   projectsDir: string,
-  _main?: string,
+  main?: string,
 ): Promise<string[] | null> {
   const dirs = new Set<string>()
   const cwds = target.sessionId ? await cwdsOf(target.sessionId, projectsDir) : []
@@ -224,7 +224,19 @@ export async function worktreesOf(
       if (path && branch && target.refs.includes(branch)) dirs.add(path)
     }
   }
+  const checker = target.kind === "reviewer" || target.kind === "tester"
+  const n = main && checker ? await ownPr(target.pr, main) : undefined
+  const clone = main && n ? join(main, ".claude", "worktrees", `review-${n}`) : undefined
+  if (clone && existsSync(clone)) dirs.add(clone)
   return [...dirs]
+}
+
+// The number of a PR on the main checkout's own origin repository, else undefined.
+async function ownPr(pr: string | undefined, main: string): Promise<string | undefined> {
+  const origin = await git(main, ["config", "--get", "remote.origin.url"])
+  const repo = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/.exec(origin ?? "")?.[1]
+  const prefix = `https://github.com/${repo}/pull/`
+  return repo && pr?.startsWith(prefix) ? /^\d+$/.exec(pr.slice(prefix.length))?.[0] : undefined
 }
 
 // Why the work in a worktree the session used is not saved, or null; a Playground worktree whose PR has merged or closed holds no end, since its cleanup discards it.
@@ -423,10 +435,10 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
 export const cleanupLive =
   (projectsDir: string, depsOf: () => Promise<CleanupDeps | null> = cleanupDeps) =>
   async (target: Target): Promise<string[]> => {
-    const dirs = await worktreesOf(target, projectsDir)
+    const deps = await depsOf()
+    const dirs = await worktreesOf(target, projectsDir, deps?.main)
     if (!dirs) return [`could not read its transcript in ${projectsDir}, so nothing was cleaned`]
     if (!dirs.length) return []
-    const deps = await depsOf()
     if (!deps) return ["could not find the main checkout, so nothing was cleaned"]
     const lines: string[] = []
     for (const dir of dirs)

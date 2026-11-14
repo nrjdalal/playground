@@ -260,6 +260,8 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
 - On both paths a worker whose status reads `shell` (a background task of its chore still running, such as a tidy after its merge) stays until that task ends, while a checker in `shell` ends by the rules above.
 - Each end runs `spawn.sh close <name>`, then `roster.ts report <name> "ended automatically: <why>" status=ended`, the merged sha in the why, and sends its lead one line: its roster `lead`, else its worker's.
 - Then it cleans each worktree the session used, one at a time (`cleanWorktree`), and the lead's line names what went and what stayed, with why; a reviewer ended idle keeps its worktrees for its resume.
+  The worktrees a session used are each linked worktree its transcript ran in, for a worker each worktree on its PRs' branches, and for a reviewer or tester whose roster `pr` is the main checkout's own PR n its `review-<n>` clone in `.claude/worktrees/` when that folder exists (`worktreesOf` in `scripts/ops/optimizer/auto_end.ts`).
+  The clone is taken by its PR's number, since code-review-loop reads it from outside it, so no transcript `cwd` names it, and a transcript that cannot be read cleans nothing, the clone included.
   A Playground worktree in `.claude/worktrees/` with uncommitted work, unpushed commits or work not on canary stays until `playground rm` confirms its PR has merged or closed (its own PR, by its branch or its exact head), then goes through `playground rm --worktree <path> --discard` whatever it holds, with no Inbox decision;
   `--discard` first writes its commits no remote holds to a git bundle beside it in the trash, and another repo's such worktree stays.
   The live dashboard's checkout stays, by its branch.
