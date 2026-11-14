@@ -175,6 +175,7 @@ const PREFIXES: [string, string][] = [
   ["npx", "npx vercel link"],
   ["a -c script", "bash -c 'vercel env pull'"],
   ["a pipe", "yes | vercel deploy --prod"],
+  ["run-slot", "~/.playground/ops/run-slot.sh s-worker -- vercel deploy --prod"],
   ["xargs, whose words the hook cannot read", "echo --prod | xargs vercel"],
   ["a program in a variable on a line naming vercel", "V=vercel; $V --prod"],
 ]

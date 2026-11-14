@@ -1048,10 +1048,11 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-raw-vercel
 
-- Production ships from `main` through the release skill's `ship:merge`, and Ops ships the hosted build by hand, `vercel deploy --prod --yes` once a project with its `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` set in the call's environment.
+- Production ships from `main` through the release skill's `ship:merge`, and Ops ships the hosted build through its step 4's `bun run ship:yard <tag>` (`packages/scripts/src/ship/yard.ts`), which runs `vercel deploy --prod --yes` for each project from a detached worktree at the tag.
+  The guard reads that step's own command line, `bun run ship:yard` or its file run by `bun`, as a production move, and its `--help` as help.
   A production deploy of the hosted build migrates the hosted database first (`packages/scripts/src/migrate-on-deploy.ts`), so a hand production move is the Ops lead's alone.
   `scripts/hooks/no-raw-vercel.ts`, run on Bash by [guards](#guards) for a factory session, reads `vercel` and `vc` by any path or case wherever the shell walker finds a command (behind `env`, `exec`, `command`, `time`, `nohup`, `timeout`, `sudo`, `xargs`, in `sh -c`, `eval`, a subshell, a group or a substitution).
-  It also reads it through `bun x`, `bunx` or `npx` (`toolWords` in `scripts/hooks/no-main-checkout.ts`); another package runner is not read.
+  It also reads it through `bun x`, `bunx` or `npx` (`toolWords` in `scripts/hooks/no-main-checkout.ts`), and after `run-slot.sh`'s `--` (`slotWords` in `shell.ts`); another package runner is not read.
 - It judges each call by vercel 65.8.0's own commands, each alias it registers read as its command (`ln` and `aliases` as `alias`, `rr` as `rolling-release`, `i` as `install`, `log` as `logs`), and by the options its `--help` lists, global (`--team`, `--api`, `--scope` and the rest) and of each command it judges.
   An option on neither list is read both ways, as a flag and as taking the next word, and the graver verdict stands, so an option the hook does not know never hides a word; one letter reads by its command (deploy's `-f` is its force flag; api's `-f` takes a field).
   A read that passes whatever its options (`help`, `inspect`, `logs`, `ls`, `whoami`) is read up to its name alone; any other call with more such readings than 64 is refused.

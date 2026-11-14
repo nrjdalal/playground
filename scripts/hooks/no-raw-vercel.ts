@@ -1,7 +1,17 @@
 // A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: lets a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx) run only as a read (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) or a preview deploy, and refuses every other call, a command or deploy subcommand a later CLI adds included; a production move (a production deploy, which also migrates the hosted database, a deploy continue, a redeploy, a promote, a rollback, an alias or a rolling release) passes for the Ops lead alone, in a call that names no role variable and sources no file.
-import { toolWords } from "./no-main-checkout"
+import { bunCall, toolWords } from "./no-main-checkout"
 import { namesRole, opsLead } from "./role"
-import { type Env, lex, run, unreadable, viaXargs, type Visit, type Word } from "./shell"
+import {
+  type Env,
+  lex,
+  program,
+  run,
+  slotWords,
+  unreadable,
+  viaXargs,
+  type Visit,
+  type Word,
+} from "./shell"
 
 type Environment = Record<string, string | undefined>
 type Verdict = { production: boolean; what: string }
@@ -95,7 +105,7 @@ const API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"])
 // The readings one call's options make at most, so many unknown options cost a bounded time; past them the call is refused as one the hook cannot read.
 const READINGS = 64
 
-const MENTION = /\bv(?:ercel|c)\b/i
+const MENTION = /\bv(?:ercel|c)\b|\bship[:/]yard\b/i
 // vercel or vc as a word of its own (an assignment's value, a tool at a version), so a program built at run time on such a line may be it.
 const NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i
 
@@ -270,6 +280,16 @@ function judgeApi(rest: Word[], flags: Flag[], built: boolean): Verdict | undefi
     return { production: false, what: "a vercel api read of a project's env" }
 }
 
+// The release skill's Yard ship step (bun run ship:yard, or its file run by bun), which runs vercel deploy --prod itself, so its own command line is the production move; its help moves nothing.
+function yardStep(name: string, args: Word[], shell: Env): boolean {
+  if (name !== "bun") return false
+  const { at, words } = bunCall(args, shell)
+  const step =
+    (words[0] === "run" && words[1] === "ship:yard") ||
+    /(?:^|\/)packages\/scripts\/src\/ship\/yard\.ts$/.test(words[0] ?? "")
+  return step && !args.slice(at + 1).some((a) => HELP.has(a.value))
+}
+
 export async function check(
   raw: string,
   environment: Environment = process.env,
@@ -293,7 +313,13 @@ export async function check(
         production: false,
         what: "a program built at run time on a line naming vercel",
       })
-    const words = toolWords(NAMES, parsed.name, parsed.args, shell)
+    // run-slot.sh runs the words after its -- as the command
+    const slotted = slotWords(parsed)
+    const name = slotted ? program(slotted[0]?.value ?? "") : parsed.name
+    const args = slotted ? slotted.slice(1) : parsed.args
+    if (yardStep(name, args, shell))
+      verdicts.push({ production: true, what: "the Yard ship step, which deploys production" })
+    const words = toolWords(NAMES, name, args, shell)
     // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string
     const verdict =
       words &&

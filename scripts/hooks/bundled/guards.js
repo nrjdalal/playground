@@ -16641,7 +16641,7 @@ var LISTS = words("dns domains integration project teams");
 var HELP2 = new Set(["--help", "--version", "-h", "-v"]);
 var API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"]);
 var READINGS2 = 64;
-var MENTION2 = /\bv(?:ercel|c)\b/i;
+var MENTION2 = /\bv(?:ercel|c)\b|\bship[:/]yard\b/i;
 var NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i;
 function readingsOf(args, { flags, takes }, toSub = false) {
   const out = [];
@@ -16797,6 +16797,13 @@ function judgeApi2(rest, flags, built) {
   if (/(?:^|\/)env(?:[/?#]|$)/i.test(endpoint.value))
     return { production: false, what: "a vercel api read of a project's env" };
 }
+function yardStep(name, args, shell) {
+  if (name !== "bun")
+    return false;
+  const { at, words } = bunCall(args, shell);
+  const step = words[0] === "run" && words[1] === "ship:yard" || /(?:^|\/)packages\/scripts\/src\/ship\/yard\.ts$/.test(words[0] ?? "");
+  return step && !args.slice(at + 1).some((a) => HELP2.has(a.value));
+}
 async function check22(raw, environment = process.env) {
   const {
     cwd,
@@ -16815,7 +16822,12 @@ async function check22(raw, environment = process.env) {
         production: false,
         what: "a program built at run time on a line naming vercel"
       });
-    const words = toolWords(NAMES2, parsed.name, parsed.args, shell);
+    const slotted = slotWords(parsed);
+    const name = slotted ? program(slotted[0]?.value ?? "") : parsed.name;
+    const args = slotted ? slotted.slice(1) : parsed.args;
+    if (yardStep(name, args, shell))
+      verdicts.push({ production: true, what: "the Yard ship step, which deploys production" });
+    const words = toolWords(NAMES2, name, args, shell);
     const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
     if (verdict)
       verdicts.push(verdict);

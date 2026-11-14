@@ -17,10 +17,165 @@ export type YardHosts = Record<Project, string>
 
 export type YardArgs = { schemaCleared?: string; since?: string; tag: string }
 
+// The API first, since its build applies the migrations the web's code reads.
+export const ORDER: Project[] = ["api", "web"]
+
+// A route a bot reads with its token, which answers 401 without one, so a deploy that serves Yard's router with its auth reads right.
 export const BOT_ROUTE = "/api/v1/yard/channels"
 
-export const schemaChanges = (_files: string[]): string[] => []
+// What a deploy migrates: the API's build applies packages/db's migrations (migrate-on-deploy.ts), which the schema's files write.
+const SCHEMA = /^packages\/db\/(?:drizzle|src\/schema)\//
 
-export async function shipYard(_args: YardArgs, _hosts: YardHosts, _io: YardIo): Promise<number> {
+export const schemaChanges = (files: string[]): string[] =>
+  files.filter((file) => SCHEMA.test(file))
+
+// The live host's two checks, each its URL and the status it answers when the deploy serves.
+export const hostChecks = (host: string): [string, number][] => [
+  [`${host}/api/health`, 200],
+  [`${host}${BOT_ROUTE}`, 401],
+]
+
+export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Promise<number> {
+  const recorded = await io.readRecord()
+  if (recorded === args.tag) {
+    io.out(`ship:yard: ${args.tag} is already deployed, by ops/yard-tag`)
+    return 0
+  }
+  const since = recorded ?? args.since
+  if (!since) {
+    io.err(
+      "ship:yard: no ops/yard-tag record in the data folder, so the step cannot tell what it deploys over: run it again with --since <the tag live now>, once, and the record takes over",
+    )
+    return 1
+  }
+  const schema = schemaChanges(await io.changed(since, args.tag))
+  if (schema.length && !args.schemaCleared) {
+    io.err(
+      `ship:yard: ${args.tag} changes the schema since ${since} (${schema.join(", ")}), which the API's build migrates: take it through the db-migration skill's step 0 first, then run again with --schema-cleared <Inbox id> naming that decision`,
+    )
+    return 1
+  }
+  const dir = await io.worktree(args.tag)
+  for (const project of ORDER) {
+    if (!(await io.deploy(project, dir))) {
+      io.err(`ship:yard: the ${project} deploy failed, so the step stops here`)
+      return 1
+    }
+    for (const [url, want] of hostChecks(hosts[project])) {
+      const got = await io.status(url)
+      if (got !== want) {
+        io.err(`ship:yard: after the ${project} deploy, ${url} answered ${got}, not ${want}`)
+        return 1
+      }
+    }
+    io.out(`ship:yard: ${project} deployed from ${args.tag}, its live checks pass`)
+  }
+  await io.writeRecord(args.tag)
   return 0
+}
+
+const USAGE = `usage: bun run ship:yard <tag> [--since <tag>] [--schema-cleared <Inbox id>]
+
+Deploys the hosted Yard from <tag>, the ship's tag: its API, then its web, each with
+vercel deploy --prod from a detached worktree at the tag, checking the live host after each
+(/api/health answers 200, ${BOT_ROUTE} answers 401 with no token), then records the tag in
+the data folder's ops/yard-tag. It stops when the tag changes packages/db's schema or
+migrations since the recorded tag, until --schema-cleared names the db-migration step 0
+decision, and with no record until --since names the tag live now.
+The ids and hosts come from the environment, else the live dashboard checkout's .env:
+${["YARD_API_URL", "YARD_VERCEL_API_PROJECT_ID", "YARD_VERCEL_TEAM_ID", "YARD_VERCEL_WEB_PROJECT_ID", "YARD_WEB_URL"].join(", ")}.`
+
+if (import.meta.main) {
+  const { parseArgs } = await import("node:util")
+  const { join } = await import("node:path")
+  const { mkdirSync } = await import("node:fs")
+  const { dataDir } = await import("../../../env/src/data-dir")
+  const { dashboardCheckout } = await import("../playground/probe")
+  const { setting } = await import("../playground/yard")
+  const { positionals, values } = parseArgs({
+    allowPositionals: true,
+    options: {
+      help: { short: "h", type: "boolean" },
+      "schema-cleared": { type: "string" },
+      since: { type: "string" },
+    },
+  })
+  const [tag] = positionals
+  if (values.help || !tag || !/^v\d+\.\d+\.\d+$/.test(tag)) {
+    console.log(USAGE)
+    process.exit(values.help ? 0 : 2)
+  }
+  const repo = join(import.meta.dir, "..", "..", "..", "..")
+  const live = dashboardCheckout(repo)
+  const keys = [
+    "YARD_API_URL",
+    "YARD_VERCEL_API_PROJECT_ID",
+    "YARD_VERCEL_TEAM_ID",
+    "YARD_VERCEL_WEB_PROJECT_ID",
+    "YARD_WEB_URL",
+  ] as const
+  const read = Object.fromEntries(
+    await Promise.all(keys.map(async (key) => [key, await setting(key, live)] as const)),
+  ) as Record<(typeof keys)[number], string | undefined>
+  const missing = keys.filter((key) => !read[key])
+  if (missing.length) {
+    console.error(
+      `ship:yard: ${missing.join(", ")} ${missing.length > 1 ? "are" : "is"} unset in the environment and the live dashboard checkout's .env`,
+    )
+    process.exit(1)
+  }
+  const git = (args: string[]) => {
+    const ran = Bun.spawnSync(["git", "-C", repo, ...args], { stderr: "pipe", stdout: "pipe" })
+    if (ran.exitCode !== 0)
+      throw new Error(`git ${args.join(" ")}: ${ran.stderr.toString().trim()}`)
+    return ran.stdout.toString()
+  }
+  const record = join(dataDir(), "ops", "yard-tag")
+  const projects = { api: read.YARD_VERCEL_API_PROJECT_ID!, web: read.YARD_VERCEL_WEB_PROJECT_ID! }
+  const io: YardIo = {
+    changed: async (from, to) => git(["diff", "--name-only", from, to]).split("\n").filter(Boolean),
+    deploy: async (project, dir) => {
+      const ran = Bun.spawn(["vercel", "deploy", "--prod", "--yes"], {
+        cwd: dir,
+        env: {
+          ...process.env,
+          VERCEL_ORG_ID: read.YARD_VERCEL_TEAM_ID!,
+          VERCEL_PROJECT_ID: projects[project],
+        },
+        stderr: "inherit",
+        stdout: "inherit",
+      })
+      return (await ran.exited) === 0
+    },
+    err: console.error,
+    out: console.log,
+    readRecord: async () => {
+      const file = Bun.file(record)
+      return (await file.exists()) ? (await file.text()).trim() || undefined : undefined
+    },
+    status: async (url) =>
+      fetch(url, { redirect: "manual", signal: AbortSignal.timeout(30_000) })
+        .then((response) => response.status)
+        .catch(() => 0),
+    worktree: async (at) => {
+      const dir = join(repo, ".claude", "worktrees", `yard-ship-${at}`)
+      const sha = git(["rev-parse", `${at}^{commit}`]).trim()
+      if (!(await Bun.file(join(dir, ".git")).exists()))
+        git(["worktree", "add", "--detach", dir, sha])
+      else if (git(["-C", dir, "rev-parse", "HEAD"]).trim() !== sha)
+        throw new Error(`${dir} holds another commit than ${at}`)
+      return dir
+    },
+    writeRecord: async (at) => {
+      mkdirSync(join(dataDir(), "ops"), { recursive: true })
+      await Bun.write(record, `${at}\n`)
+    },
+  }
+  process.exit(
+    await shipYard(
+      { schemaCleared: values["schema-cleared"], since: values.since, tag },
+      { api: read.YARD_API_URL!, web: read.YARD_WEB_URL! },
+      io,
+    ),
+  )
 }
