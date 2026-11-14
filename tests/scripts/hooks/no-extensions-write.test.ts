@@ -2495,6 +2495,7 @@ describe("a tool an array holds, run with an argument the reader cannot read, ch
     expect(
       await bash(
         `A=(agent-browser --session w); S=/tmp/s; "\${A[@]}" eval "$(cat $S/m.js)"; "\${A[@]}" screenshot --full $S/a.png`,
+        WORK,
       ),
     ).toBeUndefined()
   })

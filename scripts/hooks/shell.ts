@@ -1728,7 +1728,7 @@ export const RUNS_TEXT = new Set([
 const CHANGED: Text = { ...unknown("a value a builtin may change"), vanishes: true }
 const DECLARES = new Set([...EXPORTS, "float", "integer", "private"])
 
-// Marks each held variable a command may change, wherever on the line it is, since a change the shell may make is one the reader cannot rule out: from bash 3.2's bash(1), SHELL BUILTIN COMMANDS (bash 5.3's for the nameref `declare -n`), and zsh 5.9's zshbuiltins(1) and zshmodules(1), every variable after text a RUNS_TEXT builtin runs or loads (an eval's only when the reader cannot read it, since the walk follows it otherwise) and after a setter (NAME_SETTERS) whose name word the reader cannot read; else unset's names (every one under zsh's -m), read's (REPLY when it names none), and print -v's and printf -v's but for a format of plain text, which end of input or an empty format leaves empty, a declaration's names under an option or, but for export and readonly, with no `=` (a local of its own in a function), zsh's `set -A` or `+A` name, and every name any other setter's words hold; a program word the reader cannot read is the program a split reading resolves it to, and one none resolves is read as an eval when an argument is unread too (d-2047r)
+// Marks each held variable a command may change, wherever on the line it is, since a change the shell may make is one the reader cannot rule out: from bash 3.2's bash(1), SHELL BUILTIN COMMANDS (bash 5.3's for the nameref `declare -n`), and zsh 5.9's zshbuiltins(1) and zshmodules(1), every variable after text a RUNS_TEXT builtin runs or loads (an eval's only when the reader cannot read it, since the walk follows it otherwise) and after a setter (NAME_SETTERS) whose name word the reader cannot read; else unset's names (every one under zsh's -m), read's (REPLY when it names none), and print -v's and printf -v's but for a format of plain text, which end of input or an empty format leaves empty, a declaration's names under an option or, but for export and readonly, with no `=` (a local of its own in a function), zsh's `set -A` or `+A` name, and every name any other setter's words hold but getopts', which always takes an option letter or `?`; a program word the reader cannot read is the program a split reading resolves it to, and one none resolves is read as an eval when an argument is unread too (d-2047r)
 function change(cmd: Command, env: Env): void {
   const { args, first, name } = parse(cmd)
   const words = args.map((a) => a.value)
@@ -1787,7 +1787,7 @@ function change(cmd: Command, env: Env): void {
               ? words.flatMap((w, k) =>
                   /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : [],
                 )
-              : NAME_SETTERS.has(name)
+              : NAME_SETTERS.has(name) && name !== "getopts"
                 ? words.flatMap((w) => w.match(/[A-Za-z_]\w*/g) ?? [])
                 : []
   for (const key of names.map((w) => w.split("=")[0])) {

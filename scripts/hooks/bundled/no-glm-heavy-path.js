@@ -6959,7 +6959,7 @@ function change(cmd, env) {
   const nameWords = prints ? vNames : words.map((w) => w.split("=")[0]);
   const all = RUNS_TEXT.has(name) && (name !== "eval" || args.some(unreadWord)) || NAME_SETTERS.has(name) && nameWords.some(marked) || name === "unset" && options.some((w) => w.includes("m"));
   const read = name === "read" ? binds(cmd) : [];
-  const names = all ? [...env.vars.keys()] : name === "unset" ? options.some((w) => w.includes("f")) ? [] : words : name === "read" ? read.length > 0 ? read : ["REPLY"] : prints ? printsText(words) ? [] : vNames : DECLARES.has(name) ? words.filter((w) => options.length > 0 || !ASSIGN.test(w) && name !== "export" && name !== "readonly") : name === "set" ? words.flatMap((w, k) => /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : []) : NAME_SETTERS.has(name) ? words.flatMap((w) => w.match(/[A-Za-z_]\w*/g) ?? []) : [];
+  const names = all ? [...env.vars.keys()] : name === "unset" ? options.some((w) => w.includes("f")) ? [] : words : name === "read" ? read.length > 0 ? read : ["REPLY"] : prints ? printsText(words) ? [] : vNames : DECLARES.has(name) ? words.filter((w) => options.length > 0 || !ASSIGN.test(w) && name !== "export" && name !== "readonly") : name === "set" ? words.flatMap((w, k) => /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : []) : NAME_SETTERS.has(name) && name !== "getopts" ? words.flatMap((w) => w.match(/[A-Za-z_]\w*/g) ?? []) : [];
   for (const key of names.map((w) => w.split("=")[0])) {
     if (!NAME.test(key))
       continue;
