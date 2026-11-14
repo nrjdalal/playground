@@ -46,6 +46,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 
 - Every verdict's first line reads `## ReviewBot · round <r>: <s>/5 at <sha7>`, at the head it names, and `bun run pr:merge` accepts the last one.
 - Every verdict sets its PR's `Review • <s>/5` label, colored by its score (green for 5/5, orange for 4/5, red below) from the table in `references/COMMENTS.md`, so a label never lands in GitHub's gray.
+  It removes the PR's older score labels in the same step, through `gh pr edit --remove-label` on an extension repository's PR, so the labels carry the newest score alone.
 - Each finding of a round below 5/5 sits on its line in Files changed as well as in the verdict, while a 5/5's nits sit in the verdict alone, and the threads still open are exactly the findings still open.
 - A push gets its round within a few minutes, announced or not.
 - Round 1 of a PR that adds a member to a kind (a status, a type, a choice, a button) files every list still naming the kind's old members as one finding, found by one grep for each list's wording, so later rounds spend no turn on lists outside the diff.
