@@ -2456,6 +2456,45 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
   })
 })
 
+describe("a writer's file a cd's && chain sets to a literal runs past the chain, read as that literal (PG-2161)", () => {
+  test.each([
+    ["a copy", `cd /tmp && f=/tmp/out.txt; cp /tmp/a "$f"`],
+    ["a tee", `cd /tmp && f=/tmp/out.txt; echo x | tee "$f"`],
+    ["a move", `cd /tmp && f=/tmp/out.txt; mv /tmp/a "$f"`],
+    ["a copy after a pushd", `pushd /tmp && f=/tmp/out.txt; cp /tmp/a "$f"`],
+    [
+      "a copy by a relative literal under a folder outside the root",
+      `cd /tmp && f=out.txt; cp /tmp/a "$f"`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  // the name is set only once the cd has run, so a relative literal names a file in the folder it moved to, as its literal twin `cd /tmp && :; cp /tmp/a x` is read
+  test("a copy by a relative literal from the root, after a cd out of it", async () => {
+    expect(await bash(`cd /tmp && f=x; cp /tmp/a "$f"`, ROOT)).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "a copy by a literal the session's environment also sets",
+      `cd /tmp && f=/tmp/out.txt; cp /tmp/a "$f"`,
+    ],
+  ])("%s stays refused", async (_, command) => {
+    const raw = JSON.stringify({ cwd: HOME, tool_input: { command }, tool_name: "Bash" })
+    expect(await check(raw, { ...ENV, f: `${ROOT}/x` })).toBeDefined()
+  })
+
+  test.each([
+    [
+      "a cd through it, which an empty value leaves in the root",
+      `cd /tmp && d=/tmp; cd "$d"; cp /tmp/a x`,
+    ],
+  ])("%s stays refused, from the root", async (_, command) => {
+    expect(await bash(command, ROOT)).toBeDefined()
+  })
+})
+
 describe("a call the reader parses whole keeps its verdict beside the unread-folder rule (PG-2106)", () => {
   test("a runner chain nested 10 deep, three options each, is judged within a bound", async () => {
     const chain = Array.from({ length: 10 }, (_, i) => `npx --a${i} a --b${i} b --c${i} c`).join(
