@@ -13,12 +13,13 @@ afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 let n = 0
 
 // Each run against its own data folder.
-const cli = () => {
+const cli = (checkout?: string) => {
   const data = join(scratch, `data-${n++}`)
   const run = async (words: string[]) => {
     const out: string[] = []
     const err: string[] = []
     const io: Io = {
+      checkout,
       data,
       out: (l) => out.push(l),
       stdin: async () => "",
@@ -160,5 +161,47 @@ describe("playground settings", () => {
     })
     const why = JSON.parse((await run(["why", "jobs.opsTick"])).out)
     expect(why[0].reason).toBe(`imported from ${jobs} at the switch`)
+  })
+
+  test("set owner.names warns on stderr for each one-word entry, naming the tracked files trace-count's ownerName counts it in, and still writes", async () => {
+    const repo = join(scratch, `repo-${n}`)
+    const files: Record<string, string> = {
+      "mail.md": "mail quillon@mail.test\n",
+      "notes.md": "Quillon wrote this line.\n",
+      "other.md": "quillonish is another word\n",
+      "path.md": "see quillon/vault\n",
+      "scripts/hooks/bundled/x.js": "quillon\n",
+      "src/snake.ts": "const by_quillon_x = 1\n",
+    }
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(join(repo, path, ".."), { recursive: true })
+      writeFileSync(join(repo, path), text)
+    }
+    Bun.spawnSync(["git", "-C", repo, "init", "-q"])
+    Bun.spawnSync(["git", "-C", repo, "add", "."])
+    writeFileSync(join(repo, "loose.md"), "quillon\n")
+    const { run } = cli(repo)
+    const set = await run(["set", "owner.names", '["quillon","pat-dev"]', "--reason", "r"])
+    expect(set.code).toBe(0)
+    expect(JSON.parse(set.out).value).toEqual(["quillon", "pat-dev"])
+    expect(set.err.split("\n")).toEqual([
+      "playground settings: owner.names holds quillon, one word, which trace-count's ownerName kind counts in 2 tracked files:",
+      "  notes.md",
+      "  src/snake.ts",
+    ])
+    expect(JSON.parse((await run(["get", "owner.names"])).out).value).toEqual([
+      "quillon",
+      "pat-dev",
+    ])
+  })
+
+  test("set owner.names with no one-word entry prints no warning", async () => {
+    const repo = join(scratch, `repo-${n}`)
+    mkdirSync(repo, { recursive: true })
+    writeFileSync(join(repo, "notes.md"), "pat-dev wrote this\n")
+    Bun.spawnSync(["git", "-C", repo, "init", "-q"])
+    Bun.spawnSync(["git", "-C", repo, "add", "."])
+    const set = await cli(repo).run(["set", "owner.names", '["pat-dev"]', "--reason", "r"])
+    expect(set).toMatchObject({ code: 0, err: "" })
   })
 })

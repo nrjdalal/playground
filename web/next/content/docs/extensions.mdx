@@ -93,6 +93,7 @@ playground settings import-jobs <jobs.json> [--launch-agents <dir>] [--scope <sc
 A repository is written `owner/name`.
 While `factory.publicRepo` is unset, the leak guard keeps the main checkout's origin as the public repository; while `factory.archiveRepo` is unset, it names no archive.
 The trace count counts nothing until `factory.archiveRepo` and `owner.names` are both set in Settings, under Privacy.
+A one-word entry in `owner.names`, such as a first name alone, also matches a made-up name or a common word, so `playground settings set owner.names` prints each one on stderr with the tracked files the trace count finds it in, and their count; the write still goes through.
 
 ## Extensions
 

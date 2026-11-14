@@ -207,3 +207,36 @@ describe("WhatsApp's numbers through /api/v1/settings (#1797)", () => {
     },
   )
 })
+
+// #2142: Settings > Privacy saves owner.names through this PUT, and the answer names each one-word entry with the tracked files trace-count's ownerName kind counts it in; this file holds the made-up one, so it is the file the answer names.
+describe("owner.names' one-word warning through PUT /api/v1/settings (#2142)", () => {
+  const write = (value: string[]) =>
+    app.request(
+      "http://127.0.0.1/owner.names",
+      {
+        body: JSON.stringify({ by: "Settings", reason: "r", scope: ME, value }),
+        headers: { "content-type": "application/json", origin: trusted() },
+        method: "PUT",
+      },
+      peer("127.0.0.1"),
+    )
+
+  test("a one-word entry comes back with the files that hold it, and the write still goes through", async () => {
+    const data = setUp()
+    spies.push(signedIn("owner"))
+    const response = await write(["marrowick", "pat-dev"])
+    expect(response.status).toBe(200)
+    expect((await response.json()).data.oneWords).toEqual([
+      { files: ["tests/api/hono/src/routers/settings.test.ts"], name: "marrowick" },
+    ])
+    expect(readSetting(data, "owner.names")!.value).toEqual(["marrowick", "pat-dev"])
+  })
+
+  test("with no one-word entry the answer names none", async () => {
+    setUp()
+    spies.push(signedIn("owner"))
+    const response = await write(["pat-dev"])
+    expect(response.status).toBe(200)
+    expect((await response.json()).data.oneWords ?? []).toEqual([])
+  })
+})

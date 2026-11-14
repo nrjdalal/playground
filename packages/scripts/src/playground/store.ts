@@ -123,6 +123,8 @@ export const contentOf = async (
 }
 
 export type Io = {
+  // the checkout whose tracked files settings set's owner.names warning reads, this code's own when unset
+  checkout?: string
   data: string
   // the calling session's name in Claude Code's registry, which a write records as its author
   name?: string
@@ -332,7 +334,7 @@ export const runStore = async (
   err: Out,
 ): Promise<number> => {
   try {
-    return await (command === "settings" ? settingsCommand : extCommand)(words, io)
+    return await (command === "settings" ? settingsCommand : extCommand)(words, io, err)
   } catch (error) {
     const usage = error instanceof Usage
     err(
