@@ -201,6 +201,71 @@ describe("setup.sh", () => {
     expect(s).not.toMatch(/--token/)
     expect(s).toContain("ACTIONS_RUNNER_INPUT_TOKEN=\\$(cat ~/.runner-token)")
   })
+  // Only say, die and fetch run, cut out of setup.sh's text, with a curl on PATH that writes made-up bytes, so no install step runs and nothing reaches the network.
+  const fetchRun = (sum: string) => {
+    const root = mkdtempSync(join(tmpdir(), "runner-fetch-"))
+    dirs.push(root)
+    const b = join(root, "bin")
+    mkdirSync(b)
+    bin(
+      b,
+      "curl",
+      `echo "curl $*" >> "${root}/calls"\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && printf 'made-up bytes' > "$2"; shift; done`,
+    )
+    for (const tool of ["apt-get", "install", "su", "systemctl", "tar", "unzip"])
+      bin(b, tool, `echo "${tool} $*" >> "${root}/calls"`)
+    const text = readFileSync(join(DIR, "setup.sh"), "utf8")
+    const fns = ["say", "die", "fetch"].map((name) => {
+      const start = text.split("\n").findIndex((l) => l.startsWith(`${name}() {`))
+      if (start < 0) return ""
+      const lines = text.split("\n").slice(start)
+      const end = lines[0]!.endsWith("}") ? 0 : lines.findIndex((l) => l === "}")
+      return lines.slice(0, end + 1).join("\n")
+    })
+    const out = Bun.spawnSync(
+      [
+        "bash",
+        "-c",
+        `set -euo pipefail\n${fns.join("\n")}\nfetch https://example.invalid/tool.tar.gz ${sum} "${root}/tool.tar.gz"\necho fetched`,
+      ],
+      { env: { PATH: `${b}:/usr/bin:/bin:/usr/sbin:/sbin` }, stderr: "pipe", stdout: "pipe" },
+    )
+    const calls = existsSync(join(root, "calls")) ? readFileSync(join(root, "calls"), "utf8") : ""
+    return {
+      calls,
+      code: out.exitCode,
+      kept: existsSync(join(root, "tool.tar.gz")),
+      out: out.stdout.toString(),
+      err: out.stderr.toString(),
+    }
+  }
+  const MADE_UP_SUM = new Bun.CryptoHasher("sha256").update("made-up bytes").digest("hex")
+
+  test("fetch stops the script on a download whose sha256 is not the pinned one, and removes it", () => {
+    const r = fetchRun("0".repeat(64))
+    expect(r.code).toBe(1)
+    expect(r.out).toBe("")
+    expect(r.err).toContain(
+      `https://example.invalid/tool.tar.gz has sha256 ${MADE_UP_SUM}, not the pinned ${"0".repeat(64)}`,
+    )
+    expect(r.kept).toBe(false)
+    expect(r.calls).toMatch(/^curl -fsSL -o \S+ https:\/\/example\.invalid\/tool\.tar\.gz\n$/)
+  })
+
+  test("fetch keeps a download whose sha256 is the pinned one, and the script goes on", () => {
+    const r = fetchRun(MADE_UP_SUM)
+    expect([r.code, r.out, r.kept]).toEqual([0, "fetched\n", true])
+    expect(r.calls.split("\n").filter(Boolean)).toHaveLength(1)
+  })
+
+  test("pins bun, uv and the runner by version and sha256, with no installer piped to a shell", () => {
+    const s = readFileSync(join(DIR, "setup.sh"), "utf8")
+    for (const name of ["BUN", "UV", "RUNNER"])
+      expect(s).toMatch(new RegExp(`^${name}_VERSION=\\d+\\.\\d+\\.\\d+$`, "m"))
+    expect(s.match(/_SHA256=[0-9a-f]{64}\b/g)).toHaveLength(6)
+    expect(s).not.toMatch(/curl[^\n]*\|\s*(ba)?sh/)
+    expect(s).not.toContain("releases/latest")
+  })
 })
 
 // ci.sh exec against a scratch box: ssh keeps the run's .cmd and answers its output and exit line from a file

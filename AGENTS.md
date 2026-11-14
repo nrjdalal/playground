@@ -125,7 +125,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry: set work aside with a commit, and take a before-shot from a separate worktree on `origin/canary`.
 - Commit before a red-first swap, a chain stopping if it fails (`git commit ... || exit 1`), and restore with `git checkout HEAD -- <file>` ([.agents/testing.md](./.agents/testing.md#traps)); squash by the `gh-commit` skill's Notes.
 - When the owner asks to see a draft, a tree or a restructure, show it in chat and change no file until told to apply it.
-- Run inscope as `npx -y inscope@latest <command>`; it is not on `PATH`.
+- Run inscope as `npx -y inscope@0.18.0 <command>`; it is not on `PATH`.
 - Format with `bun run format` (oxfmt, `.oxfmtrc.jsonc`), not prettier, whose semicolons and 80-column wraps survive an oxfmt pass.
 - `scripts/link-skills.sh` installs the home skill set and links the factory's settings, its brief templates, the `playground` command and the ops scripts into the main checkout, so a pull there updates them.
   Re-run it after adding, renaming or removing a skill ([scripts/README.md](./scripts/README.md#link-skillssh-and-rerere)).
