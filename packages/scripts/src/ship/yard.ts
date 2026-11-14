@@ -162,8 +162,13 @@ if (import.meta.main) {
       })
       return (await ran.exited) === 0
     },
+    // a plain remove, which keeps the folder when it holds a change, and says so
     drop: async (dir) => {
-      git(["worktree", "remove", "--force", dir])
+      try {
+        git(["worktree", "remove", dir])
+      } catch (error) {
+        console.error(`ship:yard: ${dir} stays: ${(error as Error).message}`)
+      }
     },
     err: console.error,
     fetch: async (tags) => {
