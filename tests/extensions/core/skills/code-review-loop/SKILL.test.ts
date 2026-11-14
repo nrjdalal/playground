@@ -92,10 +92,13 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     )
     expect(step8).toContain("`state.ts checks` on a head whose gate checks are not all green")
     expect(step8).toContain(
-      "pass each name `gh pr checks <n> -R <repo> --required --json name -q '.[].name'` lists, quoted, and pass none when it lists none",
+      "pass each name `gh pr checks <n> -R <repo> --required --json name -q '.[].name'` lists that the head's check runs also list",
+    )
+    expect(step8).toContain(
+      "start `wait` in place of `checks` when it lists names but no check run carries one",
     )
     expect(await page()).toContain(
-      "the names `gh pr checks <n> --required` lists, passed after the head",
+      "since the waiter reads check runs alone and a required commit status never ends it",
     )
     expect(await page()).toContain("started again after a red it waits for that check's re-run")
     expect(await page()).toContain(
