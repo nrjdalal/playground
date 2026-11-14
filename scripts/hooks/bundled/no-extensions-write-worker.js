@@ -9596,6 +9596,54 @@ function remoteName(v) {
   }
   return false;
 }
+var UNREAD_CD_JUDGED = new Set([
+  "chmod",
+  "curl",
+  "mktemp",
+  "perl",
+  "sed",
+  "shred",
+  "sort",
+  "tar",
+  "truncate"
+]);
+var NO_WRITES = new Set([
+  ":",
+  "basename",
+  "break",
+  "cd",
+  "continue",
+  "cut",
+  "date",
+  "dirname",
+  "exit",
+  "false",
+  "for",
+  "id",
+  "popd",
+  "printenv",
+  "pushd",
+  "pwd",
+  "read",
+  "return",
+  "set",
+  "shift",
+  "sleep",
+  "sysctl",
+  "tr",
+  "true",
+  "type",
+  "uname",
+  "unset",
+  "wait",
+  "which",
+  "whoami"
+]);
+var PORTLESS_READS = new Set(["get", "list"]);
+var portlessRead = (tool, args) => {
+  const words = tool === "bunx" && args[0]?.value === "portless" ? args.slice(1) : args;
+  return (tool === "portless" || words !== args) && PORTLESS_READS.has(words[0]?.value ?? "");
+};
 var CHMOD_DASH_MODE = /^-[gorstuwXx]/;
 function unreadCdWrites(tool, args, env, stopsAtOperand) {
   if (tool === "sed" || tool === "perl")
@@ -10477,6 +10525,12 @@ async function inspect(raw, environment, unknown = false) {
       const written = path === undefined ? undefined : env.files.get(path);
       if (written && (written.unknown || marked(written.value)))
         return refuse(`${parsed.name} ${shown(operand)}, a script this line wrote with text the hook cannot read; run its commands as calls of their own`);
+      if (shellCall && !inline && env.cwdUnread && textDepth === 0) {
+        const fed = operand ? undefined : await stdinOf(cmd, env);
+        const script = operand ? shown(operand) : fed && (fed.unknown || marked(fed.value)) ? "stdin it cannot read" : undefined;
+        if (script)
+          return refuse(afterUnreadCd(`${parsed.name} running ${script}, a script that may write in the shell's folder,`));
+      }
       if (shellCall)
         return;
     }
@@ -10633,6 +10687,9 @@ async function inspect(raw, environment, unknown = false) {
     }
     if (!env.cwdUnread)
       return;
+    const git = tool === "git" ? gitCall(args, { ...env, cwd: undefined }) : undefined;
+    if (textDepth === 0 && !remover && !WRITERS.has(tool) && !NO_WRITES.has(tool) && !portlessRead(tool, args) && !reads(parsed, env) && (git ? git.sub !== "rm" && git.cwd === undefined : !UNREAD_CD_JUDGED.has(tool)))
+      return refuse(afterUnreadCd(`${git ? `git ${git.sub && !marked(git.sub) ? git.sub : "with a subcommand it cannot read"}` : verb}, which may write in the shell's folder,`));
     const unsplit = fed && !fed.unknown && (marked(fed.value) || delimiter || !fedSplit);
     const fedWords = unsplit ? [{ quoted: false, value: UNKNOWN }, ...argWord ? [argWord] : []] : stdinWords;
     const replace = xargs?.replace;

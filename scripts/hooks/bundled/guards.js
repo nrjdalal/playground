@@ -13033,6 +13033,50 @@ var GH_POSTS = new Set([
   "pr create",
   "pr edit"
 ]);
+var UNREAD_CD_JUDGED = new Set([
+  "chmod",
+  "curl",
+  "mktemp",
+  "perl",
+  "sed",
+  "shred",
+  "sort",
+  "tar",
+  "truncate"
+]);
+var NO_WRITES = new Set([
+  ":",
+  "basename",
+  "break",
+  "cd",
+  "continue",
+  "cut",
+  "date",
+  "dirname",
+  "exit",
+  "false",
+  "for",
+  "id",
+  "popd",
+  "printenv",
+  "pushd",
+  "pwd",
+  "read",
+  "return",
+  "set",
+  "shift",
+  "sleep",
+  "sysctl",
+  "tr",
+  "true",
+  "type",
+  "uname",
+  "unset",
+  "wait",
+  "which",
+  "whoami"
+]);
+var PORTLESS_READS = new Set(["get", "list"]);
 var GUARD_KEYS = new Set([
   "ext.links",
   "ext.order",
