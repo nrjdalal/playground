@@ -79,7 +79,7 @@ Settings > Harness shows the same cards with **Switch Alpha**: Alpha writes its 
 
 Outside its own folder it writes in these places, besides the tools' own installers:
 
-- `~/.bun/bin`: the `playground` command, on a new terminal's `PATH`.
+- `~/.bun/bin`: the `playground` command, on a new terminal's `PATH`, and on Linux `security`, the store that keeps Playground's tokens where macOS has its Keychain.
 - `~/.playground`: the data folder (`$PLAYGROUND_DATA_DIR` when you set it, an absolute path), with your extensions, links to the brief templates and the background jobs' scripts, and the skill sets in `orgs`. Playground's own herdr stays at `~/.playground/bin/herdr` either way.
 - Claude Code's user settings: the home skill set, `ws-home@ws`, installed from the `ws` marketplace in `~/.playground/orgs` ([Skills and orgs](/docs/skills)).
 - `/Library/LaunchDaemons/sh.portless.proxy.plist`: portless's proxy service, installed with sudo, and its certificate in the System keychain; the proxy keeps its own files in `~/.portless`.

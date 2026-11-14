@@ -167,6 +167,20 @@ describe("add-generic-password", () => {
   })
 })
 
+describe("-i over several lines", () => {
+  test("each line runs, each refusal is named, and the exit is the first refusal's", () => {
+    const b = box()
+    const lines = `add-generic-password -U -s "${SERVICE}" -w "${VALUE}"\n${addLine(VALUE)}delete-generic-password -s "${SERVICE}" -a "nobody"\n`
+    const ran = run(b, ["-i"], lines)
+    expect(ran.code).toBe(2)
+    expect(ran.stderr.trim().split("\n")).toHaveLength(2)
+    expect(ran.stderr).not.toContain(VALUE)
+    expect(run(b, ["find-generic-password", "-s", SERVICE, "-a", ACCOUNT, "-w"]).stdout).toBe(
+      `${VALUE}\n`,
+    )
+  })
+})
+
 describe("delete-generic-password", () => {
   test("removes a saved item, which then reads as not found", () => {
     const b = box()
