@@ -10,6 +10,7 @@ import { guardedOrgs } from "../../packages/settings/src/ext"
 import { coreDir, readPolicy, readPolicySync } from "../../packages/settings/src/rendered"
 import { gatedSendsSchema } from "../../packages/settings/src/slack"
 import { implicitRepos, type Repo, remoteRepo, remotes, repoOf } from "./github"
+import { input } from "./input"
 import { guardList, isRecord, isStrings } from "./lists"
 import { check as prepareWrite } from "./no-prepare-write"
 import { check as protectedPush } from "./no-protected-push"
@@ -1817,7 +1818,7 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-playground-leak", "guard")
   // a prepare-only session's tracker, chat and pull request writes wait for its claim (no-prepare-write), and a GitHub tool's write to main or canary of the factory's repository is refused (no-protected-push), checked here since this hook's matcher takes those MCP tools
   const reason = (await fromFactory(raw))
     ? ((await prepareWrite(raw)) ?? (await protectedPush(raw)) ?? (await check(raw)))

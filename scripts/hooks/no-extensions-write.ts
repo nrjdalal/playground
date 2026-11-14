@@ -16,6 +16,7 @@ import {
 } from "../../packages/settings/src/rendered"
 import { settingFields } from "../../packages/settings/src/settings"
 import { eachInput } from "./codex"
+import { input } from "./input"
 import {
   bunCall,
   FILE_TOOLS,
@@ -2397,7 +2398,7 @@ export async function guarded(
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-extensions-write", "guard")
   const reason = (await fromFactory(raw)) ? await guarded(raw) : undefined
   if (reason) {
     console.error(reason)

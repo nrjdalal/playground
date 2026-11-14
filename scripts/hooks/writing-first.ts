@@ -6,6 +6,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { dataDirOf } from "../../packages/env/src/data-dir"
 import { UPSTREAM_SKILLS } from "../../packages/scripts/src/vendor-upstream/stage"
 import { guardInputs } from "./codex"
+import { input } from "./input"
 import { writeTargets } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
@@ -418,7 +419,7 @@ async function toolCheck(input: Input, env: Environment): Promise<string | undef
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("writing-first", "recorder")
   const reason = (await fromFactory(raw)) ? await check(raw) : undefined
   if (reason) {
     console.error(reason)

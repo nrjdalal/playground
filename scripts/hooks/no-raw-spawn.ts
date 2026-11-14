@@ -2,6 +2,7 @@
 import "../../packages/env/src/aliases"
 import { join, resolve, sep } from "node:path"
 
+import { input } from "./input"
 import { fromFactory } from "./role"
 import {
   type Env,
@@ -387,7 +388,7 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-raw-spawn", "guard")
   const reason = (await fromFactory(raw)) ? await check(raw) : undefined
   if (reason) {
     console.error(reason)
