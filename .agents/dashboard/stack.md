@@ -105,6 +105,7 @@
   Every hosted web response carries `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin` (`securityHeaders` in `web/next/src/lib/security-headers.ts`, set in `next.config.ts`), and every page a CSP that runs only the app's own scripts and those holding the request's nonce, with `object-src 'none'`,
   `base-uri 'self'` and `frame-ancestors 'none'` (`secure`, run by `web/next/src/proxy.ts`).
   The root layout reads that nonce for next-themes' inline script on the hosted build alone, so every hosted page renders per request while the local build adds no header and keeps its static pages.
+  The Inbox viewer's framed pages take that policy too, so their scripts carry the nonce (asks.md, the `html` page).
   Yard's own pages, `/yard/**` (a channel at `/yard/c/<id>`, Account and tokens, the approve pages and the invite page), are the mirror: their layout answers a local stack with the app's 404 (`hostedPagesOnly`), and on the hosted build they gate on the session, a signed-out visit going home and a `user` below the `member` rung to `/yard/invite` (`yardGate` in `web/next/src/lib/yard.ts`).
   The invite page sits outside the app's sidebar and its footer menu, so it carries its own Log out (`InviteGate`), the way out of a wrong account.
   A pending message's approve page and an invite request's, which a member makes on Account and Account lists for the owner, take their paths from `approvePath()` and `invitePath()` in `packages/message`.
