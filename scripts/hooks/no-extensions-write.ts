@@ -990,14 +990,23 @@ function awkPrograms(words: Word[]): Word[] | undefined {
   return programs.length ? programs : undefined
 }
 
+// awk's program words as text, or none: every program a literal word holding no | (a pipe, which awkPipe would weigh against a regex's alternation), no " (a string, so it prints only what it reads, never a command line of its own into a file that runs) and nothing awkRuns finds
+function awkTexts(args: Word[]): Word[] {
+  const programs = awkPrograms(args) ?? []
+  return programs.every((w) => literal(w) && !/[|"]/.test(w.value) && !awkRuns(w.value))
+    ? programs
+    : []
+}
+
 const EVALUATES = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"])
-// An inline evaluator's program word, JavaScript the shell never reads as a line: bun's or node's -e, --eval, -p or --print value (-pe and -ep included) among the options before any script, or agent-browser's eval script; undefined for any other call
+// An inline evaluator's program word, JavaScript the shell never reads as a line: bun's or node's -e, --eval, -p or --print value (-pe and -ep included) among the options before any script, or agent-browser's eval script or wait --fn expression; undefined for any other call
 function evalProgram({ args, name }: Parsed): Word | undefined {
-  // agent-browser's eval after its options, a --name option's value (`--session foo`) included
+  // agent-browser's eval, or its wait whose next word is --fn, after its options, a --name option's value (`--session foo`) included
   if (name === "agent-browser") {
     for (let k = 0; k < args.length; k++) {
       const { value } = args[k]
       if (value === "eval") return args[k + 1]
+      if (value === "wait") return args[k + 1]?.value === "--fn" ? args[k + 2] : undefined
       const option = args[k - 1]?.value ?? ""
       if (!value.startsWith("-") && !(option.startsWith("--") && !option.includes("="))) return
     }
@@ -1862,8 +1871,14 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one, or grep that xargs starts as its own first word (xargsGrep)
     const reader =
       !rootLine && ((ownFirst(cmd, first) && reads(parsed, env)) || xargsGrep(cmd, parsed, env))
-    // on a line read whole with no root shell and no variable set that makes a program run another (TEXT_RUNS), a read-only gh call's jq filter, agent-browser's eval script, a read-only sed's script and a playground text flag's value stay text, as on a line read call by call, since no program runs them as a shell line; each is still refused when it names the root, and the sed's files are judged as any word is
+    // on a line read whole with no root shell and no variable set that makes a program run another (TEXT_RUNS), a read-only gh call's jq filter, agent-browser's eval script or wait --fn expression, an awk program holding no ", no | and nothing awkRuns finds, a read-only sed's script, an in-place sed's script whose every other word the hook holds (no substitution, no variable it cannot read) and a playground text flag's value stay text, as on a line read call by call, since no program runs them as a shell line; each is still refused when it names the root, and the awk's and sed's files are judged as any word is
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined
+    const edits = SEDS.has(program(name)) ? sedInPlace(cmd, parsed) : undefined
+    const editsHeld =
+      !!edits &&
+      parsed.args.every(
+        (word) => edits.has(word) || (!word.procs && held(word, env, steadyAt(cmd))),
+      )
     const wholeText = new Set<Word>(
       whole &&
         !rootLine &&
@@ -1874,7 +1889,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         ? [
             ...ghFilters(parsed),
             ...(browserCode ? [browserCode] : []),
-            ...(SEDS.has(program(name)) ? (sedReadScripts(parsed.args) ?? []) : []),
+            ...(AWKS.has(program(name)) ? awkTexts(parsed.args) : []),
+            ...(SEDS.has(program(name))
+              ? (sedReadScripts(parsed.args) ?? (editsHeld ? [...edits] : []))
+              : []),
             ...textFlagValues(parsed),
           ]
         : [],
