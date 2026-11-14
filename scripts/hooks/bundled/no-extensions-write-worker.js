@@ -9209,6 +9209,7 @@ var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings 
 var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
 var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
 var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
+var refuseNearEval = (program) => (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} Code ${program} -e runs from this folder may write there by a relative path; run ${program} -e from a worktree, with absolute paths built from process.env.HOME.`;
 var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(\u2026) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS = new Set([
@@ -10252,6 +10253,12 @@ var FLAG = /\$\{\([^)]*[eP]/;
 var FLAGS = /\$\{\([^)]*[eP][^)]*\)[^}]*\}?/g;
 var FILE_RUN = /(?:^|[\s;&|(<>])=\(/;
 var FILE_RUNS = /=\([^)]*\)?/g;
+function xargsGrep(cmd, parsed, env) {
+  const { also, chdir, first, local, name, xargs } = parsed;
+  const lead = cmd.words.find((word) => /(?:^|\/)xargs$/.test(word.value));
+  const system = /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/;
+  return !!xargs && !!first && name === "grep" && also.length === 0 && !chdir && local.size === 0 && ownFirst(cmd, lead) && system.test(lead.value) && system.test(first.value) && xargsOptions(cmd, first).every((value) => !marked(value) && !WRAPPERS.has(program(value))) && reads(parsed, env);
+}
 function narrow(cmd, env) {
   const parsed = parse3(cmd);
   const { args, first } = parsed;
@@ -10545,6 +10552,7 @@ async function inspect(raw, environment, unknown = false) {
   let rootLine = false;
   let patterns = new Set;
   let lineWrites = false;
+  let nearEval;
   let textDepth = 0;
   const varsRead = new WeakMap;
   const varsJudged = new WeakMap;
@@ -10621,7 +10629,7 @@ async function inspect(raw, environment, unknown = false) {
     const unplaced = env.cwdUnread ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd))) : undefined;
     if (unplaced?.target)
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
-    const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env);
+    const reader = !rootLine && (ownFirst(cmd, first) && reads(parsed, env) || xargsGrep(cmd, parsed, env));
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined;
     const wholeText = new Set(whole && !rootLine && ownProgram(cmd, parsed) && ![...parsed.local.keys(), ...env.vars.keys()].some((key) => TEXT_RUNS.test(key) || marked(key)) ? [
       ...ghFilters(parsed),
@@ -10656,6 +10664,8 @@ async function inspect(raw, environment, unknown = false) {
     }
     const away = places(env).every(({ cwd }) => cwd !== undefined && !above(cwd, true) && !inRoot(cwd));
     const evaluated = rootLine || cmd.scope !== 0 || !away ? undefined : evalProgram(parsed);
+    const near = !away && (name === "bun" || name === "node") && evalProgram(parsed) ? name : nearEval;
+    const unwrittenRefusal = near ? refuseNearEval(near) : refuseUnwritten;
     const masked = evaluated && !evaluated.glob && !marked(evaluated.value) ? maskRegexes(evaluated.value, (body) => guarded(body, env)) : undefined;
     const shownEval = evaluated && masked !== undefined ? { ...evaluated, value: masked } : undefined;
     const own = (word) => word === evaluated && shownEval ? shownEval : word;
@@ -10669,7 +10679,12 @@ async function inspect(raw, environment, unknown = false) {
         continue;
       seen.add(line);
       textDepth++;
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map }, visit, true).finally(() => textDepth--);
+      const outer = nearEval;
+      nearEval = near;
+      const verdict = await run(lex(line, env.known), { ...env, vars: new Map }, visit, true).finally(() => {
+        textDepth--;
+        nearEval = outer;
+      });
       if (verdict)
         return verdict;
     }
@@ -10723,7 +10738,7 @@ async function inspect(raw, environment, unknown = false) {
           continue;
         const named = names(word, here, remover, literal);
         if (named)
-          return (unwritten(named, cmd, here) ? refuseUnwritten : refuse)(`${verb} on ${named}`);
+          return (unwritten(named, cmd, here) ? unwrittenRefusal : refuse)(`${verb} on ${named}`);
       }
       if (!(name === "tee" && !rootLine) && cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`);
