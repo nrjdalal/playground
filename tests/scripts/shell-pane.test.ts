@@ -78,6 +78,7 @@ const OWN_ROWS: Record<string, string[]> = {
   "no-prompt-stop": ["rmdir $HOME/$s"],
   "no-protected-push": [`git push https://github.com/${UNSET_REPOS.public[0]}.git main`],
   "no-public-leak": [`gh pr comment 1 --repo ${UNSET_REPOS.public[0]} --body "$X"`],
+  "no-raw-vercel": ["vercel env pull"],
   "no-raw-wa": [`cat ${join(dataDir(), "whatsapp", "made-up.json")}`],
   "no-unslotted-run": ["bun run test"],
 }

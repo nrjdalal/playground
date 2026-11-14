@@ -32,11 +32,11 @@ playground planner | builder | ops | optimizer
                       start that manager as playground dispatcher starts the dispatcher, its brief from scripts/briefs/<manager>.md; the dispatcher runs it the first time it routes work there, and the optimizer at its own start
 playground status     one line each for the Dashboard, the follower, each dispatcher, GLM and each herdr server
 playground sweep <lead>
-                      what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs, its parked rows' closed or unreadable holds), or quiet
+                      what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs, its parked rows' closed or unreadable holds, and for the builder a missing or stale merge queue), or quiet
 playground focus [on --session <name> --reason "<why>" [--for <minutes>] | off]
                       give one session the Mac for up to 180 minutes (120 by default): every merge, every other session's heavy run and every new session but its own reviewer and tester and a priority start waits until off or its end, and the Inbox holds what comes in quiet but an alert; off prints how many runs queued while it stood and how long they waited, the line the Inbox's card carries once focus ends; bare, it prints the focus standing
 playground priority [on <session> --reason "<why>" | off <session> --reason "<why>"]
-                      the one way to open a priority window, and only on the owner's or the dispatcher's word: on writes the data folder's priority-<session>.json, naming the session, who opened it, the reason and the time, and while it stands a spawn.sh --priority start passes the load and slots gates and focus; off lifts it, and ops-tick's priority-lapse beat lifts one still standing after ${LAPSE_HOURS} hours; each on, off and lapse is a line in ops/priority.log; a priority file another writer keeps it leaves alone; bare, it lists the priority files standing
+                      the one way to open a priority window, and only on the owner's or the dispatcher's word: on writes the data folder's priority-<session>.json, naming the session, who opened it, the reason and the time, and while it stands a spawn.sh --priority start passes the load, slots and sessions gates and focus; off lifts it, and ops-tick's priority-lapse beat lifts one still standing after ${LAPSE_HOURS} hours; each on, off and lapse is a line in ops/priority.log; a priority file another writer keeps it leaves alone; bare, it lists the priority files standing
 playground page <file.html> --title "<title>" --by <session> [--for <session>]
                       keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, and print the copy's path for an Inbox card's html attachment (bun run ask new), opening nothing; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
 playground update [--to <tag>]
@@ -70,8 +70,8 @@ playground yard login | logout | channels | read <channel> | post <channel> <tex
 playground orgs resolve [--repo <dir>]
                       write the merged skill plugin a session in <dir> loads and print its folder: each skill from the first scope that has it: ext.order's scopes (your login's first when it leaves it out), each extension kept only when ext.links links it to the repo's GitHub owner, to the org whose own folder ~/<org> holds a <dir> with no GitHub origin, or *, then each bundled extension ext.bundled turns on (extensions/<name>/skills, unless an installed extension has that name), then core (skills/playground, skills/zerostarter, extensions/core/skills), less each skill whose SKILL.md <dir>'s own .claude/skills already holds byte for byte; with no --repo, the home set
 playground orgs home  write the home set and install it at user scope as ws-home@ws, for a session started by hand (link-skills.sh runs it)
-playground rm <path> [--reason "<why>"] | --worktree <path> [--discard [--decision <id>]] [--pr <url>] [--reason "<why>"] | --list | --restore <id>
-                      move a path into the trash (the data folder's trash/<UTC-ts>-<session>/<n>/, with a manifest.jsonl line), where it stays 7 days, sooner when the disk has under 50 GB free, its node_modules and web/next/.next stripped, which an install or a build rebuilds; refuse a protected path (HOME and the folders that hold it, ~/.ssh and its kin, the data folder but for the caller's own scratch/<name>/ and scratchpad/<name>/ and an ended session's whole scratchpad/<folder>/ (a real folder no live roster row names as itself or as <folder>-<role>), the main checkout), a path over 5,000 files or 2 GB (an ended session's whole scratchpad/<folder>/ skips the file count), a fourth delete in a minute from one session, or a move to another volume; --worktree takes a worktree in .claude/worktrees that no live session holds (a roster row naming its branch or its PR's number holds it no more once that PR has merged or closed and the worktree sits at its head, which it prints as freed; commits past it keep the hold, named with them; a live row also holds no more a worktree sitting clean, detached, at a commit origin/canary holds), with no uncommitted change and its work landed on canary, or, for another repo's worktree whose branch gh answers has no PR, its commits no remote holds archived by git format-patch into the data folder's scratchpad/archive/<repo>/<worktree>-<HEAD sha7>/ first (--discard lets those two go, which a session (PLAYGROUND_ROLE set, or a claude process above it) or a call whose parent is pid 1 or unreadable passes once the worktree's PR (--pr's, else its branch's) has merged or closed, else only with --decision <id>, an approved Inbox delete decision naming the path; --pr <url> names the PR whose session used it, so another session of that PR holds it by that PR's number no more), and prunes it from git; --list prints what the trash holds and --restore puts one item back
+playground rm <path> [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>
+                      move a path into the trash (the data folder's trash/<UTC-ts>-<session>/<n>/, with a manifest.jsonl line), where it stays 7 days, sooner when the disk has under 50 GB free, its node_modules and web/next/.next stripped, which an install or a build rebuilds; refuse a protected path (HOME and the folders that hold it, ~/.ssh and its kin, the data folder but for the caller's own scratch/<name>/ and scratchpad/<name>/ and an ended session's whole scratchpad/<folder>/ (a real folder no live roster row names as itself or as <folder>-<role>), the main checkout), a path over 5,000 files or 2 GB (an ended session's whole scratchpad/<folder>/ skips the file count), a fourth delete in a minute from one session, or a move to another volume; --worktree takes a worktree in .claude/worktrees that no live session holds (a roster row naming its branch or its PR's number holds it no more once that PR has merged or closed and the worktree sits at its head, which it prints as freed; commits past it keep the hold, named with them; a live row also holds no more a worktree sitting clean, detached, at a commit origin/canary holds), with no uncommitted change and its work landed on canary, or, for another repo's worktree whose branch gh answers has no PR, its commits no remote holds archived by git format-patch into the data folder's scratchpad/archive/<repo>/<worktree>-<HEAD sha7>/ first (--discard lets those two go, with no decision, its commits no remote holds first written to a git bundle beside it in the trash (<name>.bundle and <name>.shas), which git -C <repo> fetch <bundle> HEAD brings back; --pr <url> names the PR whose session used it, so another session of that PR holds it by that PR's number no more, with --discard only once that PR reads MERGED or CLOSED), and prunes it from git; --list prints what the trash holds and --restore puts one item back
 playground rules [<name>]
                       the standing rules a factory session starts with, each by its glance line, or one rule whole, with this machine's values in its slots
 playground settings list | get <key> [--org <org>] | why <key> | set <key> <value> --reason "<why>" [--scope <scope>] | reset <key> --reason "<why>" [--scope <scope>]
@@ -86,8 +86,8 @@ playground migrate --archive <checkout> --pre-squash <sha> --org <org> [--old <r
                       once, at the switch: move the old data folder in ~/.claude to ~/.playground, seed your login's settings and the release owners' list from the archive checkout (its canary, or --old, and the pre-squash head), bring the hand-made skills into the org's scope unless its clone holds them, then, with the Dashboard's job stopped, make each move the migration table at the pre-squash head lists: renamed and dropped jobs, archived stale copies, moved state files, and renamed variables in your profiles and LaunchAgents, and last runs playground herdr pin; a value already set is left
 playground uninstall [--purge]
                       remove the LaunchAgents that run from this checkout or the data folder, stop the Dashboard's stack and remove every link into this checkout; --purge also removes the Dashboard's database and moves the data folder aside to <data folder>-purged-<UTC time>, after asking
-playground add [--kind worker|runner] [<name>] [--title "<title>"] [--brief <file>] [--model <id>] [--backend glm|claude]
-                      start a worker (or a runner) through spawn.sh, under the name given or one bun run name picks, on handoffs/new-worker.md by default; a worker needs --title, a plain title of up to 40 characters, and a runner takes its name and no --title
+playground add [--kind worker|runner] [<name>] [--title "<title>"] [--brief <file>] [--model <id>] [--backend glm|claude] [--account <email>]
+                      start a worker (or a runner) through spawn.sh, under the name given or one bun run name picks, on handoffs/new-worker.md by default; a worker needs --title, a plain title of up to 40 characters, and a runner takes its name and no --title; --account names the Claude login, which a worker needs while usage.accounts lists a Claude account
 playground add --dispatcher --backend glm
                       start a second dispatcher on GLM
 playground alerts-wait <name>
@@ -295,7 +295,11 @@ export const addCommand = (
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
     if (arg === "--dispatcher") dispatcher = true
-    else if (["--backend", "--brief", "--kind", "--manager", "--model", "--title"].includes(arg)) {
+    else if (
+      ["--account", "--backend", "--brief", "--kind", "--manager", "--model", "--title"].includes(
+        arg,
+      )
+    ) {
       const value = args[++i]
       if (value === undefined) return { error: `${arg} needs a value` }
       if (arg === "--manager") manager = value
@@ -312,7 +316,12 @@ export const addCommand = (
   const backend = options["--backend"]
   if (backend !== undefined && !BACKENDS.includes(backend))
     return { error: `--backend takes claude or glm, not ${backend}` }
-  const passed = [...(model ? ["--model", model] : []), ...(backend ? ["--backend", backend] : [])]
+  const account = options["--account"]
+  const passed = [
+    ...(model ? ["--model", model] : []),
+    ...(backend ? ["--backend", backend] : []),
+    ...(account ? ["--account", account] : []),
+  ]
 
   const kind = options["--kind"]
   const title = options["--title"]
@@ -321,6 +330,7 @@ export const addCommand = (
 
   if (dispatcher) {
     if (
+      account !== undefined ||
       manager !== undefined ||
       words.length ||
       brief !== undefined ||

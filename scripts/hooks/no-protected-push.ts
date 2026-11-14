@@ -6,7 +6,7 @@ import { readPolicyOrDefaults } from "../../packages/settings/src/rendered"
 import { implicitRepos, remoteRepo, type Repo, repoOf } from "./github"
 import { REF_MOVE } from "./no-prepare-write"
 import { gitCommand } from "./no-stash"
-import { builderLead } from "./role"
+import { builderLead, namesRole } from "./role"
 import {
   type ApiRequest,
   type Command,
@@ -248,6 +248,22 @@ function globals(args: Word[], env: Env): { carried: boolean; dir: string | unde
 const gitVariable = (key: string) =>
   /^GIT_(?:COMMON_DIR|CONFIG(?:_\w+)?|DIR|NAMESPACE|WORK_TREE)$/.test(key)
 
+// Whether the session's own environment holds the closed sandbox's git env config alone (scripts/spawn.sh): a count, each key below it commit.gpgsign and each value false, and no other git variable, a set that moves no push; a near miss, or the set typed on the line, stays a variable the hook cannot read.
+function signingOff(environment: Record<string, string | undefined>): boolean {
+  const count = environment.GIT_CONFIG_COUNT
+  if (count === undefined || !/^[1-9]\d*$/.test(count)) return false
+  const expected = new Set(["GIT_CONFIG_COUNT"])
+  for (let n = 0; n < Number(count); n++) {
+    const key = `GIT_CONFIG_KEY_${n}`
+    const value = `GIT_CONFIG_VALUE_${n}`
+    if (environment[key] !== "commit.gpgsign" || environment[value] !== "false") return false
+    expected.add(key).add(value)
+  }
+  return Object.keys(environment)
+    .filter(gitVariable)
+    .every((name) => expected.has(name))
+}
+
 // Whether a subcommand other than push may push: false for one of git's own, or an alias whose text names no push; true for an alias that names one, or one the hook cannot read.
 function aliasOf(sub: string, args: Word[], dir: string | undefined): boolean {
   if (builtin(sub)) return false
@@ -273,7 +289,8 @@ function judge(
   const { carried: optioned, dir } = globals(args, env)
   const carried =
     optioned ||
-    [...parsed.local.keys(), ...env.vars.keys(), ...Object.keys(env.process)].some(gitVariable)
+    [...parsed.local.keys(), ...env.vars.keys()].some(gitVariable) ||
+    (!signingOff(env.process) && Object.keys(env.process).some(gitVariable))
   if (sub.value !== "push") {
     // send-pack and subtree push write the refs they name by their own rules, which the hook does not read
     const other =
@@ -362,10 +379,6 @@ function judgeTool(tool: string, input: Record<string, unknown>, factory: string
   const what = typeof branch === "string" && branch !== "" ? branch : "the default branch, canary"
   return `no-protected-push hook refuses ${tool}: it writes ${what} of ${place}. ${ROUTE} ${FIX}`
 }
-
-// Whether a command may set the role variable a merge's pass reads, or source a file that may: the pass then goes, since the hook reads the role from its own launch.
-const namesRole = (command: string): boolean =>
-  /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command)
 
 // A gh pr merge on the factory's repository, which only the Builder runs by hand, in the one form pr:merge's README names.
 async function judgeMerge(

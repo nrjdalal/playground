@@ -36,15 +36,15 @@ const USAGE =
 
 const DAY = 24 * 3600 * 1000
 
-// The hooks whose check() takes the main checkout third: canary's tree is unpacked by git archive and is no git checkout, so on its own default each would read that folder as main, and both sides get the head's main checkout
+// The hooks whose check() takes the main checkout third: canary's tree is unpacked by git archive and is no checkout of the repository, so on its own default each would read that folder as main, and both sides get the head's main checkout
 export const TAKES_MAIN = ["no-main-checkout", "no-unslotted-run"]
 
-// Every file in the hooks' import graph that finds a path from its own copy's folder (import.meta's dir, path or url), and why each reads the same on both sides: canary's copy sits in an unpacked tree that is no git checkout
+// Every file in the hooks' import graph that finds a path from its own copy's folder (import.meta's dir, path or url), and why each reads the same on both sides: canary's copy sits in an unpacked tree that is no checkout of the repository
 export const ROOT_READS: Record<string, string> = {
   "packages/scripts/src/main-checkout.ts":
     "pinned: mainCheckout() reads PLAYGROUND_REPO first, which both sides get as the head's main checkout",
   "packages/scripts/src/playground/setting.ts":
-    "unreached: only stuck-alert's import.meta.main block imports it, and role.ts and no-chat-question run it for sessions.names and live.branch, data-folder reads that never take its checkout's origin",
+    "pinned: no-protected-push's factoryRepo reads its checkout's origin when factory.repo is unset, and canary's tree takes the head main checkout's origin",
   "packages/settings/src/rendered.ts":
     "its own tree: coreDir() is extensions/core, whose lists ship with each version",
   "scripts/hooks/no-chat-question.ts":
@@ -619,6 +619,14 @@ async function main(args: string[]): Promise<number> {
       }
     : {}
   const headMain = dirname(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]))
+  // canary's unpacked tree has no git origin, so setting.ts's factoryRepo would read none there and no-protected-push would count every repository as the factory's: the tree takes the head main checkout's origin, so both sides read the same repository
+  const origin = Bun.spawnSync(["git", "-C", headMain, "remote", "get-url", "origin"], {
+    stderr: "ignore",
+  })
+  if (origin.exitCode === 0) {
+    git(before, ["init", "-q"])
+    git(before, ["config", "remote.origin.url", origin.stdout.toString().trim()])
+  }
   const result = { changed: [] as string[], counts: [] as string[] }
   for (const hook of hooks) {
     const own = join(before, "scripts/hooks", `${hook}.ts`)

@@ -880,12 +880,22 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1663 a commit by one -C that climbs out of a link | git -C, it climbs out of a link",
       // the row's cd moves the shell, so its --cwd is read from a folder no spelling knows
       "#1663 turbo by bunx --cwd that runs only when the cd before its || failed | bunx --cwd, it moves folders",
-      // bunx's spelling takes the row's last --cwd, which bun reads from the --cwd=/ before it, so the row's own folder holds none
+      // a spelling takes one of the row's --cwd alone, which bun reads from the --cwd before it, so the row's own folder holds none
       "#1732 a runner --cwd read from the one before it | bunx --cwd, no folder",
       "#1732 turbo's relative --cwd read from the runner's | bunx --cwd, no folder",
       "#1747 bunx running a commit in a --cwd read from the one before | bunx --cwd, no folder",
       "#1747 bunx running bun's build in a --cwd in a worktree read from the one before | bunx --cwd, no folder",
       "#1747 bunx running bun's build in a --cwd read from the one before | bunx --cwd, no folder",
+      "#1747 ext add by a bun run that bunx starts, its --cwd read from the runner's | bun --cwd, no folder",
+      "#1747 ext add by a bun run that bunx starts, its --cwd read from the runner's | bunx --cwd, no folder",
+      "#1747 ext add by a bun that bun x starts, its --cwd read from bun's own | bun --cwd, no folder",
+      "#1747 ext add by a bun x that bunx starts, its --cwd read from the runner's | bun --cwd, no folder",
+      "#1747 ext add by a bun x that bunx starts, its --cwd read from the runner's | bunx --cwd, no folder",
+      "#1747 ext add by a bunx that bunx starts, its --cwd read from the runner's | bunx --cwd, no folder",
+      "#1747 ext add by bun x bun in a runner --cwd read from bun's own | bun --cwd, no folder",
+      "#1747 ext add by bunx bun in a --cwd read from the one before | bunx --cwd, no folder",
+      "#1747 ext put by a bun that bunx starts, its --cwd read from the runner's | bun --cwd, no folder",
+      "#1747 ext put by a bun that bunx starts, its --cwd read from the runner's | bunx --cwd, no folder",
       // the row's -C is git's own, and its message, which git never runs, holds the cd, so no spelling of it moves a folder git uses
       "#1887 a commit by -C into a clone in the root whose message holds a folder change | git -C, it moves folders",
       "#1887 a commit by -C to another folder whose message holds a folder change | git -C, it moves folders",
@@ -943,12 +953,20 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       // turbo's own --cwd, which no path flag spells
       "#1663 turbo by its --cwd in a plain folder of the worktrees folder | --cwd",
       "#1663 turbo by its --cwd in the worktrees folder | --cwd",
-      // the --cwd=/ that bunx's spelling passes over for the row's last --cwd, read from it
+      // a --cwd that a spelling passes over for a later one, which bun reads from it or runs past
       "#1732 a runner --cwd read from the one before it | --cwd",
       "#1732 turbo's relative --cwd read from the runner's | --cwd",
       "#1747 bunx running a commit in a --cwd read from the one before | --cwd",
       "#1747 bunx running bun's build in a --cwd in a worktree read from the one before | --cwd",
       "#1747 bunx running bun's build in a --cwd read from the one before | --cwd",
+      "#1747 ext add by a bun run that bunx starts, its --cwd read from the runner's | --cwd",
+      "#1747 ext add by a bun that bun x starts, its --cwd read from bun's own | --cwd",
+      "#1747 ext add by a bun that bunx starts in its own --cwd past the runner's | --cwd",
+      "#1747 ext add by a bun x that bunx starts, its --cwd read from the runner's | --cwd",
+      "#1747 ext add by a bunx that bunx starts, its --cwd read from the runner's | --cwd",
+      "#1747 ext add by bun x bun in a runner --cwd read from bun's own | --cwd",
+      "#1747 ext add by bunx bun in a --cwd read from the one before | --cwd",
+      "#1747 ext put by a bun that bunx starts, its --cwd read from the runner's | --cwd",
       // an option that takes no value, followed by an operand
       "#356 a link to the data folder made in the same call | -s",
       "#356 a write after a word with an unbalanced quote | -rf",

@@ -31,7 +31,7 @@ export type Proc = { command: string; cwd: string; pid: number; sockets: string[
 // A running node_modules clone, from run-slot's clone holder record: the session that runs it, its pid, the checkout it copies from and the one it copies into.
 export type Clone = { destination: string; pid: number; source: string; who: string }
 
-// What tells a worktree is held: the folder another repo's worktree whose branch gh answers has no PR has its commits no remote holds archived in before it goes (archiveUnlanded), the running clones, a reader quarantine calls again right before its move, the roster's live statuses, the folders beyond the other worktrees read for links into it (linkPlaces), every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that; the worktree's own PR once it reads MERGED or CLOSED (freed, at its head), which no roster row naming its branch or its number holds while the worktree sits at that PR's head, and where a pass past such a row is told (note).
+// What tells a worktree is held: the folder another repo's worktree whose branch gh answers has no PR has its commits no remote holds archived in before it goes (archiveUnlanded), the running clones, a reader quarantine calls again right before its move, the roster's live statuses, the folders beyond the other worktrees read for links into it (linkPlaces), every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, its commits no remote holds bundled first, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that, under --discard only once that PR reads MERGED or CLOSED (freed); the worktree's own PR once it reads MERGED or CLOSED (freed, at its head), which no roster row naming its branch or its number holds while the worktree sits at that PR's head, and where a pass past such a row is told (note).
 export type Holders = {
   archive?: string
   clones: () => Clone[]
@@ -51,6 +51,7 @@ export const isAgentBrowser = (command: string): boolean =>
   /^agent-browser(?:-[\w-]+)?$/.test(basename(command.split(" ")[0]!))
 
 export type Quarantined = {
+  bundle?: string
   files: number
   id: string
   size: number
@@ -64,6 +65,7 @@ export type WorktreeGit = { branch: string | null; gitdir: string; sha: string }
 
 export type TrashEntry = {
   at: string
+  bundle?: string
   carveOut?: string
   ended?: string
   files: number
@@ -403,7 +405,7 @@ const refused = (text: string, kind: Refusal["kind"] = "refused"): Refusal => ({
   refused: text,
 })
 
-// Renames a path into <trash>/<UTC-ts>-<session>/<n>/ with a manifest line, after the protected list, worktreeRefusal for a worktree (which only the worktree option's holders move), the tripwire, the volume check and, for a worktree, the running clones read again, since the walk that counts its files takes seconds and a clone can start inside it.
+// Renames a path into <trash>/<UTC-ts>-<session>/<n>/ with a manifest line, after the protected list, worktreeRefusal for a worktree (which only the worktree option's holders move), the tripwire, the volume check and, for a worktree, the running clones read again, since the walk that counts its files takes seconds and a clone can start inside it; a worktree --discard lets go has its commits no remote holds bundled beside it in that batch first (bundleUnpushed).
 export function quarantine(
   path: string,
   opts: {
@@ -467,6 +469,8 @@ export function quarantine(
   if (dev(abs) !== dev(trash)) return refused(otherVolume(abs, trash))
   const cloned = opts.worktree && cloneHolder(real(abs), opts.worktree.clones())
   if (cloned) return refused(cloned)
+  const kept = opts.worktree?.discard ? bundleUnpushed(abs, trash, opts.session, now) : {}
+  if ("refused" in kept) return refused(kept.refused)
   const batch = `${stamp(now)}-${opts.session}`
   mkdirSync(join(trash, batch), { recursive: true })
   let n = 1
@@ -498,6 +502,7 @@ export function quarantine(
   const id = `${batch}/${n}`
   const entry: TrashEntry = {
     at: now.toISOString(),
+    ...kept,
     ...(carve ? { carveOut: opts.carveOut } : {}),
     ...(ended ? { ended } : {}),
     files,
@@ -511,6 +516,7 @@ export function quarantine(
   }
   appendFileSync(join(trash, batch, "manifest.jsonl"), `${JSON.stringify(entry)}\n`)
   return {
+    ...kept,
     files,
     id,
     size,
@@ -674,10 +680,10 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const byId = /\d/.test(id) && where.includes(id)
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
+    // --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
+    const lifted = agent.pr === holders.pr && (!holders.discard || holders.freed !== undefined)
     const pr =
-      typeof agent.pr === "string" && agent.pr !== holders.pr
-        ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1]
-        : undefined
+      typeof agent.pr === "string" && !lifted ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1] : undefined
     const byPr = pr !== undefined && new RegExp(`(^|\\D)${pr}(\\D|$)`).test(where)
     if (!byBranch && !byPr && !byName && !byId) continue
     // a clean detached checkout at a commit origin/canary holds is a reader of canary, not the row's work, so a live row holds it no more
@@ -728,7 +734,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     return `${by}: agent-browser session ${session}, which agent-browser --session ${session} close frees`
   }
   if (holders.discard) return null
-  const discard = `playground rm --worktree ${at} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`
+  const discard = `playground rm --worktree ${at} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`
   const changed = git("status", "--porcelain", "-z", "--no-renames").out.split("\0").filter(Boolean)
   if (changed.length) {
     const paths = changed.slice(0, 3).map((line) => line.slice(3))
@@ -747,6 +753,63 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     return null
   }
   return `${at}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since)${archived ? `, and ${archived.refused}` : ""}: ${discard}`
+}
+
+// Writes each ref's commits past exclude (git rev-list words, such as origin/canary or --remotes) by git bundle create in repo into <trash>/<UTC-ts>-<session>/<name>.bundle, beside <name>.shas with a "<sha> <ref>" line each, then reads the bundle's heads back: its path and the refs it holds at their sha, or why none was written. The trash purge takes both with their batch.
+export function bundleToTrash(
+  repo: string,
+  refs: { ref: string; sha: string }[],
+  exclude: string[],
+  at: { name: string; now: Date; session: string; trash: string },
+): { held: string[]; path: string } | { refused: string } {
+  const git = (...args: string[]) => {
+    const run = Bun.spawnSync(["git", "-C", repo, ...args], { stderr: "pipe", stdout: "pipe" })
+    return { err: run.stderr.toString().trim(), ok: run.exitCode === 0, out: run.stdout.toString() }
+  }
+  const batch = join(at.trash, `${stamp(at.now)}-${at.session}`)
+  const path = join(batch, `${at.name}.bundle`)
+  if (!SESSION.test(at.session) || existsSync(path))
+    return { refused: `its bundle ${path} is taken or not a trash path` }
+  try {
+    mkdirSync(batch, { recursive: true })
+  } catch (error) {
+    return {
+      refused: `its bundle's folder ${batch} could not be made: ${(error as Error).message}`,
+    }
+  }
+  const made = git("bundle", "create", "-q", path, ...refs.map((r) => r.ref), "--not", ...exclude)
+  if (!made.ok) return { refused: `git bundle create failed: ${made.err.split("\n").at(-1)}` }
+  writeFileSync(join(batch, `${at.name}.shas`), refs.map((r) => `${r.sha} ${r.ref}\n`).join(""))
+  const heads = new Set(git("bundle", "list-heads", path).out.split("\n"))
+  return { held: refs.filter((r) => heads.has(`${r.sha} ${r.ref}`)).map((r) => r.ref), path }
+}
+
+// --discard's first step: the worktree's commits no remote holds, kept in a bundle in the trash beside its move, its path for the trash entry; none when every commit is on a remote, else why the worktree stays.
+const bundleUnpushed = (
+  at: string,
+  trash: string,
+  session: string,
+  now: Date,
+): { bundle?: string } | { refused: string } => {
+  const head = Bun.spawnSync(["git", "-C", at, "rev-parse", "HEAD"], { stdout: "pipe" })
+  const ahead = Bun.spawnSync(["git", "-C", at, "rev-list", "-1", "HEAD", "--not", "--remotes"], {
+    stdout: "pipe",
+  })
+  const sha = head.stdout.toString().trim()
+  if (head.exitCode !== 0 || ahead.exitCode !== 0)
+    return { refused: `${at}'s commits could not be read, so it stays` }
+  if (!ahead.stdout.toString().trim()) return {}
+  const made = bundleToTrash(at, [{ ref: "HEAD", sha }], ["--remotes"], {
+    name: basename(at),
+    now,
+    session,
+    trash,
+  })
+  if ("refused" in made)
+    return { refused: `${at}'s commits no remote holds stay, and so does it: ${made.refused}` }
+  return made.held.length
+    ? { bundle: made.path }
+    : { refused: `${at}'s bundle ${made.path} does not hold its HEAD ${sha}, so it stays` }
 }
 
 const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`

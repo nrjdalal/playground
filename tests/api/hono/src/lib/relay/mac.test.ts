@@ -893,6 +893,42 @@ describe("startRelay, this Mac's socket to the hub", () => {
     expect([made[1]!.readyState, made[1]!.closedWith]).toEqual([3, undefined])
   })
 
+  // a swapped token leaves the socket opened on the old one holding the relay until the recycle, so renew opens the next one on the new token now, as a recycle does
+  test("renew opens the next socket on the token the Keychain holds now, and the old one answers a read in flight before it goes", async () => {
+    const { connect, made } = sockets()
+    let token = "yard_old"
+    const held: (() => void)[] = []
+    const stop = relay(connect, {
+      dispatch: async () => {
+        await new Promise<void>((resolve) => held.push(resolve))
+        return new Response('{"data":[]}', { headers: { "content-type": "application/json" } })
+      },
+      token: async () => token,
+    })
+    try {
+      await until("the socket", () => made.length === 1)
+      made[0]!.open()
+      made[0]!.feed(frame({ at: new Date().toISOString(), id: crypto.randomUUID() }))
+      await until("the read", () => held.length === 1)
+      token = "yard_new"
+      stop.renew()
+      await until("the next socket", () => made.length === 2)
+      expect(made[1]!.token).toBe("yard_new")
+      expect(made[0]!.readyState).toBe(1)
+      made[1]!.open()
+      expect(made[0]!.readyState).toBe(1)
+      held[0]!()
+      await until("the answer", () =>
+        [...made[0]!.sent, ...made[1]!.sent].some((one) => one.includes('"response"')),
+      )
+      await until("the old socket going", () => made[0]!.readyState === 3)
+      expect(made[0]!.closedWith).toBe(RELAY_REPLACED_CLOSE)
+      expect(made).toHaveLength(2)
+    } finally {
+      stop()
+    }
+  })
+
   test("a next socket that never opens leaves the old one holding the relay", async () => {
     const { connect, made } = sockets()
     const stop = relay(connect, { recycleMs: 30 })
@@ -1139,7 +1175,12 @@ describe("a bot's read of the dispatcher's log, on this Mac (#1888)", () => {
   const botDeps = (
     dispatch: (request: Request) => Promise<Response>,
     over: Record<string, unknown> = {},
-  ) => ({ ...deps(dispatch), envValues: () => [], readers: () => ({ "Scout[bot]": DM }), ...over })
+  ) => ({
+    ...deps(dispatch),
+    secretValues: () => [],
+    readers: () => ({ "Scout[bot]": DM }),
+    ...over,
+  })
 
   test("a bot on yard.logReaders reads the log route as this Mac's owner, its answer redacted before it leaves", async () => {
     const reached: string[][] = []
@@ -1152,7 +1193,7 @@ describe("a bot's read of the dispatcher's log, on this Mac (#1888)", () => {
     }
     const answer = await answerRelay(
       botFrame(),
-      botDeps(dispatch, { envValues: () => [ENV_VALUE] }),
+      botDeps(dispatch, { secretValues: () => [ENV_VALUE] }),
     )
     expect(answer?.status).toBe(200)
     expect(reached).toEqual([[`${LOG}?after=4`, "session=fake"]])

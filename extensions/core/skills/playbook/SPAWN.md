@@ -9,14 +9,14 @@ Read the section for the mode you start and for each flag you pass, and the sect
   spawn.sh names each with `roster.ts who builder` and `who ops` ([ROSTER.md](ROSTER.md)), each seat's live holder, else its `sessions.names` name, so a manager respawned under a new name takes its new workers at once:
 
   ```bash
-  "${PLAYGROUND_REPO:?}/scripts/spawn.sh" worker <name> <brief> --title "<title>" [--reports-to <session>]
+  "${PLAYGROUND_REPO:?}/scripts/spawn.sh" worker <name> <brief> --title "<title>" --account <email> [--reports-to <session>]
   "${PLAYGROUND_REPO:?}/scripts/spawn.sh" runner <name> <brief>
   ```
 
 - **A checker or probe** opens as a column in its spawner's herdr workspace, to the right of the newest member's pane (the worker for its reviewer, the reviewer for its tester), run from its spawner's session, which it reports to:
 
   ```bash
-  "${PLAYGROUND_REPO:?}/scripts/spawn.sh" column <reviewer|tester|probe> <name> <reports-to> <the newest member's herdr pane id> <brief>
+  "${PLAYGROUND_REPO:?}/scripts/spawn.sh" column <reviewer|tester|probe> <name> <reports-to> <the newest member's herdr pane id> <brief> --account <email>
   ```
 
   A reviewer or tester adds `--pr <pull url>`, the pull request it serves, or `--pr <scope>/<kind>/<key>`, the extension item it scores, so open the PR as a draft before its checkers ([scripts/README.md](../../../../scripts/README.md#spawnsh) holds the refusal and the row it writes).
@@ -32,17 +32,21 @@ Read the section for the mode you start and for each flag you pass, and the sect
 
 ## Capacity gate
 
-spawn.sh holds the machine's room in code (the room is the cores in use, not a count of slots), through a capacity gate that refuses, failing closed, unless four checks pass in order, the first failure naming its gate and its reading,
-and counts no live sessions or workers (no cap; Ops watches the live board for the risk of a terminal that stops answering, as cmux did at 49 live sessions and load5 97):
+spawn.sh holds the machine's room in code (the room is the cores in use, not a count of slots), through a capacity gate that refuses, failing closed, unless five checks pass in order, the first failure naming its gate and its reading (while no session cap is set, Ops watches the live board for the risk of a terminal that stops answering, as cmux did at 49 live sessions and load5 97):
 the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`), its own and each `slots.peers` folder's, each weighing half its item's load units, under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
 less a quarter (`gates.smallReserve`) kept for small items unless the start is small (`--size small|medium|big`, else small for a reviewer or tester, else the roster's or plan.json's size, else medium; [rules/slots.md](../../rules/slots.md)), while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the checkers,
 refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores, and the refusal names the load, the starts and the line;
 a `--priority` start passes it while `priority.json`, an org's own `priority-<name>.json`, a job's own `priority-start.json` or a session's own window (`playground priority on`, [scripts/README.md](../../../../scripts/README.md#spawnsh)) stands in the data folder, since priority work comes first, as it passes focus on any of them,
-and so does a resume within 15 minutes of `spawn.sh close` ending a row that read live, since that session already counts in the load it comes back into;
+and so does a resume within 15 minutes of `spawn.sh close` ending a row that read live, since that session already counts in the load it comes back into,
+and a manager's start or resume (role dispatcher or lead, an orchestrator's included, by every path: `spawn.sh restore`, `playground <manager>`, the Dashboard's start, switch and restart) while the CPU reads 40% idle or more (`top -l 2 -n 0`'s second sample, run-slot's default bar for slots 2 to 4), its row's `readings.cpu_idle` naming the share,
+since after a reboot load5 still carries the boot's spike and each settled start still counts, which held the managers' restore at 63% idle; under 40%, or with no reading, the line holds it and its refusal names the share;
 memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`),
 and for a fresh worker start alone swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), refusing when vm_stat gives no reading, since free memory counts compressible pages and read 62% on 7 Nov while 150 pages swapped in a second; every other start keeps its pass, as at the slots gate;
 for a fresh worker start alone, a run-slot lane free with the load units for a run, or an empty queue (`scripts/ops/run-slot.sh room`), so a new worker never joins a queue it has no room in, while checkers, resumes and moves skip it,
-and a `--priority` start passes a full queue with a priority file standing, as at the load gate, and a `--reads-only` worker start passes any room, its row's `readings.reads_only` true, since it runs nothing through run-slot; and the launching backend's usage:
+and a `--priority` start passes a full queue with a priority file standing, as at the load gate, and a `--reads-only` worker start passes any room, its row's `readings.reads_only` true, since it runs nothing through run-slot;
+while `gates.sessionCap` is set (0, the default, caps nothing), a worker, reviewer or tester start under that many live workers and checkers in the roster (rows reading `starting`, `waiting` or `working` named `<id>-worker`, `-reviewer` or `-tester` or with that word first, but the starter's own), its row's `readings.sessions` and `readings.session_cap` naming the count and the cap,
+while a `--priority` start passes it with a priority file standing, as at the load gate, and marks its row `priority=1`, which the count leaves out, so a job's own priority starts sit outside the cap (a start without the flag clears the mark),
+and a resume of a row reading live passes it, and so does a resume within 15 minutes of `spawn.sh close` ending a row that read live, its row's `readings.counted` true, since the count held that session; and the launching backend's usage:
 Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone,
 which ops-sweep writes and renews while an account the split can pick projects under 100% at its week reset (`scripts/ops/README.md`'s Usage forecasts), or a person writes by hand, and the pass line names, a missing, empty, past or unreadable time leaving the pace on;
 a `usage.json` never written, as on a fresh install before the ops-usage job first runs, passes every start, its pass line reading `unread (usage.json not yet written)`, while one that exists still has to read, be fresh and be under its limits;
@@ -65,13 +69,15 @@ A session already running stays where it is until its next restart.
 
 ## Launch, model and effort
 
-spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions` (a probe's file is `factory-settings-sandbox-400k.json`, a dispatcher's or a lead's `factory-settings-manager-400k.json`):
+spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions` (a probe's file is `factory-settings-sandbox-400k.json`, a `--sandbox` start's its own `factory-settings-sandbox-closed-400k-<name>.json`, a dispatcher's or a lead's `factory-settings-manager-400k.json`):
 every session starts at high effort, and another effort comes with spawn.sh's `--effort` at a start or a resume, by whoever playbook's chain names ([SKILL.md](SKILL.md#chain)) and brief-rush's model rule;
 every session runs on `models.default` (Opus) unless it starts with `--model` naming another of `models.claude` (Fable, Sonnet or Haiku by default; spawn.sh refuses any other id, `--model` beside `--backend glm`, and any but `models.checker` (Opus) for a reviewer or tester, whose verdict gates a merge, and records none of them,
 so a resume takes `--model` afresh and one without it runs on Opus) or with `--backend glm` (below) (Opus at extra-high effort for research and everything else, never Sonnet), and every subagent a session starts runs on Sonnet unless it names a model,
 from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approved #i492, 17 Oct; on GLM the alias maps to GLM), so a brief or subagent call that needs Opus names `model: opus`; a scheduled ops job that calls a model keeps its own.
 A resume of a dispatcher, the Assistant or the hosted session keeps neither a model nor an effort the owner picked in its Dashboard composer ([SKILL.md](SKILL.md#chain)).
 Its first prompt names the session, its role and who it reports to, and has it load this skill and read `<brief>`, a file under `~/.playground`, which spawn.sh refuses to start without (a Claude worker's adds that `brief-rush.md` binds it on its Claude lane, within the lanes its own header scopes, while that file exists; a GLM worker's leaves it out).
+spawn.sh reads `<brief>` relative to `~/.playground` (`handoffs/brief-<name>.md`), so a bare file name fails with `is not a file`.
+Every start and resume makes the session's scratchpad, the data folder's `scratchpad/<name>/`, at mode 700 before the pane opens, so its first note or log lands there.
 Its skills come by `--plugin-dir` from the folder `playground orgs resolve --repo <its folder>` writes fresh from each scope's accepted copy at every start: an org's worker, in a checkout whose GitHub origin the org owns, or in a folder with no GitHub origin inside the org's own folder in the home folder (`~/<org>`), gets that org's extension's skills over core's.
 
 `--harness codex` starts the first dispatcher in Codex in place of Claude Code: `spawn.sh manager <dispatcher> <brief> --harness codex`, and its resume, alone; spawn.sh refuses it for any other session and beside `--backend`, `--account`, `--model` or `--effort`, since Codex runs on the one login and the model its `CODEX_HOME` holds.
@@ -94,7 +100,7 @@ After a resume, restart any dev stack you served, then re-arm your watches: run 
 Done when the restarted stack answers its `/api/health` and each watch is armed once.
 Before a close that a resume follows (an account move), wait until the session has no run-slot run in flight, since the close kills that run.
 Before an account move, its dispatcher tells every session that serves a dev stack, so what it serves does not go down unannounced.
-A resume within 15 minutes of its close passes spawn.sh's load gate (the capacity gate, above); later resumes go about 2 minutes apart, since the gate counts recent starts and refuses a burst, and a refused resume waits and runs again.
+A resume within 15 minutes of its close passes spawn.sh's load gate and its session cap (the capacity gate, above); later resumes go about 2 minutes apart, since the gate counts recent starts and refuses a burst, and a refused resume waits and runs again.
 
 ## What it records
 
@@ -112,13 +118,19 @@ On a Mac whose inscope exports a workspace's own `CLAUDE_CONFIG_DIR` (its `insco
 ## --account
 
 `--account <email>`, with any mode and anywhere among its words, has the session log in as that Claude account: the lead names it to pin a login (`spawn.sh resume dispatcher <dir> <session-id> --account <email>`, `spawn.sh worker <name> <brief> --title "<title>" --in <dir> --account <email>`), and a running session never switches accounts by itself.
+A start script resolves the login into `$acct` first, `acct=$(bun packages/scripts/src/playground/cli.ts accounts list | grep -o "<pattern>" | head -1)`, and passes `--account "$acct"`,
+so no call's input holds a full email address, which makes the privacy hook ask the owner to confirm.
+`<pattern>` matches the whole address while it spells only the login's local part, such as `<local part>@[^:]*`, since `grep -o` prints only the text it matches and a domain alone can match two logins.
+A worker's, reviewer's or tester's Claude start names its login by full email, never its domain alone, since one domain can match two logins: while `usage.accounts` lists a Claude row, spawn.sh refuses one with no `--account`, listing those rows in their order, a parked one with its `parkedUntil`,
+since the account split below ranks logins by week left per hour and cannot follow which login takes which work.
+A fresh install lists no Claude row, so its bare start stays on the machine's own login; a runner, probe, manager, resume or restore starts bare as below, a probe's `--account` being optional.
 spawn.sh refuses, before it opens a pane, an email that is not a plain `local@domain`, and one with no item in the Keychain under `usage.keychainService`, checking only that the item exists.
 An `--account` naming the machine's own login (`oauthAccount.emailAddress` in Claude Code's `.claude.json`, under `$CLAUDE_CONFIG_DIR` else in `~`, matched in any case) starts on it as a bare start that stays there does, with no token and the account split skipped, so a lead steers a start onto the own login by naming it:
 its usage is judged by that login's own reading alone (`usage.json`, or `ops/usage/stored-login.json` while `usage.json` reads the factory account), refused, naming the reading, whenever a bare start would count that login as over the gate (a `stored-login.json` missing, stale or naming another account among them), and the resume record keeps the `--account`.
 It also refuses an `--account` whose `usage.accounts` row sets `parkedUntil` to a later time, naming `parkedUntil`.
 It also refuses an `--account` whose week a reading names at 100% (`usage.json`, `ops/usage/stored-login.json` or a `usage-<name>.json`, until its `resets_at`, or `usage.json`'s `accounts` map, until its `weekReset`), naming the account and its reading, and, for the map's reading, the account with the most room, in any mode, a resume included.
 The launch then starts with `CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -s <usage.keychainService> -a <email> -w)"` as text, so the new pane's own shell reads the token into the session's environment and it never reaches herdr's argv, spawn.sh's output, the roster or a log; a read that comes back empty stops the pane there, before claude runs, naming the save-it-again command.
-With no `--account`, spawn.sh picks among the machine's own login (the one in `.claude.json`'s `oauthAccount`, judged by `usage.json`, or by `ops/usage/stored-login.json` while `usage.json` reads the factory account, which then counts as another login), each other login with a `usage-<name>.json`, and each account login-flip probes with a reading in `login-flip.json`'s `seen`,
+A bare start the rule above passes picks among the machine's own login (the one in `.claude.json`'s `oauthAccount`, judged by `usage.json`, or by `ops/usage/stored-login.json` while `usage.json` reads the factory account, which then counts as another login), each other login with a `usage-<name>.json`, and each account login-flip probes with a reading in `login-flip.json`'s `seen`,
 keeping those that pass the usage gate, a login whose `usage.accounts` row sets `parkedUntil` to a later time counting as over it.
 It takes the one next in the account split: `ops/usage/login-flip.json`'s `split.shares`, each account's week left per hour to its week reset or, for an ending account, 2 hours before its end, whichever comes first, a fifth of that for an account whose row sets `own` while that deadline is over a day away, none for a parked one, read under 30 minutes old (two of the ops tick's 15-minute beats).
 The pick is a smooth weighted round robin: each start adds every passing login's share to its credit in `ops/usage/split-picks.json`, takes the highest, and takes the shares' sum off it.
@@ -167,7 +179,8 @@ each row read again once its resume finds the session gone and just before its l
 each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with, an `--effort` other than high and, for a reviewer or tester, `--pr` with the PRs its roster row serves,
 in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, or an exec line that does not parse or that it does not run),
 `waiting <name>: <reason>` (a gate holding it over a reading that falls, or focus standing for another session) or `not restored <name>: <reason>` (any other refusal, a gate that cannot read its input or reads a bad setting included).
-The first dispatcher's record runs first, past every gate, so the owner's dispatcher is back before any other resume takes the gate's room.
+The first dispatcher's record runs first, past every gate, so the owner's dispatcher is back before any other resume takes the gate's room, then every other manager's, so the managers are back before the workers, then the rest.
+A skip line takes `kind_of_name` alone and a run line takes `kind_of`, since a full `kind_of` on every skip line (608 on the live log) adds about 20 s.
 A restore whose only misses wait exits 0, since ops-herdr runs it again each cycle while a session waits; a `not restored` line exits 1.
 It is safe to run again, one at a time:
 while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
@@ -197,3 +210,19 @@ the session writes a handoff ([Write a handoff](SESSIONS.md#write-a-handoff), `~
 A resume's `<dir>` is a folder Claude Code already trusts (the Playground checkout or a worktree under it), never a scratchpad or /tmp path.
 In a folder it has never trusted, the session stops on the folder-trust dialog, which no session may approve, and `ListAgents` never lists it.
 A resumed session, a checker included, runs in the worktree or clone it ran in: spawn.sh resume refuses to move a session into the main checkout unless it started there, and refuses a removed folder, naming its branch and, for a the dispatcher worktree, the `git worktree add` line that brings it back.
+
+## --sandbox
+
+`--sandbox`, with a worker's or probe's start or a reviewer's or probe's column, starts the session in the closed sandbox, a file of its own, `factory-settings-sandbox-closed-400k-<name>.json` (`factory-settings-glm-sandbox-closed-400k-<name>.json` on GLM), since its allow list names the session.
+That is a probe's sandbox that also closes loopback, Keychain reads, and reads and writes of the data folder's secret files to its shell commands, holds outbound hosts to GitHub's and the npm registry, and commits unsigned (scripts/README.md, spawn.sh).
+A session works in the worktree it starts in, since Claude Code's own sandbox rule (2.1.323) reads "The repository's `.git/worktrees` is read-only in the sandbox, apart from this session's own worktrees", so `git worktree add` inside it fails and no allow in the settings file opens it.
+So a fresh worker or reviewer start with no `--in` runs in a detached worktree spawn.sh makes before launch, outside the sandbox, at the commit it works from, fetched from origin: a reviewer of the checkout's own PR in `.claude/worktrees/review-<n>` at the PR's head, the clone code-review-loop reuses, and any other in `.claude/worktrees/<name>` at origin's `canary`;
+a probe starts where it does today.
+Claude Code's sandbox also keeps the session's own `.claude/` read-only, and with it `skills/zerostarter/`, which `.claude/skills` links to (measured in a closed review): a checkout or merge that changes a file there fails on `unable to unlink old '<path>': Operation not permitted` and leaves it stale, and a later checkout over it aborts on local changes.
+So the worktree starts at the commit its session works from, and `--sandbox` fits a start whose PR touches neither folder and merges no `canary` that does.
+In it a worker makes its branch with `git fetch origin canary`, then `git switch -c <branch> --no-track origin/canary`, since a branch that tracks `origin/canary` writes the shut `.git/config`, and a reviewer takes the PR's head with `git fetch origin pull/<n>/head` and `git checkout --detach FETCH_HEAD`.
+It writes that worktree, its `.git/worktrees` entry, and the main checkout's `.git/FETCH_HEAD`, `objects`, `refs` and `logs`; every other session's worktree, the `canary`, `main` and `live.branch` (the live dashboard's, `live/dashboard` by default) refs and their logs, `packed-refs`, `config`, `hooks`, `HEAD`, `index` and the rest of the checkout stay shut.
+It pushes with `git push origin HEAD:<branch>`, since `-u` writes the shut `.git/config`.
+It fits a worker with no stack: inside it nothing listens on loopback or reaches a stack, so a tester, which drives one, stays off it, and spawn.sh refuses it for every other role and mode.
+Its roster row records `sandbox=on`, which a resume and `spawn.sh restore` keep, and a start without the flag under the same name clears.
+A start from inside it leaves the `--account` and GLM key check to the new pane's shell, which runs outside the sandbox and stops on a missing item before claude runs.

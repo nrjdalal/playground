@@ -1,4 +1,6 @@
-// AGENTS.md's Commits rule keeps a Co-authored-by trailer out of every commit: commit-msg runs this on the message file, which drops each such line, in any case, and says so, so the commit goes through on its first try; with `--push` pre-push refuses a pushed commit no remote holds yet whose message holds one, since a commit made with --no-verify skips commit-msg, and names the amend that drops it.
+// AGENTS.md's Commits rule keeps a Co-authored-by trailer out of every commit: commit-msg runs this on the message file, which drops each such line, in any case, and says so, so the commit goes through on its first try; with `--push` pre-push refuses a pushed commit no remote holds yet whose message holds one, since a commit made with --no-verify skips commit-msg, and names the amend that drops it. The same push step refuses such a commit whose message, or a pushed ref whose name, holds a term from no-public-leak's list, by sha or ref and kind alone.
+import { listKindsIn, readList } from "./trace-count/count"
+import { type PublicList, publicListPath } from "./trace-count/kinds"
 
 const TRAILER = /^co-authored-by:/i
 
@@ -11,12 +13,15 @@ export const dropTrailers = (message: string): string | null => {
 
 const ZERO = /^0+$/
 
-// Each commit the push sends that no remote-tracking ref holds, newest first, as [sha, subject] when its message holds the trailer: what is already on a remote was read when it went there.
-const trailered = (stdin: string): [string, string][] => {
-  const locals = stdin
+// The refs the push writes, as git hands them on stdin: [local ref, local sha, remote ref], a delete (a zero local sha) left out.
+const pushedRefs = (stdin: string): [string, string, string][] =>
+  stdin
     .split("\n")
-    .map((line) => line.trim().split(/\s+/)[1])
-    .filter((sha): sha is string => !!sha && !ZERO.test(sha))
+    .map((line) => line.trim().split(/\s+/) as [string, string, string])
+    .filter(([, sha]) => !!sha && !ZERO.test(sha))
+
+// Each commit the push sends that no remote-tracking ref holds, newest first, as [sha, subject, message]: what is already on a remote was read when it went there.
+const newCommits = (locals: string[]): [string, string, string][] => {
   if (locals.length === 0) return []
   const log = Bun.spawnSync(
     ["git", "log", "--no-color", "--format=%H%x00%s%x00%B%x01", ...locals, "--not", "--remotes"],
@@ -30,9 +35,25 @@ const trailered = (stdin: string): [string, string][] => {
     .toString()
     .split("\x01")
     .map((entry) => entry.replace(/^\n/, "").split("\x00"))
-    .filter(([sha, , body]) => sha && body !== undefined && dropTrailers(body) !== null)
-    .map(([sha, subject]) => [sha!, subject!])
+    .filter(([sha, , body]) => sha && body !== undefined)
+    .map(([sha, subject, body]) => [sha!, subject!, body!])
 }
+
+// Each list term the push carries, by the commit's sha or the ref and the kind alone, so the refusal never prints the term.
+const listed = (
+  refs: [string, string, string][],
+  commits: [string, string, string][],
+  list: PublicList,
+): string[] => [
+  ...commits.flatMap(([sha, , body]) =>
+    listKindsIn(body, list).map((kind) => `${sha.slice(0, 9)}'s message holds a ${kind} term`),
+  ),
+  ...[...new Set(refs.flatMap(([local, , remote]) => [local, remote]))].flatMap((ref) =>
+    listKindsIn(ref.replace(/^refs\/(?:heads|tags)\//, ""), list).map(
+      (kind) => `the pushed ref's name holds a ${kind} term`,
+    ),
+  ),
+]
 
 if (import.meta.main) {
   if (process.argv[2] !== "--push") {
@@ -46,8 +67,19 @@ if (import.meta.main) {
     }
     process.exit(0)
   }
-  const found = trailered(await Bun.stdin.text())
-  if (found.length === 0) process.exit(0)
+  const refs = pushedRefs(await Bun.stdin.text())
+  const commits = newCommits(refs.map(([, sha]) => sha))
+  const list = await readList(publicListPath())
+  if (typeof list === "string") console.error(`commit-trailer: ${list}`)
+  const terms = typeof list === "object" ? [...new Set(listed(refs, commits, list))] : []
+  if (terms.length)
+    console.error(
+      `commit-trailer: ${terms.join(", ")} from no-public-leak's list, which keeps it out of every public write: reword each message in plain words (\`git commit --amend\` for the newest) or push the branch or tag under another name, then push again`,
+    )
+  const found = commits
+    .filter(([, , body]) => dropTrailers(body) !== null)
+    .map(([sha, subject]) => [sha, subject] as [string, string])
+  if (found.length === 0) process.exit(terms.length || typeof list === "string" ? 1 : 0)
   const oldest = found.at(-1)![0].slice(0, 9)
   const head = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe" }).stdout.toString()
   // the checked-out commit alone takes a plain amend

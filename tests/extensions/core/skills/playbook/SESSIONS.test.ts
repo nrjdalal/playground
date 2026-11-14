@@ -69,3 +69,24 @@ describe("SESSIONS.md", () => {
     expect(loosening).toContain("every other form keeps canary's verdict")
   })
 })
+
+// issue 2030: spawn.sh's account and brief arguments, in the words a start script needs
+describe("SPAWN.md and SESSIONS.md name the start's account and brief path", () => {
+  test("--account names the login by its full email, and a start script resolves it into $acct", async () => {
+    const spawn = await Bun.file(SPAWN).text()
+    const account = spawn.split("## --account")[1]?.split("\n## ")[0] ?? ""
+    expect(account).toContain("never its domain alone, since one domain can match two logins")
+    expect(account).toContain("`acct=$(bun packages/scripts/src/playground/cli.ts accounts list")
+    const sessions = await Bun.file(SESSIONS).text()
+    expect(sessions).toContain("`--account` takes the login's full email")
+    expect(sessions).toContain("resolves it into `$acct` in the start script")
+  })
+
+  test("the brief path is read relative to ~/.playground, and a bare file name is refused", async () => {
+    const spawn = await Bun.file(SPAWN).text()
+    expect(spawn).toContain(
+      "reads `<brief>` relative to `~/.playground` (`handoffs/brief-<name>.md`)",
+    )
+    expect(spawn).toContain("a bare file name fails with `is not a file`")
+  })
+})

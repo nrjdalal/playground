@@ -384,4 +384,62 @@ describe("the poll", () => {
     expect(asked.at(-1)).toEqual({ after: "a", since: "2026-10-31T10:00:00.000Z" })
     expect(posted).toEqual([untrusted(a, channel()), untrusted(b, channel())])
   })
+
+  test("cards at most 20 mentions a day from one sender, then one card saying so, and starts again the next day", async () => {
+    const file = join(DIR, "marks-cap.json")
+    const cards: Card[] = []
+    const post = async (card: Card) => void cards.push(card)
+    const at = (day: number, i: number) => `2026-10-${day}T10:${String(i).padStart(2, "0")}:00.000Z`
+    const fromBo = Array.from({ length: 22 }, (_, i) => message({ at: at(30, i), id: `b${i}` }))
+    const fromCy = message({ at: at(30, 30), from: { device: "studio", login: "cy" }, id: "c0" })
+    const nextDay = message({ at: at(31, 0), id: "b-next" })
+    await pollWaiting(
+      client([channel()], []).yard,
+      { post, tell: noTell },
+      WEB,
+      file,
+      new Date("2026-10-30T00:00:00Z"),
+    )
+    const yard = client([channel()], [...fromBo, fromCy, nextDay]).yard
+    expect(await pollWaiting(yard, { post, tell: noTell }, WEB, file)).toBe(23)
+    expect(cards.map((c) => c.title)).toEqual([
+      ...Array.from({ length: 20 }, () => "@bo mentioned you in #ops"),
+      "@bo mentioned you more than 20 times today",
+      "@cy mentioned you in #ops",
+      "@bo mentioned you in #ops",
+    ])
+  })
+
+  test("a login an object already names, such as constructor or __proto__, counts from 0 and is capped like any other, across polls (#2091)", async () => {
+    const file = join(DIR, "marks-cap-names.json")
+    const cards: Card[] = []
+    const post = async (card: Card) => void cards.push(card)
+    const at = (i: number) => `2026-10-30T11:${String(i).padStart(2, "0")}:00.000Z`
+    const from = (login: string, i: number) =>
+      message({ at: at(i), from: { device: "studio", login }, id: `${login}-${i}` })
+    const sent = Array.from({ length: 22 }, (_, i) => [
+      from("constructor", i),
+      from("__proto__", i),
+    ]).flat()
+    await pollWaiting(
+      client([channel()], []).yard,
+      { post, tell: noTell },
+      WEB,
+      file,
+      new Date("2026-10-30T00:00:00Z"),
+    )
+    await pollWaiting(
+      client([channel()], sent.slice(0, 20)).yard,
+      { post, tell: noTell },
+      WEB,
+      file,
+    )
+    await pollWaiting(client([channel()], sent).yard, { post, tell: noTell }, WEB, file)
+    const titles = (login: string) => cards.filter((c) => c.title.startsWith(`@${login} `))
+    for (const login of ["constructor", "__proto__"])
+      expect(titles(login).map((c) => c.title)).toEqual([
+        ...Array.from({ length: 20 }, () => `@${login} mentioned you in #ops`),
+        `@${login} mentioned you more than 20 times today`,
+      ])
+  })
 })

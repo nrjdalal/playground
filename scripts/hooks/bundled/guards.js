@@ -283,8 +283,8 @@ var WRAPPERS = new Map(Object.entries({
   ],
   timeout: ["-f -p -v --foreground --preserve-status --verbose", "-k -s --kill-after --signal"],
   xargs: [
-    "-0 -o -p -r -t -x --exit --interactive --no-run-if-empty --null --open-tty --show-limits --verbose",
-    "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-lines --max-procs --process-slot-var"
+    "-0 -o -p -r -t -x --exit --interactive --max-lines --no-run-if-empty --null --open-tty --show-limits --verbose",
+    "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-procs --process-slot-var"
   ]
 }).map(([name, [flags, values]]) => [
   name,
@@ -1423,9 +1423,10 @@ function unwrap(state, inside, budget) {
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
         state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length);
         take();
-      } else if (state.xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
+      } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
+        state.xargs ??= {};
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
       } else if (wrapper === "env" && v === "-") {
         take();
@@ -1967,7 +1968,9 @@ async function existing(path, env) {
 }
 async function outputOf(cmd, env) {
   tick();
-  const { args, name } = parse(cmd);
+  const { args, name, xargs } = parse(cmd);
+  if (xargs)
+    return unknown(`the output of ${name || "echo"} under xargs`);
   if (name === "") {
     if (cmd.inner)
       return outputs(cmd.inner(), env);
@@ -1999,7 +2002,7 @@ async function outputOf(cmd, env) {
   if (hidden)
     return hidden;
   if (name === "printf")
-    return { value: printf(values.map((v) => v.value)) };
+    return { value: printf(values.slice(values[0]?.value === "--" ? 1 : 0).map((v) => v.value)) };
   let k = 0;
   while (k < values.length && /^-[neE]+$/.test(values[k].value))
     k++;
@@ -2675,6 +2678,8 @@ async function leadOf(raw, kind, environment) {
     return false;
   }
 }
+var namesRole = (command) => /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command);
+var opsLead = (raw, environment = process.env) => leadOf(raw, "ops", environment);
 var builderLead = (raw, environment = process.env) => leadOf(raw, "builder", environment);
 async function codexName(sessionId, environment = process.env) {
   if (!environment.CODEX_HOME)
@@ -2777,6 +2782,7 @@ import { join as join10 } from "path";
 
 // packages/settings/src/folder.ts
 import {
+  appendFileSync,
   chmodSync,
   existsSync as existsSync4,
   mkdirSync,
@@ -8748,7 +8754,7 @@ var slackSettings = defineSettings({
 });
 
 // scripts/hooks/no-prepare-write.ts
-import { appendFileSync, mkdirSync as mkdirSync2 } from "fs";
+import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync2 } from "fs";
 import { join as join8 } from "path";
 
 // scripts/hooks/no-stash.ts
@@ -8937,7 +8943,7 @@ var log = (environment, entry) => {
   try {
     const dir = join8(dataDirOf(environment), "ops");
     mkdirSync2(dir, { recursive: true });
-    appendFileSync(join8(dir, "no-prepare-write.log"), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}
+    appendFileSync2(join8(dir, "no-prepare-write.log"), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}
 `);
   } catch {}
 };
@@ -9293,6 +9299,11 @@ var gateSettings = defineSettings({
     default: 0.125,
     description: "The share of the load gate's line a small worker keeps back for reviewers and testers, so a held review starts first; set it under gates.smallReserve, or a small worker's line falls below a medium one's.",
     schema: number2().min(0).lt(1)
+  },
+  "gates.sessionCap": {
+    default: 0,
+    description: "The live workers, reviewers and testers in the roster a new one starts under, so the floor keeps to the cap the factory runs to; 0 caps nothing.",
+    schema: number2().int().min(0)
   },
   "gates.smallReserve": {
     default: 0.25,
@@ -9788,6 +9799,20 @@ function globals(args, env) {
   return { carried, dir };
 }
 var gitVariable = (key) => /^GIT_(?:COMMON_DIR|CONFIG(?:_\w+)?|DIR|NAMESPACE|WORK_TREE)$/.test(key);
+function signingOff(environment) {
+  const count = environment.GIT_CONFIG_COUNT;
+  if (count === undefined || !/^[1-9]\d*$/.test(count))
+    return false;
+  const expected = new Set(["GIT_CONFIG_COUNT"]);
+  for (let n = 0;n < Number(count); n++) {
+    const key = `GIT_CONFIG_KEY_${n}`;
+    const value = `GIT_CONFIG_VALUE_${n}`;
+    if (environment[key] !== "commit.gpgsign" || environment[value] !== "false")
+      return false;
+    expected.add(key).add(value);
+  }
+  return Object.keys(environment).filter(gitVariable).every((name) => expected.has(name));
+}
 function aliasOf(sub, args, dir) {
   if (builtin(sub))
     return false;
@@ -9802,7 +9827,7 @@ function judge2(args, parsed, env, factory, settled) {
   if (!sub)
     return;
   const { carried: optioned, dir } = globals(args, env);
-  const carried = optioned || [...parsed.local.keys(), ...env.vars.keys(), ...Object.keys(env.process)].some(gitVariable);
+  const carried = optioned || [...parsed.local.keys(), ...env.vars.keys()].some(gitVariable) || !signingOff(env.process) && Object.keys(env.process).some(gitVariable);
   if (sub.value !== "push") {
     const other = sub.value === "send-pack" || sub.value === "subtree" && rest[0]?.value === "push";
     const alias = other || marked(sub.value) ? undefined : aliasOf(sub.value, args, dir);
@@ -9871,7 +9896,6 @@ function judgeTool(tool, input, factory) {
   const what = typeof branch === "string" && branch !== "" ? branch : "the default branch, canary";
   return `no-protected-push hook refuses ${tool}: it writes ${what} of ${place}. ${ROUTE} ${FIX}`;
 }
-var namesRole = (command) => /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command);
 async function judgeMerge(rest, repos, parsed, env, factory, builder, command) {
   const { flags, positionals } = parseFlags(rest, MERGE_TAKES);
   if (flags.some((f) => f.name === "--help" || f.name === "-h"))
@@ -12571,24 +12595,26 @@ function gitMoves(sub, rest) {
     return rest.some((w) => w === "--force" || /^-[a-zA-Z]*f/.test(w));
   return false;
 }
-function turboWords(name, args, env) {
-  if (name === "turbo")
+var turboWords = (name, args, env) => toolWords(["turbo"], name, args, env);
+function toolWords(tools, name, args, env) {
+  const named = (word) => tools.includes(toolName(word));
+  if (tools.includes(name))
     return args;
   if (RUNNERS2.has(name) || name === "bunx")
-    return runnerTurbo(args);
+    return runnerTool(named, args);
   if (name !== "bun")
     return;
   const { at, sub, words } = bunCall(args, env);
   if (words[0] === "x")
-    return runnerTurbo(args.slice(sub + 1));
+    return runnerTool(named, args.slice(sub + 1));
   const target = words[0] === "run" ? words[1] : words[0];
-  return isTurbo(target) ? args.slice(at + 1) : undefined;
+  return named(target) ? args.slice(at + 1) : undefined;
 }
-function runnerTurbo(args) {
+function runnerTool(named, args) {
   const at = runnerTarget(args);
-  if (isTurbo(args[at]?.value))
+  if (named(args[at]?.value))
     return args.slice(at + 1);
-  return packagedTools(args).includes("turbo") ? args.slice(at) : undefined;
+  return packagedTools(args).some(named) ? args.slice(at) : undefined;
 }
 var RUNNER_TAKES = new Set([
   "--ca",
@@ -12631,7 +12657,6 @@ function runnerTarget(args) {
   return k;
 }
 var toolName = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""));
-var isTurbo = (word) => toolName(word) === "turbo";
 function validationOff(local, env) {
   const read = (key) => local.get(key)?.value ?? env.vars.get(key)?.value ?? env.process[key];
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true";
@@ -13031,6 +13056,7 @@ var GUARD_KEYS = new Set([
 ]);
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
+var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];
 var SCORE_AS_OTHER = `playground ext score on a line that clears or sets ${IDENTITY.join(", ")}, which reads as another author than the calling session`;
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
@@ -16554,10 +16580,353 @@ async function check21(raw, environment = process.env) {
 }
 if (false) {}
 
+// scripts/hooks/no-raw-vercel.ts
+import { basename as basename9, isAbsolute as isAbsolute7, resolve as resolve12 } from "path";
+var NAMES2 = ["vc", "vercel"];
+var words = (text) => new Set(text.split(" "));
+var GLOBAL = {
+  flags: words("--debug --help --no-color --non-interactive --version -d -h -v"),
+  takes: words("--api --cwd --global-config --local-config --scope --team --token -A -Q -S -T -t")
+};
+var DEPLOY = {
+  flags: words("--confirm --create-if-missing --dry --force --guidance --json --logs --no-clipboard --no-logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -c -f -l -y"),
+  takes: words("--archive --build-env --env --environment --format --meta --name --project --regions --target -F -b -e -m -n -p")
+};
+var INSTALL = {
+  flags: words("--claim --json --no-claim --no-connect --no-env-pull"),
+  takes: words("--billing-plan --environment --installation --meta --name --prefix -e")
+};
+var OWN2 = {
+  api: {
+    flags: words("--dangerously-skip-permissions --include --paginate --raw --refresh --silent --verbose -i"),
+    takes: words("--field --generate --header --input --method --raw-field --spec-url -F -H -X -f")
+  },
+  deploy: DEPLOY,
+  env: {
+    flags: words("--guidance --json --yes -y"),
+    takes: words("--environment --format --git-branch --project -F -e -p")
+  },
+  install: INSTALL,
+  integration: INSTALL,
+  promote: { flags: words("--yes -y"), takes: words("--timeout") },
+  redeploy: { flags: words("--no-wait"), takes: words("--environment --target -e") },
+  rollback: { flags: words("--yes -y"), takes: words("--timeout") }
+};
+var ALIASES = new Map(Object.entries({
+  aliases: "alias",
+  budget: "budgets",
+  cert: "certs",
+  cron: "crons",
+  daemon: "daemons",
+  "deploy-hook": "deploy-hooks",
+  develop: "dev",
+  domain: "domains",
+  drain: "drains",
+  "edge-config": "global-config",
+  environment: "environments",
+  i: "install",
+  image: "images",
+  ir: "integration-resource",
+  ln: "alias",
+  log: "logs",
+  ls: "list",
+  mf: "microfrontends",
+  organization: "organizations",
+  permission: "permissions",
+  projects: "project",
+  rm: "remove",
+  rr: "rolling-release",
+  "status-page": "health",
+  switch: "teams",
+  tags: "tag",
+  target: "environments",
+  targets: "environments",
+  team: "teams",
+  versions: "version",
+  webhook: "webhooks"
+}));
+var COMMANDS2 = words("activity agent agent-runs ai-gateway alerts alias api bisect blob budgets build builders buy cache certs changelog ci comments config connect contract crons curl daemons deploy deploy-hooks dev dns domains drains env environments experiments feedback firewall flags git global-config guidance health help httpstat image images init inspect install integration integration-resource kms link list login logout logs mcp metrics microfrontends monitors notifications open organizations page-integrity permissions pricing project promote pull redeploy redirects remove rollback rolling-release routes sandbox schedules security setup signup skills storage tag teams telemetry tokens traces upgrade usage vcr version webhooks whoami");
+var READS2 = words("help inspect list logs whoami");
+var LISTS = words("dns domains integration project teams");
+var HELP2 = new Set(["--help", "--version", "-h", "-v"]);
+var API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"]);
+var READINGS2 = 64;
+var MENTION2 = /\bv(?:ercel|c)\b|\byard\b/i;
+var STEP_NAMED = /\byard\b/i;
+var NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i;
+function readingsOf(args, { flags, takes }, toSub = false) {
+  const out = [];
+  const walk = (k, read) => {
+    if (out.length >= READINGS2)
+      return false;
+    for (;k < args.length; k++) {
+      const v = args[k].value;
+      if (v === "--") {
+        out.push({ ...read, positionals: [...read.positionals, ...args.slice(k + 1)] });
+        return true;
+      }
+      if (v.startsWith("--")) {
+        const eq = v.indexOf("=");
+        const name = eq === -1 ? v : v.slice(0, eq);
+        if (eq !== -1)
+          read = {
+            ...read,
+            flags: [...read.flags, { name, value: { ...args[k], value: v.slice(eq + 1) } }]
+          };
+        else if (takes.has(name))
+          read = { ...read, flags: [...read.flags, { name, value: args[++k] }] };
+        else if (flags.has(name))
+          read = { ...read, flags: [...read.flags, { name }] };
+        else {
+          if (!walk(k + 2, { ...read, flags: [...read.flags, { name, value: args[k + 1] }] }))
+            return false;
+          read = { ...read, flags: [...read.flags, { name }] };
+        }
+        continue;
+      }
+      if (v.startsWith("-") && v.length > 1) {
+        for (let c = 1;c < v.length; c++) {
+          const name = `-${v[c]}`;
+          const attached = c + 1 < v.length ? { ...args[k], value: v.slice(v[c + 1] === "=" ? c + 2 : c + 1) } : undefined;
+          if (flags.has(name)) {
+            read = { ...read, flags: [...read.flags, { name }] };
+            continue;
+          }
+          const taken = {
+            ...read,
+            flags: [...read.flags, { name, value: attached ?? args[k + 1] }]
+          };
+          if (takes.has(name)) {
+            read = taken;
+            if (!attached)
+              k++;
+            break;
+          }
+          if (!walk(attached ? k + 1 : k + 2, taken))
+            return false;
+          read = { ...read, flags: [...read.flags, { name }] };
+        }
+        continue;
+      }
+      read = { ...read, positionals: [...read.positionals, args[k]] };
+      if (toSub)
+        break;
+    }
+    out.push(read);
+    return true;
+  };
+  return walk(0, { flags: [], positionals: [] }) ? out : undefined;
+}
+var commandOf4 = (word) => word === undefined ? undefined : ALIASES.get(word.value) ?? word.value;
+function judgeAll(args, fed) {
+  const unread = {
+    production: false,
+    what: "a vercel call with more options than the hook reads"
+  };
+  const first = readingsOf(args, GLOBAL, true);
+  if (!first)
+    return unread;
+  const verdicts = [];
+  for (const name of new Set(first.map((r) => commandOf4(r.positionals[0])))) {
+    if (name !== undefined && READS2.has(name))
+      continue;
+    const own = OWN2[name !== undefined && COMMANDS2.has(name) ? name : "deploy"];
+    const options = own ? {
+      flags: new Set([...GLOBAL.flags, ...own.flags]),
+      takes: new Set([...GLOBAL.takes, ...own.takes])
+    } : GLOBAL;
+    const readings = readingsOf(args, options);
+    if (!readings)
+      return unread;
+    for (const reading of readings)
+      verdicts.push(judge7(reading, args.some(unreadable), fed));
+  }
+  return verdicts.find((v) => v && !v.production) ?? verdicts.find(Boolean);
+}
+function judge7({ flags, positionals }, unreadWord, fed) {
+  if (flags.some((f) => HELP2.has(f.name)))
+    return;
+  const [sub, ...rest] = positionals;
+  if (sub && unreadable(sub))
+    return { production: false, what: "a subcommand built at run time" };
+  if (fed)
+    return { production: false, what: "a vercel call whose words xargs feeds" };
+  const built = unreadWord;
+  const has = (...names) => flags.some((f) => names.includes(f.name));
+  const toProduction = (names, absent) => {
+    const flag = flags.findLast((f) => names.includes(f.name));
+    if (!flag)
+      return absent;
+    return !flag.value || unreadable(flag.value) || flag.value.value.toLowerCase() === "production";
+  };
+  const next = rest[0]?.value;
+  const name = commandOf4(sub);
+  const listing = next === "ls" || next === "list";
+  const path = sub !== undefined && !COMMANDS2.has(name) && /[./~]/.test(sub.value);
+  if (name === "deploy" && rest[0] !== undefined && next !== "init") {
+    if (next === "continue")
+      return { production: true, what: "a manual deploy's continue" };
+    if (unreadable(rest[0]))
+      return { production: false, what: "a word built at run time after vercel deploy" };
+    if (!/[./~]/.test(next))
+      return { production: false, what: `\`vercel deploy ${next}\`` };
+  }
+  const envLetter = flags.some((f) => f.name === "-e" && (!f.value || unreadable(f.value) || !f.value.value.includes("=")));
+  if (name === undefined || name === "deploy" || path)
+    return has("--prod") || toProduction(["--environment", "--target"], false) || envLetter || built ? { production: true, what: "a production deploy" } : undefined;
+  if (name === "redeploy")
+    return toProduction(["--environment", "-e", "--target"], true) || built ? { production: true, what: "a redeploy that may land in production" } : undefined;
+  if (name === "promote" || name === "rollback")
+    return next === "status" ? undefined : { production: true, what: `a ${name}` };
+  if (name === "alias")
+    return listing ? undefined : { production: true, what: "an alias change" };
+  if (name === "rolling-release")
+    return next === "inspect" ? undefined : { production: true, what: "a rolling release step" };
+  if (LISTS.has(name) && listing)
+    return;
+  if (name === "env" && listing) {
+    const format = flags.findLast((f) => f.name === "--format" || f.name === "-F");
+    const json = !!format && (!format.value || unreadable(format.value) || format.value.value.toLowerCase() === "json");
+    return has("--json") || json || built ? { production: false, what: "an env list with its values" } : undefined;
+  }
+  if (name === "api")
+    return judgeApi2(rest, flags, built);
+  const words = [sub.value, ...next === undefined || unreadable(rest[0]) ? [] : [next]];
+  return { production: false, what: `\`vercel ${words.join(" ")}\`` };
+}
+function judgeApi2(rest, flags, built) {
+  const [endpoint] = rest;
+  if (!endpoint || endpoint.value === "list")
+    return;
+  if (built)
+    return { production: false, what: "a vercel api call built at run time" };
+  const method = flags.findLast((f) => f.name === "-X" || f.name === "--method");
+  if (method && (!method.value || method.value.value.toUpperCase() !== "GET"))
+    return { production: false, what: "a vercel api write" };
+  if (flags.some((f) => API_BODY.has(f.name)))
+    return { production: false, what: "a vercel api call with a body" };
+  if (/(?:^|\/)env(?:[/?#]|$)/i.test(endpoint.value))
+    return { production: false, what: "a vercel api read of a project's env" };
+}
+var STEP_FILE = /(?:^|\/)packages\/scripts\/src\/ship\/yard\.ts$/;
+var STEP_HELP = new Set(["--help", "-h"]);
+var RUNNERS6 = new Set(["npm", "pnpm", "yarn"]);
+function yardStep(name, args, shell) {
+  if (RUNNERS6.has(name))
+    return args.some((a) => a.value === "ship:yard");
+  if (name !== "bun")
+    return false;
+  const { at, chained, words } = bunCall(args, shell);
+  const file = words[0] === "run" ? words[1] : words[0];
+  if (file === undefined)
+    return false;
+  const path = isAbsolute7(file) ? file : chained ? resolve12(chained, file) : undefined;
+  const step = file === "ship:yard" || (path ? STEP_FILE.test(path) : basename9(file) === "yard.ts");
+  const end = args.findIndex((a, k) => k > at && a.value === "--");
+  return step && !args.slice(at + 1, end === -1 ? undefined : end).some((a) => STEP_HELP.has(a.value));
+}
+var PACKAGE_RUNNERS = new Set(["bunx", "npm", "npx", "pnpm", "yarn"]);
+var MOVES2 = /^(?:--(?:cwd|dir|filter|prefix|workspace)(?:=|$)|-[CFw]|workspaces?$)/;
+var CALLS = new Set(["--call", "--shell-mode", "-c"]);
+function runnerBuns(name, args, shell) {
+  let offset = 0;
+  if (name === "bun") {
+    const { sub, words } = bunCall(args, shell);
+    if (words[0] !== "x")
+      return [];
+    offset = sub + 1;
+  } else if (!PACKAGE_RUNNERS.has(name))
+    return [];
+  const reached = [];
+  for (let at = offset;at < args.length; at++) {
+    if (toolName(args[at].value) !== "bun")
+      continue;
+    const moved = args.slice(0, at).some((a) => MOVES2.test(a.value));
+    reached.push({ args: args.slice(at + 1), shell: moved ? { ...shell, cwd: undefined } : shell });
+  }
+  return reached;
+}
+function throughRunners(name, args, shell) {
+  const reached = [];
+  const queue = runnerBuns(name, args, shell);
+  while (queue.length > 0 && reached.length < 32) {
+    const next = queue.shift();
+    reached.push(next);
+    queue.push(...runnerBuns("bun", next.args, next.shell));
+  }
+  return reached;
+}
+function runnerCalls(name, args) {
+  if (!PACKAGE_RUNNERS.has(name) || name === "bunx")
+    return [];
+  const calls = [];
+  for (let k = 0;k < args.length; k++) {
+    const v = args[k].value;
+    if (CALLS.has(v) && args[k + 1])
+      calls.push(args[k + 1]);
+    else if (v.startsWith("--call="))
+      calls.push({ ...args[k], value: v.slice(7) });
+  }
+  return calls;
+}
+async function check22(raw, environment = process.env) {
+  const {
+    cwd,
+    tool_input: toolInput,
+    tool_name: tool
+  } = JSON.parse(raw);
+  if (tool !== "Bash" || typeof toolInput?.command !== "string")
+    return;
+  const command = toolInput.command;
+  if (!MENTION2.test(command.replace(/["'\\]/g, "")))
+    return;
+  const verdicts = [];
+  const visit = async (_cmd, parsed, shell) => {
+    if (parsed.first && unreadable(parsed.first) && NAMED.test(command))
+      verdicts.push({
+        production: false,
+        what: "a program built at run time on a line naming vercel"
+      });
+    const slotted = slotWords(parsed);
+    const name = slotted ? program(slotted[0]?.value ?? "") : parsed.name;
+    const args = slotted ? slotted.slice(1) : parsed.args;
+    if (yardStep(name, args, shell) || throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell)))
+      verdicts.push({ production: true, what: "the Yard ship step, which deploys production" });
+    for (const call of runnerCalls(name, args))
+      if (!unreadable(call))
+        await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit);
+      else if (STEP_NAMED.test(command))
+        verdicts.push({
+          production: true,
+          what: "a runner's command line built at run time on a line naming the Yard ship step"
+        });
+    const words = toolWords(NAMES2, name, args, shell);
+    const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
+    if (verdict)
+      verdicts.push(verdict);
+    return;
+  };
+  const env = {
+    cwd: typeof cwd === "string" ? cwd : undefined,
+    files: new Map,
+    known: {},
+    process: {},
+    vars: new Map
+  };
+  await run(lex(command), env, visit);
+  const always = verdicts.find((v) => !v.production);
+  if (always)
+    return `no-raw-vercel hook refuses ${always.what}: in a factory session vercel runs its reads alone (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) and a preview deploy (vercel deploy, vercel deploy init, or vercel ./<folder>). A secret reaches a project through an Inbox secret ask, and production ships from main through the release skill's ship:merge.`;
+  const production = verdicts.find((v) => v.production);
+  if (!production || await opsLead(raw, environment) && !namesRole(command))
+    return;
+  return `no-raw-vercel hook refuses ${production.what}: it changes what production serves, and a production deploy also migrates the hosted database. Production ships from main through the release skill's ship:merge; the Ops lead alone makes a hand production move, in a call that names no role variable and sources no file. A preview deploy (vercel deploy without --prod) and the reads (whoami, ls, inspect, logs, help) run.`;
+}
+
 // scripts/hooks/no-raw-wa.ts
 import { realpathSync as realpathSync6 } from "fs";
 import { homedir as homedir5 } from "os";
-import { resolve as resolve12 } from "path";
+import { resolve as resolve13 } from "path";
 var refuse15 = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
 var refuseJob = (what) => `no-raw-wa hook refuses ${what}: the relay tags each line with its queue's job, and a line tagged [ops-wa] or [ops-dm-watch] reads as the owner's own words, so only ops-wa and ops-dm-watch queue under those jobs. Queue your line under your own job, notify.sh <your job> <text>, or tell your manager with SendMessage.`;
 var OWNER_JOBS = new Set(["dm-watch", "wa"]);
@@ -16571,10 +16940,10 @@ var RECURSIVE_WITH = {
   zip: /^-[A-Za-z]*r/
 };
 var targetsOf = (environment) => {
-  const typed = resolve12(dataDirOf(environment), "whatsapp");
+  const typed = resolve13(dataDirOf(environment), "whatsapp");
   let real = typed;
   try {
-    real = resolve12(realpathSync6(dataDirOf(environment)), "whatsapp");
+    real = resolve13(realpathSync6(dataDirOf(environment)), "whatsapp");
   } catch {}
   return [...new Set([typed, real].map((p) => p.toLowerCase()))];
 };
@@ -16585,10 +16954,10 @@ var queuesOf = (environment) => {
     real = realpathSync6(data);
   } catch {}
   return [
-    ...new Set([data, real].flatMap((d) => [...OWNER_JOBS].map((job) => resolve12(d, "ops", "outbox", `ops-${job}.jsonl`).toLowerCase())))
+    ...new Set([data, real].flatMap((d) => [...OWNER_JOBS].map((job) => resolve13(d, "ops", "outbox", `ops-${job}.jsonl`).toLowerCase())))
   ];
 };
-var segments = (path) => resolve12(path).toLowerCase().split("/").filter(Boolean);
+var segments = (path) => resolve13(path).toLowerCase().split("/").filter(Boolean);
 function reach(path, target, glob = false) {
   const p = segments(path);
   const t = segments(target);
@@ -16675,7 +17044,7 @@ async function judgeBash(command, cwd, environment) {
           continue;
         for (const raw of [word.value, word.value.slice(word.value.indexOf("=") + 1)]) {
           const value = /^~(?:\/|$)/.test(raw) ? `${homedir5()}${raw.slice(1)}` : raw;
-          const path = value.startsWith("/") ? value : place.cwd && resolve12(place.cwd, value);
+          const path = value.startsWith("/") ? value : place.cwd && resolve13(place.cwd, value);
           if (!path)
             continue;
           const stands = worst(path, targets, !!word.glob);
@@ -16718,11 +17087,11 @@ async function inspect16(raw, environment) {
     if (at === "inside" || tool === "Grep" && at === "above")
       return refuse15(`a ${tool} through ${path}, which reads whatsapp/ in the data folder`);
     const pattern = input?.pattern;
-    if (tool === "Glob" && typeof pattern === "string" && worst(resolve12(path, pattern), targets, true) === "inside")
+    if (tool === "Glob" && typeof pattern === "string" && worst(resolve13(path, pattern), targets, true) === "inside")
       return refuse15(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
   }
 }
-async function check22(raw, environment = process.env) {
+async function check23(raw, environment = process.env) {
   try {
     return await eachInput(raw, "no-raw-wa", (one) => inspect16(one, environment));
   } catch {
@@ -16815,7 +17184,7 @@ async function gh4(args, cmd, env, local, xargs) {
     ...xargs && !xargs.replace ? [undefined] : []
   ];
   const target = decide2(named.length > 0 ? named : implicitRepos(env, local));
-  return judge7(`gh ${key}`, target, bodies.map((b) => viaXargs(b, xargs)), env);
+  return judge8(`gh ${key}`, target, bodies.map((b) => viaXargs(b, xargs)), env);
 }
 function altText(value) {
   const tail = Math.max(value.value.lastIndexOf(UNKNOWN), value.value.lastIndexOf(READ)) + 1;
@@ -16834,7 +17203,7 @@ async function api4(args, cmd, env, local, xargs) {
     const resolved = await Promise.all(documents.map((d) => resolveText(d, env)));
     if (!resolved.some((d) => d.unknown || COMMENT_MUTATION.test(d.value)))
       return;
-    return judge7("gh api graphql", { guarded: true, label: "a repository named only by a GraphQL node id" }, [...fields.map((f) => f.text), ...inputs], env, INLINE_QUERY);
+    return judge8("gh api graphql", { guarded: true, label: "a repository named only by a GraphQL node id" }, [...fields.map((f) => f.text), ...inputs], env, INLINE_QUERY);
   }
   const path = endpoint.value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "").split("?")[0];
   const match = /^repos\/([^/]+)\/([^/]+)\/(.+)$/.exec(path);
@@ -16852,7 +17221,7 @@ async function api4(args, cmd, env, local, xargs) {
     ...fields.filter((f) => marked(f.key) || BODY_KEY.test(f.key)).map((f) => f.text),
     ...await Promise.all(inputs.map((i) => bodyOf2(i, env)))
   ];
-  return judge7(`gh api ${path.replaceAll(UNKNOWN, "*").replaceAll(READ, "*")}`, decide2(candidates), bodies, env);
+  return judge8(`gh api ${path.replaceAll(UNKNOWN, "*").replaceAll(READ, "*")}`, decide2(candidates), bodies, env);
 }
 async function bodyOf2(payload, env) {
   const text = await resolveText(payload, env);
@@ -16889,7 +17258,7 @@ async function curl3(args, cmd, env) {
   if (data.length === 0)
     return;
   const owner = marked(url[1]) ? undefined : { owner: url[1], repo: url[2] };
-  return judge7(`curl to api.github.com/repos/${url[1]}/${url[2]}`, decide2([owner]), await Promise.all(data.map((d) => bodyOf2(d, env))), env);
+  return judge8(`curl to api.github.com/repos/${url[1]}/${url[2]}`, decide2([owner]), await Promise.all(data.map((d) => bodyOf2(d, env))), env);
 }
 function decide2(candidates) {
   if (candidates.length === 0)
@@ -16906,7 +17275,7 @@ function refuse16(what, target, detail, fix) {
 var READABLE2 = "Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md).";
 var INLINE_QUERY = "Write the query and each of its fields in the command itself, not in a variable: gh api graphql -f query='query { viewer { login } }'. For a long one, write it to a file with the Write tool first and pass it by its literal absolute path (-F query=@/abs/query.graphql, -F body=@/abs/body.md).";
 var REWORD = 'Write "ship" or "publish step" instead, or leave the comment out. For a file or rule whose name holds the word, name it by what it is, such as "the ship rule" or "the comment hook", with its line number; for a patch that holds it, write the patch to a file in your scratchpad, send its absolute path to the PR\'s worker by SendMessage, and say in the comment that a patch went to the author, since gh\'s `--attach` uploads only images and video.';
-async function judge7(what, target, bodies, env, fix = READABLE2) {
+async function judge8(what, target, bodies, env, fix = READABLE2) {
   if (!target.guarded)
     return;
   const texts = await Promise.all(bodies.map((b) => resolveText(b, env)));
@@ -16938,7 +17307,7 @@ function candidate7(command) {
   const bare = command.replace(/[\\'"]/g, "");
   return command.includes("$'") || GH2.test(bare) && MAYBE_COMMENT.test(bare);
 }
-async function check23(raw, environment = process.env, lists = join20(coreDir(), "lists")) {
+async function check24(raw, environment = process.env, lists = join20(coreDir(), "lists")) {
   const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join20(lists, "release-owners.json"));
   if (owners.refusal)
     return commentCall(subjectOf3(raw)) ? owners.refusal : undefined;
@@ -16995,7 +17364,7 @@ if (false) {}
 // scripts/hooks/no-unslotted-run.ts
 import { existsSync as existsSync10, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync3 } from "fs";
 import { tmpdir } from "os";
-import { join as join21, resolve as resolve13, sep as sep6 } from "path";
+import { join as join21, resolve as resolve14, sep as sep6 } from "path";
 var refuse17 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var COMMIT_TAKES3 = new Set([
@@ -17116,7 +17485,7 @@ Fix the message by the gh-commit skill's Commit step, then commit again.`;
 }
 var anywhere = (what, command) => `no-unslotted-run hook refuses ${what} on a line that names more folders than the hook carries, since it cannot rule out a worktree: every heavy run goes through run-slot (playbook's **slots**). Run it as ~/.playground/ops/run-slot.sh <your name> -- ${command}, or as a line of its own after a cd to a literal path.`;
 var BUN_SCRIPTS2 = new Set(["build", "check-types", "test"]);
-var RUNNERS6 = new Set(["bunx", "npx"]);
+var RUNNERS7 = new Set(["bunx", "npx"]);
 var TEST_TAKES = new Set([
   "--conditions",
   "--console-depth",
@@ -17208,7 +17577,7 @@ function heavy2(name, args, env) {
       what: `turbo run ${task}`
     } : undefined;
   }
-  if (RUNNERS6.has(name)) {
+  if (RUNNERS7.has(name)) {
     const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES.has(args[k - 1]?.value ?? ""));
     const values = words.map((w) => w.value);
     const base = name === "bunx" ? bunCall([X, ...args], env).chained : env.cwd;
@@ -17289,7 +17658,7 @@ function inspect18(raw, environment, main) {
     join21(main, ".claude", "worktrees"),
     real(join21(main, ".claude", "worktrees"))
   ].map((w) => w + sep6);
-  const inWorktree = (dir) => dir !== undefined && [resolve13(dir), real(resolve13(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
+  const inWorktree = (dir) => dir !== undefined && [resolve14(dir), real(resolve14(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
   const directory = typeof cwd === "string" ? cwd : undefined;
   let line = [];
   let wrote = false;
@@ -17340,7 +17709,7 @@ function inspect18(raw, environment, main) {
       const line = words();
       if (line === undefined)
         return;
-      const moved = here.cwd !== undefined && (directory === undefined || resolve13(here.cwd) !== resolve13(directory));
+      const moved = here.cwd !== undefined && (directory === undefined || resolve14(here.cwd) !== resolve14(directory));
       const cd = moved ? `cd ${quotedDir(here.cwd)} && ` : "";
       return found.anywhere ? refuseDocker(found.what, cd, line, found.fix) : refuse17(found.what, cd, line);
     }
@@ -17357,7 +17726,7 @@ function inspect18(raw, environment, main) {
   line = lexed.commands;
   return run(lexed, env, visit);
 }
-async function check24(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
+async function check25(raw, environment = process.env, main = mainCheckout2(resolve14(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
     return await inspect18(raw, environment, main);
   } catch {
@@ -17393,13 +17762,14 @@ var GUARDS = [
   { factory: true, name: "no-public-leak", run: (raw, env) => check19(raw, env) },
   { factory: false, name: "no-raw-delete", run: (raw, env) => check20(raw, env) },
   { factory: true, name: "no-raw-spawn", run: (raw, env) => check21(raw, env) },
-  { factory: true, name: "no-raw-wa", run: (raw, env) => check22(raw, env) },
-  { factory: false, name: "no-release-comment", run: (raw, env) => check23(raw, env) },
+  { factory: true, name: "no-raw-vercel", run: (raw, env) => check22(raw, env) },
+  { factory: true, name: "no-raw-wa", run: (raw, env) => check23(raw, env) },
+  { factory: false, name: "no-release-comment", run: (raw, env) => check24(raw, env) },
   { factory: true, name: "no-stash", run: (raw, env) => check3(raw, env) },
-  { factory: true, name: "no-unslotted-run", run: (raw, env) => check24(raw, env) }
+  { factory: true, name: "no-unslotted-run", run: (raw, env) => check25(raw, env) }
 ];
 var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`;
-async function check25(raw, environment = process.env, guards = GUARDS) {
+async function check26(raw, environment = process.env, guards = GUARDS) {
   let factory;
   const reasons = await Promise.all(guards.map(async ({ factory: gated, name, run }) => {
     try {
@@ -17415,7 +17785,7 @@ async function check25(raw, environment = process.env, guards = GUARDS) {
 `) || undefined;
 }
 async function hook() {
-  const reason = await check25(await Bun.stdin.text());
+  const reason = await check26(await Bun.stdin.text());
   if (!reason)
     return 0;
   console.error(reason);
@@ -17425,6 +17795,6 @@ if (import.meta.main)
   process.exit(await hook());
 export {
   GUARDS,
-  check25 as check,
+  check26 as check,
   hook
 };

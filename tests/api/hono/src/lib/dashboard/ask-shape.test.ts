@@ -201,8 +201,8 @@ describe("ASK_EXAMPLES", () => {
     ])
   })
 
-  // PG-1066: playground rm --decision matches a delete's what by the worktree's full path, so the template leads with one
-  test("the delete template is a valid delete decision naming its worktree by the full path ask new and playground rm --decision read", () => {
+  // PG-1066: a delete names its worktree by the full path, so the template leads with one
+  test("the delete template is a valid delete decision naming its worktree by the full path ask new reads", () => {
     const example = ASK_EXAMPLES.delete
     expect(inboxInputSchema.safeParse(example).error?.issues ?? []).toEqual([])
     expect(example.preview.type).toBe("delete")

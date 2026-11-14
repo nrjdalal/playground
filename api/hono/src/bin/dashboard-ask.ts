@@ -233,7 +233,7 @@ if (command === "new" || command === "edit") {
         }).stdout.toString(),
       ),
   )
-  // a delete names its targets by full path, the one playground rm --decision matches, so the owner approves it once
+  // a delete names its targets by full path, so the owner approves the very path that goes
   const main = mainCheckoutOf(process.cwd())
   const shortDelete = deleteRefusal(input, {
     cwd: process.cwd(),

@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -13,10 +14,11 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { hasManagerRole, ROSTER_KINDS } from "../../../../packages/config/src/kinds"
 import {
+  bundleToTrash,
   CARVE_OUTS,
   type CarveOut,
   type Clone,
@@ -1014,11 +1016,11 @@ describe("worktreeRefusal", () => {
     const { holders, roots, wt } = withWorktree()
     file(join(wt, "wip.txt"))
     expect(worktreeRefusal(wt, roots, holders)).toBe(
-      `${wt} holds 1 uncommitted change (wip.txt): playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`,
+      `${wt} holds 1 uncommitted change (wip.txt): playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`,
     )
     for (const name of ["new.txt", "b", "c", "d"]) file(join(wt, name), "changed")
     expect(worktreeRefusal(wt, roots, holders)).toBe(
-      `${wt} holds 5 uncommitted changes (new.txt, b, c, and 2 more): playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`,
+      `${wt} holds 5 uncommitted changes (new.txt, b, c, and 2 more): playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`,
     )
     expect(worktreeRefusal(wt, roots, { ...holders, discard: true })).toBeNull()
     const moved = quarantine(wt, { ...opts, worktree: { ...holders, discard: true } }, roots, {
@@ -1032,7 +1034,7 @@ describe("worktreeRefusal", () => {
     const { holders, roots, wt } = withWorktree()
     const unmerged = { ...holders, merged: () => false }
     expect(worktreeRefusal(wt, roots, unmerged)).toBe(
-      `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`,
+      `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`,
     )
     git(wt, "push", "-q", "origin", "PG-1-thing")
     expect(worktreeRefusal(wt, roots, unmerged)).toContain("not landed on origin/canary")
@@ -1042,6 +1044,60 @@ describe("worktreeRefusal", () => {
       "refused",
     )
     expect(existsSync(wt)).toBe(true)
+  })
+
+  // #1348
+  test("--discard keeps a worktree's commits no remote holds in a bundle beside its move, named in its trash entry, which brings HEAD back at its sha", () => {
+    const { holders, roots, wt } = withWorktree()
+    const head = git(wt, "rev-parse", "HEAD")
+    const discard = { ...holders, discard: true, merged: () => false }
+    const moved = quarantine(wt, { ...opts, worktree: discard }, roots, { now: NOW }) as Quarantined
+    const batch = dirname(dirname(moved.to))
+    expect(moved.bundle).toBe(join(batch, "pg-1.bundle"))
+    expect(readFileSync(join(batch, "pg-1.shas"), "utf8")).toBe(`${head} HEAD\n`)
+    expect(listTrash(roots.trash).find((e) => e.path === wt)?.bundle).toBe(moved.bundle)
+    git(roots.main, "worktree", "prune")
+    git(roots.main, "branch", "-D", "PG-1-thing")
+    git(roots.main, "fetch", "-q", moved.bundle!, "HEAD:refs/heads/back")
+    expect(git(roots.main, "rev-parse", "back")).toBe(head)
+  })
+
+  test("--discard writes no bundle for a worktree whose every commit a remote holds", () => {
+    const { holders, roots, wt } = withWorktree()
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    const discard = { ...holders, discard: true, merged: () => false }
+    const moved = quarantine(wt, { ...opts, worktree: discard }, roots, { now: NOW }) as Quarantined
+    expect(moved.id).toBeDefined()
+    expect(moved.bundle).toBeUndefined()
+    expect(readdirSync(dirname(dirname(moved.to))).filter((f) => f.endsWith(".bundle"))).toEqual([])
+  })
+
+  test("bundleToTrash holds each ref at its sha past the excluded ones, its sha list beside it, and leaves out a ref the exclusion holds", () => {
+    const { roots, wt } = withWorktree()
+    const head = git(wt, "rev-parse", "HEAD")
+    const base = git(roots.main, "rev-parse", "canary")
+    const made = bundleToTrash(
+      roots.main,
+      [
+        { ref: "refs/heads/PG-1-thing", sha: head },
+        { ref: "refs/heads/canary", sha: base },
+      ],
+      ["origin/canary"],
+      { name: "branches", now: NOW, session: "nightly-clean", trash: roots.trash },
+    )
+    const path = join(roots.trash, "20261102T120000Z-nightly-clean", "branches.bundle")
+    expect(made).toEqual({ held: ["refs/heads/PG-1-thing"], path })
+    expect(readFileSync(join(dirname(path), "branches.shas"), "utf8")).toBe(
+      `${head} refs/heads/PG-1-thing\n${base} refs/heads/canary\n`,
+    )
+    expect(
+      bundleToTrash(roots.main, [{ ref: "refs/heads/PG-1-thing", sha: head }], ["origin/canary"], {
+        name: "branches",
+        now: NOW,
+        session: "nightly-clean",
+        trash: roots.trash,
+      }),
+    ).toEqual({ refused: `its bundle ${path} is taken or not a trash path` })
   })
 
   test("removes a clean worktree whose branch canary squash-merged, and asks for a merged PR once canary changes its files again", () => {

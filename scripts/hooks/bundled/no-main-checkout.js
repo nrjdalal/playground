@@ -5013,8 +5013,8 @@ var WRAPPERS = new Map(Object.entries({
   ],
   timeout: ["-f -p -v --foreground --preserve-status --verbose", "-k -s --kill-after --signal"],
   xargs: [
-    "-0 -o -p -r -t -x --exit --interactive --no-run-if-empty --null --open-tty --show-limits --verbose",
-    "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-lines --max-procs --process-slot-var"
+    "-0 -o -p -r -t -x --exit --interactive --max-lines --no-run-if-empty --null --open-tty --show-limits --verbose",
+    "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-procs --process-slot-var"
   ]
 }).map(([name, [flags, values]]) => [
   name,
@@ -6144,9 +6144,10 @@ function unwrap(state, inside, budget) {
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
         state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length);
         take();
-      } else if (state.xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
+      } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
+        state.xargs ??= {};
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
       } else if (wrapper === "env" && v === "-") {
         take();
@@ -6688,7 +6689,9 @@ async function existing(path, env) {
 }
 async function outputOf(cmd, env) {
   tick();
-  const { args, name } = parse3(cmd);
+  const { args, name, xargs } = parse3(cmd);
+  if (xargs)
+    return unknown(`the output of ${name || "echo"} under xargs`);
   if (name === "") {
     if (cmd.inner)
       return outputs(cmd.inner(), env);
@@ -6720,7 +6723,7 @@ async function outputOf(cmd, env) {
   if (hidden)
     return hidden;
   if (name === "printf")
-    return { value: printf(values.map((v) => v.value)) };
+    return { value: printf(values.slice(values[0]?.value === "--" ? 1 : 0).map((v) => v.value)) };
   let k = 0;
   while (k < values.length && /^-[neE]+$/.test(values[k].value))
     k++;
@@ -7736,24 +7739,26 @@ function gitMoves(sub, rest) {
     return rest.some((w) => w === "--force" || /^-[a-zA-Z]*f/.test(w));
   return false;
 }
-function turboWords(name, args, env) {
-  if (name === "turbo")
+var turboWords = (name, args, env) => toolWords(["turbo"], name, args, env);
+function toolWords(tools, name, args, env) {
+  const named = (word) => tools.includes(toolName(word));
+  if (tools.includes(name))
     return args;
   if (RUNNERS.has(name) || name === "bunx")
-    return runnerTurbo(args);
+    return runnerTool(named, args);
   if (name !== "bun")
     return;
   const { at, sub, words } = bunCall(args, env);
   if (words[0] === "x")
-    return runnerTurbo(args.slice(sub + 1));
+    return runnerTool(named, args.slice(sub + 1));
   const target = words[0] === "run" ? words[1] : words[0];
-  return isTurbo(target) ? args.slice(at + 1) : undefined;
+  return named(target) ? args.slice(at + 1) : undefined;
 }
-function runnerTurbo(args) {
+function runnerTool(named, args) {
   const at = runnerTarget(args);
-  if (isTurbo(args[at]?.value))
+  if (named(args[at]?.value))
     return args.slice(at + 1);
-  return packagedTools(args).includes("turbo") ? args.slice(at) : undefined;
+  return packagedTools(args).some(named) ? args.slice(at) : undefined;
 }
 var RUNNER_TAKES = new Set([
   "--ca",
@@ -7796,7 +7801,6 @@ function runnerTarget(args) {
   return k;
 }
 var toolName = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""));
-var isTurbo = (word) => toolName(word) === "turbo";
 function validationOff(local, env) {
   const read = (key) => local.get(key)?.value ?? env.vars.get(key)?.value ?? env.process[key];
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true";
@@ -8136,7 +8140,9 @@ export {
   ranIn,
   real,
   runnerFolders,
+  runnerTarget,
   toolName,
+  toolWords,
   turboWords,
   unreadFolder,
   withChained,

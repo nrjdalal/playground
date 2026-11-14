@@ -377,21 +377,34 @@ function gitMoves(sub: string, rest: string[]): boolean {
 }
 
 // turbo's own words, however it is called: by name or path, through npx, bunx or bun x (runs reads bunx as bun x), as their tool or the package their -p names.
-export function turboWords(name: string, args: Word[], env: Env): Word[] | undefined {
-  if (name === "turbo") return args
-  if (RUNNERS.has(name) || name === "bunx") return runnerTurbo(args)
+export const turboWords = (name: string, args: Word[], env: Env): Word[] | undefined =>
+  toolWords(["turbo"], name, args, env)
+
+// A tool's own words, under any of its names, called as turboWords reads turbo.
+export function toolWords(
+  tools: readonly string[],
+  name: string,
+  args: Word[],
+  env: Env,
+): Word[] | undefined {
+  const named = (word: string | undefined) => tools.includes(toolName(word))
+  if (tools.includes(name)) return args
+  if (RUNNERS.has(name) || name === "bunx") return runnerTool(named, args)
   if (name !== "bun") return
   const { at, sub, words } = bunCall(args, env)
-  if (words[0] === "x") return runnerTurbo(args.slice(sub + 1))
+  if (words[0] === "x") return runnerTool(named, args.slice(sub + 1))
   const target = words[0] === "run" ? words[1] : words[0]
-  return isTurbo(target) ? args.slice(at + 1) : undefined
+  return named(target) ? args.slice(at + 1) : undefined
 }
 
-// A package runner's turbo words: after turbo as its tool, or from its tool on when its -p names turbo, since the runner then runs whatever it names with turbo on PATH.
-function runnerTurbo(args: Word[]): Word[] | undefined {
+// A package runner's tool words: after the tool, or from its tool on when its -p names it, since the runner then runs whatever it names with the tool on PATH.
+function runnerTool(
+  named: (word: string | undefined) => boolean,
+  args: Word[],
+): Word[] | undefined {
   const at = runnerTarget(args)
-  if (isTurbo(args[at]?.value)) return args.slice(at + 1)
-  return packagedTools(args).includes("turbo") ? args.slice(at) : undefined
+  if (named(args[at]?.value)) return args.slice(at + 1)
+  return packagedTools(args).some(named) ? args.slice(at) : undefined
 }
 
 // npx's and bunx's options whose next word is their value (bun x --help, npx's -p)
@@ -435,7 +448,7 @@ export function runnerFolders(
 }
 
 // The word a package runner runs, past its options and their values (-y, --yes, -p turbo).
-function runnerTarget(args: Word[]): number {
+export function runnerTarget(args: Word[]): number {
   let k = 0
   while (k < args.length && args[k].value.startsWith("-"))
     k += RUNNER_TAKES.has(args[k].value) ? 2 : 1
@@ -445,7 +458,6 @@ function runnerTarget(args: Word[]): number {
 // A tool by name or path, or as a package at a version (turbo@latest)
 export const toolName = (word: string | undefined) =>
   program((word ?? "").replace(/(?<=.)@[^/]*$/, ""))
-const isTurbo = (word: string | undefined) => toolName(word) === "turbo"
 
 // Whether the build's settings reach turbo: from its own assignments or env wrapper, an export before it, or the session's environment.
 function validationOff(local: Map<string, Text>, env: Env): boolean {

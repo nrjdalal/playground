@@ -632,7 +632,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
 
   test("a parked login is passed over for the next one in the split, though it has the larger share and the most room", async () => {
     const r = await spawn(
-      ["worker", "worker-brave-otter", "b.md"],
+      ["runner", "runner-calm-heron", "b.md"],
       [],
       { PACE_OFF_UNTIL: offUntilUtc, SETTINGS_JSON: parkedRows(), USAGE_JSON: weekAt(98) },
       script,
@@ -648,7 +648,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
 
   test("a parked login that is the only one under its pace is never picked: the start refuses with the usage gate's line", async () => {
     const r = await spawn(
-      ["worker", "worker-brave-otter", "b.md"],
+      ["runner", "runner-calm-heron", "b.md"],
       [],
       { SETTINGS_JSON: parkedRows(), USAGE_JSON: weekAt(98) },
       script,
@@ -667,7 +667,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
 
   test("a login whose parkedUntil has passed is picked as before", async () => {
     const r = await spawn(
-      ["worker", "worker-brave-otter", "b.md"],
+      ["runner", "runner-calm-heron", "b.md"],
       [],
       { SETTINGS_JSON: parkedRows(iso(-60_000)), USAGE_JSON: weekAt(98) },
       script,
