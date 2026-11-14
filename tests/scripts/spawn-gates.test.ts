@@ -8,7 +8,7 @@ setDefaultTimeout(40_000)
 const ID = "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"
 
 describe("the capacity gate refuses and spawns nothing", () => {
-  // No cap on the count of sessions: no count of live sessions or workers holds a spawn; the load, memory, slots and usage gates guard the Mac.
+  // With gates.sessionCap unset, no count of live sessions or workers holds a spawn; the load, memory, slots and usage gates guard the Mac.
   test.each([30, 50])("%d live sessions, workers among them, hold nothing", async (n) => {
     const r = await spawn(
       ["column", "tester", "tester-x", "worker-x", "w1:p2", "b.md", "--pr", "1"],
