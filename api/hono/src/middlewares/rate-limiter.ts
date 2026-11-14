@@ -31,28 +31,35 @@ interface RateLimiterConfig {
 }
 
 const REDIS_MS = 2000
+const REDIS_REST_MS = 30_000
 
-// One Redis connection for every limiter when KV_URL is set (the hosted API's), so every instance counts the same: made on the first command, and closed on any failure so the next command connects afresh; with no offline queue and a 2 s cap a command to a Redis that stopped answering fails rather than waits.
-const redisSend = (url: string) => {
+// One Redis connection for every limiter when KV_URL is set (the hosted API's), so every instance counts the same: made on the first command, and closed on any failure so the next command connects afresh. With no offline queue and a 2 s cap, a command to a Redis that stopped answering fails rather than waits, and every command for the next 30 s fails at once, so an outage costs one request 2 s rather than each one.
+export const redisSend = (url: string, restMs = REDIS_REST_MS) => {
   let client: RedisClient | null = null
+  let restUntil = 0
   return async (command: string, args: string[]): Promise<unknown> => {
+    if (Date.now() < restUntil) throw new Error("redis failed a moment ago")
+    const used = (client ??= new RedisClient(url, {
+      autoReconnect: false,
+      connectionTimeout: REDIS_MS,
+      enableOfflineQueue: false,
+    }))
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      client ??= new RedisClient(url, {
-        autoReconnect: false,
-        connectionTimeout: REDIS_MS,
-        enableOfflineQueue: false,
-      })
-      if (!client.connected) await client.connect()
+      if (!used.connected) await used.connect()
       return await Promise.race([
-        client.send(command, args),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`no reply in ${REDIS_MS}ms`)), REDIS_MS).unref(),
-        ),
+        used.send(command, args),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`no reply in ${REDIS_MS}ms`)), REDIS_MS)
+        }),
       ])
     } catch (error) {
-      client?.close()
-      client = null
+      restUntil = Date.now() + restMs
+      used.close()
+      if (client === used) client = null
       throw error
+    } finally {
+      clearTimeout(timer)
     }
   }
 }
