@@ -69,10 +69,9 @@ A lane's item aims at about 1,000 changed lines or fewer, and a bigger diff spli
 Anything else bundles into one PR or sequences one PR after the other.
 A worker is spawned for one chore and ends when the chore is done, so the room it held fills again as work finishes: a fix for live breakage or security first, then a queued org ticket, else the next item of the planner's first lane with no worker, where his own asks sit ahead of the chores the factory proposed.
 Before a lead spawns a worker it reads the machine's room, the Dashboard's System panel through `bun run verify system`, so the factory grows as far as the Mac allows, counting every membership rather than holding for usage.
-Every factory session starts through one script, `scripts/spawn.sh`, which refuses when the machine has no room for it (its gate reads the load against the cores, memory pressure, for a new worker (a `--reads-only` one aside) a free run slot with the load room for a run, or an empty run queue, and the model's usage windows, and names the reading that failed),
+Every factory session starts through one script, `scripts/spawn.sh`, which refuses when the machine has no room for it (the gates playbook's `SPAWN.md` lists, its refusal naming the reading that failed),
 or a live session already holds the name it would start;
-a manager passes the load check while the CPU is at least 40% idle, however high the load reads;
-of the live sessions it counts only the roster's workers and checkers, and only against the cap `gates.sessionCap` sets, so Ops still watches the live board, since cmux once stopped answering at 49 live sessions and load 97; a hook turns back a session started any other way; a worker runs its dev stack only while it tests.
+Ops still watches the live board while no session cap is set, since cmux once stopped answering at 49 live sessions and load 97; a hook turns back a session started any other way; a worker runs its dev stack only while it tests.
 A heavy run, such as a suite, takes one of a few run slots and gives it back when it ends, so nothing long-lived holds one.
 Nobody builds a demo stack for the owner: he tries changes on the live dashboard alone.
 A runner hosts long-running jobs and closes when none is left; the ops jobs Ops runs are scripts with no session and show on the Dashboard under Runners from the heartbeat each writes.
@@ -120,10 +119,10 @@ No factory session blocks on him: one that posted a decision carries on or ends 
 For a focused stretch, such as a timed test, a demo or an hour of deep work, `playground focus on --session <name> --reason "<why>"` gives one session the Mac for up to 180 minutes.
 While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep and that session's own reviewer and tester keep running.
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
-A priority start (spawn.sh's `--priority`) passes the load gate, a full run-slot queue at the slots gate and the session cap (`gates.sessionCap`) while a priority file stands, its roster row marked so it counts against no later start, and the memory gate still applies to it.
+A priority start (spawn.sh's `--priority`) passes the gates `SPAWN.md` names for it while a priority file stands, its roster row marked so it counts against no later start.
 It passes focus too on any of them: `priority.json`, an org's own `priority-<name>.json`, a session's own window or a job's own `priority-start.json`.
 A session's window opens only with `playground priority on <session> --reason "<why>"`, and a lead opens one only on the owner's or the dispatcher's word; `playground priority off <session> --reason "<why>"` lifts it, ops-tick lifts one left standing after a set age, and each opening and lift is a line in `ops/priority.log`.
-A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the load gate and the session cap as well, as a Claude Code update's close and resume do, and the memory gate still applies to it.
+A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the gates `SPAWN.md` names for it as well, as a Claude Code update's close and resume do.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
@@ -195,7 +194,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused (that row read again once its resume finds the session gone, so a session you closed stays down), one that never got its first message included,
-  the first dispatcher first and past the busy-machine check, then the other managers, which pass that check while the CPU is at least 40% idle, then the rest,
+  the first dispatcher first and past the busy-machine check, then the other managers, which pass that check as `SPAWN.md`'s load gate says, then the rest,
   on the account its start named, else the login with the most room, the model it started with, an effort other than high and, for a reviewer or tester, the PRs its roster row serves, and skips any still running.
   It prints one line for each session it brings back, leaves down or cannot bring back, naming the reason, so a session the busy-machine check held back is named with the check's words, and counts as on its way back, not as a failure.
   A factory session can only read from herdr: the `no-raw-spawn` hook refuses any herdr call that types into, closes or speaks for another pane, since herdr lets anything on the machine control it.
