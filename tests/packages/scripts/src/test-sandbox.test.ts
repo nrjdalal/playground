@@ -146,6 +146,34 @@ test.each([
   20_000,
 )
 
+// a background child (bash's cmd &) ignores SIGINT, so only the trap that keeps sh alive through a forwarded Ctrl-C lets it reach kill 0
+test("a forwarded interrupt still ends a child the test left in the background, which ignores it", async () => {
+  const pidFile = join(DIR, "int.pid")
+  const mark = `left-by-int-${process.pid}`
+  writeFileSync(
+    join(DIR, "int.test.ts"),
+    `import { test } from "bun:test"\nimport { existsSync } from "node:fs"\ntest("int", async () => { Bun.spawn(["bash", "-c", ${JSON.stringify(`bun -e "setInterval(() => {}, 1000) // ${mark}" & echo $! > ${pidFile}`)}]); while (!existsSync(${JSON.stringify(pidFile)})) await Bun.sleep(20); await Bun.sleep(8_000) }, 20_000)\n`,
+  )
+  let pid = 0
+  try {
+    const run = Bun.spawn(["bun", SCRIPT, "./int.test.ts"], {
+      cwd: DIR,
+      stderr: "ignore",
+      stdout: "ignore",
+      timeout: 15_000,
+    })
+    while (!existsSync(pidFile)) await Bun.sleep(50)
+    await Bun.sleep(300)
+    pid = Number(readFileSync(pidFile, "utf8"))
+    run.kill("SIGINT")
+    expect(await run.exited).toBe(130)
+    for (let i = 0; i < 40 && alive(pid, mark); i++) await Bun.sleep(50)
+    expect(alive(pid, mark)).toBe(false)
+  } finally {
+    if (pid && alive(pid, mark)) process.kill(pid, "SIGKILL")
+  }
+}, 20_000)
+
 test("a test in the parallel pass runs past bun's 5s default", async () => {
   writeFileSync(
     join(DIR, "busy.test.ts"),
