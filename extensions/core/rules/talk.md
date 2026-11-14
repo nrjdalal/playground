@@ -4,4 +4,4 @@ plain-words (`extensions/core/skills/plain-words/SKILL.md`) is the one source of
 to-inbox (`extensions/core/skills/to-inbox/SKILL.md`) is the owner shape's one source: its steps, its pictures, its emoji legend and the card width a drawing fits; load it too before you write to the owner.
 A message outside the Inbox takes every to-inbox step but the card's own Choices and Post, and a relay of a session's message to the owner is one such message.
 How a session is named to the owner and the order PR status goes in stay in **voice**.
-Done when every text you wrote for a person passes plain-words' two rules, and every message you sent the owner passes plain-words' owner style, picture first, and keeps each code line within the card's width (to-inbox's Fit the card).
+Done when every text you wrote for a person passes plain-words' two rules, and every message you sent the owner passes plain-words' owner style, picture first, and keeps each code line within the drawing width (to-inbox's Fit the card).
