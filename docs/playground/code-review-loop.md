@@ -54,6 +54,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
   When the PR moves text out of a file, it greps the old file's name over the whole repo, code comments included, since pointers to the old file can sit anywhere.
 - A reviewer reuses its newest free review clone, one whose PR has merged or closed and that no live reviewer holds, moving it to `review-<n>` before it checks out PR n, since the nightly clean reads a detached clone's PR from its folder's name; it makes a fresh clone, about 115k files, only when none is free.
   Once it moves a clone, it sends the session it reports to the old and new paths, so the cleanup that clone's last PR handed it to drops the old one.
+- A reviewer runs every command of a round from `/private/tmp`, reading its clone through `git -C` and absolute paths, so its shell's folder stays outside the clone and the cleanup can remove the clone once the review ends.
 - A verdict posts with every blank filled, and a review's sub-agents search inside its clone and the paths its brief names, stopping every background task of theirs before they report.
   Each sub-agent makes its scratch folder first and writes every probe output to an absolute path inside it.
 - No verdict stands on stale CI: the reviewer reads the head's checks again right before it posts, and a check gone red since its earlier read is a blocking finding in that verdict.
