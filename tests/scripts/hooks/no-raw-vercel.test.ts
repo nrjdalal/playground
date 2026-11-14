@@ -267,6 +267,24 @@ const YARD_SHIP: [string, string][] = [
   ["through npx by its script", "npx bun run ship:yard v0.0.111"],
   ["through pnpm dlx", "pnpm dlx bun packages/scripts/src/ship/yard.ts v0.0.111"],
   ["through bun x's --cwd", "bun x --cwd packages/scripts bun src/ship/yard.ts v0.0.111"],
+  ["through pnpm -C and dlx", "pnpm -C packages/scripts dlx bun src/ship/yard.ts v0.0.111"],
+  ["through pnpm --dir and dlx", "pnpm --dir packages/scripts dlx bun src/ship/yard.ts v0.0.111"],
+  [
+    "through npm exec, its -- after bun",
+    "npm exec bun -- packages/scripts/src/ship/yard.ts v0.0.111",
+  ],
+  [
+    "through npm exec, its -- before bun",
+    "npm exec -- bun packages/scripts/src/ship/yard.ts v0.0.111",
+  ],
+  ["through npm x", "npm x bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through yarn dlx", "yarn dlx bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through pnpm exec", "pnpm exec bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through pnpm by bun's name", "pnpm bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through yarn by bun's name", "yarn bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through bunx at a version", "bunx bun@1 packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through npx, then bun x", "npx bun x bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through bun's --cwd, then x", "bun --cwd packages/scripts x bun src/ship/yard.ts v0.0.111"],
   ["behind env", "env FOO=1 bun run ship:yard v0.0.111"],
   ["after a pushd", "pushd packages/scripts && bun src/ship/yard.ts v0.0.111"],
   ["in a subshell", "(cd packages/scripts/src/ship && bun yard.ts v0.0.111)"],
@@ -303,6 +321,11 @@ describe("the Yard ship step", () => {
       "the Yard CLI's file through bunx",
       "bunx bun packages/scripts/src/playground/yard.ts channels",
     ],
+    [
+      "the Yard CLI's file through npm exec",
+      "npm exec -- bun packages/scripts/src/playground/yard.ts channels",
+    ],
+    ["the step's help through npx", "npx bun run ship:yard --help"],
   ])("passes for a worker: %s", async (_, command) => {
     expect(await as("worker", command)).toBeUndefined()
   })

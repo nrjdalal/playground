@@ -16815,22 +16815,30 @@ function yardStep(name, args, shell) {
   const end = args.findIndex((a, k) => k > at && a.value === "--");
   return step && !args.slice(at + 1, end === -1 ? undefined : end).some((a) => STEP_HELP.has(a.value));
 }
-function throughRunner(name, args, shell) {
+var PACKAGE_RUNNERS = new Set(["bunx", "npm", "npx", "pnpm", "yarn"]);
+var MOVES2 = /^(?:--(?:cwd|dir|prefix|workspace)(?:=|$)|-[Cw])/;
+function runnerBun(name, args, shell) {
+  let offset = 0;
   if (name === "bun") {
     const { sub, words } = bunCall(args, shell);
-    return words[0] === "x" ? throughRunner("bunx", args.slice(sub + 1), shell) : undefined;
-  }
-  if (name === "pnpm") {
-    const at = args.findIndex((a) => !a.value.startsWith("-"));
-    return args[at]?.value === "dlx" ? throughRunner("npx", args.slice(at + 1), shell) : undefined;
-  }
-  if (name !== "bunx" && name !== "npx")
+    if (words[0] !== "x")
+      return;
+    offset = sub + 1;
+  } else if (!PACKAGE_RUNNERS.has(name))
     return;
-  const tool = toolWords(["bun"], name, args, shell);
-  if (!tool)
+  const at = args.findIndex((a, k) => k >= offset && toolName(a.value) === "bun");
+  if (at === -1)
     return;
-  const moved = args.slice(0, args.length - tool.length).some((a) => a.value === "--cwd" || a.value.startsWith("--cwd="));
-  return { args: tool, shell: moved ? { ...shell, cwd: undefined } : shell };
+  const moved = args.slice(0, at).some((a) => MOVES2.test(a.value));
+  return { args: args.slice(at + 1), shell: moved ? { ...shell, cwd: undefined } : shell };
+}
+function throughRunners(name, args, shell) {
+  const reached = [];
+  for (let next = runnerBun(name, args, shell);next && reached.length < 8; ) {
+    reached.push(next);
+    next = runnerBun("bun", next.args, next.shell);
+  }
+  return reached;
 }
 async function check22(raw, environment = process.env) {
   const {
@@ -16853,8 +16861,7 @@ async function check22(raw, environment = process.env) {
     const slotted = slotWords(parsed);
     const name = slotted ? program(slotted[0]?.value ?? "") : parsed.name;
     const args = slotted ? slotted.slice(1) : parsed.args;
-    const runner = throughRunner(name, args, shell);
-    if (yardStep(name, args, shell) || runner && yardStep("bun", runner.args, runner.shell))
+    if (yardStep(name, args, shell) || throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell)))
       verdicts.push({ production: true, what: "the Yard ship step, which deploys production" });
     const words = toolWords(NAMES2, name, args, shell);
     const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);

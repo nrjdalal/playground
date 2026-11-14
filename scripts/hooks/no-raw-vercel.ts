@@ -1,7 +1,7 @@
 // A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: lets a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx) run only as a read (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) or a preview deploy, and refuses every other call, a command or deploy subcommand a later CLI adds included; a production move (a production deploy, which also migrates the hosted database, a deploy continue, a redeploy, a promote, a rollback, an alias or a rolling release) passes for the Ops lead alone, in a call that names no role variable and sources no file.
 import { basename, isAbsolute, resolve } from "node:path"
 
-import { bunCall, toolWords } from "./no-main-checkout"
+import { bunCall, toolName, toolWords } from "./no-main-checkout"
 import { namesRole, opsLead } from "./role"
 import {
   type Env,
@@ -302,27 +302,36 @@ function yardStep(name: string, args: Word[], shell: Env): boolean {
   )
 }
 
-// bun reached through a package runner (bunx, bun x, npx, pnpm dlx): its words after bun, and the shell's folder dropped when the runner names a --cwd, so the step's file is then read as any yard.ts.
-function throughRunner(
+// The package runners that may hand bun its words (bunx, bun x, npx, and npm, pnpm or yarn by exec, x, dlx or a bin's name): each runner's words after the first one naming bun.
+const PACKAGE_RUNNERS = new Set(["bunx", "npm", "npx", "pnpm", "yarn"])
+// A runner's options that may move the folder bun runs in (bun x --cwd, pnpm -C or --dir, npm --prefix or a workspace), so the step's file is then read as any yard.ts.
+const MOVES = /^(?:--(?:cwd|dir|prefix|workspace)(?:=|$)|-[Cw])/
+
+function runnerBun(
   name: string,
   args: Word[],
   shell: Env,
 ): { args: Word[]; shell: Env } | undefined {
+  let offset = 0
   if (name === "bun") {
     const { sub, words } = bunCall(args, shell)
-    return words[0] === "x" ? throughRunner("bunx", args.slice(sub + 1), shell) : undefined
+    if (words[0] !== "x") return
+    offset = sub + 1
+  } else if (!PACKAGE_RUNNERS.has(name)) return
+  const at = args.findIndex((a, k) => k >= offset && toolName(a.value) === "bun")
+  if (at === -1) return
+  const moved = args.slice(0, at).some((a) => MOVES.test(a.value))
+  return { args: args.slice(at + 1), shell: moved ? { ...shell, cwd: undefined } : shell }
+}
+
+// Each bun a chain of package runners reaches (npx bun x bun ...), outermost first.
+function throughRunners(name: string, args: Word[], shell: Env): { args: Word[]; shell: Env }[] {
+  const reached: { args: Word[]; shell: Env }[] = []
+  for (let next = runnerBun(name, args, shell); next && reached.length < 8;) {
+    reached.push(next)
+    next = runnerBun("bun", next.args, next.shell)
   }
-  if (name === "pnpm") {
-    const at = args.findIndex((a) => !a.value.startsWith("-"))
-    return args[at]?.value === "dlx" ? throughRunner("npx", args.slice(at + 1), shell) : undefined
-  }
-  if (name !== "bunx" && name !== "npx") return
-  const tool = toolWords(["bun"], name, args, shell)
-  if (!tool) return
-  const moved = args
-    .slice(0, args.length - tool.length)
-    .some((a) => a.value === "--cwd" || a.value.startsWith("--cwd="))
-  return { args: tool, shell: moved ? { ...shell, cwd: undefined } : shell }
+  return reached
 }
 
 export async function check(
@@ -352,8 +361,10 @@ export async function check(
     const slotted = slotWords(parsed)
     const name = slotted ? program(slotted[0]?.value ?? "") : parsed.name
     const args = slotted ? slotted.slice(1) : parsed.args
-    const runner = throughRunner(name, args, shell)
-    if (yardStep(name, args, shell) || (runner && yardStep("bun", runner.args, runner.shell)))
+    if (
+      yardStep(name, args, shell) ||
+      throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell))
+    )
       verdicts.push({ production: true, what: "the Yard ship step, which deploys production" })
     const words = toolWords(NAMES, name, args, shell)
     // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string

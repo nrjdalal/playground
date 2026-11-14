@@ -1051,7 +1051,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 - Production ships from `main` through the release skill's `ship:merge`, and Ops ships the hosted build through its step 4's `bun run ship:yard <tag>` (`packages/scripts/src/ship/yard.ts`), which runs `vercel deploy --prod --yes` for each project from a detached worktree at the tag.
   The guard reads that step's own command line as a production move: `bun` with its script (`bun run ship:yard`, `bun ship:yard`) or its file, and `npm`, `pnpm` or `yarn` with its script.
   It resolves the file against the folder `bun` runs in (a `cd`, `--cwd`), and reads any file named `yard.ts` when that folder is unknown.
-  It also reads `bun` reached through `bunx`, `bun x`, `npx` or `pnpm dlx`, behind the shell walker's prefixes and after run-slot's `--`.
+  It also reads `bun` that a package runner hands words to (`bunx`, `bun x`, `npx`, and `npm`, `pnpm` or `yarn` by `exec`, `x`, `dlx` or bun's name), a chain of them included, as the words after the first one naming bun, behind the shell walker's prefixes and after run-slot's `--`.
+  A runner's option that may move its folder (`--cwd`, `-C`, `--dir`, `--prefix`, a workspace) makes the file read as any `yard.ts`.
   A `--help` or `-h` before any `--` reads as help through `bun` alone, since `bun run` hands the step what follows `--`.
   The guard reads the step by its script name and file path alone: a copy or link of the file, a wrapper script, an `eval` or an encoded command is outside what it reads, the known limit of this guard family.
   A production deploy of the hosted build migrates the hosted database first (`packages/scripts/src/migrate-on-deploy.ts`), so a hand production move is the Ops lead's alone.
