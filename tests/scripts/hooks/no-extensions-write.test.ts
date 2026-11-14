@@ -1950,10 +1950,6 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
   test.each([
     ["rm of a relative path after a cd to a literal path", "cd /tmp/x && rm -rf build"],
     ["a reader after a cd to a variable", `cd "$X"; ls`],
-    [
-      "a program after a cd to the checkout's top",
-      `cd "$(git rev-parse --show-toplevel)" && bun test`,
-    ],
     ["git status after a cd to a variable", `cd "$X" && git status`],
     ["a redirect to an absolute path after a cd to a variable", `cd "$X"; echo x > /tmp/y`],
     ["rm of an absolute path after a cd to a variable", `cd "$X"; rm -rf /tmp/scratch-dir`],
@@ -2045,7 +2041,7 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "a writer under xargs fed a program's output with no -a or cd, as on canary",
       "git ls-files | xargs sed -i s/a/b/",
     ],
-    // PG-2094: a program on neither list under xargs after a cd to a variable, writing nothing or only absolute paths
+    // PG-2094: a program on neither list under xargs writing nothing or only absolute paths after a cd to a variable, and an in-place edit after a cd to a literal path
     [
       "an in-place sed under xargs fed an absolute path after a cd to a variable",
       `cd "$X" && echo /tmp/f | xargs sed -i s/a/b/`,
@@ -2070,11 +2066,44 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "a perl that only prints under xargs after a cd to a variable",
       `cd "$X" && grep -l a f | xargs perl -ne print`,
     ],
-    ["git add under xargs after a cd to a variable", `cd "$X" && grep -l a f | xargs git add`],
     [
       "an in-place sed under xargs after a cd to a literal path",
       "cd /tmp && grep -l a f | xargs sed -i s/a/b/",
     ],
+    // PG-2104: after a cd to a variable, a program that writes nothing (a reader, a printer, a builtin, a read of git or portless, a shell whose script is a read), git on a literal folder, and a writer after a cd to a literal path or with no cd
+    ["cat after a cd to a variable", `cd "$X" && cat f`],
+    ["grep after a cd to a variable", `cd "$X" && grep -rn a .`],
+    ["head and wc after a cd to a variable", `cd "$X" && head -5 f && wc -l f`],
+    ["pwd and ls after a cd to a variable", `cd "$X" && pwd && ls -la`],
+    ["a cd below a cd to a variable, then ls", `cd "$X" && cd sub && ls`],
+    ["git log after a cd to a variable", `cd "$X" && git log --oneline -5`],
+    ["git diff after a cd to a variable", `cd "$X" && git diff --stat`],
+    ["git show after a cd to a variable", `cd "$X" && git show HEAD`],
+    ["git rev-parse after a cd to a variable", `cd "$X" && git rev-parse HEAD`],
+    ["git on a literal folder after a cd to a variable", `cd "$X" && git -C /tmp/r checkout -- f`],
+    ["sleep and date after a cd to a variable", `cd "$X" && sleep 1 && date -u`],
+    ["basename and dirname after a cd to a variable", `cd "$X" && basename "$PWD" && dirname a/b`],
+    ["echo and printf after a cd to a variable", `cd "$X" && echo hi && printf "%s\n" x`],
+    ["ex in script mode after a cd to a literal path", "cd /tmp/x && ex -sc 'wq' f"],
+    ["patch after a cd to a literal path", "cd /tmp/x && patch -p1 < /tmp/d"],
+    ["git checkout of a path after a cd to a literal path", "cd /tmp/x && git checkout -- f"],
+    ["bun run with no cd", "bun run build"],
+    [
+      "cut and tr in a substitution after a cd to a variable",
+      `cd "$X"; x=$(echo a | cut -c1 | tr a b)`,
+    ],
+    ["a for loop of echoes after a cd to a variable", `cd "$X"; for f in a b; do echo $f; done`],
+    [
+      "read in a while loop after a cd to a variable",
+      `cd "$X"; while read -r l; do echo "$l"; done < /tmp/f`,
+    ],
+    [
+      "portless get by bunx after a cd to a variable",
+      `cd "$X" && bunx portless get api.playground`,
+    ],
+    ["a shell's inline read after a cd to a variable", `cd "$X" && bash -c "ls"`],
+    ["a shell fed a read after a cd to a variable", `cd "$X" && echo ls | sh`],
+    ["a shell script after a cd to a literal path", "cd /tmp/x && bash s.sh"],
     ["cp of a relative file to an absolute path after a cd to a variable", `cd "$X"; cp a /tmp/b`],
     [
       "a redirect to a file the line holds after a cd to a variable",

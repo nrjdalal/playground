@@ -890,6 +890,8 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#1887 a commit by -C into a clone in the root whose message holds a folder change | git -C, it moves folders",
       "#1887 a commit by -C to another folder whose message holds a folder change | git -C, it moves folders",
       "#1887 a commit by -c whose message holds a folder change into the root | git -C, it moves folders",
+      // the row's cd moves the shell to a folder the hook cannot read, so its relative -C names no folder any spelling knows
+      "#2104 git -C a relative folder after a cd to a variable | git -C, it moves folders",
       "#466 git --work-tree with a subcommand for its value | git --work-tree, no folder",
       "#466 git -C with a subcommand for its value | git -C, no folder",
     ])
