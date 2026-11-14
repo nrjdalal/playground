@@ -273,9 +273,10 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Both settings files register it once on Bash, with `onFailure: "block"`, in place of each Bash guard's own Bash entry, and a guard that also guards another tool keeps its own entry for that tool.
   A test holds each file to that one Bash entry, so a guard a later PR registers on Bash fails it until the guard joins `GUARDS`.
   A Codex session loads the same entry with no `onFailure`, since `codexHooks()` drops that key, which Codex's hook handler lacks (`HookHandlerConfig::Command`, codex-cli 0.167.1), so there the runner's timeout would let the call run ([A Codex session's calls](#a-codex-sessions-calls)).
-- So the hook decides at its own deadline, `DEADLINE` in `guards.ts`, 13 s from its process's start (imports included), inside the runner's 15 s timeout: each guard that has not answered by then refuses the call, named in one paragraph after the others' refusals, so a late allow reads as a refusal under either runner.
+- So the hook decides at its own deadline, `DEADLINE` in `guards.ts`, 13 s from its process's start (imports and the input's read included), inside the runner's 15 s timeout: each guard that has not answered by then refuses the call, named in one paragraph after the others' refusals, so a late allow reads as a refusal under either runner.
+  An input whose read is still open at the deadline refuses the call too, in one paragraph of its own, so a runner that leaves stdin open never holds the hook past it.
   The deadline is a timer, which fires only while the event loop is free, so a guard that does synchronous work long enough to reach it runs that work in a Worker, as no-extensions-write's `guarded()` does, and keeps its own wait under the deadline (12 s there).
-  Its tests are `bun run test:file tests/scripts/hooks/guards.test.ts tests/scripts/hooks/refused-forms.test.ts tests/scripts/hooks-abs-path.test.ts`, the second feeding each Bash row of a guard it runs through its `check()`, the third running a stub guard that never answers under each runner's command at the real deadline.
+  Its tests are `bun run test:file tests/scripts/hooks/guards.test.ts tests/scripts/hooks/refused-forms.test.ts tests/scripts/hooks-abs-path.test.ts`, the first also feeding the hook a stdin left open, the second feeding each Bash row of a guard it runs through its `check()`, the third running a stub guard that never answers under each runner's command at the real deadline.
 
 ## no-bare-slack-link
 
