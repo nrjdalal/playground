@@ -294,7 +294,7 @@ export async function pruneTurbo(dir: string, now: Date, days = 2): Promise<stri
 }
 
 // rm quarantines at most 3 paths a session per minute; the beat paces every move its worktree step makes under that cap, cleanWorktree's own included, waiting before a 4th inside the minute so rm's tripwire stays quiet, retries a refused move once the minute is out, and names what a bound on the total wait leaves for the next run. Other beats run beside this one (tick.ts starts each due beat on its own), so the wait holds up nothing.
-const RM_CAP = /quarantined \d+ paths in the last minute/
+const RM_CAP = /refused a \d+th removal: .* moved \d+ paths in the last minute/
 const CAP_WAIT_MS = 60_000
 const CAP_WAIT_BOUND_MS = 600_000
 // The refs API's answer for a sha GitHub does not hold (measured, 422).
