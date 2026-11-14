@@ -1871,8 +1871,14 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one, or grep that xargs starts as its own first word (xargsGrep)
     const reader =
       !rootLine && ((ownFirst(cmd, first) && reads(parsed, env)) || xargsGrep(cmd, parsed, env))
-    // on a line read whole with no root shell and no variable set that makes a program run another (TEXT_RUNS), a read-only gh call's jq filter, agent-browser's eval script or wait --fn expression, an awk program holding no | and nothing awkRuns finds, a read-only or in-place sed's script and a playground text flag's value stay text, as on a line read call by call, since no program runs them as a shell line; each is still refused when it names the root, and the awk's and sed's files are judged as any word is
+    // on a line read whole with no root shell and no variable set that makes a program run another (TEXT_RUNS), a read-only gh call's jq filter, agent-browser's eval script or wait --fn expression, an awk program holding no | and nothing awkRuns finds, a read-only sed's script, an in-place sed's script whose every other word the hook holds (no substitution, no variable it cannot read) and a playground text flag's value stay text, as on a line read call by call, since no program runs them as a shell line; each is still refused when it names the root, and the awk's and sed's files are judged as any word is
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined
+    const edits = SEDS.has(program(name)) ? sedInPlace(cmd, parsed) : undefined
+    const editsHeld =
+      !!edits &&
+      parsed.args.every(
+        (word) => edits.has(word) || (!word.procs && held(word, env, steadyAt(cmd))),
+      )
     const wholeText = new Set<Word>(
       whole &&
         !rootLine &&
@@ -1885,7 +1891,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
             ...(browserCode ? [browserCode] : []),
             ...(AWKS.has(program(name)) ? awkTexts(parsed.args) : []),
             ...(SEDS.has(program(name))
-              ? (sedReadScripts(parsed.args) ?? [...(sedInPlace(cmd, parsed) ?? [])])
+              ? (sedReadScripts(parsed.args) ?? (editsHeld ? [...edits] : []))
               : []),
             ...textFlagValues(parsed),
           ]

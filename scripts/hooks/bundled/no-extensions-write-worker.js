@@ -10800,11 +10800,13 @@ async function inspect(raw, environment, unknown = false) {
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
     const reader = !rootLine && (ownFirst(cmd, first) && reads(parsed, env) || xargsGrep(cmd, parsed, env));
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined;
+    const edits = SEDS.has(program(name)) ? sedInPlace(cmd, parsed) : undefined;
+    const editsHeld = !!edits && parsed.args.every((word) => edits.has(word) || !word.procs && held3(word, env, steadyAt(cmd)));
     const wholeText = new Set(whole && !rootLine && ownProgram(cmd, parsed) && ![...parsed.local.keys(), ...env.vars.keys()].some((key) => TEXT_RUNS.test(key) || marked(key)) ? [
       ...ghFilters(parsed),
       ...browserCode ? [browserCode] : [],
       ...AWKS.has(program(name)) ? awkTexts(parsed.args) : [],
-      ...SEDS.has(program(name)) ? sedReadScripts(parsed.args) ?? [...sedInPlace(cmd, parsed) ?? []] : [],
+      ...SEDS.has(program(name)) ? sedReadScripts(parsed.args) ?? (editsHeld ? [...edits] : []) : [],
       ...textFlagValues(parsed)
     ] : []);
     const xargsOwn = xargs ? xargsOptions(cmd, first) : [];
