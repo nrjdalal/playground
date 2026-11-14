@@ -282,7 +282,7 @@ function judgeApi(rest: Word[], flags: Flag[], built: boolean): Verdict | undefi
     return { production: false, what: "a vercel api read of a project's env" }
 }
 
-// The release skill's Yard ship step, which runs vercel deploy --prod itself, so its own command line is the production move: bun with its script (`bun run ship:yard`, `bun ship:yard`) or its file, resolved against the folder bun runs in, and npm, pnpm or yarn with its script; its help, before any `--`, moves nothing, and by another runner it is never help.
+// The release skill's Yard ship step, which runs vercel deploy --prod itself, so its own command line is the production move: bun with its script (`bun run ship:yard`, `bun ship:yard`) or its file, resolved against the folder bun runs in, bun reached through a package runner, and npm, pnpm or yarn with its script; its help, before any `--`, moves nothing, and by another runner it is never help.
 const STEP_FILE = /(?:^|\/)packages\/scripts\/src\/ship\/yard\.ts$/
 const STEP_HELP = new Set(["--help", "-h"])
 const RUNNERS = new Set(["npm", "pnpm", "yarn"])
@@ -300,6 +300,29 @@ function yardStep(name: string, args: Word[], shell: Env): boolean {
   return (
     step && !args.slice(at + 1, end === -1 ? undefined : end).some((a) => STEP_HELP.has(a.value))
   )
+}
+
+// bun reached through a package runner (bunx, bun x, npx, pnpm dlx): its words after bun, and the shell's folder dropped when the runner names a --cwd, so the step's file is then read as any yard.ts.
+function throughRunner(
+  name: string,
+  args: Word[],
+  shell: Env,
+): { args: Word[]; shell: Env } | undefined {
+  if (name === "bun") {
+    const { sub, words } = bunCall(args, shell)
+    return words[0] === "x" ? throughRunner("bunx", args.slice(sub + 1), shell) : undefined
+  }
+  if (name === "pnpm") {
+    const at = args.findIndex((a) => !a.value.startsWith("-"))
+    return args[at]?.value === "dlx" ? throughRunner("npx", args.slice(at + 1), shell) : undefined
+  }
+  if (name !== "bunx" && name !== "npx") return
+  const tool = toolWords(["bun"], name, args, shell)
+  if (!tool) return
+  const moved = args
+    .slice(0, args.length - tool.length)
+    .some((a) => a.value === "--cwd" || a.value.startsWith("--cwd="))
+  return { args: tool, shell: moved ? { ...shell, cwd: undefined } : shell }
 }
 
 export async function check(
@@ -329,7 +352,8 @@ export async function check(
     const slotted = slotWords(parsed)
     const name = slotted ? program(slotted[0]?.value ?? "") : parsed.name
     const args = slotted ? slotted.slice(1) : parsed.args
-    if (yardStep(name, args, shell))
+    const runner = throughRunner(name, args, shell)
+    if (yardStep(name, args, shell) || (runner && yardStep("bun", runner.args, runner.shell)))
       verdicts.push({ production: true, what: "the Yard ship step, which deploys production" })
     const words = toolWords(NAMES, name, args, shell)
     // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string

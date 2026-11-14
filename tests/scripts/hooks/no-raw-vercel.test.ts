@@ -260,6 +260,15 @@ const YARD_SHIP: [string, string][] = [
   ["by npm with a help word", "npm run ship:yard -- --help"],
   ["by pnpm", "pnpm ship:yard v0.0.111"],
   ["by yarn", "yarn run ship:yard v0.0.111"],
+  ["through bunx", "bunx bun run ship:yard v0.0.111"],
+  ["through bun x", "bun x bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through npx", "npx bun ship:yard v0.0.111"],
+  ["through pnpm dlx", "pnpm dlx bun run ship:yard v0.0.111"],
+  ["through bun x's --cwd", "bun x --cwd packages/scripts bun src/ship/yard.ts v0.0.111"],
+  ["behind env", "env FOO=1 bun run ship:yard v0.0.111"],
+  ["after a pushd", "pushd packages/scripts && bun src/ship/yard.ts v0.0.111"],
+  ["in a subshell", "(cd packages/scripts/src/ship && bun yard.ts v0.0.111)"],
+  ["in sh -c", "sh -c 'bun run ship:yard v0.0.111'"],
 ]
 
 describe("the Yard ship step", () => {
@@ -288,6 +297,10 @@ describe("the Yard ship step", () => {
       "cd packages/scripts/src/playground && bun yard.ts channels",
     ],
     ["a read naming the step", "grep -n ship:yard package.json"],
+    [
+      "the Yard CLI's file through bunx",
+      "bunx bun packages/scripts/src/playground/yard.ts channels",
+    ],
   ])("passes for a worker: %s", async (_, command) => {
     expect(await as("worker", command)).toBeUndefined()
   })

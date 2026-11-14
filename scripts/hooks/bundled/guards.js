@@ -16815,6 +16815,23 @@ function yardStep(name, args, shell) {
   const end = args.findIndex((a, k) => k > at && a.value === "--");
   return step && !args.slice(at + 1, end === -1 ? undefined : end).some((a) => STEP_HELP.has(a.value));
 }
+function throughRunner(name, args, shell) {
+  if (name === "bun") {
+    const { sub, words } = bunCall(args, shell);
+    return words[0] === "x" ? throughRunner("bunx", args.slice(sub + 1), shell) : undefined;
+  }
+  if (name === "pnpm") {
+    const at = args.findIndex((a) => !a.value.startsWith("-"));
+    return args[at]?.value === "dlx" ? throughRunner("npx", args.slice(at + 1), shell) : undefined;
+  }
+  if (name !== "bunx" && name !== "npx")
+    return;
+  const tool = toolWords(["bun"], name, args, shell);
+  if (!tool)
+    return;
+  const moved = args.slice(0, args.length - tool.length).some((a) => a.value === "--cwd" || a.value.startsWith("--cwd="));
+  return { args: tool, shell: moved ? { ...shell, cwd: undefined } : shell };
+}
 async function check22(raw, environment = process.env) {
   const {
     cwd,
@@ -16836,7 +16853,8 @@ async function check22(raw, environment = process.env) {
     const slotted = slotWords(parsed);
     const name = slotted ? program(slotted[0]?.value ?? "") : parsed.name;
     const args = slotted ? slotted.slice(1) : parsed.args;
-    if (yardStep(name, args, shell))
+    const runner = throughRunner(name, args, shell);
+    if (yardStep(name, args, shell) || runner && yardStep("bun", runner.args, runner.shell))
       verdicts.push({ production: true, what: "the Yard ship step, which deploys production" });
     const words = toolWords(NAMES2, name, args, shell);
     const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
