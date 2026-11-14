@@ -1,4 +1,4 @@
-// playground ci-wait <pr> [--repo <owner/name>]: one wait on a PR's CI for every session, so none writes its own loop, which once read a required check GitHub had not yet created as done. It waits until each of pr:merge's REQUIRED_CHECKS exists at the PR's current head and has concluded, then prints each conclusion and exits 0 when all passed, 1 when any did not; it reads over REST every POLL_SECONDS (the github rule), waits out a rate limit's reset, and waits afresh on a head that moves.
+// playground ci-wait <pr> [--repo <owner/name>]: one wait on a PR's CI for every session, so none writes its own loop, which once read a required check GitHub had not yet created as done. It waits until each of pr:merge's REQUIRED_CHECKS exists at the PR's current head and has concluded, then prints each conclusion and exits 0 when all passed, 1 when any did not, and 2 on a PR or repo GitHub does not know; it reads over REST every POLL_SECONDS (the github rule), waits out a rate limit's reset, and waits afresh on a head that moves.
 import { PASSED, REQUIRED_CHECKS, REQUIRED_WORKFLOWS } from "../pr-merge/gates"
 
 export const POLL_SECONDS = 300
@@ -27,10 +27,15 @@ const split = (text: string): [Record<string, string>, string] => {
   return [headers, body]
 }
 
-// One REST read, or null once a failed read has waited out its pause: a spent rate limit until its reset, any other failure a poll.
+// A read that no wait can mend: a PR or repo GitHub does not know (404), or a login it refuses (401).
+class Unreadable extends Error {}
+
+// One REST read, or null once a failed read has waited out its pause: a spent rate limit until its reset, any other failure a poll; a 404 or 401 throws Unreadable, since reading again would wait for good.
 const read = async <T>(deps: CiWaitDeps, path: string, jq: string): Promise<T | null> => {
   const answer = deps.gh(["api", "-i", path, "--jq", jq])
   if (answer.code === 0) return JSON.parse(split(answer.stdout)[1]) as T
+  const status = answer.stdout.split("\n", 1)[0]!.trim()
+  if (/^HTTP\/\S+ 40[14]\b/.test(status)) throw new Unreadable(`gh api ${path}: ${status}`)
   const [headers] = split(answer.stdout)
   const reset = headers["x-ratelimit-reset"] ?? ""
   const pause =
@@ -108,5 +113,11 @@ export async function runCiWait(words: string[], deps: CiWaitDeps): Promise<numb
     deps.err(USAGE)
     return 2
   }
-  return ciWait(repo, n, deps)
+  try {
+    return await ciWait(repo, n, deps)
+  } catch (error) {
+    if (!(error instanceof Unreadable)) throw error
+    deps.err(error.message)
+    return 2
+  }
 }

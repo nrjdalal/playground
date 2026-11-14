@@ -131,6 +131,7 @@ It refuses a file that is not an HTML page, and a `--by` or `--for` that names n
 `playground ci-wait <pr>` waits until each check `pr:merge` needs, `Audit, Lint, and Build` and `test`, exists at the PR's head and has finished, then prints each result and exits 0 when all passed, else 1.
 It reads GitHub every 5 minutes, waits out a rate limit, and starts over when a push moves the head.
 When a check's workflow run ends without creating the check, it exits 1 and names the `gh run rerun` that brings it.
+When GitHub does not know the PR or repo, or refuses your login, it exits 2 at once.
 `--repo <owner/name>` points it at another repo; it reads the factory's own by default.
 Run it as a background task, and read the head's checks once more yourself before you call it green.
 
