@@ -8,7 +8,7 @@ export const groups: Group[] = [
     rows: ({ CLI_DIR }) => [
       [
         "ext add by a bun --cwd behind find -exec",
-        `find /tmp -maxdepth 0 -exec bun --cwd=${CLI_DIR} cli.ts ext add login list x y \;`,
+        `find /tmp -maxdepth 0 -exec bun --cwd=${CLI_DIR} cli.ts ext add login list x y \\;`,
       ],
       // a control, refused before this source's fix
       [

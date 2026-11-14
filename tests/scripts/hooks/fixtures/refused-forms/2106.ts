@@ -36,6 +36,22 @@ export const groups: Group[] = [
         `f() { builtin cd "$X"; }; chpwd_functions=(f); cd /tmp && cp a b`,
       ],
       [
+        "cp after a cd under a chpwd hook array named with an empty double quote inside",
+        `f() { builtin cd "$X"; }; set -A chp""wd_functions f; cd /tmp && cp a b`,
+      ],
+      [
+        "cp after a cd under a chpwd hook array named with a quoted part",
+        `f() { builtin cd "$X"; }; set -A "chp"wd_functions f; cd /tmp && cp a b`,
+      ],
+      [
+        "cp after a cd under a chpwd hook array named with a backslash inside",
+        `f() { builtin cd "$X"; }; set -A chp\\wd_functions f; cd /tmp && cp a b`,
+      ],
+      [
+        "cp after a cd under a chpwd hook array typeset with an empty single quote inside",
+        `f() { builtin cd "$X"; }; typeset -ga chp''wd_functions=(f); cd /tmp && cp a b`,
+      ],
+      [
         "cp after a held cd the line defines as a function",
         `W=/tmp; cd() { builtin cd "$X"; }; cd "$W" && cp a b`,
       ],
