@@ -6177,6 +6177,7 @@ async function leadOf(raw, kind, environment) {
     return false;
   }
 }
+var namesRole = (command) => /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command);
 var builderLead = (raw, environment = process.env) => leadOf(raw, "builder", environment);
 async function codexName(sessionId, environment = process.env) {
   if (!environment.CODEX_HOME)
@@ -9316,7 +9317,6 @@ function judgeTool(tool, input, factory) {
   const what = typeof branch === "string" && branch !== "" ? branch : "the default branch, canary";
   return `no-protected-push hook refuses ${tool}: it writes ${what} of ${place}. ${ROUTE} ${FIX}`;
 }
-var namesRole = (command) => /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command);
 async function judgeMerge(rest, repos, parsed, env, factory, builder, command) {
   const { flags, positionals } = parseFlags(rest, MERGE_TAKES);
   if (flags.some((f) => f.name === "--help" || f.name === "-h"))

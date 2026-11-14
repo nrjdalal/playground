@@ -74,6 +74,10 @@ async function leadOf(
   }
 }
 
+// Whether a command may set the role variable a lead's pass reads, or source a file that may: the pass then goes, since the hook reads the role from its own launch.
+export const namesRole = (command: string): boolean =>
+  /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command)
+
 export const opsLead = (raw: string, environment: Environment = process.env) =>
   leadOf(raw, "ops", environment)
 

@@ -2675,6 +2675,8 @@ async function leadOf(raw, kind, environment) {
     return false;
   }
 }
+var namesRole = (command) => /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command);
+var opsLead = (raw, environment = process.env) => leadOf(raw, "ops", environment);
 var builderLead = (raw, environment = process.env) => leadOf(raw, "builder", environment);
 async function codexName(sessionId, environment = process.env) {
   if (!environment.CODEX_HOME)
@@ -9885,7 +9887,6 @@ function judgeTool(tool, input, factory) {
   const what = typeof branch === "string" && branch !== "" ? branch : "the default branch, canary";
   return `no-protected-push hook refuses ${tool}: it writes ${what} of ${place}. ${ROUTE} ${FIX}`;
 }
-var namesRole = (command) => /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command);
 async function judgeMerge(rest, repos, parsed, env, factory, builder, command) {
   const { flags, positionals } = parseFlags(rest, MERGE_TAKES);
   if (flags.some((f) => f.name === "--help" || f.name === "-h"))
@@ -12585,24 +12586,26 @@ function gitMoves(sub, rest) {
     return rest.some((w) => w === "--force" || /^-[a-zA-Z]*f/.test(w));
   return false;
 }
-function turboWords(name, args, env) {
-  if (name === "turbo")
+var turboWords = (name, args, env) => toolWords(["turbo"], name, args, env);
+function toolWords(tools, name, args, env) {
+  const named = (word) => tools.includes(toolName(word));
+  if (tools.includes(name))
     return args;
   if (RUNNERS2.has(name) || name === "bunx")
-    return runnerTurbo(args);
+    return runnerTool(named, args);
   if (name !== "bun")
     return;
   const { at, sub, words } = bunCall(args, env);
   if (words[0] === "x")
-    return runnerTurbo(args.slice(sub + 1));
+    return runnerTool(named, args.slice(sub + 1));
   const target = words[0] === "run" ? words[1] : words[0];
-  return isTurbo(target) ? args.slice(at + 1) : undefined;
+  return named(target) ? args.slice(at + 1) : undefined;
 }
-function runnerTurbo(args) {
+function runnerTool(named, args) {
   const at = runnerTarget(args);
-  if (isTurbo(args[at]?.value))
+  if (named(args[at]?.value))
     return args.slice(at + 1);
-  return packagedTools(args).includes("turbo") ? args.slice(at) : undefined;
+  return packagedTools(args).some(named) ? args.slice(at) : undefined;
 }
 var RUNNER_TAKES = new Set([
   "--ca",
@@ -12645,7 +12648,6 @@ function runnerTarget(args) {
   return k;
 }
 var toolName = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""));
-var isTurbo = (word) => toolName(word) === "turbo";
 function validationOff(local, env) {
   const read = (key) => local.get(key)?.value ?? env.vars.get(key)?.value ?? env.process[key];
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true";
@@ -16568,6 +16570,147 @@ async function check21(raw, environment = process.env) {
 }
 if (false) {}
 
+// scripts/hooks/no-raw-vercel.ts
+var NAMES2 = ["vc", "vercel"];
+var TAKES3 = new Set([
+  "--archive",
+  "--build-env",
+  "--cwd",
+  "--env",
+  "--environment",
+  "--field",
+  "--generate",
+  "--git-branch",
+  "--global-config",
+  "--header",
+  "--input",
+  "--local-config",
+  "--meta",
+  "--method",
+  "--project",
+  "--raw-field",
+  "--regions",
+  "--scope",
+  "--spec-url",
+  "--target",
+  "--timeout",
+  "--token",
+  "-A",
+  "-e",
+  "-F",
+  "-f",
+  "-H",
+  "-p",
+  "-Q",
+  "-S",
+  "-t",
+  "-X"
+]);
+var COMMANDS2 = new Set("activity agent agent-runs ai-gateway alerts alias api bisect blob budgets build buy cache certs changelog ci comments connect contract crons curl daemons deploy deploy-hooks dev dns domains drains env environments feedback firewall flags git global-config health help httpstat init inspect install integration kms link list login logout logs ls mcp metrics microfrontends monitors open organizations pricing project promote pull redeploy redirects remove rm rollback rolling-release routes sandbox schedules security setup signup skills storage switch teams telemetry token-pass tokens traces upgrade usage vcr version webhooks whoami".split(" "));
+var HELP2 = new Set(["--help", "--version", "-h", "-v"]);
+var API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"]);
+var MENTION2 = /\bv(?:ercel|c)\b/i;
+var NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i;
+function judge7(args, fed) {
+  const { flags, positionals } = parseFlags(args, TAKES3);
+  if (flags.some((f) => HELP2.has(f.name)))
+    return;
+  const [sub, ...rest] = positionals;
+  if (sub && unreadable(sub))
+    return { production: false, what: "a subcommand built at run time" };
+  const built = fed || args.some(unreadable);
+  const has = (...names) => flags.some((f) => names.includes(f.name));
+  const toProduction = (names, absent) => {
+    const flag = flags.findLast((f) => names.includes(f.name));
+    if (!flag)
+      return absent;
+    return !flag.value || unreadable(flag.value) || flag.value.value.toLowerCase() === "production";
+  };
+  const next = rest[0]?.value;
+  const name = sub?.value;
+  if (name === undefined || name === "deploy" || !COMMANDS2.has(name))
+    return has("--prod") || toProduction(["--environment", "--target"], false) || built ? { production: true, what: "a production deploy" } : undefined;
+  if (name === "redeploy")
+    return toProduction(["--environment", "-e", "--target"], true) || built ? { production: true, what: "a redeploy that may land in production" } : undefined;
+  if (name === "promote" || name === "rollback")
+    return next === "status" ? undefined : { production: true, what: `a ${name}` };
+  if (name === "alias")
+    return next === undefined || next === "list" || next === "ls" ? undefined : { production: true, what: "an alias change" };
+  if (name === "rolling-release")
+    return next === "inspect" ? undefined : { production: true, what: "a rolling release step" };
+  if (name === "link")
+    return { production: false, what: "a vercel link, which pulls the env" };
+  if (name === "pull")
+    return { production: false, what: "a vercel pull, which pulls the env" };
+  if (name === "integration")
+    return next === "add" && !has("--no-env-pull") ? { production: false, what: "an integration add without --no-env-pull" } : undefined;
+  if (name === "env") {
+    if (rest[0] && unreadable(rest[0]))
+      return { production: false, what: "an env subcommand built at run time" };
+    if (next === "pull" || next === "run")
+      return { production: false, what: `an env ${next}` };
+    if ((next === "ls" || next === "list") && (has("--json") || built))
+      return { production: false, what: "an env list with its values" };
+    return;
+  }
+  if (name === "api")
+    return judgeApi2(rest, flags, built);
+}
+function judgeApi2(rest, flags, built) {
+  const [endpoint] = rest;
+  if (!endpoint || endpoint.value === "list")
+    return;
+  if (built)
+    return { production: false, what: "a vercel api call built at run time" };
+  const method = flags.findLast((f) => f.name === "-X" || f.name === "--method");
+  if (method && (!method.value || method.value.value.toUpperCase() !== "GET"))
+    return { production: false, what: "a vercel api write" };
+  if (!method && flags.some((f) => API_BODY.has(f.name)))
+    return { production: false, what: "a vercel api write, a body making it a POST" };
+  if (/(?:^|\/)env(?:[/?#]|$)/i.test(endpoint.value))
+    return { production: false, what: "a vercel api read of a project's env" };
+}
+async function check22(raw, environment = process.env) {
+  const {
+    cwd,
+    tool_input: toolInput,
+    tool_name: tool
+  } = JSON.parse(raw);
+  if (tool !== "Bash" || typeof toolInput?.command !== "string")
+    return;
+  const command = toolInput.command;
+  if (!MENTION2.test(command.replace(/["'\\]/g, "")))
+    return;
+  const verdicts = [];
+  const visit = async (_cmd, parsed, shell) => {
+    if (parsed.first && unreadable(parsed.first) && NAMED.test(command))
+      verdicts.push({
+        production: false,
+        what: "a program built at run time on a line naming vercel"
+      });
+    const words = toolWords(NAMES2, parsed.name, parsed.args, shell);
+    const verdict = words && judge7(words, parsed.xargs !== undefined);
+    if (verdict)
+      verdicts.push(verdict);
+    return;
+  };
+  const env = {
+    cwd: typeof cwd === "string" ? cwd : undefined,
+    files: new Map,
+    known: {},
+    process: {},
+    vars: new Map
+  };
+  await run(lex(command), env, visit);
+  const always = verdicts.find((v) => !v.production);
+  if (always)
+    return `no-raw-vercel hook refuses ${always.what}: it writes the project's secrets to disk, prints them or hands them to a command, or writes through the API. The reads run: whoami, ls, inspect, logs, env ls without --json and a vercel api GET outside /env; a secret reaches a project through an Inbox secret ask.`;
+  const production = verdicts.find((v) => v.production);
+  if (!production || await opsLead(raw, environment) && !namesRole(command))
+    return;
+  return `no-raw-vercel hook refuses ${production.what}: it changes what production serves, and a production deploy also migrates the hosted database. Production ships from main through the release skill's ship:merge, which Vercel deploys from git; the Ops lead alone makes a hand production move, in a call that names no role variable and sources no file. A preview deploy (vercel deploy without --prod) and the reads (whoami, ls, inspect, logs) run.`;
+}
+
 // scripts/hooks/no-raw-wa.ts
 import { realpathSync as realpathSync6 } from "fs";
 import { homedir as homedir5 } from "os";
@@ -16736,7 +16879,7 @@ async function inspect16(raw, environment) {
       return refuse15(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
   }
 }
-async function check22(raw, environment = process.env) {
+async function check23(raw, environment = process.env) {
   try {
     return await eachInput(raw, "no-raw-wa", (one) => inspect16(one, environment));
   } catch {
@@ -16829,7 +16972,7 @@ async function gh4(args, cmd, env, local, xargs) {
     ...xargs && !xargs.replace ? [undefined] : []
   ];
   const target = decide2(named.length > 0 ? named : implicitRepos(env, local));
-  return judge7(`gh ${key}`, target, bodies.map((b) => viaXargs(b, xargs)), env);
+  return judge8(`gh ${key}`, target, bodies.map((b) => viaXargs(b, xargs)), env);
 }
 function altText(value) {
   const tail = Math.max(value.value.lastIndexOf(UNKNOWN), value.value.lastIndexOf(READ)) + 1;
@@ -16848,7 +16991,7 @@ async function api4(args, cmd, env, local, xargs) {
     const resolved = await Promise.all(documents.map((d) => resolveText(d, env)));
     if (!resolved.some((d) => d.unknown || COMMENT_MUTATION.test(d.value)))
       return;
-    return judge7("gh api graphql", { guarded: true, label: "a repository named only by a GraphQL node id" }, [...fields.map((f) => f.text), ...inputs], env, INLINE_QUERY);
+    return judge8("gh api graphql", { guarded: true, label: "a repository named only by a GraphQL node id" }, [...fields.map((f) => f.text), ...inputs], env, INLINE_QUERY);
   }
   const path = endpoint.value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "").split("?")[0];
   const match = /^repos\/([^/]+)\/([^/]+)\/(.+)$/.exec(path);
@@ -16866,7 +17009,7 @@ async function api4(args, cmd, env, local, xargs) {
     ...fields.filter((f) => marked(f.key) || BODY_KEY.test(f.key)).map((f) => f.text),
     ...await Promise.all(inputs.map((i) => bodyOf2(i, env)))
   ];
-  return judge7(`gh api ${path.replaceAll(UNKNOWN, "*").replaceAll(READ, "*")}`, decide2(candidates), bodies, env);
+  return judge8(`gh api ${path.replaceAll(UNKNOWN, "*").replaceAll(READ, "*")}`, decide2(candidates), bodies, env);
 }
 async function bodyOf2(payload, env) {
   const text = await resolveText(payload, env);
@@ -16903,7 +17046,7 @@ async function curl3(args, cmd, env) {
   if (data.length === 0)
     return;
   const owner = marked(url[1]) ? undefined : { owner: url[1], repo: url[2] };
-  return judge7(`curl to api.github.com/repos/${url[1]}/${url[2]}`, decide2([owner]), await Promise.all(data.map((d) => bodyOf2(d, env))), env);
+  return judge8(`curl to api.github.com/repos/${url[1]}/${url[2]}`, decide2([owner]), await Promise.all(data.map((d) => bodyOf2(d, env))), env);
 }
 function decide2(candidates) {
   if (candidates.length === 0)
@@ -16920,7 +17063,7 @@ function refuse16(what, target, detail, fix) {
 var READABLE2 = "Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md).";
 var INLINE_QUERY = "Write the query and each of its fields in the command itself, not in a variable: gh api graphql -f query='query { viewer { login } }'. For a long one, write it to a file with the Write tool first and pass it by its literal absolute path (-F query=@/abs/query.graphql, -F body=@/abs/body.md).";
 var REWORD = 'Write "ship" or "publish step" instead, or leave the comment out. For a file or rule whose name holds the word, name it by what it is, such as "the ship rule" or "the comment hook", with its line number; for a patch that holds it, write the patch to a file in your scratchpad, send its absolute path to the PR\'s worker by SendMessage, and say in the comment that a patch went to the author, since gh\'s `--attach` uploads only images and video.';
-async function judge7(what, target, bodies, env, fix = READABLE2) {
+async function judge8(what, target, bodies, env, fix = READABLE2) {
   if (!target.guarded)
     return;
   const texts = await Promise.all(bodies.map((b) => resolveText(b, env)));
@@ -16952,7 +17095,7 @@ function candidate7(command) {
   const bare = command.replace(/[\\'"]/g, "");
   return command.includes("$'") || GH2.test(bare) && MAYBE_COMMENT.test(bare);
 }
-async function check23(raw, environment = process.env, lists = join20(coreDir(), "lists")) {
+async function check24(raw, environment = process.env, lists = join20(coreDir(), "lists")) {
   const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join20(lists, "release-owners.json"));
   if (owners.refusal)
     return commentCall(subjectOf3(raw)) ? owners.refusal : undefined;
@@ -17371,7 +17514,7 @@ function inspect18(raw, environment, main) {
   line = lexed.commands;
   return run(lexed, env, visit);
 }
-async function check24(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
+async function check25(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
     return await inspect18(raw, environment, main);
   } catch {
@@ -17407,13 +17550,14 @@ var GUARDS = [
   { factory: true, name: "no-public-leak", run: (raw, env) => check19(raw, env) },
   { factory: false, name: "no-raw-delete", run: (raw, env) => check20(raw, env) },
   { factory: true, name: "no-raw-spawn", run: (raw, env) => check21(raw, env) },
-  { factory: true, name: "no-raw-wa", run: (raw, env) => check22(raw, env) },
-  { factory: false, name: "no-release-comment", run: (raw, env) => check23(raw, env) },
+  { factory: true, name: "no-raw-vercel", run: (raw, env) => check22(raw, env) },
+  { factory: true, name: "no-raw-wa", run: (raw, env) => check23(raw, env) },
+  { factory: false, name: "no-release-comment", run: (raw, env) => check24(raw, env) },
   { factory: true, name: "no-stash", run: (raw, env) => check3(raw, env) },
-  { factory: true, name: "no-unslotted-run", run: (raw, env) => check24(raw, env) }
+  { factory: true, name: "no-unslotted-run", run: (raw, env) => check25(raw, env) }
 ];
 var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`;
-async function check25(raw, environment = process.env, guards = GUARDS) {
+async function check26(raw, environment = process.env, guards = GUARDS) {
   let factory;
   const reasons = await Promise.all(guards.map(async ({ factory: gated, name, run }) => {
     try {
@@ -17429,7 +17573,7 @@ async function check25(raw, environment = process.env, guards = GUARDS) {
 `) || undefined;
 }
 async function hook() {
-  const reason = await check25(await Bun.stdin.text());
+  const reason = await check26(await Bun.stdin.text());
   if (!reason)
     return 0;
   console.error(reason);
@@ -17439,6 +17583,6 @@ if (import.meta.main)
   process.exit(await hook());
 export {
   GUARDS,
-  check25 as check,
+  check26 as check,
   hook
 };
