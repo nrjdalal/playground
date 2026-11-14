@@ -92,6 +92,10 @@ export const groups: Group[] = [
         "X=a; . ./env.sh; $X pkill -f watcher",
       ],
       [
+        "a kill by pattern behind a variable an unread program with an unread argument may change",
+        'X=a; $P "$Q"; $X pkill -f watcher',
+      ],
+      [
         "a kill by pattern behind a variable a program the reader cannot read may change",
         "U=unset; X=a; $U X; $X pkill -f watcher",
       ],
@@ -114,6 +118,14 @@ export const groups: Group[] = [
         `f=${ROOT}/x; cd /tmp && f=/tmp/y; cp /tmp/a "$f"`,
       ],
       [
+        "a copy by a relative literal held past a cd's && chain, which the starting folder may hold",
+        `cd /tmp && f=out.txt; cp /tmp/a "$f"`,
+      ],
+      [
+        "a copy through a held variable after an unread program with an unread argument",
+        `S=/tmp/x; $P "$Q"; cp /tmp/a "$S"`,
+      ],
+      [
         "a copy by a value held past a cd's && chain that is not a literal",
         `cd /tmp && f=$(pwd)/x; cp /tmp/a "$f"`,
       ],
@@ -123,6 +135,10 @@ export const groups: Group[] = [
     folders: ["extensions root"],
     guards: ["no-extensions-write"],
     rows: () => [
+      [
+        "a copy by a relative literal held past a cd out of the root, which a failed cd leaves in it",
+        `cd /tmp && f=x; cp /tmp/a "$f"`,
+      ],
       [
         "a copy by a literal held past a cd's && chain and joined to a relative name, which an empty value leaves in the root",
         `cd /tmp && S=/tmp/; cp /tmp/a "\${S}x"`,

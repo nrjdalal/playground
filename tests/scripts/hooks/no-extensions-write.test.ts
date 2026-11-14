@@ -2464,17 +2464,11 @@ describe("a writer's file a cd's && chain sets to a literal runs past the chain,
     ["a copy by the unquoted read", `cd /tmp && f=/tmp/out.txt; cp /tmp/a $f`],
     ["a copy by the braced read", `cd /tmp && f=/tmp/out.txt; cp /tmp/a "\${f}"`],
     ["a copy after a pushd", `pushd /tmp && f=/tmp/out.txt; cp /tmp/a "$f"`],
-    [
-      "a copy by a relative literal under a folder outside the root",
-      `cd /tmp && f=out.txt; cp /tmp/a "$f"`,
-    ],
+    ["an in-place sed", `cd /tmp && f=/tmp/out.txt; sed -i '' s/a/b/ "$f"`],
+    ["an in-place sed with no suffix", `cd /tmp && f=/tmp/out.txt; sed -i s/a/b/ "$f"`],
+    ["an in-place perl", `cd /tmp && f=/tmp/out.txt; perl -pi -e s/a/b/ "$f"`],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
-  })
-
-  // the name is set only once the cd has run, so a relative literal names a file in the folder it moved to, as its literal twin `cd /tmp && :; cp /tmp/a x` is read
-  test("a copy by a relative literal from the root, after a cd out of it", async () => {
-    expect(await bash(`cd /tmp && f=x; cp /tmp/a "$f"`, ROOT)).toBeUndefined()
   })
 
   test.each([
