@@ -58,6 +58,9 @@ describe("a signal sent by name or pattern is refused, with the way out", () => 
     "pgrep -f watch | xargs ~/.playground/ops/run-slot.sh w -- kill",
     "lsof -ti :3000 | xargs ~/.playground/ops/run-slot.sh w -- kill -9",
     "pgrep -f watch | xargs -n1 ~/.playground/ops/run-slot.sh w -- kill",
+    "pgrep -f watch | xargs bash ~/.playground/ops/run-slot.sh w -- kill",
+    "pgrep -f watch | xargs sh ~/.playground/ops/run-slot.sh w -- kill",
+    "pgrep -f watch | xargs -n1 bash ~/.playground/ops/run-slot.sh w -- kill",
   ])("%s", async (command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-kill-by-name hook refuses")
@@ -108,6 +111,8 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "~/.playground/ops/run-slot.sh w -- bun run test:file tests/scripts/hooks/no-kill-by-name.test.ts",
     "~/.playground/ops/run-slot.sh w -- pgrep -f watch",
     "echo 1234 | xargs ~/.playground/ops/run-slot.sh w -- kill",
+    "echo 1234 | xargs bash ~/.playground/ops/run-slot.sh w -- kill",
+    "pgrep -f watch | xargs ~/.playground/ops/run-slot.sh w -- sh -c 'kill 1234'",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
