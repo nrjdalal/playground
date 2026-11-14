@@ -249,6 +249,22 @@ export const groups: Group[] = [
         "a write after a cd to a short split of a variable holding a blank",
         `W='/other /extensions'; cd ${DATA}/other && cd $=W && echo x > f`,
       ],
+      [
+        "a write after a split cd to a variable split at an IFS the line sets",
+        `W=/otherX/extensions; cd ${DATA}/other && IFS=X && setopt sh_word_split && cd $W && echo x > f`,
+      ],
+      [
+        "a write after a split cd to a variable split at an IFS the line sets first",
+        `W=/otherX/extensions; IFS=X; cd ${DATA}/other && setopt sh_word_split && cd $W && echo x > f`,
+      ],
+      [
+        "a write after a cd to a variable holding a blank in an sh emulation",
+        `W='/other /extensions'; cd ${DATA}/other && emulate sh -c 'cd $W && echo x > f'`,
+      ],
+      [
+        "a write under a split env -C of a variable holding a blank",
+        `W='/other /extensions'; cd ${DATA}/other && setopt sh_word_split && env -C $W touch f`,
+      ],
     ],
   },
 ]
