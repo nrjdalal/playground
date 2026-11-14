@@ -1747,7 +1747,7 @@ function relexedValue(raw: string, known: Record<string, string>): string | unde
   return words?.length === 1 ? words[0].value : undefined
 }
 
-// The home an unquoted assignment expands the value's leading ~ to (`S=~/x`), which the held value keeps as written; a quoted value (`S="~/x"`) keeps its ~ literal, as bash does, so a quoted assignment passes quoted true.
+// The home an unquoted assignment expands the value's leading ~ to (`S=~/x`), which the held value keeps as written; a quoted value (`S="~/x"`) keeps its ~ literal, as bash does, so a quoted assignment passes quoted true; splitValue still reads each split word's leading ~ as the home, which errs toward refusing.
 const tildeHome = (value: string, quoted = false): string =>
   quoted || marked(value) ? value : value.replace(/^~(?=\/|$)/, homedir())
 
