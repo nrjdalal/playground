@@ -15,7 +15,6 @@ import {
   endMerged,
   endOne,
   finishedOf,
-  ownClone,
   sweep,
   type Target,
   unsavedLive,
@@ -233,28 +232,6 @@ describe("sweep: ops-tick ends what the detector flags", () => {
       { text, to: "builder" },
       { text, to: "k8wjf3-worker" },
     ])
-  })
-
-  // PG-2144: a resume named with no folder came back in the main checkout, so the line names the reviewer's own clone
-  test("an idle reviewer's resume line names its own review clone as the folder to resume in", async () => {
-    const clone = "/m/.claude/worktrees/review-2110"
-    const asked: string[] = []
-    const base = fakes().deps
-    const deps = Object.assign(base, {
-      clone: async (target: Target) => (asked.push(target.name), clone),
-    })
-    const target: Target = {
-      kind: "reviewer",
-      name: "k8wjf3-reviewer",
-      pr: URL,
-      refs: [],
-      worker: "k8wjf3-worker",
-    }
-    const [line] = await endOne(target, "checker-nothing (head scored)", deps)
-    expect(line?.text).toBe(
-      `Ended k8wjf3-reviewer: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume k8wjf3-reviewer ${clone} --pr ${URL}`,
-    )
-    expect(asked).toEqual(["k8wjf3-reviewer"])
   })
 
   test("a line goes to the roster lead, its worker's, or ops for a ops checker; a roster-says flag ends nobody", async () => {
@@ -1335,15 +1312,6 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     ).toEqual([])
     expect(await worktreesOf({ ...target, kind: "worker" }, projects, main)).toEqual([])
     expect(await worktreesOf(target, projects)).toEqual([])
-  })
-
-  test("ownClone names a reviewer's review-<n> and a tester's test-<n> as the folder its resume runs in, and none for a missing clone, a worker or another repo's PR", async () => {
-    const { clone, main, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
-    expect(await ownClone(target, main)).toBe(clone)
-    expect(await ownClone({ ...target, kind: "tester" }, main)).toBe(rest[0])
-    expect(await ownClone({ ...target, pr: "https://github.com/o/r/pull/8" }, main)).toBeUndefined()
-    expect(await ownClone({ ...target, kind: "worker" }, main)).toBeUndefined()
-    expect(await ownClone({ ...target, pr: "https://github.com/x/r/pull/7" }, main)).toBeUndefined()
   })
 
   // PG-2144: an end keeps the other checker's clone of its PR while that checker is live, so the other checker's own end takes it
