@@ -263,7 +263,7 @@ const YARD_SHIP: [string, string][] = [
   ["through bunx", "bunx bun run ship:yard v0.0.111"],
   ["through bun x", "bun x bun packages/scripts/src/ship/yard.ts v0.0.111"],
   ["through npx", "npx bun ship:yard v0.0.111"],
-  ["through pnpm dlx", "pnpm dlx bun run ship:yard v0.0.111"],
+  ["through pnpm dlx", "pnpm dlx bun packages/scripts/src/ship/yard.ts v0.0.111"],
   ["through bun x's --cwd", "bun x --cwd packages/scripts bun src/ship/yard.ts v0.0.111"],
   ["behind env", "env FOO=1 bun run ship:yard v0.0.111"],
   ["after a pushd", "pushd packages/scripts && bun src/ship/yard.ts v0.0.111"],
