@@ -20,12 +20,17 @@ test("the research worker template holds the planner's seven standing lines and 
     expect(text).toContain(line)
 })
 
-test("the research worker template's last step reports, then ends the session", async () => {
+test("the research worker template's last step reports, then the planner closes the session", async () => {
   const steps = (await read()).split("\n").filter((l) => /^\d+\. /.test(l))
   const last = steps.at(-1) ?? ""
-  expect(last).toMatch(/^4\. Report the answer or the plan to the planner by `SendMessage`/)
-  expect(last).toContain(
-    'then end with `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" close <your name>`',
+  expect(last).toMatch(
+    /^4\. Clear `~\/\.playground\/scratch\/<your name>\/` with `playground rm <path>`/,
+  )
+  expect(last).toContain("then report the answer or the plan to the planner by `SendMessage`")
+  expect(last).toContain("so the planner closes your pane with `spawn.sh close <your name>`")
+  const planner = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/planner.md")).text()
+  expect(planner).toContain(
+    'close each with `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" close <id>-worker`',
   )
 })
 
