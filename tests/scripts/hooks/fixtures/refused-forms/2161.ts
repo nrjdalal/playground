@@ -160,6 +160,14 @@ export const groups: Group[] = [
         "X=a; repeat 2 do $X pkill -f watcher; unset X; done",
       ],
       [
+        "a kill by pattern a zsh repeat loop's braced body runs first",
+        "repeat 2 { pkill -f watcher; }",
+      ],
+      [
+        "a kill by pattern behind a variable a zsh repeat loop's braced body unsets for its next pass",
+        "X=a; repeat 2 { $X pkill -f watcher; unset X; }",
+      ],
+      [
         "a kill by pattern behind a variable zsh's nameref makes a reference",
         "X=a; nameref X=Y; $X pkill -f watcher",
       ],
