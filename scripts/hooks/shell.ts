@@ -1650,13 +1650,18 @@ async function runAll(
 const CHANGED: Text = { ...unknown("a value a builtin may change"), vanishes: true }
 const DECLARES = new Set([...EXPORTS, "float", "integer", "private"])
 
-// Marks each held variable a command may change, wherever on the line it is, since a change the shell may make is one the reader cannot rule out: from bash 3.2's bash(1), SHELL BUILTIN COMMANDS, and zsh 5.9's zshbuiltins(1) and zshmodules(1) (zsh/param/private): unset's names (every one under zsh's -m), read's and printf -v's (`binds`), which end of input or an empty format leaves empty, a declaration's names under an option or, but for export and readonly, with no `=` (a local of its own in a function), zsh's `set -A` or `+A` name, and every variable after an eval, a source or a `.`, or a program word the reader cannot read, which may be any of them
+// Marks each held variable a command may change, wherever on the line it is, since a change the shell may make is one the reader cannot rule out: from bash 3.2's bash(1), SHELL BUILTIN COMMANDS (bash 5.3's for the nameref `declare -n`), and zsh 5.9's zshbuiltins(1) and zshmodules(1) (zsh/param/private): unset's names (every one under zsh's -m), read's and printf -v's (`binds`), which end of input or an empty format leaves empty, a declaration's names under an option or, but for export and readonly, with no `=` (a local of its own in a function), zsh's `set -A` or `+A` name, and every variable after an eval the reader cannot read, a source or a `.`; a program word the reader cannot read is read as its split reading names it
 function change(cmd: Command, env: Env): void {
   const { args, name } = parse(cmd)
+  // a program word the reader cannot read changes what its split reading names (`U=unset; $U X`), each reading's change marked
+  if (marked(name)) {
+    for (const variant of splitHeld(cmd, name, env))
+      if (!marked(parse(variant).name)) change(variant, env)
+    return
+  }
   const words = args.map((a) => a.value)
   const options = words.filter((w) => /^[-+]./.test(w) && w !== "--")
   const all =
-    marked(name) ||
     name === "." ||
     name === "source" ||
     (name === "eval" && args.some(unreadWord)) ||
@@ -1965,7 +1970,7 @@ function binds({ words }: Command): string[] {
   return names.filter((w) => NAME.test(w))
 }
 
-// Whether a word may expand to no word: the reader read none of it, and it is VANISHING_PART alone with every variable it names one the line never set (a binder sets one, `binds`) or set to nothing, or an unread part of a word a script the line built carries (`eval $X …`, `bash -c "$X …"`), which keeps no source of its own
+// Whether a word may expand to no word: the reader read none of it, and it is VANISHING_PART alone with every variable it names one the line never set (a binder sets one, `binds`), set to nothing or blanks alone, or one a builtin may have changed (`change`), or an unread part of a word a script the line built carries (`eval $X …`, `bash -c "$X …"`), which keeps no source of its own
 const mayVanish = (w: Word, env: Env): boolean =>
   !!w.source &&
   /^\u0000+$/.test(w.value) &&

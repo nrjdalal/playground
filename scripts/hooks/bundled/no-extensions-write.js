@@ -7722,9 +7722,15 @@ var CHANGED = { ...unknown2("a value a builtin may change"), vanishes: true };
 var DECLARES = new Set([...EXPORTS, "float", "integer", "private"]);
 function change(cmd, env) {
   const { args, name } = parse3(cmd);
+  if (marked(name)) {
+    for (const variant of splitHeld(cmd, name, env))
+      if (!marked(parse3(variant).name))
+        change(variant, env);
+    return;
+  }
   const words = args.map((a) => a.value);
   const options = words.filter((w) => /^[-+]./.test(w) && w !== "--");
-  const all = marked(name) || name === "." || name === "source" || name === "eval" && args.some(unreadWord) || name === "unset" && options.some((w) => w.includes("m"));
+  const all = name === "." || name === "source" || name === "eval" && args.some(unreadWord) || name === "unset" && options.some((w) => w.includes("m"));
   const names = all ? [...env.vars.keys()] : name === "unset" ? options.some((w) => w.includes("f")) ? [] : words : name === "read" || name === "printf" && !printsText(words) ? binds(cmd) : DECLARES.has(name) ? words.filter((w) => options.length > 0 || !ASSIGN.test(w) && name !== "export" && name !== "readonly") : name === "set" ? words.flatMap((w, k) => /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : []) : [];
   for (const key of names.map((w) => w.split("=")[0])) {
     if (!NAME.test(key))
