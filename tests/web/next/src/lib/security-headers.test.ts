@@ -1,16 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
+import { secure, securityHeaders } from "../../../../../web/next/src/lib/security-headers"
+
 const web = join(import.meta.dir, "../../../../../web/next")
 const { NextRequest } = (await import(Bun.resolveSync("next/server", web))) as {
   NextRequest: typeof Request
 }
-// A path held in a variable, so the type check passes before the module exists and the test reads red, not uncompiled.
-const MODULE: string = "../../../../../web/next/src/lib/security-headers"
-const { secure, securityHeaders } = await import(MODULE)
 
 const page = () =>
-  new NextRequest("https://yard.example/dashboard", { headers: { accept: "text/html" } })
+  new NextRequest("https://yard.example/dashboard", {
+    headers: { accept: "text/html" },
+  }) as Parameters<typeof secure>[0]
 
 describe("the hosted build's headers", () => {
   test("every response carries nosniff and a same-origin referrer", () => {
