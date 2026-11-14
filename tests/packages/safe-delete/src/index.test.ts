@@ -36,6 +36,7 @@ import {
   removeScratch,
   restore,
   type Roots,
+  rowPullRequests,
   stripTrash,
   unpushed,
   worktreeRefusal,
@@ -857,6 +858,41 @@ describe("worktreeRefusal", () => {
     expect(worktreeRefusal(wt, roots, { ...holders, procs: null })).toContain("process")
   })
 
+  // PG-2154: a checker serves every PR in its prs list, so a PR there holds the clone as its pr does, and --pr lifts it the same way
+  test("a live row holds a worktree by a PR in its prs list, a row whose pr and prs leave it out does not, and --pr lifts a prs hold as it lifts a pr one", () => {
+    const { holders, roots, wt } = withWorktree()
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    const rosterOf = (agents: object[]) => writeFileSync(holders.roster, JSON.stringify({ agents }))
+    const url = (n: number) => `https://github.com/o/r/pull/${n}`
+    rosterOf([{ name: "x9y8z7-reviewer", pr: url(11), prs: [url(11), url(1)], status: "working" }])
+    expect(worktreeRefusal(wt, roots, holders)).toContain("x9y8z7-reviewer")
+    rosterOf([{ name: "x9y8z7-reviewer", prs: [url(1)], status: "working" }])
+    expect(worktreeRefusal(wt, roots, holders)).toContain("x9y8z7-reviewer")
+    rosterOf([{ name: "x9y8z7-reviewer", pr: url(11), prs: [url(11), url(12)], status: "working" }])
+    expect(worktreeRefusal(wt, roots, holders)).toBeNull()
+    rosterOf([{ name: "abc123-worker", pr: url(11), prs: [url(11), url(1)], status: "working" }])
+    const of = (pr: string) => worktreeRefusal(wt, roots, { ...holders, pr })
+    expect(of(url(1))).toBeNull()
+    expect(of(url(2))).toContain("abc123-worker")
+    // the lift frees the one PR it names: another PR in the same prs list that names the folder still holds it
+    const other = "https://github.com/o/other/pull/1"
+    rosterOf([{ name: "abc123-worker", prs: [url(1), other], status: "working" }])
+    expect(of(url(1))).toContain("abc123-worker")
+    expect(of(other)).toContain("abc123-worker")
+  })
+
+  test("rowPullRequests reads a row's pr and every pull request in its prs once each, leaving out an issue's URL, an extension item and a non-string", () => {
+    const url = (n: number) => `https://github.com/o/r/pull/${n}`
+    expect(
+      rowPullRequests({
+        pr: url(1),
+        prs: [url(1), url(2), "https://github.com/o/r/issues/3", "home/doc/plan-x", 4],
+      }),
+    ).toEqual([url(1), url(2)])
+    expect(rowPullRequests({ prs: "not a list" })).toEqual([])
+    expect(rowPullRequests({})).toEqual([])
+  })
+
   test("a live session holds a folder by its name only when the slug after PG-<n>- is that name or starts with it and a dash", () => {
     const { holders, roots } = withWorktree()
     // [folder, branch, live session, held]
@@ -1213,6 +1249,8 @@ describe("worktreeRefusal", () => {
     const ssh = file(join(roots.root, "fake-ssh"), `#!/bin/sh\necho "$@" > '${said}'\nexit 1\n`)
     chmodSync(ssh, 0o755)
     git(roots.main, "config", "core.sshCommand", ssh)
+    // the test sandbox's git refuses ssh, so the repo allows it for this fake alone
+    git(roots.main, "config", "protocol.ssh.allow", "always")
     git(roots.main, "remote", "set-url", "origin", "ssh://git@example.invalid/remote.git")
     expect(unpushed(wt)).toMatchObject({ unread: ["origin"] })
     expect(readFileSync(said, "utf8")).toStartWith("-o BatchMode=yes -o ConnectTimeout=10 ")
