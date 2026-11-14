@@ -38,7 +38,9 @@ the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus 
 less a quarter (`gates.smallReserve`) kept for small items unless the start is small (`--size small|medium|big`, else small for a reviewer or tester, else the roster's or plan.json's size, else medium; [rules/slots.md](../../rules/slots.md)), while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the checkers,
 refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores, and the refusal names the load, the starts and the line;
 a `--priority` start passes it while `priority.json`, an org's own `priority-<name>.json`, a job's own `priority-start.json` or a session's own window (`playground priority on`, [scripts/README.md](../../../../scripts/README.md#spawnsh)) stands in the data folder, since priority work comes first, as it passes focus on any of them,
-and so does a resume within 15 minutes of `spawn.sh close` ending a row that read live, since that session already counts in the load it comes back into;
+and so does a resume within 15 minutes of `spawn.sh close` ending a row that read live, since that session already counts in the load it comes back into,
+and a manager's start or resume (role dispatcher or lead, an orchestrator's included, by every path: `spawn.sh restore`, `playground <manager>`, the Dashboard's start, switch and restart) while the CPU reads 40% idle or more (`top -l 2 -n 0`'s second sample, run-slot's bar for slots 2 to 4), its row's `readings.cpu_idle` naming the share,
+since after a reboot load5 still carries the boot's spike and each settled start still counts, which held the managers' restore at 63% idle; under 40%, or with no reading, the line holds it and its refusal names the share;
 memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`),
 and for a fresh worker start alone swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), refusing when vm_stat gives no reading, since free memory counts compressible pages and read 62% on 7 Nov while 150 pages swapped in a second; every other start keeps its pass, as at the slots gate;
 for a fresh worker start alone, a run-slot lane free with the load units for a run, or an empty queue (`scripts/ops/run-slot.sh room`), so a new worker never joins a queue it has no room in, while checkers, resumes and moves skip it,
@@ -174,7 +176,7 @@ each row read again once its resume finds the session gone and just before its l
 each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with, an `--effort` other than high and, for a reviewer or tester, `--pr` with the PRs its roster row serves,
 in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, or an exec line that does not parse or that it does not run),
 `waiting <name>: <reason>` (a gate holding it over a reading that falls, or focus standing for another session) or `not restored <name>: <reason>` (any other refusal, a gate that cannot read its input or reads a bad setting included).
-The first dispatcher's record runs first, past every gate, so the owner's dispatcher is back before any other resume takes the gate's room.
+The first dispatcher's record runs first, past every gate, so the owner's dispatcher is back before any other resume takes the gate's room, then every other manager's, so the managers are back before the workers, then the rest.
 A restore whose only misses wait exits 0, since ops-herdr runs it again each cycle while a session waits; a `not restored` line exits 1.
 It is safe to run again, one at a time:
 while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
