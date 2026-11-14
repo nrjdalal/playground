@@ -101,6 +101,62 @@ export const groups: Group[] = [
         "a kill by pattern behind a variable the line names only as read's prompt",
         "read -p s t; $s pkill -f watcher",
       ],
+      [
+        "a kill by pattern behind a variable a declaration names with no value",
+        "declare X; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable a declaration sets to nothing",
+        "declare X=; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable local names with no value",
+        "local X; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable typeset names with no value",
+        "typeset X; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable export names with no value",
+        "export X; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable readonly names with no value",
+        "readonly X; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable read binds only after it",
+        "$X pkill -f watcher; read X",
+      ],
+      [
+        "a kill by pattern behind a variable read binds only after a failure",
+        "false && read X; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable read binds only in a subshell",
+        "( read X ); $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable a function's local names, never called",
+        "f() { local X; }; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable a function's read binds, never called",
+        "f() { read X; }; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable export sets to nothing",
+        "export X= ; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable a loop binds only after it",
+        "$X pkill -f watcher; for X in a; do :; done",
+      ],
+      [
+        "a kill by pattern behind a variable read binds only in a pipeline",
+        "echo | read X; $X pkill -f watcher",
+      ],
     ],
   },
   {
