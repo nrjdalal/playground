@@ -643,7 +643,7 @@ function lex(src, known = {}) {
   const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() };
   list(lx, 0, false);
   calledAgain(lx.commands, src);
-  if (/chpwd/.test(src.replace(/["'\\]/g, "")))
+  if (lx.commands.some((c) => c.words.some((w) => /^chpwd/.test(w.value))))
     for (const c of lx.commands)
       c.cdRedefined = true;
   braced(lx.commands);
