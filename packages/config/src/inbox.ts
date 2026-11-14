@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-// The widest line, in characters, a drawing in an Inbox ask runs before bun run ask warns its author: the owner's chosen drawing width, wider than the narrowest card, which shrinks a longer line to 10px and then scrolls it.
+// The widest line, in characters, a drawing in an Inbox ask runs before bun run ask warns its author: the owner's chosen drawing width, wider than the narrowest card, which shrinks, then scrolls, any line wider than itself.
 export const ASK_CODE_COLUMNS = 72
 
 // What an Inbox answer tells its poster: one JSON line after this lead, typed through deliver(), so the poster parses it rather than reading prose.

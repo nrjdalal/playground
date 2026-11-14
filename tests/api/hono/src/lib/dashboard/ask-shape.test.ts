@@ -73,7 +73,7 @@ describe("shapeHints", () => {
     expect(shapeHints(null)).toEqual([])
   })
 
-  test("hints at a code or ASCII line wider than the card, and not at a wide line outside code", () => {
+  test("hints at a code or ASCII line past the drawing width, and not at a wide line outside code", () => {
     const wide = "─".repeat(ASK_CODE_COLUMNS + 1)
     expect(shapeHints(ask(`\`\`\`\n${wide}\n\`\`\`\n\n- One line.`))).toEqual([
       { kind: "wide", longest: ASK_CODE_COLUMNS + 1 },
