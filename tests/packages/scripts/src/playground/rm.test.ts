@@ -111,6 +111,7 @@ const machine = () => {
     clones: () => [],
     procs: () => [],
     data,
+    defaultBranch: () => null,
     home,
     main,
     merged: () => false,
@@ -816,7 +817,7 @@ test("a session's --worktree --discard on a folder outside the worktrees folder 
   expect(existsSync(outside)).toBe(false)
 })
 
-// Another repo in HOME, on main with a remote, and its worktree <repo>/.claude/worktrees/app-1 on APP-1-thing, holding one commit not pushed and an installed node_modules.
+// Another repo in HOME, on main with a remote whose origin/HEAD names main, and its worktree <repo>/.claude/worktrees/app-1 on APP-1-thing, holding one commit not pushed and an installed node_modules.
 const otherRepo = (root: string, home: string) => {
   const repo = join(home, "code", "app")
   git(root, "init", "--bare", "-q", join(root, "app.git"))
@@ -827,6 +828,7 @@ const otherRepo = (root: string, home: string) => {
   git(repo, "commit", "-qm", "init")
   git(repo, "remote", "add", "origin", join(root, "app.git"))
   git(repo, "push", "-q", "origin", "main")
+  git(repo, "remote", "set-head", "origin", "main")
   const worktrees = join(repo, ".claude", "worktrees")
   const wt = join(worktrees, "app-1")
   git(repo, "worktree", "add", "-q", "-b", "APP-1-thing", wt)
@@ -891,7 +893,7 @@ test("--worktree refuses another repo's worktree with unpushed commits and an op
   expect(await rmSaid(["--worktree", wt], deps)).toEqual({
     code: 1,
     said: [
-      `playground: ${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): ${discard}`,
+      `playground: ${wt}'s HEAD holds work not landed on origin/main or on any remote branch (fetch origin if it merged or was pushed since): ${discard}`,
     ],
   })
   expect(existsSync(wt)).toBe(true)
@@ -954,7 +956,7 @@ test("--worktree keeps another repo's worktree with no PR whose archive holds pa
   expect(await rmSaid(["--worktree", wt], { ...deps, prState: readPrs([]) })).toEqual({
     code: 1,
     said: [
-      `playground: ${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since), and its archive at ${archive} holds 1 patch, 0 of its 1 commit no remote holds: ${discard}`,
+      `playground: ${wt}'s HEAD holds work not landed on origin/main or on any remote branch (fetch origin if it merged or was pushed since), and its archive at ${archive} holds 1 patch, 0 of its 1 commit no remote holds: ${discard}`,
     ],
   })
   expect(existsSync(wt)).toBe(true)
@@ -984,7 +986,7 @@ test.each([
     expect(await rmSaid(["--worktree", wt], { ...deps, prState: readPrs(prs) })).toEqual({
       code: 1,
       said: [
-        `playground: ${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): ${discard}`,
+        `playground: ${wt}'s HEAD holds work not landed on origin/main or on any remote branch (fetch origin if it merged or was pushed since): ${discard}`,
       ],
     })
     expect(existsSync(wt)).toBe(true)
@@ -1022,6 +1024,170 @@ test("--worktree refuses, with no PR and a commit no remote holds, a live sessio
   expect(existsSync(own)).toBe(true)
   expect(existsSync(join(deps.data, "scratchpad"))).toBe(false)
   expect(repo).not.toBe(main)
+})
+
+// runRm's exit, and what it printed to stdout and to stderr.
+const rmTold = async (words: string[], deps: RmDeps) => {
+  const err: string[] = []
+  const out: string[] = []
+  const { error, log } = console
+  console.error = (line: string) => void err.push(line)
+  console.log = (line: string) => void out.push(line)
+  try {
+    return { code: await runRm(words, deps), err, out }
+  } finally {
+    console.error = error
+    console.log = log
+  }
+}
+
+// #2122: another repo's worktree is measured against its own default branch, and goes once a remote branch holds every commit HEAD holds, where this checkout's measure origin/canary alone
+const openPr =
+  (wt: string): RmDeps["prState"] =>
+  async () => ({ head: git(wt, "rev-parse", "HEAD"), number: 7, state: "OPEN" })
+// otherRepo's work squash-merged into its main and pushed, so the worktree's commit is on no remote while its files read the same on origin/main
+const landOnMain = (repo: string) => {
+  file(join(repo, "work.txt"))
+  git(repo, "add", "work.txt")
+  git(repo, "commit", "-qm", "work (#7)")
+  git(repo, "push", "-q", "origin", "main")
+}
+// the lines of rm's own, not its move line
+const notes = (out: string[]) => out.filter((line) => line.startsWith("playground: "))
+
+test.each([
+  [
+    "whose HEAD sits on origin/main",
+    (_repo: string, wt: string) => git(wt, "reset", "-q", "--hard", "origin/main"),
+  ],
+  ["whose commit's work landed on origin/main by a squash", (repo: string) => landOnMain(repo)],
+])(
+  "--worktree takes a clean worktree of another repo with no canary %s, with an open PR",
+  async (_, setup) => {
+    const { deps, home, root } = machine()
+    const { repo, wt } = otherRepo(root, home)
+    setup(repo, wt)
+    const told = await rmTold(["--worktree", wt], { ...deps, prState: openPr(wt) })
+    expect({ ...told, out: notes(told.out) }).toEqual({ code: 0, err: [], out: [] })
+    expect(existsSync(wt)).toBe(false)
+    expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(wt)
+  },
+)
+
+test("--worktree reads another repo's default branch from gh when origin/HEAD names none, and names the unread default branch when gh cannot either", async () => {
+  const { deps, home, root } = machine()
+  const { repo, wt } = otherRepo(root, home)
+  git(repo, "remote", "set-head", "origin", "-d")
+  landOnMain(repo)
+  const asked: string[] = []
+  const unread: RmDeps = {
+    ...deps,
+    defaultBranch: (at) => (asked.push(at), null),
+    prState: openPr(wt),
+  }
+  const discard = `playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`
+  expect(await rmTold(["--worktree", wt], unread)).toEqual({
+    code: 1,
+    err: [
+      `playground: ${wt}'s HEAD holds work not landed on its repo's default branch, which neither origin/HEAD nor gh names, or on any remote branch (fetch origin if it merged or was pushed since): ${discard}`,
+    ],
+    out: [],
+  })
+  expect(asked).toEqual([wt])
+  const read: RmDeps = { ...deps, defaultBranch: () => "main", prState: openPr(wt) }
+  const told = await rmTold(["--worktree", wt], read)
+  expect({ ...told, out: notes(told.out) }).toEqual({ code: 0, err: [], out: [] })
+  expect(existsSync(wt)).toBe(false)
+})
+
+test.each([
+  ["an open PR", openPr],
+  ["no PR", () => readPrs([])],
+])(
+  "--worktree takes another repo's worktree whose commits are all on a remote branch, with %s, and names that branch",
+  async (_, pr) => {
+    const { deps, home, root } = machine()
+    const { repo, wt } = otherRepo(root, home)
+    git(wt, "push", "-q", "origin", "APP-1-thing")
+    const told = await rmTold(["--worktree", wt], { ...deps, prState: pr(wt) })
+    expect({ ...told, out: notes(told.out) }).toEqual({
+      code: 0,
+      err: [],
+      out: [
+        `playground: ${wt}'s commits are all on origin/APP-1-thing, which the remote still holds, so no work is lost`,
+      ],
+    })
+    expect(existsSync(wt)).toBe(false)
+    expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(wt)
+    expect(existsSync(join(deps.data, "scratchpad"))).toBe(false)
+  },
+)
+
+// a remote-tracking ref is the remote's branch as last fetched, so each is read again from the remote itself: a branch deleted or moved there since, a remote that cannot be read, and a commit past the pushed branch keep the refusal
+test.each([
+  [
+    "a branch the remote has deleted since",
+    (root: string) => git(root, "--git-dir", join(root, "app.git"), "branch", "-D", "APP-1-thing"),
+  ],
+  [
+    "a branch the remote has moved off HEAD since",
+    (root: string) =>
+      git(root, "--git-dir", join(root, "app.git"), "update-ref", "refs/heads/APP-1-thing", "main"),
+  ],
+  [
+    "a remote that cannot be read",
+    (root: string, repo: string) =>
+      git(repo, "remote", "set-url", "origin", join(root, "gone.git")),
+  ],
+  [
+    "a commit past the pushed branch",
+    (_root: string, _repo: string, wt: string) => {
+      file(join(wt, "more.txt"))
+      git(wt, "add", ".")
+      git(wt, "commit", "-qm", "more")
+    },
+  ],
+])(
+  "--worktree refuses another repo's worktree whose remote-tracking branch holds its commits on %s, with an open PR",
+  async (_, after) => {
+    const { deps, home, root } = machine()
+    const { repo, wt } = otherRepo(root, home)
+    git(wt, "push", "-q", "origin", "APP-1-thing")
+    after(root, repo, wt)
+    expect(git(wt, "rev-parse", "--verify", "-q", "refs/remotes/origin/APP-1-thing")).not.toBe("")
+    const discard = `playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`
+    expect(await rmTold(["--worktree", wt], { ...deps, prState: openPr(wt) })).toEqual({
+      code: 1,
+      err: [
+        `playground: ${wt}'s HEAD holds work not landed on origin/main or on any remote branch (fetch origin if it merged or was pushed since): ${discard}`,
+      ],
+      out: [],
+    })
+    expect(existsSync(wt)).toBe(true)
+  },
+)
+
+test("--worktree keeps origin/canary for this checkout's own worktree: one whose commit is on a remote branch, with an open PR, still refuses", async () => {
+  const { deps, main, root } = machine()
+  git(root, "init", "--bare", "-q", join(root, "remote.git"))
+  git(main, "init", "-q", "-b", "canary")
+  file(join(main, "README.md"))
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  git(main, "remote", "add", "origin", join(root, "remote.git"))
+  git(main, "push", "-q", "origin", "canary")
+  const own = join(main, ".claude", "worktrees", "pg-1")
+  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", own)
+  file(join(own, "work.txt"))
+  git(own, "add", ".")
+  git(own, "commit", "-qm", "work")
+  git(own, "push", "-q", "origin", "PG-1-thing")
+  const told = await rmTold(["--worktree", own], { ...deps, prState: openPr(own) })
+  expect(told.code).toBe(1)
+  expect(told.err[0]).toStartWith(
+    `playground: ${own}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): `,
+  )
+  expect(existsSync(own)).toBe(true)
 })
 
 test("--worktree refuses, in another repo, a folder in its .claude/worktrees git does not list as its worktree, the repo's own checkout, and its worktree outside .claude/worktrees", async () => {
