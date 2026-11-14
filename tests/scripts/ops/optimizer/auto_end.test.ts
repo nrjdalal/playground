@@ -232,6 +232,28 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     ])
   })
 
+  // PG-2144: a resume named with no folder came back in the main checkout, so the line names the reviewer's own clone
+  test("an idle reviewer's resume line names its own review clone as the folder to resume in", async () => {
+    const clone = "/m/.claude/worktrees/review-2110"
+    const asked: string[] = []
+    const base = fakes().deps
+    const deps = Object.assign(base, {
+      clone: async (target: Target) => (asked.push(target.name), clone),
+    })
+    const target: Target = {
+      kind: "reviewer",
+      name: "k8wjf3-reviewer",
+      pr: URL,
+      refs: [],
+      worker: "k8wjf3-worker",
+    }
+    const [line] = await endOne(target, "checker-nothing (head scored)", deps)
+    expect(line?.text).toBe(
+      `Ended k8wjf3-reviewer: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume k8wjf3-reviewer ${clone} --pr ${URL}`,
+    )
+    expect(asked).toEqual(["k8wjf3-reviewer"])
+  })
+
   test("a line goes to the roster lead, its worker's, or ops for a ops checker; a roster-says flag ends nobody", async () => {
     const { closed, deps } = fakes()
     const lines = await sweep(
