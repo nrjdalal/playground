@@ -37,8 +37,8 @@ Only a choice that cannot be taken back reaches you, as an Inbox decision, and t
 ## Starting and ending sessions
 
 ```bash
-playground add --title "<title>"              # a worker, under a name Playground picks
-playground add --kind runner <name>           # a runner, titled by its name
+playground add --title "<title>" --account <email>   # a worker on that Claude login, under a name Playground picks
+playground add --kind runner <name>                  # a runner, titled by its name
 ```
 
 Every start passes a capacity check first: the Mac's load, its free memory, and the Claude account's week, and a name a live session already holds is refused.
