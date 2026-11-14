@@ -190,10 +190,10 @@ describe("jobChecks", () => {
   })
 
   test("each launchd job turned on is checked loaded, and one not loaded is MISSING", () => {
-    expect(jobChecks(jobs, (label) => label === "com.x.ops-awake")).toEqual([
+    expect(jobChecks(jobs, (label) => label === "com.x.ops-awake", "darwin")).toEqual([
       { detail: "com.x.ops-awake loaded", name: "job ops-awake", status: "ok" },
     ])
-    const [check] = jobChecks(jobs, () => false)
+    const [check] = jobChecks(jobs, () => false, "darwin")
     expect(check!.status).toBe("MISSING")
     expect(check!.detail).toContain("launchctl bootstrap")
     expect(check!.detail).toContain("com.x.ops-awake.plist")
@@ -262,7 +262,7 @@ describe("the jobs check on a machine with a store", () => {
   })
 
   test("reads the registry's values: each launchd job turned on, by its job name", () => {
-    expect(jobChecks(registryJobsText(policy), () => true)).toEqual([
+    expect(jobChecks(registryJobsText(policy), () => true, "darwin")).toEqual([
       { detail: "com.x.ops-tick loaded", name: "job ops-tick", status: "ok" },
       { detail: "com.x.ops-zai-usage loaded", name: "job ops-zai-usage", status: "ok" },
     ])
@@ -273,9 +273,9 @@ describe("the jobs check on a machine with a store", () => {
 
   test("a launchd job its row turns on by enabled alone reads its label from the registry (PG-1196)", () => {
     const rows = [{ key: "jobs.opsTick", scope: "made-up-me", value: { enabled: true } }]
-    expect(jobChecks(registryJobsText(policyJson(rows, "made-up-me")), () => true)).toEqual([
-      { detail: "com.playground.ops-tick loaded", name: "job ops-tick", status: "ok" },
-    ])
+    expect(
+      jobChecks(registryJobsText(policyJson(rows, "made-up-me")), () => true, "darwin"),
+    ).toEqual([{ detail: "com.playground.ops-tick loaded", name: "job ops-tick", status: "ok" }])
   })
 
   test("takes the store's policy.json over jobs.json, and a store that lacks it reads jobs.json", async () => {

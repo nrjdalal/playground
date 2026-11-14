@@ -81,6 +81,7 @@ const install = () => {
     database: "playground-dashboard-db",
     home,
     log: (line: string) => said.push(line),
+    platform: "darwin" as const,
     repo,
     run,
     stacks: [join(repo, ".claude", "worktrees", "dashboard")],

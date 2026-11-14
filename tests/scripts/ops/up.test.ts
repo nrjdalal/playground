@@ -234,7 +234,8 @@ test("--restarted drops the named jobs' starts once any running pass ends, and s
 })
 
 // Loads up.py and runs two passes with every job healthy by its heartbeat, lsof answering the fake listing given and every other call recorded; a TERM'd pid dies, and starts are recorded rather than made.
-const DELETED = `${LOAD}listing = sys.argv[2]
+const DELETED = `${LOAD}sys.platform = "darwin"
+listing = sys.argv[2]
 calls, kills, started = [], [], []
 up.healthy = lambda job: (True, "ok")
 up.ptable.table = lambda: {pid: None for pid in (4301, 4302, 4401, 4501, 4601, 4602, 4701)}
@@ -319,7 +320,8 @@ test("a job on a deleted executable is restarted, or reported once when launchd 
 })
 
 // Loads up.py and runs one pass per health answer given, every notify.sh call recorded rather than made.
-const DOWN = `${LOAD}calls = []
+const DOWN = `${LOAD}sys.platform = "darwin"
+calls = []
 up.render_jobs = lambda: None
 up.ptable.table = lambda: {}
 up.once.running = lambda name, marker: None
@@ -370,7 +372,7 @@ test("on Linux a launchd job down 3 passes in a row is told to ops as its system
     JSON.stringify({ jobs: [{ heartbeat: "ops-l", launchd: "com.x.ops-l", name: "ops-l" }] }),
   )
   const down = [false, "no heartbeat"]
-  const linux = DOWN.replace(LOAD, `${LOAD}sys.platform = "linux"\n`)
+  const linux = DOWN.replace('sys.platform = "darwin"', 'sys.platform = "linux"')
   const child = Bun.spawnSync(
     ["python3", "-I", "-c", linux, upPy, JSON.stringify([down, down, down])],
     {
@@ -655,7 +657,14 @@ test("a pass hands the render HOME's LaunchAgents folder to install into", () =>
     `require("node:fs").writeFileSync(${JSON.stringify(argv)}, JSON.stringify(process.argv.slice(2)))\n`,
   )
   const pass = Bun.spawnSync(
-    ["python3", "-I", "-c", `${LOAD}up.JOBS_RENDER = sys.argv[2]\nup.render_jobs()`, upPy, render],
+    [
+      "python3",
+      "-I",
+      "-c",
+      `${LOAD}sys.platform = "darwin"\nup.JOBS_RENDER = sys.argv[2]\nup.render_jobs()`,
+      upPy,
+      render,
+    ],
     {
       env: {
         CLAUDE_CONFIG_DIR: config,

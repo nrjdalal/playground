@@ -252,7 +252,7 @@ const unitOf = (name: string, job: Job, fill: Fill): string => {
     "",
     "[Service]",
     `Environment=${quoted(`PATH=%h/.bun/bin:${spec(fill.path)}`)}`,
-    `ExecStart=${job.program!.map((arg) => quoted(spec(filled(arg, fill)).replaceAll("$", "$$$$"))).join(" ")}`,
+    `ExecStart=${job.program!.map((arg) => quoted(spec(filled(arg, fill)).replaceAll("$", () => "$$"))).join(" ")}`,
     "Restart=always",
     "RestartSec=10",
     `StandardError=append:${log}`,
