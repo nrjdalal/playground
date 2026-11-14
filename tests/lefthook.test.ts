@@ -585,8 +585,8 @@ test("the pre-push trailer check refuses a pushed commit a --no-verify commit le
   }
 }, 60_000)
 
-// the same pre-push job reads each new commit's message and the pushed branch's name against no-public-leak's list, a made-up one in a scratch data folder here, so a --no-verify commit holding a list term is refused before it reaches the remote; the refusal names the sha and the kind, never the term
-test("the pre-push list check refuses a pushed commit message or branch name holding a list term", async () => {
+// the same pre-push job reads each new commit's message and the pushed branch or tag name against no-public-leak's list, a made-up one in a scratch data folder here, so a --no-verify commit holding a list term is refused before it reaches the remote; the refusal names the sha and the kind, never the term
+test("the pre-push list check refuses a pushed commit message or branch or tag name holding a list term", async () => {
   const trailer = await pushScript("commit-trailer.sh")
   const dir = mkdtempSync(join(tmpdir(), "lefthook-push-lists-"))
   const data = join(dir, ".data")

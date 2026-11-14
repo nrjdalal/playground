@@ -31,6 +31,9 @@ What the factory fetches from outside the lockfile runs at one known version, an
 - **The runner host's installers:** `scripts/ops/runner-host/setup.sh` pins `BUN_VERSION`, `UV_VERSION` and `RUNNER_VERSION`, and its `fetch` checks each download's sha256 (`*_SHA256`, one per architecture) before it unpacks it, stopping on a mismatch.
   To bump one, change the version and both architectures' sums, taken from the release's own published sums (`gh api repos/<owner>/<repo>/releases/tags/<tag> --jq '.assets[] | [.name, .digest]'`), and cross-check them against its sums file where it ships one (bun's `SHASUMS256.txt`, uv's `<asset>.sha256`, the runner's release notes). `BUN_VERSION` follows `package.json`'s `packageManager`, which `tests/bun-version.test.ts` holds.
 - **inscope:** `AGENTS.md` runs `npx -y inscope@<version>`. To bump it, change that one version to the release `npm view inscope version` names.
+- **inscope's synced skills:** each entry in a workspace's `skills` in `~/.config/inscope/inscope.json` names a commit, in inscope's object form `{ "source": "<owner>/<repo>", "path": "<subdir>", "ref": "<sha>" }`, since the string form `<owner>/<repo>#<path>` takes no ref; the file lives in the home folder, so no test holds these pins.
+  `inscope skill update` skips a pinned entry, so to bump one, read the repo's new head (`gh api repos/<owner>/<repo>/commits/<branch> --jq .sha`) and the upstream diff on the skill's own path since the pinned sha (`gh api repos/<owner>/<repo>/compare/<pinned>...<new> --jq '.files[] | select(.filename | startswith("<path>/")) | .filename, .patch'`), then set `ref` to the new sha and run `npx -y inscope@<version> apply`.
+  Copy the file to `inscope.json.bak-<YYYYMMDD>` beside it before the edit; to undo, put that copy back and run `apply` again.
 
 ## Notable dependencies
 
