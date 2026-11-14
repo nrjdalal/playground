@@ -9812,7 +9812,7 @@ function cliCalls(parsed, env) {
     return [];
   const words = [first, ...args];
   const call = name === "bun" ? bunCall(args, env) : name === "bunx" ? bunCall([X, ...args], env) : undefined;
-  const dirs = [env.cwd, call?.cwd, call?.chained];
+  const dirs = [env.cwd, call?.cwd, call?.words[0] === "x" ? call.chained : undefined];
   return words.flatMap((word, at) => isCli(word, dirs) ? [words.slice(at + 1)] : []);
 }
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];

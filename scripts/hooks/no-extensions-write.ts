@@ -799,14 +799,14 @@ function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   )
 }
 
-// The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare, a bun or bunx word read from bun's last --cwd and from the folder its --cwd options chain to, where bun x runs a program.
+// The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare, a bun or bunx word read from bun's last --cwd and, for bun x and bunx, from the folder their --cwd options chain to, where bun x runs a program.
 function cliCalls(parsed: Parsed, env: Env): Word[][] {
   const { args, first, name } = parsed
   if (!first) return []
   const words = [first, ...args]
   const call =
     name === "bun" ? bunCall(args, env) : name === "bunx" ? bunCall([X, ...args], env) : undefined
-  const dirs = [env.cwd, call?.cwd, call?.chained]
+  const dirs = [env.cwd, call?.cwd, call?.words[0] === "x" ? call.chained : undefined]
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
