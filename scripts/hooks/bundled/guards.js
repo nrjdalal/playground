@@ -13051,7 +13051,7 @@ var GUARD_KEYS = new Set([
 ]);
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
-var BUNS = new Set(["bun", "bunx"]);
+var RUNNERS3 = new Set(["bun", "bunx", "npx"]);
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];
 var SCORE_AS_OTHER = `playground ext score on a line that clears or sets ${IDENTITY.join(", ")}, which reads as another author than the calling session`;
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
@@ -13112,7 +13112,7 @@ var TAKES2 = new Set([
   "-w",
   "--workspace"
 ]);
-var RUNNERS3 = new Set(["bun", "npm", "pnpm", "yarn"]);
+var RUNNERS4 = new Set(["bun", "npm", "pnpm", "yarn"]);
 var EXECS = new Set(["bunx", "npx", "pnpx"]);
 var TEST_BINS = new Set(["jest", "vitest"]);
 var PY_TOOLS = new Set(["pytest", "ruff", "ty"]);
@@ -13169,7 +13169,7 @@ function runsTests(cmd) {
   const [sub = "", next = ""] = positionals(args);
   if (EXECS.has(name))
     return TEST_BINS.has(program(sub));
-  if (!RUNNERS3.has(name))
+  if (!RUNNERS4.has(name))
     return false;
   if (sub === "run" || sub === "run-script")
     return TEST_SCRIPT.test(next);
@@ -13710,7 +13710,7 @@ var ORG_SCRIPT_DIRS = [
     "the DM sender, which posts to the owner's chat"
   ]
 ];
-var RUNNERS4 = new Set([
+var RUNNERS5 = new Set([
   "bash",
   "bun",
   "bunx",
@@ -13756,7 +13756,7 @@ function orgScript(parsed, env) {
   }
   if (name === "playground" && args.find((a) => !a.value.startsWith("-"))?.value === "dm")
     return { why: `it runs ${ORG_SCRIPT_DIRS[1][1]}` };
-  if (!RUNNERS4.has(name))
+  if (!RUNNERS5.has(name))
     return;
   let at = env.cwd;
   for (let i = 0;i < args.length; i++) {
@@ -16018,7 +16018,7 @@ var STARTERS = new Set(["screen", "tmux"]);
 var RM = new Set(["grm", "rm"]);
 var DEL = new Set(["del", "del-cli"]);
 var DELETER_PROGRAMS = new Set([...DEL, "rimraf"]);
-var RUNNERS5 = new Map([
+var RUNNERS6 = new Map([
   ["bun", ["x"]],
   ["bunx", []],
   ["npm", ["exec", "x"]],
@@ -16043,7 +16043,7 @@ var JUDGED = new Set([
   "rsync"
 ]);
 function packageOf(name, args) {
-  const subs = RUNNERS5.get(name);
+  const subs = RUNNERS6.get(name);
   if (!subs)
     return;
   const words = args.filter((a) => !a.value.startsWith("-"));
@@ -16805,9 +16805,9 @@ function judgeApi2(rest, flags, built) {
 }
 var STEP_FILE = /(?:^|\/)packages\/scripts\/src\/ship\/yard\.ts$/;
 var STEP_HELP = new Set(["--help", "-h"]);
-var RUNNERS6 = new Set(["npm", "pnpm", "yarn"]);
+var RUNNERS7 = new Set(["npm", "pnpm", "yarn"]);
 function yardStep(name, args, shell) {
-  if (RUNNERS6.has(name))
+  if (RUNNERS7.has(name))
     return args.some((a) => a.value === "ship:yard");
   if (name !== "bun")
     return false;
@@ -17480,7 +17480,7 @@ Fix the message by the gh-commit skill's Commit step, then commit again.`;
 }
 var anywhere = (what, command) => `no-unslotted-run hook refuses ${what} on a line that names more folders than the hook carries, since it cannot rule out a worktree: every heavy run goes through run-slot (playbook's **slots**). Run it as ~/.playground/ops/run-slot.sh <your name> -- ${command}, or as a line of its own after a cd to a literal path.`;
 var BUN_SCRIPTS2 = new Set(["build", "check-types", "test"]);
-var RUNNERS7 = new Set(["bunx", "npx"]);
+var RUNNERS8 = new Set(["bunx", "npx"]);
 var TEST_TAKES = new Set([
   "--conditions",
   "--console-depth",
@@ -17572,7 +17572,7 @@ function heavy2(name, args, env) {
       what: `turbo run ${task}`
     } : undefined;
   }
-  if (RUNNERS7.has(name)) {
+  if (RUNNERS8.has(name)) {
     const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES.has(args[k - 1]?.value ?? ""));
     const values = words.map((w) => w.value);
     const base = name === "bunx" ? bunCall([X, ...args], env).chained : env.cwd;

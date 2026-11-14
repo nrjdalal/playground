@@ -808,22 +808,23 @@ function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   )
 }
 
-const BUNS = new Set(["bun", "bunx"])
+// the package runners runnerDirs follows when a runner starts one
+const RUNNERS = new Set(["bun", "bunx", "npx"])
 
-// The folders a bun, bunx or npx call's word may land in: bun's last --cwd, for bun x and bunx also the folder their --cwd options chain to, and for a bun that bunx, bun x, npx or bun run starts, that bun's own folders read from the folder the runner starts it in, as no-main-checkout's runs() reads a bun x program.
+// The folders a bun, bunx or npx call's word may land in: bun's last --cwd, for bun x and bunx also the folder their --cwd options chain to, and for a bun, bunx or npx that bunx, bun x, npx or bun run starts, its own folders read from the folder the runner starts it in, as no-main-checkout's runs() reads a bun x program.
 function runnerDirs(name: string, args: Word[], env: Env): (string | undefined)[] {
   if (name === "bunx") return runnerDirs("bun", [X, ...args], env)
   if (name === "npx") {
     const at = runnerTarget(args)
     const started = toolName(args[at]?.value)
-    return BUNS.has(started) ? runnerDirs(started, args.slice(at + 1), env) : []
+    return RUNNERS.has(started) ? runnerDirs(started, args.slice(at + 1), env) : []
   }
   if (name !== "bun") return []
   const { at, chained, cwd, words } = bunCall(args, env)
   const x = words[0] === "x"
   const own = x ? [cwd, chained] : [cwd]
   const started = x || words[0] === "run" ? toolName(args[at]?.value) : ""
-  if (!BUNS.has(started)) return own
+  if (!RUNNERS.has(started)) return own
   return [...own, ...runnerDirs(started, args.slice(at + 1), { ...env, cwd: x ? chained : cwd })]
 }
 

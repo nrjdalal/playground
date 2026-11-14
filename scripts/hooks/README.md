@@ -502,7 +502,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It finds git's subcommand and tree past git's own options through `GIT_TAKES`, by no-main-checkout's `gitCall`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD log -1` reads as a `log` and `git --attr-source log commit -m x` as a commit.
   It refuses the `playground` CLI's calls that change what a guard reads, the CLI found by where its word lands: `playground` by name in any case, or by a path that is no folder, or the checkout's `cli.ts` with or without its extension, as any word of a command but a reader's, so behind any wrapper (`bun`, `npx`, `find -exec`, `arch`, `watch`),
   a word of `bun` read from the shell's folder and from bun's last `--cwd`, one of `bunx` or `bun x` also from the folder their `--cwd` options chain to (each read from the one before),
-  and one of a bun that a package runner starts (`bunx`, `bun x`, `npx`, `bun run`) also from that bun's own folders, read from the folder the runner starts it in,
+  and one of a `bun`, `bunx` or `npx` that a package runner starts (`bunx`, `bun x`, `npx`, `bun run`) also from its own folders, read from the folder the runner starts it in,
   its words followed by the stdin xargs hands it or carried in xargs' `-I` string.
   Its words split as that command's own parse splits them (`--dry-run` and `--yes` are bare for `ext`, `--dry-run` alone for `settings`):
   `ext accept`, the owner's own call, whatever its words (the role cleared in the same call included);
