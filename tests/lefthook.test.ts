@@ -1490,7 +1490,7 @@ test("pre-commit runs the native-title and dashboard-map tests when a file they 
   }
 }, 60_000)
 
-// Two text tests went red only in CI after a push (#2141): no-raw-delete reads every tracked file, as text-tests' tests do, and workflow-runners reads the workflows; checked on lefthook itself with each run swapped for an echo
+// Two text tests went red only in CI after a push on 14 Nov: no-raw-delete reads every tracked file, as text-tests' tests do, and workflow-runners reads the workflows; checked on lefthook itself with each run swapped for an echo
 test("pre-commit runs the no-raw-delete test on any text commit and the workflow-runners test on a workflow commit", async () => {
   type Job = { exclude?: string[]; glob?: string[]; run?: string }
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
