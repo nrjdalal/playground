@@ -3496,4 +3496,52 @@ describe("on Linux a bare cp, ln, mv, install and sed read as GNU's builds (PG-2
     for (const platform of ["darwin", "linux"] as const)
       expect(await as(platform, () => bash("cp /tmp/f /tmp/y"))).toBeUndefined()
   })
+
+  // GNU permutes a later dashed word into an option, while POSIXLY_CORRECT stops its options at the first operand, so that word is a file again; each was measured on GNU coreutils 9.4
+  test.each([
+    [
+      "a remover's option after its first operand after a cd to a variable",
+      `cd "$X"; rm /tmp/x -f`,
+    ],
+    ["a writer's value option after its first operand", `mkdir /tmp/x -m "$M"`],
+  ])("%s is allowed on Linux and refused on macOS", async (_, command) => {
+    expect(await as("linux", () => bash(command))).toBeUndefined()
+    expect(await as("darwin", () => bash(command))).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each([
+    [
+      "a remover's option after its first operand under POSIXLY_CORRECT after a cd to a variable",
+      `cd "$X"; POSIXLY_CORRECT=1 rm /tmp/x -f`,
+    ],
+    [
+      "a remover's option after its first operand after an exported POSIXLY_CORRECT and a cd to a variable",
+      `export POSIXLY_CORRECT=1; cd "$X"; rm /tmp/x -f`,
+    ],
+    [
+      "a writer's value option after its first operand under POSIXLY_CORRECT",
+      `POSIXLY_CORRECT=1 mkdir /tmp/x -m "$M"`,
+    ],
+  ])("%s stays refused on Linux", async (_, command) => {
+    expect(await as("linux", () => bash(command))).toContain("no-extensions-write hook refuses")
+  })
+
+  // GNU coreutils 9.4 exits 1 on each before it writes: chmod and install refuse an unknown letter, so a dash-led word GNU reads as options names no file
+  test.each([
+    ["chmod of a dash-led file after a cd to a variable", `cd "$X"; chmod 644 -policy.json`],
+    [
+      "install with macOS's metalog option after a cd to a variable",
+      `cd "$X"; install -Mlog x /tmp/y`,
+    ],
+  ])("%s, which GNU refuses as an invalid option, is allowed on Linux", async (_, command) => {
+    expect(await as("linux", () => bash(command))).toBeUndefined()
+    expect(await as("darwin", () => bash(command))).toContain("no-extensions-write hook refuses")
+  })
+
+  test("GNU sed's glob script after a bare -i edits a work file on Linux and stays refused on a file in the root", async () => {
+    expect(await as("linux", () => bash(`sed -i '/a*b/d' ${WORK}/a.ts`))).toBeUndefined()
+    expect(await as("linux", () => bash(`sed -i '/a*b/d' ${LIST}`))).toContain(
+      "no-extensions-write hook refuses",
+    )
+  })
 })
