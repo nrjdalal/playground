@@ -55,6 +55,18 @@ export const groups: Group[] = [
         "turbo's build in the main checkout by npx past a user config option's value",
         `npx --userconfig /tmp/u turbo run build --cwd ${MAIN}`,
       ],
+      [
+        "turbo's build in the main checkout by npx started by npx",
+        `npx npx turbo run build --cwd ${MAIN}`,
+      ],
+      [
+        "turbo's build in the main checkout by npx started by npx past a user config option's value",
+        `npx --userconfig /tmp/u npx turbo run build --cwd ${MAIN}`,
+      ],
+      [
+        "turbo's build in the main checkout by npx started by npx, both past an unlisted option's value",
+        `npx --userconfig /tmp/u npx --cache /tmp/c turbo run build --cwd ${MAIN}`,
+      ],
     ],
   },
   {
@@ -64,6 +76,14 @@ export const groups: Group[] = [
       [
         "turbo's build by npx past a user config option's value",
         `npx --userconfig /tmp/u turbo run build --cwd ${MAIN}/.claude/worktrees/a`,
+      ],
+      [
+        "turbo's build by npx started by npx",
+        `npx npx turbo run build --cwd ${MAIN}/.claude/worktrees/a`,
+      ],
+      [
+        "turbo's build by npx started by npx, both past an unlisted option's value",
+        `npx --userconfig /tmp/u npx --cache /tmp/c turbo run build --cwd ${MAIN}/.claude/worktrees/a`,
       ],
     ],
   },

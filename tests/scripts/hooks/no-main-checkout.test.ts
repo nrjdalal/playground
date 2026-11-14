@@ -1190,6 +1190,8 @@ describe("a runner's option the reader does not list keeps its verdict when no r
     ["bun's evaluated script", "bun -e 'console.log(1)'"],
     ["bun's script with no env file", "bun --no-env-file packages/scripts/src/x.ts"],
     ["a package runner's tool", "bunx cowsay hi"],
+    ["a nested runner's version", "npx npx --version"],
+    ["a nested runner's help", "npx bunx --help"],
   ])("in the main checkout, %s, runs", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })
