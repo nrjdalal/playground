@@ -2,6 +2,10 @@ import type { Group } from "./_shared"
 
 // 22 runners each started by the one before, each past three unlisted options' values, so the readings pass their cap at every level
 const DEEP = Array.from({ length: 22 }, (_, i) => `npx --a${i} a --b${i} b --c${i} c`).join(" ")
+// the same runners each started through env, a wrapper the reader parses, so each is read again, past the depth no-extensions-write reads runners to
+const WRAPPED = Array.from({ length: 22 }, (_, i) => `npx --a${i} a --b${i} b --c${i} c env`).join(
+  " ",
+)
 
 // #2103: a value-taking option the shared runner reader does not list had its value read as the program, so a later --cwd went unread; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
@@ -9,6 +13,18 @@ export const groups: Group[] = [
     folders: ["home", "process worktree"],
     guards: ["no-extensions-write"],
     rows: ({ CLI_DIR }) => [
+      [
+        "ext add by runners nested past the readings' cap",
+        `${DEEP} bun --cwd ${CLI_DIR} cli.ts ext add login list x y`,
+      ],
+      [
+        "ext add after runners nested past the readings' cap",
+        `${DEEP} cowsay hi; bun --cwd ${CLI_DIR} cli.ts ext add login list x y`,
+      ],
+      [
+        "ext add by runners each started through env, past the depth the hook reads",
+        `${WRAPPED} bun --cwd ${CLI_DIR} cli.ts ext add login list x y`,
+      ],
       [
         "ext add by bun run past an unlisted option's value",
         `bun run --env-file /tmp/e bun --cwd ${CLI_DIR} cli.ts ext add login list x y`,

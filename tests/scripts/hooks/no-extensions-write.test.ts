@@ -2352,6 +2352,15 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
 })
 
 describe("a call the reader parses whole keeps its verdict beside the unread-folder rule (PG-2106)", () => {
+  test("a runner chain nested 10 deep, three options each, is judged within a bound", async () => {
+    const chain = Array.from({ length: 10 }, (_, i) => `npx --a${i} a --b${i} b --c${i} c`).join(
+      " ",
+    )
+    const started = performance.now()
+    expect(await bash(`${chain} cowsay hi`, WORK)).toBeUndefined()
+    expect(performance.now() - started).toBeLessThan(3000)
+  })
+
   test.each([
     ["a relative cd after a held absolute one", `W=/opt/w; cd "$W" && cd sub && ex -sc wq f`],
     ["a held absolute cd after a cd to a variable", `W=/opt/w; cd "$X" && cd "$W" && ex -sc wq f`],
