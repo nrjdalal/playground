@@ -1,6 +1,84 @@
 // @bun
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
+// packages/safe-delete/src/live-refs.ts
+import { AsyncLocalStorage } from "async_hooks";
+var budget = new AsyncLocalStorage;
+function withLiveBudget(body, ms = 6000) {
+  return budget.getStore() ? body() : budget.run({ reads: new Map, until: performance.now() + ms }, body);
+}
+var run = (at, args, env, timeout) => {
+  const proc = Bun.spawnSync(["git", "-C", at, ...args], {
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", ...env },
+    stderr: "ignore",
+    stdin: "ignore",
+    stdout: "pipe",
+    timeout
+  });
+  return { ok: proc.exitCode === 0, out: proc.stdout.toString() };
+};
+function liveHeads(at, remote, timeout) {
+  const command = process.env.GIT_SSH_COMMAND || run(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
+  const env = { GIT_TERMINAL_PROMPT: "0" };
+  if (command)
+    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
+  const live = run(at, ["ls-remote", "--heads", "--", remote], env, timeout);
+  if (!live.ok)
+    return null;
+  const tips = [];
+  for (const line of live.out.split(`
+`)) {
+    const [sha, name] = line.split("\t");
+    if (/^[0-9a-f]{40,64}$/.test(sha ?? "") && name?.startsWith("refs/heads/"))
+      tips.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha });
+  }
+  return tips;
+}
+function present(at, tips) {
+  if (!tips.length)
+    return [];
+  const had = run(at, ["rev-list", "--no-walk", "--ignore-missing", ...tips.map((t) => t.sha)]);
+  if (!had.ok)
+    return null;
+  const here = new Set(had.out.split(`
+`).filter(Boolean));
+  return tips.filter((t) => here.has(t.sha));
+}
+function pushRemote(at, branch = run(at, ["symbolic-ref", "-q", "--short", "HEAD"]).out.trim()) {
+  const config = (key) => run(at, ["config", "--get", key]).out.trim() || undefined;
+  return branch && config(`branch.${branch}.pushRemote`) || config("remote.pushDefault") || branch && config(`branch.${branch}.remote`) || "origin";
+}
+function heldBy(at, remote, timeout = 5000) {
+  const call = budget.getStore();
+  const key = `${at}\x00${remote}`;
+  let live = call?.reads.get(key);
+  if (live === undefined) {
+    const left = call ? Math.floor(call.until - performance.now()) : timeout;
+    live = left > 0 ? liveHeads(at, remote, Math.min(timeout, left)) : null;
+    call?.reads.set(key, live);
+  }
+  if (!live?.length)
+    return [];
+  const here = present(at, live) ?? [];
+  const had = new Set(here.map((t) => t.ref));
+  const tracked = new Map;
+  if (live.length > here.length && !/[:/\\]/.test(remote))
+    for (const line of run(at, [
+      "for-each-ref",
+      "--format=%(objectname) %(refname)",
+      `refs/remotes/${remote}/`
+    ]).out.split(`
+`)) {
+      const [sha, ref] = line.split(" ");
+      if (sha && ref)
+        tracked.set(ref.slice("refs/remotes/".length), sha);
+    }
+  return [
+    ...here.map((t) => t.sha),
+    ...live.flatMap((t) => had.has(t.ref) || !tracked.has(t.ref) ? [] : [tracked.get(t.ref)])
+  ];
+}
+
 // scripts/hooks/no-desktop-owner-app.ts
 import { realpathSync as realpathSync2 } from "fs";
 import { join as join5, resolve as resolve3 } from "path";
@@ -171,7 +249,7 @@ var isStrings = (value) => Array.isArray(value) && value.every((item) => typeof 
 var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
 // scripts/hooks/shell.ts
-import { AsyncLocalStorage } from "async_hooks";
+import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
 import { realpathSync, statSync } from "fs";
 import { homedir as homedir2 } from "os";
 import { basename, dirname as dirname2, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
@@ -181,7 +259,7 @@ var NOT_RUN = "The refusal stopped this whole Bash call, so none of its commands
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
-var deadlines = new AsyncLocalStorage;
+var deadlines = new AsyncLocalStorage2;
 async function withDeadline(budget, body) {
   return await deadlines.run(performance.now() + budget, body);
 }
@@ -825,9 +903,6 @@ function lex(src, known = {}) {
   const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() };
   list(lx, 0, false);
   calledAgain(lx.commands, src);
-  if (lx.commands.some((c) => c.words.some((w) => /^chpwd/.test(w.value))))
-    for (const c of lx.commands)
-      c.cdRedefined = true;
   braced(lx.commands);
   return { commands: lx.commands, scopes: lx.scopes };
 }
@@ -872,9 +947,6 @@ function calledAgain(commands, src) {
     }
     const body = commands.slice(k, end + 1);
     const name = word.value.replace(/\(\)$/, "");
-    if (name === "cd" || name === "chpwd")
-      for (const c of commands)
-        c.cdRedefined = true;
     if (word.quoted || !/^[\w.:-]+$/.test(name)) {
       for (const c of body)
         c.repeated = true;
@@ -1261,8 +1333,6 @@ function dollar(lx, plain = false) {
     const from = lx.i;
     while (/\w/.test(src[lx.i] ?? ""))
       lx.i++;
-    if (/^:[A-Za-z&]/.test(src.slice(lx.i, lx.i + 2)))
-      return unknown("a zsh modifier");
     return variable(src.slice(from, lx.i));
   }
   if (next === "$") {
@@ -1364,7 +1434,6 @@ function mktempPath(cmd, known) {
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`;
 }
 var SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/;
-var chdirOf = (state, word) => state.chdir && word ? { ...word, ...unknown("a second env -C") } : word;
 var READINGS = 16;
 function parse(cmd) {
   const state = { local: new Map, rest: cmd.words.toReversed(), xargs: undefined };
@@ -1428,9 +1497,9 @@ function unwrap(state, inside, budget) {
           rest.push({ quoted: false, value: split[j] });
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         take();
-        state.chdir = chdirOf(state, take());
+        state.chdir = take();
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
-        state.chdir = chdirOf(state, slice(w, v.startsWith("-C") ? 2 : "--chdir=".length));
+        state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length);
         take();
       } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
@@ -1482,7 +1551,7 @@ function shellSlot(args, shell) {
     return;
   return args.slice(args.indexOf(operand));
 }
-async function run(lexed, env, visit, builtins = false) {
+async function run2(lexed, env, visit, builtins = false) {
   if (running >= MAX_RUNS)
     throw new RangeError("scripts nested too deep");
   running++;
@@ -1545,7 +1614,7 @@ async function examine(cmd, env, visit, builtins) {
   if (!cmd.runsStdin || stdinScript(primary))
     return;
   for (const script of await scriptStdin(cmd, env)) {
-    const verdict = await nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins));
+    const verdict = await nested(cmd, env, () => run2(lexScript(known(script), env), subshell(env), visit, builtins));
     if (verdict)
       return verdict;
   }
@@ -1724,12 +1793,12 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
     for (const script of verdict ? [] : scripts) {
-      verdict = await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
+      verdict = await nested(cmd, env, () => run2(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
       if (verdict)
         break;
     }
   } else if (name === "eval") {
-    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
+    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run2(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record(cmd, name, args, here);
@@ -1840,8 +1909,6 @@ function cdTargets(name, cmd, parsed, env, from) {
     const word = env.hold?.(typed, cmd, env) ?? typed;
     if (word !== typed && !landsHeld(typed, cmd, env))
       unread = true;
-    if (env.cwdUnread && pathOf(word, { ...env, cwd: undefined }) === undefined)
-      unread = true;
     for (const base of from.length > 0 ? from : [undefined]) {
       tick();
       const path = pathOf(word, { ...env, cwd: base });
@@ -1895,8 +1962,7 @@ async function chdirTo(name, cmd, parsed, env) {
   const back = [...new Set([...env.cwdBack ?? [], ...from])];
   const bases = [...new Set([...from, ...env.cwdHeld ?? []])];
   const move = name === "popd" ? { back: true, paths: [], unread: true } : tildeMove(cdTargets(name, cmd, parsed, env, bases), name, parsed, env, from, back);
-  const { paths } = move;
-  const unread = move.unread || !!cmd.cdRedefined;
+  const { paths, unread } = move;
   const named = [left, env.cwd].filter((dir) => dir !== undefined);
   env.cwdBack = keep([...new Set([...back, ...paths, ...named])], env);
   if (cmd.held) {
@@ -1908,8 +1974,6 @@ async function chdirTo(name, cmd, parsed, env) {
   if (sureToRun(cmd, parsed) && !unread && paths.length === 1 && (chained || isFolder(paths[0]))) {
     env.cwdSure = paths[0];
     env.cwdMaybe = [];
-    if (chained)
-      env.cwdChainUnread ||= env.cwdUnread;
     env.cwdUnread = false;
     env.cwdOr = chained ? undefined : { before: from, cdChain: cmd.chain, scope: cmd.scope };
     if (env.old)
@@ -1960,18 +2024,9 @@ function orElse(cmd, env) {
   env.cwdOr = undefined;
 }
 function unchain(cmd, env) {
-  if (!env.cwdChain?.length && !env.cwdChainUnread || cmd.chain === env.cwdChainToken)
+  if (!env.cwdChain?.length || cmd.chain === env.cwdChainToken)
     return;
-  if (env.cwdChainUnread)
-    env.cwdUnread = true;
-  env.cwdChainUnread = undefined;
-  env.cwdMaybe = keep([
-    ...new Set([
-      ...env.cwdMaybe ?? [],
-      ...env.cwdSure ? [env.cwdSure] : [],
-      ...env.cwdChain ?? []
-    ])
-  ], env);
+  env.cwdMaybe = keep([...new Set([...env.cwdMaybe ?? [], ...env.cwdSure ? [env.cwdSure] : [], ...env.cwdChain])], env);
   env.cwdSure = undefined;
   if (env.old)
     env.oldFrom = [];
@@ -2021,11 +2076,11 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins);
+    return run2(lexScript(script, env), subshell(env), visit, builtins);
   }
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script);
-    const verdict = await run(lexScript(text, env), subshell(env), visit, builtins);
+    const verdict = await run2(lexScript(text, env), subshell(env), visit, builtins);
     if (verdict)
       return verdict;
   }
@@ -2543,7 +2598,7 @@ async function runsTool(line) {
   try {
     const env = { cwd: undefined, files: new Map, known: {}, process: {}, vars: new Map };
     const visit = async (_, { args, first, name }) => TOOL.test(name) || first !== undefined && unreadable(first) || LAUNCHERS.has(name) && args.some((a) => TOOL.test(program(a.value))) || (INTERPRETERS.has(name) || LINES.has(name)) && args.some((a) => MENTION.test(a.value)) || name === "source" || name === "." || first?.value.includes("/") ? "runs" : undefined;
-    return await run(lex(line), env, visit) !== undefined;
+    return await run2(lex(line), env, visit) !== undefined;
   } catch {
     return true;
   }
@@ -2643,7 +2698,7 @@ async function judgeText(text, cwd, apps, depth) {
     if (name === "source" || name === "." || first?.value.includes("/"))
       return unread(SCRIPT_IN_CALL);
   };
-  return run(lexed, env, visit);
+  return run2(lexed, env, visit);
 }
 async function script(path, env, mention, apps, depth) {
   if (mention)
@@ -2864,7 +2919,7 @@ async function inspect(raw) {
   if (!/\b(?:declare|env|export|printenv|set|typeset)\b/.test(toolInput.command.replace(/["'\\]/g, "")))
     return;
   const env = { files: new Map, known: {}, process: {}, vars: new Map };
-  return run(lex(toolInput.command), env, visit, true);
+  return run2(lex(toolInput.command), env, visit, true);
 }
 async function check2(raw) {
   try {
@@ -2958,7 +3013,7 @@ function remotes(cwd) {
 }
 
 // scripts/hooks/no-playground-leak.ts
-import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
+import { AsyncLocalStorage as AsyncLocalStorage3 } from "async_hooks";
 import { existsSync as existsSync5, readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync3 } from "fs";
 import { basename as basename3, join as join9 } from "path";
 
@@ -9006,7 +9061,7 @@ async function inspect2(raw, environment) {
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit2);
+  return run2(lex(command, env.known), env, visit2);
 }
 async function check3(raw, environment = process.env) {
   try {
@@ -9107,7 +9162,7 @@ async function writeOf(tool, input, cwd, environment) {
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit3);
+  return run2(lex(command, env.known), env, visit3);
 }
 async function marked2(sessionId, environment) {
   if (typeof sessionId !== "string")
@@ -10173,7 +10228,7 @@ async function inspect3(raw, environment) {
       settled = false;
     return verdict;
   };
-  return run(lex(command, env.known), env, visit);
+  return run2(lex(command, env.known), env, visit);
 }
 async function check5(raw, environment = process.env) {
   try {
@@ -10648,7 +10703,7 @@ var leakPolicy = (orgs, term = /(?!)/) => ({
   what: "a factory term",
   why: "the factory is private, so nothing about it, its skills or its sessions goes into anything a guarded org sees, in any shape."
 });
-var calls = new AsyncLocalStorage2;
+var calls = new AsyncLocalStorage3;
 var IDLE = {
   changed: false,
   cleared: {},
@@ -10895,7 +10950,7 @@ function prCreate2(rest, flags, env) {
   const texts = [];
   const head = flags.findLast((f) => f.name === "-H" || f.name === "--head")?.value;
   if (!head || unreadable(head) || !head.value.trim() || /[$`*?[\]'"]/.test(head.value))
-    texts.push(...commitTexts(env.cwd, ["HEAD", "--not", "--remotes"], "the commits it may push", ", which it may push"), withPlace(branch(env.cwd), "the branch it opens from"));
+    texts.push(...commitTexts(env.cwd, ["HEAD", "--not", ...env.cwd ? heldBy(env.cwd, pushRemote(env.cwd)) : []], "the commits it may push", ", which it may push"), withPlace(branch(env.cwd), "the branch it opens from"));
   if (values.some((v) => v === "-f" || v.startsWith("--fill"))) {
     const at = values.findIndex((v) => /^(?:-B|--base)(?:=|$)/.test(v));
     const base = at === -1 ? "HEAD" : values[at].includes("=") ? values[at].split("=")[1] : values[at + 1];
@@ -11439,15 +11494,17 @@ async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
   const names = new Set(flags.map((f) => f.name));
   const [remote, ...refspecs] = positionals;
   let target;
-  let remoteName;
-  if (!remote)
+  let pushTo;
+  if (!remote) {
     target = decide(env.cwd ? checkout : [undefined]);
-  else if (remote.unknown || remote.reads?.length || remote.value.includes(UNKNOWN))
+    pushTo = env.cwd && pushRemote(env.cwd);
+  } else if (remote.unknown || remote.reads?.length || remote.value.includes(UNKNOWN))
     target = decide([undefined]);
-  else if (/[:/]/.test(remote.value))
+  else if (/[:/]/.test(remote.value)) {
     target = decide([remoteRepo(remote.value)]);
-  else {
-    remoteName = remote.value;
+    pushTo = remote.value;
+  } else {
+    pushTo = remote.value;
     const url = gitText(env.cwd, ["remote", "get-url", remote.value], `the URL of remote ${remote.value}`);
     target = decide([url.unknown ? undefined : remoteRepo(url.value)]);
   }
@@ -11478,8 +11535,8 @@ async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
     sources.push("HEAD");
   }
   if (sources.length > 0) {
-    const not = remoteName ? `--remotes=${remoteName}` : "--remotes";
-    texts.push(...commitTexts(env.cwd, [...sources, "--not", not], "the messages of the commits it pushes"));
+    const held = env.cwd && pushTo ? heldBy(env.cwd, pushTo) : [];
+    texts.push(...commitTexts(env.cwd, [...sources, "--not", ...held], "the messages of the commits it pushes"));
   }
   return judge3("git push", target, texts, env);
 }
@@ -11617,7 +11674,7 @@ function gateOf(org, values) {
 var refusedList = (raw, refusal) => WRITE_CALL.test(subjectOf(raw)) && !readOnly(raw) ? refusal : undefined;
 async function inspectAs(given, raw, environment, cleared = {}) {
   const call = { changed: false, cleared, moved: false, movedBefore: false, policy: given };
-  return await calls.run(call, async () => {
+  return await withLiveBudget(() => calls.run(call, async () => {
     try {
       return await inspect4(raw, environment);
     } catch (error) {
@@ -11629,7 +11686,7 @@ async function inspectAs(given, raw, environment, cleared = {}) {
         return `${given.guard} hook refused this call: it could not read it (${error}), so it cannot tell whether it is ${given.what}. Split it into plain commands and run them again.`;
       return `${given.guard} hook could not read this call (${error}), which may carry ${given.what} to ${given.place}, so it refuses it. Split it into plain commands and run them again.`;
     }
-  });
+  }));
 }
 function subjectOf(raw) {
   try {
@@ -11666,7 +11723,7 @@ async function inspect4(raw, environment) {
       process: environment,
       vars: new Map
     };
-    return run(lex(command, env.known), env, leak);
+    return run2(lex(command, env.known), env, leak);
   }
   if (typeof tool === "string")
     return mcp(tool, input);
@@ -12749,48 +12806,6 @@ function runnerFolders(name, args, env, tool) {
   const folders = [cwdFlag(tool, { ...env, cwd: chained })];
   return xCwd ? [...folders, xCwd.dir] : folders;
 }
-var BUN_SPLITS = new Set(["--cwd", "--filter", "-F"]);
-var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
-var OPTION_READINGS = 16;
-var UNREAD_CWD = {
-  quoted: false,
-  ...unknown("a runner's option past the readings the hook makes")
-};
-function runnerReadings(name, args) {
-  if (!STARTED_RUNNERS.has(name))
-    return [args];
-  const out = [];
-  const walk = (from, head) => {
-    let k = from;
-    for (;k < args.length && out.length <= OPTION_READINGS; k++) {
-      const word = args[k];
-      const next = args[k + 1];
-      const v = word.value;
-      if (!v.startsWith("-") || v === "-") {
-        if (v !== "run" && v !== "x")
-          break;
-      } else if (BUN_SPLITS.has(v) && next) {
-        head = [...head, word, next];
-        k++;
-        continue;
-      } else if (!v.includes("=") && next && !next.value.startsWith("-"))
-        walk(k + 2, [...head, { ...word, value: `${v}=${next.value}` }]);
-      head = [...head, word];
-    }
-    const started = toolName(args[k]?.value);
-    if (!STARTED_RUNNERS.has(started))
-      out.push([...head, ...args.slice(k)]);
-    else
-      for (const sub of runnerReadings(started, args.slice(k + 1)))
-        out.push([...head, args[k], ...sub]);
-  };
-  walk(0, []);
-  return out.length > OPTION_READINGS ? [
-    args,
-    ...out.slice(0, OPTION_READINGS - 1),
-    [{ quoted: false, value: "--cwd" }, UNREAD_CWD, ...args]
-  ] : out;
-}
 function runnerTarget(args) {
   let k = 0;
   while (k < args.length && args[k].value.startsWith("-"))
@@ -12809,8 +12824,6 @@ var ranIn = (dir, also) => [
 ];
 var unreadFolder = (also) => also?.includes(undefined) ?? false;
 function runs(name, args, local, env) {
-  if (args[1] === UNREAD_CWD)
-    return { also: [undefined], cwd: undefined, what: `${name} past the readings the hook makes` };
   if (name === "bunx")
     return runs("bun", [X, ...args], local, env);
   const turbo = turboWords(name, args, env);
@@ -12830,11 +12843,6 @@ function runs(name, args, local, env) {
     const tool = [toolName(args[runnerTarget(args)]?.value), ...packagedTools(args)].find((t) => TOOLS.has(t));
     if (tool)
       return { cwd: cwdFlag(args, env), what: `${name} ${tool}` };
-    const at = runnerTarget(args);
-    const started = toolName(args[at]?.value);
-    const ran = STARTED_RUNNERS.has(started) && runs(started, args.slice(at + 1), local, env);
-    if (ran)
-      return { ...ran, what: `${name} ${ran.what}` };
   }
   if (name === "git") {
     const { also, cwd, rest, sub } = gitCall(args, env, local);
@@ -13001,7 +13009,7 @@ async function fedScript(cmd, here, sure, inMain, visit) {
     return refuse6(`a shell whose script (${unread}) the hook cannot read`, fixFor2(sure));
   }
   if (kind === "root" && !cmd.bareOf)
-    return run(lex(script.value, here.known), { ...here, vars: new Map }, visit, true);
+    return run2(lex(script.value, here.known), { ...here, vars: new Map }, visit, true);
 }
 async function inspect5(raw, environment, main) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
@@ -13064,8 +13072,8 @@ async function inspect5(raw, environment, main) {
     const { args, local, name } = parsed;
     if (env.cwdAnywhere) {
       const blind = { ...env, cwd: undefined };
-      const ran = runnerReadings(name, args).map((reading) => runs(name, reading, local, blind)).find((ran) => ran && ranIn(ran.cwd, ran.also).some((dir) => dir === undefined || inMain(dir)));
-      if (ran)
+      const ran = runs(name, args, local, blind);
+      if (ran && ranIn(ran.cwd, ran.also).some((dir) => dir === undefined || inMain(dir)))
         return refuse6(ran.what, ANYWHERE_FIX);
       const blindWrite = writeTargets(cmd, name, args).find((t) => {
         const path = pathOf(t, blind);
@@ -13090,8 +13098,8 @@ async function inspect5(raw, environment, main) {
       const script = await fedScript(cmd, here, sure, inMain, visit);
       if (script)
         return script;
-      const ran = runnerReadings(name, args).map((reading) => runs(name, reading, local, here)).find((ran) => ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)));
-      if (ran)
+      const ran = runs(name, args, local, here);
+      if (ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)))
         return refuse6(ran.what, fixFor2(sure, ran.fix));
       const moved = name === "git" ? await liveRefusal(args, local, here, inLive, fixFor2(sure, LIVE_FIX)) : undefined;
       if (moved)
@@ -13112,7 +13120,7 @@ async function inspect5(raw, environment, main) {
     process: environment,
     vars: new Map
   };
-  return run(lexed, env, visit, true);
+  return run2(lexed, env, visit, true);
 }
 async function check8(raw, environment = process.env, main = mainCheckout2(resolve6(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
@@ -13186,7 +13194,17 @@ var GH_POSTS = new Set([
   "pr create",
   "pr edit"
 ]);
-var UNREAD_CD_JUDGED = new Set(["chmod", "curl", "mktemp", "shred", "sort", "tar", "truncate"]);
+var UNREAD_CD_JUDGED = new Set([
+  "chmod",
+  "curl",
+  "mktemp",
+  "perl",
+  "sed",
+  "shred",
+  "sort",
+  "tar",
+  "truncate"
+]);
 var NO_WRITES = new Set([
   ":",
   "basename",
@@ -13238,7 +13256,7 @@ var GUARD_KEYS = new Set([
 ]);
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
-var STARTED_RUNNERS2 = new Set(["bun", "bunx", "npx"]);
+var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];
 var SCORE_AS_OTHER = `playground ext score on a line that clears or sets ${IDENTITY.join(", ")}, which reads as another author than the calling session`;
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
@@ -13514,7 +13532,7 @@ async function check10(raw, environment = process.env) {
       return missing.length ? "refuse" : undefined;
     };
     const env = { files: new Map, known: {}, process: {}, vars: new Map };
-    if (!await run(lex(toolInput.command), env, visit))
+    if (!await run2(lex(toolInput.command), env, visit))
       return;
     const account = await accountOf(id, environment) ?? "<your --account>";
     return `no-headless-login hook refuses a headless claude that does not set ${missing.join(" or ")}: without the token it bills this machine's own login, not your account, and without the role the factory's hooks pass it. Run it as: tk="$(security find-generic-password -s ${await keychainOf(environment)} -a ${account} -w)"; ${TOKEN}="$tk" ${ROLE}=${role} env -u CLAUDE_CONFIG_DIR -u ANTHROPIC_API_KEY claude -p ...`;
@@ -13761,12 +13779,11 @@ async function commit(rest, dir, chained, forced) {
     return `no-glm-heavy-path hook refuses this git commit: ${heavyFiles.join(", ")} is on disk and not staged, and the hook cannot tell before the call runs whether the git add before it stages it, while this session runs on GLM and that is Opus work. Run git commit as its own call.`;
   return refuse8("git commit", heavyFiles);
 }
-function rebased(dir, named, source, dest, not) {
+function rebased(dir, named, source, dest, held) {
   const branch = dest === "HEAD" ? names2(dir, ["symbolic-ref", "-q", "--short", "HEAD"])?.[0] : dest.replace(/^refs\/heads\//, "");
   if (!branch)
     return;
-  const config = (key) => names2(dir, ["config", "--get", key])?.[0];
-  const remote = named ?? config(`branch.${branch}.pushRemote`) ?? config("remote.pushDefault") ?? config(`branch.${branch}.remote`) ?? "origin";
+  const remote = named ?? pushRemote(dir, branch);
   const old = names2(dir, ["rev-parse", "-q", "--verify", `refs/remotes/${remote}/${branch}`])?.[0];
   if (!old)
     return;
@@ -13776,7 +13793,14 @@ function rebased(dir, named, source, dest, not) {
   });
   if (ancestor.exitCode !== 1)
     return;
-  const oldest = names2(dir, ["rev-list", "--reverse", "--topo-order", source, "--not", not])?.[0];
+  const oldest = names2(dir, [
+    "rev-list",
+    "--reverse",
+    "--topo-order",
+    source,
+    "--not",
+    ...held
+  ])?.[0];
   const base = oldest && names2(dir, ["rev-parse", "-q", "--verify", `${oldest}^`])?.[0];
   return base ? [old, base] : undefined;
 }
@@ -13809,8 +13833,7 @@ function push2(rest, dir, branchReads) {
   if (deleting && sources.length === 0)
     return;
   const name = remote && !/[:/]/.test(remote.value) ? remote.value : undefined;
-  const tracked = name && names2(dir, ["for-each-ref", "--count=1", `refs/remotes/${name}`])?.length;
-  const not = tracked ? `--remotes=${name}` : "--remotes";
+  const held = heldBy(dir, remote?.value ?? pushRemote(dir));
   const listed = pathsOf(dir, [
     "log",
     "--name-only",
@@ -13819,9 +13842,9 @@ function push2(rest, dir, branchReads) {
     "--format=",
     ...sources,
     "--not",
-    not
+    ...held
   ]);
-  const merges = names2(dir, ["rev-list", "--merges", ...sources, "--not", not]);
+  const merges = names2(dir, ["rev-list", "--merges", ...sources, "--not", ...held]);
   if (listed === null || merges === null)
     return unread2("git push", "the files of the commits it pushes");
   const files = new Set(listed);
@@ -13854,7 +13877,7 @@ function push2(rest, dir, branchReads) {
     for (const file of made)
       files.add(file);
   }
-  const bases = sources.length === 1 && dests.length === 1 && (!remote || name) ? rebased(dir, name, sources[0], dests[0], not) : undefined;
+  const bases = sources.length === 1 && dests.length === 1 && (!remote || name) ? rebased(dir, name, sources[0], dests[0], held) : undefined;
   if (bases)
     beyondMerge(files, bases[0], bases[1], (tree) => [pathsOf(dir, ["diff", "--name-only", "--no-renames", tree, sources[0]])], dir);
   const heavyFiles = [...files].filter(heavy).sort();
@@ -14985,7 +15008,7 @@ async function inspect7(raw, environment, load5, limit) {
   const home = guarding ? checkoutOf(directory, orgs, roots) : undefined;
   try {
     const unset = (key) => !named.blind && !named.counts.has(key) && environment[key] === undefined;
-    return await run(lexed, env, visitor(load5, limit, orgs, roots, { own, steadyAt, unset }));
+    return await run2(lexed, env, visitor(load5, limit, orgs, roots, { own, steadyAt, unset }));
   } catch (error) {
     if (home)
       return checkoutRefusal("this call, which the hook could not read,", home);
@@ -14996,7 +15019,7 @@ var mayRefuse = (text, load5, limit) => GIT_CALL.test(text) || ORG_CALL.test(tex
 async function check11(raw, environment = process.env, load5 = currentLoad5()) {
   const limit = await loadLimit(environment);
   try {
-    return await inspect7(raw, environment, load5, limit);
+    return await withLiveBudget(() => inspect7(raw, environment, load5, limit));
   } catch (error) {
     if (!mayRefuse(raw, load5, limit))
       return;
@@ -15037,7 +15060,7 @@ async function inspect8(raw) {
       search ??= parsed.name;
     return;
   };
-  await run(lexed, fresh(), find);
+  await run2(lexed, fresh(), find);
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || []);
   const visit = async (cmd, parsed, env) => {
     const slot = slotWords(parsed) ?? (SHELLS.has(parsed.name) ? shellSlot(parsed.args, parsed.name) : undefined);
@@ -15056,7 +15079,7 @@ async function inspect8(raw) {
     if (fed)
       return refuse9(`a kill in a call that searches with ${search}`, ` Run a kill of a pid you hold in a Bash call of its own, apart from the search.`);
   };
-  return run(lexed, { ...fresh(), visitShells: true }, visit);
+  return run2(lexed, { ...fresh(), visitShells: true }, visit);
 }
 async function check12(raw) {
   try {
@@ -15352,7 +15375,7 @@ async function inspect9(raw, environment, now) {
       process: environment,
       vars: new Map
     };
-    return run(lex(command, env.known), env, ticket);
+    return run2(lex(command, env.known), env, ticket);
   }
   if (typeof tool !== "string")
     return;
@@ -15720,7 +15743,7 @@ async function inspect10(raw, environment) {
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit4);
+  return run2(lex(command, env.known), env, visit4);
 }
 async function check15(raw, environment = process.env) {
   try {
@@ -15856,7 +15879,7 @@ async function inspect11(raw) {
     process: process.env,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit5);
+  return run2(lex(command, env.known), env, visit5);
 }
 async function check16(raw) {
   try {
@@ -15965,7 +15988,7 @@ async function inspect12(raw, environment) {
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit6);
+  return run2(lex(command, env.known), env, visit6);
 }
 async function check17(raw, environment = process.env) {
   try {
@@ -16031,7 +16054,7 @@ async function inspect13(raw) {
     process: {},
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit7);
+  return run2(lex(command, env.known), env, visit7);
 }
 async function check18(raw) {
   try {
@@ -16362,7 +16385,7 @@ async function inspect14(raw, environment) {
   };
   const lexed = lex(command, env.known);
   const browserOnly = new Set(lexed.commands.every((c) => c.words[0]?.source === "agent-browser") ? lexed.commands : []);
-  const line = (text, at) => run(lex(text, at.known), { ...at, vars: new Map(at.vars) }, visit);
+  const line = (text, at) => run2(lex(text, at.known), { ...at, vars: new Map(at.vars) }, visit);
   const visitAs = (reach) => async (cmd, parsed, at) => {
     const { args, name } = parsed;
     const verdict = await judge(cmd, parsed, at, reach);
@@ -16470,7 +16493,7 @@ async function inspect14(raw, environment) {
           return found;
       }
   };
-  return run(lexed, env, visit);
+  return run2(lexed, env, visit);
 }
 var bare = (command) => command.replace(/[\\'"]/g, "");
 var CANDIDATE = /rm|del|chflags|chmod|clean|worktree|rimraf|rsync|shred|\bg?tar\b|screen|tmux|\bat\b|batch|\$|`|[{*?[]/i;
@@ -16770,7 +16793,7 @@ async function inspect15(raw, environment) {
     vars: new Map,
     visitShells: true
   };
-  return run(lex(command, env.known), env, visit8, true);
+  return run2(lex(command, env.known), env, visit8, true);
 }
 async function check21(raw, environment = process.env) {
   try {
@@ -17056,8 +17079,7 @@ function throughRunners(name, args, shell) {
   while (queue.length > 0 && reached.length < 32) {
     const next = queue.shift();
     reached.push(next);
-    for (const reading of runnerReadings("bun", next.args))
-      queue.push(...runnerBuns("bun", reading, next.shell));
+    queue.push(...runnerBuns("bun", next.args, next.shell));
   }
   return reached;
 }
@@ -17094,22 +17116,21 @@ async function check22(raw, environment = process.env) {
       });
     const slotted = slotWords(parsed);
     const name = slotted ? program(slotted[0]?.value ?? "") : parsed.name;
-    for (const args of runnerReadings(name, slotted ? slotted.slice(1) : parsed.args)) {
-      if (yardStep(name, args, shell) || throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell)))
-        verdicts.push({ production: true, what: "the Yard ship step, which deploys production" });
-      for (const call of runnerCalls(name, args))
-        if (!unreadable(call))
-          await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit);
-        else if (STEP_NAMED.test(command))
-          verdicts.push({
-            production: true,
-            what: "a runner's command line built at run time on a line naming the Yard ship step"
-          });
-      const words = toolWords(NAMES2, name, args, shell);
-      const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
-      if (verdict)
-        verdicts.push(verdict);
-    }
+    const args = slotted ? slotted.slice(1) : parsed.args;
+    if (yardStep(name, args, shell) || throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell)))
+      verdicts.push({ production: true, what: "the Yard ship step, which deploys production" });
+    for (const call of runnerCalls(name, args))
+      if (!unreadable(call))
+        await run2(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit);
+      else if (STEP_NAMED.test(command))
+        verdicts.push({
+          production: true,
+          what: "a runner's command line built at run time on a line naming the Yard ship step"
+        });
+    const words = toolWords(NAMES2, name, args, shell);
+    const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
+    if (verdict)
+      verdicts.push(verdict);
     return;
   };
   const env = {
@@ -17119,7 +17140,7 @@ async function check22(raw, environment = process.env) {
     process: {},
     vars: new Map
   };
-  await run(lex(command), env, visit);
+  await run2(lex(command), env, visit);
   const always = verdicts.find((v) => !v.production);
   if (always)
     return `no-raw-vercel hook refuses ${always.what}: in a factory session vercel runs its reads alone (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) and a preview deploy (vercel deploy, vercel deploy init, or vercel ./<folder>). A secret reaches a project through an Inbox secret ask, and production ships from main through the release skill's ship:merge.`;
@@ -17264,7 +17285,7 @@ async function judgeBash(command, cwd, environment) {
       }
     }
   };
-  return run(lex(command, env.known), env, visit, true);
+  return run2(lex(command, env.known), env, visit, true);
 }
 var FILE_TOOLS4 = new Set(["Edit", "MultiEdit", "NotebookEdit", "Read", "Write"]);
 async function inspect16(raw, environment) {
@@ -17560,7 +17581,7 @@ async function inspect17(raw, environment) {
       process: environment,
       vars: new Map
     };
-    return run(lex(command, env.known), env, comment);
+    return run2(lex(command, env.known), env, comment);
   }
   if (typeof tool === "string" && MCP_COMMENT.test(tool))
     return mcp4(tool, input);
@@ -17757,8 +17778,6 @@ function turboTask(words) {
 }
 var recursive5 = (args) => args.some((a) => /^-[a-zA-Z]*[Rra]/.test(a.value) || ["--archive", "--recursive"].includes(a.value));
 function heavy2(name, args, env) {
-  if (args[1] === UNREAD_CWD)
-    return { also: [undefined], dir: undefined, what: `${name} past the readings the hook makes` };
   const compose = portlessCompose(name, args);
   if (DOCKERS.has(name) || compose) {
     const build = compose ? dockerBuild(compose, true) : dockerBuild(args, name === "docker-compose");
@@ -17800,11 +17819,7 @@ function heavy2(name, args, env) {
       };
     if (packagedTools(args).includes("next") && nextBuild(values))
       return { also: runnerFolders(name, args, env, []), dir: env.cwd, what: `${name} next build` };
-    if (name === "bunx")
-      return heavy2("bun", [X, ...args], env);
-    const at = runnerTarget(args);
-    const started = toolName(args[at]?.value);
-    return STARTED_RUNNERS.has(started) ? heavy2(started, args.slice(at + 1), env) : undefined;
+    return name === "bunx" ? heavy2("bun", [X, ...args], env) : undefined;
   }
   if (name !== "bun")
     return;
@@ -17907,16 +17922,16 @@ function inspect18(raw, environment, main) {
       ].join(" ");
     };
     if (env.cwdAnywhere) {
-      const found = runnerReadings(name, args).map((reading) => heavy2(name, reading, { ...env, cwd: undefined })).find((found) => found && (found.anywhere || ranIn(found.dir, found.also).some((dir) => dir === undefined || inWorktree(dir))));
+      const found = heavy2(name, args, { ...env, cwd: undefined });
       const line = words();
       if (found?.anywhere && line !== undefined)
         return refuseDocker(found.what, "", line, found.fix);
-      if (found && line !== undefined)
+      if (found && line !== undefined && ranIn(found.dir, found.also).some((dir) => dir === undefined || inWorktree(dir)))
         return anywhere(found.what, line);
     }
     for (const here of places(env)) {
-      const found = runnerReadings(name, args).map((reading) => heavy2(name, reading, here)).find((found) => found && (found.anywhere || unreadFolder(found.also) || ranIn(found.dir, found.also).some(inWorktree)));
-      if (!found)
+      const found = heavy2(name, args, here);
+      if (!found || !(found.anywhere || unreadFolder(found.also) || ranIn(found.dir, found.also).some(inWorktree)))
         continue;
       const line = words();
       if (line === undefined)
@@ -17936,7 +17951,7 @@ function inspect18(raw, environment, main) {
   };
   const lexed = lex(command, env.known);
   line = lexed.commands;
-  return run(lexed, env, visit);
+  return run2(lexed, env, visit);
 }
 async function check25(raw, environment = process.env, main = mainCheckout2(resolve14(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
@@ -17983,7 +17998,7 @@ var GUARDS = [
 var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`;
 async function check26(raw, environment = process.env, guards = GUARDS) {
   let factory;
-  const reasons = await Promise.all(guards.map(async ({ factory: gated, name, run }) => {
+  const reasons = await withLiveBudget(() => Promise.all(guards.map(async ({ factory: gated, name, run }) => {
     try {
       if (gated && !await (factory ??= fromFactory(raw, environment)))
         return;
@@ -17991,7 +18006,7 @@ async function check26(raw, environment = process.env, guards = GUARDS) {
     } catch (error) {
       return threw(name, error);
     }
-  }));
+  })));
   return reasons.filter(Boolean).join(`
 
 `) || undefined;
