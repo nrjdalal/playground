@@ -223,8 +223,23 @@ test("runRm tells the dispatcher once when a session hits the per-minute cap, ho
   for (const path of paths) codes.push(await runRm([path], deps))
   expect(codes).toEqual([0, 0, 0, ...Array(11).fill(1)])
   expect(told).toEqual([
-    "j6rjgy-worker: j6rjgy-worker quarantined 3 paths in the last minute, the most one session may",
+    "j6rjgy-worker: refused a 4th removal: j6rjgy-worker moved 3 paths in the last minute, the most one session may",
   ])
+})
+
+test("an end clears its scratch folder of 4 subfolders and its scratchpad in one move each, under the per-minute cap", async () => {
+  const { deps, home, told } = machine()
+  const scratch = join(home, ".playground", "scratch", "j6rjgy-worker")
+  const pad = join(home, ".playground", "scratchpad", "j6rjgy-worker")
+  for (const sub of ["a", "b", "c", "d"]) {
+    mkdirSync(join(scratch, sub), { recursive: true })
+    writeFileSync(join(scratch, sub, "work.txt"), "x")
+  }
+  mkdirSync(pad, { recursive: true })
+  writeFileSync(join(pad, "brief.md"), "x")
+  expect([await runRm([scratch], deps), await runRm([pad], deps)]).toEqual([0, 0])
+  expect(listTrash(join(deps.data, "trash")).map((entry) => entry.path)).toEqual([scratch, pad])
+  expect(told).toEqual([])
 })
 
 test("runRm clears the caller's own scratch folder", async () => {
