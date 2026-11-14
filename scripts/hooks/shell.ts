@@ -1851,7 +1851,6 @@ function change(cmd: Command, env: Env): void {
   }
 }
 
-// An array the line holds, run whole as the program word (`"${A[@]}"`), runs its elements as the command's first words: the command with them in its place when each is a word the reader reads as written, null when one is not or something may have changed the array, so the program may be any; undefined for any other program word, or a name the line never set to an array
 // Each time the line names a variable, counted, a whole array run as a program word aside: an expansion as written (`$A`, `${A[1]}`, `${#A[@]}`), and a word whose value names it as a setter or an assignment takes a name (`A`, `A[0]`, `A=x`, `A+=(x)`, `x=A`, `-vA[0]`)
 function namings(commands: Command[]): Map<string, number> {
   const counts = new Map<string, number>()
@@ -1881,6 +1880,7 @@ function namings(commands: Command[]): Map<string, number> {
   return counts
 }
 
+// An array the line holds, run whole as the program word (`"${A[@]}"`), runs its elements as the command's first words: the command with them in its place when each is a word the reader reads as written, null when one is not, when something may have changed the array, or when the line names it beside its one whole assignment and its runs (`namings`), so the program may be any; undefined for any other program word, or a name the line never set to an array
 function arrayRun(cmd: Command, first: Word | undefined, env: Env): Command | null | undefined {
   const key = (first?.raw ?? first?.source)?.match(WHOLE_RUN)?.[1]
   const set = key ? env.vars.get(key) : undefined
