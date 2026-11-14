@@ -550,7 +550,12 @@ export type FixtureHerdr = Fixture["herdr"] & {
   // The model each pane's status line names once a /model switched it, and the one its open confirm would switch to.
   models?: Record<string, string>
   switching?: Record<string, string>
+  // When each pane's turn ends, the message sent or the picker answered that set it working, since no made-up session replies.
+  turns?: Record<string, string>
 }
+
+// How long a made-up pane works a turn before it reads idle again.
+export const FIXTURE_TURN_MS = 3000
 
 const NO_HERDR: Fixture["herdr"] = {
   panes: [],
@@ -577,9 +582,17 @@ export type FixtureMachine = {
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, "utf8")) as T
 
 // A fixture written before herdr.json was runs no herdr server.
-export const readFixtureHerdr = (dir = ensureFixture(), _now = new Date()): FixtureHerdr => {
+// The made-up herdr server's state, each pane whose turn has ended by `now` read idle again.
+export const readFixtureHerdr = (dir = ensureFixture(), now = new Date()): FixtureHerdr => {
   const path = join(dir, "herdr.json")
-  return existsSync(path) ? readJson<FixtureHerdr>(path) : { ...NO_HERDR, inputs: {} }
+  const state = existsSync(path) ? readJson<FixtureHerdr>(path) : { ...NO_HERDR, inputs: {} }
+  for (const pane of state.panes) {
+    const ends = state.turns?.[pane.pane_id]
+    if (ends === undefined || Date.parse(ends) > now.getTime()) continue
+    pane.agent_status = "idle"
+    delete state.turns?.[pane.pane_id]
+  }
+  return state
 }
 
 const writeFixtureHerdr = (state: FixtureHerdr, dir: string): void => {
@@ -828,19 +841,26 @@ export function fixtureHerdrScreen(pane: string, dir = ensureFixture()): string 
 
 export type FixtureHerdrInput = { keys: string[] } | { prompt: string } | { text: string }
 
-// What a request types into a made-up pane. A prompt (agent.prompt) sends its text as a paste and its Enter, as herdr's bracketed paste does, refused while the pane draws a picker, as herdr refuses one into a blocked session; words fill the input box; Enter sends the box, and Enter or a number key answers a picker, whose rows the arrows and Space move over unseen. A message sent or a picker answered sets the pane working.
+// What a request types into a made-up pane. A prompt (agent.prompt) sends its text as a paste and its Enter, as herdr's bracketed paste does, refused while the pane draws a picker, as herdr refuses one into a blocked session; words fill the input box; Enter sends the box, and Enter or a number key answers a picker, whose rows the arrows and Space move over unseen. A message sent or a picker answered sets the pane working for `FIXTURE_TURN_MS`.
 export function fixtureHerdrInput(
   pane: string,
   input: FixtureHerdrInput,
   dir = ensureFixture(),
   now = new Date(),
 ): void {
-  const state = readFixtureHerdr(dir)
+  const state = readFixtureHerdr(dir, now)
   const found = paneOf(state, pane)
   const session = { ...found, cwd: str(found.processes[0]?.cwd) }
+  const working = () => {
+    found.agent_status = "working"
+    state.turns = {
+      ...state.turns,
+      [pane]: new Date(now.getTime() + FIXTURE_TURN_MS).toISOString(),
+    }
+  }
   const send = (typed: string, pasted: boolean) => {
     sent(session, typed, pasted, dir, now)
-    found.agent_status = "working"
+    working()
   }
   const alias = "prompt" in input ? MODEL_COMMAND.exec(input.prompt)?.[1] : undefined
   if ("prompt" in input) {
@@ -861,7 +881,7 @@ export function fixtureHerdrInput(
     for (const key of input.keys) {
       if (state.prompts[pane] !== undefined && (key === "enter" || /^\d$/.test(key))) {
         delete state.prompts[pane]
-        found.agent_status = "working"
+        working()
       } else if (key === "enter" && state.inputs[pane]) {
         send(state.inputs[pane], false)
         delete state.inputs[pane]
