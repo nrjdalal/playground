@@ -37,9 +37,11 @@ Playground checks only that it is a JSON object; the job checks each field itsel
 ## Reach a Dashboard on another machine
 
 When the Dashboard runs on another machine, such as a DGX Spark, it listens on that machine's loopback alone, and the `ops-tunnel` job on your Mac brings it to you.
-The job holds an ssh tunnel with the key `~/.ssh/playground_spark` from a port on your Mac's loopback to the same port on the other machine's loopback, 1355 by default, so the link is that machine's own address, `https://playground.localhost:1355/dashboard`, and nothing listens off loopback at either end.
+The job holds an ssh tunnel with the key `~/.ssh/playground_spark` from a port on your Mac's loopback to the same port on the other machine's loopback, 1355 by default, so the link is the address of that machine's live Dashboard, `https://dashboard.playground.localhost:1355/dashboard`, and nothing listens off loopback at either end.
+The link's host comes from the `live.branch` setting (`live/dashboard` by default), and the Dashboard's API, `dashboard.api.playground.localhost`, goes through the same port.
 Its config names the machine: `{"host": "<name or address>", "port": 1355}`, with optional `key` and `user` (your Mac's user by default).
-The step that sets the other machine up posts three Inbox Approves together, in this order, so you type nothing: trust that machine's certificate authority on your Mac, set the job's host, then turn the job on.
+Three steps set it up, in this order: your Mac trusts that machine's certificate authority, the job's config card in Settings > Jobs names the host, then the job's switch there turns it on.
+The first step has no Playground action yet, so until your Mac trusts that authority, `playground doctor` says the certificate is not trusted yet and the job posts no link.
 
 Once the tunnel is up and your Mac trusts the certificate the other machine serves, the job posts the link to your Inbox once: click the card's title and the Dashboard opens in a new tab.
 That Dashboard keeps a sign-in of its own, apart from your Mac's, since a stack on a port other than 443 names its sign-in cookie by its port.

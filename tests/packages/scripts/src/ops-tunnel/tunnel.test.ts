@@ -17,6 +17,7 @@ import {
   sshArgs,
   type Tunnel,
   tunnelOf,
+  webHostOf,
   whyOf,
 } from "../../../../../packages/scripts/src/ops-tunnel/tunnel"
 
@@ -48,6 +49,19 @@ const dataWith = (name: string, config: Record<string, unknown>) => {
   return data
 }
 
+// A fake ssh that holds its forward until a stop: the port answers while its marker exists, and its TERM trap ends its own sleep and logs the stop.
+const holding = (name: string) => {
+  const up = join(scratch, name, "up")
+  const terms = join(scratch, name, "terms")
+  return {
+    body: `trap 'kill $! 2>/dev/null; rm -f "${up}"; echo term >> "${terms}"; exit 143' TERM\ntouch "${up}"\nsleep 30 &\nwait`,
+    listens: async () => existsSync(up),
+    terms,
+  }
+}
+
+const LIVE = () => "live/dashboard"
+
 const beatOf = (data: string) =>
   JSON.parse(readFileSync(join(data, "ops", "ops-tunnel.json"), "utf8")) as { lastResult: string }
 
@@ -70,8 +84,13 @@ describe("the tunnel's ssh (PG-2207)", () => {
     expect(args.at(-1)).toBe("me@spark-a")
   })
 
-  test("the link is the Spark's own web origin on the same port, so its trusted origins already hold it", () => {
-    expect(linkOf(1355)).toBe("https://playground.localhost:1355/dashboard")
+  test("the link is the Spark's live Dashboard's own web origin on the same port, so its trusted origins already hold it", () => {
+    expect(webHostOf("live/dashboard")).toBe("dashboard.playground.localhost")
+    expect(webHostOf("live/Desk_")).toBe("desk.playground.localhost")
+    expect(webHostOf("main")).toBe("playground.localhost")
+    expect(linkOf(1355, "dashboard.playground.localhost")).toBe(
+      "https://dashboard.playground.localhost:1355/dashboard",
+    )
   })
 
   test("its row's config names the host; the key, port and user fall back to the factory's key, 1355 and this Mac's user", () => {
@@ -127,6 +146,7 @@ describe("the tunnel job's loop (PG-2207)", () => {
     const data = dataWith("drop", { host: "spark-a", port: 1355 })
     const stop = new AbortController()
     const kept = keep({
+      branch: LIVE,
       data,
       env: ssh.env,
       listens: async () => false,
@@ -147,15 +167,16 @@ describe("the tunnel job's loop (PG-2207)", () => {
   })
 
   test("the wait doubles on each drop up to its cap, and starts over once a link has held steadyMs", async () => {
-    const waitsOf = async (name: string, body: string, listens: boolean) => {
+    const waitsOf = async (name: string, body: string, listens: () => Promise<boolean>) => {
       const ssh = fakeSsh(name, body)
       const data = dataWith(name, { host: "spark-a" })
       const stop = new AbortController()
       const waits: number[] = []
       const kept = keep({
+        branch: LIVE,
         data,
         env: ssh.env,
-        listens: async () => listens,
+        listens,
         served: async () => null,
         maxWaitMs: 40,
         minWaitMs: 10,
@@ -169,8 +190,12 @@ describe("the tunnel job's loop (PG-2207)", () => {
       await kept
       return waits
     }
-    expect(await waitsOf("backoff", "exit 255", false)).toEqual([10, 20, 40, 40, 40])
-    expect(await waitsOf("steady", "sleep 0.1\nexit 255", true)).toEqual([10, 10, 10, 10, 10])
+    expect(await waitsOf("backoff", "exit 255", async () => false)).toEqual([10, 20, 40, 40, 40])
+    const up = join(scratch, "steady", "up")
+    const steady = `touch "${up}"\nsleep 0.5\nrm -f "${up}"\nexit 255`
+    expect(await waitsOf("steady", steady, async () => existsSync(up))).toEqual([
+      10, 10, 10, 10, 10,
+    ])
   })
 
   test("with no host set it starts no ssh and says where the host goes", async () => {
@@ -200,19 +225,47 @@ describe("the tunnel job's loop (PG-2207)", () => {
     )
   })
 
+  test("a port another program already answers on starts no ssh and posts no link", async () => {
+    const ssh = fakeSsh("taken", "exit 0")
+    const data = dataWith("taken", { host: "spark-a" })
+    const posts: string[] = []
+    const stop = new AbortController()
+    const waits: number[] = []
+    await keep({
+      branch: LIVE,
+      data,
+      env: ssh.env,
+      listens: async () => true,
+      maxWaitMs: 40,
+      minWaitMs: 10,
+      post: async (link) => (posts.push(link), "item-1"),
+      served: async () => null,
+      signal: stop.signal,
+      wait: async (ms) => {
+        waits.push(ms)
+        if (waits.length >= 3) stop.abort()
+      },
+    })
+    expect(existsSync(ssh.log)).toBe(false)
+    expect(beatOf(data).lastResult).toBe("down: port 1355 on this Mac is taken by another program")
+    expect(waits).toEqual([10, 20, 40])
+    expect(posts).toEqual([])
+  })
+
   test("once up it beats the link and posts it to the Inbox once, and a stop ends its ssh", async () => {
-    const pids = join(scratch, "up", "pids")
-    const ssh = fakeSsh("up", `echo $$ >> "${pids}"\nexec sleep 30`)
+    const held = holding("up")
+    const ssh = fakeSsh("up", held.body)
     const data = dataWith("up", { host: "spark-a", port: 1355 })
     const posts: string[] = []
     const run = async () => {
       rmSync(join(data, "ops", "ops-tunnel.json"), { force: true })
       const stop = new AbortController()
       const kept = keep({
+        branch: LIVE,
         data,
         env: ssh.env,
         // the port answers once the fake ssh has started, as a real forward does
-        listens: async () => existsSync(pids),
+        listens: held.listens,
         minWaitMs: 10,
         post: async (link) => (posts.push(link), "item-1"),
         served: async () => null,
@@ -228,23 +281,24 @@ describe("the tunnel job's loop (PG-2207)", () => {
     }
     await run()
     await run()
-    expect(posts).toEqual(["https://playground.localhost:1355/dashboard"])
+    expect(posts).toEqual(["https://dashboard.playground.localhost:1355/dashboard"])
     expect(beatOf(data).lastResult).toBe(
-      "up: https://playground.localhost:1355/dashboard through spark-a",
+      "up: https://dashboard.playground.localhost:1355/dashboard through spark-a",
     )
-    for (const pid of readFileSync(pids, "utf8").trim().split("\n").map(Number))
-      expect(() => process.kill(pid, 0)).toThrow()
+    expect(readFileSync(held.terms, "utf8").trim().split("\n")).toEqual(["term", "term"])
   })
 
   test("a Dashboard whose certificate this Mac does not trust yet beats down with why and posts no link", async () => {
-    const ssh = fakeSsh("untrusted", "exec sleep 30")
+    const held = holding("untrusted")
+    const ssh = fakeSsh("untrusted", held.body)
     const data = dataWith("untrusted", { host: "spark-a" })
     const posts: string[] = []
     const stop = new AbortController()
     const kept = keep({
+      branch: LIVE,
       data,
       env: ssh.env,
-      listens: async () => true,
+      listens: held.listens,
       post: async (link) => (posts.push(link), "item-1"),
       served: async () =>
         "this Mac does not trust the certificate the Dashboard on spark-a serves yet",

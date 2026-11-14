@@ -370,7 +370,7 @@ describe("tunnelChecks (PG-2207)", () => {
   })
 
   test("a tunnel that is up reads ok with its link", () => {
-    const up = "up: https://playground.localhost:1355/dashboard through spark-a"
+    const up = "up: https://dashboard.playground.localhost:1355/dashboard through spark-a"
     expect(tunnelChecks(on, beat(up), NOW)).toEqual([{ detail: up, name: "tunnel", status: "ok" }])
   })
 

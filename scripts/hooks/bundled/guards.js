@@ -15653,6 +15653,7 @@ var portlessDir = (env = process.env) => {
   const dir = join16(env.HOME || homedir4(), ".portless");
   return !serving(dir) && serving(fallbackDir(dir)) ? fallbackDir(dir) : dir;
 };
+var UNPREFIXED = new Set(["main", "master"]);
 var fallbackDir = (dir) => join16(dir, "fallback");
 
 // scripts/hooks/no-live-sign-in.ts

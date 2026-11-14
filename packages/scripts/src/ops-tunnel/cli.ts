@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises"
 import { constants } from "node:os"
 import { join } from "node:path"
 
@@ -12,8 +11,8 @@ const data = engineData(JOB)
 
 // The Inbox card the owner opens the link from: one update from Ops, whose title is the link.
 const post = async (link: string, host: string): Promise<string | null> => {
-  const roster = await readFile(join(data, "roster.json"), "utf8")
-    .then((text) => JSON.parse(text) as { agents?: unknown })
+  const roster: { agents?: unknown } | null = await Bun.file(join(data, "roster.json"))
+    .json()
     .catch(() => null)
   const item = {
     from: managerOf(roster?.agents, "ops"),

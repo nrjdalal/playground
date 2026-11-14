@@ -3,10 +3,10 @@ export type ParsedHost = {
   domain: string | null
   isIp: boolean
   isPrivate: boolean | null
-  publicSuffix: string | null
-  subdomain: string | null
   // a runtime .localhost URL's port, "" on 443 or none
   port?: string
+  publicSuffix: string | null
+  subdomain: string | null
 }
 
 // Reconcile the app host's tldts breakdown into the session cookie config, plus tldts's own isPrivate flag passed through.

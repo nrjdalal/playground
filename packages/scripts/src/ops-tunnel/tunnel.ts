@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { connect } from "node:tls"
 
-import { FALLBACK_PORT, listening } from "../../../../api/hono/src/lib/dev/proxy"
+import { FALLBACK_PORT, listening, prefixOf } from "../../../../api/hono/src/lib/dev/proxy"
 import { beat } from "../ops-tick/tick"
+import { liveBranch } from "../playground/probe"
 
 // ops-tunnel: holds an ssh tunnel from this Mac's loopback to another machine's loopback Dashboard, on the same port at both ends, so the link is that machine's own web origin, which its trusted origins and the URLs its web build holds already name. It runs on the Mac alone, and nothing of it runs on the far machine.
 export const JOB = "ops-tunnel"
@@ -44,11 +44,15 @@ export const sshArgs = ({ host, key, port, user }: Tunnel): string[] => [
   `${user}@${host}`,
 ]
 
-// The far Dashboard's host name under portless, which the link and the certificate it serves name.
-const HOST = "playground.localhost"
+// Pure: the live Dashboard's web host as portless names its checkout, the worktree on live.branch (dashboard.playground.localhost on live/dashboard), which the link and the certificate served there name.
+export const webHostOf = (branch: string): string => {
+  const prefix = prefixOf(branch)
+  return `${prefix ? `${prefix}.` : ""}playground.localhost`
+}
 
 // Pure: the Dashboard's link through the tunnel, the far machine's own portless origin.
-export const linkOf = (port: number): string => `https://${HOST}:${port}/dashboard`
+export const linkOf = (port: number, webHost: string): string =>
+  `https://${webHost}:${port}/dashboard`
 
 // Pure: why ssh ended, in plain words from its stderr, else its last line as it said it, else its exit code.
 export const whyOf = (stderr: string, { host, key, port }: Tunnel, code: number): string => {
@@ -72,7 +76,7 @@ export const whyOf = (stderr: string, { host, key, port }: Tunnel, code: number)
 // The tunnel job's row config, read from jobs.json at each start, so a host set later takes effect with no restart.
 const configOf = async (data: string): Promise<unknown> => {
   try {
-    const { jobs } = JSON.parse(await readFile(join(data, "ops", "jobs.json"), "utf8"))
+    const { jobs } = await Bun.file(join(data, "ops", "jobs.json")).json()
     return (jobs as { config?: unknown; name?: string }[]).find((job) => job.name === JOB)?.config
   } catch {
     return undefined
@@ -95,24 +99,24 @@ const postOnce = async (
   host: string,
   post: (link: string, host: string) => Promise<string | null>,
 ) => {
-  const posted = await readFile(cardPath(data), "utf8")
-    .then((saved) => (JSON.parse(saved) as { link?: string }).link)
+  const posted = await Bun.file(cardPath(data))
+    .json()
+    .then((saved: { link?: string }) => saved.link)
     .catch(() => undefined)
   if (posted === link) return
   const id = await post(link, host)
   if (!id) return
-  await mkdir(join(data, "ops", "tunnel"), { recursive: true })
-  await writeFile(cardPath(data), JSON.stringify({ id, link }))
+  await Bun.write(cardPath(data), JSON.stringify({ id, link }))
 }
 
 const pemOf = (der: Buffer) =>
   `-----BEGIN CERTIFICATE-----\n${der.toString("base64").replace(/.{64}/g, "$&\n").replace(/\n?$/, "\n")}-----END CERTIFICATE-----\n`
 
 // The certificate the far Dashboard serves through the tunnel for the link's host, as PEM, or null when nothing answers with one.
-const servedCert = (port: number): Promise<string | null> =>
+const servedCert = (port: number, webHost: string): Promise<string | null> =>
   new Promise((done) => {
     const socket = connect(
-      { host: "127.0.0.1", port, rejectUnauthorized: false, servername: HOST },
+      { host: "127.0.0.1", port, rejectUnauthorized: false, servername: webHost },
       () => {
         const raw = socket.getPeerCertificate()?.raw
         socket.end()
@@ -127,13 +131,13 @@ const servedCert = (port: number): Promise<string | null> =>
 export const servedWhy = async (
   port: number,
   host: string,
+  webHost: string,
   data: string,
 ): Promise<string | null> => {
-  const pem = await servedCert(port)
+  const pem = await servedCert(port, webHost)
   if (!pem) return `the Dashboard on ${host} does not answer through the tunnel on port ${port}`
   const file = join(data, "ops", "tunnel", "served.pem")
-  await mkdir(join(data, "ops", "tunnel"), { recursive: true })
-  await writeFile(file, pem)
+  await Bun.write(file, pem)
   const verify = Bun.spawnSync([
     "/usr/bin/security",
     "verify-cert",
@@ -143,7 +147,7 @@ export const servedWhy = async (
     "-p",
     "ssl",
     "-s",
-    HOST,
+    webHost,
   ])
   return verify.exitCode === 0
     ? null
@@ -151,6 +155,8 @@ export const servedWhy = async (
 }
 
 export type KeepOptions = {
+  // the live Dashboard's branch, live.branch, which names its web host
+  branch?: () => string
   data: string
   env: Record<string, string | undefined>
   home?: string
@@ -159,7 +165,7 @@ export type KeepOptions = {
   minWaitMs?: number
   post?: (link: string, host: string) => Promise<string | null>
   // null when the far Dashboard answers through the tunnel with a certificate this Mac trusts, else why
-  served?: (port: number, host: string) => Promise<string | null>
+  served?: (port: number, host: string, webHost: string) => Promise<string | null>
   signal: AbortSignal
   // a link up this long starts the next wait from minWaitMs again
   steadyMs?: number
@@ -167,8 +173,9 @@ export type KeepOptions = {
   wait?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
-// The job's loop until signal: starts ssh, beats up once the port answers and the Dashboard behind it serves a certificate this Mac trusts, checked again each minute, and posts the link once; and on a drop beats down with why and starts ssh again after a wait that doubles from minWaitMs to maxWaitMs, from minWaitMs again once a link held steadyMs. A missing host or key starts no ssh. Its ssh is ended by its own handle on the signal.
+// The job's loop until signal: starts ssh, beats up once the port answers and the Dashboard behind it serves a certificate this Mac trusts, checked again each minute, and posts the link once; and on a drop beats down with why and starts ssh again after a wait that doubles from minWaitMs to maxWaitMs, from minWaitMs again once a link held steadyMs. A missing host or key, or a port another program already answers on, starts no ssh. Its ssh is ended by its own handle on the signal.
 export const keep = async ({
+  branch = liveBranch,
   data,
   env,
   home = env.HOME ?? "",
@@ -176,7 +183,7 @@ export const keep = async ({
   maxWaitMs = 60_000,
   minWaitMs = 2_000,
   post,
-  served = (port, host) => servedWhy(port, host, data),
+  served = (port, host, webHost) => servedWhy(port, host, webHost, data),
   signal,
   steadyMs = 60_000,
   user = env.USER ?? "",
@@ -209,6 +216,14 @@ export const keep = async ({
       await wait(maxWaitMs, signal)
       continue
     }
+    // a port that answers before ssh starts is another program's, whose answer would read as the tunnel's
+    if (await listens(tunnel.port)) {
+      await say(`down: port ${tunnel.port} on this Mac is taken by another program`)
+      await wait(next, signal)
+      next = Math.min(next * 2, maxWaitMs)
+      continue
+    }
+    const webHost = webHostOf(branch())
     const child = Bun.spawn([ssh!, ...sshArgs(tunnel)], {
       env,
       stderr: "pipe",
@@ -227,8 +242,8 @@ export const keep = async ({
       if (!upAt && (await listens(tunnel.port)) && !ended) upAt = Date.now()
       if (upAt && Date.now() >= checkAt && !ended) {
         checkAt = Date.now() + 60_000
-        const why = await served(tunnel.port, tunnel.host)
-        const link = linkOf(tunnel.port)
+        const why = await served(tunnel.port, tunnel.host, webHost)
+        const link = linkOf(tunnel.port, webHost)
         if (ended || signal.aborted) break
         await say(why ? `down: ${why}` : `up: ${link} through ${tunnel.host}`)
         if (!why && post) await postOnce(data, link, tunnel.host, post).catch(console.error)
