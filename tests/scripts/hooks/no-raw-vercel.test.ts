@@ -165,6 +165,11 @@ describe("a factory session's Vercel call that moves production or reads its sec
     ["an env pull xargs feeds", "echo env pull | xargs vercel"],
     ["a link xargs feeds", "echo link | xargs vercel"],
     ["an env pull xargs feeds after a production flag", "echo env pull | xargs vercel --prod"],
+    ["a subcommand in xargs' replace string", "echo env | xargs -I{} vercel {} pull"],
+    ["a link in xargs' replace string", "echo link | xargs -I{} vercel {}"],
+    ["a subcommand in a spaced replace string", "echo env | xargs -I % vercel % pull"],
+    ["a subcommand in BSD xargs' -J string", "echo env | xargs -J % vercel % pull"],
+    ["a production deploy xargs feeds", "echo demo | xargs vercel deploy --prod"],
   ])("for the Ops lead, words xargs feeds: %s", async (_, command) => {
     expect(await as("ops", command)).toContain(REFUSED)
   })
@@ -210,6 +215,10 @@ describe("a read, a preview and a help run", () => {
     ["logs", "vercel logs demo-abc.vercel.app"],
     ["logs of production", "vercel logs -e production"],
     ["logs of production by the log alias", "vercel log --environment production"],
+    [
+      "logs with more options than the readings bound",
+      "vercel logs demo --since 1h --until 2h --limit 5 --json --follow --level error --query x",
+    ],
     ["an env list in table format", "vercel env ls --format table"],
     ["a redeploy to preview by its letter", "vercel redeploy demo-abc.vercel.app -e preview"],
     ["an integration list", "vercel integration ls"],

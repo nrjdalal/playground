@@ -16635,12 +16635,13 @@ var ALIASES = new Map(Object.entries({
   webhook: "webhooks"
 }));
 var COMMANDS2 = words("activity agent agent-runs ai-gateway alerts alias api bisect blob budgets build builders buy cache certs changelog ci comments config connect contract crons curl daemons deploy deploy-hooks dev dns domains drains env environments experiments feedback firewall flags git global-config guidance health help httpstat image images init inspect install integration integration-resource kms link list login logout logs mcp metrics microfrontends monitors notifications open organizations page-integrity permissions pricing project promote pull redeploy redirects remove rollback rolling-release routes sandbox schedules security setup signup skills storage tag teams telemetry tokens traces upgrade usage vcr version webhooks whoami");
+var JUDGED2 = words("alias api build deploy env install integration link promote pull redeploy rollback rolling-release");
 var HELP2 = new Set(["--help", "--version", "-h", "-v"]);
 var API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"]);
 var READINGS2 = 64;
 var MENTION2 = /\bv(?:ercel|c)\b/i;
 var NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i;
-function readingsOf(args, { flags, takes }) {
+function readingsOf(args, { flags, takes }, toSub = false) {
   const out = [];
   const walk = (k, read) => {
     if (out.length >= READINGS2)
@@ -16695,6 +16696,8 @@ function readingsOf(args, { flags, takes }) {
         continue;
       }
       read = { ...read, positionals: [...read.positionals, args[k]] };
+      if (toSub)
+        break;
     }
     out.push(read);
     return true;
@@ -16707,11 +16710,13 @@ function judgeAll(args, fed) {
     production: false,
     what: "a vercel call with more options than the hook reads"
   };
-  const first = readingsOf(args, GLOBAL);
+  const first = readingsOf(args, GLOBAL, true);
   if (!first)
     return unread;
   const verdicts = [];
   for (const name of new Set(first.map((r) => commandOf4(r.positionals[0])))) {
+    if (name !== undefined && COMMANDS2.has(name) && !JUDGED2.has(name))
+      continue;
     const own = OWN2[name !== undefined && COMMANDS2.has(name) ? name : "deploy"];
     const options = own ? {
       flags: new Set([...GLOBAL.flags, ...own.flags]),
@@ -16731,9 +16736,9 @@ function judge7({ flags, positionals }, unreadWord, fed) {
   const [sub, ...rest] = positionals;
   if (sub && unreadable(sub))
     return { production: false, what: "a subcommand built at run time" };
-  if (fed && !sub)
+  if (fed)
     return { production: false, what: "a vercel call whose words xargs feeds" };
-  const built = fed || unreadWord;
+  const built = unreadWord;
   const has = (...names) => flags.some((f) => names.includes(f.name));
   const toProduction = (names, absent) => {
     const flag = flags.findLast((f) => names.includes(f.name));
@@ -16809,7 +16814,7 @@ async function check22(raw, environment = process.env) {
         what: "a program built at run time on a line naming vercel"
       });
     const words = toolWords(NAMES2, parsed.name, parsed.args, shell);
-    const verdict = words && judgeAll(words, parsed.xargs !== undefined);
+    const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
     if (verdict)
       verdicts.push(verdict);
     return;

@@ -1,7 +1,7 @@
 // A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: refuses a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx) that moves what production serves (a production deploy, which also migrates the hosted database, a redeploy, a promote, a rollback, an alias or a rolling release), but for the Ops lead in a call that names no role variable and sources no file, and one that writes the project's secrets to disk, prints them or hands them to a command (env pull, pull, env ls with its values, env run, link, build, an integration add that pulls the env) or writes through vercel api or reads its /env, for every session; reads, previews and help run.
 import { toolWords } from "./no-main-checkout"
 import { namesRole, opsLead } from "./role"
-import { type Env, lex, run, unreadable, type Visit, type Word } from "./shell"
+import { type Env, lex, run, unreadable, viaXargs, type Visit, type Word } from "./shell"
 
 type Environment = Record<string, string | undefined>
 type Verdict = { production: boolean; what: string }
@@ -83,6 +83,10 @@ const ALIASES = new Map(
 const COMMANDS = words(
   "activity agent agent-runs ai-gateway alerts alias api bisect blob budgets build builders buy cache certs changelog ci comments config connect contract crons curl daemons deploy deploy-hooks dev dns domains drains env environments experiments feedback firewall flags git global-config guidance health help httpstat image images init inspect install integration integration-resource kms link list login logout logs mcp metrics microfrontends monitors notifications open organizations page-integrity permissions pricing project promote pull redeploy redirects remove rollback rolling-release routes sandbox schedules security setup signup skills storage tag teams telemetry tokens traces upgrade usage vcr version webhooks whoami",
 )
+// The commands judge() gives a verdict by their words; every other command passes.
+const JUDGED = words(
+  "alias api build deploy env install integration link promote pull redeploy rollback rolling-release",
+)
 const HELP = new Set(["--help", "--version", "-h", "-v"])
 const API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"])
 // The readings one call's options make at most, so many unknown options cost a bounded time; past them the call is refused as one the hook cannot read.
@@ -95,8 +99,8 @@ const NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i
 type Flag = { name: string; value?: Word }
 type Reading = { flags: Flag[]; positionals: Word[] }
 
-// Every reading of a call's words under these options: an option on neither list is read both as a flag and as taking the next word (or the rest of its cluster), or undefined past READINGS.
-function readingsOf(args: Word[], { flags, takes }: Options): Reading[] | undefined {
+// Every reading of a call's words under these options, each up to its first positional when toSub is set: an option on neither list is read both as a flag and as taking the next word (or the rest of its cluster), or undefined past READINGS.
+function readingsOf(args: Word[], { flags, takes }: Options, toSub = false): Reading[] | undefined {
   const out: Reading[] = []
   const walk = (k: number, read: Reading): boolean => {
     if (out.length >= READINGS) return false
@@ -150,6 +154,7 @@ function readingsOf(args: Word[], { flags, takes }: Options): Reading[] | undefi
         continue
       }
       read = { ...read, positionals: [...read.positionals, args[k]!] }
+      if (toSub) break
     }
     out.push(read)
     return true
@@ -166,10 +171,12 @@ function judgeAll(args: Word[], fed: boolean): Verdict | undefined {
     production: false,
     what: "a vercel call with more options than the hook reads",
   }
-  const first = readingsOf(args, GLOBAL)
+  const first = readingsOf(args, GLOBAL, true)
   if (!first) return unread
   const verdicts: (Verdict | undefined)[] = []
   for (const name of new Set(first.map((r) => commandOf(r.positionals[0])))) {
+    // a command judged by its name alone (logs, inspect, whoami) passes whatever options follow it
+    if (name !== undefined && COMMANDS.has(name) && !JUDGED.has(name)) continue
     const own = OWN[name !== undefined && COMMANDS.has(name) ? name : "deploy"]
     const options = own
       ? {
@@ -192,9 +199,9 @@ function judge(
   if (flags.some((f) => HELP.has(f.name))) return
   const [sub, ...rest] = positionals
   if (sub && unreadable(sub)) return { production: false, what: "a subcommand built at run time" }
-  // xargs appends words from stdin, which may name any command when no readable one comes first
-  if (fed && !sub) return { production: false, what: "a vercel call whose words xargs feeds" }
-  const built = fed || unreadWord
+  // xargs puts words from stdin among its words, which the hook cannot read, so a fed call it judges is refused for every session
+  if (fed) return { production: false, what: "a vercel call whose words xargs feeds" }
+  const built = unreadWord
   const has = (...names: string[]) => flags.some((f) => names.includes(f.name))
   // whether the last of these flags names production, or one it cannot read; absent, the command's own default
   const toProduction = (names: string[], absent: boolean) => {
@@ -282,8 +289,13 @@ export async function check(
         what: "a program built at run time on a line naming vercel",
       })
     const words = toolWords(NAMES, parsed.name, parsed.args, shell)
-    // xargs hands it words from stdin, which the hook cannot read
-    const verdict = words && judgeAll(words, parsed.xargs !== undefined)
+    // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string
+    const verdict =
+      words &&
+      judgeAll(
+        words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })),
+        parsed.xargs !== undefined,
+      )
     if (verdict) verdicts.push(verdict)
     return undefined
   }
