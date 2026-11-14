@@ -8878,7 +8878,6 @@ var contentFields = {
 // packages/safe-delete/src/index.ts
 var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
 var PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/;
-var PLAYGROUND_UNIT = /^com\.playground\.[\w.-]+\.service$/;
 var CARVE_OUTS = {
   "dashboard-supervisor": {
     bytes: 256 * 1024 ** 2,
@@ -8892,13 +8891,6 @@ var CARVE_OUTS = {
     folder: "Library/LaunchAgents",
     home: true,
     name: PLAYGROUND_AGENT
-  },
-  "jobs-units": {
-    bytes: 64 * 1024,
-    files: 1,
-    folder: ".config/systemd/user",
-    home: true,
-    name: PLAYGROUND_UNIT
   }
 };
 
@@ -9024,6 +9016,11 @@ var JOBS = {
   "ops-tick": launchd("ops-tick", {
     description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
     schedule: { every: 60 }
+  }),
+  "ops-tunnel": terminal("ops-tunnel", `${bunJob("ops-tunnel")} --data {data}`, {
+    config: { host: "", port: 1355 },
+    description: "Holds an ssh tunnel from this Mac's loopback to the Dashboard on the machine config.host names, and posts its link to the Inbox.",
+    schedule: { always: true }
   }),
   "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
     description: "Reads every live session's screen and clears a factory session stuck on a prompt.",

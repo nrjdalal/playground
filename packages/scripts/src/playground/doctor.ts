@@ -179,6 +179,44 @@ export const registryJobsText = (policyText: string): string => {
   return JSON.stringify({ jobs })
 }
 
+// The tunnel job's line (ops-tunnel), when jobs.json turns it on: ok while its heartbeat is fresh and reads up, else MISSING with the why it beats, such as a key the far machine refused or a port this Mac already holds.
+export const tunnelChecks = (
+  jobsText: string | null,
+  beatText: string | null,
+  now: Date,
+): Check[] => {
+  let on = false
+  try {
+    const jobs = JSON.parse(jobsText ?? "").jobs as { disabled?: boolean; name?: string }[]
+    on = jobs.some((job) => job.name === "ops-tunnel" && job.disabled !== true)
+  } catch {}
+  if (!on) return []
+  let beat: { cycleSeconds?: number; lastBeatAt?: string; lastResult?: string } = {}
+  try {
+    beat = JSON.parse(beatText ?? "")
+  } catch {}
+  const age = Math.floor((now.getTime() - Date.parse(beat.lastBeatAt ?? "")) / 60_000)
+  const result = beat.lastResult ?? ""
+  const detail = !beat.lastBeatAt
+    ? "the ops-tunnel job has not started: the ops runner starts it on its next pass"
+    : age * 60 > 3 * (beat.cycleSeconds ?? 60)
+      ? `its heartbeat is ${age}m old, so the ops-tunnel job is not running: ${result}`
+      : result.includes("exited")
+        ? `the ops-tunnel job is not running: ${result}`
+        : result
+  return [{ detail, name: "tunnel", status: detail.startsWith("up: ") ? "ok" : "MISSING" }]
+}
+
+// The tunnel's line from the data folder's jobs.json and the job's heartbeat.
+const tunnelOfData = (data: string): Check[] => {
+  const read = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : null)
+  return tunnelChecks(
+    read(join(data, "ops", "jobs.json")),
+    read(join(data, "ops", "ops-tunnel.json")),
+    new Date(),
+  )
+}
+
 export const line = ({ detail, name, status }: Check): string =>
   `${status.padEnd(8)} ${name.padEnd(22)} ${detail}`
 
@@ -216,7 +254,7 @@ export const launchdChecks = async (
   return jobChecks(existsSync(jobs) ? readFileSync(jobs, "utf8") : null, loaded, platform)
 }
 
-// The whole doctor: the tools, the data folder, the pinned herdr, the links into the checkout, the release it is at, on macOS portless's proxy service, and the jobs launchd, or on Linux systemd, should hold.
+// The whole doctor: the tools, the data folder, the pinned herdr, the links into the checkout, the release it is at, on macOS portless's proxy service, the jobs launchd, or on Linux systemd, should hold, and the tunnel's state while its job is on.
 export const doctor = async (repo: string, home: string, data: string): Promise<Check[]> => [
   ...tools(),
   dataCheck(data, existsSync),
@@ -233,6 +271,7 @@ export const doctor = async (repo: string, home: string, data: string): Promise<
   ...(process.platform === "darwin" || process.platform === "linux"
     ? await launchdChecks(data, jobLoaded(process.platform))
     : []),
+  ...tunnelOfData(data),
 ]
 
 export const report = (checks: Check[]): number => {

@@ -23,6 +23,7 @@ import {
   proxyCheck,
   registryJobsText,
   toolChecks,
+  tunnelChecks,
   versionCheck,
 } from "../../../../../packages/scripts/src/playground/doctor"
 import { writeRoot } from "../../../../../packages/settings/src/folder"
@@ -400,5 +401,39 @@ describe("versionCheck", () => {
     expect(versionCheck("v0.0.1-1-gabc1234", null, 1).detail).toBe(
       "at v0.0.1-1-gabc1234, 1 commit behind origin/main: playground update moves it on",
     )
+  })
+})
+
+describe("tunnelChecks (PG-2207)", () => {
+  const NOW = new Date("2026-11-15T00:00:00Z")
+  const on = JSON.stringify({ jobs: [{ config: { host: "spark-a" }, name: "ops-tunnel" }] })
+  const beat = (lastResult: string, at = "2026-11-14T23:59:30.000Z") =>
+    JSON.stringify({ cycleSeconds: 60, job: "ops-tunnel", lastBeatAt: at, lastResult, pid: 1 })
+
+  test("a tunnel job turned off, or no jobs.json, adds no line", () => {
+    const off = JSON.stringify({ jobs: [{ disabled: true, name: "ops-tunnel" }] })
+    for (const jobs of [null, "{", off]) expect(tunnelChecks(jobs, null, NOW)).toEqual([])
+  })
+
+  test("a tunnel that is up reads ok with its link", () => {
+    const up = "up: https://dashboard.playground.localhost:1355/dashboard through spark-a"
+    expect(tunnelChecks(on, beat(up), NOW)).toEqual([{ detail: up, name: "tunnel", status: "ok" }])
+  })
+
+  test("a tunnel that cannot connect is MISSING and names why", () => {
+    const [check] = tunnelChecks(
+      on,
+      beat("down: the Spark refused the key /h/.ssh/playground_spark"),
+      NOW,
+    )
+    expect(check!.status).toBe("MISSING")
+    expect(check!.detail).toContain("refused the key /h/.ssh/playground_spark")
+  })
+
+  test("a job turned on with no heartbeat, or one gone stale, is MISSING and says so", () => {
+    expect(tunnelChecks(on, null, NOW)[0]!.detail).toContain("has not started")
+    const stale = tunnelChecks(on, beat("up: x", "2026-11-14T23:40:00.000Z"), NOW)[0]!
+    expect(stale.status).toBe("MISSING")
+    expect(stale.detail).toContain("20m old")
   })
 })

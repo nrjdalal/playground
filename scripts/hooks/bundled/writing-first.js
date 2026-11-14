@@ -130,7 +130,6 @@ var budget = new AsyncLocalStorage;
 // packages/safe-delete/src/index.ts
 var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
 var PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/;
-var PLAYGROUND_UNIT = /^com\.playground\.[\w.-]+\.service$/;
 var CARVE_OUTS = {
   "dashboard-supervisor": {
     bytes: 256 * 1024 ** 2,
@@ -144,13 +143,6 @@ var CARVE_OUTS = {
     folder: "Library/LaunchAgents",
     home: true,
     name: PLAYGROUND_AGENT
-  },
-  "jobs-units": {
-    bytes: 64 * 1024,
-    files: 1,
-    folder: ".config/systemd/user",
-    home: true,
-    name: PLAYGROUND_UNIT
   }
 };
 

@@ -34,6 +34,21 @@ Moving a schedule or pausing a job with `pausedFor` is the same kind of write, n
 A job with a `config`, the settings of its own it reads on each pass, shows a card under its row in Settings > Jobs: the config as JSON in a box you edit, and Save, which writes the new object at the job's scope at once, over the rest of the value there.
 Playground checks only that it is a JSON object; the job checks each field itself, and when it refuses one it writes why as `configRefused` in its heartbeat, which the card shows in red under the box until a beat holds none.
 
+## Reach a Dashboard on another machine
+
+When the Dashboard runs on another machine, such as a DGX Spark, it listens on that machine's loopback alone, and the `ops-tunnel` job on your Mac brings it to you.
+The job holds an ssh tunnel with the key `~/.ssh/playground_spark` from a port on your Mac's loopback to the same port on the other machine's loopback, 1355 by default, so the link is the address of that machine's live Dashboard, `https://dashboard.playground.localhost:1355/dashboard`, and nothing listens off loopback at either end.
+The link's host comes from the `live.branch` setting (`live/dashboard` by default), and the Dashboard's API, `dashboard.api.playground.localhost`, goes through the same port.
+Its config names the machine: `{"host": "<name or address>", "port": 1355}`, with optional `key` and `user` (your Mac's user by default).
+That machine serves its names under the certificate authority your Mac already trusts, since its setup copies your Mac's portless folder there, so there is no trust step.
+Two Approves set the job up, in this order: a session posts the host as an Inbox guard decision, `{"config": {"host": ...}}`, then the switch, `{"enabled": true}`, and you click Approve on each.
+If your Mac does not trust the certificate that machine serves, `playground doctor` says so and the job posts no link.
+
+Once the tunnel is up and your Mac trusts the certificate the other machine serves, the job posts the link to your Inbox once: click the card's title and the Dashboard opens in a new tab.
+That Dashboard keeps a sign-in of its own, apart from your Mac's, since a stack on a port other than 443 names its sign-in cookie by its port.
+After a drop, the job starts ssh again within 2 seconds, waiting up to a minute between tries while it keeps failing.
+`playground doctor` shows a `tunnel` line while the job is on: ok with the link, or why it cannot connect, such as a key the other machine refused, a host key this Mac does not know yet, the port already taken on your Mac, or a certificate your Mac does not trust yet.
+
 ## Restore now
 
 The ops-restore row in Settings > Jobs holds Restore now, your way back when the main checkout's guards are gone and no session can repair it, with the job on or off.
