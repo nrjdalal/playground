@@ -52,6 +52,8 @@ In the app, **Set up settings** on the Settings page does the same for you: it n
 
 Install Playground with the GitHub CLI signed in to the same account ([Install](/docs/install)).
 Its `playground ext init` finds your repo and clones your login's folder from it, with your settings and their history, and your sessions read them from the first start.
+When the install could not, approve the Inbox card **Clone your extensions onto this machine?** that a session posts: it lists each repo it clones and the folder it fills, your login's first, and on **Approve** the dashboard clones them, making no repo, then copies the guards' lists from your checkout into your login's lists, keeping each one already there.
+It is refused on a machine whose extensions already hold any of those folders, so it runs only as the first clone.
 An org's scope comes back from an export, with `playground ext import <folder>`.
 
 ## What is not backed up

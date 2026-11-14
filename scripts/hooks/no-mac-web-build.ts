@@ -10,6 +10,7 @@ import {
   positionals,
   COMPOSE_SERVICE_TAKES,
 } from "./docker-build"
+import { input } from "./input"
 import { fromFactory } from "./role"
 import {
   type Env,
@@ -200,7 +201,7 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-mac-web-build", "guard")
   const reason = (await fromFactory(raw)) ? await check(raw) : undefined
   if (reason) {
     console.error(reason)

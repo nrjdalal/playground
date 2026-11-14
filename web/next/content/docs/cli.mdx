@@ -95,7 +95,7 @@ If an update stops partway, after your checkout has moved (a crash, a closed ter
 
 ## Put herdr back: `playground herdr pin`
 
-`playground herdr pin` downloads the herdr version Playground pins for your Mac (Apple silicon or Intel) from herdr's GitHub release, checks it against the SHA-256 written in Playground, and only then keeps it at `~/.playground/bin/herdr`. A download that does not match is refused, naming both sums, and nothing is installed. When the copy already matches, it changes nothing. `--check` only reads the copy and exits 1 when it is missing or changed; `--asset <file>` installs from a file you downloaded instead. A herdr on your `PATH` is yours: Playground never runs it.
+`playground herdr pin` downloads the herdr version Playground pins for your machine (a Mac with Apple silicon or Intel, or Linux on arm64) from herdr's GitHub release, checks it against the SHA-256 written in Playground, and only then keeps it at `~/.playground/bin/herdr`. A download that does not match is refused, naming both sums, and nothing is installed. When the copy already matches, it changes nothing. `--check` only reads the copy and exits 1 when it is missing or changed; `--asset <file>` installs from a file you downloaded instead. A herdr on your `PATH` is yours: Playground never runs it.
 
 ## Show the version: `playground version`
 
@@ -242,6 +242,7 @@ Every change needs its reason, and `--scope` sets it for an org (its name) or fo
 `playground accounts add --provider glm --label <label>` asks for a Z.ai key the same way and keeps it under `models.glmKeychainService` by that label; `spawn.sh --backend glm --account <label>` runs on it, and the first GLM row is the default.
 Adding an account that is already listed replaces its secret and leaves its row as it is.
 `playground accounts remove <email|label>` drops the row and its Keychain item.
+On Linux, which has no Keychain, each item is a file only you can read under `secrets/keychain/` in Playground's data folder.
 
 ## Yard: `playground yard`
 

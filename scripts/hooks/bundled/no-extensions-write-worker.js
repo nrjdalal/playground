@@ -7558,6 +7558,7 @@ function mktempPath(cmd, known) {
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`;
 }
 var SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/;
+var splitFrom = new WeakMap;
 var chdirOf = (state, word) => state.chdir && word ? { ...word, ...unknown2("a second env -C") } : word;
 var READINGS = 16;
 function parse3(cmd) {
@@ -7602,9 +7603,21 @@ function unwrap(state, inside, budget) {
   };
   for (let wrapper = inside;; wrapper = undefined) {
     if (!wrapper) {
-      wrapper = program(peek()?.value ?? "");
+      const word = peek();
+      const held = [state.xargs?.replace ?? "", ...state.xargs?.outer ?? []];
+      for (const replace of held.filter((r) => r && word?.value.includes(r)))
+        if (word) {
+          const typed = splitFrom.get(word) ?? word;
+          state.xargs = {
+            ...state.xargs,
+            filled: [...state.xargs?.filled ?? [], [typed, replace]]
+          };
+        }
+      wrapper = program(word?.value ?? "");
       if (!WRAPPERS.has(wrapper))
         break;
+      if (wrapper === "xargs" && state.xargs?.replace)
+        state.xargs = { ...state.xargs, outer: [...state.xargs.outer ?? [], state.xargs.replace] };
       if (wrapper === "xargs")
         state.xargs ??= {};
       take();
@@ -7617,9 +7630,14 @@ function unwrap(state, inside, budget) {
       else if (wrapper === "env" && SPLIT.test(v)) {
         const attached = SPLIT.exec(v)?.[1] ?? "";
         take();
-        const split = (attached || take()?.value || "").split(/\s+/).filter(Boolean);
-        for (let j = split.length - 1;j >= 0; j--)
-          rest.push({ quoted: false, value: split[j] });
+        const from = attached ? w : take();
+        const split = (attached || from?.value || "").split(/\s+/).filter(Boolean);
+        for (let j = split.length - 1;j >= 0; j--) {
+          const word = { quoted: false, value: split[j] };
+          if (from)
+            splitFrom.set(word, splitFrom.get(from) ?? from);
+          rest.push(word);
+        }
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         take();
         state.chdir = chdirOf(state, take());
@@ -7769,7 +7787,8 @@ async function examine(cmd, env, visit, builtins) {
   const expanded = [
     ...expandTilde(cmd, primary.name, env),
     ...splitHeld(cmd, primary.name, env),
-    ...vanished
+    ...vanished,
+    ...await xargsFilled(cmd, [primary, ...others], env)
   ];
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
@@ -7805,6 +7824,32 @@ function stdinScript({ args, name }) {
     return false;
   const { inline, operand } = shellOperand(args, name);
   return !operand || !inline && STDIN_PATHS.has(operand.value);
+}
+async function xargsFilled(cmd, parsed, env) {
+  const filled = new Map;
+  for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
+    filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
+  if (filled.size === 0)
+    return [];
+  const fed = await stdinOf(cmd, env);
+  const raw = fed.unknown ? [] : [fed.value, ...fed.value.split(`
+`), ...fed.value.split(/\s+/)];
+  const quoted = raw.some((text) => /["'\\]/.test(text));
+  const texts = [...new Set(raw.map((text) => text.replace(/["'\\]/g, "").trim()))].filter(Boolean);
+  const fill = (text) => ({
+    ...cmd,
+    words: cmd.words.flatMap((w) => {
+      const held = filled.get(w);
+      if (!held)
+        return [w];
+      if (text === undefined)
+        return [{ ...w, ...unknown2(`the program xargs puts in place of ${held.join(" or ")}`) }];
+      return held.reduce((value, replace) => value.replaceAll(replace, text), w.value).split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
+    })
+  });
+  if (fed.unknown || texts.length > READINGS)
+    return [fill(undefined)];
+  return [...texts.map(fill), ...quoted ? [fill(undefined)] : []];
 }
 var BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line";
 function expandTilde(cmd, name, env) {
@@ -9976,7 +10021,6 @@ function writeTargets(name, args, gnu, posix = false) {
   let folders = false;
   const maybe = [];
   const logs = [];
-  const values = [];
   for (let k = 0, options = true;k < args.length; k++) {
     const word = args[k];
     const { value } = word;
@@ -9994,8 +10038,8 @@ function writeTargets(name, args, gnu, posix = false) {
         folder = attached ? after(word, long.length + 3) : args[++k];
       else if (name === "install" && "directory".startsWith(long))
         folders = true;
-      else if (!takes?.flags?.includes(long) && takes?.long.some((take) => take.startsWith(long)))
-        values.push(...attached ? [after(word, long.length + 3)] : args.slice(++k, k + 1));
+      else if (!attached && !takes?.flags?.includes(long) && takes?.long.some((take) => take.startsWith(long)))
+        k++;
     } else
       for (let i = 1;i < value.length; i++) {
         const letter = value[i];
@@ -10011,7 +10055,8 @@ function writeTargets(name, args, gnu, posix = false) {
             if (log)
               logs.push(log);
           }
-          values.push(...rest ? [after(word, i + 1)] : args.slice(++k, k + 1));
+          if (!rest)
+            k++;
           break;
         }
       }
@@ -10019,8 +10064,6 @@ function writeTargets(name, args, gnu, posix = false) {
   if (name === "ln" && !folder && operands.length === 1)
     return [{ quoted: false, value: "." }, ...splits];
   const targets = into && !folders ? folder ? [folder] : operands.slice(-1) : operands;
-  if (process.platform === "linux" && name === "install" && folders && operands.length === 0)
-    targets.push(...values);
   const moved = into && !gnu && name !== "install" ? [] : splits;
   return [...new Set([...targets, ...maybe, ...logs, ...moved])];
 }
@@ -10417,7 +10460,7 @@ function sedEdits(args) {
       break;
     } else if (suffix) {
       inPlace = true;
-      if (suffix[1] || process.platform === "linux")
+      if (suffix[1])
         continue;
       const word = args[++k];
       if (!word || !literal2(word) || !SED_SUFFIX.test(word.value))
@@ -11049,7 +11092,7 @@ async function inspect(raw, environment, unknown = false) {
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
     const tool = GNU_NAMED.exec(name)?.[1] ?? name;
-    const gnu = tool !== name || first.value.includes("/gnubin/") || process.platform === "linux";
+    const gnu = tool !== name || first.value.includes("/gnubin/");
     const remover = REMOVERS.has(tool);
     const edited = new Set(inPlace(tool, args));
     const sedEdit = sedInPlace(cmd, parsed) ?? (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : []);

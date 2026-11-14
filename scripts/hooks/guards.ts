@@ -1,6 +1,7 @@
 // PreToolUse hook on Bash: runs every Bash guard's check in this one process, as each guard's own main block runs it, and refuses with every refusal they give, so a Bash call starts one bun rather than one a guard; a guard that throws refuses the call, naming it.
 
 import { withLiveBudget } from "../../packages/safe-delete/src/live-refs"
+import { DEADLINE, input } from "./input"
 import { check as desktopOwnerApp } from "./no-desktop-owner-app"
 import { check as envDump } from "./no-env-dump"
 import { check as extensionRepoWrite } from "./no-extension-repo-write"
@@ -72,9 +73,6 @@ export const GUARDS: readonly Guard[] = [
   { factory: true, name: "no-unslotted-run", run: (raw, env) => unslottedRun(raw, env) },
 ]
 
-// The hook's own deadline, from its process start, inside the runner's 15 s timeout.
-export const DEADLINE = 13_000
-
 const threw = (name: string, error: unknown) =>
   `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`
 
@@ -119,22 +117,13 @@ export async function check(
   return reasons.filter(Boolean).join("\n\n") || undefined
 }
 
-const unread = `guards hook: the call's input did not arrive by its deadline, about ${DEADLINE / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`
-
-// The hook's exit: 2 with the reasons on stderr, else 0; its deadline counts from the process's start, so the imports and the input's read spend it too.
+// The hook's exit: 2 with the reasons on stderr, else 0; its deadline counts from the process's start, so the imports and the input's read spend it too, and an input unread by then refuses the call in input().
 export async function hook(
   guards: readonly Guard[] = GUARDS,
   deadline = DEADLINE,
 ): Promise<number> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const raw = await Promise.race([
-    Bun.stdin.text(),
-    new Promise<undefined>((done) => {
-      timer = setTimeout(() => done(undefined), deadline - performance.now())
-    }),
-  ]).finally(() => clearTimeout(timer))
-  const reason =
-    raw === undefined ? unread : await check(raw, process.env, guards, deadline - performance.now())
+  const raw = await input("guards", "guard", deadline)
+  const reason = await check(raw, process.env, guards, deadline - performance.now())
   if (!reason) return 0
   console.error(reason)
   return 2
