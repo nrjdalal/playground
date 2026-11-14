@@ -99,6 +99,70 @@ export const groups: Group[] = [
         "a kill by pattern behind a variable a program the reader cannot read may change",
         "U=unset; X=a; $U X; $X pkill -f watcher",
       ],
+      [
+        "a kill by pattern behind a variable zsh's print -v sets",
+        "X=a; print -v X ''; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable zsh's zparseopts sets",
+        "X=a; zparseopts x=X; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable zsh's zformat sets",
+        "X=a; zformat -f X '' a:b; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable zsh's zstyle sets",
+        "X=a; zstyle -s :x y X; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable mapfile sets",
+        "X=a; mapfile -t X < /dev/null; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable read sets as its default name",
+        "REPLY=a; read < /dev/null; $REPLY pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable a trap's text may change",
+        "X=a; trap 'unset X' DEBUG; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable unset names by a substitution",
+        "X=a; unset $(printf X); $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable unset names by a variable the reader cannot read",
+        'N=$(printf X); X=a; unset "$N"; $X pkill -f watcher',
+      ],
+      [
+        "a kill by pattern behind a variable read names by a substitution",
+        "X=a; read $(printf X) < /dev/null; $X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind a variable a for loop's body unsets for its next pass",
+        "X=a; for i in 1 2; do $X pkill -f watcher; unset X; done",
+      ],
+      [
+        "a kill by pattern behind a variable a while loop's body unsets for its next pass",
+        "X=a; while :; do $X pkill -f watcher; unset X; done",
+      ],
+      [
+        "a kill by pattern behind a variable an until loop's body unsets for its next pass",
+        "X=a; until false; do $X pkill -f watcher; unset X; done",
+      ],
+      [
+        "a kill by pattern behind a variable a loop's body assigns for its next pass",
+        "X=a; for i in 1 2; do $X pkill -f watcher; X=; done",
+      ],
+      [
+        "a kill by pattern behind a variable an array that holds eval may change",
+        'X=a; A=(eval); "${A[@]}" "$Q"; $X pkill -f watcher',
+      ],
+      [
+        "a kill by pattern behind a variable an array that holds source may change",
+        'X=a; A=(source); "${A[@]}" ./env.sh; $X pkill -f watcher',
+      ],
     ],
   },
   {
@@ -129,6 +193,10 @@ export const groups: Group[] = [
         "a copy by a value held past a cd's && chain that is not a literal",
         `cd /tmp && f=$(pwd)/x; cp /tmp/a "$f"`,
       ],
+      [
+        "a copy by an unquoted literal held past a cd's && chain, whose empty value makes the folder before it the copy's",
+        "cd /tmp && f=/tmp/out.txt; cp /tmp/a .playground/extensions/hooks $f",
+      ],
     ],
   },
   {
@@ -142,6 +210,22 @@ export const groups: Group[] = [
       [
         "a copy by a literal held past a cd's && chain and joined to a relative name, which an empty value leaves in the root",
         `cd /tmp && S=/tmp/; cp /tmp/a "\${S}x"`,
+      ],
+      [
+        "a copy by an unquoted literal held past a cd's && chain, whose empty value makes the name before it the copy's",
+        "cd /tmp && f=/tmp/out.txt; cp /tmp/a sub $f",
+      ],
+      [
+        "a move by an unquoted literal held past a cd's && chain, whose empty value makes the name before it the move's",
+        "cd /tmp && f=/tmp/out.txt; mv /tmp/a sub $f",
+      ],
+      [
+        "a link by an unquoted literal held past a cd's && chain, whose empty value makes the name before it the link",
+        "cd /tmp && f=/tmp/out.txt; ln -s /tmp/a sub $f",
+      ],
+      [
+        "a copy by an unquoted braced literal held past a cd's && chain, whose empty value makes the name before it the copy's",
+        "cd /tmp && f=/tmp/out.txt; cp /tmp/a sub ${f}",
       ],
     ],
   },

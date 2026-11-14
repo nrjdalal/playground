@@ -2461,7 +2461,6 @@ describe("a writer's file a cd's && chain sets to a literal runs past the chain,
     ["a copy", `cd /tmp && f=/tmp/out.txt; cp /tmp/a "$f"`],
     ["a tee", `cd /tmp && f=/tmp/out.txt; echo x | tee "$f"`],
     ["a move", `cd /tmp && f=/tmp/out.txt; mv /tmp/a "$f"`],
-    ["a copy by the unquoted read", `cd /tmp && f=/tmp/out.txt; cp /tmp/a $f`],
     ["a copy by the braced read", `cd /tmp && f=/tmp/out.txt; cp /tmp/a "\${f}"`],
     ["a copy after a pushd", `pushd /tmp && f=/tmp/out.txt; cp /tmp/a "$f"`],
     ["an in-place sed", `cd /tmp && f=/tmp/out.txt; sed -i '' s/a/b/ "$f"`],
@@ -2488,6 +2487,16 @@ describe("a writer's file a cd's && chain sets to a literal runs past the chain,
     ],
   ])("%s stays refused, from the root", async (_, command) => {
     expect(await bash(command, ROOT)).toBeDefined()
+  })
+})
+
+describe("a tool an array holds, run with an argument the reader cannot read, changes no variable (PG-2161)", () => {
+  test("a write through a held name after it", async () => {
+    expect(
+      await bash(
+        `A=(agent-browser --session w); S=/tmp/s; "\${A[@]}" eval "$(cat $S/m.js)"; "\${A[@]}" screenshot --full $S/a.png`,
+      ),
+    ).toBeUndefined()
   })
 })
 
