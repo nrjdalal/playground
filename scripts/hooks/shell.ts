@@ -1824,7 +1824,7 @@ const mayVanish = (w: Word, env: Env): boolean =>
     return !set || (!set.unknown && set.value === "")
   })
 
-// The empty reading of a command: each program word that may expand to no word (mayVanish) dropped, until one that stays leads, so the word after it is judged as the program (`$X pkill`, `nice $X pkill`, `$X $Y pkill`); none when the program word stays. It is judged beside the typed reading, so a verdict only moves to refused.
+// The empty reading of a command: each program word that may expand to no word (mayVanish) dropped, until one that stays leads, so the word after it is judged as the program (`$X git commit`, `nice $X git commit`, `$X $Y git commit`); none when the program word stays. It is judged beside the typed reading, so a verdict only moves to refused.
 function emptyProgram(cmd: Command, env: Env): Command[] {
   if (!cmd.words.some((w) => mayVanish(w, env))) return []
   let words = cmd.words
