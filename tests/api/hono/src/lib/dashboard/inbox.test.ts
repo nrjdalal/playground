@@ -6447,10 +6447,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           JSON.parse(readFileSync(join(scopeDir(data, ME), "lists", `${name}.json`), "utf8")),
           name,
         ).toEqual(JSON.parse(readFileSync(join(LISTS, `${name}.json`), "utf8")))
+      // core ships no no-public-leak list, so the line names it as still missing
+      const missing = GUARD_LISTS.filter((name) => !seeded.includes(name))
+      expect(missing).toContain("no-public-leak")
       expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
         cloned: {
           exitCode: 0,
-          line: `${ME}/playground-${ME} into ${scopeDir(data, ME)}, ${ME}/playground-made-up-tools into ${scopeDir(data, "made-up-tools")}; seeded ${seeded.length} of the guards' lists, kept 0 already there`,
+          line: `${ME}/playground-${ME} into ${scopeDir(data, ME)}, ${ME}/playground-made-up-tools into ${scopeDir(data, "made-up-tools")}; seeded ${seeded.length} of the guards' lists, kept 0 already there; still missing: ${missing.join(", ")}`,
         },
       })
     })

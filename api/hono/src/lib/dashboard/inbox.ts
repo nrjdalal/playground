@@ -482,7 +482,13 @@ function seedLists(data: string, lists: string, ref: number, actor: string): Run
   if (!done.ok) return { exitCode: 1, line: done.message }
   const added = done.lines.filter((line) => line.startsWith("+ ")).length
   const kept = done.lines.filter((line) => line.startsWith("= ")).length
-  return { exitCode: 0, line: `seeded ${added} of the guards' lists, kept ${kept} already there` }
+  const missing = done.lines
+    .filter((line) => line.startsWith("- "))
+    .map((line) => line.slice(2).split(":")[0])
+  return {
+    exitCode: 0,
+    line: `seeded ${added} of the guards' lists, kept ${kept} already there${missing.length ? `; still missing: ${missing.join(", ")}` : ""}`,
+  }
 }
 
 // Clones each repo in order through `playground ext`, stopping at the first that fails: ext init --dry-run first, so the login's repo it clones is the card's first, then ext init, then ext add for each further one. Neither runs with --yes, so off a terminal neither makes a repo.

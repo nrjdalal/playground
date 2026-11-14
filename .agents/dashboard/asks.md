@@ -437,7 +437,9 @@
   Approve checks the card again as it runs, its shape and its folders against this machine, refusing before it records anything, then runs `ext init --dry-run` through `runCli()`, recording a failure with nothing cloned when gh's login or the repo it names is not the card's first, or that repo is not on GitHub,
   then `ext init` for the first and `ext add <scope> <repo>` for each further one, in order, neither with `--yes`, so off a terminal neither makes a repo (`cloneAll`); a stack showing test data refuses it, cloning nothing.
   Once every repo is cloned, it seeds the guards' lists from the checkout's `extensions/core/lists` into the login's lists as one commit, the step `playground ext import --from-tree` takes, keeping each list the login already holds, so a second seed changes nothing (`seedLists`, `importLists` with `keep`).
-  The answer keeps `cloned: {exitCode, line}`: `<repo> into <folder>, …; seeded N of the guards' lists, kept M already there`, or on a clone failure the ones cloned, the failed one with its reason, then `not tried:` and the rest, or on a seed failure `cloned <repos>; seeding the guards' lists failed: <reason>`; the card reads `Cloned: <line>` green or `Clone failed (exit N): <line>` red.
+  The answer keeps `cloned: {exitCode, line}`: `<repo> into <folder>, …; seeded N of the guards' lists, kept M already there`, then `; still missing: <lists>` for each list neither the checkout nor the login holds (core ships no `no-public-leak`).
+  On a clone failure it keeps the ones cloned, the failed one with its reason, then `not tried:` and the rest, and on a seed failure `cloned <repos>; seeding the guards' lists failed: <reason>`.
+  The card reads `Cloned: <line>` green or `Clone failed (exit N): <line>` red.
   A failure part way leaves the cloned folders in place, so a new card names only the rest, since one naming a folder already there is refused.
 
   ```json
