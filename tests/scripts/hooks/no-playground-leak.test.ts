@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { chmodSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -439,6 +440,32 @@ describe("git push and gh pr create read the live branches of the remote they pu
     expect(await bash("git push", dir)).toContain('"worker-envy"')
   })
 })
+
+// three checkouts whose origin names Acme's repository while an insteadOf rule sends git's reads to an ssh remote whose ssh sleeps: the pushes of one call share one live-read budget (withLiveBudget), so the call ends inside the guard's timeout, and the last scan, past the budget, reads every commit
+test("three push scans in one call on a hung remote end within the budget", async () => {
+  const url = "https://github.com/acme-blue/app.git"
+  const ssh = join(scratch, "hung-ssh")
+  await Bun.write(ssh, "#!/bin/sh\nexec sleep 10\n")
+  chmodSync(ssh, 0o755)
+  const dirs = ["hung-a", "hung-b", "hung-c"].map((name) => join(scratch, name))
+  for (const dir of dirs) {
+    await mkdir(dir, { recursive: true })
+    git(dir, "init", "-q", "-b", "main")
+    git(dir, "remote", "add", "origin", url)
+    git(dir, "config", "url.ssh://git@example.invalid/app.git.insteadOf", url)
+    git(dir, "config", "core.sshCommand", ssh)
+    // the test sandbox's git refuses ssh, so each checkout allows it for this fake alone
+    git(dir, "config", "protocol.ssh.allow", "always")
+  }
+  // the first two scans find no term, so the hook reads all three; the third's commit names a session
+  git(dirs[0], "commit", "-q", "--allow-empty", "-m", "Fix the export button")
+  git(dirs[1], "commit", "-q", "--allow-empty", "-m", "Fix the import button")
+  git(dirs[2], "commit", "-q", "--allow-empty", "-m", "Fix from worker-envy")
+  const start = performance.now()
+  const reason = await bash(dirs.map((dir) => `git -C ${dir} push`).join(" && "))
+  expect(performance.now() - start).toBeLessThan(6_000 + 2_000)
+  expect(reason).toContain('"worker-envy"')
+}, 20_000)
 
 describe("the roster's names are terms too, since sessions are renamed", () => {
   const slack = "mcp__slack-shared__chat_post_message"
