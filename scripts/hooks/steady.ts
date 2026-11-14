@@ -1,5 +1,17 @@
 // The steady variables of a line, the one way a writer or a cd holds a variable's value: each named once, by a plain assignment the hook reads whole at the line's top level, so a later word that reads it can be lexed again with its value
-import { ASSIGN, type Command, type Env, lex, marked, parse, type Parsed, type Word } from "./shell"
+import {
+  ASSIGN,
+  type Command,
+  type Env,
+  lex,
+  marked,
+  NAME_SETTERS,
+  parse,
+  type Parsed,
+  PRINTS,
+  RUNS_TEXT,
+  type Word,
+} from "./shell"
 
 // the line's text as a shell it runs reads it: backslash-newlines, a $ before a quote, and every quote and backslash removed
 export const unquoted = (text: string) => text.replace(/\\\n|\$(?=["'])|["'\\]/g, "")
@@ -384,80 +396,10 @@ export type Steady = {
 }
 export const NONE: Steady = { has: () => false }
 
-// The builtins that set a variable by a name among their words, from bash 5.3's bash(1), SHELL BUILTIN COMMANDS, and zsh 5.9's zshbuiltins(1) and zshmodules(1)
-const NAME_SETTERS = new Set([
-  "compgen",
-  "declare",
-  "export",
-  "float",
-  "getln",
-  "getopts",
-  "integer",
-  "let",
-  "local",
-  "mapfile",
-  "pcre_match",
-  "print",
-  "printf",
-  "private",
-  "read",
-  "readarray",
-  "readonly",
-  "set",
-  "shift",
-  "stat",
-  "strftime",
-  "syserror",
-  "sysopen",
-  "sysread",
-  "syswrite",
-  "typeset",
-  "unset",
-  "vared",
-  "wait",
-  "zcurses",
-  "zformat",
-  "zgdbmpath",
-  "zgetattr",
-  "zlistattr",
-  "zmodload",
-  "zparseopts",
-  "zpty",
-  "zregexparse",
-  "zselect",
-  "zsocket",
-  "zstat",
-  "zstyle",
-  "zsystem",
-  "ztcp",
-  "ztie",
-  "zuntie",
-])
-// the setters that name a variable only by their v option, so their other words are text they print
-const PRINTS = new Set(["print", "printf"])
 // zsh's builtins that make a name integer or float, so every later assignment to it is an arithmetic evaluation, as let's words are
 const NUMERIC = new Set(["float", "integer"])
 // the builtins that give a name an attribute: n makes a bash nameref, a name whose every later write sets the variable its value names, and i (zsh's E and F too) makes every later assignment to it an arithmetic evaluation
 const TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"])
-// the builtins that run text or load code as the line's own shell, which can set any variable: a trap's text runs there (a DEBUG trap's before each command), as do zsh's sched's, emulate -c's, a zstyle -e value's and a zregexparse action's, bash's mapfile -C callback, an alias on a later line, a history event fc or r runs, and the code autoload, zmodload and enable -f load
-const RUNS_TEXT = new Set([
-  ".",
-  "alias",
-  "autoload",
-  "emulate",
-  "enable",
-  "eval",
-  "fc",
-  "mapfile",
-  "r",
-  "readarray",
-  "sched",
-  "source",
-  "trap",
-  "zmodload",
-  "zregexparse",
-  "zstyle",
-])
 // the tests whose -v reads its operand as a name, evaluating any subscript it holds; test and [ take their operators after expansion, so a word that expands may be a -v or split into one and its operand, while [[ reads its operators as written
 const TESTS = new Set(["[", "[[", "test"])
 // the -v operand that names no subscript: a plain unquoted name, as written
@@ -673,9 +615,9 @@ function relexed(raw: string, known: Record<string, string>): Word | undefined {
 }
 
 // The steady variables the call has set by now whose values the hook holds, an assignment that names an earlier one (`T="$S/x"`) lexed again with it, in the order they were set
-// A key held past its chain (Steady.past) reads only in a word that is its read alone (`"$f"`, `$f`, `${f}`), since the empty value a failed cd leaves turns any other word into the rest of it (`$S/c` into `/c`)
+// A key held past its chain (Steady.past) reads only in a word that is its quoted read alone (`"$f"`, `"${f}"`), since the empty value a failed cd leaves turns any other word into the rest of it (`$S/c` into `/c`) and an unquoted read into no word, which hands its place to the word before it (`cp a sub $f` copies to `sub`)
 function heldVars(env: Env, steady: Steady, raw?: string): Record<string, string> {
-  const alone = raw?.match(/^"?\$\{?([A-Za-z_]\w*)\}?"?$/)?.[1]
+  const alone = raw?.match(/^"\$\{?([A-Za-z_]\w*)\}?"$/)?.[1]
   const known = { ...env.known }
   for (const [key, text] of env.vars) {
     // a TMPDIR the call sets steers mktemp, so mktemp's path stays unheld
