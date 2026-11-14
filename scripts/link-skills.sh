@@ -69,7 +69,7 @@ link_file() {
     echo "linked $target -> $src"
   fi
 }
-for brief in new-reviewer new-tester new-worker; do
+for brief in new-research-worker new-reviewer new-tester new-worker; do
   link_file "$REPO/scripts/briefs/$brief.md" "$DATA/handoffs/$brief.md"
 done
 # brief-rush.md sits beside the state files, not in handoffs/; a copy from before it was versioned moves aside like beat.py's

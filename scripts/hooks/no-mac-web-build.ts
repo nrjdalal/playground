@@ -23,7 +23,7 @@ import {
   type Word,
 } from "./shell"
 
-// docker inspect is killed past this, well inside the hook's registered 15s, since a hook past its limit lets the call through and a Docker VM wedged by memory is the case this hook is for; a second later the read gives up even on pipes the killed process left open.
+// docker inspect is killed past this, inside the guards hook's 13 s deadline, so its own reason comes first, and a Docker VM wedged by memory is the case this hook is for; a second later the read gives up even on pipes the killed process left open.
 export const INSPECT_TIMEOUT_MS = 8_000
 const WEB_DOCKERFILE = "web/next/Dockerfile"
 const API_HERE = "The api image still builds here (docker compose build api)."

@@ -223,8 +223,23 @@ test("runRm tells the dispatcher once when a session hits the per-minute cap, ho
   for (const path of paths) codes.push(await runRm([path], deps))
   expect(codes).toEqual([0, 0, 0, ...Array(11).fill(1)])
   expect(told).toEqual([
-    "j6rjgy-worker: j6rjgy-worker quarantined 3 paths in the last minute, the most one session may",
+    "j6rjgy-worker: refused a 4th removal: j6rjgy-worker moved 3 paths in the last minute, the most one session may",
   ])
+})
+
+test("an end clears its scratch folder of 4 subfolders and its scratchpad in one move each, under the per-minute cap", async () => {
+  const { deps, home, told } = machine()
+  const scratch = join(home, ".playground", "scratch", "j6rjgy-worker")
+  const pad = join(home, ".playground", "scratchpad", "j6rjgy-worker")
+  for (const sub of ["a", "b", "c", "d"]) {
+    mkdirSync(join(scratch, sub), { recursive: true })
+    writeFileSync(join(scratch, sub, "work.txt"), "x")
+  }
+  mkdirSync(pad, { recursive: true })
+  writeFileSync(join(pad, "brief.md"), "x")
+  expect([await runRm([scratch], deps), await runRm([pad], deps)]).toEqual([0, 0])
+  expect(listTrash(join(deps.data, "trash")).map((entry) => entry.path)).toEqual([scratch, pad])
+  expect(told).toEqual([])
 })
 
 test("runRm clears the caller's own scratch folder", async () => {
@@ -361,9 +376,9 @@ test("runRm refuses an ended session's whole scratchpad folder over 2 GB, naming
   ])
 })
 
-test("runRm keeps the tripwire's file count for the caller's own scratchpad folder, a path inside an ended folder and any other path", async () => {
+test("runRm keeps the tripwire's file count and its alert for a path inside the caller's own scratchpad folder, a path inside an ended folder and any other path", async () => {
   for (const at of [
-    (pad: string) => join(pad, "j6rjgy-worker"),
+    (pad: string) => join(pad, "j6rjgy-worker", "work"),
     (pad: string) => join(pad, "a4b5c6-worker", "1938"),
     (pad: string) => join(pad, "..", "..", "big"),
   ]) {
@@ -377,6 +392,77 @@ test("runRm keeps the tripwire's file count for the caller's own scratchpad fold
     expect(existsSync(join(path, "clone", "0", "0"))).toBe(true)
     expect(told.some((line) => line.includes("past the tripwire"))).toBe(true)
   }
+})
+
+test("an end leaves its own scratch or scratchpad folder over the tripwire in place, with no move and no alert, its refusal naming who clears it", async () => {
+  for (const dir of ["scratch", "scratchpad"]) {
+    const { deps, told } = pads([{ name: "j6rjgy-worker", status: "working" }])
+    const folder = join(deps.data, dir, "j6rjgy-worker")
+    overCount(folder)
+    const errors: string[] = []
+    const error = console.error
+    console.error = (line: string) => void errors.push(line)
+    try {
+      expect(await runRm([folder], deps)).toBe(1)
+    } finally {
+      console.error = error
+    }
+    expect(existsSync(join(folder, "clone", "0", "0"))).toBe(true)
+    expect(listTrash(join(deps.data, "trash"))).toEqual([])
+    expect(told).toEqual([])
+    expect(errors.join("\n")).toContain("leave it in place whole, never split")
+  }
+})
+
+// The own folder's plain refusal reaches nothing else: each path here, over the tripwire, keeps its alert.
+test("over the tripwire, another session's folder, a folder above the own one, the own folder as a symlink and that symlink's target still alert", async () => {
+  const own = (data: string, dir: string) => join(data, dir, "j6rjgy-worker")
+  const filled = (path: string, at = path) => {
+    overCount(path)
+    return at
+  }
+  const linked = (data: string, home: string, at: string) => {
+    overCount(join(home, "big"))
+    mkdirSync(join(data, "scratchpad"), { recursive: true })
+    symlinkSync(join(home, "big"), own(data, "scratchpad"))
+    return at
+  }
+  const cases: [string, (data: string, home: string) => string][] = [
+    ["another session's scratch", (data) => filled(join(data, "scratch", "a4b5c6-worker"))],
+    ["another session's scratchpad", (data) => filled(join(data, "scratchpad", "a4b5c6-worker"))],
+    ["scratch/ itself", (data) => filled(own(data, "scratch"), join(data, "scratch"))],
+    ["scratchpad/ itself", (data) => filled(own(data, "scratchpad"), join(data, "scratchpad"))],
+    ["the own folder as a symlink", (data, home) => linked(data, home, own(data, "scratchpad"))],
+    ["the own folder's symlink target", (data, home) => linked(data, home, join(home, "big"))],
+  ]
+  for (const [name, at] of cases) {
+    const { deps, home, told } = pads([
+      { name: "j6rjgy-worker", status: "working" },
+      { name: "a4b5c6-worker", status: "working" },
+    ])
+    const path = at(deps.data, home)
+    const error = console.error
+    console.error = () => {}
+    try {
+      expect([name, await runRm([path], deps)]).toEqual([name, 1])
+    } finally {
+      console.error = error
+    }
+    expect([name, listTrash(join(deps.data, "trash"))]).toEqual([name, []])
+    expect([name, told.length]).toEqual([name, 1])
+  }
+})
+
+test("a symlink inside the own scratch folder to a folder over the tripwire moves alone, its target whole, with no alert", async () => {
+  const { deps, home, told } = machine()
+  const link = join(deps.data, "scratch", "j6rjgy-worker", "out")
+  overCount(join(home, "big"))
+  mkdirSync(dirname(link), { recursive: true })
+  symlinkSync(join(home, "big"), link)
+  expect(await runRm([link], deps)).toBe(0)
+  expect(listTrash(join(deps.data, "trash")).map((entry) => entry.path)).toEqual([link])
+  expect(existsSync(join(home, "big", "clone", "0", "0"))).toBe(true)
+  expect(told).toEqual([])
 })
 
 test("--restore refuses a path inside an ended folder while a symlink stands at that folder or at a folder between", async () => {
