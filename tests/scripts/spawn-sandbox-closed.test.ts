@@ -454,6 +454,21 @@ describe("the closed sandbox lets a session work in its own worktree", () => {
     },
   )
 
+  test("a reviewer of a PR whose head origin lacks is refused, with no worktree made", async () => {
+    const { env, main, spawnSh } = checkout()
+    const r = await spawn(
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "9", "--sandbox"],
+      [],
+      env,
+      spawnSh,
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(
+      "git ls-remote origin refs/pull/9/head read no commit, so reviewer-x has no commit to start its worktree at",
+    )
+    expect(existsSync(treeOf(main, "review-9"))).toBe(false)
+  })
+
   test("a worker whose --in names a worktree starts there, with no worktree made, and writes it and its git entry", async () => {
     const { env, main, spawnSh } = checkout()
     const tree = treeOf(main, "pg-9-x")
