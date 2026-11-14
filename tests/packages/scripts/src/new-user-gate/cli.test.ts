@@ -24,6 +24,7 @@ import {
   readAfter,
   report,
   resultLine,
+  roomReadings,
   scriptsGroup,
   shotAfter,
   STEP_COUNT,
@@ -33,6 +34,7 @@ import {
   zshStartup,
 } from "../../../../../packages/scripts/src/new-user-gate/cli"
 import { stubs } from "../../../../../packages/scripts/src/new-user-gate/stubs"
+import { procDir } from "../../../../scripts/fixtures/proc"
 
 describe("the new-user gate's reads", () => {
   test("reads install.sh's Left for you lines, and none from a clean finish", () => {
@@ -370,5 +372,39 @@ describe("the gate's last line, which ship:merge reads (#1659)", () => {
       join(import.meta.dir, "../../../../../packages/scripts/src/new-user-gate/cli.ts"),
     ).text()
     expect(source.match(/\bawait check\((?!\))/g)?.length).toBe(STEP_COUNT)
+  })
+})
+
+// The wait for room reads the load and the cores as spawn.sh's load gate does: sysctl, else /proc's text, and a reading neither gives is null, never 0 or NaN, which waited for nothing (#2201).
+describe("the gate's room readings", () => {
+  const saved = process.env.PLAYGROUND_PROC
+  afterAll(() => {
+    process.env.PLAYGROUND_PROC = saved
+  })
+  const linux = (name: string) => ({
+    code: 255,
+    out: `sysctl: cannot stat /proc/sys/${name.replaceAll(".", "/")}: No such file or directory\n`,
+  })
+
+  test("macOS's sysctl gives the cores and max(load1, load5)", () => {
+    const mac = (name: string) => ({
+      code: 0,
+      out: name === "hw.ncpu" ? "15\n" : "{ 3.00 16.50 9.00 }\n",
+    })
+    expect(roomReadings(mac)).toEqual({ cores: 15, load: 16.5 })
+  })
+
+  test("Linux's /proc/stat and /proc/loadavg give them where sysctl does not", () => {
+    process.env.PLAYGROUND_PROC = procDir({ cores: 20, load1: 12.5, load5: 4 })
+    expect(roomReadings(linux)).toEqual({ cores: 20, load: 12.5 })
+  })
+
+  test.each([
+    ["sysctl exits non-zero", linux],
+    ["sysctl prints nothing", () => ({ code: 0, out: "" })],
+    ["sysctl prints no numbers", () => ({ code: 0, out: "{ x y z }\n" })],
+  ])("%s and /proc gives neither: both are null", (_, answer) => {
+    process.env.PLAYGROUND_PROC = procDir({}, ["loadavg", "stat"])
+    expect(roomReadings(answer)).toEqual({ cores: null, load: null })
   })
 })
