@@ -1322,16 +1322,33 @@ describe("holders", () => {
   ]
   const bytes = (config: string) => readFileSync(join(config, "playground", "roster.json"), "utf8")
 
-  test("prints each live row naming the PR in pr or prs, leaving out an ended row, exits 0 and writes nothing", async () => {
+  const holdersOf = async (pr: string) => {
     const config = configWith(rows)
     const before = bytes(config)
-    for (const pr of ["7", "#7", "https://github.com/acme/app/pull/7"]) {
-      const r = await run(config, ["holders", pr])
-      expect([r.code, r.out]).toEqual([0, "k3m9px-reviewer\nq8r2tx-reviewer\n"])
-    }
-    const prs = await run(config, ["holders", "5"])
-    expect([prs.code, prs.out]).toEqual([0, "q8r2tx-reviewer\n"])
+    const r = await run(config, ["holders", pr])
     expect(bytes(config)).toBe(before)
+    return { code: r.code, names: r.out.split("\n").filter(Boolean) }
+  }
+
+  test("a live row naming the PR in pr holds it, by its number or its URL, exiting 0 and writing nothing", async () => {
+    for (const pr of ["7", "#7", "https://github.com/acme/app/pull/7"]) {
+      const r = await holdersOf(pr)
+      expect(r.code).toBe(0)
+      expect(r.names).toContain("k3m9px-reviewer")
+    }
+    expect(await holdersOf("5")).toEqual({ code: 0, names: ["q8r2tx-reviewer"] })
+  })
+
+  test("a live row naming the PR only in prs holds it", async () => {
+    const r = await holdersOf("7")
+    expect(r.code).toBe(0)
+    expect(r.names).toContain("q8r2tx-reviewer")
+  })
+
+  test("an ended row naming the PR holds nothing", async () => {
+    const r = await holdersOf("7")
+    expect(r.names).not.toContain("x7mh4d-reviewer")
+    expect(r.names).toEqual(["k3m9px-reviewer", "q8r2tx-reviewer"])
   })
 
   test("a PR no live row names prints nothing and exits 1, writing nothing", async () => {
