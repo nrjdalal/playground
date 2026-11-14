@@ -24,7 +24,7 @@ When the stop at a conflict fired, run `git merge-tree --write-tree origin/canar
 The factory's sessions start and end as its work needs them; none of that waits on the owner (a request from outside the chain is the one exception, under [DISPATCH.md](DISPATCH.md)).
 Sessions that work together share a workspace as full-height columns ([SPAWN.md](SPAWN.md#layout)): the managers one (the dispatcher, the Planner, the Builder, Ops), and each worker its own, with its checkers and probes beside it.
 
-- **Workers** are spawned by the Builder, one per chore, and close with their checkers once their chore is done.
+- **Workers** are spawned by the Builder, one per chore, and close once their chore is done, their checkers by auto-end (below).
   A worker ends when its chore is done: its PR merged (or dropped with the Builder's ok), its branch pushed (`git push origin <branch>`), so its commits show on origin even with no PR,
   its probes cleaned up, and its final report sent, naming the pushed head.
   Its worktrees, their containers and its branches go when it ends ([SESSIONS.md](SESSIONS.md#end)'s cleanup), as its reviewer's and tester's do; one the cleanup keeps, named in its lead's line, the nightly clean (below) tries again once its PR is merged or closed, discarding what it holds then, or the lead removes it by hand from the main checkout with `playground rm --worktree <path>`.
@@ -33,6 +33,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   It takes only a folder directly under the main checkout's `.claude/worktrees/`, so a tree nested in another goes with its parent, which AGENTS.md's worktree rule prevents.
   The Builder then closes its workspace, which takes any split still open in it, and its slot returns to the pool.
   Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead.
+  A worker leaves its checkers to auto-end's beat and does not close them itself: a checker idle under 10 minutes after its worker ends stays open, and the first beat past 10 closes it.
   The Builder closes a session by hand only on a `Not ended` line, whose reason names what to fix first, and reassigns or closes a worker on a `Kept` line, whose last PR closed unmerged.
   The Builder may also end a worker mid-chore to drop or reassign the chore, recording why.
   A parked chore gets its branch pushed (`git push origin <branch>`) and a handoff note ([SESSIONS.md](SESSIONS.md#write-a-handoff)), `~/.playground/handoffs/<ID>.md`, and its worker closes, its final report naming the pushed head; the chore restarts later from the note, its branch and its PR.
