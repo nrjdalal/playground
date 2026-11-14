@@ -906,6 +906,17 @@ describe("switchKeys", () => {
     expect(keys(" Switch model?\n\n ❯ 1. Yes\n   2. No")).toBeNull()
     expect(keys(confirm("Switch model to Opus 9.9?", " ❯ 1. Yes", "   2. No"))).toBeNull()
     expect(keys(confirm("Switch to Opus 9.9?", " ❯ 1. Yes", "   2. No"))).toBeNull()
+    expect(
+      keys(
+        confirm(
+          "Read file sonnet/notes.md Do you want to proceed?",
+          " ❯ 1. Yes",
+          "   2. Yes, allow reading from sonnet/ during this session",
+          "   3. No",
+        ),
+      ),
+    ).toBeNull()
+    expect(keys(confirm("Sonnet 9.9?", " ❯ 1. Allow reading from sonnet/", "   2. No"))).toBeNull()
     expect(keys(confirm("Switch from Sonnet 9.9 to Opus 9.9?", " ❯ 1. Yes", "   2. No"))).toBeNull()
     expect(
       keys(
