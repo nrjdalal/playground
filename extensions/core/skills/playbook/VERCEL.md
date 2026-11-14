@@ -2,7 +2,8 @@
 
 A factory session's `vercel` call passes the no-raw-vercel guard first ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#no-raw-vercel)), which allows reads by name and refuses every other call.
 It runs `whoami`, `ls`, `inspect`, `logs`, help, the `ls` of `alias`, `dns`, `domains`, `integration`, `project` and `teams`, `env ls` without its values, `promote status`, `rollback status`, `rolling-release inspect`, a `vercel api` GET outside `/env`, and a preview deploy (`vercel deploy`, or `vercel ./<folder>`).
-A production move (a production deploy, a `redeploy` into production, a `promote`, `rollback`, alias change or rolling release step) passes for the Ops lead alone, since production ships from `main` through the release skill; every other call, `link` and `integration add` among them, is refused in the factory.
+A production move (a production deploy, a `redeploy` into production, a `promote`, `rollback`, alias change or rolling release step) passes for the Ops lead alone, since production ships from `main` through the release skill, whose step 4 deploys the hosted Yard with `bun run ship:yard <tag>`, a production move too.
+Every other call, `link` and `integration add` among them, is refused in the factory.
 
 Three traps one CLI deploy met (measured), each a step at the command it follows.
 

@@ -63,6 +63,7 @@
     "ship:approve-held": "bun packages/scripts/src/verify/prebuild.ts ship && bun --no-env-file packages/scripts/src/ship/approve-held.ts",
     "ship:freeze": "bun packages/scripts/src/verify/prebuild.ts pr-merge && bun --no-env-file packages/scripts/src/pr-merge/freeze-cli.ts",
     "ship:merge": "bun packages/scripts/src/verify/prebuild.ts pr-merge && bun --no-env-file packages/scripts/src/pr-merge/ship-merge.ts",
+    "ship:yard": "bun --no-env-file packages/scripts/src/ship/yard.ts",
     "start": "turbo run start",
     "test": "if [ -d tests ]; then env NODE_ENV=production SKIP_ENV_VALIDATION=true turbo run build --filter='./packages/*' && bun packages/scripts/src/env-keys.ts && bun packages/scripts/src/data-table-metrics.ts && NODE_ENV=test bun packages/scripts/src/test-sandbox.ts; fi",
     "test:e2e": "[ ! -d tests ] || E2E_API_URL=${E2E_API_URL:-http://localhost:4000} E2E_WEB_URL=${E2E_WEB_URL:-http://localhost:3000} bun run test:file e2e.test",
