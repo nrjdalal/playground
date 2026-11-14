@@ -1,8 +1,6 @@
-// AGENTS.md's Commits rule keeps a Co-authored-by trailer out of every commit: commit-msg runs this on the message file, which drops each such line, in any case, and says so, so the commit goes through on its first try; with `--push` pre-push refuses a pushed commit no remote holds yet whose message holds one, since a commit made with --no-verify skips commit-msg, and names the amend that drops it. The same push step refuses such a commit whose message, or a pushed branch whose name, holds a term from no-public-leak's list, by sha or branch and kind alone.
-import { existsSync } from "node:fs"
-
-import { listKindsIn } from "./trace-count/count"
-import { isPublicList, type PublicList, publicListPath } from "./trace-count/kinds"
+// AGENTS.md's Commits rule keeps a Co-authored-by trailer out of every commit: commit-msg runs this on the message file, which drops each such line, in any case, and says so, so the commit goes through on its first try; with `--push` pre-push refuses a pushed commit no remote holds yet whose message holds one, since a commit made with --no-verify skips commit-msg, and names the amend that drops it. The same push step refuses such a commit whose message, or a pushed ref whose name, holds a term from no-public-leak's list, by sha or ref and kind alone.
+import { listKindsIn, readList } from "./trace-count/count"
+import { type PublicList, publicListPath } from "./trace-count/kinds"
 
 const TRAILER = /^co-authored-by:/i
 
@@ -41,17 +39,7 @@ const newCommits = (locals: string[]): [string, string, string][] => {
     .map(([sha, subject, body]) => [sha!, subject!, body!])
 }
 
-// no-public-leak's list on this machine, or undefined with none, so a machine with no list checks nothing
-const readList = async (): Promise<PublicList | undefined> => {
-  const path = publicListPath()
-  if (!existsSync(path)) return undefined
-  const value: unknown = await Bun.file(path)
-    .json()
-    .catch(() => undefined)
-  return isPublicList(value) ? value : undefined
-}
-
-// Each list term the push carries, by the commit's sha or the branch and the kind alone, so the refusal never prints the term.
+// Each list term the push carries, by the commit's sha or the ref and the kind alone, so the refusal never prints the term.
 const listed = (
   refs: [string, string, string][],
   commits: [string, string, string][],
@@ -61,8 +49,8 @@ const listed = (
     listKindsIn(body, list).map((kind) => `${sha.slice(0, 9)}'s message holds a ${kind} term`),
   ),
   ...[...new Set(refs.flatMap(([local, , remote]) => [local, remote]))].flatMap((ref) =>
-    listKindsIn(ref.replace(/^refs\/heads\//, ""), list).map(
-      (kind) => `the pushed branch's name holds a ${kind} term`,
+    listKindsIn(ref.replace(/^refs\/(?:heads|tags)\//, ""), list).map(
+      (kind) => `the pushed ref's name holds a ${kind} term`,
     ),
   ),
 ]
@@ -81,16 +69,17 @@ if (import.meta.main) {
   }
   const refs = pushedRefs(await Bun.stdin.text())
   const commits = newCommits(refs.map(([, sha]) => sha))
-  const list = await readList()
-  const terms = list ? [...new Set(listed(refs, commits, list))] : []
+  const list = await readList(publicListPath())
+  if (typeof list === "string") console.error(`commit-trailer: ${list}`)
+  const terms = typeof list === "object" ? [...new Set(listed(refs, commits, list))] : []
   if (terms.length)
     console.error(
-      `commit-trailer: ${terms.join(", ")} from no-public-leak's list, which keeps it out of every public write: reword each message in plain words (\`git commit --amend\` for the newest) or push the branch under another name, then push again`,
+      `commit-trailer: ${terms.join(", ")} from no-public-leak's list, which keeps it out of every public write: reword each message in plain words (\`git commit --amend\` for the newest) or push the branch or tag under another name, then push again`,
     )
   const found = commits
     .filter(([, , body]) => dropTrailers(body) !== null)
     .map(([sha, subject]) => [sha, subject] as [string, string])
-  if (found.length === 0) process.exit(terms.length ? 1 : 0)
+  if (found.length === 0) process.exit(terms.length || typeof list === "string" ? 1 : 0)
   const oldest = found.at(-1)![0].slice(0, 9)
   const head = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe" }).stdout.toString()
   // the checked-out commit alone takes a plain amend

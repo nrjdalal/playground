@@ -43,6 +43,8 @@ jobs:
 
       # the list kinds over what this PR adds (each changed file, a new file's path, each commit message, the branch's name), the list from the TRACE_TERMS secret written to a data folder outside the checkout; the log names a place and a kind, never a term, and a run with no secret, a fork's PR among them, skips with a notice
       - name: List check
+        # the ship PR into main reads canary's squash commits, whose messages are earlier PRs' bodies already merged, so the check runs on a PR into canary alone
+        if: github.base_ref == 'canary'
         run: |
           if [ -z "$TRACE_TERMS" ]; then echo "::notice::no TRACE_TERMS secret, so the list check is skipped"; exit 0; fi
           mkdir -p "$PLAYGROUND_DATA_DIR/extensions/hooks"

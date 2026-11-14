@@ -645,7 +645,7 @@ test("the pre-push list check refuses a pushed commit message or branch name hol
     expect(push(clean)).toEqual({ code: 0, out: "" })
     const named = push(clean, "fix-qmarsh-page")
     expect(named.code).not.toBe(0)
-    expect(named.out).toContain("the pushed branch's name holds a handles term")
+    expect(named.out).toContain("the pushed ref's name holds a handles term")
     printsNoTerm(named.out)
     const term = commit("c.txt", "fix: thanks Quilla Marsh")
     const refused = push(term)
@@ -654,6 +654,11 @@ test("the pre-push list check refuses a pushed commit message or branch name hol
     printsNoTerm(refused.out)
     // a delete reads nothing, and with no list in the data folder the push passes
     expect(push(ZERO)).toEqual({ code: 0, out: "" })
+    // a list file that is not the list is refused by its path, as the commit step refuses it
+    writeFileSync(join(data, "extensions", "hooks", "no-public-leak.json"), "{")
+    const broken = push(clean)
+    expect(broken.code).not.toBe(0)
+    expect(broken.out).toContain("is not no-public-leak's list")
     rmSync(join(data, "extensions", "hooks", "no-public-leak.json"))
     expect(push(term)).toEqual({ code: 0, out: "" })
   } finally {

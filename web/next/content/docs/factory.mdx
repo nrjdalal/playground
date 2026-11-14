@@ -83,7 +83,7 @@ Its refusal names the kind of text and where it sat (a commit, the title, the bo
 `bun run trace-count` counts each of those kinds over the files git holds, plus issue numbers, the old session names and the old skill names, and fails when any count rises.
 It needs that guard's list: when the list is missing or one of its keys is empty, it stops and says how to add it, since those kinds would count nothing.
 Every commit runs `bun run trace-count --lists`, which counts the list's kinds alone, so a file holding a value on your machine's list fails the commit, and a machine with no list counts none.
-Every push checks each new commit's message and the branch's name against the same list, and each pull request's CI checks what it adds (its changed files, their paths, its commit messages and its branch's name) against the list kept as the `TRACE_TERMS` secret; each refusal names a place and a kind, never the value.
+Every push checks each new commit's message and the branch's name against the same list, and the CI of each pull request into `canary` checks what it adds (its changed files, their paths, its commit messages and its branch's name) against the list kept as the `TRACE_TERMS` secret; each refusal names a place and a kind, never the value.
 A made-up address counts as none: one on a domain kept for examples (`example.com`, `.test`, `.invalid`, `.localhost`) or the fixtures' `local.host`.
 So do a made-up issue number in a test or a fixture and a hex colour such as `#000`.
 So new comments, docs and tests are written in plain words, and the counts only fall.

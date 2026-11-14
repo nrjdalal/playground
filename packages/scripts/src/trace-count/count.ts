@@ -251,13 +251,19 @@ export async function list(path: string): Promise<{ list: PublicList } | { refus
   return { list: value }
 }
 
-// The commit's count of the list-fed kinds, from the list at path, which the sandboxed tree test cannot see: nothing with no list there (the runner box, a machine with no org), else the refusal when one of them is over counts.json; an empty key counts nothing, so a partial list still gates the kinds it holds.
-export async function listGate(root: string, path: string): Promise<string> {
-  if (!existsSync(path)) return ""
+// The list file at path for the list checks (commit, push, CI): undefined with none, so a machine with no list checks nothing; the refusal for a file that is not the list.
+export async function readList(path: string): Promise<PublicList | string | undefined> {
+  if (!existsSync(path)) return undefined
   const value: unknown = await Bun.file(path)
     .json()
     .catch(() => undefined)
-  if (!isPublicList(value)) return `trace-count: ${path} is not no-public-leak's list`
+  return isPublicList(value) ? value : `trace-count: ${path} is not no-public-leak's list`
+}
+
+// The commit's count of the list-fed kinds, from the list at path, which the sandboxed tree test cannot see: nothing with no list there (the runner box, a machine with no org), else the refusal when one of them is over counts.json; an empty key counts nothing, so a partial list still gates the kinds it holds.
+export async function listGate(root: string, path: string): Promise<string> {
+  const value = await readList(path)
+  if (value === undefined || typeof value === "string") return value ?? ""
   const files = await tree(root)
   const kept = (await Bun.file(KEPT).json()) as Kept[]
   const counted = count(files, value, UNSET_REPOS, kept)
@@ -284,11 +290,8 @@ export async function listSince(
   path: string,
   branch = "",
 ): Promise<string> {
-  if (!existsSync(path)) return ""
-  const value: unknown = await Bun.file(path)
-    .json()
-    .catch(() => undefined)
-  if (!isPublicList(value)) return `trace-count: ${path} is not no-public-leak's list`
+  const value = await readList(path)
+  if (value === undefined || typeof value === "string") return value ?? ""
   const merged = gitIn(root, ["merge-base", base, "HEAD"])
   if (merged.exitCode !== 0) return `trace-count: ${base} and HEAD have no merge-base`
   const from = merged.stdout.toString().trim()
