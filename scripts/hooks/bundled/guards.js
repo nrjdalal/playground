@@ -330,6 +330,7 @@ var FREES = new Set([`
 var tokens = 0;
 var freshToken = () => ++tokens;
 var BODIES = new Set(["do", "elif", "else", "then"]);
+var REPEAT_BODY = new Set(["do", "{"]);
 var MARKERS = new Set([...RESERVED, ...OPENS, ...CLOSES, ...BODIES]);
 function markers(words) {
   const out = [];
@@ -343,7 +344,7 @@ function markers(words) {
     } else if (MARKERS.has(w.value)) {
       out.push(w.value);
       k++;
-    } else if (w.value === "repeat" && words[k + 2]?.value === "do" && !words[k + 2].quoted) {
+    } else if (w.value === "repeat" && REPEAT_BODY.has(words[k + 2]?.value ?? "") && !words[k + 2].quoted) {
       k += 2;
     } else if (ASSIGN.test(w.value))
       k++;
@@ -1014,6 +1015,7 @@ function walk(lx, scope, nested, inherit) {
   const opens = [];
   let depth = 0;
   let loops = 0;
+  const counted = [];
   let after = "";
   const bodies = [];
   const heads = [];
@@ -1070,17 +1072,28 @@ function walk(lx, scope, nested, inherit) {
         heads.push(false);
       else if (each === "end" && heads.length > 0 && !loop)
         heads.pop();
-      if (loops > 0 || loop || head || each === "foreach")
+      const counting = each === "repeat" && reserved.includes("{");
+      if (loops > 0 || loop || head || each === "foreach" || counting)
         done.repeated = true;
       if (outer && !loop && reserved.some((w) => w === "while" || w === "until"))
         done.atLeastOnce = true;
       depth = Math.max(0, depth + opened - closed);
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0));
+      if (counting) {
+        counted.push(depth);
+        loops++;
+      }
+      while (counted.length > 0 && depth < counted[counted.length - 1]) {
+        counted.pop();
+        loops = Math.max(0, loops - 1);
+      }
       if (depth === 0 && FREES.has(op)) {
         lx.token = freshToken();
         lx.orRun = op === "||";
       }
       after = op;
+      if (counting)
+        opens.push(lx.commands.length);
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted)
           break;
@@ -1556,7 +1569,7 @@ function unwrap(state, inside, budget) {
     }
     if (COUNTED.has(wrapper))
       take();
-    if (wrapper === "repeat" && peek()?.value === "do" && !peek()?.quoted)
+    if (wrapper === "repeat" && REPEAT_BODY.has(peek()?.value ?? "") && !peek()?.quoted)
       take();
   }
   const first = take();

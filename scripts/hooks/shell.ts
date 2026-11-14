@@ -203,6 +203,8 @@ let tokens = 0
 const freshToken = () => ++tokens
 // The reserved words a body's own commands carry, which the shell may not run
 const BODIES = new Set(["do", "elif", "else", "then"])
+// The words that open zsh's `repeat N` body: a `do` up to its `done`, or a brace up to its own
+const REPEAT_BODY = new Set(["do", "{"])
 // Every reserved word the walk counts, each read in command position alone: `grep -q done` names a pattern, not a loop's end
 const MARKERS = new Set([...RESERVED, ...OPENS, ...CLOSES, ...BODIES])
 
@@ -218,8 +220,12 @@ function markers(words: Word[]): string[] {
     } else if (MARKERS.has(w.value)) {
       out.push(w.value)
       k++
-    } else if (w.value === "repeat" && words[k + 2]?.value === "do" && !words[k + 2].quoted) {
-      // zsh's `repeat N do … done` is a loop: its count is skipped so its do opens the body
+    } else if (
+      w.value === "repeat" &&
+      REPEAT_BODY.has(words[k + 2]?.value ?? "") &&
+      !words[k + 2].quoted
+    ) {
+      // zsh's `repeat N do … done` and `repeat N { … }` are loops: the count is skipped so the do or the brace opens the body
       k += 2
     } else if (ASSIGN.test(w.value)) k++
     else break
@@ -968,6 +974,8 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   // How many bodies the walk is inside, how many of them a loop runs, and the operator that joined the last command to this one, so a command the shell may not run is marked unsure and one it runs only on the command before it succeeding is marked chained.
   let depth = 0
   let loops = 0
+  // the depth each zsh `repeat N {` body sits at, a loop until its closing brace
+  const counted: number[] = []
   let after = ""
   // each body the walk is inside, true for one the shell may keep for a later call
   const bodies: boolean[] = []
@@ -1024,18 +1032,29 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       }
       if (each === "foreach") heads.push(false)
       else if (each === "end" && heads.length > 0 && !loop) heads.pop()
+      // zsh's `repeat N {` opens a loop's body that its closing brace ends (markers reads the brace)
+      const counting = each === "repeat" && reserved.includes("{")
       // every command between a loop's head and its `do` runs once for each pass: a while's or an until's condition, and the body of zsh's short loops, which have no `do`
-      if (loops > 0 || loop || head || each === "foreach") done.repeated = true
+      if (loops > 0 || loop || head || each === "foreach" || counting) done.repeated = true
       if (outer && !loop && reserved.some((w) => w === "while" || w === "until"))
         done.atLeastOnce = true
       depth = Math.max(0, depth + opened - closed)
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0))
+      if (counting) {
+        counted.push(depth)
+        loops++
+      }
+      while (counted.length > 0 && depth < counted[counted.length - 1]) {
+        counted.pop()
+        loops = Math.max(0, loops - 1)
+      }
       // a run ends only at an operator that runs the next command whatever this one did, and only outside every body: a `|` keeps the pipeline in the run, and entering a group, a body or a script keeps the run it was reached through
       if (depth === 0 && FREES.has(op)) {
         lx.token = freshToken()
         lx.orRun = op === "||"
       }
       after = op
+      if (counting) opens.push(lx.commands.length)
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted) break
         opens.push(lx.commands.length)
@@ -1567,8 +1586,8 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       } else break
     }
     if (COUNTED.has(wrapper)) take()
-    // zsh's `repeat N do … done` runs its body's first command after the do
-    if (wrapper === "repeat" && peek()?.value === "do" && !peek()?.quoted) take()
+    // zsh's `repeat N do … done` and `repeat N { … }` run their body's first command after the do or the brace
+    if (wrapper === "repeat" && REPEAT_BODY.has(peek()?.value ?? "") && !peek()?.quoted) take()
   }
   const first = take()
   return {
