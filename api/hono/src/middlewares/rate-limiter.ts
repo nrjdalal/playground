@@ -1,9 +1,9 @@
 import { findIp } from "@arcjet/ip"
 import { auth } from "@packages/auth"
 import { env } from "@packages/env/api-hono"
-import { hash } from "bun"
+import { hash, RedisClient } from "bun"
 import type { Context } from "hono"
-import { rateLimiter } from "hono-rate-limiter"
+import { MemoryStore, rateLimiter, RedisStore, type Store } from "hono-rate-limiter"
 import { createMiddleware } from "hono/factory"
 
 import { jsonError } from "@/lib/error"
@@ -30,12 +30,69 @@ interface RateLimiterConfig {
   getApiKey?: (c: Context) => string | undefined
 }
 
+const REDIS_MS = 2000
+
+// One Redis connection for every limiter when KV_URL is set (the hosted API's), so every instance counts the same: made on the first command, and closed on any failure so the next command connects afresh; with no offline queue and a 2 s cap a command to a Redis that stopped answering fails rather than waits.
+const redisSend = (url: string) => {
+  let client: RedisClient | null = null
+  return async (command: string, args: string[]): Promise<unknown> => {
+    try {
+      client ??= new RedisClient(url, {
+        autoReconnect: false,
+        connectionTimeout: REDIS_MS,
+        enableOfflineQueue: false,
+      })
+      if (!client.connected) await client.connect()
+      return await Promise.race([
+        client.send(command, args),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`no reply in ${REDIS_MS}ms`)), REDIS_MS).unref(),
+        ),
+      ])
+    } catch (error) {
+      client?.close()
+      client = null
+      throw error
+    }
+  }
+}
+const redis = env.KV_URL ? redisSend(env.KV_URL) : null
+
+// Each limiter's own counters in Redis, named by its place in the module's load order, which every instance of one build shares.
+let made = 0
+
+// Counts in Redis, falling back to this instance's own memory for a call Redis cannot answer, so a Redis outage limits each instance alone, as before Redis, and refuses nothing for it.
+function sharedStore(send: ReturnType<typeof redisSend>): Store {
+  const shared = new RedisStore({
+    client: {
+      decr: (key) => send("DECR", [key]) as Promise<number>,
+      del: (key) => send("DEL", [key]) as Promise<number>,
+      evalsha: (sha, keys, args) =>
+        send("EVALSHA", [sha, String(keys.length), ...keys, ...args.map(String)]) as never,
+      scriptLoad: (script) => send("SCRIPT", ["LOAD", script]) as Promise<string>,
+    },
+    prefix: `rate:${made++}:`,
+  })
+  const own = new MemoryStore()
+  return {
+    decrement: (key) => shared.decrement(key).catch(() => own.decrement(key)),
+    increment: (key) => shared.increment(key).catch(() => own.increment(key)),
+    init: (options) => {
+      shared.init(options)
+      own.init(options)
+    },
+    localKeys: false,
+    resetKey: (key) => shared.resetKey(key).catch(() => own.resetKey(key)),
+  }
+}
+
 export function createRateLimiter(config: RateLimiterConfig = {}) {
   const { limit = 60, windowMs = 60000, getUserId, getApiKey } = config
 
   return rateLimiter({
     limit,
     windowMs,
+    ...(redis && { store: sharedStore(redis) }),
     keyGenerator: (c) => generateRateLimitKey(c, getUserId, getApiKey),
     handler: (c) => jsonError(c, 429, "TOO_MANY_REQUESTS", "Too Many Requests"),
   })
