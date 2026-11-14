@@ -1495,36 +1495,33 @@ function delimiterOf(word: Word | undefined): string | undefined {
   return letter ? ESCAPES[letter] : undefined
 }
 
-// Reads one xargs option word that sets where its input comes from, how it splits, or its replace string, as GNU and BSD read it: -I, -J, -i and --replace, GNU's -a and --arg-file, -d and --delimiter, -0 and --null, a short one at the end of a cluster of flags (`-rJ`) and a long one by its prefix; true when it took the word and any value after it, false for every other option, which unwrap reads as before
-function xargsOption(xargs: NonNullable<Xargs>, w: Word, take: () => Word | undefined): boolean {
+// xargs' replace options as unwrap reads and takes them itself: -I, -J, -i and --replace, each leading its word
+const XARGS_REPLACE = /^(?:-[IiJ]|--replace)/
+
+// Records what one xargs option word sets beside unwrap's own reading, which still takes the word and forks as before, so the parse keeps every reading it made: GNU's -a and --arg-file (the input), -d, --delimiter, -0 and --null (its split), and a replace string XARGS_REPLACE misses, at the end of a cluster of flags (`-rJ`) or by a long prefix GNU takes (`--repl=`); its value attached or the next word
+function xargsOption(xargs: NonNullable<Xargs>, w: Word, next: Word | undefined): void {
+  if (XARGS_REPLACE.test(w.value)) return
   const long = /^--([^=]+)(=?)/.exec(w.value)
   let name: string | undefined
   let value: Word | undefined
   if (long) {
     const names = XARGS_LONG.filter((n) => n.startsWith(long[1]))
     name = names.includes(long[1]) ? long[1] : names.length === 1 ? names[0] : undefined
-    if (!name || !XARGS_READ.has(name)) return false
     if (long[2]) value = slice(w, long[0].length)
-  } else {
-    if (!w.value.startsWith("-")) return false
+  } else if (w.value.startsWith("-")) {
     let k = 1
     while (XARGS_FLAGS.includes(w.value[k] ?? "-")) k++
     if (w.value.slice(1, k).includes("0")) xargs.delimiters = [...(xargs.delimiters ?? []), "\0"]
     name = w.value[k]
-    if (!name || !"adIiJ".includes(name)) return false
     if (k + 1 < w.value.length) value = slice(w, k + 1)
   }
-  take()
   if (name === "i" || name === "replace") xargs.replace = value?.value || "{}"
   else if (name === "null") xargs.delimiters = [...(xargs.delimiters ?? []), "\0"]
-  else {
-    value ??= take()
-    if (name === "I" || name === "J") xargs.replace = value?.value
-    else if (name === "a" || name === "arg-file")
-      xargs.files = [...(xargs.files ?? []), ...(value ? [value] : [])]
-    else xargs.delimiters = [...(xargs.delimiters ?? []), delimiterOf(value)]
-  }
-  return true
+  else if (name === "I" || name === "J") xargs.replace = (value ?? next)?.value
+  else if (name === "a" || name === "arg-file")
+    xargs.files = [...(xargs.files ?? []), ...[value ?? next].filter((f) => f !== undefined)]
+  else if (name === "d" || name === "delimiter")
+    xargs.delimiters = [...(xargs.delimiters ?? []), delimiterOf(value ?? next)]
 }
 
 // Each word env -S splits out of its string, to the typed word in cmd.words that string came from, so xargsFilled fills the typed word; keyed on parse's own words alone, so no call's state is kept
@@ -1608,6 +1605,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
     const options = WRAPPERS.get(wrapper) as Options
     for (let w = peek(); w; w = peek()) {
       const v = w.value
+      if (wrapper === "xargs") xargsOption((state.xargs ??= {}), w, rest[rest.length - 2])
       if (ASSIGN.test(v)) assign(local, take() as Word)
       // env -S splits its one string into the words it runs
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -1626,8 +1624,12 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
         state.chdir = chdirOf(state, slice(w, v.startsWith("-C") ? 2 : "--chdir=".length))
         take()
-      } else if (wrapper === "xargs" && xargsOption((state.xargs ??= {}), w, take)) continue
-      else if (wrapper === "env" && v === "-") {
+      } else if (wrapper === "xargs" && XARGS_REPLACE.test(v)) {
+        const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
+        take()
+        state.xargs ??= {}
+        state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
+      } else if (wrapper === "env" && v === "-") {
         // a lone `-` is env's -i, and BSD env reads its options on after it
         take()
       } else if (v === "--") {

@@ -1494,46 +1494,38 @@ function delimiterOf(word) {
     return code < 256 ? String.fromCharCode(code) : undefined;
   return letter ? ESCAPES[letter] : undefined;
 }
-function xargsOption(xargs, w, take) {
+var XARGS_REPLACE = /^(?:-[IiJ]|--replace)/;
+function xargsOption(xargs, w, next) {
+  if (XARGS_REPLACE.test(w.value))
+    return;
   const long = /^--([^=]+)(=?)/.exec(w.value);
   let name;
   let value;
   if (long) {
     const names = XARGS_LONG.filter((n) => n.startsWith(long[1]));
     name = names.includes(long[1]) ? long[1] : names.length === 1 ? names[0] : undefined;
-    if (!name || !XARGS_READ.has(name))
-      return false;
     if (long[2])
       value = slice(w, long[0].length);
-  } else {
-    if (!w.value.startsWith("-"))
-      return false;
+  } else if (w.value.startsWith("-")) {
     let k = 1;
     while (XARGS_FLAGS.includes(w.value[k] ?? "-"))
       k++;
     if (w.value.slice(1, k).includes("0"))
       xargs.delimiters = [...xargs.delimiters ?? [], "\x00"];
     name = w.value[k];
-    if (!name || !"adIiJ".includes(name))
-      return false;
     if (k + 1 < w.value.length)
       value = slice(w, k + 1);
   }
-  take();
   if (name === "i" || name === "replace")
     xargs.replace = value?.value || "{}";
   else if (name === "null")
     xargs.delimiters = [...xargs.delimiters ?? [], "\x00"];
-  else {
-    value ??= take();
-    if (name === "I" || name === "J")
-      xargs.replace = value?.value;
-    else if (name === "a" || name === "arg-file")
-      xargs.files = [...xargs.files ?? [], ...value ? [value] : []];
-    else
-      xargs.delimiters = [...xargs.delimiters ?? [], delimiterOf(value)];
-  }
-  return true;
+  else if (name === "I" || name === "J")
+    xargs.replace = (value ?? next)?.value;
+  else if (name === "a" || name === "arg-file")
+    xargs.files = [...xargs.files ?? [], ...[value ?? next].filter((f) => f !== undefined)];
+  else if (name === "d" || name === "delimiter")
+    xargs.delimiters = [...xargs.delimiters ?? [], delimiterOf(value ?? next)];
 }
 var splitFrom = new WeakMap;
 var chdirOf = (state, word) => state.chdir && word ? { ...word, ...unknown("a second env -C") } : word;
@@ -1602,6 +1594,8 @@ function unwrap(state, inside, budget) {
     const options = WRAPPERS.get(wrapper);
     for (let w = peek();w; w = peek()) {
       const v = w.value;
+      if (wrapper === "xargs")
+        xargsOption(state.xargs ??= {}, w, rest[rest.length - 2]);
       if (ASSIGN.test(v))
         assign(local, take());
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -1621,9 +1615,12 @@ function unwrap(state, inside, budget) {
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
         state.chdir = chdirOf(state, slice(w, v.startsWith("-C") ? 2 : "--chdir=".length));
         take();
-      } else if (wrapper === "xargs" && xargsOption(state.xargs ??= {}, w, take))
-        continue;
-      else if (wrapper === "env" && v === "-") {
+      } else if (wrapper === "xargs" && XARGS_REPLACE.test(v)) {
+        const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
+        take();
+        state.xargs ??= {};
+        state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
+      } else if (wrapper === "env" && v === "-") {
         take();
       } else if (v === "--") {
         take();
