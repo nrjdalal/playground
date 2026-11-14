@@ -324,7 +324,7 @@ describe("run-slot hold", () => {
 
 describe("tick", () => {
   const MARKS = [
-    "acme@example.com: week 91% (resets Tue 14:00Z), rate 1.2%/h; today 10% spent",
+    "acme@example.com: week 91% (resets Tue 14:00Z), rate 1.2%/h over 1h; today 10% spent",
     "ALERT 90 acme@example.com: week at 91%, past 90%",
     "ALERT 98 pride@example.com: week at 98%, past 98%",
   ].join("\n")
