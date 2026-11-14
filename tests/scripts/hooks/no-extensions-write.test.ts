@@ -1901,6 +1901,10 @@ describe("a listed program's single-quoted text stays text on a line read whole"
       `sed -i '' '/item 5 (a, after item 4)/d; /item 5 note: carry it/d' ${WORK}/queue.md; echo "$(date -u +%FT%TZ) x" >> ${WORK}/notes.md`,
     ],
     [
+      "an in-place sed of a file through a variable the line holds",
+      `F=${WORK}/f; bun x.ts; sed -i '' '/x (a)/d' "$F"`,
+    ],
+    [
       "a browser wait --fn holding a >",
       `agent-browser wait --fn 'document.getElementsByTagName("p").length > 2'`,
     ],
@@ -1939,6 +1943,14 @@ describe("a listed program's single-quoted text stays text on a line read whole"
     ["an in-place sed w into the root", `bun x.ts; sed -i '' '/^# .*a/w ${LIST}' ${WORK}/f`],
     ["an in-place sed s///w into the root", `bun x.ts; sed -i '' 's/(a)/b/w ${LIST}' ${WORK}/f`],
     ["an in-place sed of a file in the root", `bun x.ts; sed -i '' '/(a) .*/d' ${LIST}`],
+    [
+      "an in-place sed of a quoted variable the hook does not hold",
+      `bun x.ts; sed -i '' '/x (a)/d' "$F"`,
+    ],
+    ["an in-place sed of a variable the hook does not hold", `bun x.ts; sed -i '' '/x (a)/d' $F`],
+    ["an in-place sed of a substitution", `bun x.ts; sed -i '' '/x (a)/d' $(echo f)`],
+    ["an in-place sed of a quoted substitution", `bun x.ts; sed -i '' '/x (a)/d' "$(echo f)"`],
+    ["an in-place sed of a backtick substitution", "bun x.ts; sed -i '' '/x (a)/d' `echo f`"],
     ["a sh -c writing the root", `bun x.ts; sh -c 'echo x > ${LIST}'`],
     [
       "a browser wait --fn whose output a shell runs",
