@@ -9,8 +9,7 @@ import {
   recordSent,
   USER,
 } from "../../../../../../extensions/slack/skills/slack/scripts/slack"
-import * as dmWatch from "../../../../../../extensions/slack/skills/slack/scripts/watch"
-import { watch } from "../../../../../../extensions/slack/skills/slack/scripts/watch"
+import { relay, watch } from "../../../../../../extensions/slack/skills/slack/scripts/watch"
 import { type Stuck } from "../../../../../../packages/scripts/src/ops-job/dispatcher"
 import { DM, fakeDm, OWNER } from "./fake-dm"
 import { fakeKeychain } from "./fake-keychain"
@@ -199,9 +198,7 @@ describe("watch.ts as the beat runs it", () => {
     process.env.CLAUDE_CONFIG_DIR = data
     process.env.PLAYGROUND_DATA_DIR = join(data, "playground")
     try {
-      const { relay } = dmWatch as { relay?: (to: string, text: string) => Promise<boolean> }
-      expect(relay).toBeFunction()
-      await relay?.("dispatcher", "made-up dm words")
+      await relay("dispatcher", "made-up dm words")
     } finally {
       if (before.config === undefined) delete process.env.CLAUDE_CONFIG_DIR
       else process.env.CLAUDE_CONFIG_DIR = before.config
