@@ -652,7 +652,7 @@ const linkHolder = (at: string, roots: Roots, places: string[]): string | null =
   return `${at} is linked into by ${links.sort().slice(0, 3).join(", ")}${more}: repoint or remove each link first`
 }
 
-// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit its base, origin/canary or another repo's default branch, holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree, on that repo's default branch (defaultBase), or on a branch the remote itself holds now (remoteHolding), or, given an archive folder, archiveUnlanded has archived each of its commits no remote holds.
+// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit its base, origin/canary or another repo's default branch, holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree, on that repo's default branch (defaultBase), or on a branch the remote itself holds now (remoteHolding), or, given an archive folder, archiveUnlanded has archived, with every remote read, each of its commits no remote holds.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   const repo = worktreeRepo(at, roots)
@@ -913,7 +913,7 @@ const bundleUnpushed = (
 
 const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 
-// The commits a worktree's HEAD holds that no remote holds now (unpushed), archived by git format-patch into <archive>/<repo>/<worktree>-<HEAD sha7>, written only when that folder is not there yet, then read back: its path and count once it holds a patch for each of those commits, by each patch's From line, a patch for any other commit allowed since a remote read since may list fewer, else why the worktree stays.
+// The commits a worktree's HEAD holds that no remote holds now (unpushed), archived, only while every remote reads, by git format-patch into <archive>/<repo>/<worktree>-<HEAD sha7>, written only when that folder is not there yet, then read back: its path and count once it holds a patch for each of those commits, by each patch's From line, a patch for any other commit allowed since a remote read since may list fewer, else why the worktree stays.
 export function archiveUnlanded(
   at: string,
   archive: string,
@@ -925,6 +925,10 @@ export function archiveUnlanded(
   const head = git("rev-parse", "HEAD")
   const listed = unpushed(at)
   if (!head.ok || listed === null) return { refused: "its commits could not be read" }
+  if (listed.unread.length)
+    return {
+      refused: `its remote ${listed.unread.join(", ")} could not be read, so its work stays until it answers`,
+    }
   const { shas } = listed
   if (!shas.length) return { refused: "it holds no commit past its remotes to archive" }
   const repo = dirname(dirname(dirname(at)))

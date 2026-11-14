@@ -9,6 +9,7 @@ import {
   isPublicList,
   type Kind,
   LIST_KEYS,
+  ownerWord,
   patterns,
   type PublicList,
   readPast,
@@ -67,6 +68,17 @@ const NOT_A_PERSON = [
   /^git@/,
   /@\d+\.\d+/,
 ]
+
+// The paths of the files whose text, as the ownerName kind reads it, holds the name, so a name's hits show before a commit counts them.
+export const holding = (files: File[], name: string, repos: Repos): string[] => {
+  const word = new RegExp(ownerWord(name))
+  return files
+    .filter(({ path, text }) => {
+      if ([...LEFT_OUT, ...LOCKFILES].some((re) => re.test(path))) return false
+      return word.test(readable(text, repos))
+    })
+    .map((file) => file.path)
+}
 
 // Each kind's hits in one file's text, past the live names, the read-past repositories and the kinds its path is left out of.
 const hitsIn = (path: string, text: string, kinds: [Kind, RegExp][], repos: Repos): Counts => {

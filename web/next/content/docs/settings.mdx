@@ -88,6 +88,7 @@ WhatsApp's card also holds its two numbers, **Device number** (`wa.device`, the 
 
 Privacy holds two settings: **Names you go by**, your first name and handles, lowercase and separated by commas (`owner.names`, which the trace count and the inbox gate read), and **Private archive repository**, as owner/name, whose links count as private history (`factory.archiveRepo`, which the trace count and the leak guard read).
 **Save** writes each field that holds a value, and each one you cleared, at your login's scope, so it also rebuilds a settings file a guard could not read; a value the setting refuses shows under its field.
+A name that is one word, such as a first name alone, also matches a made-up name or a common word, so after a Save each one shows under **Names you go by** with the tracked files the trace count finds it in; the save still goes through.
 Until both are set, the trace count counts nothing, and a session that runs it asks you, through its lead, to fill them in here.
 Before your settings are set up the section shows the same **Set up settings** step as Accounts.
 

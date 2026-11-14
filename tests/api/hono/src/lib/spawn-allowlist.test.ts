@@ -5,7 +5,7 @@ import { Glob } from "bun"
 
 const LIB = join(import.meta.dir, "../../../../../api/hono/src/lib")
 
-// Every file under api/hono/src/lib allowed to start a process, the 24 that spawn today: a new one fails here, and one that stops spawning leaves the list.
+// Every file under api/hono/src/lib allowed to start a process, the 25 that spawn today: a new one fails here, and one that stops spawning leaves the list.
 const ALLOWLIST = [
   "accounts/claude-setup.ts",
   "dashboard/agents.ts",
@@ -28,6 +28,7 @@ const ALLOWLIST = [
   "sessions/guard.ts",
   "setup/container.ts",
   "store/extensions.ts",
+  "store/one-word.ts",
   "system/probe.ts",
   "trash.ts",
   "yard/inbound.ts",
