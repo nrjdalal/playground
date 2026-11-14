@@ -218,6 +218,29 @@ describe("link-skills.sh links the playground command and its brief templates", 
     expect(result.stderr).toContain(`${bin}: a real file`)
     expect(readFileSync(bin, "utf8")).toBe("mine")
   })
+
+  // Linux has no Keychain, so there the secret store's `security` sits beside `playground`; a fake uname first on PATH stands in for Linux.
+  test("on Linux it also links ~/.bun/bin/security to the secret store", async () => {
+    const { home, repo } = setup()
+    const linuxBin = join(home, "linux-bin")
+    mkdirSync(linuxBin)
+    writeFileSync(
+      join(linuxBin, "uname"),
+      '#!/bin/bash\n[ "$1" = -s ] && echo Linux || exec /usr/bin/uname "$@"\n',
+    )
+    chmodSync(join(linuxBin, "uname"), 0o755)
+    const proc = Bun.spawn(["bash", join(repo, "scripts", "link-skills.sh")], {
+      cwd: repo,
+      env: { ...isolatedEnv(home), PATH: `${linuxBin}:${fakeBin}:${process.env.PATH}` },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    expect(await proc.exited).toBe(0)
+    expect(readdirSync(join(home, ".bun", "bin")).sort()).toEqual(["playground", "security"])
+    expect(readlinkSync(join(home, ".bun", "bin", "security"))).toBe(
+      join(repo, "packages", "scripts", "src", "security", "cli.ts"),
+    )
+  })
 })
 
 // Why rerere goes off: scripts/README.md, link-skills.sh and rerere.
