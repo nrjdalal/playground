@@ -1936,9 +1936,16 @@ const tildeSign = (name: string, dir: Word | undefined, env: Env): string | unde
     : undefined
 
 // The one folder a cd names, taken as the shell's own wherever the reader reads it: `Env.cwd`'s own rule, which every hook read before the proven folder arrived and a hook outside `places` reads still.
-async function cdTarget(name: string, args: Word[], env: Env): Promise<string | undefined> {
-  const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
-  if (!dir) return homedir()
+async function cdTarget(
+  name: string,
+  cmd: Command,
+  args: Word[],
+  env: Env,
+): Promise<string | undefined> {
+  const typedDir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
+  if (!typedDir) return homedir()
+  // a steady variable holding a literal absolute path reads as that path typed (landsHeld), so a hook that reads `cwd` alone judges the folder it lands in
+  const dir = landsHeld(typedDir, cmd, env) ?? typedDir
   const lexical = dir.value === "-" ? undefined : pathOf(dir, env)
   const typed = await folder(
     lexical && physicalCd(args) ? kernelPath(dir, env.cwd, lexical) : lexical,
@@ -2040,7 +2047,8 @@ function tildeMove(
 async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Promise<void> {
   // `cwd` moves by the reading every hook had before the proven folder arrived, so a hook that reads it alone keeps its verdicts; it is read first, since it resolves a relative target against the folder this cd leaves
   const left = env.cwd
-  env.cwd = name === "popd" || cmd.detached ? undefined : await cdTarget(name, parsed.args, env)
+  env.cwd =
+    name === "popd" || cmd.detached ? undefined : await cdTarget(name, cmd, parsed.args, env)
   if (env.old) env.old = name === "popd" ? {} : { dir: env.cwd === undefined ? undefined : left }
   // a word's ~- names a folder only after a cd the reader is sure of, set below
   if (env.old) env.oldFrom = []
