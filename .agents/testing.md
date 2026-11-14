@@ -55,6 +55,7 @@ Any other red in the pass is a real clock mix: fix it so the code takes one cloc
 
 ## Traps
 
+Write a run's output to a log file, then grep the log (`bun run test:file <paths> > <scratch>/run.log 2>&1`, then `grep -E "pass|fail" <scratch>/run.log`), since the run keeps its own exit status that way, and the `no-false-green` hook refuses a test run piped into `tail` or any other command ([scripts/hooks/README.md](../scripts/hooks/README.md#no-false-green)).
 Commit before a red-first swap, so the file's edits sit in a commit, and restore it with `git checkout HEAD -- <file>`, which brings back that commit, where `git checkout -- <file>` brings back the index, which holds the swap once it is staged: on 1 Nov a worker's restore after a red-first swap took the file's uncommitted edits with it, and the work was redone.
 A chain stops when that commit fails (`git commit ... || exit 1`), so the swap never runs over uncommitted edits: on 7 Nov trace-count refused a chain's commit, the chain went on to its swap, and the restore wiped the fix, re-applied from a patch.
 A red commit for a new module adds a stub of it, its exports typed and returning the wrong value or throwing, so the pre-commit check-types passes and the test fails on behaviour, not on a missing import.
