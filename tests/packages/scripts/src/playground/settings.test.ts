@@ -18,7 +18,7 @@ const cli = (checkout?: string) => {
   const run = async (words: string[]) => {
     const out: string[] = []
     const err: string[] = []
-    const io: Io & { checkout?: string } = {
+    const io: Io = {
       checkout,
       data,
       out: (l) => out.push(l),
