@@ -100,7 +100,7 @@ case "$2" in
   *) exit 1 ;;
 esac`,
 )
-// The CPU read, top -l 2 -n 0, which run-slot's gauges take and spawn.sh does not: each call logged to top.calls, idle at FAKE_CPU_IDLE (0 by default).
+// The CPU read, top -l 2 -n 0, which run-slot's gauges and spawn.sh's load gate for a manager take: each call logged to top.calls, idle at FAKE_CPU_IDLE (0 by default).
 fake(
   "top",
   `echo "$*" >> "$HOME/top.calls"
