@@ -46,6 +46,14 @@ export const fake = (name: string, body: string) => {
   chmodSync(join(bin, name), 0o755)
 }
 fake("cmux", `printf '%s\\n' "$@" > "$HOME/cmux.args"`)
+// macOS's getconf naming the user's temp folder, a folder of the suite's own, so no checkout a test makes sits under the temp folder a sandbox may write; under LINUX_GETCONF or FAKE_LINUX it is Linux's, which has no such name.
+export const userTemp = join(scratch, "user-temp")
+fake(
+  "getconf",
+  `[ -n "$LINUX_GETCONF$FAKE_LINUX" ] && { echo "getconf: Unrecognized variable $1" >&2; exit 1; }
+[ "$1" = DARWIN_USER_TEMP_DIR ] && { echo ${userTemp}/; exit 0; }
+exec /usr/bin/getconf "$@"`,
+)
 fake(
   "ps",
   `[ -n "$FAKE_PS_BROKEN" ] && exit 1

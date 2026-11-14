@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-import { FACTORY_SETTINGS, launchAfterRm, root, spawn } from "./spawn-fake"
+import { FACTORY_SETTINGS, launchAfterRm, root, spawn, userTemp } from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them; one took 19.9s on the loaded runner box, so each gets twice that.
 setDefaultTimeout(40_000)
@@ -13,10 +13,7 @@ const main = dirname(
     .stdout.toString()
     .trim(),
 )
-// macOS's user temp folder, or /tmp on Linux, whose getconf has no such name
-const temp = Bun.spawnSync(["getconf", "DARWIN_USER_TEMP_DIR"]).stdout.toString().trim() || "/tmp"
-
-const sandboxOf = (home: string, data = join(home, ".playground")) => ({
+const sandboxOf = (home: string, data = join(home, ".playground"), temp = userTemp) => ({
   allowUnsandboxedCommands: false,
   enabled: true,
   enableWeakerNetworkIsolation: true,
@@ -29,7 +26,7 @@ const sandboxOf = (home: string, data = join(home, ".playground")) => ({
       join(home, ".bun", "install", "cache"),
       join(home, ".cache", "turbo"),
       join(home, ".portless"),
-      ...(temp ? [temp.replace(/\/$/, "")] : []),
+      temp,
     ].sort(),
     denyWrite: expect.any(Array),
   },
@@ -65,6 +62,14 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
       sandbox: sandboxOf(r.home),
     })
     expect(existsSync(settingsOf(r, "factory-settings-400k.json"))).toBe(false)
+  })
+
+  test("on Linux, whose getconf has no user temp folder, the probe may write /tmp, the temp folder its launch sets", async () => {
+    const r = await spawn(["probe", "probe-x", "ops", "p.md"], [], { LINUX_GETCONF: "1" })
+    expect(r.code, r.err).toBe(0)
+    expect(builtOf(r, "factory-settings-sandbox-400k.json").sandbox).toEqual(
+      sandboxOf(r.home, undefined, "/tmp"),
+    )
   })
 
   test("a probe whose folder is the main checkout can write no entry of it, .git and .claude/worktrees included", async () => {
