@@ -1745,6 +1745,12 @@ function change(cmd, env) {
         setVar(env.vars, key, CHANGED);
     return;
   }
+  const element = (first?.source ?? first?.value ?? "").match(SUBSCRIPTED)?.[1];
+  if (element) {
+    if (env.vars.has(element))
+      setVar(env.vars, element, CHANGED);
+    return;
+  }
   const options = words.filter((w) => /^[-+]./.test(w) && w !== "--");
   const prints = PRINTS.has(name);
   const vNames = prints ? words.flatMap((w, k) => /^-[^-\s]*v/.test(w) ? [w.slice(w.indexOf("v") + 1), words[k + 1] ?? ""] : []) : [];
@@ -1752,7 +1758,7 @@ function change(cmd, env) {
   const all = RUNS_TEXT.has(name) && (name !== "eval" || args.some(unreadWord)) || NAME_SETTERS.has(name) && nameWords.some(marked) || name === "unset" && options.some((w) => w.includes("m"));
   const read = name === "read" ? binds(cmd) : [];
   const names = all ? [...env.vars.keys()] : name === "unset" ? options.some((w) => w.includes("f")) ? [] : words : name === "read" ? read.length > 0 ? read : ["REPLY"] : prints ? printsText(words) ? [] : vNames : DECLARES.has(name) ? words.filter((w) => options.length > 0 || !ASSIGN.test(w) && name !== "export" && name !== "readonly") : name === "set" ? words.flatMap((w, k) => /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : []) : NAME_SETTERS.has(name) && name !== "getopts" ? words.flatMap((w) => w.match(/[A-Za-z_]\w*/g) ?? []) : [];
-  for (const key of names.map((w) => w.split("=")[0])) {
+  for (const key of names.map((w) => w.split("=")[0].replace(/\[[\s\S]*$/, ""))) {
     if (!NAME.test(key))
       continue;
     if (env.vars.has(key) || name === "read" || prints)
@@ -2021,6 +2027,7 @@ var vanishingParts = (source) => {
 };
 var READ_VALUES = new Set(["d", "i", "n", "N", "p", "t", "u"]);
 var NAME = /^[A-Za-z_]\w*$/;
+var SUBSCRIPTED = /^([A-Za-z_]\w*)(?:\[[^\]]*\]\+?|\+)=/;
 function binds({ words }) {
   let at = 0;
   while (at < words.length && (!words[at].quoted && RESERVED.has(words[at].value) || ASSIGN.test(words[at].value)))

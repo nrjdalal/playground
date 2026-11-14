@@ -1792,6 +1792,12 @@ function change(cmd: Command, env: Env): void {
     for (const key of names) if (env.vars.has(key)) setVar(env.vars, key, CHANGED)
     return
   }
+  // an element's assignment or an append (`A[1]=x`, `A[1]+=x`, zsh's `A[1]=()`, `A+=(x)`) reads as a program word, and changes its array
+  const element = (first?.source ?? first?.value ?? "").match(SUBSCRIPTED)?.[1]
+  if (element) {
+    if (env.vars.has(element)) setVar(env.vars, element, CHANGED)
+    return
+  }
   const options = words.filter((w) => /^[-+]./.test(w) && w !== "--")
   const prints = PRINTS.has(name)
   // print and printf name one only by a v in an option cluster (`-v N`, `-vN`, `-rv N`), as steadyNames reads them
@@ -1833,7 +1839,8 @@ function change(cmd: Command, env: Env): void {
               : NAME_SETTERS.has(name) && name !== "getopts"
                 ? words.flatMap((w) => w.match(/[A-Za-z_]\w*/g) ?? [])
                 : []
-  for (const key of names.map((w) => w.split("=")[0])) {
+  // a subscripted name (`unset 'A[0]'`, `read 'A[1]'`) changes its array
+  for (const key of names.map((w) => w.split("=")[0].replace(/\[[\s\S]*$/, ""))) {
     if (!NAME.test(key)) continue
     // a name a read or a v option sets is set, maybe empty; one any other builtin names is changed only where the line holds it, since an unset one already reads as no word
     if (env.vars.has(key) || name === "read" || prints) setVar(env.vars, key, CHANGED)
@@ -2144,6 +2151,8 @@ const vanishingParts = (source: string): boolean => {
 // read's options that take a value, which binds no name (bash manual, Bourne Shell Builtins and Bash Builtins: read)
 const READ_VALUES = new Set(["d", "i", "n", "N", "p", "t", "u"])
 const NAME = /^[A-Za-z_]\w*$/
+// An array element's assignment or an append as written, its name captured: `A[1]=x`, `A[$k]+=x`, zsh's `A[1]=()`, `A+=(x)`
+const SUBSCRIPTED = /^([A-Za-z_]\w*)(?:\[[^\]]*\]\+?|\+)=/
 
 // The names one command gives a value without an `=` (bind reads them), each at its builtin's binding place as the bash manual gives it: `for NAME in`, `select NAME in`, `read [options] NAME…` and its `-a NAME`, `getopts OPTSTRING NAME` and `printf -v NAME`; a declaration builtin gives none, its `=` part read as an assignment
 function binds({ words }: Command): string[] {
