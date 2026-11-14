@@ -14,6 +14,8 @@ import {
   ranIn,
   runnerReadings,
   runnerFolders,
+  runnerTarget,
+  STARTED_RUNNERS,
   toolName,
   turboWords,
   unreadFolder,
@@ -347,7 +349,11 @@ function heavy(
       }
     if (packagedTools(args).includes("next") && nextBuild(values))
       return { also: runnerFolders(name, args, env, []), dir: env.cwd, what: `${name} next build` }
-    return name === "bunx" ? heavy("bun", [X, ...args], env) : undefined
+    if (name === "bunx") return heavy("bun", [X, ...args], env)
+    // a runner npx starts is read as the shell would read it, as bun x's program is below
+    const at = runnerTarget(args)
+    const started = toolName(args[at]?.value)
+    return STARTED_RUNNERS.has(started) ? heavy(started, args.slice(at + 1), env) : undefined
   }
   if (name !== "bun") return
   const { at, chained, cwd, filtered, sub, words } = bunCall(args, env)

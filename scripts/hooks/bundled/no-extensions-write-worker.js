@@ -9144,13 +9144,14 @@ var RUNNER_TAKES = new Set([
   "-p"
 ]);
 var BUN_SPLITS = new Set(["--cwd", "--filter", "-F"]);
+var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
 var OPTION_READINGS = 16;
 var UNREAD_CWD = {
   quoted: false,
   ...unknown2("a runner's option past the readings the hook makes")
 };
 function runnerReadings(name, args) {
-  if (name !== "bun" && name !== "bunx" && name !== "npx")
+  if (!STARTED_RUNNERS.has(name))
     return [args];
   const out = [];
   const walk = (from, head) => {
@@ -9170,7 +9171,12 @@ function runnerReadings(name, args) {
         walk(k + 2, [...head, { ...word, value: `${v}=${next.value}` }]);
       head = [...head, word];
     }
-    out.push([...head, ...args.slice(k)]);
+    const started = toolName(args[k]?.value);
+    if (!STARTED_RUNNERS.has(started))
+      out.push([...head, ...args.slice(k)]);
+    else
+      for (const sub of runnerReadings(started, args.slice(k + 1)))
+        out.push([...head, args[k], ...sub]);
   };
   walk(0, []);
   return out.length > OPTION_READINGS ? [
@@ -9933,7 +9939,7 @@ function isCli(word, dirs) {
   const cli = (sep2 + CLI).toLowerCase();
   return paths.some((path) => path === undefined ? /^cli(?:\.ts)?$/.test(program(word.value)) : [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
 }
-var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
+var STARTED_RUNNERS2 = new Set(["bun", "bunx", "npx"]);
 function runnerDirs(name, args, env) {
   return runnerReadings(name, args).flatMap((reading) => reading[1] === UNREAD_CWD ? [undefined] : readingDirs(name, reading, env));
 }
@@ -9955,7 +9961,7 @@ function startedDirs(words, env) {
     return [];
   const { args, chdir, name } = parse3({ redirects: [], scope: 0, words });
   const tool = toolName(name);
-  if (!STARTED_RUNNERS.has(tool))
+  if (!STARTED_RUNNERS2.has(tool))
     return [];
   return runnerDirs(tool, args, chdir ? { ...env, cwd: pathOf(chdir, env) } : env);
 }
@@ -9968,7 +9974,7 @@ function cliCalls(parsed, env) {
   for (const [at, word] of words.entries()) {
     const tool = toolName(word.value);
     const bases = [...new Set(dirs)];
-    if (at > 0 && STARTED_RUNNERS.has(tool))
+    if (at > 0 && STARTED_RUNNERS2.has(tool))
       for (const here of bases.length > 16 ? [undefined] : bases)
         dirs.push(...runnerDirs(tool, words.slice(at + 1), { ...env, cwd: here }));
     if (word.value === "-execdir" || word.value === "-okdir")
@@ -10735,7 +10741,7 @@ async function inspect(raw, environment, unknown = false) {
     const shownEval = evaluated && masked !== undefined ? { ...evaluated, value: masked } : undefined;
     const own = (word) => word === evaluated && shownEval ? shownEval : word;
     const shownText = new Set([...wholeText].map(own));
-    const started = STARTED_RUNNERS.has(name) ? places(env).flatMap((here) => runnerDirs(name, args, here)) : [];
+    const started = STARTED_RUNNERS2.has(name) ? places(env).flatMap((here) => runnerDirs(name, args, here)) : [];
     const ranIn = started.filter((dir) => dir !== undefined);
     const textEnv = started.length === 0 ? env : {
       ...env,

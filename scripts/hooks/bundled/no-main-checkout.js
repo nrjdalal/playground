@@ -7823,13 +7823,14 @@ function runnerFolders(name, args, env, tool) {
   return xCwd ? [...folders, xCwd.dir] : folders;
 }
 var BUN_SPLITS = new Set(["--cwd", "--filter", "-F"]);
+var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
 var OPTION_READINGS = 16;
 var UNREAD_CWD = {
   quoted: false,
   ...unknown("a runner's option past the readings the hook makes")
 };
 function runnerReadings(name, args) {
-  if (name !== "bun" && name !== "bunx" && name !== "npx")
+  if (!STARTED_RUNNERS.has(name))
     return [args];
   const out = [];
   const walk = (from, head) => {
@@ -7849,7 +7850,12 @@ function runnerReadings(name, args) {
         walk(k + 2, [...head, { ...word, value: `${v}=${next.value}` }]);
       head = [...head, word];
     }
-    out.push([...head, ...args.slice(k)]);
+    const started = toolName(args[k]?.value);
+    if (!STARTED_RUNNERS.has(started))
+      out.push([...head, ...args.slice(k)]);
+    else
+      for (const sub of runnerReadings(started, args.slice(k + 1)))
+        out.push([...head, args[k], ...sub]);
   };
   walk(0, []);
   return out.length > OPTION_READINGS ? [
@@ -7895,6 +7901,11 @@ function runs(name, args, local, env) {
     const tool = [toolName(args[runnerTarget(args)]?.value), ...packagedTools(args)].find((t) => TOOLS.has(t));
     if (tool)
       return { cwd: cwdFlag(args, env), what: `${name} ${tool}` };
+    const at = runnerTarget(args);
+    const started = toolName(args[at]?.value);
+    const ran = STARTED_RUNNERS.has(started) && runs(started, args.slice(at + 1), local, env);
+    if (ran)
+      return { ...ran, what: `${name} ${ran.what}` };
   }
   if (name === "git") {
     const { also, cwd, rest, sub } = gitCall(args, env, local);
@@ -8192,6 +8203,7 @@ if (import.meta.main) {
 export {
   FILE_TOOLS,
   RUNNER_TAKES,
+  STARTED_RUNNERS,
   UNREAD_CWD,
   X,
   bunCall,

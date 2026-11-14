@@ -450,15 +450,16 @@ export function runnerFolders(
 
 // bun's options whose value bunCall reads itself, and the most readings runnerReadings makes of one call, past which the call as typed and a --cwd the hook cannot read (UNREAD_CWD) join them, so the call's folder reads as unread too
 const BUN_SPLITS = new Set(["--cwd", "--filter", "-F"])
+export const STARTED_RUNNERS = new Set(["bun", "bunx", "npx"])
 const OPTION_READINGS = 16
 export const UNREAD_CWD: Word = {
   quoted: false,
   ...unknown("a runner's option past the readings the hook makes"),
 }
 
-// The readings of a bun, bunx or npx call's words: as typed, and for each option before the word it runs that no list names, written without = and followed by a word (`--env-file /tmp/e`, `-w pkg`), one more that takes that word as its value, as `--env-file=/tmp/e`, so a value the reader would take for the program is judged as the option's too; any other program's words read as typed alone
+// The readings of a bun, bunx or npx call's words: as typed, and for each option before the word it runs that no list names, written without = and followed by a word (`--env-file /tmp/e`, `-w pkg`), one more that takes that word as its value, as `--env-file=/tmp/e`, so a value the reader would take for the program is judged as the option's too, and a runner it starts read by its own readings; any other program's words read as typed alone
 export function runnerReadings(name: string, args: Word[]): Word[][] {
-  if (name !== "bun" && name !== "bunx" && name !== "npx") return [args]
+  if (!STARTED_RUNNERS.has(name)) return [args]
   const out: Word[][] = []
   const walk = (from: number, head: Word[]): void => {
     let k = from
@@ -476,7 +477,11 @@ export function runnerReadings(name: string, args: Word[]): Word[][] {
         walk(k + 2, [...head, { ...word, value: `${v}=${next.value}` }])
       head = [...head, word]
     }
-    out.push([...head, ...args.slice(k)])
+    const started = toolName(args[k]?.value)
+    if (!STARTED_RUNNERS.has(started)) out.push([...head, ...args.slice(k)])
+    else
+      for (const sub of runnerReadings(started, args.slice(k + 1)))
+        out.push([...head, args[k], ...sub])
   }
   walk(0, [])
   return out.length > OPTION_READINGS
@@ -548,6 +553,11 @@ function runs(
       TOOLS.has(t),
     )
     if (tool) return { cwd: cwdFlag(args, env), what: `${name} ${tool}` }
+    // a runner npx starts is read as the shell would read it, as bun x's program is below
+    const at = runnerTarget(args)
+    const started = toolName(args[at]?.value)
+    const ran = STARTED_RUNNERS.has(started) && runs(started, args.slice(at + 1), local, env)
+    if (ran) return { ...ran, what: `${name} ${ran.what}` }
   }
   if (name === "git") {
     const { also, cwd, rest, sub } = gitCall(args, env, local)

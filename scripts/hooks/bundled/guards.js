@@ -12679,13 +12679,14 @@ function runnerFolders(name, args, env, tool) {
   return xCwd ? [...folders, xCwd.dir] : folders;
 }
 var BUN_SPLITS = new Set(["--cwd", "--filter", "-F"]);
+var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
 var OPTION_READINGS = 16;
 var UNREAD_CWD = {
   quoted: false,
   ...unknown("a runner's option past the readings the hook makes")
 };
 function runnerReadings(name, args) {
-  if (name !== "bun" && name !== "bunx" && name !== "npx")
+  if (!STARTED_RUNNERS.has(name))
     return [args];
   const out = [];
   const walk = (from, head) => {
@@ -12705,7 +12706,12 @@ function runnerReadings(name, args) {
         walk(k + 2, [...head, { ...word, value: `${v}=${next.value}` }]);
       head = [...head, word];
     }
-    out.push([...head, ...args.slice(k)]);
+    const started = toolName(args[k]?.value);
+    if (!STARTED_RUNNERS.has(started))
+      out.push([...head, ...args.slice(k)]);
+    else
+      for (const sub of runnerReadings(started, args.slice(k + 1)))
+        out.push([...head, args[k], ...sub]);
   };
   walk(0, []);
   return out.length > OPTION_READINGS ? [
@@ -12751,6 +12757,11 @@ function runs(name, args, local, env) {
     const tool = [toolName(args[runnerTarget(args)]?.value), ...packagedTools(args)].find((t) => TOOLS.has(t));
     if (tool)
       return { cwd: cwdFlag(args, env), what: `${name} ${tool}` };
+    const at = runnerTarget(args);
+    const started = toolName(args[at]?.value);
+    const ran = STARTED_RUNNERS.has(started) && runs(started, args.slice(at + 1), local, env);
+    if (ran)
+      return { ...ran, what: `${name} ${ran.what}` };
   }
   if (name === "git") {
     const { also, cwd, rest, sub } = gitCall(args, env, local);
@@ -13154,7 +13165,7 @@ var GUARD_KEYS = new Set([
 ]);
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
-var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
+var STARTED_RUNNERS2 = new Set(["bun", "bunx", "npx"]);
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];
 var SCORE_AS_OTHER = `playground ext score on a line that clears or sets ${IDENTITY.join(", ")}, which reads as another author than the calling session`;
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
@@ -17702,7 +17713,11 @@ function heavy2(name, args, env) {
       };
     if (packagedTools(args).includes("next") && nextBuild(values))
       return { also: runnerFolders(name, args, env, []), dir: env.cwd, what: `${name} next build` };
-    return name === "bunx" ? heavy2("bun", [X, ...args], env) : undefined;
+    if (name === "bunx")
+      return heavy2("bun", [X, ...args], env);
+    const at = runnerTarget(args);
+    const started = toolName(args[at]?.value);
+    return STARTED_RUNNERS.has(started) ? heavy2(started, args.slice(at + 1), env) : undefined;
   }
   if (name !== "bun")
     return;

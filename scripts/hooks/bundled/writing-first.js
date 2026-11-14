@@ -7148,6 +7148,7 @@ var RUNNER_TAKES = new Set([
   "-p"
 ]);
 var BUN_SPLITS = new Set(["--cwd", "--filter", "-F"]);
+var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
 var UNREAD_CWD = {
   quoted: false,
   ...unknown("a runner's option past the readings the hook makes")
