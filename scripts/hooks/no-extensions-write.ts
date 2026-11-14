@@ -1140,9 +1140,27 @@ const SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/
 // a bare -i's suffix word: empty or a dot and letters, so a GNU sed, which reads that word as its script, reads it as no command or none it knows
 const SED_SUFFIX = /^(?:\.[\w.~-]*)?$/
 const SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
-const SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}${SED_TEXT}[gpI0-9]*)[ \t]*`
+const SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}(${SED_TEXT})[gpI0-9]*)[ \t]*`
 // an in-place sed's script read whole by its allowlist: line, $ or /regex/ addresses and their ranges, then d, p, or s/// with flags from g, p, I and digits; every other command and flag (w, W, r, R, e, s///w, s///e) is off it
 const SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`)
+// one item of an in-place sed's script and its separator, read in turn from where the last ended
+const SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y")
+// The text each s/// of an in-place sed's script writes, as sed reads it: a backslash dropped (`\/` reads as /, `\n` as a line break) and the matched text (&, \1 to \9) read as a *, since it can be anything; the whole script read so when its items do not read in turn
+function sedWrites(script: string): string[] {
+  const read = (text: string) =>
+    text.replace(/\\(.)|&/gs, (m, c?: string) =>
+      m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? "\n" : (c ?? m),
+    )
+  const writes: string[] = []
+  SED_EDIT_STEP.lastIndex = 0
+  while (SED_EDIT_STEP.lastIndex < script.length) {
+    const at = SED_EDIT_STEP.lastIndex
+    const item = SED_EDIT_STEP.exec(script)
+    if (!item || SED_EDIT_STEP.lastIndex === at) return [read(script)]
+    if (item[1]) writes.push(read(item[1].slice(0, -1)))
+  }
+  return writes
+}
 
 // The scripts of a sed call that edits its files in place and writes nothing else, or undefined, its argv read as macOS sed reads it: sed as its own program (ownProgram) with no variable set in the call, an in-place option (SED_IN_PLACE) whose bare form takes the next word as its suffix (SED_SUFFIX), every other option on -E, -n, -r, -s, -u and -z, and every script (each -e value, else the first operand) a literal word that SED_EDIT holds, while each other operand, a file it edits, is judged as any word is
 function sedInPlace(cmd: Command, parsed: Parsed): Set<Word> | undefined {
@@ -1717,6 +1735,19 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
+  // What an in-place sed's script writes that a shell may run later (sedWrites): the root in it, else each word under ~, $HOME or / judged as a path or a glob is, so a glob or an escaped slash spells the root no other way than its literal path
+  const scriptNames = (script: string, env: Env): string | undefined => {
+    for (const text of sedWrites(script)) {
+      if (holds(text, env)) return `${root} in its text`
+      for (const token of text.split(/[\s;|&'"`<>=:]+/)) {
+        const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(token)
+        const value = tilde ? home + token.slice(tilde[0].length) : token
+        if (!value.startsWith(sep)) continue
+        const named = names({ quoted: false, value }, env, false)
+        if (named) return named
+      }
+    }
+  }
   // whether the hook places a write's path, the whole word, with no folder of the shell's: absolute, under ~, or through a variable the call holds
   const placed = (word: Word, env: Env, steady: Steady) =>
     pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined
@@ -1983,6 +2014,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // a quiet commit's message is text git never runs, a gated call it names included, and an in-place sed's script is text sed reads as a program of its own
     const quiet = !whole && quietCommit(cmd, parsed, env)
     const sedScripts = whole ? undefined : inPlaceScripts(cmd, parsed, env)
+    const sedEdit = sedInPlace(cmd, parsed)
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
@@ -2050,6 +2082,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       for (const value of [...parsed.local.values(), ...scope]) {
         const named = names({ ...value, quoted: false }, here, remover)
         if (named) return refuse(`${verb} with a variable on ${named}`)
+      }
+      for (const script of sedEdit ?? []) {
+        const named = scriptNames(script.value, here)
+        if (named) return refuse(`${verb} with a script that names ${named}`)
       }
       const literal = !whole && narrow(cmd, here)
       for (const word of [first, ...args].map(

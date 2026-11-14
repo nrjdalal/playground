@@ -10246,8 +10246,24 @@ function textFlagValues({ args, name }) {
 var SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/;
 var SED_SUFFIX = /^(?:\.[\w.~-]*)?$/;
 var SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
-var SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}${SED_TEXT}[gpI0-9]*)[ \t]*`;
+var SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}(${SED_TEXT})[gpI0-9]*)[ \t]*`;
 var SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`);
+var SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y");
+function sedWrites(script) {
+  const read = (text) => text.replace(/\\(.)|&/gs, (m, c) => m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
+` : c ?? m);
+  const writes = [];
+  SED_EDIT_STEP.lastIndex = 0;
+  while (SED_EDIT_STEP.lastIndex < script.length) {
+    const at = SED_EDIT_STEP.lastIndex;
+    const item = SED_EDIT_STEP.exec(script);
+    if (!item || SED_EDIT_STEP.lastIndex === at)
+      return [read(script)];
+    if (item[1])
+      writes.push(read(item[1].slice(0, -1)));
+  }
+  return writes;
+}
 function sedInPlace(cmd, parsed) {
   const { args, local, name } = parsed;
   if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed))
@@ -10709,6 +10725,21 @@ async function inspect(raw, environment, unknown = false) {
       }
     }
   };
+  const scriptNames = (script, env) => {
+    for (const text of sedWrites(script)) {
+      if (holds(text, env))
+        return `${root} in its text`;
+      for (const token of text.split(/[\s;|&'"`<>=:]+/)) {
+        const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(token);
+        const value = tilde ? home + token.slice(tilde[0].length) : token;
+        if (!value.startsWith(sep2))
+          continue;
+        const named = names({ quoted: false, value }, env, false);
+        if (named)
+          return named;
+      }
+    }
+  };
   const placed = (word, env, steady) => pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined;
   const afterUnreadCd = (write) => `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`;
   const seen = new Set;
@@ -10865,6 +10896,7 @@ async function inspect(raw, environment, unknown = false) {
     }
     const quiet = !whole && quietCommit(cmd, parsed, env);
     const sedScripts = whole ? undefined : inPlaceScripts(cmd, parsed, env);
+    const sedEdit = sedInPlace(cmd, parsed);
     if (!first || EXPORTS3.has(name) || reader)
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
@@ -10905,6 +10937,11 @@ async function inspect(raw, environment, unknown = false) {
         const named = names({ ...value, quoted: false }, here, remover);
         if (named)
           return refuse(`${verb} with a variable on ${named}`);
+      }
+      for (const script of sedEdit ?? []) {
+        const named = scriptNames(script.value, here);
+        if (named)
+          return refuse(`${verb} with a script that names ${named}`);
       }
       const literal = !whole && narrow(cmd, here);
       for (const word of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word))) {
