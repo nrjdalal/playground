@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -1571,6 +1572,17 @@ describe("relay watch", () => {
           .map((l) => JSON.parse(l))
       : []
 
+  // The relay sending every queued line at moved, the late-stop line it queued among them: cursor.json at each queue's end, all three cursors moved.
+  const sentAll = (ops: string, moved: Date) => {
+    const queues = readdirSync(join(ops, "outbox")).filter((f) => /^ops-.+\.jsonl$/.test(f))
+    const ends = Object.fromEntries(
+      queues.map((f) => [f, readFileSync(join(ops, "outbox", f)).length]),
+    )
+    writeFileSync(join(ops, "outbox", "cursor.json"), JSON.stringify(ends))
+    for (const file of ["cursor.json", "dm-cursor.json", "linear-cursor.json"])
+      if (existsSync(join(ops, "outbox", file))) utimesSync(join(ops, "outbox", file), moved, moved)
+  }
+
   // sysctl's line for a kern time, as measured: `{ sec = <s>, usec = <us> } <date>`, 0 for a wake the machine has not had.
   const kern = (date?: Date) =>
     `{ sec = ${date ? Math.floor(date.getTime() / 1000) : 0}, usec = ${date ? 147343 : 0} } Sat Nov 14 05:25:54 2026\n`
@@ -1652,7 +1664,7 @@ describe("relay watch", () => {
     await beat("relay-watch").run(still.ctx)
     expect(still.asks).toEqual([])
     expect(waiterLines(ops)).toHaveLength(1)
-    outbox(ops, at(14, 38))
+    sentAll(ops, at(14, 38))
     const back = watch(ops, at(14, 40), "timeout")
     await beat("relay-watch").run(back.ctx)
     expect(back.asks).toEqual([])
@@ -1760,11 +1772,7 @@ describe("relay watch", () => {
     expect(waiterLines(ops).map((l) => l.text)).toEqual([
       `The outbox relay has never run: no ops line has gone out since the watch began, and this machine relays through Ops' sweep. Ops runs its sweep, whose step 2 runs ops:outbox.${DOWN}`,
     ])
-    writeFileSync(
-      join(ops, "outbox", "cursor.json"),
-      JSON.stringify({ "ops-session-resume.jsonl": readFileSync(queue).length }),
-    )
-    utimesSync(join(ops, "outbox", "cursor.json"), at(14, 45), at(14, 45))
+    sentAll(ops, at(14, 45))
     await beat("relay-watch").run(watch(ops, at(14, 50), "timeout").ctx)
     expect(existsSync(join(ops, "tick", "relay-watch.json"))).toBe(false)
     await beat("relay-watch").run(watch(ops, at(15, 30), "timeout").ctx)
