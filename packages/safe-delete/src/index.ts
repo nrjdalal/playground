@@ -24,7 +24,7 @@ import { liveHeads, present, type Tip } from "./live-refs"
 // The folders a delete starts from, passed in so a test builds them on a mkdtemp root of its own.
 export type Roots = { home: string; main: string; trash: string }
 
-// protected and tripwire refusals go to the dispatcher through the ops notify line; refused is a plain no, as is a per-minute cap refusal after its burst's first (firstOfBurst), so a burst alerts once.
+// protected and tripwire refusals go to the dispatcher through the ops notify line; refused is a plain no, as is a per-minute cap refusal after its burst's first (firstOfBurst), so a burst alerts once, and a session's own scratch or scratchpad folder over the tripwire, which it leaves in place at its end.
 export type Refusal = { kind: "protected" | "refused" | "tripwire"; refused: string }
 
 // A process with a working folder: its command line, and the unix sockets it holds open, read for an agent-browser daemon alone.
@@ -468,19 +468,24 @@ export function quarantine(
       firstOfBurst(trash, opts.session, recent) ? "tripwire" : "refused",
     )
   // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratchpad folder, or with gone a gone session's entry directly in scratch/, skips the file count, keeping the byte cap.
-  const whole = ended && join(real(dirname(abs)), basename(abs)) === ended
+  const own = join(real(dirname(abs)), basename(abs))
+  const whole = ended && own === ended
   const cap = carve ?? (whole ? { ...LIMITS, files: Infinity } : LIMITS)
   const { files, size } = measure(abs, {
     limits: opts.worktree ? undefined : cap,
     skip: carve ? undefined : isRebuildable,
   })
   if (!opts.worktree && (files > cap.files || size > cap.bytes))
-    return refused(
-      carve
-        ? `${abs} holds over ${cap.files} files or ${cap.bytes} bytes, past the ${opts.carveOut} carve-out's cap`
-        : `${abs} holds over ${whole ? "" : `${LIMITS.files} files or `}${LIMITS.bytes / 1024 ** 3} GB, past the tripwire`,
-      "tripwire",
-    )
+    return ownScratchOf(real(roots.home), opts.session).includes(own)
+      ? refused(
+          `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire: leave it in place whole, never split, for the nightly clean (scratch/) or your lead's cleanup (scratchpad/) once you end`,
+        )
+      : refused(
+          carve
+            ? `${abs} holds over ${cap.files} files or ${cap.bytes} bytes, past the ${opts.carveOut} carve-out's cap`
+            : `${abs} holds over ${whole ? "" : `${LIMITS.files} files or `}${LIMITS.bytes / 1024 ** 3} GB, past the tripwire`,
+          "tripwire",
+        )
   mkdirSync(trash, { recursive: true })
   const dev = io.dev ?? ((p: string) => lstatSync(p).dev)
   if (dev(abs) !== dev(trash)) return refused(otherVolume(abs, trash))

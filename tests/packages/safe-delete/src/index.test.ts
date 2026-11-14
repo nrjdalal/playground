@@ -315,7 +315,7 @@ describe("the tripwire", () => {
       return join(dir, name)
     }
     const own = big("j6rjgy-worker")
-    expect(quarantine(own, opts, roots, { now: NOW })).toMatchObject({ kind: "tripwire" })
+    expect(quarantine(own, opts, roots, { now: NOW })).toMatchObject({ kind: "refused" })
     expect(existsSync(own)).toBe(true)
     const gone = { gone: true as const, reason: "test", session: "q1w2e3-worker" }
     const folder = big("q1w2e3-worker")
