@@ -520,9 +520,10 @@ const unitRun = async (
     },
     units,
   }
+  // the logs go into the test's own data folder, which the install makes each log's folder in
   const options = {
     data,
-    fill,
+    fill: { ...fill, data },
     install,
     jobs: join(data, "ops", "jobs.json"),
     roots: { home, main: CHECKOUT, trash: join(data, "trash") },
@@ -542,7 +543,7 @@ const unitRun = async (
 }
 
 test("on Linux a launchd job turned on is written as a user unit and enabled once, and one already there and active stays as it stands", async () => {
-  const { changes, render, units } = await unitRun(
+  const { changes, data, render, units } = await unitRun(
     "unit-on",
     {
       "jobs.opsHerdr": {
@@ -563,6 +564,7 @@ test("on Linux a launchd job turned on is written as a user unit and enabled onc
   const tickUnit = join(units, "com.playground.ops-tick.service")
   expect(readFileSync(tickUnit, "utf8")).toContain('"/c/packages/scripts/src/ops-tick/cli.ts"')
   expect(changes()).toEqual([["enable", "--now", "com.playground.ops-tick.service"]])
+  expect(statSync(join(data, "ops", "tick")).isDirectory()).toBe(true)
   expect(readFileSync(herdr, "utf8")).toBe("installed by hand")
   expect((await render()).out).toBe("jobs: unchanged")
   expect(changes()).toHaveLength(1)
@@ -631,4 +633,36 @@ test("on Linux an enable systemctl refuses is named on stderr, exits 1, and is t
     ["enable", "--now", "com.playground.ops-tick.service"],
     ["enable", "--now", "com.playground.ops-tick.service"],
   ])
+})
+
+// The command line picks systemctl --user on Linux, through a fake systemctl first on PATH that records each call and finds no unit active.
+test("on Linux the command line's render installs through systemctl --user, making the unit and its log's folder", async () => {
+  const data = storeWith("cli-linux", { "jobs.opsTick": tick })
+  const bin = join(scratch, "cli-linux", "bin")
+  mkdirSync(bin, { recursive: true })
+  const said = join(bin, "said")
+  writeFileSync(
+    join(bin, "systemctl"),
+    `#!/bin/sh\necho "$*" >> "${said}"\n[ "$2" = is-active ] && exit 3\nexit 0\n`,
+    { mode: 0o755 },
+  )
+  const units = join(scratch, "cli-linux", "home", ".config", "systemd", "user")
+  const err: string[] = []
+  const code = await jobsExit(
+    ["render", "--data", data, "--jobs", join(data, "ops", "jobs.json"), "--install", units],
+    { HOME: join(scratch, "cli-linux", "home"), PATH: `${bin}:${process.env.PATH}` },
+    () => {},
+    (l) => err.push(l),
+    "linux",
+  )
+  expect({ code, err: err.join("\n") }).toEqual({ code: 0, err: "" })
+  const lines = readFileSync(said, "utf8").trim().split("\n")
+  expect(lines).toContain("--user is-active --quiet com.playground.ops-tick.service")
+  expect(lines.filter((line) => !line.startsWith("--user is-active "))).toEqual([
+    "--user enable --now com.playground.ops-tick.service",
+  ])
+  expect(readFileSync(join(units, "com.playground.ops-tick.service"), "utf8")).toContain(
+    `StandardOutput=append:${data}/ops/tick/launchd.log`,
+  )
+  expect(statSync(join(data, "ops", "tick")).isDirectory()).toBe(true)
 })

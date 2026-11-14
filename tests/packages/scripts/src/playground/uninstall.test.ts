@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
-import { ourPlists, uninstall } from "../../../../../packages/scripts/src/playground/uninstall"
+import { ourJobFiles, uninstall } from "../../../../../packages/scripts/src/playground/uninstall"
 import type { Run } from "../../../../../packages/scripts/src/playground/update"
 
 const scratch = mkdtempSync(join(tmpdir(), "playground-uninstall-"))
@@ -89,13 +89,13 @@ const install = () => {
   return { agents, base, calls, data, home, repo, said }
 }
 
-test("ourPlists takes the LaunchAgents that run from the checkout or the data folder, and no other", () => {
+test("ourJobFiles takes the LaunchAgents that run from the checkout or the data folder, and no other", () => {
   const { agents, data, repo } = install()
-  expect(ourPlists(agents, repo, data)).toEqual([
+  expect(ourJobFiles(agents, repo, data)).toEqual([
     join(agents, "com.playground.ops-awake.plist"),
     join(agents, "com.playground.ops-tick.plist"),
   ])
-  expect(ourPlists(join(scratch, "no-agents"), repo, data)).toEqual([])
+  expect(ourJobFiles(join(scratch, "no-agents"), repo, data)).toEqual([])
 })
 
 describe("uninstall", () => {

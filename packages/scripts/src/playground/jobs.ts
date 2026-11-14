@@ -15,6 +15,7 @@ import {
   CORE,
   type Fill,
   importedJob,
+  logOf,
   loginOf,
   orgJobs,
   plistProgram,
@@ -143,9 +144,10 @@ const installAgents = async (
   return code
 }
 
-// On Linux, each enabled launchd job systemd does not run gets its rendered unit in install's folder when none is there, and is enabled and started, so a refused start is tried again on the next pass; each turned-off one is disabled, its unit there moved to the trash through the jobs-units carve-out and systemd reloaded, then stopped while it runs. A unit already there stays as it stands, as a plist does. A label that is not Playground's own (PLAYGROUND_UNIT) is left alone.
+// On Linux, each enabled launchd job systemd does not run gets its rendered unit in install's folder when none is there and its log's folder made, and is enabled and started, so a refused start is tried again on the next pass; each turned-off one is disabled, its unit there moved to the trash through the jobs-units carve-out and systemd reloaded, then stopped while it runs. A unit already there stays as it stands, as a plist does. A label that is not Playground's own (PLAYGROUND_UNIT) is left alone.
 const installUnits = async (
   install: Extract<Install, { systemctl: Run }>,
+  fill: Fill,
   jobs: Record<string, unknown>[],
   units: Map<string, string>,
   roots: Roots,
@@ -168,6 +170,8 @@ const installUnits = async (
     const active = (await install.systemctl(["is-active", "--quiet", unit])).code === 0
     if (on && !active) {
       if (!existsSync(path)) writeIfChanged(path, text!)
+      // systemd opens the log to append but makes no missing folder, so a first start would fail
+      mkdirSync(dirname(logOf(String(job.name), fill)), { recursive: true })
       const started = await install.systemctl(["enable", "--now", unit])
       if (started.code === 0) changed.push(`+${label}`)
       else refused("enable", unit, started)
@@ -274,7 +278,15 @@ export const renderJobsFile = async (
       code,
       "launchctl" in options.install
         ? await installAgents(options.install, jobs, plists, options.roots, changed, err)
-        : await installUnits(options.install, jobs, units, options.roots, changed, err),
+        : await installUnits(
+            options.install,
+            options.fill,
+            jobs,
+            units,
+            options.roots,
+            changed,
+            err,
+          ),
     )
   const lines = changed.filter(Boolean)
   out(lines.length ? `jobs: rendered ${lines.join(", ")}` : "jobs: unchanged")
@@ -313,9 +325,9 @@ export const importJobs = async (
 }
 
 const spawned =
-  (head: string[]): Run =>
+  (head: string[], env: Record<string, string | undefined>): Run =>
   async (args) => {
-    const done = Bun.spawnSync([...head, ...args])
+    const done = Bun.spawnSync([...head, ...args], { env })
     return { code: done.exitCode, out: `${done.stdout.toString()}${done.stderr.toString()}` }
   }
 
@@ -324,6 +336,7 @@ export const jobsExit = async (
   environment: Record<string, string | undefined>,
   out: (line: string) => void,
   err: (line: string) => void,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<number> => {
   let parsed
   try {
@@ -363,9 +376,13 @@ export const jobsExit = async (
       },
       install: !values.install
         ? undefined
-        : process.platform === "linux"
-          ? { systemctl: spawned(["systemctl", "--user"]), units: values.install }
-          : { agents: values.install, launchctl: spawned(["launchctl"]), uid: process.getuid!() },
+        : platform === "linux"
+          ? { systemctl: spawned(["systemctl", "--user"], environment), units: values.install }
+          : {
+              agents: values.install,
+              launchctl: spawned(["launchctl"], environment),
+              uid: process.getuid!(),
+            },
       jobs: values.jobs,
       launchAgents: values["launch-agents"],
       roots: {

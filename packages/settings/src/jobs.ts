@@ -215,7 +215,8 @@ const filled = (text: string, fill: Fill) =>
 const xml = (text: string) =>
   text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
 
-const logOf = (name: string, fill: Fill) =>
+// A launchd job's log, which its plist and its systemd unit both write to.
+export const logOf = (name: string, fill: Fill) =>
   `${fill.data}/ops/${name.replace(/^ops-/, "")}/launchd.log`
 
 // A launchd job's plist: its label, its program from its cwd, kept alive, logging into its own folder under ops.
@@ -241,7 +242,7 @@ const plistOf = (name: string, job: Job, fill: Fill): string => {
   ].join("\n")
 }
 
-// The same job as a systemd user unit, for Linux, which has no launchd: its plist's program, folder and log, its PATH with ~/.bun/bin (%h, the home folder) first, restarted always 10 s apart as launchd throttles, so systemd's start limit never parks it, and started at login. % is systemd's specifier and $ its variable sign, so each is doubled where systemd reads it.
+// The same job as a systemd user unit, for Linux, which has no launchd: its plist's program, folder and log, its PATH with ~/.bun/bin (%h, the home folder) first, restarted always 10 s apart as launchd throttles, so systemd's start limit never parks it, and started at login; a stop ends its own process alone, as launchd's does, so a server it started detached (ops-herdr's herdr servers) outlives it. % is systemd's specifier and $ its variable sign, so each is doubled where systemd reads it.
 const unitOf = (name: string, job: Job, fill: Fill): string => {
   const spec = (text: string) => text.replaceAll("%", "%%")
   const quoted = (text: string) => `"${text.replace(/["\\]/g, "\\$&")}"`
@@ -253,6 +254,7 @@ const unitOf = (name: string, job: Job, fill: Fill): string => {
     "[Service]",
     `Environment=${quoted(`PATH=%h/.bun/bin:${spec(fill.path)}`)}`,
     `ExecStart=${job.program!.map((arg) => quoted(spec(filled(arg, fill)).replaceAll("$", () => "$$"))).join(" ")}`,
+    "KillMode=process",
     "Restart=always",
     "RestartSec=10",
     `StandardError=append:${log}`,

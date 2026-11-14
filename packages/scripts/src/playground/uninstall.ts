@@ -6,7 +6,7 @@ import { linksInto } from "./links"
 import type { Run } from "./update"
 
 // The LaunchAgents, or with suffix .service the systemd user units, that run something from the checkout (a worktree of it included) or the data folder, A to Z.
-export const ourPlists = (
+export const ourJobFiles = (
   agents: string,
   repo: string,
   data: string,
@@ -70,7 +70,7 @@ export const uninstall = async (o: Options): Promise<number> => {
   const agents = linux
     ? join(o.home, ".config", "systemd", "user")
     : join(o.home, "Library", "LaunchAgents")
-  const ours = ourPlists(agents, o.repo, o.data, linux ? ".service" : ".plist")
+  const ours = ourJobFiles(agents, o.repo, o.data, linux ? ".service" : ".plist")
   for (const file of ours) {
     await o.run(
       linux

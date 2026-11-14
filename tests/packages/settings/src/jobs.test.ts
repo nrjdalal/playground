@@ -127,6 +127,7 @@ describe("the job registry", () => {
           `append:${log}`,
         ])
         expect(unit.Restart).toBe("always")
+        expect(unit.KillMode).toBe("process")
         expect(unit.WantedBy).toBe("default.target")
         expect(words(unit.Environment!)).toEqual([`PATH=%h/.bun/bin:${fill.path}`])
         expect([...units.keys()]).toEqual([...plists.keys()])
