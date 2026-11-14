@@ -106,8 +106,6 @@ export type Env = {
   oldFrom?: string[]
   process: Record<string, string | undefined>
   vars: Map<string, Text>
-  // The names a builtin on the line binds at its own binding place (`binds`), which the empty reading counts as set
-  bound?: Set<string>
   // Set by a hook that judges a shell the line starts as a program too, so its visit sees the shell's own words and assignments before the walk follows its script; a script file the walk cannot read is otherwise followed as an empty one
   visitShells?: boolean
 }
@@ -1607,7 +1605,6 @@ async function runAll(
   visit: Visit,
   builtins: boolean,
 ): Promise<string | undefined> {
-  env.bound = new Set([...(env.bound ?? []), ...lexed.commands.flatMap(binds)])
   const envs = new Map<number, Env>([[0, env]])
   const envOf = (scope: number): Env => {
     const found = envs.get(scope)
@@ -1671,6 +1668,9 @@ export async function examine(
     if (MOVES.has(parsed.name))
       await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env)
   }
+  // a binder the shell runs unconditionally here gives its names a value the reader cannot read, for the commands after it in this scope
+  if (!cmd.unsure && !cmd.chained && !cmd.detached && !cmd.kept)
+    for (const name of binds(cmd)) setVar(env.vars, name, unknown("a value a builtin gives"))
   // piped input the command may run as code is judged as a script it runs, unless its own reading took that input as its script already
   if (!cmd.runsStdin || stdinScript(primary)) return
   for (const script of await scriptStdin(cmd, env)) {
@@ -1829,7 +1829,7 @@ const vanishingParts = (source: string): boolean => {
 const READ_VALUES = new Set(["d", "i", "n", "N", "p", "t", "u"])
 const NAME = /^[A-Za-z_]\w*$/
 
-// The names one command binds without an `=` of its own, each at its builtin's binding place as the bash manual gives it: `for NAME in`, `select NAME in`, `read [options] NAME…` and its `-a NAME`, `getopts OPTSTRING NAME`, `printf -v NAME`, and a declaration builtin's NAME (`local`, `declare`, `typeset`, `export`, `readonly`), with or without `=`
+// The names one command gives a value without an `=`, each at its builtin's binding place as the bash manual gives it: `for NAME in`, `select NAME in`, `read [options] NAME…` and its `-a NAME`, `getopts OPTSTRING NAME` and `printf -v NAME`; a declaration builtin gives none, its `=` part read as an assignment
 function binds({ words }: Command): string[] {
   let at = 0
   while (
@@ -1845,11 +1845,6 @@ function binds({ words }: Command): string[] {
     const name = v < 0 ? undefined : rest[v] === "-v" ? rest[v + 1] : rest[v].slice(2)
     return name && NAME.test(name) ? [name] : []
   }
-  if (head && EXPORTS.has(head))
-    return rest
-      .filter((w) => !w.startsWith("-"))
-      .map((w) => w.split("=")[0])
-      .filter((w) => NAME.test(w))
   if (head !== "read") return []
   const names: string[] = []
   for (let i = 0; i < rest.length; i++) {
@@ -1868,7 +1863,7 @@ function binds({ words }: Command): string[] {
   return names.filter((w) => NAME.test(w))
 }
 
-// Whether a word may expand to no word: the reader read none of it, and it is VANISHING_PART alone with every variable it names one the line never set nor bound (`binds`), or set to nothing, or an unread part of a word a script the line built carries (`eval $X …`, `bash -c "$X …"`), which keeps no source of its own
+// Whether a word may expand to no word: the reader read none of it, and it is VANISHING_PART alone with every variable it names one the line never set (a binder sets one, `binds`) or set to nothing, or an unread part of a word a script the line built carries (`eval $X …`, `bash -c "$X …"`), which keeps no source of its own
 const mayVanish = (w: Word, env: Env): boolean =>
   !!w.source &&
   /^\u0000+$/.test(w.value) &&
@@ -1876,7 +1871,6 @@ const mayVanish = (w: Word, env: Env): boolean =>
     (vanishingParts(w.source) &&
       [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
         const set = env.vars.get(name)
-        if (env.bound?.has(name)) return false
         return !set || (!set.unknown && set.value === "")
       })))
 

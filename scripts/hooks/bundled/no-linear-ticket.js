@@ -1559,7 +1559,6 @@ async function run(lexed, env, visit, builtins = false) {
 var running = 0;
 var MAX_RUNS = 256;
 async function runAll(lexed, env, visit, builtins) {
-  env.bound = new Set([...env.bound ?? [], ...lexed.commands.flatMap(binds)]);
   const envs = new Map([[0, env]]);
   const envOf = (scope) => {
     const found = envs.get(scope);
@@ -1617,6 +1616,9 @@ async function examine(cmd, env, visit, builtins) {
     if (MOVES.has(parsed.name))
       await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env);
   }
+  if (!cmd.unsure && !cmd.chained && !cmd.detached && !cmd.kept)
+    for (const name of binds(cmd))
+      setVar(env.vars, name, unknown("a value a builtin gives"));
   if (!cmd.runsStdin || stdinScript(primary))
     return;
   for (const script of await scriptStdin(cmd, env)) {
@@ -1753,8 +1755,6 @@ function binds({ words }) {
     const name = v < 0 ? undefined : rest[v] === "-v" ? rest[v + 1] : rest[v].slice(2);
     return name && NAME.test(name) ? [name] : [];
   }
-  if (head && EXPORTS.has(head))
-    return rest.filter((w) => !w.startsWith("-")).map((w) => w.split("=")[0]).filter((w) => NAME.test(w));
   if (head !== "read")
     return [];
   const names = [];
@@ -1776,8 +1776,6 @@ function binds({ words }) {
 }
 var mayVanish = (w, env) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source) && [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
   const set = env.vars.get(name);
-  if (env.bound?.has(name))
-    return false;
   return !set || !set.unknown && set.value === "";
 }));
 function emptyProgram(cmd, env) {
