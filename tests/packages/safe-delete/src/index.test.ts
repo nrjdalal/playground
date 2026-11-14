@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -13,10 +14,11 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { hasManagerRole, ROSTER_KINDS } from "../../../../packages/config/src/kinds"
 import {
+  bundleToTrash,
   CARVE_OUTS,
   type CarveOut,
   type Clone,
@@ -724,6 +726,56 @@ describe("worktreeRefusal", () => {
     )
   })
 
+  // PG-2017: a clean detached checkout at a commit origin/canary holds is a reader of canary, not the row's work; each broken condition keeps the hold. The row holds by the folder's name, since a detached tree reads no branch.
+  test("a clean detached checkout at a commit origin/canary holds passes a live row whole, and a dirty, untracked, branched or past-canary one keeps it", () => {
+    const row = [{ name: "pg-1", status: "working" }]
+    const withRow = () => {
+      const w = withWorktree()
+      writeFileSync(w.holders.roster, JSON.stringify({ agents: row }))
+      return w
+    }
+    const clean = withRow()
+    git(clean.wt, "checkout", "-q", "--detach", "origin/canary")
+    expect(worktreeRefusal(clean.wt, clean.roots, clean.holders)).toBeNull()
+    const dirty = withRow()
+    git(dirty.wt, "checkout", "-q", "--detach", "origin/canary")
+    file(join(dirty.wt, "README.md"), "dirty")
+    expect(worktreeRefusal(dirty.wt, dirty.roots, dirty.holders)).toContain("is held by pg-1")
+    const untracked = withRow()
+    git(untracked.wt, "checkout", "-q", "--detach", "origin/canary")
+    file(join(untracked.wt, "extra.txt"), "x")
+    expect(worktreeRefusal(untracked.wt, untracked.roots, untracked.holders)).toContain(
+      "is held by pg-1",
+    )
+    const branched = withRow()
+    git(branched.wt, "checkout", "-q", "-B", "PG-1-thing", "origin/canary")
+    expect(worktreeRefusal(branched.wt, branched.roots, branched.holders)).toContain(
+      "is held by pg-1",
+    )
+    const past = withRow()
+    git(past.wt, "checkout", "-q", "--detach", "PG-1-thing")
+    expect(worktreeRefusal(past.wt, past.roots, past.holders)).toContain("is held by pg-1")
+  })
+
+  // status.showUntrackedFiles=no hides an untracked file from a plain git status --porcelain, so both clean-tree reads name every untracked file themselves.
+  test("an untracked file counts under status.showUntrackedFiles=no: it keeps a live row's hold on a detached canary checkout, and is named as an uncommitted change", () => {
+    const held = withWorktree()
+    git(held.roots.main, "config", "status.showUntrackedFiles", "no")
+    writeFileSync(
+      held.holders.roster,
+      JSON.stringify({ agents: [{ name: "pg-1", status: "working" }] }),
+    )
+    git(held.wt, "checkout", "-q", "--detach", "origin/canary")
+    file(join(held.wt, "extra.txt"), "x")
+    expect(worktreeRefusal(held.wt, held.roots, held.holders)).toContain("is held by pg-1")
+    const changed = withWorktree()
+    git(changed.roots.main, "config", "status.showUntrackedFiles", "no")
+    file(join(changed.wt, "extra.txt"), "x")
+    expect(worktreeRefusal(changed.wt, changed.roots, changed.holders)).toContain(
+      "holds 1 uncommitted change (extra.txt)",
+    )
+  })
+
   test("refuses a worktree a live session holds by branch, by name, or by a process's folder", () => {
     const { holders, roots, wt } = withWorktree()
     git(wt, "push", "-q", "origin", "PG-1-thing")
@@ -983,11 +1035,11 @@ describe("worktreeRefusal", () => {
     const { holders, roots, wt } = withWorktree()
     file(join(wt, "wip.txt"))
     expect(worktreeRefusal(wt, roots, holders)).toBe(
-      `${wt} holds 1 uncommitted change (wip.txt): playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`,
+      `${wt} holds 1 uncommitted change (wip.txt): playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`,
     )
     for (const name of ["new.txt", "b", "c", "d"]) file(join(wt, name), "changed")
     expect(worktreeRefusal(wt, roots, holders)).toBe(
-      `${wt} holds 5 uncommitted changes (new.txt, b, c, and 2 more): playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`,
+      `${wt} holds 5 uncommitted changes (new.txt, b, c, and 2 more): playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`,
     )
     expect(worktreeRefusal(wt, roots, { ...holders, discard: true })).toBeNull()
     const moved = quarantine(wt, { ...opts, worktree: { ...holders, discard: true } }, roots, {
@@ -1001,7 +1053,7 @@ describe("worktreeRefusal", () => {
     const { holders, roots, wt } = withWorktree()
     const unmerged = { ...holders, merged: () => false }
     expect(worktreeRefusal(wt, roots, unmerged)).toBe(
-      `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`,
+      `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`,
     )
     git(wt, "push", "-q", "origin", "PG-1-thing")
     expect(worktreeRefusal(wt, roots, unmerged)).toContain("not landed on origin/canary")
@@ -1011,6 +1063,60 @@ describe("worktreeRefusal", () => {
       "refused",
     )
     expect(existsSync(wt)).toBe(true)
+  })
+
+  // #1348
+  test("--discard keeps a worktree's commits no remote holds in a bundle beside its move, named in its trash entry, which brings HEAD back at its sha", () => {
+    const { holders, roots, wt } = withWorktree()
+    const head = git(wt, "rev-parse", "HEAD")
+    const discard = { ...holders, discard: true, merged: () => false }
+    const moved = quarantine(wt, { ...opts, worktree: discard }, roots, { now: NOW }) as Quarantined
+    const batch = dirname(dirname(moved.to))
+    expect(moved.bundle).toBe(join(batch, "pg-1.bundle"))
+    expect(readFileSync(join(batch, "pg-1.shas"), "utf8")).toBe(`${head} HEAD\n`)
+    expect(listTrash(roots.trash).find((e) => e.path === wt)?.bundle).toBe(moved.bundle)
+    git(roots.main, "worktree", "prune")
+    git(roots.main, "branch", "-D", "PG-1-thing")
+    git(roots.main, "fetch", "-q", moved.bundle!, "HEAD:refs/heads/back")
+    expect(git(roots.main, "rev-parse", "back")).toBe(head)
+  })
+
+  test("--discard writes no bundle for a worktree whose every commit a remote holds", () => {
+    const { holders, roots, wt } = withWorktree()
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    const discard = { ...holders, discard: true, merged: () => false }
+    const moved = quarantine(wt, { ...opts, worktree: discard }, roots, { now: NOW }) as Quarantined
+    expect(moved.id).toBeDefined()
+    expect(moved.bundle).toBeUndefined()
+    expect(readdirSync(dirname(dirname(moved.to))).filter((f) => f.endsWith(".bundle"))).toEqual([])
+  })
+
+  test("bundleToTrash holds each ref at its sha past the excluded ones, its sha list beside it, and leaves out a ref the exclusion holds", () => {
+    const { roots, wt } = withWorktree()
+    const head = git(wt, "rev-parse", "HEAD")
+    const base = git(roots.main, "rev-parse", "canary")
+    const made = bundleToTrash(
+      roots.main,
+      [
+        { ref: "refs/heads/PG-1-thing", sha: head },
+        { ref: "refs/heads/canary", sha: base },
+      ],
+      ["origin/canary"],
+      { name: "branches", now: NOW, session: "nightly-clean", trash: roots.trash },
+    )
+    const path = join(roots.trash, "20261102T120000Z-nightly-clean", "branches.bundle")
+    expect(made).toEqual({ held: ["refs/heads/PG-1-thing"], path })
+    expect(readFileSync(join(dirname(path), "branches.shas"), "utf8")).toBe(
+      `${head} refs/heads/PG-1-thing\n${base} refs/heads/canary\n`,
+    )
+    expect(
+      bundleToTrash(roots.main, [{ ref: "refs/heads/PG-1-thing", sha: head }], ["origin/canary"], {
+        name: "branches",
+        now: NOW,
+        session: "nightly-clean",
+        trash: roots.trash,
+      }),
+    ).toEqual({ refused: `its bundle ${path} is taken or not a trash path` })
   })
 
   test("removes a clean worktree whose branch canary squash-merged, and asks for a merged PR once canary changes its files again", () => {

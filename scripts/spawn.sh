@@ -3,50 +3,9 @@ set -euo pipefail
 
 # Spawns a factory session in herdr, the one way a factory session starts one
 # (the no-raw-spawn hook refuses the rest). A capacity gate refuses, failing
-# closed, unless four gates pass in order,
-# the first failure naming its gate and its reading, every pass and refusal
-# logged as one JSON line in ~/.playground/ops/capacity.jsonl, where the
-# load gate reads the starts of the last 5 minutes back, with each slots.peers folder's own log's. No count of live sessions holds a spawn, so
-# the gates cap nothing but the machine's own room:
-#   1. load, max(load1, load5) plus those starts under the core count (sysctl
-#      hw.ncpu) times PLAYGROUND_LOAD_MULT (default 1.0), each start weighing
-#      half its item's load units (small 1, medium 2, big 3: --size, else small
-#      for a reviewer or tester, else what `ops/run-slot.sh size <name>` reads),
-#      and a quarter of that cap kept for small items, so a big plan never blocks a small one,
-#      a small worker keeping an eighth in its place for the reviewers and testers; a load at or over
-#      that line refuses whatever the CPU's idle share, so the load stays under the cores, but for a
-#      --priority start while a priority file stands (PRIORITY_FILE), logged as readings.priority,
-#      a resume within 15 minutes of close ending a row that read live (JUST_CLOSED), logged as
-#      readings.just_closed, and a manager's start or resume (role dispatcher or lead) while the
-#      CPU reads 40% idle or more (top -l 2 -n 0), logged as readings.cpu_idle
-#   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
-#      free at 8% or more (kern.memorystatus_level); a fresh worker start also needs swap-ins
-#      under 100/s (vm_stat -c 2 1, gates.glmSwapinsMax), since free memory counts compressible
-#      pages and read 62% on 7 Nov while 150 pages swapped in a second; every other start keeps
-#      its pass, as at the slots gate
-#   A GLM session takes its own load and memory gate in place of both:
-#   load5 under 30, pressure level 1 and swap-ins under 100/s (vm_stat -c 2 1)
-#   Under Claude Code's sandbox the load comes from uptime, and a refused pressure level leaves the swap-ins to decide (scripts/README.md)
-#   3. slots, for a fresh worker start alone (a reviewer, tester or resume skips it, so work
-#      already admitted finishes): `ops/run-slot.sh room`, refusing while runs wait in its queue and no
-#      lane is free with the load units for a run (but for a --priority start while a priority file
-#      stands, PRIORITY_FILE, logged as readings.priority), or when room gives no reading; a --reads-only
-#      worker start passes it, logged as readings.reads_only, since it takes no lane
-#   4. usage, the launching backend's own window: Claude reads usage.json
-#      (5-hour under 90%, the week within 14.3 points a day of pace, floored at one day's share, readings
-#      no older than 15 minutes; one never written, as on a fresh install before ops-usage first runs, passes,
-#      its row reading it unread; a missing 5-hour window is an account with no 5-hour limit, read as none) and each other login's
-#      usage-<name>.json or reading in login-flip.json's seen (the same checks, readings no older than 60 minutes); with no --account it
-#      starts on the passing login next in the account split, else the one with the lowest week, naming it, and refuses
-#      only when every login is over, its pick kept off the resume record's exec line so a restore picks afresh; a login whose usage.accounts
-#      row is parked (parkedUntil a later time) counts as over, and an --account naming it is refused; --account skips the usage
-#      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; an --account naming
-#      this machine's own login starts there, the split skipped, judged and refused as that login is in a bare start; GLM reads zai-usage.json
-#      (the 5-hour window under 95% of its credits, with no week check, and no empty balance (its `balance`), valid only
-#      while the zai usage job's last beat is ok and within 3 cycles)
-#   The first dispatcher starts past every gate, by a manager start or a resume, so the owner always has one: the gates still read, a failure
-#   logs a skipped row naming its gate and reading (which the load gate counts as a start) and prints it, and the
-#   pass picks its login as for any start; every other manager start, an orchestrator's included, takes them all
+# closed, unless its gates pass in order, the first failure naming its gate and
+# its reading, each pass and refusal one JSON line in ~/.playground/ops/capacity.jsonl;
+# playbook's SPAWN.md, Capacity gate, holds each gate and its rule (gate_capacity below).
 # It also refuses a name a live session holds, since Claude Code would start the
 # new one under a generated name. Every launch is in bypass mode, and drops
 # inscope's own CLAUDE_CONFIG_DIR where inscope exports one.
@@ -63,9 +22,9 @@ set -euo pipefail
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row just before the pane closes, putting its status back when herdr refuses the close
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
-#   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
+#   --priority         with any mode but restore or close, anywhere among its words: the start passes the gates playbook's SPAWN.md, Capacity gate, names for a priority start, its roster row marked priority=1 so it counts against no later start, while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
 #   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, holds outbound hosts to the ones a worker's loop needs, and a worker or reviewer with no --in starts in a detached worktree made for it (review-<n> for this checkout's PR n, else <name>), whose folder, git entry and the main checkout's FETCH_HEAD, objects, refs and logs it writes, canary's, main's and live.branch's refs left shut; its roster row records sandbox=on, which a resume keeps and a start without it clears
-#   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate; the load, memory and usage gates still hold it
+#   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate while the other gates still hold it (playbook's SPAWN.md, Capacity gate)
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words, and on a worker's, reviewer's or tester's Claude start while usage.accounts lists a Claude row, which the refusal lists in order: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
@@ -109,7 +68,7 @@ fi
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
 # The roster's manager kinds (kinds.ts' ROSTER_ROLE_OF_KIND), so a kind role_of_kind does not list runs as a lead: an orchestrator. A read that fails leaves the named kinds alone, so an orchestrator is refused rather than guessed.
 MANAGER_KINDS=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { ROSTER_ROLE_OF_KIND as r } from '$REPO/packages/config/src/kinds.ts'; console.log(Object.keys(r).filter((k) => r[k] === 'manager').join(' '))" 2>/dev/null) || MANAGER_KINDS=
-# The priority file standing in the data folder, exit 1 when none does, its content unread: every priority*.json (priority.json, an org's own priority-<name>.json, a session's from playground priority, or a job's own start file, priority-start.json, each writer keeping its own) passes the load and slots gates and focus.
+# The priority file standing in the data folder, exit 1 when none does, its content unread: every priority*.json (priority.json, an org's own priority-<name>.json, a session's from playground priority, or a job's own start file, priority-start.json, each writer keeping its own) passes focus and the gates playbook's SPAWN.md, Capacity gate, names for a priority start.
 priority_file() {
   local f
   for f in "$DATA"/priority*.json; do
@@ -281,18 +240,18 @@ for pid, data in sorted(entries.items()):
         print(pid, field(data.get("sessionId")), field(data.get("cwd")), starts[pid], sep="\t")
 PY
 }
-# The capacity gate: four gates in order (load, memory, slots for a fresh worker start, usage), the first failure naming its gate and its reading (a first dispatcher's failures each kept as a skip, the gates after it still read), every pass and refusal, and a first dispatcher's skipped start, one JSON line in ~/.playground/ops/capacity.jsonl naming its session (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing a past line for each skip and then ok, or the refusal for refuse() to print.
+# The capacity gate, whose gates and rules playbook's SPAWN.md, Capacity gate, holds in order; python exits 0 printing a past line for each skip and then ok, or the refusal for refuse() to print.
 # The login a launch runs on with no --account, from Claude Code's config, which the launch reads from ~ when it drops inscope's folder.
 own_config() { if [ -n "$UNSET" ]; then echo "$HOME/.claude.json"; else echo "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"; fi; }
 gate_capacity() {
-  # run-slot's room, for the slots gate (the header's gate 3)
+  # run-slot's room, for the slots gate (SPAWN.md's gate 3)
   room=
   if [ "$MODE" = worker ]; then
     room=$(RUN_SLOT_OPS="$DATA/ops" bash "$REPO/scripts/ops/run-slot.sh" room 2>/dev/null) || room=
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" "$OWN_LOGIN" "${READS_ONLY:+reads-only}" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" "$OWN_LOGIN" "${READS_ONLY:+reads-only}" "$ROSTER_JSON" "$MODE" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -302,7 +261,7 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed, session, own_pick, reads_only = sys.argv[1:18]
+data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed, session, own_pick, reads_only, roster_path, mode = sys.argv[1:20]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -531,7 +490,7 @@ else:
     except Skip:
         pass
 
-# 3 slots (the header's gate 3)
+# 3 slots (SPAWN.md's gate 3)
 try:
     # a reads-only worker runs nothing through run-slot, so its room never holds it
     if room and reads_only:
@@ -551,7 +510,34 @@ try:
 except Skip:
     pass
 
-# 4 usage: the launching backend's own window
+# 4 sessions (SPAWN.md's gate 4)
+CAPPED = re.compile(r"(worker|reviewer|tester)-.+|.+-(worker|reviewer|tester)")
+LIVE = ("starting", "waiting", "working")
+try:
+    cap = gates["sessionCap"]
+    if cap and role in ("worker", "reviewer", "tester"):
+        try:
+            with open(roster_path) as f:
+                agents = json.load(f).get("agents") or []
+        except FileNotFoundError:
+            agents = []
+        except (OSError, ValueError, AttributeError):
+            refuse("sessions", f"it cannot read {roster_path} (does not read)")
+        rows = [a for a in agents if isinstance(a, dict) and isinstance(a.get("name"), str)] if isinstance(agents, list) else []
+        own = next((a for a in rows if a["name"] == session), {})
+        live = sorted(a["name"] for a in rows if a["name"] != session and a.get("status") in LIVE and a.get("priority") != "1" and CAPPED.fullmatch(a["name"]))
+        readings.update(session_cap=cap, sessions=len(live))
+        # priority work comes first, as at the load and slots gates, and a resume of a live row, or of one spawn.sh closed live in the last 15 minutes (JUST_CLOSED), brings back a session the count held
+        if priority:
+            readings["priority"] = priority
+        elif mode == "resume" and (own.get("status") in LIVE or just_closed):
+            readings["counted"] = True
+        elif len(live) >= cap:
+            refuse("sessions", f"{len(live)} live {'worker or checker' if len(live) == 1 else 'workers and checkers'} in the roster ({', '.join(live)}), and gates.sessionCap is {cap}. Wait for one to end, or close a session that is done, and run it again.")
+except Skip:
+    pass
+
+# 5 usage: the launching backend's own window
 try:
     readings["backend"] = backend or "claude"
     # usage.accounts' rows parked until a later time (parkedUntil), by email: no new session starts on one, picked or named
@@ -857,17 +843,17 @@ GLM_ACCOUNT=
 GLM_GIVEN=
 # usage.accounts sits mid-list, since an empty list prints an empty line, which a last line would lose. The models a session runs on (models.*) and the capacity gate's lines (gates.*) are settings, each in the docs' list of keys, so changing one is a settings write, never an edit here.
 MODEL_SETTINGS=$(env $UNSET "$BUN" "$REPO/packages/scripts/src/playground/setting.ts" --text models.claude models.default models.checker models.glm models.glmKeychainService \
-  gates.glmLoad5Max gates.glmSwapinsMax gates.memoryFreeMin gates.reviewReserve gates.smallReserve gates.startsWindow usage.accounts sessions.names sessions.aliases context.window 2>&1) ||
+  gates.glmLoad5Max gates.glmSwapinsMax gates.memoryFreeMin gates.reviewReserve gates.sessionCap gates.smallReserve gates.startsWindow usage.accounts sessions.names sessions.aliases context.window 2>&1) ||
   { echo "spawn.sh refuses: it cannot read the model and gate settings: $MODEL_SETTINGS" >&2; exit 1; }
 {
   read -r CLAUDE_MODELS; read -r DEFAULT_MODEL; read -r CHECKER_MODEL; read -r GLM_ID; read -r GLM_KEYCHAIN
-  read -r GLM_LOAD5_MAX; read -r GLM_SWAPINS_MAX; read -r MEMORY_FREE_MIN; read -r REVIEW_RESERVE; read -r SMALL_RESERVE; read -r STARTS_WINDOW
+  read -r GLM_LOAD5_MAX; read -r GLM_SWAPINS_MAX; read -r MEMORY_FREE_MIN; read -r REVIEW_RESERVE; read -r SESSION_CAP; read -r SMALL_RESERVE; read -r STARTS_WINDOW
   read -r USAGE_ACCOUNTS; read -r SESSION_NAMES; read -r SESSION_ALIASES; read -r WINDOW
 } <<<"$MODEL_SETTINGS"
 SESSION_KINDS=$(python3 -I -c 'import json, sys; n, a = map(json.loads, sys.argv[1:3]); [print(*row) for row in [(v, k) for k, v in n.items()] + [(n["dispatcher"] + "-2", "dispatcher")] + list(a.items())]' "$SESSION_NAMES" "$SESSION_ALIASES")
 # slots.peers, the ops folders of the other factories on this machine, whose starts the load gate counts beside this one's; none when unread
 PEERS=$(setting slots.peers) || PEERS=; [ -n "$PEERS" ] || PEERS="[]"
-GATES="{\"accounts\": ${USAGE_ACCOUNTS:-[]}, \"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"reviewReserve\": $REVIEW_RESERVE, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
+GATES="{\"accounts\": ${USAGE_ACCOUNTS:-[]}, \"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"reviewReserve\": $REVIEW_RESERVE, \"sessionCap\": $SESSION_CAP, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
 MODELS=$(printf '%s\n' $CLAUDE_MODELS | awk '{ m[NR] = $0 } END { for (i = 1; i <= NR; i++) printf "%s%s", m[i], (i < NR - 1 ? ", " : i == NR - 1 ? " or " : "") }')
 CLAUDE_MODEL=
 EFFORT=
@@ -1192,7 +1178,7 @@ except (ValueError, KeyError, TypeError):
     refuse "herdr would not close pane $panes (${said:-no answer from herdr})"
   fi
   echo "closed $NAME (pane $panes on $server)"
-  # The close keeps its time and the row's status before it ended it, for the load gate's pass of a resume within 15 minutes (JUST_CLOSED, below).
+  # The close keeps its time and the row's status before it ended it, for a just-closed resume's pass (JUST_CLOSED, below).
   { mkdir -p "$DATA/closes" && echo "$(date -u +%s) $(date -u +%FT%TZ) ${was:-none}" > "$DATA/closes/$NAME"; } 2>/dev/null || true
   if [ -z "$ended" ]; then
     [ -n "$rostered" ] && echo "roster.ts says: $rostered" >&2
@@ -1569,7 +1555,7 @@ PRIORITY_FILE=
 if [ -n "$PRIORITY" ]; then
   PRIORITY_FILE=$(priority_file) || refuse "--priority starts only while a priority file stands in $DATA (priority.json, priority-start.json or another priority-<name>.json), and none does: playground priority on <session> --reason \"<why>\" opens one, on the owner's or the dispatcher's word"
 fi
-# A resume within 15 minutes of spawn.sh closing its row while it read live (not ended, parked, paused or done) passes the load gate, as a Claude Code update's close and resume do, since that session already counts in the load it comes back into; a new start, an older close and a close of a row that read otherwise meet it.
+# JUST_CLOSED names a just-closed resume, whose pass playbook's SPAWN.md, Capacity gate, holds: a resume within 15 minutes of spawn.sh closing its row while it read live, as a Claude Code update's close and resume are.
 JUST_CLOSED=
 if [ "$MODE" = resume ] && [ -f "$DATA/closes/$NAME" ] && read -r closed_at closed_iso closed_was < "$DATA/closes/$NAME"; then
   case "${closed_was:-none}" in
@@ -2073,6 +2059,12 @@ PY
     set -- "$@" sandbox=on
   elif [ "$MODE" != resume ] && [ "$(roster_field "$NAME" sandbox)" = on ]; then
     set -- "$@" sandbox=
+  fi
+  # A --priority start while a priority file stands marks its row, which the sessions gate leaves out of the count, and a start without it clears the mark, as for sandbox=on.
+  if [ -n "$PRIORITY_FILE" ]; then
+    set -- "$@" priority=1
+  elif [ "$MODE" != resume ] && [ "$(roster_field "$NAME" priority)" = 1 ]; then
+    set -- "$@" priority=
   fi
   [ -z "${ARM:-}" ] || { mkdir -p "$DATA/memory" && printf '%s\n' "$MEMORY" > "$ARM"; } || echo "spawn.sh: $NAME $WHEN, but the memory trial's turn could not be written to $ARM" >&2
   said=

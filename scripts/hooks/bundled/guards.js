@@ -9300,6 +9300,11 @@ var gateSettings = defineSettings({
     description: "The share of the load gate's line a small worker keeps back for reviewers and testers, so a held review starts first; set it under gates.smallReserve, or a small worker's line falls below a medium one's.",
     schema: number2().min(0).lt(1)
   },
+  "gates.sessionCap": {
+    default: 0,
+    description: "The live workers, reviewers and testers in the roster a new one starts under, so the floor keeps to the cap the factory runs to; 0 caps nothing.",
+    schema: number2().int().min(0)
+  },
   "gates.smallReserve": {
     default: 0.25,
     description: "The share of the load gate's line kept for small items, so a big plan never blocks a small one.",
@@ -13051,6 +13056,7 @@ var GUARD_KEYS = new Set([
 ]);
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
+var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];
 var SCORE_AS_OTHER = `playground ext score on a line that clears or sets ${IDENTITY.join(", ")}, which reads as another author than the calling session`;
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
@@ -15986,7 +15992,7 @@ if (false) {}
 import { realpathSync as realpathSync5 } from "fs";
 import { basename as basename8, dirname as dirname9, resolve as resolve10, sep as sep4 } from "path";
 var INSTEAD4 = "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
-var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it, it holds no uncommitted change and its work has landed on canary.";
+var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it (a clean worktree, detached at a commit canary already has, counts as held by none), it holds no uncommitted change and its work has landed on canary.";
 var refuse13 = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD4) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
 var shown2 = (word) => word.variable ? `$${word.variable}` : visible(word.value);
 var DATA = new Set([

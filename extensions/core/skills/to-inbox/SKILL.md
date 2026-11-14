@@ -12,7 +12,7 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 
 - An update with no `text`, or a `ship` or `schema` decision, carries only its fields, which the card lays out itself: its title takes step 5, then steps 8 and 9.
 - An `accept`, `apps`, `budget`, `delete`, `grant`, `guard` or `own` decision's `why` is free text, shown as written: it takes steps 3 and 5 as plain lines, one fact each, then steps 8 and 9; a `delete`'s `why` renders as markdown, so it takes step 4 too.
-- A `delete` decision's `what` names each target by its full path (`<main checkout>/.claude/worktrees/<name>`), since `playground rm --decision` matches that path and `ask new` refuses a short name.
+- A `delete` decision's `what` names each target by its full path (`<main checkout>/.claude/worktrees/<name>`), so the owner approves the very path that goes, and `ask new` refuses a short name.
 - A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 5, 8 and 9. A draft or a `slack` decision may carry `attachments`, such as an issue's before and after shots, which its card shows under the words and Send leaves out of Slack. A public post's draft, one the owner posts on a social site or a public page, carries `noLink` with the site's name in place of a `link`, and keeps to the **public** rule, which `bun run ask new` holds it to.
 - A `secret` ask carries only its key and sink, which the card words itself: its title takes step 5, then step 9; the value itself is the owner's to type into the card, so it appears nowhere in the item.
 - A `reveal` card carries only the item's full `service` and a `why`, a plain line: its title takes step 5, then step 9; the card fetches the value on the owner's own click, so it appears nowhere in the item either.
@@ -33,7 +33,7 @@ On an update, Done types you `done`: edit the same card for more, which brings i
 ## Steps
 
 1. **Already open?** Run `playground ask open` before you write anything (asks.md). Done when no open item asks the same thing, or you have named that item's `#iN` in chat and stopped here.
-2. **Picture and note.** Load [plain-words](../plain-words/SKILL.md) with the Skill tool, then pick the one picture asks.md's shape leads with, by its owner style, each line within the card's width ([Fit the card](#fit-the-card)), which a `diff` block is free of, since the card wraps it. Under it, write the picture's note: one sentence on the point. Attachments always show under the text, so an item whose picture is an attachment opens its text on the note, then the bullets. A work status card's block is its picture, and the block's first line, the job and its done/total, is its note ([PROGRESS.md](references/PROGRESS.md)). Done when the text opens on that picture with its note under it, or, when the picture is an attachment, on the note.
+2. **Picture and note.** Load [plain-words](../plain-words/SKILL.md) with the Skill tool, then pick the one picture asks.md's shape leads with, by its owner style, each line within the drawing width ([Fit the card](#fit-the-card)), which a `diff` block is free of, since the card wraps it. Under it, write the picture's note: one sentence on the point. Attachments always show under the text, so an item whose picture is an attachment opens its text on the note, then the bullets. A work status card's block is its picture, and the block's first line, the job and its done/total, is its note ([PROGRESS.md](references/PROGRESS.md)). Done when the text opens on that picture with its note under it, or, when the picture is an attachment, on the note.
 
    Beside asks.md's diff, ASCII flow and before and after pair, two more fit:
 
@@ -96,9 +96,10 @@ On an update, Done types you `done`: edit the same card for more, which brings i
 
 ## Fit the card
 
-Draw each code or ASCII line up to `ASK_CODE_COLUMNS` (`packages/config/src/inbox.ts`), 37 columns, an emoji counted as two.
-The card shows a drawing at its 12px code size, and shrinks a wider one's font to fit, down to 10px, before it scrolls sideways, so a line of that width shows whole at 12px on the narrowest card.
-A picture that runs past it becomes a table of three columns or fewer, or bullets.
+Draw each code or ASCII line up to `ASK_CODE_COLUMNS` (`packages/config/src/inbox.ts`), 72 columns, the owner's chosen drawing width, an emoji counted as two.
+The card shows a drawing at its 12px code size, and on a card narrower than its widest line shrinks the font to fit, down to 10px, before it scrolls sideways.
+Keep a drawing compact: several items or events go in a table, one row per item, over a tall chain of one event per line.
+A picture that still runs past the width becomes a table of three columns or fewer, or bullets.
 
 ## Example
 

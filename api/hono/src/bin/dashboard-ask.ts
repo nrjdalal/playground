@@ -233,7 +233,7 @@ if (command === "new" || command === "edit") {
         }).stdout.toString(),
       ),
   )
-  // a delete names its targets by full path, the one playground rm --decision matches, so the owner approves it once
+  // a delete names its targets by full path, so the owner approves the very path that goes
   const main = mainCheckoutOf(process.cwd())
   const shortDelete = deleteRefusal(input, {
     cwd: process.cwd(),
@@ -253,7 +253,7 @@ if (command === "new" || command === "edit") {
           ? 'ask: this ask labels no options, so its card shows a bare Approve and Deny; for a yes or no, label one option, "options": [{"label": "..."}], with "deny"; for real alternatives, label 2 to 5 (.agents/dashboard/asks.md, The ask\'s shape)'
           : hint.kind === "unlinked"
             ? `ask: ${hint.refs.join(", ")} named with no link on its line; link each so the owner can open it: a PR as [#N](https://github.com/<owner>/<repo>/pull/N), a commit as [sha](https://github.com/<owner>/<repo>/commit/<sha>), a ticket at its tracker's URL (to-inbox, Links; .agents/dashboard/asks.md, The ask's shape)`
-            : `ask: a code or ASCII line runs ${hint.longest} characters, past the ${ASK_CODE_COLUMNS} the narrowest Inbox card shows on one line; break or shorten it (.agents/dashboard/asks.md, The ask's shape)`,
+            : `ask: a code or ASCII line runs ${hint.longest} characters, past the ${ASK_CODE_COLUMNS} columns the owner chose for an Inbox drawing; break or shorten it, or make it a compact table (.agents/dashboard/asks.md, The ask's shape)`,
     )
   }
   // the files an ask names are copied in first, so the item keeps their ids, never a path on this Mac
