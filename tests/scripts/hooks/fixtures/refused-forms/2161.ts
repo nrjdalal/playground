@@ -220,6 +220,14 @@ export const groups: Group[] = [
         'A=(echo X); : ${A[1]}; X=a; "${A[@]}"; $X pkill -f watcher',
       ],
       [
+        "a kill by pattern behind a variable an array run whole changes after printf sets an element by its joined -v",
+        'A=(echo X); printf -vA[0] unset; X=a; "${A[@]}"; $X pkill -f watcher',
+      ],
+      [
+        "a kill by pattern behind a variable an array run whole changes after eval's text sets an element",
+        `A=(echo X); eval 'echo hi; A[0]=unset'; X=a; "\${A[@]}"; $X pkill -f watcher`,
+      ],
+      [
         "a kill by pattern behind a variable zsh's nameref makes a reference",
         "X=a; nameref X=Y; $X pkill -f watcher",
       ],
