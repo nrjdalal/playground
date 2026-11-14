@@ -1042,7 +1042,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-raw-vercel
 
-- Production ships from `main` alone: the release skill's `ship:merge` merges, and Vercel deploys the hosted build from git, its build migrating the hosted database first (`packages/scripts/src/migrate-on-deploy.ts`), so no step of a ship runs the Vercel CLI.
+- Production ships from `main` through the release skill's `ship:merge`, and Ops ships the hosted build by hand, `vercel deploy --prod --yes` once a project with its `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` set in the call's environment.
+  A production deploy of the hosted build migrates the hosted database first (`packages/scripts/src/migrate-on-deploy.ts`), so a hand production move is the Ops lead's alone.
   `scripts/hooks/no-raw-vercel.ts`, run on Bash by [guards](#guards) for a factory session, reads `vercel` and `vc` by any path or case wherever the shell walker finds a command (behind `env`, `exec`, `command`, `time`, `nohup`, `timeout`, `sudo`, `xargs`, in `sh -c`, `eval`, a subshell, a group or a substitution).
   It also reads it through `bun x`, `bunx` or `npx` (`toolWords` in `scripts/hooks/no-main-checkout.ts`); another package runner is not read.
 - It judges each call by vercel 65.8.0's own commands, each alias it registers read as its command (`ln` and `aliases` as `alias`, `rr` as `rolling-release`, `i` as `install`, `log` as `logs`), and by the options its `--help` lists, global (`--team`, `--api`, `--scope` and the rest) and of each command it judges.

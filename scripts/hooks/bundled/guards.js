@@ -16825,7 +16825,7 @@ async function check22(raw, environment = process.env) {
   const production = verdicts.find((v) => v.production);
   if (!production || await opsLead(raw, environment) && !namesRole(command))
     return;
-  return `no-raw-vercel hook refuses ${production.what}: it changes what production serves, and a production deploy also migrates the hosted database. Production ships from main through the release skill's ship:merge, which Vercel deploys from git; the Ops lead alone makes a hand production move, in a call that names no role variable and sources no file. A preview deploy (vercel deploy without --prod) and the reads (whoami, ls, inspect, logs, help) run.`;
+  return `no-raw-vercel hook refuses ${production.what}: it changes what production serves, and a production deploy also migrates the hosted database. Production ships from main through the release skill's ship:merge; the Ops lead alone makes a hand production move, in a call that names no role variable and sources no file. A preview deploy (vercel deploy without --prod) and the reads (whoami, ls, inspect, logs, help) run.`;
 }
 
 // scripts/hooks/no-raw-wa.ts

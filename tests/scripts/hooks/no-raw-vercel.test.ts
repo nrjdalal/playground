@@ -201,6 +201,28 @@ describe("a factory session's Vercel call that moves production or reads its sec
   })
 })
 
+// Ops' ship of the hosted build: one production deploy a project, its ids in the call's environment; the ids are made up.
+const OPS_SHIP: [string, string][] = [
+  [
+    "with the project's ids as assignments",
+    "VERCEL_ORG_ID=team_madeup1 VERCEL_PROJECT_ID=prj_madeup1 vercel deploy --prod --yes",
+  ],
+  [
+    "with the project's ids through env",
+    "env VERCEL_ORG_ID=team_madeup1 VERCEL_PROJECT_ID=prj_madeup2 vercel deploy --prod --yes",
+  ],
+]
+
+describe("Ops' ship of the hosted build", () => {
+  test.each(OPS_SHIP)("passes for the Ops lead %s", async (_, command) => {
+    expect(await as("ops", command)).toBeUndefined()
+  })
+
+  test.each(OPS_SHIP)("is refused for a worker %s", async (_, command) => {
+    expect(await as("worker", command)).toContain(REFUSED)
+  })
+})
+
 describe("the Ops lead's production moves", () => {
   test.each(PRODUCTION.filter(([, command]) => !command.includes("$")))(
     "pass: %s",
