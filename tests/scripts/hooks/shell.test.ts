@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -373,5 +373,46 @@ describe("an unquoted heredoc body's substitutions are lexed as the commands the
     const [sub, cmd] = lex("true <<EOF\n$(probe a)\nEOF").commands
     expect(sub.words.map((w) => w.value)).toEqual(["probe", "a"])
     expect(cmd.redirects[0].body?.unknown).toBe("an expansion in an unquoted heredoc")
+  })
+})
+
+// #2198: GNU xargs' input options: xargs fills its program from each item of the input -a names in place of stdin, split at a -d or -0 delimiter, and the reader reads the program as unread wherever it cannot read that input or decode that delimiter
+describe("xargs fills its program from the input GNU's input options name", () => {
+  const dir = mkdtempSync(join(tmpdir(), "shell-xargs-input-"))
+  afterAll(() => rmSync(dir, { force: true, recursive: true }))
+  writeFileSync(join(dir, "f"), "turbo\n")
+  writeFileSync(join(dir, "big"), "turbo ".repeat(200_000))
+  const filled = async (line: string) => {
+    const env: Env = { cwd: dir, files: new Map(), known: {}, process: {}, vars: new Map() }
+    const seen: string[] = []
+    await run(lex(line), env, async (_cmd, parsed) => {
+      seen.push([parsed.name, ...parsed.args.map((a) => a.value)].join(" "))
+      return undefined
+    })
+    return seen
+  }
+
+  test.each([
+    ["an item -d's comma splits off", "printf 'a,turbo' | xargs -d, -I X nice X run"],
+    ["an item -d's hex escape splits off", "printf 'a,turbo' | xargs -d '\\x2c' -I X nice X run"],
+    ["an item -d's octal escape splits off", "printf 'a,turbo' | xargs -d '\\054' -I X nice X run"],
+    ["an item -0 splits off", "printf 'a\\0turbo' | xargs -0 -I X nice X run"],
+    ["a line of -a's file", "echo a | xargs -a f -I X nice X run"],
+    ["a line of -a's process substitution", "echo a | xargs -a <(echo turbo) -I X nice X run"],
+  ])("%s fills the program", async (_, line) => {
+    expect(await filled(line)).toContain("turbo run")
+  })
+
+  test.each([
+    ["a -d escape the reader cannot decode", "printf 'a,turbo' | xargs -d '\\q' -I X nice X run"],
+    ["a -d delimiter in a variable", "printf 'a,turbo' | xargs -d \"$D\" -I X nice X run"],
+    ["a -d of more than one character", "printf 'a,turbo' | xargs -d ab -I X nice X run"],
+    ["an -a file that does not exist", "echo a | xargs -a missing -I X nice X run"],
+    ["an -a folder", "echo a | xargs -a . -I X nice X run"],
+    ["an -a descriptor other than stdin", "echo a | xargs -a /dev/fd/3 -I X nice X run"],
+    ["an -a file over the reader's size cap", "echo a | xargs -a big -I X nice X run"],
+    ["an -a file in a variable", 'echo a | xargs -a "$F" -I X nice X run'],
+  ])("%s reads the program as unread", async (_, line) => {
+    expect(await filled(line)).toContain(`${UNKNOWN} run`)
   })
 })

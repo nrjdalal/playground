@@ -3465,3 +3465,27 @@ describe("an xargs replace string outside the program word keeps the call's verd
     )
   })
 })
+
+// #2198: GNU xargs' input options, and a replace option at the end of a cluster of flags, beside a typed program leave it typed, so each keeps canary's verdict
+describe("an xargs input option beside a typed program keeps the call's verdict", () => {
+  test.each([
+    ["echo under xargs -d,", "printf 'a,b' | xargs -d, echo"],
+    ["echo under xargs --delimiter given apart", "printf 'a,b' | xargs --delimiter , echo"],
+    ["echo under xargs -d, fed a program's name", "printf 'a,playground' | xargs -d, echo"],
+    ["grep under xargs -0 fed by find -print0", "find . -print0 | xargs -0 grep -l x"],
+    ["echo under xargs -a of a process substitution", "xargs -a <(echo a) echo"],
+    ["echo under a shortened --arg=", "xargs --arg=/tmp/list echo"],
+    ["echo under xargs -d, -I %", "printf 'a,b' | xargs -d, -I % echo %"],
+    ["cat under xargs -0I %", "printf a | xargs -0I % cat %"],
+    ["cat under nice under xargs -rJ %", "echo a | xargs -rJ % nice cat %"],
+    ["echo under a shortened --repl=%", "echo a | xargs --repl=% echo %"],
+  ])("%s runs from a worktree", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+
+  test("cp into the root under xargs -rJ % stays refused", async () => {
+    expect(await bash("echo a | xargs -rJ % cp % $HOME/.playground/extensions/", WORK)).toContain(
+      "no-extensions-write hook refuses",
+    )
+  })
+})
