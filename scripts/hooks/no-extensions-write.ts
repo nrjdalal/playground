@@ -61,6 +61,7 @@ import {
   type Visit,
   withDeadline,
   type Word,
+  WRAPPERS,
 } from "./shell"
 import {
   held,
@@ -100,6 +101,9 @@ const refuse = (what: string) =>
 // A refusal that likely names no write (`unwritten`), which the reader most often reaches by reading text as a path, so it routes to the lead as a likely false positive
 const refuseUnwritten = (what: string) =>
   `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`
+// The same, for code bun or node runs inline from a folder in or above the root, which may write there by a relative path, so it names the form that runs
+const refuseNearEval = (program: string) => (what: string) =>
+  `no-extensions-write hook refuses ${what}: ${WHY_ROOT} Code ${program} -e runs from this folder may write there by a relative path; run ${program} -e from a worktree, with absolute paths built from process.env.HOME.`
 
 // text the shell runs as code where the lexer reads a plain word (evaluatedParts), read past by the reader, so code naming the root's folders may write there
 const EVALUATES_ROOT =
@@ -1303,6 +1307,32 @@ const FLAGS = /\$\{\([^)]*[eP][^)]*\)[^}]*\}?/g
 const FILE_RUN = /(?:^|[\s;&|(<>])=\(/
 const FILE_RUNS = /=\([^)]*\)?/g
 
+// Whether a call is grep that xargs starts, read as a direct grep is: xargs its command's own first word, bare or by a system path, then only its own options, each read one way (no other reading in `also`, no wrapper's name among them), no variable set, its own --process-slot-var included, no replace string inside grep's own word, which stdin would put in place of the program, and grep bare or by a system path
+function xargsGrep(cmd: Command, parsed: Parsed, env: Env): boolean {
+  const { also, chdir, first, local, name, xargs } = parsed
+  const lead = cmd.words.find((word) => /(?:^|\/)xargs$/.test(word.value))
+  const system = /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/
+  return (
+    !!xargs &&
+    !!first &&
+    name === "grep" &&
+    also.length === 0 &&
+    !chdir &&
+    local.size === 0 &&
+    ownFirst(cmd, lead) &&
+    system.test(lead.value) &&
+    system.test(first.value) &&
+    (xargs.replace === undefined || !first.value.includes(xargs.replace)) &&
+    xargsOptions(cmd, first).every(
+      (value) =>
+        !marked(value) &&
+        !WRAPPERS.has(program(value)) &&
+        !/^--process-slot-var(?:=|$)/.test(value),
+    ) &&
+    reads(parsed, env)
+  )
+}
+
 // Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, date, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, a bash -c of a script of such readers, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
@@ -1671,6 +1701,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   let rootLine = false
   let patterns = new Set<Command>()
   let lineWrites = false
+  // the inline evaluator (bun or node) whose code the walk reads from a folder in or above the root, so a likely false positive in it names the form that runs
+  let nearEval: string | undefined
   // how deep the walk is in a line read out of a quoted text (runsOf), whose commands no one typed
   let textDepth = 0
   // where each scope's variables were read to for their lines, and judged to for each cwd and remover, so each variable is read once rather than once a command
@@ -1798,8 +1830,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd)))
       : undefined
     if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
-    // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
-    const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env)
+    // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one, or grep that xargs starts as its own first word (xargsGrep)
+    const reader =
+      !rootLine && ((ownFirst(cmd, first) && reads(parsed, env)) || xargsGrep(cmd, parsed, env))
     // on a line read whole with no root shell and no variable set that makes a program run another (TEXT_RUNS), a read-only gh call's jq filter, agent-browser's eval script, a read-only sed's script and a playground text flag's value stay text, as on a line read call by call, since no program runs them as a shell line; each is still refused when it names the root, and the sed's files are judged as any word is
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined
     const wholeText = new Set<Word>(
@@ -1868,6 +1901,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       ({ cwd }) => cwd !== undefined && !above(cwd, true) && !inRoot(cwd),
     )
     const evaluated = rootLine || cmd.scope !== 0 || !away ? undefined : evalProgram(parsed)
+    const near =
+      !away && (name === "bun" || name === "node") && evalProgram(parsed) ? name : nearEval
+    const unwrittenRefusal = near ? refuseNearEval(near) : refuseUnwritten
     const masked =
       evaluated && !evaluated.glob && !marked(evaluated.value)
         ? maskRegexes(evaluated.value, (body) => guarded(body, env))
@@ -1887,12 +1923,17 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (seen.has(line)) continue
       seen.add(line)
       textDepth++
+      const outer = nearEval
+      nearEval = near
       const verdict = await run(
         lex(line, env.known),
         { ...env, vars: new Map() },
         visit,
         true,
-      ).finally(() => textDepth--)
+      ).finally(() => {
+        textDepth--
+        nearEval = outer
+      })
       if (verdict) return verdict
     }
     // a quiet commit's message is text git never runs, a gated call it names included, and an in-place sed's script is text sed reads as a program of its own
@@ -1978,7 +2019,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         if (text && !texts(word).some((t) => holds(t.value, here))) continue
         const named = names(word, here, remover, literal)
         if (named)
-          return (unwritten(named, cmd, here) ? refuseUnwritten : refuse)(`${verb} on ${named}`)
+          return (unwritten(named, cmd, here) ? unwrittenRefusal : refuse)(`${verb} on ${named}`)
       }
       // tee copies its heredoc to the targets the loop above judged, so the body is data, unless the line feeds code
       if (
