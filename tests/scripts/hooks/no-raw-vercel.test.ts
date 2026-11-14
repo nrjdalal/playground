@@ -82,6 +82,20 @@ const PRODUCTION: [string, string][] = [
   ["an alias by its default", "vercel alias demo-abc.vercel.app demo.example.com"],
   ["a rolling release start", "vercel rolling-release start --deployment=dpl_123"],
   ["a rolling release approve", "vercel rolling-release approve"],
+  ["an alias set by ln", "vercel ln set demo-abc.vercel.app demo.example.com"],
+  ["an alias by ln's default", "vercel ln demo-abc.vercel.app demo.example.com"],
+  ["an alias set by aliases", "vercel aliases set demo-abc.vercel.app demo.example.com"],
+  ["an alias by aliases' default", "vercel aliases demo-abc.vercel.app demo.example.com"],
+  ["a rolling release start by rr", "vercel rr start --deployment=dpl_1"],
+  ["a rolling release approve by rr", "vercel rr approve"],
+  ["a promote after the team option", "vercel --team acme promote demo-abc.vercel.app"],
+  ["a production deploy after deploy's force letter", "vercel deploy -f --prod"],
+  ["a bare production deploy after the force letter", "vercel -f --prod"],
+  ["a production target after the force letter", "vercel deploy -f --target production"],
+  [
+    "a production deploy after an option the hook does not know",
+    "vercel deploy --made-up x --prod",
+  ],
 ]
 
 // Each writes the project's secrets to disk, prints them, or hands them to a command.
@@ -108,6 +122,20 @@ const SECRETS: [string, string][] = [
   ["an api input file", "vercel api /v9/projects/demo --input body.json"],
   ["an api method built at run time", 'vercel api /v2/user -X "$M"'],
   ["an api endpoint built at run time", 'vercel api "$P"'],
+  ["an install, which adds an integration", "vercel install neon"],
+  ["an install by its letter", "vercel i neon"],
+  ["an integration install", "vercel integration install neon"],
+  ["an env list in json format", "vercel env ls --format json"],
+  ["an env list in json format attached", "vercel env ls --format=json"],
+  ["an env list in json format by its letter", "vercel env ls -F json"],
+  ["an env list in json format in capitals", "vercel env list --format JSON --project demo"],
+  ["an env pull after the team letter", "vercel -T acme env pull"],
+  ["a link after the api option", "vercel --api https://api.example.com link"],
+  ["a build", "vercel build --yes"],
+  ["a production build", "vercel build --prod --yes --project demo"],
+  ["an api GET with a field", "vercel api /v2/user -X GET -F a=b"],
+  ["an api GET with a string field", "vercel api /v2/user -X GET -f a=b"],
+  ["an api GET with an input file", "vercel api /v2/user -X GET --input x"],
 ]
 
 // The prefixes a call can come behind.
@@ -131,6 +159,14 @@ describe("a factory session's Vercel call that moves production or reads its sec
 
   test.each(PRODUCTION)("for a lead that is not Ops: %s", async (_, command) => {
     expect(await as("builder", command)).toContain(REFUSED)
+  })
+
+  test.each([
+    ["an env pull xargs feeds", "echo env pull | xargs vercel"],
+    ["a link xargs feeds", "echo link | xargs vercel"],
+    ["an env pull xargs feeds after a production flag", "echo env pull | xargs vercel --prod"],
+  ])("for the Ops lead, words xargs feeds: %s", async (_, command) => {
+    expect(await as("ops", command)).toContain(REFUSED)
   })
 
   test.each(SECRETS)("for the Ops lead too: %s", async (_, command) => {
@@ -173,6 +209,10 @@ describe("a read, a preview and a help run", () => {
     ["inspect", "vercel inspect demo-abc.vercel.app"],
     ["logs", "vercel logs demo-abc.vercel.app"],
     ["logs of production", "vercel logs -e production"],
+    ["logs of production by the log alias", "vercel log --environment production"],
+    ["an env list in table format", "vercel env ls --format table"],
+    ["a redeploy to preview by its letter", "vercel redeploy demo-abc.vercel.app -e preview"],
+    ["an integration list", "vercel integration ls"],
     ["a bare preview deploy", "vercel"],
     ["a preview deploy", "vercel deploy --yes"],
     ["a preview by its environment", "vercel deploy --environment preview"],

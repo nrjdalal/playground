@@ -1,7 +1,7 @@
 # Deploying through the Vercel CLI
 
 A factory session's `vercel` call passes the no-raw-vercel guard first ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#no-raw-vercel)).
-For every session it refuses `link`, `pull`, `env pull`, `env run`, `env ls --json`, an `integration add` without `--no-env-pull`, and a `vercel api` write or `/env` read.
+For every session it refuses `link`, `pull`, `build`, `env pull`, `env run`, `env ls` with its values, an `integration add` without `--no-env-pull`, and a `vercel api` write or `/env` read.
 For all but the Ops lead it also refuses a deploy or `redeploy` that may land in production, a `promote`, a `rollback`, an alias change and a rolling release, since production ships from `main` through the release skill.
 Reads, preview deploys and help run.
 

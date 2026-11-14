@@ -16572,53 +16572,168 @@ if (false) {}
 
 // scripts/hooks/no-raw-vercel.ts
 var NAMES2 = ["vc", "vercel"];
-var TAKES3 = new Set([
-  "--archive",
-  "--build-env",
-  "--cwd",
-  "--env",
-  "--environment",
-  "--field",
-  "--generate",
-  "--git-branch",
-  "--global-config",
-  "--header",
-  "--input",
-  "--local-config",
-  "--meta",
-  "--method",
-  "--project",
-  "--raw-field",
-  "--regions",
-  "--scope",
-  "--spec-url",
-  "--target",
-  "--timeout",
-  "--token",
-  "-A",
-  "-e",
-  "-F",
-  "-f",
-  "-H",
-  "-p",
-  "-Q",
-  "-S",
-  "-t",
-  "-X"
-]);
-var COMMANDS2 = new Set("activity agent agent-runs ai-gateway alerts alias api bisect blob budgets build buy cache certs changelog ci comments connect contract crons curl daemons deploy deploy-hooks dev dns domains drains env environments feedback firewall flags git global-config health help httpstat init inspect install integration kms link list login logout logs ls mcp metrics microfrontends monitors open organizations pricing project promote pull redeploy redirects remove rm rollback rolling-release routes sandbox schedules security setup signup skills storage switch teams telemetry token-pass tokens traces upgrade usage vcr version webhooks whoami".split(" "));
+var words = (text) => new Set(text.split(" "));
+var GLOBAL = {
+  flags: words("--debug --help --no-color --non-interactive --version -d -h -v"),
+  takes: words("--api --cwd --global-config --local-config --scope --team --token -A -Q -S -T -t")
+};
+var DEPLOY = {
+  flags: words("--create-if-missing --dry --force --guidance --json --logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -y"),
+  takes: words("--archive --build-env --env --environment --meta --project --regions --target -p")
+};
+var INSTALL = {
+  flags: words("--claim --json --no-claim --no-connect --no-env-pull"),
+  takes: words("--billing-plan --environment --installation --meta --name --prefix -e")
+};
+var OWN2 = {
+  api: {
+    flags: words("--dangerously-skip-permissions --include --paginate --raw --refresh --silent --verbose -i"),
+    takes: words("--field --generate --header --input --method --raw-field --spec-url -F -H -X -f")
+  },
+  deploy: DEPLOY,
+  env: {
+    flags: words("--guidance --json --yes -y"),
+    takes: words("--environment --format --git-branch --project -F -e -p")
+  },
+  install: INSTALL,
+  integration: INSTALL,
+  promote: { flags: words("--yes -y"), takes: words("--timeout") },
+  redeploy: { flags: words("--no-wait"), takes: words("--environment --target -e") },
+  rollback: { flags: words("--yes -y"), takes: words("--timeout") }
+};
+var ALIASES = new Map(Object.entries({
+  aliases: "alias",
+  budget: "budgets",
+  cert: "certs",
+  cron: "crons",
+  daemon: "daemons",
+  "deploy-hook": "deploy-hooks",
+  develop: "dev",
+  domain: "domains",
+  drain: "drains",
+  "edge-config": "global-config",
+  environment: "environments",
+  i: "install",
+  image: "images",
+  ir: "integration-resource",
+  ln: "alias",
+  log: "logs",
+  ls: "list",
+  mf: "microfrontends",
+  organization: "organizations",
+  permission: "permissions",
+  projects: "project",
+  rm: "remove",
+  rr: "rolling-release",
+  "status-page": "health",
+  switch: "teams",
+  tags: "tag",
+  target: "environments",
+  targets: "environments",
+  team: "teams",
+  versions: "version",
+  webhook: "webhooks"
+}));
+var COMMANDS2 = words("activity agent agent-runs ai-gateway alerts alias api bisect blob budgets build builders buy cache certs changelog ci comments config connect contract crons curl daemons deploy deploy-hooks dev dns domains drains env environments experiments feedback firewall flags git global-config guidance health help httpstat image images init inspect install integration integration-resource kms link list login logout logs mcp metrics microfrontends monitors notifications open organizations page-integrity permissions pricing project promote pull redeploy redirects remove rollback rolling-release routes sandbox schedules security setup signup skills storage tag teams telemetry tokens traces upgrade usage vcr version webhooks whoami");
 var HELP2 = new Set(["--help", "--version", "-h", "-v"]);
 var API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"]);
+var READINGS2 = 64;
 var MENTION2 = /\bv(?:ercel|c)\b/i;
 var NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i;
-function judge7(args, fed) {
-  const { flags, positionals } = parseFlags(args, TAKES3);
+function readingsOf(args, { flags, takes }) {
+  const out = [];
+  const walk = (k, read) => {
+    if (out.length >= READINGS2)
+      return false;
+    for (;k < args.length; k++) {
+      const v = args[k].value;
+      if (v === "--") {
+        out.push({ ...read, positionals: [...read.positionals, ...args.slice(k + 1)] });
+        return true;
+      }
+      if (v.startsWith("--")) {
+        const eq = v.indexOf("=");
+        const name = eq === -1 ? v : v.slice(0, eq);
+        if (eq !== -1)
+          read = {
+            ...read,
+            flags: [...read.flags, { name, value: { ...args[k], value: v.slice(eq + 1) } }]
+          };
+        else if (takes.has(name))
+          read = { ...read, flags: [...read.flags, { name, value: args[++k] }] };
+        else if (flags.has(name))
+          read = { ...read, flags: [...read.flags, { name }] };
+        else {
+          if (!walk(k + 2, { ...read, flags: [...read.flags, { name, value: args[k + 1] }] }))
+            return false;
+          read = { ...read, flags: [...read.flags, { name }] };
+        }
+        continue;
+      }
+      if (v.startsWith("-") && v.length > 1) {
+        for (let c = 1;c < v.length; c++) {
+          const name = `-${v[c]}`;
+          const attached = c + 1 < v.length ? { ...args[k], value: v.slice(v[c + 1] === "=" ? c + 2 : c + 1) } : undefined;
+          if (flags.has(name)) {
+            read = { ...read, flags: [...read.flags, { name }] };
+            continue;
+          }
+          const taken = {
+            ...read,
+            flags: [...read.flags, { name, value: attached ?? args[k + 1] }]
+          };
+          if (takes.has(name)) {
+            read = taken;
+            if (!attached)
+              k++;
+            break;
+          }
+          if (!walk(attached ? k + 1 : k + 2, taken))
+            return false;
+          read = { ...read, flags: [...read.flags, { name }] };
+        }
+        continue;
+      }
+      read = { ...read, positionals: [...read.positionals, args[k]] };
+    }
+    out.push(read);
+    return true;
+  };
+  return walk(0, { flags: [], positionals: [] }) ? out : undefined;
+}
+var commandOf4 = (word) => word === undefined ? undefined : ALIASES.get(word.value) ?? word.value;
+function judgeAll(args, fed) {
+  const unread = {
+    production: false,
+    what: "a vercel call with more options than the hook reads"
+  };
+  const first = readingsOf(args, GLOBAL);
+  if (!first)
+    return unread;
+  const verdicts = [];
+  for (const name of new Set(first.map((r) => commandOf4(r.positionals[0])))) {
+    const own = OWN2[name !== undefined && COMMANDS2.has(name) ? name : "deploy"];
+    const options = own ? {
+      flags: new Set([...GLOBAL.flags, ...own.flags]),
+      takes: new Set([...GLOBAL.takes, ...own.takes])
+    } : GLOBAL;
+    const readings = readingsOf(args, options);
+    if (!readings)
+      return unread;
+    for (const reading of readings)
+      verdicts.push(judge7(reading, args.some(unreadable), fed));
+  }
+  return verdicts.find((v) => v && !v.production) ?? verdicts.find(Boolean);
+}
+function judge7({ flags, positionals }, unreadWord, fed) {
   if (flags.some((f) => HELP2.has(f.name)))
     return;
   const [sub, ...rest] = positionals;
   if (sub && unreadable(sub))
     return { production: false, what: "a subcommand built at run time" };
-  const built = fed || args.some(unreadable);
+  if (fed && !sub)
+    return { production: false, what: "a vercel call whose words xargs feeds" };
+  const built = fed || unreadWord;
   const has = (...names) => flags.some((f) => names.includes(f.name));
   const toProduction = (names, absent) => {
     const flag = flags.findLast((f) => names.includes(f.name));
@@ -16627,7 +16742,7 @@ function judge7(args, fed) {
     return !flag.value || unreadable(flag.value) || flag.value.value.toLowerCase() === "production";
   };
   const next = rest[0]?.value;
-  const name = sub?.value;
+  const name = commandOf4(sub);
   if (name === undefined || name === "deploy" || !COMMANDS2.has(name))
     return has("--prod") || toProduction(["--environment", "--target"], false) || built ? { production: true, what: "a production deploy" } : undefined;
   if (name === "redeploy")
@@ -16642,14 +16757,19 @@ function judge7(args, fed) {
     return { production: false, what: "a vercel link, which pulls the env" };
   if (name === "pull")
     return { production: false, what: "a vercel pull, which pulls the env" };
-  if (name === "integration")
-    return next === "add" && !has("--no-env-pull") ? { production: false, what: "an integration add without --no-env-pull" } : undefined;
+  if (name === "build")
+    return { production: false, what: "a vercel build, which may pull the env" };
+  const adds = name === "install" || name === "integration" && ["add", "i", "install"].includes(next ?? "");
+  if (adds)
+    return has("--no-env-pull") ? undefined : { production: false, what: "an integration add without --no-env-pull" };
   if (name === "env") {
     if (rest[0] && unreadable(rest[0]))
       return { production: false, what: "an env subcommand built at run time" };
     if (next === "pull" || next === "run")
       return { production: false, what: `an env ${next}` };
-    if ((next === "ls" || next === "list") && (has("--json") || built))
+    const format = flags.findLast((f) => f.name === "--format" || f.name === "-F");
+    const json = !!format && (!format.value || unreadable(format.value) || format.value.value.toLowerCase() === "json");
+    if ((next === "ls" || next === "list") && (has("--json") || json || built))
       return { production: false, what: "an env list with its values" };
     return;
   }
@@ -16665,8 +16785,8 @@ function judgeApi2(rest, flags, built) {
   const method = flags.findLast((f) => f.name === "-X" || f.name === "--method");
   if (method && (!method.value || method.value.value.toUpperCase() !== "GET"))
     return { production: false, what: "a vercel api write" };
-  if (!method && flags.some((f) => API_BODY.has(f.name)))
-    return { production: false, what: "a vercel api write, a body making it a POST" };
+  if (flags.some((f) => API_BODY.has(f.name)))
+    return { production: false, what: "a vercel api call with a body" };
   if (/(?:^|\/)env(?:[/?#]|$)/i.test(endpoint.value))
     return { production: false, what: "a vercel api read of a project's env" };
 }
@@ -16689,7 +16809,7 @@ async function check22(raw, environment = process.env) {
         what: "a program built at run time on a line naming vercel"
       });
     const words = toolWords(NAMES2, parsed.name, parsed.args, shell);
-    const verdict = words && judge7(words, parsed.xargs !== undefined);
+    const verdict = words && judgeAll(words, parsed.xargs !== undefined);
     if (verdict)
       verdicts.push(verdict);
     return;
