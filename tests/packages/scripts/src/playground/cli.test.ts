@@ -206,9 +206,12 @@ describe("bare dispatcher", () => {
             ...(opts.linked === false
               ? {}
               : Object.fromEntries(
-                  ["factory-settings.json", "handoffs/new-worker.md", "ops/run-slot.sh"].map(
-                    (file) => [`../.playground/${file}`, "linked\n"],
-                  ),
+                  [
+                    "factory-settings.json",
+                    "handoffs/new-research-worker.md",
+                    "handoffs/new-worker.md",
+                    "ops/run-slot.sh",
+                  ].map((file) => [`../.playground/${file}`, "linked\n"]),
                 )),
             "packages/scripts/src/ops-herdr/cli.ts": `import { appendFileSync } from "node:fs"\nappendFileSync(${JSON.stringify(log)}, \`ops-herdr \${process.argv.slice(2).join(" ")}\\n\`)\n${opts.opsHerdr}\n`,
             "packages/scripts/src/ops-herdr/pin.json": JSON.stringify(pin),
