@@ -1706,7 +1706,7 @@ function expandTilde(cmd: Command, name: string, env: Env): Command[] {
   })
 }
 
-// The words a command's unquoted reads of a variable the line set to a value the reader holds (`$V`, `${V}`) split into at blanks, as bash and zsh under sh_word_split run them (`C="git push"; $C`, `W="w --"; run-slot.sh $W git push`), judged beside the typed reading so the hook is never looser than that reading; none when no word reads one, and a cd's own words stay as chdirTo reads them.
+// The words a command's unquoted reads of a variable the line set to a value the reader holds (`$V`, `${V}`) split into at blanks, as bash and zsh under sh_word_split run them, the home a value opens with expanded as the assignment did (`C="git push"; $C`, `W="w --"; run-slot.sh $W git push`), judged beside the typed reading so the hook is never looser than that reading; none when no word reads one, and a cd's own words stay as chdirTo reads them.
 function splitHeld(cmd: Command, name: string, env: Env): Command[] {
   if (name === "cd" || name === "popd" || name === "pushd") return []
   let split = false
@@ -1715,7 +1715,9 @@ function splitHeld(cmd: Command, name: string, env: Env): Command[] {
       !w.quoted && w.value === UNKNOWN && w.variable ? env.vars.get(w.variable) : undefined
     if (!held || held.unknown || marked(held.value)) return [w]
     split = true
+    // an assignment expands the ~ its value opens with (`S=~/x`), which the held value keeps as written
     return held.value
+      .replace(/^~(?=\/|$)/, homedir())
       .split(/\s+/)
       .filter(Boolean)
       .map((value) => ({ quoted: false, value }))

@@ -1398,7 +1398,7 @@ function splitHeld(cmd, name, env) {
     if (!held || held.unknown || marked(held.value))
       return [w];
     split = true;
-    return held.value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
+    return held.value.replace(/^~(?=\/|$)/, homedir()).split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
   });
   return split ? [{ ...cmd, words }] : [];
 }

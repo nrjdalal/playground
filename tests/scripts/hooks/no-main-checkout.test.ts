@@ -552,6 +552,10 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
       `~/.playground/ops/run-slot.sh w -- env K=V git -C ${WORKTREE} commit -m x`,
     ],
     ["run-slot with no command", "~/.playground/ops/run-slot.sh w"],
+    [
+      "a commit in a home folder a variable the line sets names",
+      "S=~/scratch/x; git -C $S commit -m x",
+    ],
     ["a read through bash run-slot", "bash ~/.playground/ops/run-slot.sh w -- git status --short"],
     ["another script through bash", "bash scripts/other.sh w -- git commit -m x"],
     ["curl to stdout", "curl -sS https://example.com"],
