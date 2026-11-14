@@ -675,6 +675,8 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
   const maybe: Word[] = []
   // the file macOS's install writes its metalog to
   const logs: Word[] = []
+  // the words an option took as its value
+  const values: Word[] = []
   for (let k = 0, options = true; k < args.length; k++) {
     const word = args[k]
     const { value } = word
@@ -690,12 +692,8 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
       if (into && "target-directory".startsWith(long))
         folder = attached ? after(word, long.length + 3) : args[++k]
       else if (name === "install" && "directory".startsWith(long)) folders = true
-      else if (
-        !attached &&
-        !takes?.flags?.includes(long) &&
-        takes?.long.some((take) => take.startsWith(long))
-      )
-        k++
+      else if (!takes?.flags?.includes(long) && takes?.long.some((take) => take.startsWith(long)))
+        values.push(...(attached ? [after(word, long.length + 3)] : args.slice(++k, k + 1)))
     } else
       // a short cluster read letter by letter up to the first that takes a value, whose value is the cluster's rest or else the next word
       for (let i = 1; i < value.length; i++) {
@@ -713,7 +711,7 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
             const log = rest ? after(word, i + 1) : args[k + 1]
             if (log) logs.push(log)
           }
-          if (!rest) k++
+          values.push(...(rest ? [after(word, i + 1)] : args.slice(++k, k + 1)))
           break
         }
       }
@@ -722,6 +720,9 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
   if (name === "ln" && !folder && operands.length === 1)
     return [{ quoted: false, value: "." }, ...splits]
   const targets = into && !folders ? (folder ? [folder] : operands.slice(-1)) : operands
+  // on Linux, install -d with no operand writes nothing only because GNU's operand check fails, so the values its options took are judged as targets
+  if (process.platform === "linux" && name === "install" && folders && operands.length === 0)
+    targets.push(...values)
   // macOS's cp, ln and mv take no target option and write to their last operand, so a split word moves no target there
   const moved = into && !gnu && name !== "install" ? [] : splits
   return [...new Set([...targets, ...maybe, ...logs, ...moved])]

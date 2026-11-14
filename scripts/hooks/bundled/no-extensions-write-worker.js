@@ -9976,6 +9976,7 @@ function writeTargets(name, args, gnu, posix = false) {
   let folders = false;
   const maybe = [];
   const logs = [];
+  const values = [];
   for (let k = 0, options = true;k < args.length; k++) {
     const word = args[k];
     const { value } = word;
@@ -9993,8 +9994,8 @@ function writeTargets(name, args, gnu, posix = false) {
         folder = attached ? after(word, long.length + 3) : args[++k];
       else if (name === "install" && "directory".startsWith(long))
         folders = true;
-      else if (!attached && !takes?.flags?.includes(long) && takes?.long.some((take) => take.startsWith(long)))
-        k++;
+      else if (!takes?.flags?.includes(long) && takes?.long.some((take) => take.startsWith(long)))
+        values.push(...attached ? [after(word, long.length + 3)] : args.slice(++k, k + 1));
     } else
       for (let i = 1;i < value.length; i++) {
         const letter = value[i];
@@ -10010,8 +10011,7 @@ function writeTargets(name, args, gnu, posix = false) {
             if (log)
               logs.push(log);
           }
-          if (!rest)
-            k++;
+          values.push(...rest ? [after(word, i + 1)] : args.slice(++k, k + 1));
           break;
         }
       }
@@ -10019,6 +10019,8 @@ function writeTargets(name, args, gnu, posix = false) {
   if (name === "ln" && !folder && operands.length === 1)
     return [{ quoted: false, value: "." }, ...splits];
   const targets = into && !folders ? folder ? [folder] : operands.slice(-1) : operands;
+  if (process.platform === "linux" && name === "install" && folders && operands.length === 0)
+    targets.push(...values);
   const moved = into && !gnu && name !== "install" ? [] : splits;
   return [...new Set([...targets, ...maybe, ...logs, ...moved])];
 }

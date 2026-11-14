@@ -3538,6 +3538,13 @@ describe("on Linux a bare cp, ln, mv, install and sed read as GNU's builds (PG-2
     expect(await as("darwin", () => bash(command))).toContain("no-extensions-write hook refuses")
   })
 
+  test.each([
+    ["install -d of no folder past a suffix from a variable", `install -d -S "$D"`],
+    ["install -d of no folder past a group from a variable", `install -d -Tg "$D"`],
+  ])("%s, which only GNU's operand check stops, stays refused on Linux", async (_, command) => {
+    expect(await as("linux", () => bash(command))).toContain("no-extensions-write hook refuses")
+  })
+
   test("GNU sed's glob script after a bare -i edits a work file on Linux and stays refused on a file in the root", async () => {
     expect(await as("linux", () => bash(`sed -i '/a*b/d' ${WORK}/a.ts`))).toBeUndefined()
     expect(await as("linux", () => bash(`sed -i '/a*b/d' ${LIST}`))).toContain(
