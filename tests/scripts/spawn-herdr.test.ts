@@ -19,6 +19,7 @@ import {
   execLine,
   herdrPin,
   launchOf,
+  linuxTemp,
   lw,
   opened,
   placing,
@@ -218,12 +219,16 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
   test.each([
     ["with none set gets the user's temp folder", {}, "/var/folders/zz/T/"],
     ["keeps one already set", { TMPDIR: "/tmp/own/" }, "/tmp/own/"],
-    ["on Linux, whose getconf has no such name, gets /tmp", { LINUX_GETCONF: "1" }, "/tmp"],
+    [
+      "on Linux, whose getconf has no such name, gets a folder of its own under /tmp, mode 700",
+      { LINUX_GETCONF: "1" },
+      /^\/.*\/playground-worker-brave-otter\.[A-Za-z0-9]{6}$/,
+    ],
   ])("a herdr session %s as TMPDIR", async (_, env, expected) => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md", "--runtime", "herdr"],
       [],
-      {},
+      "LINUX_GETCONF" in env ? env : {},
       undefined,
       undefined,
       herdrPin(),
@@ -246,7 +251,11 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
       stdout: "ignore",
     })
     expect(await run.exited).toBe(0)
-    expect(readFileSync(join(r.home, "claude.tmpdir"), "utf8")).toBe(expected)
+    const tmpdir = readFileSync(join(r.home, "claude.tmpdir"), "utf8")
+    if (typeof expected === "string") return expect(tmpdir).toBe(expected)
+    expect(tmpdir).toMatch(expected)
+    expect(dirname(tmpdir)).toBe(linuxTemp)
+    expect(statSync(tmpdir).mode & 0o777).toBe(0o700)
   })
 
   test("a session on the probes server records that server in its resume record", async () => {

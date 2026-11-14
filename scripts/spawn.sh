@@ -1773,7 +1773,15 @@ LIVE=
 # The folder the session runs in, as the launch below moves to it.
 OWN=${DIR:-$REPO}
 [ "$MODE" = column ] && [ -z "$TREE" ] && OWN=$REPO
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || echo /tmp)" "$OWN" "$MEMORY_DIR" "$MANAGER" "$CLOSED" "$LIVE" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+# The session's temp folder, which its sandbox may write: macOS's per-user one, else on Linux, whose getconf has no such name and whose /tmp every user and session shares, a folder of the session's own that mktemp makes under /tmp at each launch, mode 700, which the launch sets as TMPDIR; a sandboxed start there builds a file of its own, since the folder is the session's.
+TEMP=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null) || TEMP=
+LINUX_TEMP=
+if [ -z "$TEMP" ]; then
+  LINUX_TEMP=$(mktemp -d "/tmp/playground-$NAME.XXXXXX") || refuse "mktemp -d under /tmp failed, so $NAME has no temp folder of its own"
+  TEMP=$LINUX_TEMP
+  [ -n "$SANDBOX" ] && [ "$BUILT" = "$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k.json" ] && BUILT="$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k-$NAME.json"
+fi
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$TEMP" "$OWN" "$MEMORY_DIR" "$MANAGER" "$CLOSED" "$LIVE" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
 src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager, closed, live = sys.argv[1:15]
 settings = json.load(open(src))
@@ -1956,8 +1964,12 @@ if [ "$RUNTIME" = herdr ]; then
   mkdir -p "$RESUME_DIR" && chmod 700 "$RESUME_DIR" || refuse "it cannot prepare $RESUME_DIR"
   # A pane herdr restored keeps the folder it had, so the launch moves to the session's own; a resume stamps each run in <name>.ran, so you can see when a restore ran it.
   HEAD_LINES="cd $(printf %q "$CWD") || exit 1"$'\n'
-  # A herdr server hands its panes the shell basics alone, so the launch gives the session the user's temp folder, keeping one already set: macOS's own, or /tmp on Linux, whose getconf has no such name.
-  HEAD_LINES+='export TMPDIR="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || echo /tmp)}"'$'\n'
+  # A herdr server hands its panes the shell basics alone, so the launch gives the session its temp folder (TEMP, above), keeping one already set: macOS's per-user one, or on Linux the session's own.
+  if [ -n "$LINUX_TEMP" ]; then
+    HEAD_LINES+="export TMPDIR=\${TMPDIR:-$(printf %q "$LINUX_TEMP")}"$'\n'
+  else
+    HEAD_LINES+='export TMPDIR="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR)}"'$'\n'
+  fi
   [ "$MODE" = resume ] && HEAD_LINES+="date -u +%FT%TZ >> $(printf %q "$RESUME_DIR/$NAME.ran")"$'\n'
 fi
 (umask 077 && printf 'rm -f -- "$0"\n%sexport PLAYGROUND_REPO=%q\n%s' "$HEAD_LINES" "$MAIN" "$COMMAND" > "$LAUNCH_FILE" && chmod 700 "$LAUNCH_FILE") ||

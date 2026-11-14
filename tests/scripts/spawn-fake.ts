@@ -54,6 +54,14 @@ fake(
 [ "$1" = DARWIN_USER_TEMP_DIR ] && { echo ${userTemp}/; exit 0; }
 exec /usr/bin/getconf "$@"`,
 )
+// mktemp, but a session's Linux temp folder spawn.sh makes under /tmp lands in linuxTemp, so a test leaves nothing in the machine's /tmp.
+export const linuxTemp = join(scratch, "linux-tmp")
+mkdirSync(linuxTemp)
+fake(
+  "mktemp",
+  `[ "$1" = -d ] && case "$2" in /tmp/playground-*) exec /usr/bin/mktemp -d "${linuxTemp}/\${2#/tmp/}" ;; esac
+exec /usr/bin/mktemp "$@"`,
+)
 fake(
   "ps",
   `[ -n "$FAKE_PS_BROKEN" ] && exit 1
