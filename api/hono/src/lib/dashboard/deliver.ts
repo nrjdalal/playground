@@ -20,7 +20,7 @@ import {
   type Attachment,
 } from "@/lib/dashboard/attachments"
 import { configDir, readsLive } from "@/lib/dashboard/fixture"
-import { pressEnter, prompt, promptOutcome } from "@/lib/dashboard/herdr"
+import { pressEnter, prompt, promptOutcome, typeKeys, type KeyStep } from "@/lib/dashboard/herdr"
 import { settingCommand, settingSummary, type SessionSetting } from "@/lib/dashboard/setting"
 import { readScreen } from "@/lib/dashboard/terminal"
 import { readTail, TEXT_LIMIT, type Entry } from "@/lib/dashboard/transcript"
@@ -336,6 +336,7 @@ export type DeliverDeps = {
   record: (event: ActivityEvent, typing: () => Promise<void>) => Promise<void>
   said: (worker: Worker) => Promise<Entry[]>
   skills: (cwd: string) => Promise<ReadonlySet<string>>
+  typeKeys: (surface: string, steps: KeyStep[]) => Promise<void>
   wait: (ms: number) => Promise<void>
 }
 
@@ -378,6 +379,7 @@ export const deliverDeps: DeliverDeps = {
     return path ? readTail(path, Number.POSITIVE_INFINITY) : []
   },
   skills: sessionSkills,
+  typeKeys,
   wait: (ms) => Bun.sleep(ms),
 }
 

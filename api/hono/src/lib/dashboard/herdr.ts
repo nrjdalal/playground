@@ -690,7 +690,9 @@ export function promptOnScreen(screen: string): ScreenPrompt {
 }
 
 // One key a request, by herdr's key names, or words typed as they are (`pane.send_text`).
-export type KeyStep = { key: "down" | "enter" | "space" | "up" | `${number}` } | { text: string }
+export type KeyStep =
+  | { key: "backspace" | "down" | "enter" | "space" | "up" | `${number}` }
+  | { text: string }
 
 // One answer to a picker's one question as the keys see it: its option labels in order, and the labels picked or the person's own words.
 export type Ask = {
@@ -758,6 +760,9 @@ export function answerKeys(screen: ScreenPrompt, ask: Ask): Keys {
   }
   return { keys: [...keys, ...moves(at, submit), { key: "enter" }], ok: true }
 }
+
+// Pure: red-first stub.
+export const switchKeys = (_screen: ScreenPrompt, _model: string): KeyStep[] | null => null
 
 // The gap between two keys, so Claude Code reads each as its own press rather than one chunk of input.
 const KEY_GAP_MS = 40

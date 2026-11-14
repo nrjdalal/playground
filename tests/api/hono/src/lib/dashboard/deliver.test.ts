@@ -28,6 +28,7 @@ import {
   HerdrDown,
   HerdrRefused,
   HerdrTimedOut,
+  type KeyStep,
 } from "../../../../../../api/hono/src/lib/dashboard/herdr"
 import {
   clip,
@@ -87,6 +88,17 @@ const screen = (...box: string[]) =>
     "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
   ].join("\n")
 const EMPTY = screen("❯")
+// A pane whose status line names the model it runs, as the factory's status line draws it, with made-up versions.
+const running = (label: string, ...box: string[]) =>
+  [
+    "⏺ Done.",
+    "",
+    `${"─".repeat(30)} dispatcher ─`,
+    ...(box.length ? box : ["❯"]),
+    RULE,
+    `  💡 ${label} high · 🔥 12%`,
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
+  ].join("\n")
 // The same in an 18-column herdr pane, its shape as a live dispatcher pane drew it: a rule as wide as the pane, and status lines cut at its edge.
 const narrow = (...box: string[]) =>
   [
@@ -150,6 +162,7 @@ function fakes(board: Live, failOn?: (text: string, index: number) => boolean) {
       skillsRead.push(cwd)
       return new Set(["end-of-day", "acme"])
     },
+    typeKeys: async () => {},
     wait: async () => {},
   }
   return { deps, recorded, skillsRead, took, typed }
@@ -702,6 +715,7 @@ describe("deliver", () => {
       record: async (_, typing) => typing(),
       said: async () => [OLDER],
       skills: async () => new Set(),
+      typeKeys: async () => {},
       wait: async () => {},
     }
     const [first, second] = await Promise.all([
@@ -735,6 +749,7 @@ describe("deliver", () => {
       },
       said: async () => [OLDER, ...typed.map((text, n) => tookLine(text, new Date(), n))],
       skills: async () => new Set(),
+      typeKeys: async () => {},
       wait: async () => {},
     }
     return { deps, typed }
@@ -1055,7 +1070,7 @@ describe("who calls deliver()", () => {
   })
 })
 
-// The one route beside deliver()'s that types into a pane: a herdr prompt's answer, the owner's own Submit on its card, which answerFeed() hands to answerHerdr() past its guards: the same contract as deliver() for the composer. herdr.test.ts holds typeKeys() to feed.ts.
+// The one route beside deliver()'s that types into a pane: a herdr prompt's answer, the owner's own Submit on its card, which answerFeed() hands to answerHerdr() past its guards: the same contract as deliver() for the composer. herdr.test.ts holds typeKeys() to feed.ts and deliver.ts, whose model switch answers the confirm its own /model drew.
 const HERDR_ANSWER_ROUTE = {
   file: "api/hono/src/routers/dashboard.ts",
   path: "/workers/:sessionId/feed/:requestId",
@@ -1149,7 +1164,7 @@ describe("deliver to a herdr session", () => {
 
   test("a setting types its one slash command, recorded whole, while the same words typed by hand stay refused", async () => {
     const { deps, recorded, sent } = herdr()
-    deps.readScreen = async () => EMPTY
+    deps.readScreen = async () => running("Opus 9.9")
     const set = await deliver(
       { actor, setting: { model: "opus" }, text: "", to: "dispatcher" },
       deps,
@@ -1160,6 +1175,123 @@ describe("deliver to a herdr session", () => {
     const typed = await deliver({ actor, text: "/model opus", to: "dispatcher" }, deps)
     expect(typed).toMatchObject({ code: "COMMAND", ok: false })
     expect(sent).toHaveLength(1)
+  })
+
+  // The model menu's switch is judged by the model the session runs once it is done, never by a fixed screen text: Claude Code may draw a confirm over the box, a reworded one, or none, and only a prompt it reads gets a key.
+  describe("the model menu's switch", () => {
+    const COMMAND = "/model sonnet"
+    const OLD = running("Opus 9.9")
+    const NEW = running("Sonnet 9.9")
+    const dialog = (question: string, ...options: string[]) =>
+      [
+        "⏺ Done.",
+        "",
+        RULE,
+        ` ${question}`,
+        "",
+        ...options,
+        "",
+        " Enter to confirm · Esc to cancel",
+      ].join("\n")
+    const TODAY = dialog(
+      "Switch model? Your next response will be slower and use more tokens. This conversation is cached for the current model. Switching to Sonnet 9.9 means the full history gets re-read.",
+      " ❯ 1. Yes, switch to Sonnet 9.9",
+      "   2. No, go back",
+    )
+    const REWORDED = dialog(
+      "Change the model mid-conversation?",
+      " ❯ 1. Stay on Opus 9.9",
+      "   2. Use Sonnet 9.9 from here",
+    )
+    // the pane shows OLD before the send, `shown` after it, and `answered` once a key is pressed
+    const switchRun = (shown: string, answered = NEW) => {
+      const run = herdr()
+      const keys: KeyStep[] = []
+      const enters: string[] = []
+      run.deps.readScreen = async () => (!run.sent.length ? OLD : keys.length ? answered : shown)
+      run.deps.typeKeys = async (_surface, steps) => {
+        keys.push(...steps)
+      }
+      run.deps.pressEnter = async (surface) => {
+        enters.push(surface)
+      }
+      const send = () =>
+        deliver({ actor, setting: { model: "sonnet" }, text: "", to: "dispatcher" }, run.deps)
+      return { ...run, enters, keys, send }
+    }
+    const reason = (result: Awaited<ReturnType<typeof deliver>>) => (result.ok ? "" : result.reason)
+
+    test("with no prompt shown, it reads done once the status line names the picked model, and no key is pressed, a y included", async () => {
+      const run = switchRun(NEW)
+      expect(await run.send()).toMatchObject({ ok: true, sessionId: "s-dispatcher" })
+      expect(run.sent.map((s) => s.text)).toEqual([COMMAND])
+      expect(run.keys).toEqual([])
+      expect(run.enters).toEqual([])
+      expect(run.recorded).toEqual(["Set dispatcher's model to sonnet"])
+    })
+
+    test("today's confirm gets its Yes, and the switch reads done on the new model", async () => {
+      const run = switchRun(TODAY)
+      expect(await run.send()).toMatchObject({ ok: true })
+      expect(run.keys).toEqual([{ key: "enter" }])
+      expect(run.recorded).toEqual(["Set dispatcher's model to sonnet"])
+    })
+
+    test("a reworded confirm gets the option that carries out the switch, wherever it sits", async () => {
+      const run = switchRun(REWORDED)
+      expect(await run.send()).toMatchObject({ ok: true })
+      expect(run.keys).toEqual([{ key: "down" }, { key: "enter" }])
+    })
+
+    test("a prompt with no option reading as the switch gets no key, and the refusal names what it shows", async () => {
+      const run = switchRun(
+        dialog("Change the model?", " ❯ 1. Stay on Opus 9.9", "   2. Ask me later"),
+      )
+      const result = await run.send()
+      expect(result).toMatchObject({ code: "INTERRUPTED", ok: false })
+      expect(reason(result)).toContain("Change the model?")
+      expect(reason(result)).not.toContain("Cannot find")
+      expect(run.keys).toEqual([])
+      expect(run.recorded).toEqual([])
+    })
+
+    test("a status line still on the old model after the wait reads not done, naming what the pane shows", async () => {
+      const run = switchRun(OLD)
+      const result = await run.send()
+      expect(result).toMatchObject({ code: "INTERRUPTED", ok: false })
+      expect(reason(result)).toContain("Opus 9.9")
+      expect(reason(result)).not.toContain("Cannot find")
+      expect(run.keys).toEqual([])
+      expect(run.recorded).toEqual([])
+    })
+
+    test("its own paste left unsent after one more Enter is cleared, its own characters alone, so the box ends empty", async () => {
+      const run = switchRun(running("Opus 9.9", `❯ ${COMMAND}`), OLD)
+      const result = await run.send()
+      expect(result).toMatchObject({ code: "INTERRUPTED", ok: false })
+      expect(reason(result)).toContain("cleared")
+      expect(run.enters).toHaveLength(1)
+      expect(run.keys).toEqual(Array(COMMAND.length).fill({ key: "backspace" }))
+      expect(run.recorded).toEqual([])
+    })
+
+    test("text in the box that is not its own paste is never cleared", async () => {
+      const run = switchRun(running("Opus 9.9", "❯ half a thought"))
+      expect(await run.send()).toMatchObject({ code: "INTERRUPTED", ok: false })
+      expect(run.keys).toEqual([])
+      expect(run.enters).toEqual([])
+    })
+
+    test("a plain message that meets a dialog after its send never presses a key in it", async () => {
+      const run = switchRun(TODAY)
+      const result = await deliver(
+        { actor, text: "switch to sonnet please", to: "dispatcher" },
+        run.deps,
+      )
+      expect(result).toMatchObject({ ok: false })
+      expect(run.keys).toEqual([])
+      expect(run.enters).toEqual([])
+    })
   })
 
   // herdr pastes the message and then presses Enter, and the Enter can land while Claude Code is still taking a pasted image's path in, so the message sat unsent in dispatcher's box and every later delivery read it as a draft
@@ -1481,7 +1613,7 @@ describe("deliver to a herdr session", () => {
         })
 
         test("sent to an idle session reads delivered", async () => {
-          const run = settingRun(EMPTY)
+          const run = settingRun(running("Opus 9.9"))
           expect(await run.send()).toMatchObject({ ok: true, sessionId: "s-dispatcher" })
           expect(run.sent).toEqual([{ surface: HERDR, text: COMMAND }])
           expect(run.recorded).toEqual(["Set dispatcher's model to opus"])

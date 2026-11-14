@@ -37,6 +37,7 @@ import {
   restoring,
   RESUBSCRIBE,
   showsAsk,
+  switchKeys,
   typeKeys,
   WATCHED,
   withHerdrState,
@@ -790,6 +791,53 @@ describe("answerKeys", () => {
   })
 })
 
+// The confirm Claude Code 2.1.325 draws over the input box when /model switches mid-conversation, with a made-up model name, and a reworded one whose switch is its second option.
+const confirm = (question: string, ...options: string[]) =>
+  [
+    "⏺ Done.",
+    "",
+    "─".repeat(40),
+    ` ${question}`,
+    "",
+    ...options,
+    "",
+    " Enter to confirm · Esc to cancel",
+  ].join("\n")
+const SWITCH_TODAY = confirm(
+  "Switch model? Your next response will be slower and use more tokens.",
+  " ❯ 1. Yes, switch to Sonnet 9.9",
+  "   2. No, go back",
+)
+const SWITCH_REWORDED = confirm(
+  "Change the model mid-conversation?",
+  " ❯ 1. Stay on Opus 9.9",
+  "   2. Use Sonnet 9.9 from here",
+)
+
+describe("switchKeys", () => {
+  const keys = (screen: string) => switchKeys(promptOnScreen(screen), "sonnet")
+
+  test("takes the one option that carries out the switch, by its words or the model's name, from the cursor", () => {
+    expect(keys(SWITCH_TODAY)).toEqual([{ key: "enter" }])
+    expect(keys(SWITCH_REWORDED)).toEqual([{ key: "down" }, { key: "enter" }])
+    expect(keys(confirm("Switch?", "   1. Keep Opus 9.9", " ❯ 2. Switch anyway"))).toEqual([
+      { key: "enter" },
+    ])
+  })
+
+  test("no option reading as the switch, two of them, no cursor or a multi-select gives no keys", () => {
+    expect(
+      keys(confirm("Change the model?", " ❯ 1. Stay on Opus 9.9", "   2. Ask me later")),
+    ).toBeNull()
+    expect(
+      keys(confirm("Switch?", " ❯ 1. Yes, switch now", "   2. Switch to Sonnet 9.9 later")),
+    ).toBeNull()
+    expect(keys(SWITCH_TODAY.replace("❯", " "))).toBeNull()
+    expect(keys(confirm("Switch?", " ❯ 1. [ ] Yes, switch", "   2. [ ] No"))).toBeNull()
+    expect(keys(PICKER)).toBeNull()
+  })
+})
+
 describe("herdrServers and readScreen", () => {
   const configure = (dir: string) => {
     const before = [process.env.PLAYGROUND_HERDR_DIR, process.env.PLAYGROUND_HERDR_SESSIONS]
@@ -1225,14 +1273,14 @@ describe("typing into a pane", () => {
   })
 })
 
-// herdr's pane writes, the one way the dashboard types into a pane: herdr.ts alone names them, and of those that type, prompt() and pressEnter() reach only deliver.ts (the owner's composer, the Linear app's row actions and the owner's inbox answers), with prompt() also reaching idle-compact.ts, the one ops pass the owner approved (ADR 0020), and typeKeys() only feed.ts, whose answerHerdr() serves the herdr answer route, POST /api/v1/workers/:sessionId/feed/:requestId, the owner's own Submit on a prompt's card, since an answer from the card is the owner's own Submit.
+// herdr's pane writes, the one way the dashboard types into a pane: herdr.ts alone names them, and of those that type, prompt() and pressEnter() reach only deliver.ts (the owner's composer, the Linear app's row actions and the owner's inbox answers), with prompt() also reaching idle-compact.ts, the one ops pass the owner approved (ADR 0020), and typeKeys() only feed.ts, whose answerHerdr() serves the herdr answer route, POST /api/v1/workers/:sessionId/feed/:requestId, the owner's own Submit on a prompt's card, since an answer from the card is the owner's own Submit, and deliver.ts, whose model switch answers the confirm its own /model drew, and clears its own paste left unsent, since the owner's pick in the menu is the consent.
 const HERDR_TS = "api/hono/src/lib/dashboard/herdr.ts"
 const HERDR_WRITES =
   /["'`](?:agent\.(?:prompt|send_keys)|pane\.(?:send_input|send_keys|send_text))["'`]/
 const HERDR_TYPERS: Record<string, string[]> = {
   pressEnter: ["api/hono/src/lib/dashboard/deliver.ts"],
   prompt: ["api/hono/src/lib/dashboard/deliver.ts", "api/hono/src/lib/dashboard/idle-compact.ts"],
-  typeKeys: ["api/hono/src/lib/dashboard/feed.ts"],
+  typeKeys: ["api/hono/src/lib/dashboard/deliver.ts", "api/hono/src/lib/dashboard/feed.ts"],
 }
 
 // Each source file, other than herdr.ts, that imports or re-exports `name` from a module ending in /herdr, or takes that module whole (a star or a dynamic import).
@@ -1278,7 +1326,7 @@ describe("herdr's pane writes", () => {
     ).toEqual([])
   })
 
-  test("prompt() reaches only deliver.ts and idle-compact.ts, pressEnter() only deliver.ts, and typeKeys() only feed.ts's herdr answer route", async () => {
+  test("prompt() reaches only deliver.ts and idle-compact.ts, pressEnter() only deliver.ts, and typeKeys() only deliver.ts's model switch and feed.ts's herdr answer route", async () => {
     const files = await sourceFiles()
     for (const [name, allowed] of Object.entries(HERDR_TYPERS)) {
       expect([name, herdrTypers(files, name).sort()]).toEqual([name, allowed])
