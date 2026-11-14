@@ -252,6 +252,22 @@ describe("jobLoaded", () => {
   })
 })
 
+// A Linux with no systemd: the probe reads the job as down, so doctor prints its MISSING line rather than crashing.
+test("jobLoaded on Linux with no systemctl on PATH reads the job as not running", () => {
+  const empty = mkdtempSync(join(scratch, "no-systemctl-"))
+  const child = Bun.spawnSync(
+    [
+      process.execPath,
+      "--no-env-file",
+      "-e",
+      `const { jobLoaded } = await import(${JSON.stringify(DOCTOR)}); console.log(JSON.stringify(jobLoaded("linux")("com.x.ops-tick")))`,
+    ],
+    { env: { ...process.env, PATH: empty } },
+  )
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString())).toBe(false)
+})
+
 describe("the jobs check on a machine with a store", () => {
   const policy = JSON.stringify({
     values: {

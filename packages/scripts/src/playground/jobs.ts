@@ -324,11 +324,16 @@ export const importJobs = async (
   return problems ? 1 : 0
 }
 
+// A program that is not there answers as the shell's 127 with why, so the render names it rather than crashing.
 const spawned =
   (head: string[], env: Record<string, string | undefined>): Run =>
   async (args) => {
-    const done = Bun.spawnSync([...head, ...args], { env })
-    return { code: done.exitCode, out: `${done.stdout.toString()}${done.stderr.toString()}` }
+    try {
+      const done = Bun.spawnSync([...head, ...args], { env })
+      return { code: done.exitCode, out: `${done.stdout.toString()}${done.stderr.toString()}` }
+    } catch (error) {
+      return { code: 127, out: (error as Error).message }
+    }
   }
 
 export const jobsExit = async (

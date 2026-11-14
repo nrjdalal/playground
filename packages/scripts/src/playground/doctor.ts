@@ -222,8 +222,14 @@ export const line = ({ detail, name, status }: Check): string =>
 
 export const missing = (checks: Check[]): boolean => checks.some((c) => c.status === "MISSING")
 
-const exitsZero = (argv: string[]): boolean =>
-  Bun.spawnSync(argv, { stderr: "ignore", stdout: "ignore" }).exitCode === 0
+// A program that is not there reads as a nonzero exit, so a machine with no systemctl gets its MISSING line, not a crash.
+const exitsZero = (argv: string[]): boolean => {
+  try {
+    return Bun.spawnSync(argv, { stderr: "ignore", stdout: "ignore" }).exitCode === 0
+  } catch {
+    return false
+  }
+}
 
 // Whether a launchd job runs: launchd holds its label on macOS, and on Linux systemd runs its user unit of the same name.
 export const jobLoaded =

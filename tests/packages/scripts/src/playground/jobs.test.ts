@@ -666,3 +666,29 @@ test("on Linux the command line's render installs through systemctl --user, maki
   )
   expect(statSync(join(data, "ops", "tick")).isDirectory()).toBe(true)
 })
+
+test("on Linux with no systemctl on PATH the command line's render names the refused enable and exits 1", async () => {
+  const data = storeWith("cli-no-systemctl", { "jobs.opsTick": tick })
+  const empty = join(scratch, "cli-no-systemctl", "empty")
+  mkdirSync(empty, { recursive: true })
+  const err: string[] = []
+  const code = await jobsExit(
+    [
+      "render",
+      "--data",
+      data,
+      "--jobs",
+      join(data, "ops", "jobs.json"),
+      "--install",
+      join(scratch, "cli-no-systemctl", "home", ".config", "systemd", "user"),
+    ],
+    { HOME: join(scratch, "cli-no-systemctl", "home"), PATH: empty },
+    () => {},
+    (l) => err.push(l),
+    "linux",
+  )
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain(
+    "jobs: refused enable of com.playground.ops-tick.service, exit 127",
+  )
+})
