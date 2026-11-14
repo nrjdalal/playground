@@ -1105,18 +1105,18 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
 PY
   }
   lines=$(restore_list) || refuse "it cannot read the roster or the resume files"
-  # The first dispatcher's record runs first, so the owner's dispatcher is back before any other resume takes the gate's room, then every other manager's (role_of_kind's dispatcher and lead) with the records passed over, which start nothing, and the rest after them, so the managers are back before the workers.
+  # The first dispatcher's record runs first, so the owner's dispatcher is back before any other resume takes the gate's room, then every other manager's line (role_of_kind's dispatcher and lead), then the rest in their order, so the managers are back before the workers.
+  # A run line's kind is kind_of's; a skip line, which starts nothing and may number in the hundreds, takes its name's kind alone (kind_of_name), since kind_of reads the roster once a call.
   first=$(dispatcher_of 1)
   lead= ahead= rest=
   while IFS= read -r line; do
+    name=${line#*$'\t'} name=${name%%$'\t'*}
     case "$line" in
-      "run"$'\t'"$first"$'\t'*) lead+="$line"$'\n' ;;
-      "run"$'\t'*)
-        name=${line#run$'\t'} name=${name%%$'\t'*}
-        case "$(role_of_kind "$(kind_of "$name")")" in dispatcher | lead) ahead+="$line"$'\n' ;; *) rest+="$line"$'\n' ;; esac
-        ;;
-      *) ahead+="$line"$'\n' ;;
+      "run"$'\t'"$first"$'\t'*) lead+="$line"$'\n'; continue ;;
+      "run"$'\t'*) kind=$(kind_of "$name") ;;
+      *) kind=$(kind_of_name "$name") ;;
     esac
+    case "$(role_of_kind "$kind")" in dispatcher | lead) ahead+="$line"$'\n' ;; *) rest+="$line"$'\n' ;; esac
   done <<<"$lines"
   lines="$lead$ahead$rest"
   # A resume that waits (restore_waits) comes back on a later restore, so it is progress, printed as waiting, and leaves the exit 0; any other miss fails the restore.
