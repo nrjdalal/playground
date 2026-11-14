@@ -109,14 +109,14 @@ function PrivacyFields({ saved, scope }: { saved: PrivacyForm; scope: string }) 
           )}
         </form.Field>
         {oneWords.map(({ files, name }) => (
-          <Alert key={name}>
-            <RiErrorWarningLine className="text-warning" />
+          <Alert key={name} className="text-warning">
+            <RiErrorWarningLine />
             <AlertTitle>{name} is one word</AlertTitle>
             <AlertDescription>
               The trace count finds it in {files.length} tracked{" "}
               {files.length === 1 ? "file" : "files"}, so a made-up name or a common word can match
               it too.
-              <ul className="max-h-32 overflow-y-auto font-mono text-xs">
+              <ul className="max-h-32 overflow-y-auto font-mono text-xs break-all">
                 {files.map((file) => (
                   <li key={file}>{file}</li>
                 ))}
