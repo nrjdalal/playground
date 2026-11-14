@@ -35,6 +35,7 @@ import {
   workIn,
   worktreesIn,
 } from "../../../../../packages/scripts/src/ops-tick/nightly-clean"
+import { CWDS } from "../../../../../packages/scripts/src/ops-tick/orphans"
 import { BEATS, type Context } from "../../../../../packages/scripts/src/ops-tick/tick"
 import type { CleanupDeps } from "../../../../../scripts/ops/optimizer/auto_end"
 import { type Answers, fakeRun, ghErrors } from "./fake-run"
@@ -1419,6 +1420,31 @@ describe("one night's run against a fixture data folder", () => {
     )
     expect(sent.find((s) => s.to === "ops")?.text).toContain(said)
     expect(inputs).toEqual([])
+  })
+  // #2177: a test's child left with parent pid 1 runs a relative script, so only its working folder, read from lsof for the parent-pid-1 rows alone, names the removed sandbox it ran in
+  test("a test's child under a removed sandbox is ended by its pid, its working folder read from lsof for the parent-pid-1 rows alone", async () => {
+    const { ctx, deps, ops, runs } = night({}, undefined, 0.01)
+    const sandbox = join(ops, "T", "test-sandbox-ended1")
+    const listed = [
+      "60001     1    02:00:00 bun --no-env-file scripts/hooks/guards.ts",
+      "60002 59000    02:00:00 bun --no-env-file scripts/hooks/guards.ts",
+    ].join("\n")
+    const fake = ctx.run
+    let reads = 0
+    ctx.run = async (argv, timeoutMs, stdin) => {
+      if (argv[0] === "ps" && reads++ === 0) return { code: 0, out: listed }
+      if (argv.join(" ") === `${CWDS.join(" ")} 60001`)
+        return { code: 0, out: `p60001\nfcwd\nn${sandbox}/t/hooks-x/stuck\n` }
+      return fake(argv, timeoutMs, stdin)
+    }
+    deps.sleep = async () => {}
+    await nightlyClean(deps)(ctx)
+    expect(runs.filter((r) => r[0] === "kill").map((r) => r.join(" "))).toEqual([
+      "kill -TERM 60001",
+    ])
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toContain(
+      `orphans: orphan pid 60001 ended by TERM (age 02:00:00, its test sandbox ${sandbox} gone): bun --no-env-file scripts/hooks/guards.ts`,
+    )
   })
 })
 

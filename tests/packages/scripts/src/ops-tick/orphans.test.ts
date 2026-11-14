@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  cwdsOf,
   endOrphans,
   orphansOf,
   PS,
@@ -41,6 +42,17 @@ describe("procsOf", () => {
         ppid: 1,
       },
     ])
+  })
+})
+
+describe("cwdsOf", () => {
+  test("reads each pid's working folder from lsof -F pn, spaces kept, and skips a pid lsof names no folder for", () => {
+    expect(cwdsOf("p314\nfcwd\nn/\np750\nfcwd\nn/tmp/test-sandbox-a b/t\np751\nfcwd\n")).toEqual(
+      new Map([
+        [314, "/"],
+        [750, "/tmp/test-sandbox-a b/t"],
+      ]),
+    )
   })
 })
 
