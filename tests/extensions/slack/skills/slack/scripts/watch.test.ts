@@ -9,6 +9,7 @@ import {
   recordSent,
   USER,
 } from "../../../../../../extensions/slack/skills/slack/scripts/slack"
+import * as dmWatch from "../../../../../../extensions/slack/skills/slack/scripts/watch"
 import { watch } from "../../../../../../extensions/slack/skills/slack/scripts/watch"
 import { type Stuck } from "../../../../../../packages/scripts/src/ops-job/dispatcher"
 import { DM, fakeDm, OWNER } from "./fake-dm"
@@ -190,5 +191,29 @@ describe("watch.ts as the beat runs it", () => {
     expect(code).toBe(1)
     expect(out).toBe("")
     expect(err).toBe(`error: ${NO_TOKEN}\n`)
+  })
+
+  test("its relay line is private: the outbox holds the DM whole, and alerts.log its length alone", async () => {
+    const data = scratch()
+    const before = { config: process.env.CLAUDE_CONFIG_DIR, data: process.env.PLAYGROUND_DATA_DIR }
+    process.env.CLAUDE_CONFIG_DIR = data
+    process.env.PLAYGROUND_DATA_DIR = join(data, "playground")
+    try {
+      const { relay } = dmWatch as { relay?: (to: string, text: string) => Promise<boolean> }
+      expect(relay).toBeFunction()
+      await relay?.("dispatcher", "made-up dm words")
+    } finally {
+      if (before.config === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = before.config
+      if (before.data === undefined) delete process.env.PLAYGROUND_DATA_DIR
+      else process.env.PLAYGROUND_DATA_DIR = before.data
+    }
+    const ops = join(data, "playground", "ops")
+    const log = await Bun.file(join(ops, "alerts.log")).text()
+    expect(log).toContain("[ops-dm-watch → dispatcher] (a private line of 16 characters)")
+    expect(log).not.toContain("made-up dm words")
+    expect(await Bun.file(join(ops, "outbox", "ops-dm-watch.jsonl")).text()).toContain(
+      "made-up dm words",
+    )
   })
 })
