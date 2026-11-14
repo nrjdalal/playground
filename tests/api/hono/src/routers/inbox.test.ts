@@ -161,6 +161,17 @@ describe("an Approve the dashboard carries out: an accept, an apps change, a gra
     expect((await approve({ origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)
     expect((await approve({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
   })
+
+  test("a clone's Approve takes the same guards, and the route hands it the CLI only on a stack that reads this machine (PG-2205)", async () => {
+    const source = await Bun.file(
+      join(import.meta.dir, "../../../../../api/hono/src/routers/inbox.ts"),
+    ).text()
+    expect(source).toContain("clone: readsLive() ? cloneRun() : undefined,")
+    expect((await approve({}, peer("127.0.0.1"))).status).toBe(403)
+    expect((await approve({ origin: "http://evil.localhost" }, peer("127.0.0.1"))).status).toBe(403)
+    expect((await approve({ origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)
+    expect((await approve({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
+  })
 })
 
 describe("a secret's two routes refuse the agent sign-in (PG-1023)", () => {

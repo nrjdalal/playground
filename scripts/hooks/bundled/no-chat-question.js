@@ -5894,6 +5894,7 @@ var answerPayloadSchema = strictObject({
   accepted: ranSchema.optional(),
   at: exports_iso.datetime(),
   close: string2().min(1).optional(),
+  cloned: ranSchema.optional(),
   comment: string2().optional(),
   go: boolean2(),
   id: string2().min(1),

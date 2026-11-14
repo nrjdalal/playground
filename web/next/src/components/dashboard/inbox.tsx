@@ -20,6 +20,7 @@ import {
   RiEyeOffLine,
   RiFileCopyLine,
   RiGitMergeLine,
+  RiGitRepositoryLine,
   RiInboxLine,
   RiInboxUnarchiveLine,
   RiKey2Line,
@@ -194,6 +195,7 @@ const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   apps: RiAppsLine,
   ask: RiQuestionAnswerLine,
   budget: RiMoneyDollarCircleLine,
+  clone: RiGitRepositoryLine,
   delete: RiDeleteBinLine,
   grant: RiShieldKeyholeLine,
   guard: RiShieldCheckLine,
@@ -763,6 +765,27 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
             <code className="font-mono">{preview.app}</code>{" "}
             {preview.change === "add" ? "to" : "from"} your apps, which no session may drive.
           </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "clone":
+      // each repo and the very folder Approve fills, in the order it clones them
+      return (
+        <>
+          <p>
+            On Approve, the dashboard clones these repos into this machine&apos;s extensions, in
+            order, and stops at the first that fails. Then it copies the guards&apos; lists from
+            this checkout into your login&apos;s lists, keeping each one already there. It makes no
+            repo.
+          </p>
+          <ol className="list-decimal pl-5">
+            {preview.repos.map((repo) => (
+              <li key={repo.scope}>
+                <code className="font-mono break-all">{repo.repo}</code> into{" "}
+                <code className="font-mono break-all">{repo.folder}</code>
+              </li>
+            ))}
+          </ol>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
       )
