@@ -775,18 +775,20 @@ const GOES = /\b(?:confirm|continue|ok|switch|yes)\b/i
 // A question about a switch of model, as a confirm's own words read it.
 const SWITCH_QUESTION =
   /\b(?:(?:change|move|switch)(?:ing)?\s+(?:the\s+|this\s+)?model|model\s+(?:change|switch))\b/i
-// A question about a tool, a file or a permission, which never reads as the switch.
-const TOOL_QUESTION =
-  /\b(?:allow|bash|command|edit|editing|fetch|file|permission|proceed|run|tool)\b/i
+// Words of a tool, a file or a permission, in a prompt's question or an option, which never read as the switch.
+const TOOL_WORDS =
+  /\b(?:allow|bash|command|edit|editing|fetch|file|permission|proceed|reading|run|tool|write|writing)\b/i
 
-// Pure: the keys that take the one option of a single-select prompt with a cursor that carries out a switch to `model`, read by meaning, never by position or exact words: its own words name the model by its alias and none turn it down, or, with no such option, the prompt's own question names the model or a model switch, no other model but one it switches from (`from Opus to Sonnet`, `Opus → Sonnet`), and none of a tool's, a file's or a permission's words, and the option reads as going ahead. So a permission prompt or any other question drawn over the box gets nothing. Null when no option or more than one reads so, or the screen shows no live single-select, so nothing is pressed.
+// Pure: the keys that take the one option of a single-select prompt with a cursor that carries out a switch to `model`, read by meaning, never by position or exact words: its own words name the model by its alias and none turn it down or name a tool, a file or a permission, under a question that names none either, or, with no such option, the prompt's own question names the model or a model switch, no other model but one it switches from (`from Opus to Sonnet`, `Opus → Sonnet`), and none of a tool's, a file's or a permission's words, and the option reads as going ahead. So a permission prompt or any other question drawn over the box gets nothing. Null when no option or more than one reads so, or the screen shows no live single-select, so nothing is pressed.
 export function switchKeys(screen: ScreenPrompt, model: string): KeyStep[] | null {
   const { options } = screen
   const cursor = options.findIndex((o) => o.on)
   if (cursor < 0 || options.some((o) => o.checked !== null)) return null
   const names = new RegExp(`\\b${model}\\b`, "i")
   const pick = (reads: RegExp) =>
-    options.flatMap((o, i) => (reads.test(o.label) && !STAYS.test(o.label) ? [i] : []))
+    options.flatMap((o, i) =>
+      reads.test(o.label) && !STAYS.test(o.label) && !TOOL_WORDS.test(o.label) ? [i] : [],
+    )
   const { question } = screen
   const others = SESSION_MODELS.filter((m) => m !== model.toLowerCase()).flatMap((m) => {
     const at = question.search(new RegExp(`\\b${m}\\b`, "i"))
@@ -795,9 +797,8 @@ export function switchKeys(screen: ScreenPrompt, model: string): KeyStep[] | nul
   const target = question.search(new RegExp(`(?:\\bto|→|->)\\s+(?:the\\s+)?${model}\\b`, "i"))
   const fromOther = others.length === 1 && target >= 0 && (others[0] ?? target) < target
   const asks =
-    (names.test(question) || SWITCH_QUESTION.test(question)) &&
-    (others.length === 0 || fromOther) &&
-    !TOOL_QUESTION.test(question)
+    (names.test(question) || SWITCH_QUESTION.test(question)) && (others.length === 0 || fromOther)
+  if (TOOL_WORDS.test(question)) return null
   const naming = pick(names)
   const goes = naming.length || !asks ? naming : pick(GOES)
   return goes.length === 1 ? [...moves(cursor, goes[0] ?? 0), { key: "enter" }] : null
