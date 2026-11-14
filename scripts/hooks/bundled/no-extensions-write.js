@@ -10858,7 +10858,6 @@ async function inspect(raw, environment, unknown = false) {
     }
   };
   const scriptNames = (script, env) => {
-    const near = relative(env)?.split(sep2);
     for (const text of sedWrites(script)) {
       const plain = text.replace(/['"]/g, "");
       if (holds(plain, env))
@@ -10869,9 +10868,9 @@ async function inspect(raw, environment, unknown = false) {
           const value = tilde ? home + word.slice(tilde[0].length) : word;
           if (value.startsWith(sep2) && reaches(value))
             return value;
-          const parts = word.split(sep2);
-          if (near && follows(parts, near))
+          if (env.cwd && !value.startsWith(sep2) && /[/*?[(]/.test(value) && reaches(resolve5(env.cwd, value)))
             return word;
+          const parts = word.split(sep2);
           const expands = (k) => parts.slice(0, k).some((part) => /[$~`]/.test(part));
           if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts)))
             return word;

@@ -1758,9 +1758,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
-  // What an in-place sed's script writes that a shell may run later (sedWrites), its quotes dropped: the root in its text, else a word, or a part of a brace list, under ~, $HOME or / that can name the root or a path in it (reaches), or that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), or from its start when the cwd is above the root, so a glob or an escaped slash spells the root no other way than its literal path
+  // What an in-place sed's script writes that a shell may run later (sedWrites), its quotes dropped: the root in its text, else a word, or a part of a brace list, under ~, $HOME or / that can name the root or a path in it (reaches), a relative one holding a / or a glob that can once resolved against the cwd, its .. collapsed, or one that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), so a glob or an escaped slash spells the root no other way than its literal path
   const scriptNames = (script: string, env: Env): string | undefined => {
-    const near = relative(env)?.split(sep)
     for (const text of sedWrites(script)) {
       const plain = text.replace(/['"]/g, "")
       if (holds(plain, env)) return `${root} in its text`
@@ -1769,8 +1768,14 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word)
           const value = tilde ? home + word.slice(tilde[0].length) : word
           if (value.startsWith(sep) && reaches(value)) return value
+          if (
+            env.cwd &&
+            !value.startsWith(sep) &&
+            /[/*?[(]/.test(value) &&
+            reaches(resolve(env.cwd, value))
+          )
+            return word
           const parts = word.split(sep)
-          if (near && follows(parts, near)) return word
           const expands = (k: number) => parts.slice(0, k).some((part) => /[$~`]/.test(part))
           if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts))) return word
         }
