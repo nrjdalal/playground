@@ -43,7 +43,7 @@ playground update [--to <tag>]
                       fast-forward this checkout onto origin/main, re-run link-skills.sh, install when a lockfile or package.json changed, build packages/* when one with a dist changed, restart the ops jobs whose source changed, then roll the Dashboard to the newest build: Building, Switching, then Updated to <sha7> or Failed: <reason>; --to moves the checkout to that release instead, back or on, and leaves the Dashboard as it is
 playground doctor     one line per need, as ok, MISSING with its fix, or optional: the tools, the data folder, the pinned herdr, the links into this checkout, the release it is at, and each ops job launchd should hold
 playground herdr pin [--check | --asset <file>]
-                      put the pinned herdr's release asset for this Mac at the data folder's bin/herdr, after checking its SHA-256 against the pin, refusing a mismatch with both sums; --check reads the copy alone, exit 1 when it is missing or changed; --asset installs from a file instead of downloading
+                      put the pinned herdr's release asset for this machine (a Mac, or Linux on arm64) at the data folder's bin/herdr, after checking its SHA-256 against the pin, refusing a mismatch with both sums; --check reads the copy alone, exit 1 when it is missing or changed; --asset installs from a file instead of downloading
 playground herdr stop stop every herdr server Playground started, each through its own socket in the data folder's herdr folder; every session in them ends with it, and the next playground or Start brings them back
 playground version    this checkout's tag and sha, the extensions' last commit and Claude Code's version
 playground ask <command> ...

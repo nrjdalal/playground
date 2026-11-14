@@ -1222,3 +1222,28 @@ describe("a GIT_DIR or GIT_WORK_TREE that names your own worktree", () => {
     expect(await bash(command, WORKTREE)).toBeUndefined()
   })
 })
+
+// #2158: an xargs replace string that sits in the program's arguments alone leaves the program typed, so each keeps canary's verdict
+describe("an xargs replace string outside the program word keeps the call's verdict", () => {
+  test.each([
+    ["grep under a plain xargs", "ls /tmp | xargs grep -l x"],
+    ["echo under xargs -I{}", "echo a | xargs -I{} echo {}"],
+    ["cat under xargs -I %", "echo a | xargs -I % cat %"],
+    ["cp to /tmp under xargs -J %", "echo a | xargs -J % cp % /tmp/"],
+    ["a sh -c script holding xargs' -I{} string", "echo a | xargs -I{} sh -c 'echo {}'"],
+    ["cat under nice under xargs -J %", "echo a | xargs -J % nice cat %"],
+    [
+      "echo under env -S with xargs' -I % string in its arguments",
+      "echo a | xargs -I % env -S 'echo %'",
+    ],
+    [
+      "cat under env -S with xargs' -J % string as its argument",
+      "echo a | xargs -J % env -S cat %",
+    ],
+    ["echo under xargs -I % from input holding a quote", 'echo "it\'s" | xargs -I % echo %'],
+    ["echo under xargs -n1", "echo a b | xargs -n1 echo"],
+    ["echo under an xargs -I zz inside xargs -I %", "echo a | xargs -I % xargs -I zz echo %"],
+  ])("%s runs in the main checkout", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+})

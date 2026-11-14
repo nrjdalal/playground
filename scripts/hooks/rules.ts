@@ -18,6 +18,7 @@ import {
   readRendered,
 } from "../../packages/settings/src/rendered"
 import { extChain, settingFields } from "../../packages/settings/src/settings"
+import { input } from "./input"
 import { fromFactory } from "./role"
 
 // The core extension's rules, in the checkout's extensions/core.
@@ -179,6 +180,6 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const out = await check(await Bun.stdin.text())
+  const out = await check(await input("rules", "recorder"))
   if (out) console.log(out)
 }

@@ -3,6 +3,7 @@ import { join } from "node:path"
 
 import { coreDir } from "../../packages/settings/src/rendered"
 import { implicitRepos, type Repo, repoOf } from "./github"
+import { input } from "./input"
 import { guardList, isStrings } from "./lists"
 import {
   type Command,
@@ -381,7 +382,7 @@ async function inspect(
 }
 
 if (import.meta.main) {
-  const reason = await check(await Bun.stdin.text())
+  const reason = await check(await input("no-release-comment", "guard"))
   if (reason) {
     console.error(reason)
     process.exit(2)

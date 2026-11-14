@@ -1,5 +1,6 @@
 // PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash test run that reads green while no test ran or a test failed: bun with an option given its value as the next word (--cwd <dir>, --env-file <file>) before its run or test subcommand, which then prints bun's usage and exits 0 (run) or runs package.json's test script with the paths appended in place of the tests (test), and a test run (bun's, or a pytest, ty or ruff run) or a git push piped into another command in a script that sets no pipefail and reads no pipe status of its own shell, whose exit status is then the last command's.
 
+import { input } from "./input"
 import { gitCommand } from "./no-stash"
 import { fromFactory } from "./role"
 import {
@@ -210,7 +211,7 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-false-green", "guard")
   const reason = (await fromFactory(raw)) ? await check(raw) : undefined
   if (reason) {
     console.error(reason)

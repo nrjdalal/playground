@@ -1833,9 +1833,9 @@ if sandbox:
         "network": {"allowLocalBinding": True, "allowUnixSockets": sorted({herdr, os.path.join(home, ".agent-browser")})},
     }
     if closed:
-        # Claude Code's sandbox opens loopback whole or not at all (allowLocalBinding gives every localhost port), and portless's proxy serves the live API's name on the same port as every other stack's, so loopback closes whole; a strict list keeps outbound hosts to the ones a worker's loop reads, since bypass mode lets any other pass. The Keychain's login items are files the client reads itself, so a read deny on its folder refuses them.
-        secrets = [os.path.join(data, name) for name in ("dumps", "remote-key.json", "whatsapp")]
-        settings["sandbox"]["filesystem"]["denyRead"] = sorted([os.path.join(home, "Library", "Keychains")] + secrets)
+        # Claude Code's sandbox opens loopback whole or not at all (allowLocalBinding gives every localhost port), and portless's proxy serves the live API's name on the same port as every other stack's, so loopback closes whole; a strict list keeps outbound hosts to the ones a worker's loop reads, since bypass mode lets any other pass. The Keychain's login items are files the client reads itself, so a read deny on its folder refuses them; on Linux Claude Code's login file and the secret store's folder stand in for them.
+        secrets = [os.path.join(data, name) for name in ("dumps", "remote-key.json", "secrets", "whatsapp")]
+        settings["sandbox"]["filesystem"]["denyRead"] = sorted([os.path.join(home, ".claude", ".credentials.json"), os.path.join(home, "Library", "Keychains")] + secrets)
         settings["sandbox"]["filesystem"]["denyWrite"] = deny + secrets
         settings["sandbox"]["network"] = {
             "allowedDomains": ["api.github.com", "github.com", "registry.npmjs.org"],
