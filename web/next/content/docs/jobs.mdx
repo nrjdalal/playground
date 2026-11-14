@@ -34,6 +34,18 @@ Moving a schedule or pausing a job with `pausedFor` is the same kind of write, n
 A job with a `config`, the settings of its own it reads on each pass, shows a card under its row in Settings > Jobs: the config as JSON in a box you edit, and Save, which writes the new object at the job's scope at once, over the rest of the value there.
 Playground checks only that it is a JSON object; the job checks each field itself, and when it refuses one it writes why as `configRefused` in its heartbeat, which the card shows in red under the box until a beat holds none.
 
+## Reach a Dashboard on another machine
+
+When the Dashboard runs on another machine, such as a DGX Spark, it listens on that machine's loopback alone, and the `ops-tunnel` job on your Mac brings it to you.
+The job holds an ssh tunnel with the key `~/.ssh/playground_spark` from a port on your Mac's loopback to the same port on the other machine's loopback, 1355 by default, so the link is that machine's own address, `https://playground.localhost:1355/dashboard`, and nothing listens off loopback at either end.
+Its config names the machine: `{"host": "<name or address>", "port": 1355}`, with optional `key` and `user` (your Mac's user by default).
+The step that sets the other machine up posts three Inbox Approves together, in this order, so you type nothing: trust that machine's certificate authority on your Mac, set the job's host, then turn the job on.
+
+Once the tunnel is up and your Mac trusts the certificate the other machine serves, the job posts the link to your Inbox once: click the card's title and the Dashboard opens in a new tab.
+That Dashboard keeps a sign-in of its own, apart from your Mac's, since a stack on a port other than 443 names its sign-in cookie by its port.
+After a drop, the job starts ssh again within 2 seconds, waiting up to a minute between tries while it keeps failing.
+`playground doctor` shows a `tunnel` line while the job is on: ok with the link, or why it cannot connect, such as a key the other machine refused, a host key this Mac does not know yet, the port already taken on your Mac, or a certificate your Mac does not trust yet.
+
 ## Restore now
 
 The ops-restore row in Settings > Jobs holds Restore now, your way back when the main checkout's guards are gone and no session can repair it, with the job on or off.

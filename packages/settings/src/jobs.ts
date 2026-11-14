@@ -161,6 +161,13 @@ export const JOBS: Record<string, Job> = {
       "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
     schedule: { every: 60 },
   }),
+  // On the Mac that reaches a Dashboard on another machine: config.host names it, set by the step that sets that machine up.
+  "ops-tunnel": terminal("ops-tunnel", `${bunJob("ops-tunnel")} --data {data}`, {
+    config: { host: "", port: 1355 },
+    description:
+      "Holds an ssh tunnel from this Mac's loopback to the Dashboard on the machine config.host names, and posts its link to the Inbox.",
+    schedule: { always: true },
+  }),
   "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
     description:
       "Reads every live session's screen and clears a factory session stuck on a prompt.",

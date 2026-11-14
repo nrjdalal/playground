@@ -42,7 +42,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   A long-running job joins an open runner; Ops spawns a runner when none is open, or another one for isolation or load.
   Each job runs as its own background task with its own log and health check, all listed in that runner's roster task.
   Ops closes a runner once it holds no job that is still needed.
-- **Ops jobs** Ops runs as scripts with no session (ops-awake, ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-unstick, ops-usage, ops-wa, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
+- **Ops jobs** Ops runs as scripts with no session (ops-awake, ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-tunnel, ops-unstick, ops-usage, ops-wa, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
   named `ops-*.json` so the Dashboard finds a new job by its file alone,
   in the shape `heartbeatSchema` in `api/hono/src/lib/dashboard/ops.ts` reads (`job`, `pid`, `startedAt`, `lastBeatAt`, `lastResult`, `cycleSeconds`), written atomically each beat by a loop that does not wait on the work.
   The Dashboard lists each under Scripts, by its plain name and its `jobs.json` `schedule`: Running while `lastResult` is `ok` and the beat is within three cycles, Waiting while it starts `waiting: ` (a job with nothing to read yet, muted and not broken), Failing on any other result, Down once the beat goes stale, the pid goes or the loop writes `loop exited <code>` or `supervisor exited`.
@@ -55,6 +55,12 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   ops-dashboard runs the dashboard checkout's own `scripts/ops/dashboard/`, swapping onto it in the same pid at each start and after a roll that changes it (`.agents/dashboard/live.md`).
   ops-merge-train is merge-on-ready, a job and never a worker: every 60 seconds it reads the open PRs' heads and checks, and on any change runs `bun run pr:train ready`, which merges the first PR in queue order whose every gate passes; its beat's `lastResult` is `ok` or the command that failed and why.
   ops-unstick (`scripts/ops/unstick/run.py`) watches for stuck sessions, by the **unstick** rule.
+  ops-tunnel (`packages/scripts/src/ops-tunnel/`, off by default) runs on a Mac whose Dashboard lives on another machine, holding `ssh -L 127.0.0.1:<port>:127.0.0.1:<port>` with the key `~/.ssh/playground_spark`.
+  Its `jobs.opsTunnel` row's `config.host` names the machine, set through an Inbox Approve by the step that sets that machine up, and `config.port` is the same at both ends, 1355 by default.
+  So its link, `https://playground.localhost:<port>/dashboard`, is that machine's own web origin, which its trusted origins already name.
+  It starts ssh again after a drop, 2 s on and doubling to 60 s, from 2 s again once a link held 60 s.
+  It beats `up: <link> through <host>` once the port answers and macOS trusts the certificate served there (checked each minute), else `down: <why>`.
+  It posts the link once as an Inbox update whose title opens it, and `playground doctor`'s `tunnel` line reads its beat.
   ops-session-resume is `bun run ops:session-resume` in a checkout of `canary`: every 60 seconds it reads the state each session's hooks write (`session-state/<session id>.json` in the data folder),
   and to each live factory session (never a probe, nor one of the owner's own) at its usage limit whose reset passed a minute ago, unless Claude Code announced it carries on by itself (the **unstick** rule),
   it queues one resume line in the ops outbox, which the relay sends with `SendMessage` (**voice**), and one carry-on line to each such session whose turn a restart lost (its newest state `working`, written before its process started, 2 minutes on, with no Escape after it in the transcript),

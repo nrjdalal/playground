@@ -96,8 +96,12 @@ describe("why a tunnel cannot connect (PG-2207)", () => {
     ["ssh: connect to host spark-a port 22: Connection refused", "nothing answers ssh on spark-a"],
     ["ssh: connect to host spark-a port 22: Operation timed out", "spark-a is not reachable"],
     ["ssh: connect to host spark-a port 22: No route to host", "spark-a is not reachable"],
-    ["Host key verification failed.", "host key"],
+    ["Host key verification failed.", "host key unknown or changed for spark-a"],
     ["bind [127.0.0.1]:1355: Address already in use", "port 1355 on this Mac is taken"],
+    [
+      "Could not request local forwarding.\nError: cannot listen to port: 1355",
+      "port 1355 on this Mac is taken",
+    ],
     [
       "Warning: Identity file /h/.ssh/playground_spark not accessible: No such file or directory.",
       "the key /h/.ssh/playground_spark is missing",
@@ -142,6 +146,33 @@ describe("the tunnel job's loop (PG-2207)", () => {
     expect(lastResult).not.toContain("exited")
   })
 
+  test("the wait doubles on each drop up to its cap, and starts over once a link has held steadyMs", async () => {
+    const waitsOf = async (name: string, body: string, listens: boolean) => {
+      const ssh = fakeSsh(name, body)
+      const data = dataWith(name, { host: "spark-a" })
+      const stop = new AbortController()
+      const waits: number[] = []
+      const kept = keep({
+        data,
+        env: ssh.env,
+        listens: async () => listens,
+        served: async () => null,
+        maxWaitMs: 40,
+        minWaitMs: 10,
+        signal: stop.signal,
+        steadyMs: 0,
+        wait: async (ms) => {
+          waits.push(ms)
+          if (waits.length >= 5) stop.abort()
+        },
+      })
+      await kept
+      return waits
+    }
+    expect(await waitsOf("backoff", "exit 255", false)).toEqual([10, 20, 40, 40, 40])
+    expect(await waitsOf("steady", "sleep 0.1\nexit 255", true)).toEqual([10, 10, 10, 10, 10])
+  })
+
   test("with no host set it starts no ssh and says where the host goes", async () => {
     const ssh = fakeSsh("nohost", "exit 0")
     const data = dataWith("nohost", { host: "" })
@@ -170,17 +201,21 @@ describe("the tunnel job's loop (PG-2207)", () => {
   })
 
   test("once up it beats the link and posts it to the Inbox once, and a stop ends its ssh", async () => {
-    const ssh = fakeSsh("up", "exec sleep 30")
+    const pids = join(scratch, "up", "pids")
+    const ssh = fakeSsh("up", `echo $$ >> "${pids}"\nexec sleep 30`)
     const data = dataWith("up", { host: "spark-a", port: 1355 })
     const posts: string[] = []
     const run = async () => {
+      rmSync(join(data, "ops", "ops-tunnel.json"), { force: true })
       const stop = new AbortController()
       const kept = keep({
         data,
         env: ssh.env,
-        listens: async () => true,
+        // the port answers once the fake ssh has started, as a real forward does
+        listens: async () => existsSync(pids),
         minWaitMs: 10,
         post: async (link) => (posts.push(link), "item-1"),
+        served: async () => null,
         signal: stop.signal,
       })
       await until(
@@ -197,5 +232,32 @@ describe("the tunnel job's loop (PG-2207)", () => {
     expect(beatOf(data).lastResult).toBe(
       "up: https://playground.localhost:1355/dashboard through spark-a",
     )
+    for (const pid of readFileSync(pids, "utf8").trim().split("\n").map(Number))
+      expect(() => process.kill(pid, 0)).toThrow()
+  })
+
+  test("a Dashboard whose certificate this Mac does not trust yet beats down with why and posts no link", async () => {
+    const ssh = fakeSsh("untrusted", "exec sleep 30")
+    const data = dataWith("untrusted", { host: "spark-a" })
+    const posts: string[] = []
+    const stop = new AbortController()
+    const kept = keep({
+      data,
+      env: ssh.env,
+      listens: async () => true,
+      post: async (link) => (posts.push(link), "item-1"),
+      served: async () =>
+        "this Mac does not trust the certificate the Dashboard on spark-a serves yet",
+      signal: stop.signal,
+    })
+    await until(
+      () =>
+        existsSync(join(data, "ops", "ops-tunnel.json")) &&
+        beatOf(data).lastResult.startsWith("down"),
+    )
+    stop.abort()
+    await kept
+    expect(beatOf(data).lastResult).toContain("does not trust the certificate")
+    expect(posts).toEqual([])
   })
 })
