@@ -47,6 +47,9 @@ export const JOINED_ON_REDEEM = [
 // The token, invite and channel writes a member makes in an hour.
 export const WRITES_HOUR = 20
 
+// A caller's hourly budget on the calls with no other: a bot's reads of the log, each a relay round trip to its maker's Mac, and a member's DM opens, channel joins and invite tries.
+export const CALL_LIMITS = { dmHour: 30, joinHour: 30, logReadHour: 120, redeemHour: 10 } as const
+
 export const hashOf = (secret: string): string => createHash("sha256").update(secret).digest("hex")
 
 // A unique-constraint violation, which a write that can lose a race answers as 409; drizzle wraps the driver's error as its cause.
@@ -189,6 +192,7 @@ export const createChannel = async (
 export const joinChannel = async (db: Database, caller: Caller, id: string): Promise<Channel> => {
   const [row] = await db.select().from(yardChannel).where(eq(yardChannel.id, id))
   if (!row || row.kind !== "channel") throw notFound("Channel")
+  await take(db, `join:${caller.id}`, "hour", CALL_LIMITS.joinHour)
   await db.insert(yardMember).values({ channelId: id, userId: caller.id }).onConflictDoNothing()
   return channelFor(db, caller, id)
 }
@@ -201,6 +205,7 @@ export const openDm = async (db: Database, caller: Caller, login: string): Promi
     .where(sql`lower(${user.login}) = ${login.toLowerCase()}`)
   if (!peer || !reachesConsole(peer, "member")) throw notFound("Member")
   if (peer.id === caller.id) throw new ApiError(400, "BAD_REQUEST", "A DM is between two members")
+  await take(db, `dm:${caller.id}`, "hour", CALL_LIMITS.dmHour)
   const name = dmName(caller.id, peer.id)
   await db.transaction(async (tx) => {
     await tx
@@ -727,6 +732,7 @@ export const botDm = async (
 
 // A bot's read of the log reaches its maker's Mac: the maker's login, which the Mac checks against its own token's, and the bot's DM, where the read's line goes.
 export const logReadOf = async (db: Database, caller: Caller & { bot: { madeBy: string } }) => {
+  await take(db, `logread:${caller.id}`, "hour", CALL_LIMITS.logReadHour)
   const [maker] = await db
     .select({ login: user.login })
     .from(user)
@@ -860,6 +866,7 @@ export const decideInvite = async (
 
 // Redeems an open, unexpired invite meant for the caller (or for anyone): the caller takes the member rung, unless already above it, and joins #general and #releases.
 export const redeemInvite = async (db: Database, caller: Caller, code: string) => {
+  await take(db, `redeem:${caller.id}`, "hour", CALL_LIMITS.redeemHour)
   const now = new Date()
   await db.transaction(async (tx) => {
     const [row] = await tx

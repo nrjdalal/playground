@@ -1,7 +1,19 @@
 // A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: lets a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx) run only as a read (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) or a preview deploy, and refuses every other call, a command or deploy subcommand a later CLI adds included; a production move (a production deploy, which also migrates the hosted database, a deploy continue, a redeploy, a promote, a rollback, an alias or a rolling release) passes for the Ops lead alone, in a call that names no role variable and sources no file.
-import { toolWords } from "./no-main-checkout"
+import { basename, isAbsolute, resolve } from "node:path"
+
+import { bunCall, toolName, toolWords } from "./no-main-checkout"
 import { namesRole, opsLead } from "./role"
-import { type Env, lex, run, unreadable, viaXargs, type Visit, type Word } from "./shell"
+import {
+  type Env,
+  lex,
+  program,
+  run,
+  slotWords,
+  unreadable,
+  viaXargs,
+  type Visit,
+  type Word,
+} from "./shell"
 
 type Environment = Record<string, string | undefined>
 type Verdict = { production: boolean; what: string }
@@ -95,7 +107,8 @@ const API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"])
 // The readings one call's options make at most, so many unknown options cost a bounded time; past them the call is refused as one the hook cannot read.
 const READINGS = 64
 
-const MENTION = /\bv(?:ercel|c)\b/i
+const MENTION = /\bv(?:ercel|c)\b|\byard\b/i
+const STEP_NAMED = /\byard\b/i
 // vercel or vc as a word of its own (an assignment's value, a tool at a version), so a program built at run time on such a line may be it.
 const NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i
 
@@ -270,6 +283,75 @@ function judgeApi(rest: Word[], flags: Flag[], built: boolean): Verdict | undefi
     return { production: false, what: "a vercel api read of a project's env" }
 }
 
+// The release skill's Yard ship step, which runs vercel deploy --prod itself, so its own command line is the production move: bun with its script (`bun run ship:yard`, `bun ship:yard`) or its file, resolved against the folder bun runs in, bun reached through a package runner, and npm, pnpm or yarn with its script; its help, before any `--`, moves nothing, and by another runner it is never help.
+const STEP_FILE = /(?:^|\/)packages\/scripts\/src\/ship\/yard\.ts$/
+const STEP_HELP = new Set(["--help", "-h"])
+const RUNNERS = new Set(["npm", "pnpm", "yarn"])
+
+function yardStep(name: string, args: Word[], shell: Env): boolean {
+  if (RUNNERS.has(name)) return args.some((a) => a.value === "ship:yard")
+  if (name !== "bun") return false
+  const { at, chained, words } = bunCall(args, shell)
+  const file = words[0] === "run" ? words[1] : words[0]
+  if (file === undefined) return false
+  const path = isAbsolute(file) ? file : chained ? resolve(chained, file) : undefined
+  // with no folder to read it from, any file named yard.ts may be the step
+  const step = file === "ship:yard" || (path ? STEP_FILE.test(path) : basename(file) === "yard.ts")
+  const end = args.findIndex((a, k) => k > at && a.value === "--")
+  return (
+    step && !args.slice(at + 1, end === -1 ? undefined : end).some((a) => STEP_HELP.has(a.value))
+  )
+}
+
+// The package runners that may hand bun its words (bunx, bun x, npx, and npm, pnpm or yarn by exec, x, dlx or a bin's name): each runner's words after each word naming bun, since one may be an option's value (npx -p bun bun ...).
+const PACKAGE_RUNNERS = new Set(["bunx", "npm", "npx", "pnpm", "yarn"])
+// A runner's words that may move the folder bun runs in (bun x --cwd, pnpm -C, --dir or --filter, npm --prefix or a workspace, yarn's workspace command), so the step's file is then read as any yard.ts.
+const MOVES = /^(?:--(?:cwd|dir|filter|prefix|workspace)(?:=|$)|-[CFw]|workspaces?$)/
+// The runners' options whose value is a command line they run in a shell (npm exec -c, npx --call, pnpm's shell mode).
+const CALLS = new Set(["--call", "--shell-mode", "-c"])
+
+type Reached = { args: Word[]; shell: Env }
+
+function runnerBuns(name: string, args: Word[], shell: Env): Reached[] {
+  let offset = 0
+  if (name === "bun") {
+    const { sub, words } = bunCall(args, shell)
+    if (words[0] !== "x") return []
+    offset = sub + 1
+  } else if (!PACKAGE_RUNNERS.has(name)) return []
+  const reached: Reached[] = []
+  for (let at = offset; at < args.length; at++) {
+    if (toolName(args[at]!.value) !== "bun") continue
+    const moved = args.slice(0, at).some((a) => MOVES.test(a.value))
+    reached.push({ args: args.slice(at + 1), shell: moved ? { ...shell, cwd: undefined } : shell })
+  }
+  return reached
+}
+
+// Each bun a chain of package runners may reach (npx bun x bun ...), bounded so a long line costs a bounded time.
+function throughRunners(name: string, args: Word[], shell: Env): Reached[] {
+  const reached: Reached[] = []
+  const queue = runnerBuns(name, args, shell)
+  while (queue.length > 0 && reached.length < 32) {
+    const next = queue.shift()!
+    reached.push(next)
+    queue.push(...runnerBuns("bun", next.args, next.shell))
+  }
+  return reached
+}
+
+// The command lines a runner runs in a shell, each the value of its -c, --call or shell-mode option.
+function runnerCalls(name: string, args: Word[]): Word[] {
+  if (!PACKAGE_RUNNERS.has(name) || name === "bunx") return []
+  const calls: Word[] = []
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k]!.value
+    if (CALLS.has(v) && args[k + 1]) calls.push(args[k + 1]!)
+    else if (v.startsWith("--call=")) calls.push({ ...args[k]!, value: v.slice(7) })
+  }
+  return calls
+}
+
 export async function check(
   raw: string,
   environment: Environment = process.env,
@@ -293,7 +375,25 @@ export async function check(
         production: false,
         what: "a program built at run time on a line naming vercel",
       })
-    const words = toolWords(NAMES, parsed.name, parsed.args, shell)
+    // run-slot.sh runs the words after its -- as the command
+    const slotted = slotWords(parsed)
+    const name = slotted ? program(slotted[0]?.value ?? "") : parsed.name
+    const args = slotted ? slotted.slice(1) : parsed.args
+    if (
+      yardStep(name, args, shell) ||
+      throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell))
+    )
+      verdicts.push({ production: true, what: "the Yard ship step, which deploys production" })
+    // a runner's -c line runs in a shell, so it is read as sh -c's is, and one the hook cannot read is the step on a line naming it
+    for (const call of runnerCalls(name, args))
+      if (!unreadable(call))
+        await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit)
+      else if (STEP_NAMED.test(command))
+        verdicts.push({
+          production: true,
+          what: "a runner's command line built at run time on a line naming the Yard ship step",
+        })
+    const words = toolWords(NAMES, name, args, shell)
     // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string
     const verdict =
       words &&

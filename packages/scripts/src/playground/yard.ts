@@ -186,8 +186,8 @@ async function bot(words: string[], client: YardClient, io: YardIo): Promise<num
   return 0
 }
 
-// YARD_API_URL and YARD_WEB_URL from the environment, else from the live dashboard checkout's .env, the checkout live.branch names, as the local API reads its settings. The main checkout keeps no .env, so the checkout the command runs from is never read.
-const setting = async (name: string, live: string | null): Promise<string | undefined> => {
+// A setting (the Yard hosts, and ship:yard's Vercel ids) from the environment, else from the live dashboard checkout's .env, the checkout live.branch names, as the local API reads its settings. The main checkout keeps no .env, so the checkout the command runs from is never read.
+export const setting = async (name: string, live: string | null): Promise<string | undefined> => {
   if (process.env[name]) return process.env[name]
   if (!live) return undefined
   const file = Bun.file(`${live}/.env`)

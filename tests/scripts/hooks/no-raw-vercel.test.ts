@@ -14,6 +14,9 @@ const ROLE: Record<Session, string> = { builder: "lead", ops: "lead", worker: "w
 beforeAll(async () => {
   scratch = await mkdtemp(join(tmpdir(), "no-raw-vercel-"))
   await mkdir(join(scratch, "config", "sessions"), { recursive: true })
+  // the step's folder and the Yard CLI's, so a cd into either lands where it does in a checkout
+  for (const dir of ["ship", "playground"])
+    await mkdir(join(scratch, "packages", "scripts", "src", dir), { recursive: true })
   await Bun.write(
     join(scratch, "data", "roster.json"),
     JSON.stringify({
@@ -175,6 +178,7 @@ const PREFIXES: [string, string][] = [
   ["npx", "npx vercel link"],
   ["a -c script", "bash -c 'vercel env pull'"],
   ["a pipe", "yes | vercel deploy --prod"],
+  ["run-slot", "~/.playground/ops/run-slot.sh s-worker -- vercel deploy --prod"],
   ["xargs, whose words the hook cannot read", "echo --prod | xargs vercel"],
   ["a program in a variable on a line naming vercel", "V=vercel; $V --prod"],
 ]
@@ -210,7 +214,7 @@ describe("a factory session's Vercel call that moves production or reads its sec
   })
 })
 
-// Ops' ship of the hosted build: one production deploy a project, its ids in the call's environment; the ids are made up.
+// The call ship:yard makes for each hosted project, and Ops' hand form of it: one production deploy a project, its ids in the call's environment; the ids are made up.
 const OPS_SHIP: [string, string][] = [
   [
     "with the project's ids as assignments",
@@ -229,6 +233,135 @@ describe("Ops' ship of the hosted build", () => {
 
   test.each(OPS_SHIP)("is refused for a worker %s", async (_, command) => {
     expect(await as("worker", command)).toContain(REFUSED)
+  })
+})
+
+// The release skill's Yard ship step, which runs vercel deploy --prod itself, so the hook reads the step's own command line as the production move it makes.
+const YARD_SHIP: [string, string][] = [
+  ["by its script", "bun run ship:yard v0.0.111"],
+  ["after a cd", "cd /Users/x/playground && bun run ship:yard v0.0.111 --since v0.0.110"],
+  ["through run-slot", "~/.playground/ops/run-slot.sh ops-ship -- bun run ship:yard v0.0.111"],
+  ["by its file", "bun packages/scripts/src/ship/yard.ts v0.0.111 --schema-cleared i123"],
+  ["by its file's full path", "bun /Users/x/playground/packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["by its script with no run", "bun ship:yard v0.0.111"],
+  ["by its file after run", "bun run packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["by its file from bun's --cwd", "bun --cwd packages/scripts src/ship/yard.ts v0.0.111"],
+  ["by its file after run from --cwd=", "bun --cwd=packages/scripts run src/ship/yard.ts v0.0.111"],
+  ["by its file after a cd", "cd packages/scripts && bun src/ship/yard.ts v0.0.111"],
+  ["from its own folder", "cd packages/scripts/src/ship && bun yard.ts v0.0.111"],
+  ["by a path with ..", "bun packages/scripts/src/ship/../ship/yard.ts v0.0.111"],
+  ["by a path with a doubled slash", "bun packages//scripts/src/ship/yard.ts v0.0.111"],
+  ["from a folder the hook cannot read", 'cd "$D" && bun yard.ts v0.0.111'],
+  [
+    "with a help word after --, which bun hands the step as a tag",
+    "bun run ship:yard v0.0.111 -- --help",
+  ],
+  ["by npm", "npm run ship:yard -- v0.0.111"],
+  ["by npm with a help word", "npm run ship:yard -- --help"],
+  ["by pnpm", "pnpm ship:yard v0.0.111"],
+  ["by yarn", "yarn run ship:yard v0.0.111"],
+  ["through bunx", "bunx bun run ship:yard v0.0.111"],
+  ["through bun x", "bun x bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through npx", "npx bun ship:yard v0.0.111"],
+  ["through bun x by its script", "bun x bun run ship:yard v0.0.111"],
+  ["through npx by its script", "npx bun run ship:yard v0.0.111"],
+  ["through pnpm dlx", "pnpm dlx bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through bun x's --cwd", "bun x --cwd packages/scripts bun src/ship/yard.ts v0.0.111"],
+  ["through pnpm -C and dlx", "pnpm -C packages/scripts dlx bun src/ship/yard.ts v0.0.111"],
+  ["through pnpm --dir and dlx", "pnpm --dir packages/scripts dlx bun src/ship/yard.ts v0.0.111"],
+  [
+    "through npm exec, its -- after bun",
+    "npm exec bun -- packages/scripts/src/ship/yard.ts v0.0.111",
+  ],
+  [
+    "through npm exec, its -- before bun",
+    "npm exec -- bun packages/scripts/src/ship/yard.ts v0.0.111",
+  ],
+  ["through npm x", "npm x bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through yarn dlx", "yarn dlx bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through pnpm exec", "pnpm exec bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through pnpm by bun's name", "pnpm bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through yarn by bun's name", "yarn bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through bunx at a version", "bunx bun@1 packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through npx, then bun x", "npx bun x bun packages/scripts/src/ship/yard.ts v0.0.111"],
+  ["through bun's --cwd, then x", "bun --cwd packages/scripts x bun src/ship/yard.ts v0.0.111"],
+  [
+    "through npx, bun as -p's value first",
+    "npx -p bun bun packages/scripts/src/ship/yard.ts v0.0.111",
+  ],
+  [
+    "through npx, bun as --package's value first",
+    "npx --package bun bun packages/scripts/src/ship/yard.ts v0.0.111",
+  ],
+  [
+    "through bunx, bun as --package's value first",
+    "bunx --package bun bun packages/scripts/src/ship/yard.ts v0.0.111",
+  ],
+  [
+    "through bunx, bun as -p's value first",
+    "bunx -p bun bun packages/scripts/src/ship/yard.ts v0.0.111",
+  ],
+  ["through pnpm --filter and exec", "pnpm --filter scripts exec bun src/ship/yard.ts v0.0.111"],
+  ["through pnpm -F and exec", "pnpm -F scripts exec bun src/ship/yard.ts v0.0.111"],
+  ["through yarn workspace and exec", "yarn workspace scripts exec bun src/ship/yard.ts v0.0.111"],
+  ["in npm exec's -c line", "npm exec -c 'bun run ship:yard v0.0.111'"],
+  ["in npx's -c line", "npx -c 'bun run ship:yard v0.0.111'"],
+  ["in npx's --call= line", "npx --call='bun packages/scripts/src/ship/yard.ts v0.0.111'"],
+  [
+    "in a -c line the hook cannot read, on a line naming the step",
+    'S="bun run ship:yard v0.0.111"; npx -c "$S"',
+  ],
+  ["behind env", "env FOO=1 bun run ship:yard v0.0.111"],
+  ["after a pushd", "pushd packages/scripts && bun src/ship/yard.ts v0.0.111"],
+  ["in a subshell", "(cd packages/scripts/src/ship && bun yard.ts v0.0.111)"],
+  ["in sh -c", "sh -c 'bun run ship:yard v0.0.111'"],
+]
+
+describe("the Yard ship step", () => {
+  test.each(YARD_SHIP)("passes for the Ops lead %s", async (_, command) => {
+    expect(await as("ops", command)).toBeUndefined()
+  })
+
+  test.each(YARD_SHIP)("is refused for a worker %s", async (_, command) => {
+    expect(await as("worker", command)).toContain(REFUSED)
+  })
+
+  test.each(YARD_SHIP)("is refused for a lead that is not Ops %s", async (_, command) => {
+    expect(await as("builder", command)).toContain(REFUSED)
+  })
+
+  test("loses the Ops lead's pass with the role as a prefix", async () => {
+    expect(await as("ops", "PLAYGROUND_ROLE=lead bun run ship:yard v0.0.111")).toContain(REFUSED)
+  })
+
+  test.each([
+    ["its help", "bun run ship:yard --help"],
+    ["its short help by its file", "bun packages/scripts/src/ship/yard.ts -h"],
+    ["the Yard CLI's file", "bun packages/scripts/src/playground/yard.ts channels"],
+    [
+      "the Yard CLI's file from its own folder",
+      "cd packages/scripts/src/playground && bun yard.ts channels",
+    ],
+    ["a read naming the step", "grep -n ship:yard package.json"],
+    [
+      "the Yard CLI's file through bunx",
+      "bunx bun packages/scripts/src/playground/yard.ts channels",
+    ],
+    [
+      "the Yard CLI's file through npm exec",
+      "npm exec -- bun packages/scripts/src/playground/yard.ts channels",
+    ],
+    ["the step's help through npx", "npx bun run ship:yard --help"],
+    ["a build through pnpm --filter", "pnpm --filter web exec bun run build"],
+    ["an install of bun", "npm install bun"],
+    ["an add of bun and its types", "pnpm add -D bun @types/bun"],
+    ["bun's version through npx", "npx bun --version"],
+    [
+      "a -c line running the Yard CLI",
+      "npx -c 'bun packages/scripts/src/playground/yard.ts channels'",
+    ],
+  ])("passes for a worker: %s", async (_, command) => {
+    expect(await as("worker", command)).toBeUndefined()
   })
 })
 
