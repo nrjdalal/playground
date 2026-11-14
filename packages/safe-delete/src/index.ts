@@ -793,12 +793,15 @@ const defaultBase = (
   return name ? `origin/${name}` : null
 }
 
-// The remote branch that holds HEAD, and so every commit HEAD holds, as <remote>/<branch>, or null: the first live tip unpushed reads that is HEAD or has HEAD as an ancestor.
+// The remote branch that holds HEAD, and so every commit HEAD holds, as <remote>/<branch>, or null: once unpushed lists no commit, the first live tip it reads that is HEAD or has HEAD as an ancestor.
 const remoteHolding = (
   git: (...args: string[]) => { ok: boolean; out: string },
   at: string,
-): string | null =>
-  unpushed(at)?.tips.find((t) => git("merge-base", "--is-ancestor", "HEAD", t.sha).ok)?.ref ?? null
+): string | null => {
+  const ahead = unpushed(at)
+  if (!ahead || ahead.shas.length) return null
+  return ahead.tips.find((t) => git("merge-base", "--is-ancestor", "HEAD", t.sha).ok)?.ref ?? null
+}
 
 // The commits HEAD holds that no remote holds now, past each branch tip ls-remote reads from each remote itself, since a remote-tracking ref is only the remote's last fetch; tips names those this repo has, as <remote>/<branch> at its sha, and unread each remote ls-remote could not read in 30 s, with ssh never prompting, which holds none. Null when the commits cannot be read.
 export function unpushed(
@@ -818,13 +821,15 @@ export function unpushed(
   if (!remotes.ok) return null
   const listed: { ref: string; sha: string }[] = []
   const unread: string[] = []
-  const ssh = `${process.env.GIT_SSH_COMMAND || "ssh"} -o BatchMode=yes -o ConnectTimeout=10`
+  // ssh's options go on the command git would run (GIT_SSH_COMMAND, else core.sshCommand, else ssh), and none under GIT_SSH alone, whose program may take no -o
+  const command =
+    process.env.GIT_SSH_COMMAND ||
+    git(["config", "--get", "core.sshCommand"]).out.trim() ||
+    (process.env.GIT_SSH ? "" : "ssh")
+  const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0" }
+  if (command) env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`
   for (const remote of remotes.out.split("\n").filter(Boolean)) {
-    const live = git(
-      ["ls-remote", "--heads", "--", remote],
-      { GIT_SSH_COMMAND: ssh, GIT_TERMINAL_PROMPT: "0" },
-      30_000,
-    )
+    const live = git(["ls-remote", "--heads", "--", remote], env, 30_000)
     if (!live.ok) {
       unread.push(remote)
       continue
@@ -908,7 +913,7 @@ const bundleUnpushed = (
 
 const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 
-// The commits a worktree's HEAD holds that no remote holds now (unpushed), archived by git format-patch into <archive>/<repo>/<worktree>-<HEAD sha7>, written only when that folder is not there yet, then read back: its path and count once it holds one patch for each of those commits, by each patch's From line, else why the worktree stays.
+// The commits a worktree's HEAD holds that no remote holds now (unpushed), archived by git format-patch into <archive>/<repo>/<worktree>-<HEAD sha7>, written only when that folder is not there yet, then read back: its path and count once it holds a patch for each of those commits, by each patch's From line, a patch for any other commit allowed since a remote read since may list fewer, else why the worktree stays.
 export function archiveUnlanded(
   at: string,
   archive: string,
@@ -953,7 +958,7 @@ export function archiveUnlanded(
     return { refused: `its archive at ${path} could not be read: ${(error as Error).message}` }
   }
   const held = shas.filter((sha) => patches.includes(sha)).length
-  if (patches.length !== shas.length || held !== shas.length)
+  if (held !== shas.length)
     return {
       refused: `its archive at ${path} holds ${counted(patches.length, "patch", "patches")}, ${held} of its ${counted(shas.length, "commit", "commits")} no remote holds`,
     }

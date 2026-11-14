@@ -37,6 +37,7 @@ import {
   restore,
   type Roots,
   stripTrash,
+  unpushed,
   worktreeRefusal,
 } from "../../../../packages/safe-delete/src"
 
@@ -1189,6 +1190,38 @@ describe("worktreeRefusal", () => {
     git(roots.main, "remote", "set-url", "origin", join(roots.root, "gone.git"))
     const path = join(archive, "playground", `pg-1-${git(wt, "rev-parse", "HEAD").slice(0, 7)}`)
     expect(archiveUnlanded(wt, archive)).toEqual({ count: 2, path })
+  })
+
+  // #2132: a short archive written while the remote could not be read, a merge commit's patch missing, lets the tree go once the remote reads again and lists fewer commits
+  test("archiveUnlanded refuses a short archive of the whole history while the remote cannot be read, then passes the same folder once it reads", () => {
+    const { roots, wt } = withWorktree()
+    const archive = join(roots.root, "archive")
+    const side = git(wt, "commit-tree", "-p", "HEAD", "-m", "side", "HEAD^{tree}")
+    git(wt, "merge", "-q", "--no-ff", "-m", "merge", side)
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    file(join(wt, "late.txt"))
+    git(wt, "add", ".")
+    git(wt, "commit", "-qm", "late")
+    const late = git(wt, "rev-parse", "HEAD")
+    const path = join(archive, "playground", `pg-1-${late.slice(0, 7)}`)
+    git(roots.main, "remote", "set-url", "origin", join(roots.root, "gone.git"))
+    expect(archiveUnlanded(wt, archive)).toEqual({
+      refused: `its archive at ${path} holds 4 patches, 4 of its 5 commits no remote holds`,
+    })
+    git(roots.main, "remote", "set-url", "origin", join(roots.root, "remote.git"))
+    expect(archiveUnlanded(wt, archive)).toEqual({ count: 1, path })
+  })
+
+  // #2132: ssh's options go on the command git would run, so a configured core.sshCommand still reads the remote
+  test("unpushed reads an ssh remote through core.sshCommand, with BatchMode and a connect limit added", () => {
+    const { roots, wt } = withWorktree()
+    const said = join(roots.root, "ssh-args")
+    const ssh = file(join(roots.root, "fake-ssh"), `#!/bin/sh\necho "$@" > '${said}'\nexit 1\n`)
+    chmodSync(ssh, 0o755)
+    git(roots.main, "config", "core.sshCommand", ssh)
+    git(roots.main, "remote", "set-url", "origin", "ssh://git@example.invalid/remote.git")
+    expect(unpushed(wt)).toMatchObject({ unread: ["origin"] })
+    expect(readFileSync(said, "utf8")).toStartWith("-o BatchMode=yes -o ConnectTimeout=10 ")
   })
 
   test("bundleToTrash holds each ref at its sha past the excluded ones, its sha list beside it, and leaves out a ref the exclusion holds", () => {
