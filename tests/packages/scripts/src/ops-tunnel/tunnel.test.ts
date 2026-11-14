@@ -252,6 +252,31 @@ describe("the tunnel job's loop (PG-2207)", () => {
     expect(posts).toEqual([])
   })
 
+  test("a live.branch it cannot read beats down with why and starts no ssh, and the loop goes on", async () => {
+    const ssh = fakeSsh("nobranch", "exit 0")
+    const data = dataWith("nobranch", { host: "spark-a" })
+    const stop = new AbortController()
+    const waits: number[] = []
+    await keep({
+      branch: () => {
+        throw new Error("policy.json does not parse")
+      },
+      data,
+      env: ssh.env,
+      listens: async () => false,
+      signal: stop.signal,
+      wait: async (ms) => {
+        waits.push(ms)
+        if (waits.length >= 2) stop.abort()
+      },
+    })
+    expect(existsSync(ssh.log)).toBe(false)
+    expect(waits).toEqual([60_000, 60_000])
+    expect(beatOf(data).lastResult).toBe(
+      "down: the live.branch setting cannot be read: policy.json does not parse",
+    )
+  })
+
   test("once up it beats the link and posts it to the Inbox once, and a stop ends its ssh", async () => {
     const held = holding("up")
     const ssh = fakeSsh("up", held.body)

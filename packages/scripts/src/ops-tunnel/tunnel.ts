@@ -223,7 +223,14 @@ export const keep = async ({
       next = Math.min(next * 2, maxWaitMs)
       continue
     }
-    const webHost = webHostOf(branch())
+    let webHost: string
+    try {
+      webHost = webHostOf(branch())
+    } catch (error) {
+      await say(`down: the live.branch setting cannot be read: ${(error as Error).message}`)
+      await wait(maxWaitMs, signal)
+      continue
+    }
     const child = Bun.spawn([ssh!, ...sshArgs(tunnel)], {
       env,
       stderr: "pipe",

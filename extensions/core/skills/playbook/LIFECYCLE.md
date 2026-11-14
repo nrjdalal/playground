@@ -56,9 +56,10 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   ops-merge-train is merge-on-ready, a job and never a worker: every 60 seconds it reads the open PRs' heads and checks, and on any change runs `bun run pr:train ready`, which merges the first PR in queue order whose every gate passes; its beat's `lastResult` is `ok` or the command that failed and why.
   ops-unstick (`scripts/ops/unstick/run.py`) watches for stuck sessions, by the **unstick** rule.
   ops-tunnel (`packages/scripts/src/ops-tunnel/`, off by default) runs on a Mac whose Dashboard lives on another machine, holding `ssh -L 127.0.0.1:<port>:127.0.0.1:<port>` with the key `~/.ssh/playground_spark`.
-  Its `jobs.opsTunnel` row's `config.host` names the machine, set in that row's config card in Settings > Jobs, and `config.port` is the same at both ends, 1355 by default.
+  Its `jobs.opsTunnel` row's `config.host` names the machine, and `config.port` is the same at both ends, 1355 by default.
   So its link, `https://dashboard.playground.localhost:<port>/dashboard` on the default `live.branch`, is that machine's live Dashboard's own web origin, which its trusted origins already name, and the API's origin goes through the same port.
-  It needs, in order: this Mac trusting that machine's portless CA (no Playground step yet), the host set, then the job turned on.
+  That machine serves under this Mac's own portless CA, which its setup copies there, so the owner trusts no new CA.
+  A session asks for the host and then the switch as two Inbox guard decisions, `{"config": {"host": ...}}` then `{"enabled": true}`, so the owner only clicks Approve; Settings > Jobs' config card and switch are the by-hand way.
   It starts ssh again after a drop, 2 s on and doubling to 60 s, from 2 s again once a link held 60 s.
   A port another program already answers on starts no ssh.
   It beats `up: <link> through <host>` once the port answers and macOS trusts the certificate served there (checked each minute), else `down: <why>`.

@@ -161,7 +161,7 @@ export const JOBS: Record<string, Job> = {
       "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
     schedule: { every: 60 },
   }),
-  // On the Mac that reaches a Dashboard on another machine: config.host names it, set in the row's config card.
+  // On the Mac that reaches a Dashboard on another machine: config.host names it, set through an Inbox guard decision's Approve.
   "ops-tunnel": terminal("ops-tunnel", `${bunJob("ops-tunnel")} --data {data}`, {
     config: { host: "", port: 1355 },
     description:
