@@ -3239,8 +3239,18 @@ describe("an xargs-led grep and bun -e from the data folder", () => {
     ["a grep of the shell's folder under xargs", `ls /tmp | xargs ./grep -h ${PATTERN}`],
     ["grep under xargs with a variable set", `ls /tmp | GREP=1 xargs grep -h ${PATTERN}`],
     ["grep under xargs piped into a shell", `ls /tmp | xargs grep -h ${PATTERN} | sh`],
+    [
+      "perl -i on a file in the root, its script holding an xargs-led grep",
+      `perl -0pi -e 's/(a)/ls \\/tmp | xargs grep -h x \\$HOME\\/.playground\\/extensions\\/policy.json $1/' $HOME/.playground/extensions/x.json`,
+    ],
   ])("%s stays refused", async (_, command) => {
     expect(await bash(command, WORK)).toContain("no-extensions-write hook refuses")
+  })
+
+  test("perl -i on a relative file in the root, its script holding an xargs-led grep, stays refused", async () => {
+    expect(
+      await bash(`perl -0pi -e 's/(a)/ls \\/tmp | xargs grep -h x $1/' extensions/x.json`, DATA),
+    ).toContain("no-extensions-write hook refuses")
   })
 
   test.each([
