@@ -7882,6 +7882,8 @@ var ranIn = (dir, also) => [
 ];
 var unreadFolder = (also) => also?.includes(undefined) ?? false;
 function runs(name, args, local, env) {
+  if (args[1] === UNREAD_CWD)
+    return { also: [undefined], cwd: undefined, what: `${name} past the readings the hook makes` };
   if (name === "bunx")
     return runs("bun", [X, ...args], local, env);
   const turbo = turboWords(name, args, env);

@@ -12738,6 +12738,8 @@ var ranIn = (dir, also) => [
 ];
 var unreadFolder = (also) => also?.includes(undefined) ?? false;
 function runs(name, args, local, env) {
+  if (args[1] === UNREAD_CWD)
+    return { also: [undefined], cwd: undefined, what: `${name} past the readings the hook makes` };
   if (name === "bunx")
     return runs("bun", [X, ...args], local, env);
   const turbo = turboWords(name, args, env);
@@ -17672,6 +17674,8 @@ function turboTask(words) {
 }
 var recursive5 = (args) => args.some((a) => /^-[a-zA-Z]*[Rra]/.test(a.value) || ["--archive", "--recursive"].includes(a.value));
 function heavy2(name, args, env) {
+  if (args[1] === UNREAD_CWD)
+    return { also: [undefined], dir: undefined, what: `${name} past the readings the hook makes` };
   const compose = portlessCompose(name, args);
   if (DOCKERS.has(name) || compose) {
     const build = compose ? dockerBuild(compose, true) : dockerBuild(args, name === "docker-compose");

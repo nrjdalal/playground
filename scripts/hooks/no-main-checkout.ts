@@ -536,6 +536,9 @@ function runs(
 ):
   | { also?: (string | undefined)[]; cwd: string | undefined; fix?: string; what: string }
   | undefined {
+  // a call past the readings runnerReadings makes may run any program in any folder, so it fails closed at any depth
+  if (args[1] === UNREAD_CWD)
+    return { also: [undefined], cwd: undefined, what: `${name} past the readings the hook makes` }
   if (name === "bunx") return runs("bun", [X, ...args], local, env)
   const turbo = turboWords(name, args, env)
   if (turbo && packagesBuild(turbo)) {

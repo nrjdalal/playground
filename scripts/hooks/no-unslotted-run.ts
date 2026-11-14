@@ -18,6 +18,7 @@ import {
   STARTED_RUNNERS,
   toolName,
   turboWords,
+  UNREAD_CWD,
   unreadFolder,
   withChained,
   X,
@@ -296,6 +297,9 @@ function heavy(
       what: string
     }
   | undefined {
+  // a call past the readings runnerReadings makes may run any program in any folder, so it fails closed at any depth
+  if (args[1] === UNREAD_CWD)
+    return { also: [undefined], dir: undefined, what: `${name} past the readings the hook makes` }
   const compose = portlessCompose(name, args)
   if (DOCKERS.has(name) || compose) {
     const build = compose
