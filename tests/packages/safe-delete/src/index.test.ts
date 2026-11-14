@@ -18,6 +18,7 @@ import { dirname, join } from "node:path"
 
 import { hasManagerRole, ROSTER_KINDS } from "../../../../packages/config/src/kinds"
 import {
+  archiveUnlanded,
   bundleToTrash,
   CARVE_OUTS,
   type CarveOut,
@@ -1131,6 +1132,63 @@ describe("worktreeRefusal", () => {
     expect(moved.id).toBeDefined()
     expect(moved.bundle).toBeUndefined()
     expect(readdirSync(dirname(dirname(moved.to))).filter((f) => f.endsWith(".bundle"))).toEqual([])
+  })
+
+  // #2132: a remote-tracking ref is the remote's branch as last fetched, so --discard reads the remote itself: a branch deleted there since, its tracking ref kept, and a remote that cannot be read each hold no commit
+  test.each([
+    [
+      "whose remote branch was deleted since, its tracking ref kept",
+      (roots: Roots) =>
+        git(roots.root, "--git-dir", join(roots.root, "remote.git"), "branch", "-D", "PG-1-thing"),
+    ],
+    [
+      "whose remote cannot be read",
+      (roots: Roots & { root: string }) =>
+        git(roots.main, "remote", "set-url", "origin", join(roots.root, "gone.git")),
+    ],
+  ])("--discard bundles the commits of a pushed worktree %s, which bring HEAD back", (_, arm) => {
+    const { holders, roots, wt } = withWorktree()
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    arm(roots)
+    expect(git(wt, "rev-parse", "--verify", "-q", "refs/remotes/origin/PG-1-thing")).not.toBe("")
+    const head = git(wt, "rev-parse", "HEAD")
+    const discard = { ...holders, discard: true, merged: () => false }
+    const moved = quarantine(wt, { ...opts, worktree: discard }, roots, { now: NOW }) as Quarantined
+    expect(existsSync(wt)).toBe(false)
+    expect(moved.bundle).toBe(join(dirname(dirname(moved.to)), "pg-1.bundle"))
+    git(roots.main, "worktree", "prune")
+    git(roots.main, "branch", "-D", "PG-1-thing")
+    git(roots.main, "fetch", "-q", moved.bundle!, "HEAD:refs/heads/back")
+    expect(git(roots.main, "rev-parse", "back")).toBe(head)
+  })
+
+  // #2132: archiveUnlanded counts a commit as held only when the remote itself holds it now
+  test("archiveUnlanded archives a commit whose remote branch was deleted since, its tracking ref kept, and leaves out one the remote holds", () => {
+    const { roots, wt } = withWorktree()
+    const archive = join(roots.root, "archive")
+    const work = git(wt, "rev-parse", "HEAD")
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    expect(archiveUnlanded(wt, archive)).toEqual({
+      refused: "it holds no commit past its remotes to archive",
+    })
+    git(roots.root, "--git-dir", join(roots.root, "remote.git"), "branch", "-D", "PG-1-thing")
+    const path = join(archive, "playground", `pg-1-${work.slice(0, 7)}`)
+    expect(archiveUnlanded(wt, archive)).toEqual({ count: 1, path })
+    expect(
+      readdirSync(path).map(
+        (f) => /^From ([0-9a-f]+) /.exec(readFileSync(join(path, f), "utf8"))?.[1],
+      ),
+    ).toEqual([work])
+  })
+
+  // #2132: a remote that cannot be read holds no commit, so every commit HEAD holds is archived
+  test("archiveUnlanded archives every commit of a worktree whose remote cannot be read", () => {
+    const { roots, wt } = withWorktree()
+    const archive = join(roots.root, "archive")
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    git(roots.main, "remote", "set-url", "origin", join(roots.root, "gone.git"))
+    const path = join(archive, "playground", `pg-1-${git(wt, "rev-parse", "HEAD").slice(0, 7)}`)
+    expect(archiveUnlanded(wt, archive)).toEqual({ count: 2, path })
   })
 
   test("bundleToTrash holds each ref at its sha past the excluded ones, its sha list beside it, and leaves out a ref the exclusion holds", () => {
