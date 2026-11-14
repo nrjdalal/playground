@@ -70,7 +70,8 @@ export const uninstall = async (o: Options): Promise<number> => {
   const agents = linux
     ? join(o.home, ".config", "systemd", "user")
     : join(o.home, "Library", "LaunchAgents")
-  for (const file of ourPlists(agents, o.repo, o.data, linux ? ".service" : ".plist")) {
+  const ours = ourPlists(agents, o.repo, o.data, linux ? ".service" : ".plist")
+  for (const file of ours) {
     await o.run(
       linux
         ? ["systemctl", "--user", "disable", "--now", basename(file)]
@@ -79,6 +80,8 @@ export const uninstall = async (o: Options): Promise<number> => {
     rmSync(file, { force: true })
     o.log(`removed ${file}`)
   }
+  // systemd forgets the removed units at a reload
+  if (linux && ours.length) await o.run(["systemctl", "--user", "daemon-reload"])
   // a stack that would not stop is named with its last output line, and the run ends 1 once the rest is done
   let failed = false
   for (const checkout of o.stacks) {

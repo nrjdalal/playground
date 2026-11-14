@@ -205,12 +205,9 @@ describe("uninstall", () => {
     expect(
       await uninstall({ ...base, confirm: async () => true, platform: "linux", purge: false }),
     ).toBe(0)
-    expect(calls).toContainEqual([
-      "systemctl",
-      "--user",
-      "disable",
-      "--now",
-      "com.playground.ops-tick.service",
+    expect(calls.filter((argv) => argv[0] === "systemctl")).toEqual([
+      ["systemctl", "--user", "disable", "--now", "com.playground.ops-tick.service"],
+      ["systemctl", "--user", "daemon-reload"],
     ])
     expect(existsSync(join(units, "com.playground.ops-tick.service"))).toBe(false)
     expect(existsSync(join(units, "syncthing.service"))).toBe(true)

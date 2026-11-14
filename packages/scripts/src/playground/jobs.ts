@@ -143,7 +143,7 @@ const installAgents = async (
   return code
 }
 
-// On Linux, each enabled launchd job systemd does not run gets its rendered unit in install's folder when none is there, and is enabled and started, so a refused start is tried again on the next pass; each turned-off one is disabled, its unit there moved to the trash through the jobs-units carve-out, then stopped while it runs. A unit already there stays as it stands, as a plist does. A label that is not Playground's own (PLAYGROUND_UNIT) is left alone.
+// On Linux, each enabled launchd job systemd does not run gets its rendered unit in install's folder when none is there, and is enabled and started, so a refused start is tried again on the next pass; each turned-off one is disabled, its unit there moved to the trash through the jobs-units carve-out and systemd reloaded, then stopped while it runs. A unit already there stays as it stands, as a plist does. A label that is not Playground's own (PLAYGROUND_UNIT) is left alone.
 const installUnits = async (
   install: Extract<Install, { systemctl: Run }>,
   jobs: Record<string, unknown>[],
@@ -186,7 +186,11 @@ const installUnits = async (
           if ("refused" in moved) {
             err(`jobs: kept ${path}: ${moved.refused}`)
             code = 1
-          } else gone = true
+          } else {
+            gone = true
+            // systemd forgets a unit whose file is gone at a reload, made before the stop that can end this render
+            await install.systemctl(["daemon-reload"])
+          }
         }
       }
       if (active) {

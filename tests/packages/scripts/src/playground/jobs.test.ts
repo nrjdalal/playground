@@ -568,7 +568,7 @@ test("on Linux a launchd job turned on is written as a user unit and enabled onc
   expect(changes()).toHaveLength(1)
 })
 
-test("on Linux a launchd job turned off is disabled, its unit moved to the trash, then stopped, and another unit left alone", async () => {
+test("on Linux a launchd job turned off is disabled, its unit moved to the trash and systemd reloaded, then stopped, and another unit left alone", async () => {
   const { changes, data, render, units } = await unitRun(
     "unit-off",
     { "jobs.opsTick": { ...tick, enabled: false } },
@@ -582,6 +582,7 @@ test("on Linux a launchd job turned off is disabled, its unit moved to the trash
   expect(done.out).toContain("-com.playground.ops-tick")
   expect(changes()).toEqual([
     ["disable", "com.playground.ops-tick.service"],
+    ["daemon-reload"],
     ["stop", "com.playground.ops-tick.service"],
   ])
   expect(existsSync(tickUnit)).toBe(false)
@@ -591,7 +592,7 @@ test("on Linux a launchd job turned off is disabled, its unit moved to the trash
   ).toBe("installed")
   expect(readFileSync(join(units, "other.service"), "utf8")).toBe("theirs")
   expect((await render()).out).toBe("jobs: unchanged")
-  expect(changes()).toHaveLength(2)
+  expect(changes()).toHaveLength(3)
 })
 
 // ops-tick runs the render through up.py inside its own unit, so stopping ops-tick ends the render inside that call.
@@ -606,6 +607,7 @@ test("on Linux a unit whose stop ends the render is disabled and in the trash al
   await expect(render()).rejects.toThrow("killed by its own stop")
   expect(changes()).toEqual([
     ["disable", "com.playground.ops-tick.service"],
+    ["daemon-reload"],
     ["stop", "com.playground.ops-tick.service"],
   ])
   expect(existsSync(tickUnit)).toBe(false)
