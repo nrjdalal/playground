@@ -13486,8 +13486,9 @@ var SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRES
 var SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`);
 var TEXT_FLAGS = new Set(["--body", "--reason", "--title"]);
 var SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
-var SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}${SED_TEXT}[gpI0-9]*)[ \t]*`;
+var SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}(${SED_TEXT})[gpI0-9]*)[ \t]*`;
 var SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`);
+var SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y");
 var PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
 var PERL_RE = `/${PERL_BODY}`;
 var PERL_MATCH = String.raw`\$[1-9&](?![[{]|->)`;
@@ -17274,9 +17275,14 @@ var CALLS = new Set(["--call", "--shell-mode", "-c"]);
 function runnerBuns(name, args, shell) {
   let offset = 0;
   if (name === "bun") {
-    const { sub, words } = bunCall(args, shell);
-    if (words[0] !== "x")
-      return [];
+    const { at, chained, sub, words } = bunCall(args, shell);
+    if (words[0] !== "x") {
+      const started = toolName(args[at]?.value);
+      const there = { ...shell, cwd: chained };
+      if (started === "bun")
+        return [{ args: args.slice(at + 1), shell: there }];
+      return PACKAGE_RUNNERS.has(started) ? runnerBuns(started, args.slice(at + 1), there) : [];
+    }
     offset = sub + 1;
   } else if (!PACKAGE_RUNNERS.has(name))
     return [];
@@ -17313,22 +17319,28 @@ function runnerCalls(name, args) {
   }
   return calls;
 }
+var builtName = (word) => !!word && marked(word.value.slice(word.value.lastIndexOf("/") + 1));
 function chain(name, args, shell) {
   const links = [];
   for (;; ) {
     if (args[1] === UNREAD_CWD)
-      return [...links, "unread"];
+      return [...links, { unread: "a runner call past the readings the hook makes" }];
     links.push({ args, name });
     if (!STARTED_RUNNERS.has(name) || toolWords(NAMES2, name, args, shell))
       return links;
     let rest = args;
+    let at;
     if (name === "bun") {
-      const { sub, words } = bunCall(args, shell);
-      if (words[0] !== "x")
-        return links;
-      rest = args.slice(sub + 1);
-    }
-    const at = runnerTarget(rest);
+      const call = bunCall(args, shell);
+      at = call.at;
+      if (call.words[0] === "x") {
+        rest = args.slice(call.sub + 1);
+        at = runnerTarget(rest);
+      }
+    } else
+      at = runnerTarget(rest);
+    if (builtName(rest[at]))
+      return [...links, { unread: "a runner's program built at run time" }];
     const started = toolName(rest[at]?.value);
     if (!STARTED_RUNNERS.has(started))
       return links;
@@ -17361,12 +17373,9 @@ async function check22(raw, environment = process.env) {
         verdicts.push({ production: true, what: "the Yard ship step, which deploys production" });
       let scanned = false;
       for (const link of chain(name, args, shell)) {
-        if (link === "unread") {
+        if ("unread" in link) {
           if (NAMED.test(command))
-            verdicts.push({
-              production: false,
-              what: "a runner call past the readings the hook makes on a line naming vercel"
-            });
+            verdicts.push({ production: false, what: `${link.unread} on a line naming vercel` });
           continue;
         }
         if (!scanned) {
@@ -18284,8 +18293,16 @@ async function check26(raw, environment = process.env, guards = GUARDS, wait = D
 
 `) || undefined;
 }
-async function hook(guards = GUARDS) {
-  const reason = await check26(await Bun.stdin.text(), process.env, guards, DEADLINE - performance.now());
+var unread3 = `guards hook: the call's input did not arrive by its deadline, about ${DEADLINE / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`;
+async function hook(guards = GUARDS, deadline = DEADLINE) {
+  let timer;
+  const raw = await Promise.race([
+    Bun.stdin.text(),
+    new Promise((done) => {
+      timer = setTimeout(() => done(undefined), deadline - performance.now());
+    })
+  ]).finally(() => clearTimeout(timer));
+  const reason = raw === undefined ? unread3 : await check26(raw, process.env, guards, deadline - performance.now());
   if (!reason)
     return 0;
   console.error(reason);
