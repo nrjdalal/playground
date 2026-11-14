@@ -80,6 +80,8 @@ if [ -f "$RUSH" ] && [ ! -L "$RUSH" ]; then
 fi
 link_file "$REPO/scripts/briefs/brief-rush.md" "$RUSH"
 link_file "$REPO/packages/scripts/src/playground/cli.ts" "$HOME/.bun/bin/playground"
+# Linux has no Keychain, so the secret store stands in as `security` there, serving the forms the factory runs
+if [ "$(uname -s)" = Linux ]; then link_file "$REPO/packages/scripts/src/security/cli.ts" "$HOME/.bun/bin/security"; fi
 # run-slot.sh keeps its state in the state folder (ops/run-slot*) beside the link, so every heavy run follows the checkout's copy
 link_file "$REPO/scripts/ops/run-slot.sh" "$DATA/ops/run-slot.sh"
 BEAT="$DATA/ops/beat.py"
