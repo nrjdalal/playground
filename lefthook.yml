@@ -105,6 +105,26 @@ pre-commit:
         - "*.webp"
         - "*.woff2"
       run: bun run test:file tests/cmux.test.ts tests/shell-read-redirect.test.ts
+    no-raw-delete:
+      # the raw-delete test, about 0.25 s, which went red only in CI after a push on 14 Nov while no commit ran it; it reads every tracked file, so it skips only what text-tests skips
+      priority: 4
+      exclude:
+        - "*.gif"
+        - "*.ico"
+        - "*.jpeg"
+        - "*.jpg"
+        - "*.png"
+        - "*.webp"
+        - "*.woff2"
+      run: bun run test:file tests/no-raw-delete.test.ts
+    workflow-runners:
+      # the workflows' runner test, under 0.1 s, which went red only in CI after a push on 14 Nov while no commit ran it; its glob is what the test reads: the workflows, the checker it imports and itself
+      priority: 4
+      glob:
+        - ".github/workflows/*"
+        - "packages/scripts/src/workflow-runners.ts"
+        - "tests/packages/scripts/src/workflow-runners.test.ts"
+      run: bun run test:file tests/packages/scripts/src/workflow-runners.test.ts
     dev-stack:
       # the build below rebuilds packages/* under this checkout's running `bun run dev` and hangs it, so the commit waits for the stack to stop
       priority: 4
