@@ -30,12 +30,6 @@ const dropScratch = () => {
 // CI's clock-ahead pass: with CLOCK_AHEAD_DAYS set, every test file reads a clock that many days on, so a test that mixes a fixed clock with the real one fails on its own PR rather than on the day the real clock reaches it
 const ahead = Boolean(process.env.CLOCK_AHEAD_DAYS)
 const clock = ahead ? [`--preload=${join(import.meta.dir, "../../../tests/clock-ahead.ts")}`] : []
-const run = (argv: string[]) =>
-  Bun.spawnSync(["bun", "test", ...clock, ...argv], {
-    env,
-    stdio: ["inherit", "inherit", "inherit"],
-  }).exitCode ?? 1
-
 // bun's own test timeout cannot stop a test blocked in sync code (a spawnSync that never returns held a worker 29 minutes once), so the parallel pass has a deadline: each worker marks the file it holds through a preload that runs once per test file, and a pass past the deadline is killed as a group and fails naming the files still marked
 const DEADLINE_MS = Number(process.env.TEST_PARALLEL_DEADLINE_MS) || 20 * 60_000
 const running = join(scratch, "running")
@@ -54,12 +48,22 @@ const held = () =>
     }
   })
 let interrupted: NodeJS.Signals | undefined
-const runParallel = async (argv: string[]) => {
-  const child = Bun.spawn(["bun", "test", `--preload=${preload}`, ...clock, ...argv], {
-    detached: true,
-    env,
-    stdio: ["inherit", "inherit", "inherit"],
-  })
+// each pass runs bun test in a process group of its own, which ends whole as the pass ends: a child a test left running, after it passed or bun timed it out, once spun with parent pid 1 until a reboot; sh leads the group and ends it from inside with kill 0 once bun test exits, so the signal reaches this group alone, where a pid already reaped can name a new process within a second; its trap outlives a forwarded Ctrl-C, which bun test takes, so the group still ends
+let passes = 0
+const runPass = async (argv: string[], deadline?: number) => {
+  const status = join(scratch, `pass-${++passes}`)
+  const child = Bun.spawn(
+    [
+      "sh",
+      "-c",
+      'f=$1; shift; trap : INT TERM; bun test "$@"; echo $? > "$f"; kill -KILL 0',
+      "sh",
+      status,
+      ...clock,
+      ...argv,
+    ],
+    { detached: true, env, stdio: ["inherit", "inherit", "inherit"] },
+  )
   const stop = (signal: NodeJS.Signals) => {
     try {
       process.kill(-child.pid, signal)
@@ -73,12 +77,14 @@ const runParallel = async (argv: string[]) => {
   process.on("SIGINT", forward)
   process.on("SIGTERM", forward)
   let timer: Timer | undefined
-  const late = new Promise<"late">((done) => (timer = setTimeout(() => done("late"), DEADLINE_MS)))
+  const late = new Promise<"late">((done) => {
+    if (deadline) timer = setTimeout(() => done("late"), deadline)
+  })
   const code = await Promise.race([child.exited, late])
   clearTimeout(timer)
   process.off("SIGINT", forward)
   process.off("SIGTERM", forward)
-  if (code !== "late") return code
+  if (code !== "late") return existsSync(status) ? Number(readFileSync(status, "utf8")) : code
   const files = held()
   stop("SIGKILL")
   await child.exited
@@ -145,22 +151,26 @@ console.error(
 )
 const parallel =
   rest.length > 0
-    ? await runParallel([
-        `--parallel=${workers}`,
-        `--timeout=${TIMEOUT_MS}`,
-        ...timings,
-        ...(update ? ["--update-timings"] : []),
-        ...SERIAL.map((file) => `--path-ignore-patterns=${file}`),
-        ...(ahead ? CLOCK_EXEMPT.map(([pattern]) => `--path-ignore-patterns=${pattern}`) : []),
-        ...rest,
-      ])
+    ? await runPass(
+        [
+          `--preload=${preload}`,
+          `--parallel=${workers}`,
+          `--timeout=${TIMEOUT_MS}`,
+          ...timings,
+          ...(update ? ["--update-timings"] : []),
+          ...SERIAL.map((file) => `--path-ignore-patterns=${file}`),
+          ...(ahead ? CLOCK_EXEMPT.map(([pattern]) => `--path-ignore-patterns=${pattern}`) : []),
+          ...rest,
+        ],
+        DEADLINE_MS,
+      )
     : 0
 if (interrupted) {
   console.error(`test-sandbox: parallel pass interrupted by ${interrupted}, serial pass skipped`)
   dropScratch()
   process.exit(128 + constants.signals[interrupted])
 }
-const alone = serial.length > 0 ? run(serial) : 0
+const alone = serial.length > 0 ? await runPass(serial) : 0
 console.error(
   `test-sandbox: parallel pass ${parallel === 0 ? "passed" : `failed (exit ${parallel})`}, serial pass ${alone === 0 ? "passed" : `failed (exit ${alone})`}`,
 )
