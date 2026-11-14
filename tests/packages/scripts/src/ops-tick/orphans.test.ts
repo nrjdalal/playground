@@ -145,6 +145,31 @@ describe("orphansOf", () => {
     ).toEqual([744, 745, 746, 747])
   })
 
+  // #2177: a stub checkout's hook ran a relative script with parent pid 1 from a test sandbox's temp folder, which the run had removed, and no worktree in its command ever matched; lsof still names a removed working folder
+  test("selects a process whose working folder sits under a test sandbox that is gone, and leaves a live run's child alone", () => {
+    const tmp = join(root, "T")
+    const live = join(tmp, "test-sandbox-live01")
+    mkdirSync(join(live, "t", "hooks-abs-path-x", "stuck"), { recursive: true })
+    const ended = join(tmp, "test-sandbox-ended1")
+    const at = (pid: number, ppid: number, cwd: string) =>
+      Object.assign(procsOf(row(pid, ppid, "bun --no-env-file scripts/hooks/guards.ts"))[0]!, {
+        cwd,
+      })
+    const found = orphansOf(
+      [
+        at(750, 1, join(ended, "t", "hooks-abs-path-x", "stuck")),
+        at(751, 1, join(live, "t", "hooks-abs-path-x", "stuck")),
+        at(752, 640, join(ended, "t", "hooks-abs-path-x", "stuck")),
+        // a run nested in a live run's sandbox, whose own sandbox is gone
+        at(753, 1, join(live, "t", "test-sandbox-inner1", "home")),
+        at(754, 1, join(root, "elsewhere")),
+      ],
+      worktrees,
+      existsSync,
+    )
+    expect(found.map((o) => o.pid)).toEqual([750, 753])
+  })
+
   test("never selects a process that names no worktree of this checkout", () => {
     expect(
       select([
