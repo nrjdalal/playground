@@ -3434,3 +3434,31 @@ describe("an xargs-led grep and bun -e from the data folder", () => {
     expect(reason).not.toContain(WORKING)
   })
 })
+
+// #2158: an xargs replace string that sits in the program's arguments alone leaves the program typed, so each keeps canary's verdict
+describe("an xargs replace string outside the program word keeps the call's verdict", () => {
+  test.each([
+    ["grep under a plain xargs", "ls /tmp | xargs grep -l x"],
+    ["echo under xargs -I{}", "echo a | xargs -I{} echo {}"],
+    ["cat under xargs -I %", "echo a | xargs -I % cat %"],
+    ["cp to /tmp under xargs -J %", "echo a | xargs -J % cp % /tmp/"],
+    ["a sh -c script holding xargs' -I{} string", "echo a | xargs -I{} sh -c 'echo {}'"],
+    ["cat under nice under xargs -J %", "echo a | xargs -J % nice cat %"],
+    [
+      "echo under env -S with xargs' -I % string in its arguments",
+      "echo a | xargs -I % env -S 'echo %'",
+    ],
+    [
+      "cat under env -S with xargs' -J % string as its argument",
+      "echo a | xargs -J % env -S cat %",
+    ],
+  ])("%s runs from a worktree", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+
+  test("cp into the root under xargs -J % stays refused", async () => {
+    expect(await bash("echo a | xargs -J % cp % $HOME/.playground/extensions/", WORK)).toContain(
+      "no-extensions-write hook refuses",
+    )
+  })
+})

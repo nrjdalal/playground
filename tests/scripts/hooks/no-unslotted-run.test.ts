@@ -552,3 +552,31 @@ describe("a git commit whose header is 100 characters or fewer, or one the hook 
     expect(await commit(command)).toBeUndefined()
   })
 })
+
+// #2158: an xargs replace string that sits in the program's arguments alone leaves the program typed, so each keeps canary's verdict
+describe("an xargs replace string outside the program word keeps the call's verdict", () => {
+  test.each([
+    ["grep under a plain xargs", "ls /tmp | xargs grep -l x"],
+    ["echo under xargs -I{}", "echo a | xargs -I{} echo {}"],
+    ["cat under xargs -I %", "echo a | xargs -I % cat %"],
+    ["cp to /tmp under xargs -J %", "echo a | xargs -J % cp % /tmp/"],
+    ["a sh -c script holding xargs' -I{} string", "echo a | xargs -I{} sh -c 'echo {}'"],
+    ["cat under nice under xargs -J %", "echo a | xargs -J % nice cat %"],
+    [
+      "echo under env -S with xargs' -I % string in its arguments",
+      "echo a | xargs -I % env -S 'echo %'",
+    ],
+    [
+      "cat under env -S with xargs' -J % string as its argument",
+      "echo a | xargs -J % env -S cat %",
+    ],
+  ])("%s runs in a worktree", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test("a build under xargs -I {} with the string in its arguments stays refused", async () => {
+    expect(await bash("echo a | xargs -I {} turbo run build {}")).toContain(
+      "no-unslotted-run hook refuses",
+    )
+  })
+})
