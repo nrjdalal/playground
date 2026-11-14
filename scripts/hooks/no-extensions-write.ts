@@ -602,6 +602,9 @@ const gitPlaced = (args: Word[], env: Env): string | undefined => {
 
 // a word macOS chmod takes as a dash-led mode (-w, -go+x) rather than an option
 const CHMOD_DASH_MODE = /^-[gorstuwXx]/
+// a word GNU chmod reads as setting the mode: a cluster past its -R, -c, -f and -v flags that reaches a mode letter, operator or digit (-w, -=r, -0, -Rw), or --reference by any prefix down to --ref
+const GNU_CHMOD_MODE =
+  /^-[Rcfv]*[rwxXstugoa,+=0-7]|^--ref(?:e(?:r(?:e(?:n(?:c(?:e)?)?)?)?)?)?(?:=|$)/
 
 // The words a program on neither REMOVERS nor WRITERS writes after a cd the hook cannot read: an in-place sed's or perl's files, every file chmod, truncate or shred names, tar's -C folder or the shell's when it extracts, curl's and sort's output files, git rm's pathspecs from git's own folder or its pathspec file's, and a mktemp template outside the temp folder
 function unreadCdWrites(tool: string, args: Word[], env: Env, stopsAtOperand: boolean): Word[] {
@@ -612,11 +615,11 @@ function unreadCdWrites(tool: string, args: Word[], env: Env, stopsAtOperand: bo
     const files = stopsAtOperand
       ? args.slice(at === -1 ? args.length : at)
       : operandsPast(args, "", [])
-    // GNU chmod, Linux's, takes its mode from a dash-led one (-w) or --reference when the call gives one, so its first operand is then a file
+    // GNU chmod, Linux's, takes its mode from a dash-led word or --reference when the call gives one (GNU_CHMOD_MODE), so its first operand is then a file
     const given =
       process.platform === "linux" &&
       !stopsAtOperand &&
-      args.some((w) => CHMOD_DASH_MODE.test(w.value) || w.value.startsWith("--reference"))
+      args.some((w) => GNU_CHMOD_MODE.test(w.value))
     return !given && MODE.test(files[0]?.value ?? "") ? files.slice(1) : files
   }
   if (tool === "truncate") return operandsPast(args, "rs", ["--reference", "--size"])

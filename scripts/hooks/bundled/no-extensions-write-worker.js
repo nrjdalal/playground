@@ -9966,13 +9966,14 @@ var gitPlaced = (args, env) => {
   return cwd;
 };
 var CHMOD_DASH_MODE = /^-[gorstuwXx]/;
+var GNU_CHMOD_MODE = /^-[Rcfv]*[rwxXstugoa,+=0-7]|^--ref(?:e(?:r(?:e(?:n(?:c(?:e)?)?)?)?)?)?(?:=|$)/;
 function unreadCdWrites(tool, args, env, stopsAtOperand) {
   if (tool === "sed" || tool === "perl")
     return inPlace(tool, args);
   if (tool === "chmod") {
     const at = args.findIndex((w) => !/^-./.test(w.value) || CHMOD_DASH_MODE.test(w.value));
     const files = stopsAtOperand ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", []);
-    const given = process.platform === "linux" && !stopsAtOperand && args.some((w) => CHMOD_DASH_MODE.test(w.value) || w.value.startsWith("--reference"));
+    const given = process.platform === "linux" && !stopsAtOperand && args.some((w) => GNU_CHMOD_MODE.test(w.value));
     return !given && MODE.test(files[0]?.value ?? "") ? files.slice(1) : files;
   }
   if (tool === "truncate")

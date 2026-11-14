@@ -3537,6 +3537,13 @@ describe("on Linux a bare cp, ln, mv, install and sed read as GNU's builds (PG-2
     ["an octal word before a two-letter dash mode", `cd "$X"; chmod 644 -wx`],
     ["a symbolic word beside a dash mode", `cd "$X"; chmod u+x -w`],
     ["an octal word after --reference", `cd "$X"; chmod --reference=/tmp/r 644`],
+    ["an octal word after an = mode option", `cd "$X"; chmod -=r 644`],
+    ["an octal word after a bare = mode option", `cd "$X"; chmod -= 644`],
+    ["an octal word after --reference's --ref prefix", `cd "$X"; chmod --ref=/tmp/r 644`],
+    ["an octal word after --reference's --refer prefix", `cd "$X"; chmod --refer=/tmp/r 644`],
+    ["an octal word after a + mode option", `cd "$X"; chmod -+w 644`],
+    ["an octal word after a , mode option", `cd "$X"; chmod -,u+w 644`],
+    ["an octal word after a digit mode option", `cd "$X"; chmod -0 644`],
   ])("chmod of %s after a cd to a variable stays refused on Linux", async (_, command) => {
     expect(await as("linux", () => bash(command))).toContain("no-extensions-write hook refuses")
   })
@@ -3544,6 +3551,7 @@ describe("on Linux a bare cp, ln, mv, install and sed read as GNU's builds (PG-2
   test.each([
     ["chmod of an absolute file past its mode", `cd "$X"; chmod 644 /tmp/f`],
     ["chmod of an absolute file past a dash mode", `cd "$X"; chmod -w /tmp/f`],
+    ["chmod of an absolute file past a non-mode option", `cd "$X"; chmod -R 644 /tmp/f`],
     // GNU coreutils 9.4 exits 1 on -M, an option it does not know, before it writes
     ["install with macOS's metalog option", `cd "$X"; install -Mlog x /tmp/y`],
   ])("%s after a cd to a variable is allowed on Linux", async (_, command) => {
