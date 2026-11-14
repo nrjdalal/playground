@@ -36,6 +36,7 @@ import {
   removeScratch,
   restore,
   type Roots,
+  rowPullRequests,
   stripTrash,
   unpushed,
   worktreeRefusal,
@@ -878,6 +879,18 @@ describe("worktreeRefusal", () => {
     rosterOf([{ name: "abc123-worker", prs: [url(1), other], status: "working" }])
     expect(of(url(1))).toContain("abc123-worker")
     expect(of(other)).toContain("abc123-worker")
+  })
+
+  test("rowPullRequests reads a row's pr and every pull request in its prs once each, leaving out an issue's URL, an extension item and a non-string", () => {
+    const url = (n: number) => `https://github.com/o/r/pull/${n}`
+    expect(
+      rowPullRequests({
+        pr: url(1),
+        prs: [url(1), url(2), "https://github.com/o/r/issues/3", "home/doc/plan-x", 4],
+      }),
+    ).toEqual([url(1), url(2)])
+    expect(rowPullRequests({ prs: "not a list" })).toEqual([])
+    expect(rowPullRequests({})).toEqual([])
   })
 
   test("a live session holds a folder by its name only when the slug after PG-<n>- is that name or starts with it and a dash", () => {

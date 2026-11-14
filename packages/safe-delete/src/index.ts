@@ -652,6 +652,15 @@ const linkHolder = (at: string, roots: Roots, places: string[]): string | null =
   return `${at} is linked into by ${links.sort().slice(0, 3).join(", ")}${more}: repoint or remove each link first`
 }
 
+// The pull request URLs a roster row serves: its pr and every /pull/<n> entry of its prs, once each, leaving out an issue's URL and an extension item.
+export const rowPullRequests = (row: { pr?: unknown; prs?: unknown }): string[] => [
+  ...new Set(
+    [row.pr, ...(Array.isArray(row.prs) ? row.prs : [])].filter(
+      (u): u is string => typeof u === "string" && /\/pull\/\d+$/.test(u),
+    ),
+  ),
+]
+
 // Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit its base, origin/canary or another repo's default branch, holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree, on that repo's default branch (defaultBase), or on a branch the remote itself holds now (remoteHolding), or, given an archive folder, archiveUnlanded has archived, with every remote read, each of its commits no remote holds.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
@@ -700,11 +709,10 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
     // a row holds by its pr and every PR in its prs; --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
     const liftable = !holders.discard || holders.freed !== undefined
-    const listed = [agent.pr, ...(Array.isArray(agent.prs) ? agent.prs : [])]
-    const prs = listed
-      .filter((u): u is string => typeof u === "string" && !(liftable && u === holders.pr))
-      .map((u) => /\/pull\/(\d+)$/.exec(u)?.[1])
-      .filter((n) => n !== undefined && new RegExp(`(^|\\D)${n}(\\D|$)`).test(where))
+    const prs = rowPullRequests(agent)
+      .filter((u) => !(liftable && u === holders.pr))
+      .flatMap((u) => /\/pull\/(\d+)$/.exec(u)?.[1] ?? [])
+      .filter((n) => new RegExp(`(^|\\D)${n}(\\D|$)`).test(where))
     const byPr = prs.length > 0
     if (!byBranch && !byPr && !byName && !byId) continue
     // a clean detached checkout at a commit its base holds (origin/canary, or another repo's default branch) is a reader of that base, not the row's work, so a live row holds it no more
