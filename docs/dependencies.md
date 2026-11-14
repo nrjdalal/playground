@@ -22,6 +22,16 @@ The rule has **no opt-out**, so no pin survives an install, whatever reason is r
 
 Enforcement is only partial by design. Specs the rule cannot convert are reported and the script still exits 0, so a compound range such as `>=4.4.3 <5` survives an install with nothing but a line of `postinstall` output. Failing the install instead would block work for a range that may be perfectly deliberate, so the auto-convertible half is enforced and the rest is advisory.
 
+## Pinned actions and installers
+
+What the factory fetches from outside the lockfile runs at one known version, and `tests/github/workflows/pins.test.ts` holds each pin:
+
+- **A GitHub action:** every `uses:` in `.github/workflows/` and `.github/actions/` names a full 40-character commit sha, with the tag it stands for in a trailing comment (`uses: actions/checkout@<sha> # v7`). A local action (`./...`) needs none, and a `docker://` image takes a `@sha256:` digest. Every workflow also declares a top-level `permissions` block.
+  To bump one, read the new tag's sha from the action's own repo, `gh api repos/<owner>/<action>/git/ref/tags/<tag> --jq .object`, and when its `type` is `tag`, peel it to the commit with `gh api repos/<owner>/<action>/git/tags/<sha> --jq .object.sha`. Then write that sha and the new tag's comment on every line that uses the action.
+- **The runner host's installers:** `scripts/ops/runner-host/setup.sh` pins `BUN_VERSION`, `UV_VERSION` and `RUNNER_VERSION`, and its `fetch` checks each download's sha256 (`*_SHA256`, one per architecture) before it unpacks it, stopping on a mismatch.
+  To bump one, change the version and both architectures' sums, taken from the release's own published sums (`gh api repos/<owner>/<repo>/releases/tags/<tag> --jq '.assets[] | [.name, .digest]'`), and cross-check them against its sums file where it ships one (bun's `SHASUMS256.txt`, uv's `<asset>.sha256`, the runner's release notes). `BUN_VERSION` follows `package.json`'s `packageManager`, which `tests/bun-version.test.ts` holds.
+- **inscope:** `AGENTS.md` runs `npx -y inscope@<version>`. To bump it, change that one version to the release `npm view inscope version` names.
+
 ## Notable dependencies
 
 ### `@pierre/diffs` (`^1.6.2`, web)
