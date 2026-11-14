@@ -16,7 +16,16 @@ import {
 } from "../../packages/settings/src/rendered"
 import { settingFields } from "../../packages/settings/src/settings"
 import { eachInput } from "./codex"
-import { bunCall, FILE_TOOLS, gitCall, inPlace, real, X } from "./no-main-checkout"
+import {
+  bunCall,
+  FILE_TOOLS,
+  gitCall,
+  inPlace,
+  real,
+  runnerTarget,
+  toolName,
+  X,
+} from "./no-main-checkout"
 import { fromFactory, opsLead } from "./role"
 import {
   codeFed,
@@ -799,14 +808,31 @@ function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   )
 }
 
-// The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare, a bun or bunx word read from bun's last --cwd and, for bun x and bunx, from the folder their --cwd options chain to, where bun x runs a program.
+const BUNS = new Set(["bun", "bunx"])
+
+// The folders a bun, bunx or npx call's word may land in: bun's last --cwd, for bun x and bunx also the folder their --cwd options chain to, and for a bun that bunx, bun x, npx or bun run starts, that bun's own folders read from the folder the runner starts it in, as no-main-checkout's runs() reads a bun x program.
+function runnerDirs(name: string, args: Word[], env: Env): (string | undefined)[] {
+  if (name === "bunx") return runnerDirs("bun", [X, ...args], env)
+  if (name === "npx") {
+    const at = runnerTarget(args)
+    const started = toolName(args[at]?.value)
+    return BUNS.has(started) ? runnerDirs(started, args.slice(at + 1), env) : []
+  }
+  if (name !== "bun") return []
+  const { at, chained, cwd, words } = bunCall(args, env)
+  const x = words[0] === "x"
+  const own = x ? [cwd, chained] : [cwd]
+  const started = x || words[0] === "run" ? toolName(args[at]?.value) : ""
+  if (!BUNS.has(started)) return own
+  return [...own, ...runnerDirs(started, args.slice(at + 1), { ...env, cwd: x ? chained : cwd })]
+}
+
+// The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare, a package runner's word read in each folder runnerDirs names too.
 function cliCalls(parsed: Parsed, env: Env): Word[][] {
   const { args, first, name } = parsed
   if (!first) return []
   const words = [first, ...args]
-  const call =
-    name === "bun" ? bunCall(args, env) : name === "bunx" ? bunCall([X, ...args], env) : undefined
-  const dirs = [env.cwd, call?.cwd, call?.words[0] === "x" ? call.chained : undefined]
+  const dirs = [env.cwd, ...runnerDirs(name, args, env)]
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 

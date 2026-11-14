@@ -448,7 +448,7 @@ export function runnerFolders(
 }
 
 // The word a package runner runs, past its options and their values (-y, --yes, -p turbo).
-function runnerTarget(args: Word[]): number {
+export function runnerTarget(args: Word[]): number {
   let k = 0
   while (k < args.length && args[k].value.startsWith("-"))
     k += RUNNER_TAKES.has(args[k].value) ? 2 : 1
