@@ -1594,7 +1594,7 @@ async function examine(cmd, env, visit, builtins) {
     env.cwdUnread = true;
   }
   const [primary, ...others] = readings(parse(cmd));
-  const expanded = expandTilde(cmd, primary.name, env);
+  const expanded = [...expandTilde(cmd, primary.name, env), ...splitHeld(cmd, primary.name, env)];
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
   if (verdict)
@@ -1652,6 +1652,19 @@ function expandTilde(cmd, name, env) {
       words: moves ? cmd.words : cmd.words.map(expand)
     };
   });
+}
+function splitHeld(cmd, name, env) {
+  if (name === "cd" || name === "popd" || name === "pushd")
+    return [];
+  let split = false;
+  const words = cmd.words.flatMap((w) => {
+    const held = !w.quoted && w.value === UNKNOWN && w.variable ? env.vars.get(w.variable) : undefined;
+    if (!held || held.unknown || marked(held.value))
+      return [w];
+    split = true;
+    return held.value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
+  });
+  return split ? [{ ...cmd, words }] : [];
 }
 async function examineExpanded(cmd, expanded, before, visit, builtins) {
   const { redirects, words } = cmd;

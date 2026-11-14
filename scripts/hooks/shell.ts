@@ -1644,7 +1644,7 @@ export async function examine(
     env.cwdUnread = true
   }
   const [primary, ...others] = readings(parse(cmd))
-  const expanded = expandTilde(cmd, primary.name, env)
+  const expanded = [...expandTilde(cmd, primary.name, env), ...splitHeld(cmd, primary.name, env)]
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env
   const verdict = await examineReading(cmd, primary, env, visit, builtins)
@@ -1704,6 +1704,23 @@ function expandTilde(cmd: Command, name: string, env: Env): Command[] {
       words: moves ? cmd.words : cmd.words.map(expand),
     }
   })
+}
+
+// The words a command's unquoted reads of a variable the line set to a value the reader holds (`$V`, `${V}`) split into at blanks, as bash and zsh under sh_word_split run them (`C="pkill -f x"; $C`, `W="w --"; run-slot.sh $W pkill -f x`), judged beside the typed reading so the hook is never looser than that reading; none when no word reads one, and a cd's own words stay as chdirTo reads them.
+function splitHeld(cmd: Command, name: string, env: Env): Command[] {
+  if (name === "cd" || name === "popd" || name === "pushd") return []
+  let split = false
+  const words = cmd.words.flatMap((w): Word[] => {
+    const held =
+      !w.quoted && w.value === UNKNOWN && w.variable ? env.vars.get(w.variable) : undefined
+    if (!held || held.unknown || marked(held.value)) return [w]
+    split = true
+    return held.value
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((value) => ({ quoted: false, value }))
+  })
+  return split ? [{ ...cmd, words }] : []
 }
 
 // The expanded words are judged on the command itself, swapped in and back, since hooks key their notes on the command, and on a copy of the env before it, as every other reading is.
