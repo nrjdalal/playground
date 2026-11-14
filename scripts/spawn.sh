@@ -1681,12 +1681,19 @@ BUILT="$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k.json"
 TREE=
 if [ -n "$SANDBOX_ARG" ] && [ -z "$IN_DIR" ] && [[ $ROLE =~ ^(worker|reviewer)$ ]]; then
   leaf=$NAME first=${PR_ARG%%,*}
-  origin=$(git -C "$MAIN" remote get-url origin 2>/dev/null) || origin=
+  # origin as configured, which names the PR's repository even where an insteadOf points its fetches elsewhere
+  origin=$(git -C "$MAIN" config --get remote.origin.url 2>/dev/null) || origin=
   [[ $origin =~ github\.com[:/]([^/]+/[^/]+)$ ]] && origin=${BASH_REMATCH[1]%.git} || origin=
-  if [[ $first =~ ^#?([1-9][0-9]*)$ ]] || { [ -n "$origin" ] && [[ $first =~ ^https://github\.com/$origin/pull/([1-9][0-9]*)$ ]]; }; then leaf=review-${BASH_REMATCH[1]}; fi
+  ref=refs/heads/canary
+  if [[ $first =~ ^#?([1-9][0-9]*)$ ]] || { [ -n "$origin" ] && [[ $first =~ ^https://github\.com/$origin/pull/([1-9][0-9]*)$ ]]; }; then leaf=review-${BASH_REMATCH[1]} ref=refs/pull/${BASH_REMATCH[1]}/head; fi
   TREE="$MAIN/.claude/worktrees/$leaf"
   if [ ! -e "$TREE" ]; then
-    made=$(git -C "$MAIN" worktree add -q --detach "$TREE" 2>&1) || refuse "git worktree add $TREE failed, so $NAME has no worktree to start in: ${made%%$'\n'*}"
+    # The worktree starts at the commit the session works from, its PR's head for a reviewer of this checkout's PR and origin's canary for any other, fetched here, so its first checkout changes no file: the sandbox shuts .claude/ and skills/zerostarter/, which .claude/skills links to, so a checkout that changes either fails inside it (SPAWN.md, --sandbox).
+    at=$(git -C "$MAIN" ls-remote origin "$ref" 2>/dev/null) && at=${at%%[[:space:]]*} || at=
+    [ -n "$at" ] || refuse "git ls-remote origin $ref read no commit, so $NAME has no commit to start its worktree at"
+    git -C "$MAIN" cat-file -e "$at^{commit}" 2>/dev/null || git -C "$MAIN" fetch -q --no-write-fetch-head origin "$ref" 2>/dev/null
+    git -C "$MAIN" cat-file -e "$at^{commit}" 2>/dev/null || refuse "git fetch origin $ref did not bring $at, so $NAME has no commit to start its worktree at"
+    made=$(git -C "$MAIN" worktree add -q --detach "$TREE" "$at" 2>&1) || refuse "git worktree add $TREE failed, so $NAME has no worktree to start in: ${made%%$'\n'*}"
   fi
   DIR=$(cd -P "$TREE" && pwd -P)
 fi

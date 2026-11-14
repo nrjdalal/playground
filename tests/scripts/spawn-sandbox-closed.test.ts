@@ -67,7 +67,29 @@ const checkout = () => {
   for (const name of ["worker-other", "pg-9-x"])
     git("worktree", "add", "-q", "--detach", join(".claude", "worktrees", name))
   git("fetch", "-q", ".", "canary")
-  return { env: { PLAYGROUND_REPO: main }, main, spawnSh: join(main, "scripts", "spawn.sh") }
+  // origin's GitHub URL fetches from a local mirror whose canary and PR heads have moved past the checkout's HEAD, with objects the checkout lacks, so a start's worktree shows the commit it was made at.
+  const mirror = join(main, "..", `${main.split("/").pop()}-origin.git`)
+  const ahead = `${mirror}-work`
+  const run = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.email=t@t", "-c", "user.name=t", ...args], {
+      cwd,
+      stderr: "ignore",
+    })
+  run(main, "clone", "-q", "--bare", main, mirror)
+  run(main, "clone", "-q", mirror, ahead)
+  run(ahead, "commit", "-q", "--allow-empty", "-m", "canary moved on")
+  run(ahead, "push", "-q", "origin", "HEAD:refs/heads/canary")
+  run(ahead, "commit", "-q", "--allow-empty", "-m", "a PR's head")
+  run(ahead, "push", "-q", "origin", "HEAD:refs/pull/1/head", "HEAD:refs/pull/7/head")
+  const shaOf = (ref: string) =>
+    Bun.spawnSync(["git", "-C", mirror, "rev-parse", ref]).stdout.toString().trim()
+  git("config", `url.${mirror}.insteadOf`, "https://github.com/acme/app.git")
+  return {
+    at: { canary: shaOf("refs/heads/canary"), pr: shaOf("refs/pull/1/head") },
+    env: { PLAYGROUND_REPO: main },
+    main,
+    spawnSh: join(main, "scripts", "spawn.sh"),
+  }
 }
 // The worktree a fresh closed start makes and runs in, with its .git/worktrees entry, and what git writes in the common dir.
 const treeOf = (main: string, leaf: string) => join(main, ".claude", "worktrees", leaf)
@@ -379,6 +401,73 @@ describe("the closed sandbox lets a session work in its own worktree", () => {
       expect(under(allowWrite)(join(main, ".git", "worktrees", "worker-other"))).toBe(false)
     },
   )
+
+  // issue 2059: the closed sandbox shuts .claude/ and skills/zerostarter/, which .claude/skills links to, so a checkout that changes either fails inside it; the worktree starts at the commit the session works from, so its first checkout changes no file.
+  test.each([
+    [
+      "a reviewer of this checkout's PR by its number",
+      "review-1",
+      "pr",
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "1"],
+    ],
+    [
+      "a reviewer of this checkout's PR by its URL",
+      "review-7",
+      "pr",
+      [
+        "column",
+        "reviewer",
+        "reviewer-x",
+        "worker-x",
+        "w1:p2",
+        "r.md",
+        "--pr",
+        "https://github.com/acme/app/pull/7",
+      ],
+    ],
+    [
+      "a reviewer of another repo's PR",
+      "reviewer-x",
+      "canary",
+      [
+        "column",
+        "reviewer",
+        "reviewer-x",
+        "worker-x",
+        "w1:p2",
+        "r.md",
+        "--pr",
+        "https://github.com/acme/web/pull/7",
+      ],
+    ],
+    ["a worker", "worker-x", "canary", ["worker", "worker-x", "b.md", "--reads-only"]],
+  ] as const)(
+    "%s starts its worktree at the commit it works from, fetched from origin",
+    async (_, leaf, from, args) => {
+      const { at, env, main, spawnSh } = checkout()
+      const r = await spawn([...args, "--sandbox"], [], env, spawnSh)
+      expect(r.code, r.err).toBe(0)
+      const head = Bun.spawnSync(["git", "-C", treeOf(main, leaf), "rev-parse", "HEAD"])
+        .stdout.toString()
+        .trim()
+      expect(head).toBe(at[from])
+    },
+  )
+
+  test("a reviewer of a PR whose head origin lacks is refused, with no worktree made", async () => {
+    const { env, main, spawnSh } = checkout()
+    const r = await spawn(
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md", "--pr", "9", "--sandbox"],
+      [],
+      env,
+      spawnSh,
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(
+      "git ls-remote origin refs/pull/9/head read no commit, so reviewer-x has no commit to start its worktree at",
+    )
+    expect(existsSync(treeOf(main, "review-9"))).toBe(false)
+  })
 
   test("a worker whose --in names a worktree starts there, with no worktree made, and writes it and its git entry", async () => {
     const { env, main, spawnSh } = checkout()
