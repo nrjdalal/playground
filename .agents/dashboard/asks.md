@@ -499,7 +499,7 @@
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
      Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names; a `diff` block's lines may run longer, since the card wraps them.
      Draw several items or events as a compact table, one row per item, over a tall chain of one event per line.
-     A wider drawing still posts and shrinks to 10px, then scrolls, so the limit is a writing guide.
+     A wider drawing still posts: the card shrinks its font until the widest line fits, down to 10px, and scrolls sideways only when that line is still wider at 10px, so the limit is a writing guide.
      A note of one sentence on the point follows the picture, by the `plain-words` skill's owner style (`extensions/core/skills/plain-words/SKILL.md`).
   2. Short bullets, one fact each, an emoji as each one's marker.
   3. The options: for a true yes or no, one `options` row saying what Approve does, with `deny` beside it; for real alternatives, 2 to 5 rows, A to E, each a `label` and an optional `description`.

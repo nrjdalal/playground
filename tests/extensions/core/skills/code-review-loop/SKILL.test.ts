@@ -321,7 +321,7 @@ describe("code-review-loop's round 1 greps each changed term", () => {
   test("AGENTS.md's pre-review pass runs the same grep before round 1", async () => {
     const agents = await Bun.file(join(root, "AGENTS.md")).text()
     const line = agents.split("\n").find((l) => l.includes("changed-term grep")) ?? ""
-    expect(line).toContain("`git grep -l <term>` over the whole repo, code and help text too")
+    expect(line).toContain("`git grep -lE <term>` over the whole repo, code and help text too")
     expect(line).toContain("each term whose meaning the diff changes")
     expect(agents).toContain("each list grep and changed-term grep with its hits")
   })

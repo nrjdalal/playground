@@ -253,7 +253,7 @@ const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string 
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, and the folders in `ended`, ended sessions' scratchpad folders (endedPadOf), and nothing else.
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, and the paths in `ended`, ended sessions' scratchpad folders (endedPadOf) and gone sessions' entries directly in scratch/ (goneScratchOf), and nothing else.
 export function isProtected(
   path: string,
   roots: Roots,
@@ -573,7 +573,7 @@ export function restore(
       (at !== entry.ended && stands && !stands.isDirectory())
     )
       return refused(
-        `${entry.path} came from ${entry.ended}, an ended session's folder, which no longer reaches it as a real folder in ${pads.join(" or ")}`,
+        `${entry.path} came from ${entry.ended}, an ended session's folder or a gone session's entry, which no longer reaches it as a real entry directly in ${pads.join(" or ")}`,
       )
     back = [entry.ended]
   }
