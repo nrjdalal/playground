@@ -2675,6 +2675,8 @@ async function leadOf(raw, kind, environment) {
     return false;
   }
 }
+var namesRole = (command) => /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command);
+var opsLead = (raw, environment = process.env) => leadOf(raw, "ops", environment);
 var builderLead = (raw, environment = process.env) => leadOf(raw, "builder", environment);
 async function codexName(sessionId, environment = process.env) {
   if (!environment.CODEX_HOME)
@@ -9886,7 +9888,6 @@ function judgeTool(tool, input, factory) {
   const what = typeof branch === "string" && branch !== "" ? branch : "the default branch, canary";
   return `no-protected-push hook refuses ${tool}: it writes ${what} of ${place}. ${ROUTE} ${FIX}`;
 }
-var namesRole = (command) => /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command);
 async function judgeMerge(rest, repos, parsed, env, factory, builder, command) {
   const { flags, positionals } = parseFlags(rest, MERGE_TAKES);
   if (flags.some((f) => f.name === "--help" || f.name === "-h"))
@@ -12586,24 +12587,26 @@ function gitMoves(sub, rest) {
     return rest.some((w) => w === "--force" || /^-[a-zA-Z]*f/.test(w));
   return false;
 }
-function turboWords(name, args, env) {
-  if (name === "turbo")
+var turboWords = (name, args, env) => toolWords(["turbo"], name, args, env);
+function toolWords(tools, name, args, env) {
+  const named = (word) => tools.includes(toolName(word));
+  if (tools.includes(name))
     return args;
   if (RUNNERS2.has(name) || name === "bunx")
-    return runnerTurbo(args);
+    return runnerTool(named, args);
   if (name !== "bun")
     return;
   const { at, sub, words } = bunCall(args, env);
   if (words[0] === "x")
-    return runnerTurbo(args.slice(sub + 1));
+    return runnerTool(named, args.slice(sub + 1));
   const target = words[0] === "run" ? words[1] : words[0];
-  return isTurbo(target) ? args.slice(at + 1) : undefined;
+  return named(target) ? args.slice(at + 1) : undefined;
 }
-function runnerTurbo(args) {
+function runnerTool(named, args) {
   const at = runnerTarget(args);
-  if (isTurbo(args[at]?.value))
+  if (named(args[at]?.value))
     return args.slice(at + 1);
-  return packagedTools(args).includes("turbo") ? args.slice(at) : undefined;
+  return packagedTools(args).some(named) ? args.slice(at) : undefined;
 }
 var RUNNER_TAKES = new Set([
   "--ca",
@@ -12646,7 +12649,6 @@ function runnerTarget(args) {
   return k;
 }
 var toolName = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, ""));
-var isTurbo = (word) => toolName(word) === "turbo";
 function validationOff(local, env) {
   const read = (key) => local.get(key)?.value ?? env.vars.get(key)?.value ?? env.process[key];
   return !!read("NODE_ENV") && read("SKIP_ENV_VALIDATION") === "true";
@@ -16569,6 +16571,273 @@ async function check21(raw, environment = process.env) {
 }
 if (false) {}
 
+// scripts/hooks/no-raw-vercel.ts
+var NAMES2 = ["vc", "vercel"];
+var words = (text) => new Set(text.split(" "));
+var GLOBAL = {
+  flags: words("--debug --help --no-color --non-interactive --version -d -h -v"),
+  takes: words("--api --cwd --global-config --local-config --scope --team --token -A -Q -S -T -t")
+};
+var DEPLOY = {
+  flags: words("--confirm --create-if-missing --dry --force --guidance --json --logs --no-clipboard --no-logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -c -f -l -y"),
+  takes: words("--archive --build-env --env --environment --format --meta --name --project --regions --target -F -b -e -m -n -p")
+};
+var INSTALL = {
+  flags: words("--claim --json --no-claim --no-connect --no-env-pull"),
+  takes: words("--billing-plan --environment --installation --meta --name --prefix -e")
+};
+var OWN2 = {
+  api: {
+    flags: words("--dangerously-skip-permissions --include --paginate --raw --refresh --silent --verbose -i"),
+    takes: words("--field --generate --header --input --method --raw-field --spec-url -F -H -X -f")
+  },
+  deploy: DEPLOY,
+  env: {
+    flags: words("--guidance --json --yes -y"),
+    takes: words("--environment --format --git-branch --project -F -e -p")
+  },
+  install: INSTALL,
+  integration: INSTALL,
+  promote: { flags: words("--yes -y"), takes: words("--timeout") },
+  redeploy: { flags: words("--no-wait"), takes: words("--environment --target -e") },
+  rollback: { flags: words("--yes -y"), takes: words("--timeout") }
+};
+var ALIASES = new Map(Object.entries({
+  aliases: "alias",
+  budget: "budgets",
+  cert: "certs",
+  cron: "crons",
+  daemon: "daemons",
+  "deploy-hook": "deploy-hooks",
+  develop: "dev",
+  domain: "domains",
+  drain: "drains",
+  "edge-config": "global-config",
+  environment: "environments",
+  i: "install",
+  image: "images",
+  ir: "integration-resource",
+  ln: "alias",
+  log: "logs",
+  ls: "list",
+  mf: "microfrontends",
+  organization: "organizations",
+  permission: "permissions",
+  projects: "project",
+  rm: "remove",
+  rr: "rolling-release",
+  "status-page": "health",
+  switch: "teams",
+  tags: "tag",
+  target: "environments",
+  targets: "environments",
+  team: "teams",
+  versions: "version",
+  webhook: "webhooks"
+}));
+var COMMANDS2 = words("activity agent agent-runs ai-gateway alerts alias api bisect blob budgets build builders buy cache certs changelog ci comments config connect contract crons curl daemons deploy deploy-hooks dev dns domains drains env environments experiments feedback firewall flags git global-config guidance health help httpstat image images init inspect install integration integration-resource kms link list login logout logs mcp metrics microfrontends monitors notifications open organizations page-integrity permissions pricing project promote pull redeploy redirects remove rollback rolling-release routes sandbox schedules security setup signup skills storage tag teams telemetry tokens traces upgrade usage vcr version webhooks whoami");
+var READS2 = words("help inspect list logs whoami");
+var LISTS = words("dns domains integration project teams");
+var HELP2 = new Set(["--help", "--version", "-h", "-v"]);
+var API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"]);
+var READINGS2 = 64;
+var MENTION2 = /\bv(?:ercel|c)\b/i;
+var NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i;
+function readingsOf(args, { flags, takes }, toSub = false) {
+  const out = [];
+  const walk = (k, read) => {
+    if (out.length >= READINGS2)
+      return false;
+    for (;k < args.length; k++) {
+      const v = args[k].value;
+      if (v === "--") {
+        out.push({ ...read, positionals: [...read.positionals, ...args.slice(k + 1)] });
+        return true;
+      }
+      if (v.startsWith("--")) {
+        const eq = v.indexOf("=");
+        const name = eq === -1 ? v : v.slice(0, eq);
+        if (eq !== -1)
+          read = {
+            ...read,
+            flags: [...read.flags, { name, value: { ...args[k], value: v.slice(eq + 1) } }]
+          };
+        else if (takes.has(name))
+          read = { ...read, flags: [...read.flags, { name, value: args[++k] }] };
+        else if (flags.has(name))
+          read = { ...read, flags: [...read.flags, { name }] };
+        else {
+          if (!walk(k + 2, { ...read, flags: [...read.flags, { name, value: args[k + 1] }] }))
+            return false;
+          read = { ...read, flags: [...read.flags, { name }] };
+        }
+        continue;
+      }
+      if (v.startsWith("-") && v.length > 1) {
+        for (let c = 1;c < v.length; c++) {
+          const name = `-${v[c]}`;
+          const attached = c + 1 < v.length ? { ...args[k], value: v.slice(v[c + 1] === "=" ? c + 2 : c + 1) } : undefined;
+          if (flags.has(name)) {
+            read = { ...read, flags: [...read.flags, { name }] };
+            continue;
+          }
+          const taken = {
+            ...read,
+            flags: [...read.flags, { name, value: attached ?? args[k + 1] }]
+          };
+          if (takes.has(name)) {
+            read = taken;
+            if (!attached)
+              k++;
+            break;
+          }
+          if (!walk(attached ? k + 1 : k + 2, taken))
+            return false;
+          read = { ...read, flags: [...read.flags, { name }] };
+        }
+        continue;
+      }
+      read = { ...read, positionals: [...read.positionals, args[k]] };
+      if (toSub)
+        break;
+    }
+    out.push(read);
+    return true;
+  };
+  return walk(0, { flags: [], positionals: [] }) ? out : undefined;
+}
+var commandOf4 = (word) => word === undefined ? undefined : ALIASES.get(word.value) ?? word.value;
+function judgeAll(args, fed) {
+  const unread = {
+    production: false,
+    what: "a vercel call with more options than the hook reads"
+  };
+  const first = readingsOf(args, GLOBAL, true);
+  if (!first)
+    return unread;
+  const verdicts = [];
+  for (const name of new Set(first.map((r) => commandOf4(r.positionals[0])))) {
+    if (name !== undefined && READS2.has(name))
+      continue;
+    const own = OWN2[name !== undefined && COMMANDS2.has(name) ? name : "deploy"];
+    const options = own ? {
+      flags: new Set([...GLOBAL.flags, ...own.flags]),
+      takes: new Set([...GLOBAL.takes, ...own.takes])
+    } : GLOBAL;
+    const readings = readingsOf(args, options);
+    if (!readings)
+      return unread;
+    for (const reading of readings)
+      verdicts.push(judge7(reading, args.some(unreadable), fed));
+  }
+  return verdicts.find((v) => v && !v.production) ?? verdicts.find(Boolean);
+}
+function judge7({ flags, positionals }, unreadWord, fed) {
+  if (flags.some((f) => HELP2.has(f.name)))
+    return;
+  const [sub, ...rest] = positionals;
+  if (sub && unreadable(sub))
+    return { production: false, what: "a subcommand built at run time" };
+  if (fed)
+    return { production: false, what: "a vercel call whose words xargs feeds" };
+  const built = unreadWord;
+  const has = (...names) => flags.some((f) => names.includes(f.name));
+  const toProduction = (names, absent) => {
+    const flag = flags.findLast((f) => names.includes(f.name));
+    if (!flag)
+      return absent;
+    return !flag.value || unreadable(flag.value) || flag.value.value.toLowerCase() === "production";
+  };
+  const next = rest[0]?.value;
+  const name = commandOf4(sub);
+  const listing = next === "ls" || next === "list";
+  const path = sub !== undefined && !COMMANDS2.has(name) && /[./~]/.test(sub.value);
+  if (name === "deploy" && rest[0] !== undefined && next !== "init") {
+    if (next === "continue")
+      return { production: true, what: "a manual deploy's continue" };
+    if (unreadable(rest[0]))
+      return { production: false, what: "a word built at run time after vercel deploy" };
+    if (!/[./~]/.test(next))
+      return { production: false, what: `\`vercel deploy ${next}\`` };
+  }
+  const envLetter = flags.some((f) => f.name === "-e" && (!f.value || unreadable(f.value) || !f.value.value.includes("=")));
+  if (name === undefined || name === "deploy" || path)
+    return has("--prod") || toProduction(["--environment", "--target"], false) || envLetter || built ? { production: true, what: "a production deploy" } : undefined;
+  if (name === "redeploy")
+    return toProduction(["--environment", "-e", "--target"], true) || built ? { production: true, what: "a redeploy that may land in production" } : undefined;
+  if (name === "promote" || name === "rollback")
+    return next === "status" ? undefined : { production: true, what: `a ${name}` };
+  if (name === "alias")
+    return listing ? undefined : { production: true, what: "an alias change" };
+  if (name === "rolling-release")
+    return next === "inspect" ? undefined : { production: true, what: "a rolling release step" };
+  if (LISTS.has(name) && listing)
+    return;
+  if (name === "env" && listing) {
+    const format = flags.findLast((f) => f.name === "--format" || f.name === "-F");
+    const json = !!format && (!format.value || unreadable(format.value) || format.value.value.toLowerCase() === "json");
+    return has("--json") || json || built ? { production: false, what: "an env list with its values" } : undefined;
+  }
+  if (name === "api")
+    return judgeApi2(rest, flags, built);
+  const words = [sub.value, ...next === undefined || unreadable(rest[0]) ? [] : [next]];
+  return { production: false, what: `\`vercel ${words.join(" ")}\`` };
+}
+function judgeApi2(rest, flags, built) {
+  const [endpoint] = rest;
+  if (!endpoint || endpoint.value === "list")
+    return;
+  if (built)
+    return { production: false, what: "a vercel api call built at run time" };
+  const method = flags.findLast((f) => f.name === "-X" || f.name === "--method");
+  if (method && (!method.value || method.value.value.toUpperCase() !== "GET"))
+    return { production: false, what: "a vercel api write" };
+  if (flags.some((f) => API_BODY.has(f.name)))
+    return { production: false, what: "a vercel api call with a body" };
+  if (/(?:^|\/)env(?:[/?#]|$)/i.test(endpoint.value))
+    return { production: false, what: "a vercel api read of a project's env" };
+}
+async function check22(raw, environment = process.env) {
+  const {
+    cwd,
+    tool_input: toolInput,
+    tool_name: tool
+  } = JSON.parse(raw);
+  if (tool !== "Bash" || typeof toolInput?.command !== "string")
+    return;
+  const command = toolInput.command;
+  if (!MENTION2.test(command.replace(/["'\\]/g, "")))
+    return;
+  const verdicts = [];
+  const visit = async (_cmd, parsed, shell) => {
+    if (parsed.first && unreadable(parsed.first) && NAMED.test(command))
+      verdicts.push({
+        production: false,
+        what: "a program built at run time on a line naming vercel"
+      });
+    const words = toolWords(NAMES2, parsed.name, parsed.args, shell);
+    const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
+    if (verdict)
+      verdicts.push(verdict);
+    return;
+  };
+  const env = {
+    cwd: typeof cwd === "string" ? cwd : undefined,
+    files: new Map,
+    known: {},
+    process: {},
+    vars: new Map
+  };
+  await run(lex(command), env, visit);
+  const always = verdicts.find((v) => !v.production);
+  if (always)
+    return `no-raw-vercel hook refuses ${always.what}: in a factory session vercel runs its reads alone (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) and a preview deploy (vercel deploy, vercel deploy init, or vercel ./<folder>). A secret reaches a project through an Inbox secret ask, and production ships from main through the release skill's ship:merge.`;
+  const production = verdicts.find((v) => v.production);
+  if (!production || await opsLead(raw, environment) && !namesRole(command))
+    return;
+  return `no-raw-vercel hook refuses ${production.what}: it changes what production serves, and a production deploy also migrates the hosted database. Production ships from main through the release skill's ship:merge; the Ops lead alone makes a hand production move, in a call that names no role variable and sources no file. A preview deploy (vercel deploy without --prod) and the reads (whoami, ls, inspect, logs, help) run.`;
+}
+
 // scripts/hooks/no-raw-wa.ts
 import { realpathSync as realpathSync6 } from "fs";
 import { homedir as homedir5 } from "os";
@@ -16737,7 +17006,7 @@ async function inspect16(raw, environment) {
       return refuse15(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
   }
 }
-async function check22(raw, environment = process.env) {
+async function check23(raw, environment = process.env) {
   try {
     return await eachInput(raw, "no-raw-wa", (one) => inspect16(one, environment));
   } catch {
@@ -16830,7 +17099,7 @@ async function gh4(args, cmd, env, local, xargs) {
     ...xargs && !xargs.replace ? [undefined] : []
   ];
   const target = decide2(named.length > 0 ? named : implicitRepos(env, local));
-  return judge7(`gh ${key}`, target, bodies.map((b) => viaXargs(b, xargs)), env);
+  return judge8(`gh ${key}`, target, bodies.map((b) => viaXargs(b, xargs)), env);
 }
 function altText(value) {
   const tail = Math.max(value.value.lastIndexOf(UNKNOWN), value.value.lastIndexOf(READ)) + 1;
@@ -16849,7 +17118,7 @@ async function api4(args, cmd, env, local, xargs) {
     const resolved = await Promise.all(documents.map((d) => resolveText(d, env)));
     if (!resolved.some((d) => d.unknown || COMMENT_MUTATION.test(d.value)))
       return;
-    return judge7("gh api graphql", { guarded: true, label: "a repository named only by a GraphQL node id" }, [...fields.map((f) => f.text), ...inputs], env, INLINE_QUERY);
+    return judge8("gh api graphql", { guarded: true, label: "a repository named only by a GraphQL node id" }, [...fields.map((f) => f.text), ...inputs], env, INLINE_QUERY);
   }
   const path = endpoint.value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "").split("?")[0];
   const match = /^repos\/([^/]+)\/([^/]+)\/(.+)$/.exec(path);
@@ -16867,7 +17136,7 @@ async function api4(args, cmd, env, local, xargs) {
     ...fields.filter((f) => marked(f.key) || BODY_KEY.test(f.key)).map((f) => f.text),
     ...await Promise.all(inputs.map((i) => bodyOf2(i, env)))
   ];
-  return judge7(`gh api ${path.replaceAll(UNKNOWN, "*").replaceAll(READ, "*")}`, decide2(candidates), bodies, env);
+  return judge8(`gh api ${path.replaceAll(UNKNOWN, "*").replaceAll(READ, "*")}`, decide2(candidates), bodies, env);
 }
 async function bodyOf2(payload, env) {
   const text = await resolveText(payload, env);
@@ -16904,7 +17173,7 @@ async function curl3(args, cmd, env) {
   if (data.length === 0)
     return;
   const owner = marked(url[1]) ? undefined : { owner: url[1], repo: url[2] };
-  return judge7(`curl to api.github.com/repos/${url[1]}/${url[2]}`, decide2([owner]), await Promise.all(data.map((d) => bodyOf2(d, env))), env);
+  return judge8(`curl to api.github.com/repos/${url[1]}/${url[2]}`, decide2([owner]), await Promise.all(data.map((d) => bodyOf2(d, env))), env);
 }
 function decide2(candidates) {
   if (candidates.length === 0)
@@ -16921,7 +17190,7 @@ function refuse16(what, target, detail, fix) {
 var READABLE2 = "Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md).";
 var INLINE_QUERY = "Write the query and each of its fields in the command itself, not in a variable: gh api graphql -f query='query { viewer { login } }'. For a long one, write it to a file with the Write tool first and pass it by its literal absolute path (-F query=@/abs/query.graphql, -F body=@/abs/body.md).";
 var REWORD = 'Write "ship" or "publish step" instead, or leave the comment out. For a file or rule whose name holds the word, name it by what it is, such as "the ship rule" or "the comment hook", with its line number; for a patch that holds it, write the patch to a file in your scratchpad, send its absolute path to the PR\'s worker by SendMessage, and say in the comment that a patch went to the author, since gh\'s `--attach` uploads only images and video.';
-async function judge7(what, target, bodies, env, fix = READABLE2) {
+async function judge8(what, target, bodies, env, fix = READABLE2) {
   if (!target.guarded)
     return;
   const texts = await Promise.all(bodies.map((b) => resolveText(b, env)));
@@ -16953,7 +17222,7 @@ function candidate7(command) {
   const bare = command.replace(/[\\'"]/g, "");
   return command.includes("$'") || GH2.test(bare) && MAYBE_COMMENT.test(bare);
 }
-async function check23(raw, environment = process.env, lists = join20(coreDir(), "lists")) {
+async function check24(raw, environment = process.env, lists = join20(coreDir(), "lists")) {
   const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join20(lists, "release-owners.json"));
   if (owners.refusal)
     return commentCall(subjectOf3(raw)) ? owners.refusal : undefined;
@@ -17372,7 +17641,7 @@ function inspect18(raw, environment, main) {
   line = lexed.commands;
   return run(lexed, env, visit);
 }
-async function check24(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
+async function check25(raw, environment = process.env, main = mainCheckout2(resolve13(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
     return await inspect18(raw, environment, main);
   } catch {
@@ -17408,13 +17677,14 @@ var GUARDS = [
   { factory: true, name: "no-public-leak", run: (raw, env) => check19(raw, env) },
   { factory: false, name: "no-raw-delete", run: (raw, env) => check20(raw, env) },
   { factory: true, name: "no-raw-spawn", run: (raw, env) => check21(raw, env) },
-  { factory: true, name: "no-raw-wa", run: (raw, env) => check22(raw, env) },
-  { factory: false, name: "no-release-comment", run: (raw, env) => check23(raw, env) },
+  { factory: true, name: "no-raw-vercel", run: (raw, env) => check22(raw, env) },
+  { factory: true, name: "no-raw-wa", run: (raw, env) => check23(raw, env) },
+  { factory: false, name: "no-release-comment", run: (raw, env) => check24(raw, env) },
   { factory: true, name: "no-stash", run: (raw, env) => check3(raw, env) },
-  { factory: true, name: "no-unslotted-run", run: (raw, env) => check24(raw, env) }
+  { factory: true, name: "no-unslotted-run", run: (raw, env) => check25(raw, env) }
 ];
 var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`;
-async function check25(raw, environment = process.env, guards = GUARDS) {
+async function check26(raw, environment = process.env, guards = GUARDS) {
   let factory;
   const reasons = await Promise.all(guards.map(async ({ factory: gated, name, run }) => {
     try {
@@ -17430,7 +17700,7 @@ async function check25(raw, environment = process.env, guards = GUARDS) {
 `) || undefined;
 }
 async function hook() {
-  const reason = await check25(await Bun.stdin.text());
+  const reason = await check26(await Bun.stdin.text());
   if (!reason)
     return 0;
   console.error(reason);
@@ -17440,6 +17710,6 @@ if (import.meta.main)
   process.exit(await hook());
 export {
   GUARDS,
-  check25 as check,
+  check26 as check,
   hook
 };
