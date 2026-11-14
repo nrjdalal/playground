@@ -5,7 +5,7 @@ export const groups: Group[] = [
   {
     folders: ["home", "process worktree"],
     guards: ["no-extensions-write"],
-    rows: ({ HOME, ROOT }) => [
+    rows: ({ DATA, HOME, ROOT }) => [
       ["ex in script mode after a cd to a variable", `cd "$X" && ex -sc 'wq' f`],
       ["vim running a write after a cd to a variable", `cd "$X" && vim -c wq f`],
       ["patch from an absolute diff after a cd to a variable", `cd "$X" && patch -p1 < /tmp/d`],
@@ -208,6 +208,46 @@ export const groups: Group[] = [
       [
         "a write after a cd to a variable followed by a colon path",
         `W=/tmp; cd "$X" && cd $W:/x && echo x > f`,
+      ],
+      [
+        "a write after a split cd to a variable holding a blank",
+        `W='/other /extensions'; cd ${DATA}/other && setopt sh_word_split && cd $W && echo x > f`,
+      ],
+      [
+        "a write after a split cd to a variable holding a blank, the option set first",
+        `W='/other /extensions'; setopt sh_word_split; cd ${DATA}/other && cd $W && echo x > f`,
+      ],
+      [
+        "a write after a split cd to a variable holding a blank, the option unspaced",
+        `W='/other /extensions'; cd ${DATA}/other && setopt shwordsplit; cd $W; echo x > f`,
+      ],
+      [
+        "a write after a split cd to a variable holding a blank, the option by set -o",
+        `W='/other /extensions'; cd ${DATA}/other && set -o shwordsplit && cd $W && echo x > f`,
+      ],
+      [
+        "a write after a split pushd to a variable holding a blank",
+        `W='/other /extensions'; cd ${DATA}/other && setopt SH_WORD_SPLIT && pushd $W && echo x > f`,
+      ],
+      [
+        "a write after a split cd to a variable holding a tab",
+        `W=$'/other\\t/extensions'; cd ${DATA}/other && setopt sh_word_split && cd $W && echo x > f`,
+      ],
+      [
+        "patch after a split cd to a variable holding a blank",
+        `W='/other /extensions'; cd ${DATA}/other && setopt sh_word_split && cd $W && patch -p1 < /tmp/d`,
+      ],
+      [
+        "a write after a typed two-operand cd",
+        `cd ${DATA}/other && cd /other /extensions && echo x > f`,
+      ],
+      [
+        "a write after a cd to a split of a variable holding a blank",
+        `W='/other /extensions'; cd ${DATA}/other && cd \${=W} && echo x > f`,
+      ],
+      [
+        "a write after a cd to a short split of a variable holding a blank",
+        `W='/other /extensions'; cd ${DATA}/other && cd $=W && echo x > f`,
       ],
     ],
   },
