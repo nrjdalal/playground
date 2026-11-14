@@ -90,7 +90,7 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
       expect(own).toHaveLength(1)
       expect(own[0]).toMatch(/\/playground-probe-x\.[A-Za-z0-9]{6}$/)
       expect(statSync(own[0]).mode & 0o777).toBe(0o700)
-      expect(launchOf(r)).toContain(`export TMPDIR=\${TMPDIR:-${own[0]}}`)
+      expect(launchOf(r)).toContain(`export TMPDIR=${own[0]}\n`)
       const writes = (path: string) =>
         allowWrite.some((entry: string) => path === entry || path.startsWith(`${entry}/`))
       for (const path of ["/tmp", "/tmp/another-session/file", join(linuxTemp, "another")])

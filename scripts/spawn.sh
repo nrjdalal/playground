@@ -1964,9 +1964,9 @@ if [ "$RUNTIME" = herdr ]; then
   mkdir -p "$RESUME_DIR" && chmod 700 "$RESUME_DIR" || refuse "it cannot prepare $RESUME_DIR"
   # A pane herdr restored keeps the folder it had, so the launch moves to the session's own; a resume stamps each run in <name>.ran, so you can see when a restore ran it.
   HEAD_LINES="cd $(printf %q "$CWD") || exit 1"$'\n'
-  # A herdr server hands its panes the shell basics alone, so the launch gives the session its temp folder (TEMP, above), keeping one already set: macOS's per-user one, or on Linux the session's own.
+  # A herdr server hands its panes the shell basics alone, so the launch gives the session its temp folder (TEMP, above): on macOS its per-user one, keeping one already set; on Linux the session's own, always, since an inherited TMPDIR there (an rc file's /tmp) would widen the sandbox's and no-raw-spawn's temp folder to what every session shares.
   if [ -n "$LINUX_TEMP" ]; then
-    HEAD_LINES+="export TMPDIR=\${TMPDIR:-$(printf %q "$LINUX_TEMP")}"$'\n'
+    HEAD_LINES+="export TMPDIR=$(printf %q "$LINUX_TEMP")"$'\n'
   else
     HEAD_LINES+='export TMPDIR="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR)}"'$'\n'
   fi

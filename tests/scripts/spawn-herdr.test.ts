@@ -224,11 +224,16 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
       { LINUX_GETCONF: "1" },
       /^\/.*\/playground-worker-brave-otter\.[A-Za-z0-9]{6}$/,
     ],
+    [
+      "on Linux gets its own folder over an inherited /tmp, which every session shares",
+      { LINUX_GETCONF: "1", TMPDIR: "/tmp" },
+      /^\/.*\/playground-worker-brave-otter\.[A-Za-z0-9]{6}$/,
+    ],
   ])("a herdr session %s as TMPDIR", async (_, env, expected) => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md", "--runtime", "herdr"],
       [],
-      "LINUX_GETCONF" in env ? env : {},
+      "LINUX_GETCONF" in env ? { LINUX_GETCONF: "1" } : {},
       undefined,
       undefined,
       herdrPin(),
