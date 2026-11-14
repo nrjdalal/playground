@@ -18,6 +18,7 @@ import {
   liveDeps,
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
+import { procSource, readSysctl } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
 import { lapse } from "../playground/priority"
@@ -105,13 +106,13 @@ const readJson = async (path: string): Promise<unknown> => JSON.parse(await Bun.
 const fresh = (at: unknown, now: Date, ms: number): boolean =>
   typeof at === "string" && now.getTime() - Date.parse(at) <= ms
 
-// The load averages, from sysctl's `{ 1m 5m 15m }`.
-const loadOf = async (ctx: Context): Promise<number[]> =>
-  (await ctx.run(["sysctl", "-n", "vm.loadavg"])).out
-    .replace(/[{}]/g, "")
-    .trim()
-    .split(/\s+/)
-    .map(Number)
+// load5 from sysctl's `{ 1m 5m 15m }`, or Linux's /proc/loadavg (readSysctl); a load neither gives throws, since an unread load is never 0.
+const load5Of = async (ctx: Context): Promise<number> => {
+  const loads = await readSysctl(ctx.run, "vm.loadavg")
+  if (loads === null)
+    throw new Error(`load5 unread: neither sysctl vm.loadavg nor ${procSource("vm.loadavg")} reads`)
+  return Number(loads.replace(/[{}]/g, "").trim().split(/\s+/)[1])
+}
 
 // Names the dashboard's paused file over 30 minutes old to ops, once a file; roll-now is left to Update now and `playground update`, so the dashboard's roll holds stand.
 const rollGate = async (ctx: Context) => {
@@ -385,8 +386,9 @@ const tick = async (ctx: Context) => {
   if (ctx.now.getMinutes() === 3 && marks[0]) await ctx.send("builder", `usage: ${marks[0]}`, true)
   const flip = (await python(ctx, "usage/login-flip.py")).out.trim()
   if (flip.includes("switch due")) await ctx.send("dispatcher", flip)
-  const [, load5 = 0] = await loadOf(ctx)
-  if (load5 > 15) {
+  const load5 = await load5Of(ctx).catch((error: Error) => error)
+  if (load5 instanceof Error) await ctx.send("builder", load5.message, true)
+  else if (load5 > 15) {
     await ctx.send("builder", `load5 ${load5}: ${(await loadReport(ctx)).join(" ")}`, true)
   }
   for (const line of lines((await python(ctx, "usage/near-limit.py")).out))
@@ -616,7 +618,7 @@ const up = async (ctx: Context) => {
 
 // load5 at 30 or more, told once a crossing and cleared under 22.5.
 const highLoad = async (ctx: Context) => {
-  const [, load5 = 0] = await loadOf(ctx)
+  const load5 = await load5Of(ctx)
   const toldPath = join(ctx.ops, "tick", "load-told")
   const told = await Bun.file(toldPath).exists()
   if (load5 >= 30 && !told) {

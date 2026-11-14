@@ -19,6 +19,7 @@ import { join } from "node:path"
 import type { SpawnOptions, Subprocess } from "bun"
 
 import { slowChild } from "../../slow-child"
+import { FAKE_SLEEP } from "../fixtures/proc"
 
 // run-slot.sh's fakes and the scratch machine for the run-slot*.test.ts files, split so the parallel pass spreads them; test-sandbox's --parallel loads this afresh for each file, so the afterAll is that file's own
 // Load is weighed by size, so a big plan never blocks small runs: small, medium and big weigh 1, 2 and 3.
@@ -187,6 +188,8 @@ export type Setup = {
   // the seconds between two looks of a waiting run (run-slot.sh's RUN_SLOT_POLL: 15 real for a queued run's looks, 5 for a clone's and an --after wait; 0.2 in the tests, 0.05 in the commit-lane files)
   poll?: number
   pressure?: number
+  // a folder of recorded /proc text (tests/scripts/fixtures/proc.ts): the machine answers as Ubuntu does, procps's sysctl knowing no macOS name, its top no -l and no vm_stat, so every reading comes from that text
+  proc?: string
   roster?: unknown
   sandboxed?: boolean
   swapins?: number
@@ -208,6 +211,7 @@ export const machine = ({
   plan,
   poll,
   pressure = 1,
+  proc,
   roster,
   sandboxed = false,
   swapins = 0,
@@ -262,6 +266,23 @@ esac
     `#!/bin/bash\necho "              disk0 "\necho "    KB/t  tps  MB/s "\necho "   32.98 2576 82.98 "\necho "   30.00 ${disk[0]} ${disk[1].toFixed(2)} "\n`,
   )
   chmodSync(join(bin, "iostat"), 0o755)
+  if (proc) {
+    const ubuntu = {
+      sysctl:
+        'echo "sysctl: cannot stat /proc/sys/${2//.//}: No such file or directory" >&2\nexit 255',
+      top: "echo \"top: unknown option 'l'\" >&2\nexit 1",
+      vm_stat: 'echo "vm_stat: command not found" >&2\nexit 127',
+    }
+    for (const [name, body] of Object.entries(ubuntu)) {
+      writeFileSync(
+        join(bin, name),
+        `#!/bin/bash\necho "$2" >> ${join(root, `${name}.log`)}\n${body}\n`,
+      )
+      chmodSync(join(bin, name), 0o755)
+    }
+    writeFileSync(join(bin, "sleep"), FAKE_SLEEP)
+    chmodSync(join(bin, "sleep"), 0o755)
+  }
   if (sandboxed) {
     writeFileSync(
       join(bin, "ps"),
@@ -293,8 +314,11 @@ esac
     PLAYGROUND_DATA_DIR: join(config, "playground"),
     HOME: root,
     PATH: `${bin}:${process.env.PATH}`,
+    // the readings' /proc text, read under the test sandbox's marker alone: none unless the machine has recorded text
+    PLAYGROUND_PROC: proc ?? join(root, "no-proc"),
     RUN_SLOT_OPS: ops,
     RUN_SLOT_POLL: poll === undefined ? "0.2" : String(poll),
+    TEST_SANDBOX_HOME: root,
     ...extra,
   })
   // A slot already held by this test's own process, which stays alive throughout, taken at `at`.
