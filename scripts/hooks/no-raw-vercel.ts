@@ -15,7 +15,7 @@ const GLOBAL: Options = {
   takes: words("--api --cwd --global-config --local-config --scope --team --token -A -Q -S -T -t"),
 }
 // The options of each command judged here, from its --help on 65.8.0; any other option is read both ways, as a flag and as taking the next word.
-// deploy's from deployCommand in the dist, its deprecated letters included: -e is --env's and -b --build-env's (DEPRECATED_SHORTHANDS), so neither names the environment.
+// deploy's from deployCommand in the dist, its deprecated letters included: -e is --env's and -b --build-env's (DEPRECATED_SHORTHANDS), and judge() still reads an -e with no = as the environment.
 const DEPLOY: Options = {
   flags: words(
     "--confirm --create-if-missing --dry --force --guidance --json --logs --no-clipboard --no-logs --no-wait --prebuilt --prod --skip-domain --temporary --turbo --verify --with-cache --yes -c -f -l -y",
