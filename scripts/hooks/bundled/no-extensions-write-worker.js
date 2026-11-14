@@ -7932,7 +7932,7 @@ async function folder(path) {
 }
 var landsHeld = (word, cmd, env) => {
   const held = env.hold?.(word, cmd, env);
-  return held && isAbsolute3(held.value) && !held.glob ? held : undefined;
+  return held && isAbsolute3(held.value) && !held.glob && !held.value.includes(":") ? held : undefined;
 };
 function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
@@ -9657,6 +9657,31 @@ var portlessRead = (tool, args) => {
   const words = tool === "bunx" && args[0]?.value === "portless" ? args.slice(1) : args;
   return (tool === "portless" || words !== args) && PORTLESS_READS.has(words[0]?.value ?? "");
 };
+var gitPlaced = (args, env) => {
+  let cwd;
+  let dir = false;
+  let tree = false;
+  for (let k = 0;k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value;
+    const flag = ["-C", "--git-dir", "--work-tree"].find((f) => v === f || f !== "-C" && v.startsWith(`${f}=`));
+    if (!flag) {
+      if (GIT_TAKES.has(v))
+        k++;
+      continue;
+    }
+    const word = v === flag ? args[++k] : { ...args[k], value: v.slice(flag.length + 1) };
+    const at = word && pathOf(word, { ...env, cwd });
+    if (at === undefined)
+      return false;
+    if (flag === "-C")
+      cwd = at;
+    else if (flag === "--git-dir")
+      dir = true;
+    else
+      tree = true;
+  }
+  return cwd !== undefined || dir && tree;
+};
 var CHMOD_DASH_MODE = /^-[gorstuwXx]/;
 function unreadCdWrites(tool, args, env, stopsAtOperand) {
   if (tool === "sed" || tool === "perl")
@@ -10724,7 +10749,7 @@ async function inspect(raw, environment, unknown = false) {
     if (!env.cwdUnread)
       return;
     const git = tool === "git" ? gitCall(args, { ...env, cwd: undefined }) : undefined;
-    if (textDepth === 0 && !remover && !WRITERS.has(tool) && !NO_WRITES.has(tool) && !portlessRead(tool, args) && !reads(parsed, env) && (git ? git.sub !== "rm" && git.cwd === undefined : !UNREAD_CD_JUDGED.has(tool)))
+    if (textDepth === 0 && !remover && !WRITERS.has(tool) && !NO_WRITES.has(tool) && !portlessRead(tool, args) && !reads(parsed, env) && (git ? git.sub !== "rm" && !gitPlaced(args, env) : !UNREAD_CD_JUDGED.has(tool)))
       return refuse(afterUnreadCd(`${git ? `git ${git.sub && !marked(git.sub) ? git.sub : "with a subcommand it cannot read"}` : verb}, which may write in the shell's folder,`));
     const unsplit = fed && !fed.unknown && (marked(fed.value) || delimiter || !fedSplit);
     const fedWords = unsplit ? [{ quoted: false, value: UNKNOWN }, ...argWord ? [argWord] : []] : stdinWords;

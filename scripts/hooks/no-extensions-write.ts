@@ -587,6 +587,30 @@ const portlessRead = (tool: string, args: Word[]): boolean => {
   return (tool === "portless" || words !== args) && PORTLESS_READS.has(words[0]?.value ?? "")
 }
 
+// Whether git's options place both its work tree and its index with no shell folder: a -C the hook reads, or both --git-dir and --work-tree read, since git takes the shell's folder as the work tree for a --git-dir alone and finds the repository from it for a --work-tree alone
+const gitPlaced = (args: Word[], env: Env): boolean => {
+  let cwd: string | undefined
+  let dir = false
+  let tree = false
+  for (let k = 0; k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value
+    const flag = ["-C", "--git-dir", "--work-tree"].find(
+      (f) => v === f || (f !== "-C" && v.startsWith(`${f}=`)),
+    )
+    if (!flag) {
+      if (GIT_TAKES.has(v)) k++
+      continue
+    }
+    const word = v === flag ? args[++k] : { ...args[k], value: v.slice(flag.length + 1) }
+    const at = word && pathOf(word, { ...env, cwd })
+    if (at === undefined) return false
+    if (flag === "-C") cwd = at
+    else if (flag === "--git-dir") dir = true
+    else tree = true
+  }
+  return cwd !== undefined || (dir && tree)
+}
+
 // a word macOS chmod takes as a dash-led mode (-w, -go+x) rather than an option
 const CHMOD_DASH_MODE = /^-[gorstuwXx]/
 
@@ -1997,7 +2021,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     }
     // after a cd the hook cannot read, a remover's operand or a writer's target the hook can place only by the shell's own folder may be in the root
     if (!env.cwdUnread) return
-    // a typed program off every list may write in the shell's folder, and git but a read, git rm or a call on a folder the hook places (its -C, --git-dir or --work-tree) may write its clone there; a command read out of a quoted text is judged by the lists alone, since its words are most often no program
+    // a typed program off every list may write in the shell's folder, and git but a read, git rm or a call whose work tree and index the hook places (gitPlaced) may write its clone there; a command read out of a quoted text is judged by the lists alone, since its words are most often no program
     const git = tool === "git" ? gitCall(args, { ...env, cwd: undefined }) : undefined
     if (
       textDepth === 0 &&
@@ -2006,7 +2030,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       !NO_WRITES.has(tool) &&
       !portlessRead(tool, args) &&
       !reads(parsed, env) &&
-      (git ? git.sub !== "rm" && git.cwd === undefined : !UNREAD_CD_JUDGED.has(tool))
+      (git ? git.sub !== "rm" && !gitPlaced(args, env) : !UNREAD_CD_JUDGED.has(tool))
     )
       return refuse(
         afterUnreadCd(

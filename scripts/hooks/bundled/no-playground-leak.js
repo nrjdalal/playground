@@ -7792,7 +7792,7 @@ async function folder(path) {
 }
 var landsHeld = (word, cmd, env) => {
   const held = env.hold?.(word, cmd, env);
-  return held && isAbsolute2(held.value) && !held.glob ? held : undefined;
+  return held && isAbsolute2(held.value) && !held.glob && !held.value.includes(":") ? held : undefined;
 };
 function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
