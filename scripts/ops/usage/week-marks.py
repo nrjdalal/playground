@@ -7,7 +7,7 @@ each other account's week, keeps its own samples per account, and prints one sta
   ALERT 5h ...                     once per 5-hour window of the logged-in account, when it passes 85%
 Each other account in usage.json's `accounts` is sampled into account-samples.jsonl, and the status line adds their combined %/h. It sends nothing:
 Ops' tick relays the alerts."""
-import calendar, datetime, json, os, sys, time
+import calendar, datetime, json, math, os, sys, time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 HERE = os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path")), "ops", "usage")  # the state folder by name, so a run by its repo path still reads the live state
@@ -40,7 +40,7 @@ samples, others_samples = os.path.join(HERE, "week-samples.jsonl"), os.path.join
 
 
 def pace(rows):
-    """The week's %/h and its words, naming the window: the last hour's, else the last 6 hours' while the whole-percent reading held through the hour; one held through every window reads under one point over the span it covers, as 0. None with under 15 minutes of readings."""
+    """The week's %/h, its words naming the window, and its bound: the last hour's, else the last 6 hours' while the whole-percent reading held through the hour; one held through every window reads under one point over the span it covers, rounded up, as 0 bounded by that. None with under 15 minutes of readings."""
     flat, seen = None, 0
     for hours in (1, 6):
         w = [r for r in rows if r["t"] >= now - hours * 3600]
@@ -49,9 +49,10 @@ def pace(rows):
             continue
         seen, rate = len(w), (w[-1]["week"] - w[0]["week"]) / span * 3600
         if rate:
-            return rate, f"{rate:.1f}%/h over {hours}h"
-        flat = f"under {3600 / span:.1f}%/h over {f'{round(span / 60)}m' if span < 3600 else f'{span / 3600:.1f}h'}"
-    return (0.0, flat) if flat else (None, "?%/h")
+            return rate, f"{rate:.1f}%/h over {hours}h", rate
+        bound = math.ceil(3600 / span * 10) / 10
+        flat = (0.0, f"under {bound:.1f}%/h over {f'{round(span / 60)}m' if span < 3600 else f'{span / 3600:.1f}h'}", bound)
+    return flat or (None, "?%/h", None)
 
 
 def sample(path, t, account, used, reset):
@@ -62,16 +63,18 @@ def sample(path, t, account, used, reset):
     return rows, pace(rows)
 
 
-rows, (rate, rate_words) = sample(samples, now, account, used, reset) if counted else ([], (None, "?%/h"))
+rows, (rate, rate_words, bound) = sample(samples, now, account, used, reset) if counted else ([], (None, "?%/h", None))
 # the pace across every account ops-usage reads (login-flip.json's `accounts`), since the spares' budget is one %/h for all of them
 spares = {a: r for a, r in (u.get("accounts") or {}).items() if a != account}
 def spare_pace(a, r):
     """The account's pace(); a week that cannot spend before its reset, or one parked by its limitedUntil, counts as 0 and the combined figure stays a number."""
-    rate, words = sample(others_samples, calendar.timegm(time.strptime(r["readAt"], "%Y-%m-%dT%H:%M:%SZ")), a, r["week"], r["weekReset"])[1]
-    return (0.0, "0.0%/h") if rate is None and (r["week"] >= 100 or (r.get("limitedUntil") or 0) > now) else (rate, words)
+    pace = sample(others_samples, calendar.timegm(time.strptime(r["readAt"], "%Y-%m-%dT%H:%M:%SZ")), a, r["week"], r["weekReset"])[1]
+    return (0.0, "0.0%/h", 0.0) if pace[0] is None and (r["week"] >= 100 or (r.get("limitedUntil") or 0) > now) else pace
 others = {a: spare_pace(a, r) for a, r in spares.items()}
-paces = [rate, *(p for p, _ in others.values())]
-combined = f"; combined {'?' if None in paces else f'{sum(paces):.1f}'}%/h across {len(paces)} accounts" if others else ""
+# a flat account's pace is a bound, so a sum holding one is a bound too
+paces = [(rate, bound), *((p, b) for p, _, b in others.values())]
+total = "?" if any(p is None for p, _ in paces) else f"{'under ' if any(b != p for p, b in paces) else ''}{sum(b for _, b in paces):.1f}"
+combined = f"; combined {total}%/h across {len(paces)} accounts" if others else ""
 # the owner's day, midnight to midnight in clock.ownerZone; a value the setting takes but zoneinfo cannot read (an offset such as +05:30) runs the day in UTC and says so
 owner_zone, unread = setting("clock.ownerZone"), ""
 try:
@@ -95,7 +98,7 @@ else:
     print(f"{account}: week {used:g}% (resets {time.strftime('%a %H:%MZ', time.gmtime(reset))}), rate {rate_words}{eta(90)}{eta(98)}; today {spent:g}% spent, on pace for {projected:.0f}% (no daily cap){combined}{unread}")
 drain_tail = "; nothing parks: at 100% a seated second dispatcher switches the factory to the next account (#i823)"
 # the logged-in account first, then each spare usage.accounts lists, each keyed by its own week reset
-for who, week_used, week_reset, (pct_h, words) in [*([(account, used, reset, (rate, rate_words))] if counted else []), *((a, r["week"], r["weekReset"], others[a]) for a, r in spares.items() if a in FACTORY)]:
+for who, week_used, week_reset, (pct_h, words, _) in [*([(account, used, reset, (rate, rate_words, bound))] if counted else []), *((a, r["week"], r["weekReset"], others[a]) for a, r in spares.items() if a in FACTORY)]:
     key = f"{who}:{round(week_reset / 3600)}"
     for mark in (90, 97, 98):
         if week_used >= mark and mark not in sent.get(key, []):

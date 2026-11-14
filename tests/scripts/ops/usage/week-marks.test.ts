@@ -86,7 +86,8 @@ const history = (home: string, accounts: [string, number, number][]) => {
 
 const iso = (t: number) => new Date(t * 1000).toISOString().replace(/\.\d{3}Z$/, "Z")
 
-const status = (home: string) => {
+// one run of the script under the scratch HOME, its output's lines
+const run = (home: string) => {
   const env: Record<string, string | undefined> = {
     ...process.env,
     HOME: home,
@@ -95,24 +96,15 @@ const status = (home: string) => {
   delete env.CLAUDE_CONFIG_DIR
   const child = Bun.spawnSync(["python3", "-I", script], { env })
   expect(child.exitCode).toBe(0)
-  return child.stdout.toString().split("\n")[0]
+  return child.stdout.toString().split("\n")
 }
 
-const alerts = (home: string) => {
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    HOME: home,
-    PATH: `${join(home, "bin")}:${process.env.PATH}`,
-  }
-  delete env.CLAUDE_CONFIG_DIR
-  const child = Bun.spawnSync(["python3", "-I", script], { env })
-  expect(child.exitCode).toBe(0)
-  return child.stdout
-    .toString()
-    .split("\n")
+const status = (home: string) => run(home)[0]
+
+const alerts = (home: string) =>
+  run(home)
     .filter((line) => line.startsWith("ALERT"))
     .map((line) => line.split(" ").slice(0, 2).join(" "))
-}
 
 test("a week past 90% and a 5-hour window past 85% each alert once", () => {
   const home = setup("high", 91, 86)
@@ -275,25 +267,35 @@ test("a flat hour inside a rising week reads the 6-hour rate and names its windo
     [5 * 3600, 86],
     [50 * 60, 91],
   ])
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    HOME: home,
-    PATH: `${join(home, "bin")}:${process.env.PATH}`,
-  }
-  delete env.CLAUDE_CONFIG_DIR
-  const lines = Bun.spawnSync(["python3", "-I", script], { env }).stdout.toString().split("\n")
+  const lines = run(home)
   expect(lines[0]).toContain("rate 1.0%/h over 6h, 98% in ~7.0h;")
   expect(lines.find((line) => line.startsWith("ALERT 90"))).toContain(
     "burning 1.0%/h over 6h, 98% in ~7.0h",
   )
 })
 
-// #2100: a reading that held through every window with data reads as under one point over the span it covers, never 0.0%/h
+// #2100: a reading that held through every window with data reads as under one point over the span it covers, rounded up, never 0.0%/h
 test("a reading flat through every window reads under one point over its span (#2100)", () => {
   const home = setup("flat-all", 50, 20)
   readings(home, [[45 * 60, 50]])
   const line = status(home)
-  expect(line).toContain("rate under 1.3%/h over 45m;")
+  expect(line).toContain("rate under 1.4%/h over 45m;")
+  expect(line).not.toContain("0.0%/h")
+})
+
+// #2100: two accounts flat for 45 minutes each read under 1.4%/h, so their combined pace is a bound too
+test("a combined pace holding a flat account reads as under the sum of the bounds (#2100)", () => {
+  const now = Date.now() / 1000
+  const home = setup("flat-combined", 50, 20, {
+    "spare@example.test": { readAt: iso(now), week: 30, weekReset: now + 172800 },
+  })
+  readings(home, [[45 * 60, 50]])
+  appendFileSync(
+    samples(home, "account-samples.jsonl"),
+    `${JSON.stringify({ account: "spare@example.test", reset: now + 172800, t: now - 45 * 60, week: 30 })}\n`,
+  )
+  const line = status(home)
+  expect(line).toContain("; combined under 2.8%/h across 2 accounts")
   expect(line).not.toContain("0.0%/h")
 })
 
