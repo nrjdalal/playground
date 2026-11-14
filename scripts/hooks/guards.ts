@@ -78,33 +78,55 @@ export const DEADLINE = 13_000
 const threw = (name: string, error: unknown) =>
   `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`
 
-// Every refusal the guards give, in GUARDS' order, one paragraph each, or undefined when none refuses; the factory's gate is read once, for the guards that take it.
+const late = (names: string[]) =>
+  `guards hook: ${names.join(", ")} did not answer by its deadline, about ${DEADLINE / 1000} s, inside the runner's 15 s timeout, so the call is refused; split it into smaller calls, or report it to your lead.`
+
+// Every refusal the guards give, in GUARDS' order, one paragraph each, or undefined when none refuses; the factory's gate is read once, for the guards that take it. Past the wait, each guard that has not answered refuses the call, naming it, so no runner's timeout decides it; the timer fires only while no guard holds the event loop.
 export async function check(
   raw: string,
   environment: Environment = process.env,
   guards: readonly Guard[] = GUARDS,
-  _wait = DEADLINE,
+  wait = DEADLINE,
 ): Promise<string | undefined> {
   let factory: Promise<boolean> | undefined
+  const verdicts: (string | undefined)[] = []
+  const answered = new Set<number>()
   // every guard's live reads of a push's remote share one budget, so a hung remote leaves the call inside its timeout
-  const reasons = await withLiveBudget(() =>
+  const all = withLiveBudget(() =>
     Promise.all(
-      guards.map(async ({ factory: gated, name, run }) => {
+      guards.map(async ({ factory: gated, name, run }, i) => {
         try {
-          if (gated && !(await (factory ??= fromFactory(raw, environment)))) return
-          return await run(raw, environment)
+          if (!gated || (await (factory ??= fromFactory(raw, environment))))
+            verdicts[i] = await run(raw, environment)
         } catch (error) {
-          return threw(name, error)
+          verdicts[i] = threw(name, error)
         }
+        answered.add(i)
       }),
     ),
   )
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const slow = await Promise.race([
+    all.then(() => []),
+    new Promise<string[]>((done) => {
+      timer = setTimeout(
+        () => done(guards.filter((_, i) => !answered.has(i)).map(({ name }) => name)),
+        wait,
+      )
+    }),
+  ]).finally(() => clearTimeout(timer))
+  const reasons = [...verdicts, slow.length > 0 ? late(slow) : undefined]
   return reasons.filter(Boolean).join("\n\n") || undefined
 }
 
-// The hook's exit: 2 with the reasons on stderr, else 0.
+// The hook's exit: 2 with the reasons on stderr, else 0; its deadline counts from the process's start, so the imports spend it too.
 export async function hook(guards: readonly Guard[] = GUARDS): Promise<number> {
-  const reason = await check(await Bun.stdin.text(), process.env, guards)
+  const reason = await check(
+    await Bun.stdin.text(),
+    process.env,
+    guards,
+    DEADLINE - performance.now(),
+  )
   if (!reason) return 0
   console.error(reason)
   return 2

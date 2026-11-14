@@ -17997,23 +17997,34 @@ var GUARDS = [
 ];
 var DEADLINE = 13000;
 var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`;
-async function check26(raw, environment = process.env, guards = GUARDS, _wait = DEADLINE) {
+var late = (names) => `guards hook: ${names.join(", ")} did not answer by its deadline, about ${DEADLINE / 1000} s, inside the runner's 15 s timeout, so the call is refused; split it into smaller calls, or report it to your lead.`;
+async function check26(raw, environment = process.env, guards = GUARDS, wait = DEADLINE) {
   let factory;
-  const reasons = await withLiveBudget(() => Promise.all(guards.map(async ({ factory: gated, name, run }) => {
+  const verdicts = [];
+  const answered = new Set;
+  const all = withLiveBudget(() => Promise.all(guards.map(async ({ factory: gated, name, run }, i) => {
     try {
-      if (gated && !await (factory ??= fromFactory(raw, environment)))
-        return;
-      return await run(raw, environment);
+      if (!gated || await (factory ??= fromFactory(raw, environment)))
+        verdicts[i] = await run(raw, environment);
     } catch (error) {
-      return threw(name, error);
+      verdicts[i] = threw(name, error);
     }
+    answered.add(i);
   })));
+  let timer;
+  const slow = await Promise.race([
+    all.then(() => []),
+    new Promise((done) => {
+      timer = setTimeout(() => done(guards.filter((_, i) => !answered.has(i)).map(({ name }) => name)), wait);
+    })
+  ]).finally(() => clearTimeout(timer));
+  const reasons = [...verdicts, slow.length > 0 ? late(slow) : undefined];
   return reasons.filter(Boolean).join(`
 
 `) || undefined;
 }
 async function hook(guards = GUARDS) {
-  const reason = await check26(await Bun.stdin.text(), process.env, guards);
+  const reason = await check26(await Bun.stdin.text(), process.env, guards, DEADLINE - performance.now());
   if (!reason)
     return 0;
   console.error(reason);
