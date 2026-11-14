@@ -6,6 +6,7 @@ import { dirname, join, relative, resolve, sep } from "node:path"
 import { dataDirOf } from "@packages/env/data-dir"
 import { extensionsDir, extGit, scopeDir } from "@packages/settings"
 
+import { sysctlOf } from "../ops-machine/readings"
 import { sourceOf } from "../ops-restart/restart"
 import {
   beat,
@@ -210,12 +211,14 @@ export function scheduled(
   }, tickMs)
 }
 
-// sysctl's `{ 1m 5m 15m }` load line, then the memory pressure level (4 is critical).
-export const gateOf = (out: string) => {
+// sysctl's `{ 1m 5m 15m }` load line, then the memory pressure level (4 is critical), each line that does not read taken from Linux's /proc text (sysctlOf), and null when neither gives it.
+export const gateOf = (out: string, code = 0) => {
   const [loads = "", pressure = ""] = out.split("\n")
+  const load = sysctlOf("vm.loadavg", { code, out: loads })
+  const level = sysctlOf("kern.memorystatus_vm_pressure_level", { code, out: pressure })
   return {
-    load5: Number(loads.replace(/[{}]/g, "").trim().split(/\s+/)[1]),
-    pressure: Number(pressure.trim()),
+    load5: load === null ? null : Number(load.replace(/[{}]/g, "").trim().split(/\s+/)[1]),
+    pressure: level === null ? null : Number(level),
   }
 }
 
@@ -231,14 +234,21 @@ export const failureOf = (out: string, log: string) => {
   return `${error} | ${tail.slice(-(337 - error.length))}`
 }
 
-// A dashboard script run as the old cron ran it: skipped with a line to ops under load, skipped quietly while busy matches a running command, its output appended to the log, and a failure sent to ops with its first error line and the log's last 5 lines.
+// A dashboard script run as the old cron ran it: skipped with a line to ops under load or while a reading does not read, skipped quietly while busy matches a running command, its output appended to the log, and a failure sent to ops with its first error line and the log's last 5 lines.
 export const dashboardRun =
   (label: string, args: string[], log: string, busy?: RegExp) => async (ctx: Context) => {
-    const { load5, pressure } = gateOf(
-      (await ctx.run(["sysctl", "-n", "vm.loadavg", "kern.memorystatus_vm_pressure_level"])).out,
-    )
-    if (load5 > 12 || pressure === 4) {
-      await ctx.send("ops", `${label} skipped: load5 ${load5}, pressure ${pressure}`)
+    const gate = await ctx.run([
+      "sysctl",
+      "-n",
+      "vm.loadavg",
+      "kern.memorystatus_vm_pressure_level",
+    ])
+    const { load5, pressure } = gateOf(gate.out, gate.code)
+    if (load5 === null || pressure === null || load5 > 12 || pressure === 4) {
+      await ctx.send(
+        "ops",
+        `${label} skipped: load5 ${load5 ?? "unread"}, pressure ${pressure ?? "unread"}`,
+      )
       return
     }
     if (busy?.test((await ctx.run(["ps", "-xo", "command"])).out)) return

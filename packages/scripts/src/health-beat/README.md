@@ -22,7 +22,7 @@ The two lines under the header say what this install runs, each naming the place
 
 Each read leaves the machine as it was: up to four git reads of the main checkout or the Dashboard's, portless's `routes.json`, one `ps`, `lsof` reads of the web's port and of up to 3 working folders up its process chain, a `git branch` in each and one GET, with no process signalled or selected for any action.
 
-The memory line reads what spawn.sh's memory gate reads, through ops-machine's `readMachine`: the pressure level (`kern.memorystatus_vm_pressure_level`) first, then the free share (`kern.memorystatus_level`).
+The memory line reads what spawn.sh's memory gate reads, through ops-machine's `readMachine`: the pressure level (`kern.memorystatus_vm_pressure_level`, on Linux PSI's `/proc/pressure/memory`) first, then the free share (`kern.memorystatus_level`, on Linux `/proc/meminfo`), each from `packages/scripts/src/ops-machine/readings.ts`, which also reads the CPU idle share from `top` or two `/proc/stat` reads.
 It warns only when that gate would refuse every Claude start (a GLM start takes a stricter gate, and a fresh worker also waits while the machine pages, which this line does not read): a level other than 1 or 2, or a free share under the `gates.memoryFreeMin` setting (8% by default).
 Reading the gate's own two figures keeps its warning in step with every start those two figures refuse, where `memory_pressure`'s free percentage and the System panel's `vm_stat` figure each count memory their own way.
 
