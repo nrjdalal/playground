@@ -65,6 +65,14 @@ describe("on Linux a reading /proc does not give shuts slots 2 to 4, never readi
   test.each(["meminfo", "pressure/memory", "vmstat"])("with no /proc/%s", (file) => {
     expect(look({ idle: 80 }, [file]).slots).toBe("1\n")
   })
+
+  // an unread idle share opens under the load1 stop and memory (issue 1818), so with load1 unread too the load1 stop shuts them
+  test("with no /proc/stat and no load1 from /proc/loadavg or uptime", () => {
+    const m = machine({ load1: 2, load5: 2, proc: procDir({}, ["stat", "loadavg"]) })
+    writeFileSync(join(m.root, "bin", "uptime"), "#!/bin/bash\nexit 1\n")
+    const run = Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() })
+    expect(run.stdout.toString()).toBe("1\n")
+  })
 })
 
 describe("on Linux the clones' brake is /proc/stat's core count", () => {
