@@ -199,6 +199,16 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 - A resumed session's SessionStart `cwd` is the folder it launched in, the main checkout for a worker, so a hook keyed on the session's worktree reads the transcript's own `cwd` entries or its `git -C <worktree>` commits, as [after-resume](#after-resume) does.
 - lefthook names the patch it sets aside (`info/lefthook-unstaged.<folder>.patch`) and its stash entry (`lefthook auto backup - <folder>`) after the worktree's folder, never the branch (the patch measured on lefthook 2.2.2, the stash name read in its `store_stash.go`).
 
+## The push scans' live read
+
+- Each push scan leaves out only what the remote the push goes to holds now: `heldBy` in `packages/safe-delete/src/live-refs.ts` reads that remote's branches with `git ls-remote` (5 s in a guard, 30 s in pre-push), since a remote-tracking ref is only the remote's last fetch and can name a branch the remote deleted.
+  The scans are commit-trailer's pre-push step, no-glm-heavy-path's and no-playground-leak's `git push`, and `gh pr create`'s commits, which no-public-leak reads through no-playground-leak's engine.
+  The remote is the one the push names, a configured name or a URL, else git's push remote for the branch (`branch.<b>.pushRemote`, `remote.pushDefault`, `branch.<b>.remote`, `origin`), so a commit only another remote holds is read too.
+  A remote it cannot read leaves every local commit in the scan.
+  A live branch whose tip this repo lacks stands in by its own remote-tracking ref until a fetch, so a first push after `canary` moves reads only its own commits; the residual is a commit that branch dropped in a force-push this repo has not fetched, which stays out.
+  The guards import the file by its relative source path, since `@packages/safe-delete`'s index reads `@packages/config`'s built kinds (`role.ts`); `unpushed` there reads through the same `liveHeads`.
+  A test's remote is a local bare repo, since the test sandbox's git reaches no network ([.agents/testing.md](../../.agents/testing.md#the-sandbox)), placed as a GitHub one through an `insteadOf` rule where the guard places it by the raw URL.
+
 ## after-compact
 
 - A factory session that has just compacted its context is told what to reread: `scripts/hooks/after-compact.ts`, a SessionStart hook with the `compact` matcher in both `scripts/factory-settings.json` and `.claude/settings.json`,
@@ -624,8 +634,9 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-glm-heavy-path
 
-- A factory session on GLM keeps off the Opus paths: `scripts/hooks/no-glm-heavy-path.ts` refuses a `git commit` whose files (the staged ones, plus every tracked change under `-a` or `--all` and each path it names) or a `git push` whose commits the remote lacks (`git log <sources> --not --remotes=<remote>`, every remote when it names none,
-  a URL or one not fetched yet) touch a path in its `OPUS_PATHS` (`.github/workflows/`, `lefthook.yml`, the `pr-merge` and `verify` scripts, `scripts/hooks/`, `scripts/spawn.sh`, `web/next/`), naming the files and the fix: report to your lead, who moves the change to a Claude worker.
+- A factory session on GLM keeps off the Opus paths: `scripts/hooks/no-glm-heavy-path.ts` refuses a `git commit` whose files (the staged ones, plus every tracked change under `-a` or `--all` and each path it names) or a `git push` whose commits the remote it pushes to lacks touch a path in its `OPUS_PATHS` (`.github/workflows/`, `lefthook.yml`, the `pr-merge` and `verify` scripts,
+  `scripts/hooks/`, `scripts/spawn.sh`, `web/next/`), naming the files and the fix: report to your lead, who moves the change to a Claude worker.
+  What the remote lacks is read live ([The push scans' live read](#the-push-scans-live-read)).
   It refuses a GLM session's `Edit`, `MultiEdit`, `NotebookEdit` or `Write` of a file under an `OPUS_PATHS` entry too, read from the root of the checkout that holds the file (the nearest folder above it with a `.git`), with the same fix, so the GLM worker stops at its first edit rather than at its commit.
   Concluding a merge, a file counts when it differs from HEAD and from every commit `MERGE_HEAD` lists, or when one of those sides changed it since its merge base and the result does not take that side's copy;
   a push reads each merge commit's own changes (`--diff-merges=dense-combined`) and, for each parent after the first, the files that parent changed that the merge does not take, so a `merge -s ours` counts too.
@@ -726,11 +737,12 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   its sins the seven words alone so `worker-pool` and `probe-path` pass, any skill's name in the checkout's `skills/` bucket folders,
   or any agent's name in the roster, both read on every call since skills are added and sessions renamed, leaving out one the file's `everyday` list names, such as `builder`, an org's own name, which its extension's copy adds, or `pr`, the public skill copied from upstream whose name is the word for a pull request, and adding none when the roster is missing or does not read;
   each matched whole in any case, with `_` and `-` counting as edges, so `PLAYGROUND_ROLE` holds one and `the dashboard` does not):
-  a Linear or Slack MCP tool that is not a read, a GitHub MCP write whose owner is a guarded org, a `gh` write (pr, issue, label, release, a non-GET `gh api`) or curl to Linear, Slack or a guarded org's repository, and `git commit` or `git push` in a guarded org's checkout, judged by its message, its branch and the messages of the commits the remote does not hold.
+  a Linear or Slack MCP tool that is not a read, a GitHub MCP write whose owner is a guarded org, a `gh` write (pr, issue, label, release, a non-GET `gh api`) or curl to Linear, Slack or a guarded org's repository, and `git commit` or `git push` in a guarded org's checkout, judged by its message, its branch and the messages of the commits the remote it pushes to does not hold,
+  read live ([The push scans' live read](#the-push-scans-live-read)).
   Its refusal names which text held the term (`withPlace` in `scripts/hooks/no-playground-leak.ts`): a commit by its short sha, whose fix is to reword that message, a ref, a push option, the tags a push carries,
   the branch names it pushes (each an `--all` push carries) or the branch `gh pr create` with no `--head` opens from, and a `gh` write's title, body, body file, comment, or a ship's notes or notes file,
   by its flag.
-  `gh pr create` with no `--head` also carries the branch it opens from and the commits it may push, read from its checkout, so outside a checkout it is refused as text it cannot read.
+  `gh pr create` with no `--head` also carries the branch it opens from and the commits it may push, those its branch's push remote holds no live branch of, read from its checkout, so outside a checkout it is refused as text it cannot read.
   With `--head` it opens from that pushed branch and pushes nothing, so it is judged on its own title, body and body file wherever it runs.
   Only a parsed `-H` or `--head` flag counts, the last one given, as gh keeps it, and only when its value is a non-empty literal: one empty, only whitespace, unreadable, or holding `$`, a backtick, a glob character or a quote reads as no `--head`, so the commits and the branch are read as before.
   The same pull request opened through `gh api repos/<owner>/<repo>/pulls -X POST` is judged on its `-F title=@<file>` and `-F body=@<file>` alike.
@@ -774,7 +786,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   An extensions root whose policy.json it cannot read for those two refuses the write, as a list it cannot trust does.
   Its reason names the kind, which text held it, as [no-playground-leak](#no-playground-leak)'s refusal does, and the plain-words fix, never the text.
   It reads every write through no-playground-leak's engine (`inspectAs` with its own `Policy`), so the shapes it reads are that guard's gh, `gh api`, curl and GitHub MCP writes; git commits and pushes, Linear and Slack are outside it.
-  `gh pr create` with no `--head` still reads the messages of the commits it may push, before a push the same call runs first, so a commit message holding a term refuses it, and its refusal names that commit by its short sha.
+  `gh pr create` with no `--head` still reads the messages of the commits it may push, those its branch's push remote holds no live branch of ([The push scans' live read](#the-push-scans-live-read)), before a push the same call runs first, so a commit message holding a term refuses it, and its refusal names that commit by its short sha.
   Each public repository's own name, which holds its owner's handle, is read past.
   So is the owner's own line in a ship's notes, as `bun run release:notes` writes it: in a plain `gh release create` or `edit` (one command, with no substitution, chain, pipe or redirect), a line that reads `- <names> @<login>` or `- @<login>` with the login and every name in `owner.names` (`ownerWords` in `notes.ts`, the renderer's own rule), inside the renderer's Contributors section.
   That section opens at the exact `### ❤️ Contributors` line and ends at the first line that is neither blank nor a contributor's, so a heading of any shape, a fence or prose closes it.
@@ -936,7 +948,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A push with hooks off reads nothing, and CI's build is the backstop there.
   Its tests are `bun run test:file tests/lefthook.test.ts tests/packages/scripts/src/precommit-light.test.ts`.
 - A Co-authored-by trailer, which AGENTS.md's Commits rule keeps out, is dropped by lefthook's commit-msg step `co-authored-by` (`packages/scripts/src/commit-trailer.ts <msgfile>`), in any case, first of its steps and with one line saying so, so the commit goes through on its first try.
-  A commit made with `--no-verify` skips commit-msg, as one made after `bun run precommit:light` once did, so lefthook's pre-push script `commit-trailer` (`commit-trailer.ts --push`) refuses a pushed commit no remote-tracking ref holds yet whose message holds the trailer.
+  A commit made with `--no-verify` skips commit-msg, as one made after `bun run precommit:light` once did, so lefthook's pre-push script `commit-trailer` (`commit-trailer.ts --push <remote>`) refuses a pushed commit whose message holds the trailer and that the remote it pushes to, pre-push's first argument, holds no live branch of ([The push scans' live read](#the-push-scans-live-read)).
   Its refusal names each such commit and the amend that drops the line through commit-msg: `git commit --amend --no-edit` for the checked-out commit alone, else a `git rebase --rebase-merges --exec` of that amend.
   The same script refuses a pushed commit whose message, or a pushed branch or tag whose name, holds a term from no-public-leak's list in the data folder, naming the sha or the ref and the kind alone (`listKindsIn()` in `packages/scripts/src/trace-count/count.ts`); a machine with no list reads nothing, and a list file that is not the list refuses the push, naming its path.
   Its tests are `bun run test:file tests/lefthook.test.ts`.
