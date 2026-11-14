@@ -1240,6 +1240,9 @@ describe("an xargs replace string outside the program word keeps the call's verd
       "cat under env -S with xargs' -J % string as its argument",
       "echo a | xargs -J % env -S cat %",
     ],
+    ["echo under xargs -I % from input holding a quote", 'echo "it\'s" | xargs -I % echo %'],
+    ["echo under xargs -n1", "echo a b | xargs -n1 echo"],
+    ["echo under an xargs -I zz inside xargs -I %", "echo a | xargs -I % xargs -I zz echo %"],
   ])("%s runs in the main checkout", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })

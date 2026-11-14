@@ -64,6 +64,39 @@ export const groups: Group[] = [
         "ext add by a program xargs -I puts in a string an env -S inside env -S splits",
         `echo playground | xargs -I cat env -S 'env -S cat' ext add login list x y`,
       ],
+      [
+        "ext add by a program xargs -J puts in place of the typed one, from input whose double quotes xargs strips",
+        "echo 'play\"\"ground' | xargs -J cat cat ext add login list x y",
+      ],
+      [
+        "ext add by a program xargs -I puts in place of the typed one, from input whose single quotes xargs strips",
+        "echo \"pl'ay'ground\" | xargs -I cat cat ext add login list x y",
+      ],
+      [
+        "ext add by a program xargs -J puts in place of the typed one, from input whose backslash xargs strips",
+        "echo 'play\\ground' | xargs -J cat cat ext add login list x y",
+      ],
+      [
+        "ext add by a program xargs -I puts in place of a wrapper's program, from input whose quotes xargs strips",
+        "echo \"play'gro'und\" | xargs -I cat nice cat ext add login list x y",
+      ],
+      [
+        "ext add by a program xargs -n1 -J puts in place of the typed one, one input item at a time",
+        "echo a playground | xargs -n1 -J cat cat ext add login list x y",
+      ],
+      [
+        "ext add by a program xargs -n 1 -J puts in place of the typed one, one input item at a time",
+        "echo a playground | xargs -n 1 -J cat cat ext add login list x y",
+      ],
+      [
+        "ext add by a program an outer xargs -I puts in place of an inner xargs' program",
+        "echo playground | xargs -I cat xargs -I zz cat ext add login list x y",
+      ],
+      [
+        "ext add by a program an outer xargs -I{} puts in place of an inner xargs -I%'s program",
+        "echo playground | xargs -I{} xargs -I% {} ext add login list x y",
+        "checkout",
+      ],
     ],
   },
   {
@@ -126,6 +159,38 @@ export const groups: Group[] = [
         "a build in the main checkout by a program xargs -I puts in a string an env -S inside env -S splits",
         `echo turbo | xargs -I cat env -S 'env -S cat' run build`,
       ],
+      [
+        "a build in the main checkout by a program xargs -J puts in place of the typed one, from input whose double quotes xargs strips",
+        "echo 'tur\"\"bo' | xargs -J cat cat run build",
+      ],
+      [
+        "a build in the main checkout by a program xargs -I puts in place of the typed one, from input whose single quotes xargs strips",
+        "echo \"tu'r'bo\" | xargs -I cat cat run build",
+      ],
+      [
+        "a build in the main checkout by a program xargs -J puts in place of the typed one, from input whose backslash xargs strips",
+        "echo 'turb\\o' | xargs -J cat cat run build",
+      ],
+      [
+        "a build in the main checkout by a program xargs -I puts in place of a wrapper's program, from input whose quotes xargs strips",
+        "echo \"tur'b'o\" | xargs -I cat nice cat run build",
+      ],
+      [
+        "a build in the main checkout by a program xargs -n1 -J puts in place of the typed one, one input item at a time",
+        "echo a turbo | xargs -n1 -J cat cat run build",
+      ],
+      [
+        "a build in the main checkout by a program xargs -n 1 -J puts in place of the typed one, one input item at a time",
+        "echo a turbo | xargs -n 1 -J cat cat run build",
+      ],
+      [
+        "a build in the main checkout by a program an outer xargs -I puts in place of an inner xargs' program",
+        "echo turbo | xargs -I cat xargs -I zz cat run build",
+      ],
+      [
+        "a build in the main checkout by a program an outer xargs -I{} puts in place of an inner xargs -I%'s program",
+        "echo turbo | xargs -I{} xargs -I% {} run build",
+      ],
     ],
   },
   {
@@ -167,6 +232,38 @@ export const groups: Group[] = [
       [
         "an unslotted build by the program a bare xargs --replace puts in place of its default {}",
         "echo turbo | xargs --replace {} run build",
+      ],
+      [
+        "an unslotted build by a program xargs -J puts in place of the typed one, from input whose double quotes xargs strips",
+        "echo 'tur\"\"bo' | xargs -J cat cat run build",
+      ],
+      [
+        "an unslotted build by a program xargs -I puts in place of the typed one, from input whose single quotes xargs strips",
+        "echo \"tu'r'bo\" | xargs -I cat cat run build",
+      ],
+      [
+        "an unslotted build by a program xargs -J puts in place of the typed one, from input whose backslash xargs strips",
+        "echo 'turb\\o' | xargs -J cat cat run build",
+      ],
+      [
+        "an unslotted build by a program xargs -I puts in place of a wrapper's program, from input whose quotes xargs strips",
+        "echo \"tur'b'o\" | xargs -I cat nice cat run build",
+      ],
+      [
+        "an unslotted build by a program xargs -n1 -J puts in place of the typed one, one input item at a time",
+        "echo a turbo | xargs -n1 -J cat cat run build",
+      ],
+      [
+        "an unslotted build by a program xargs -n 1 -J puts in place of the typed one, one input item at a time",
+        "echo a turbo | xargs -n 1 -J cat cat run build",
+      ],
+      [
+        "an unslotted build by a program an outer xargs -I puts in place of an inner xargs' program",
+        "echo turbo | xargs -I cat xargs -I zz cat run build",
+      ],
+      [
+        "an unslotted build by a program an outer xargs -I{} puts in place of an inner xargs -I%'s program",
+        "echo turbo | xargs -I{} xargs -I% {} run build",
       ],
     ],
   },
