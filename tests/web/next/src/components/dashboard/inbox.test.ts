@@ -2166,3 +2166,65 @@ describe("an ask card's answer in progress (PG-1345)", () => {
     expect(note(html)).toBe("")
   })
 })
+
+describe("a clone card (PG-2205)", () => {
+  const FOLDER = "/made/up/data/extensions"
+  const clone = {
+    ...decision,
+    id: "id-2205",
+    preview: {
+      repos: [
+        {
+          folder: `${FOLDER}/made-up-me`,
+          repo: "made-up-me/playground-made-up-me",
+          scope: "made-up-me",
+        },
+        {
+          folder: `${FOLDER}/made-up-tools`,
+          repo: "made-up-me/playground-made-up-tools",
+          scope: "made-up-tools",
+        },
+      ],
+      type: "clone",
+      why: "This new machine has no extensions yet",
+    },
+    title: "Clone your extensions onto this machine?",
+  } as unknown as InboxItem
+
+  test("lists each repo it clones and the folder it fills, in order, with its why, and offers Clone", () => {
+    const html = opened(clone)
+    expect(html).toContain("On Approve, the dashboard clones")
+    const first = html.indexOf("made-up-me/playground-made-up-me")
+    const second = html.indexOf("made-up-me/playground-made-up-tools")
+    expect(first).toBeGreaterThan(-1)
+    expect(second).toBeGreaterThan(first)
+    expect(html).toContain(`${FOLDER}/made-up-me`)
+    expect(html).toContain(`${FOLDER}/made-up-tools`)
+    expect(html).toContain("Why: This new machine has no extensions yet")
+    expect(named(html, "Clone the 2 repos")).not.toBe("")
+    expect(named(html, "Do not clone")).not.toBe("")
+  })
+
+  test("once approved, reads the clone's result line, green or red by its exit code", () => {
+    const line = "made-up-me/playground-made-up-me into /made/up/data/extensions/made-up-me"
+    const done = {
+      ...clone,
+      answer: { at: "2026-10-12T10:05:00.000Z", choice: "approve", cloned: { exitCode: 0, line } },
+      status: "approved",
+    } as unknown as InboxItem
+    expect(opened(done, "done")).toContain(`Cloned: ${line}`)
+    const failed = {
+      ...done,
+      answer: {
+        ...done.answer,
+        cloned: {
+          exitCode: 1,
+          line: "made-up-me/playground-made-up-me is not on GitHub, so nothing was cloned",
+        },
+      },
+    } as unknown as InboxItem
+    expect(opened(failed, "done")).toContain(
+      "Clone failed (exit 1): made-up-me/playground-made-up-me is not on GitHub, so nothing was cloned",
+    )
+  })
+})

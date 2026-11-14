@@ -1,5 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -49,10 +58,13 @@ import {
   payloadOf,
 } from "../../../../../../packages/config/src/inbox"
 import { RELAY_ANSWER_KINDS } from "../../../../../../packages/message/src/index"
+import type { Run } from "../../../../../../packages/scripts/src/ops-tick/tick"
+import { extInitCheck, extVerb } from "../../../../../../packages/scripts/src/playground/ext-init"
+import type { Io } from "../../../../../../packages/scripts/src/playground/store"
 import { writeFiles } from "../../../../../../packages/settings/src/folder"
 import { GUARD_SETTING_KEYS } from "../../../../../../packages/settings/src/guard-keys"
 import { judgeItem, putItem } from "../../../../../../packages/settings/src/items"
-import { loginPath } from "../../../../../../packages/settings/src/rendered"
+import { loginPath, scopeDir } from "../../../../../../packages/settings/src/rendered"
 import {
   readSetting,
   resetSetting,
@@ -927,6 +939,13 @@ describe("an answer", () => {
       ref: 44,
       title: "Accept",
     })
+    const cloning = item({
+      id: "mno",
+      kind: "decision",
+      preview: CLONE as never,
+      ref: 45,
+      title: "Clone",
+    })
     const read = (ref: number) => `playground ask get #i${ref} --ack`
     const ack = (ref: number) => `playground ask ack #i${ref} --link <https url>`
     const ackOrWhy = (ref: number) => `${ack(ref)}, or --no-link "<why>" when it leaves no page`
@@ -1087,6 +1106,16 @@ describe("an answer", () => {
         {
           accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
           close: 'playground ask ack #i44 --no-link "<why>"',
+          next: "nothing",
+          verb: "pick",
+        },
+      ],
+      [
+        cloning,
+        { at: AT, choice: "approve", cloned: { exitCode: 0, line: "cloned" } } as never,
+        {
+          cloned: { exitCode: 0, line: "cloned" },
+          close: 'playground ask ack #i45 --no-link "<why>"',
           next: "nothing",
           verb: "pick",
         },
@@ -1714,6 +1743,62 @@ describe("an own decision (PG-1162)", () => {
     expect(checkAnswer(open, { action: "deny" })).toMatchObject({ status: "denied" })
     expect(checkAnswer(open, { action: "edit", text: "another account" })).toHaveProperty("message")
     expect(RELAY_ANSWER_KINDS as readonly string[]).not.toContain("own")
+  })
+})
+
+const CLONE = {
+  repos: [
+    {
+      folder: "/made/up/data/extensions/made-up-me",
+      repo: "made-up-me/playground-made-up-me",
+      scope: "made-up-me",
+    },
+  ],
+  type: "clone",
+  why: "This new machine has no extensions yet",
+}
+const CLONE_TOOLS = {
+  folder: "/made/up/data/extensions/made-up-tools",
+  repo: "made-up-me/playground-made-up-tools",
+  scope: "made-up-tools",
+}
+
+describe("a clone decision (PG-2205)", () => {
+  const takes = (change: object) =>
+    inboxInputSchema.safeParse(decision({ ...CLONE, ...change })).success
+
+  test("carries 1 to 20 repos, each its owner/name, its scope and the folder it fills, and why", () => {
+    expect(takes({})).toBe(true)
+    expect(takes({ repos: [...CLONE.repos, CLONE_TOOLS] })).toBe(true)
+  })
+
+  test("refuses no repos, more than 20, a repo that is no owner/name, a relative folder, core, two repos for one scope, no why and any other field", () => {
+    const one = CLONE.repos[0]!
+    const many = Array.from({ length: 21 }, (_, at) => ({
+      folder: `/made/up/data/extensions/made-up-${at}`,
+      repo: `made-up-me/playground-made-up-${at}`,
+      scope: `made-up-${at}`,
+    }))
+    for (const change of [
+      { repos: [] },
+      { repos: many },
+      { repos: [{ ...one, repo: "playground-made-up-me" }] },
+      { repos: [{ ...one, repo: "--upload-pack=x/y" }] },
+      { repos: [{ ...one, folder: "extensions/made-up-me" }] },
+      { repos: [{ ...one, scope: "core" }] },
+      { repos: [one, { ...CLONE_TOOLS, scope: one.scope }] },
+      { why: "" },
+      { more: [] },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+
+  test("is approved, denied or cleared as it reads, never edited, and stays off the relay", () => {
+    const open = { kind: "decision", preview: CLONE, status: "open" } as never
+    expect(checkAnswer(open, { action: "deny" })).toMatchObject({ status: "denied" })
+    expect(checkAnswer(open, { action: "edit", text: "another repo" })).toHaveProperty("message")
+    expect(RELAY_ANSWER_KINDS as readonly string[]).not.toContain("clone")
   })
 })
 
@@ -6197,6 +6282,269 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect((await store.getItem(db, unseen.id))?.status).toBe("open")
       expect(writes(data)).toBe(before)
       expect(rows(data)).toEqual(ACCOUNTS)
+    })
+  })
+  describe("a clone decision's post and Approve (PG-2205)", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "inbox-clone-"))
+    afterAll(() => rmSync(scratch, { force: true, recursive: true }))
+    const ME = "made-up-me"
+    let n = 0
+    const git = (cwd: string, ...args: string[]) =>
+      Bun.spawnSync(["git", ...args], { cwd, stderr: "pipe", stdout: "pipe" })
+    // A new machine: a data folder with no extensions root yet, and a scratch bare repo with one commit standing in for each private GitHub repo a fake gh shows, signed in as made-up-me; no real repo is read or made.
+    const machine = (slugs = [`${ME}/playground-${ME}`, `${ME}/playground-made-up-tools`]) => {
+      const at = join(scratch, `${n++}`)
+      const data = join(at, "data")
+      const repos = new Map<string, string>()
+      for (const slug of slugs) {
+        const bare = join(at, `${slug.replace("/", "-")}.git`)
+        const work = join(at, `${slug.replace("/", "-")}-work`)
+        mkdirSync(work, { recursive: true })
+        git(at, "init", "-q", "--bare", "-b", "main", bare)
+        git(work, "init", "-q", "-b", "main")
+        writeFileSync(join(work, "settings.json"), "{}\n")
+        git(work, "add", "settings.json")
+        git(
+          work,
+          "-c",
+          "user.name=made-up",
+          "-c",
+          "user.email=made-up",
+          "commit",
+          "-q",
+          "-m",
+          "seed",
+        )
+        git(work, "push", "-q", bare, "HEAD:main")
+        repos.set(slug, bare)
+      }
+      const ghCalls: string[] = []
+      const gh: Run = async (argv) => {
+        ghCalls.push(argv.join(" "))
+        const [cmd, area, verb, slug = ""] = argv
+        if (cmd !== "gh") return { code: 1, out: "" }
+        if (area === "api") return { code: 0, out: `${ME}\n` }
+        if (area === "repo" && verb === "view" && repos.has(slug))
+          return { code: 0, out: `PRIVATE ${repos.get(slug)}\n` }
+        return { code: 1, out: "" }
+      }
+      const calls: string[][] = []
+      // `playground ext <args>` as runCli runs it: off a terminal with no --yes, so it makes no repo; init --dry-run prints its JSON, and a refusal its error with exit 1
+      const clone = async (args: string[]) => {
+        calls.push(args)
+        const lines: string[] = []
+        const io = { data, out: (line: string) => lines.push(line) } as unknown as Io
+        try {
+          if (args[0] === "init" && args[1] === "--dry-run")
+            return { code: 0, err: "", out: JSON.stringify(await extInitCheck(data, gh)) }
+          const code = await extVerb(args[0] as "add" | "init", args.slice(1), io, gh, NO)
+          return { code, err: "", out: lines.join("\n") }
+        } catch (error) {
+          return { code: 1, err: `playground ext: ${(error as Error).message}`, out: "" }
+        }
+      }
+      return { calls, clone, data, ghCalls }
+    }
+    const approveWith = (id: string, clone: unknown, data: string) =>
+      store.answerItem(db, id, { action: "approve" }, {
+        actor,
+        clone,
+        settingsData: data,
+      } as Parameters<typeof store.answerItem>[3])
+    const made = (ghCalls: string[]) => ghCalls.filter((call) => call.startsWith("gh repo create"))
+    const NO = async () => false
+    const card = (data: string, scopes = [ME, "made-up-tools"]) => ({
+      repos: scopes.map((scope) => ({
+        folder: scopeDir(data, scope),
+        repo: `${ME}/playground-${scope}`,
+        scope,
+      })),
+      type: "clone",
+      why: "This new machine has no extensions yet",
+    })
+    const postClone = async (preview: object, data?: string) => {
+      const posted = await store.postItem(db, decision(preview), undefined, undefined, data)
+      if (!posted.ok) throw new Error(posted.message)
+      return posted.item
+    }
+    // chflags off PATH, as on Linux, whose machines take no lock on the extensions root: git alone, by a link in a folder of its own
+    const linuxPath = () => {
+      const bin = join(scratch, `bin-${n++}`)
+      mkdirSync(bin)
+      symlinkSync(Bun.which("git")!, join(bin, "git"))
+      return bin
+    }
+
+    test("a card naming each repo and the folder it fills in this machine's extensions posts; a folder that is not its scope's there, or no data folder to read, is refused", async () => {
+      const { data } = machine()
+      expect((await store.postItem(db, decision(card(data)), undefined, undefined, data)).ok).toBe(
+        true,
+      )
+      const before = (await store.openItems(db)).length
+      const elsewhere = card(data)
+      elsewhere.repos[1]!.folder = join(scratch, "elsewhere", "made-up-tools")
+      for (const [preview, folder] of [
+        [elsewhere, data],
+        [card(data), undefined],
+      ] as const) {
+        expect(
+          await store.postItem(db, decision(preview), undefined, undefined, folder),
+          JSON.stringify(preview),
+        ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      }
+      expect((await store.openItems(db)).length).toBe(before)
+    })
+
+    test("Approve clones each repo into the data folder's extensions root, the login's by ext init and the rest by ext add, making no repo and with no chflags on PATH, and records the line under cloned", async () => {
+      const { calls, clone, data } = machine()
+      const posted = await postClone(card(data), data)
+      const path = process.env.PATH
+      process.env.PATH = linuxPath()
+      let answered: Awaited<ReturnType<typeof store.answerItem>>
+      try {
+        answered = await store.answerItem(db, posted.id, { action: "approve" }, {
+          actor,
+          clone,
+          settingsData: data,
+        } as Parameters<typeof store.answerItem>[3])
+      } finally {
+        process.env.PATH = path
+      }
+      expect(answered.ok && answered.item.status).toBe("approved")
+      expect(calls).toEqual([
+        ["init", "--dry-run"],
+        ["init"],
+        ["add", "made-up-tools", `${ME}/playground-made-up-tools`],
+      ])
+      expect(readFileSync(loginPath(data), "utf8")).toBe(`${ME}\n`)
+      for (const scope of [ME, "made-up-tools"])
+        expect(existsSync(join(scopeDir(data, scope), ".git", "HEAD")), scope).toBe(true)
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        cloned: {
+          exitCode: 0,
+          line: `${ME}/playground-${ME} into ${scopeDir(data, ME)}, ${ME}/playground-made-up-tools into ${scopeDir(data, "made-up-tools")}`,
+        },
+      })
+    })
+
+    test("refuses on a machine whose extensions root already holds a repo's folder: as it is posted, and at Approve before anything runs or is recorded", async () => {
+      const { calls, clone, data } = machine()
+      const posted = await postClone(card(data), data)
+      mkdirSync(scopeDir(data, "made-up-tools"), { recursive: true })
+      const refused = await store.postItem(db, decision(card(data)), undefined, undefined, data)
+      expect(refused).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      expect(!refused.ok && refused.message).toContain(scopeDir(data, "made-up-tools"))
+      const approved = await store.answerItem(db, posted.id, { action: "approve" }, {
+        actor,
+        clone,
+        settingsData: data,
+      } as Parameters<typeof store.answerItem>[3])
+      expect(approved).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      expect(!approved.ok && approved.message).toContain(scopeDir(data, "made-up-tools"))
+      expect(calls).toEqual([])
+      expect((await store.getItem(db, posted.id))?.status).toBe("open")
+      expect(existsSync(scopeDir(data, ME))).toBe(false)
+    })
+
+    test("a first repo other than the one ext init would clone for gh's login clones nothing, its line saying why", async () => {
+      const { calls, clone, data } = machine([`${ME}/playground-made-up-tools`])
+      const posted = await postClone(card(data, ["made-up-tools"]), data)
+      await store.answerItem(db, posted.id, { action: "approve" }, {
+        actor,
+        clone,
+        settingsData: data,
+      } as Parameters<typeof store.answerItem>[3])
+      expect(calls).toEqual([["init", "--dry-run"]])
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        cloned: { exitCode: 1 },
+      })
+      expect(existsSync(scopeDir(data, "made-up-tools"))).toBe(false)
+    })
+
+    test("a first repo not on GitHub clones nothing and makes no repo, since ext init answers no off a terminal", async () => {
+      const { calls, clone, data, ghCalls } = machine([])
+      const posted = await postClone(card(data, [ME]), data)
+      await approveWith(posted.id, clone, data)
+      expect(calls).toEqual([["init", "--dry-run"]])
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        cloned: {
+          exitCode: 1,
+          line: `${ME}/playground-${ME} is not on GitHub, so nothing was cloned`,
+        },
+      })
+      expect(made(ghCalls)).toEqual([])
+      expect(existsSync(scopeDir(data, ME))).toBe(false)
+    })
+
+    test("a later repo not on GitHub stops the clone there, making no repo: the line names the repos cloned and those not, and a second card for them is refused, naming the folders already there", async () => {
+      const { calls, clone, data, ghCalls } = machine([`${ME}/playground-${ME}`])
+      const posted = await postClone(card(data), data)
+      await approveWith(posted.id, clone, data)
+      expect(calls.map((args) => args[0])).toEqual(["init", "init", "add"])
+      expect(made(ghCalls)).toEqual([])
+      const answer = (await store.getItem(db, posted.id))?.answer as unknown as { cloned: object }
+      expect(answer.cloned).toMatchObject({ exitCode: 1 })
+      expect(JSON.stringify(answer.cloned)).toContain(
+        `cloned ${ME}/playground-${ME} into ${scopeDir(data, ME)}; ${ME}/playground-made-up-tools failed: `,
+      )
+      expect(existsSync(join(scopeDir(data, ME), ".git", "HEAD"))).toBe(true)
+      expect(existsSync(scopeDir(data, "made-up-tools"))).toBe(false)
+      const again = await store.postItem(db, decision(card(data)), undefined, undefined, data)
+      expect(again).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      expect(!again.ok && again.message).toContain(scopeDir(data, ME))
+    })
+
+    test("Approve checks the card again as it runs: a stored card past 20 repos, or one whose folder is not its scope's here, runs nothing", async () => {
+      const { calls, clone, data } = machine()
+      const many = await postClone(card(data), data)
+      const twentyOne = {
+        ...card(data),
+        repos: Array.from({ length: 21 }, (_, at) => ({
+          folder: scopeDir(data, `made-up-${at}`),
+          repo: `${ME}/playground-made-up-${at}`,
+          scope: `made-up-${at}`,
+        })),
+      }
+      const moved = await postClone(card(data), data)
+      const away = card(data)
+      away.repos[0]!.folder = join(scratch, "elsewhere", ME)
+      for (const [item, preview] of [
+        [many, twentyOne],
+        [moved, away],
+      ] as const) {
+        // written past postItem's checks, as a row changed after it was posted
+        const writer = new SQL(url, { max: 1 })
+        await writer`update inbox_item set preview = ${JSON.stringify(preview)}::jsonb where id = ${item.id}`
+        await writer.close()
+        expect(await approveWith(item.id, clone, data), item.id).toMatchObject({
+          code: "VALIDATION_ERROR",
+          ok: false,
+        })
+        expect((await store.getItem(db, item.id))?.status).toBe("open")
+      }
+      expect(calls).toEqual([])
+    })
+
+    test("Deny and Later run nothing, and a dashboard with no runner refuses Approve", async () => {
+      const { calls, clone, data } = machine()
+      const denied = await postClone(card(data), data)
+      await store.answerItem(db, denied.id, { action: "deny" }, {
+        actor,
+        clone,
+        settingsData: data,
+      } as Parameters<typeof store.answerItem>[3])
+      const later = await postClone(card(data), data)
+      await store.answerItem(db, later.id, { action: "clear" }, {
+        actor,
+        clone,
+        settingsData: data,
+      } as Parameters<typeof store.answerItem>[3])
+      const bare = await postClone(card(data), data)
+      expect(
+        await store.answerItem(db, bare.id, { action: "approve" }, { actor, settingsData: data }),
+      ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      expect(calls).toEqual([])
+      expect(existsSync(scopeDir(data, ME))).toBe(false)
     })
   })
 })
