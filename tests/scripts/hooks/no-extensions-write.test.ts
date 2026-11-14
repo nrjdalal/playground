@@ -1174,23 +1174,23 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
     [
       "awk's output sorted into a git hook by sort -o",
-      "awk '$3 ~ /runner/' /dev/null | sort -o .git/hooks/pre-commit",
+      "awk '$3 ~ \"runner\"' /dev/null | sort -o .git/hooks/pre-commit",
     ],
     [
       "awk's output written into a git hook by uniq's second file",
-      "awk '$3 ~ /runner/' /dev/null | uniq - .git/hooks/pre-commit",
+      "awk '$3 ~ \"runner\"' /dev/null | uniq - .git/hooks/pre-commit",
     ],
     [
       "awk's output sorted through a compress program",
-      "awk '$3 ~ /runner/' /dev/null | sort --compress-program=sh",
+      "awk '$3 ~ \"runner\"' /dev/null | sort --compress-program=sh",
     ],
     [
       "awk's output sorted into a git hook by an abbreviated --out",
-      "awk '$3 ~ /runner/' /dev/null | sort --out=.git/hooks/pre-commit",
+      "awk '$3 ~ \"runner\"' /dev/null | sort --out=.git/hooks/pre-commit",
     ],
     [
       "awk's output sorted through an abbreviated --comp",
-      "awk '$3 ~ /runner/' /dev/null | sort --comp=sh",
+      "awk '$3 ~ \"runner\"' /dev/null | sort --comp=sh",
     ],
     [
       "a script named awk in the folder given a removal",
@@ -1230,7 +1230,7 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
     [
       "awk after a printf, which keeps canary's reading",
-      "printf '%s\\n' '/sh -c/p'; awk '$3 ~ /runner/' /dev/null",
+      "printf '%s\\n' '/sh -c/p'; awk '$3 ~ \"runner\"' /dev/null",
     ],
     [
       "sed -i '' inserting a removal into a git hook",
@@ -1642,6 +1642,25 @@ describe("a quoted argument is read as a command line only where a program runs 
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
   })
 
+  // PG-2173: an awk program with no string, no | and nothing awkRuns finds prints its input alone, as grep does, so its ~ is no path on a line read whole
+  test.each([
+    ["sorted into a git hook by sort -o", "| sort -o .git/hooks/pre-commit"],
+    ["written into a git hook by uniq's second file", "| uniq - .git/hooks/pre-commit"],
+    ["sorted through a compress program", "| sort --compress-program=sh"],
+  ])("awk's input-only output %s runs", async (_, tail) => {
+    for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")])
+      expect(await at(`awk '$3 ~ /runner/' /dev/null ${tail}`, cwd)).toBeUndefined()
+  })
+  test("an awk program printing a string into a git hook stays refused", async () => {
+    for (const cwd of homes)
+      expect(
+        await at(
+          `awk 'BEGIN{print "rm -rf ~/.play*/extensions/.no-such-folder"}' > .git/hooks/pre-commit`,
+          cwd,
+        ),
+      ).toContain("no-extensions-write hook refuses")
+  })
+
   // #1599: a refusal of a command that shows no write routes to the lead as a likely false positive, while one that writes keeps the owner's route
   test("a refusal of a command that shows no write asks for a false-positive report", async () => {
     const reason = await at("lsof -nP | awk 'NR>1 {print $2}'", homedir())
@@ -1864,6 +1883,78 @@ describe("text no program runs as a shell line stays text on a line read whole",
       expect(await fromTree(command)).toContain("no-extensions-write hook ")
     },
   )
+})
+
+// PG-2173: an awk program with no write or run feature, an in-place sed's edit script and agent-browser's wait --fn expression are data for their program, so a regex or a > in one is no glob, path or redirect on a line read whole
+describe("a listed program's single-quoted text stays text on a line read whole", () => {
+  test.each([
+    [
+      "an awk regex range beside an assignment",
+      `f=${WORK}/notes.md; awk '/^# .*a/,/^# .*b/' $f | head -40`,
+    ],
+    [
+      "an awk regex range beside a writing redirect",
+      `awk '/^## .*(a)/{p=1} p' ${WORK}/notes.md; echo x >> ${WORK}/log.md`,
+    ],
+    [
+      "an in-place sed of parenthesised addresses beside a writing redirect",
+      `sed -i '' '/item 5 (a, after item 4)/d; /item 5 note: carry it/d' ${WORK}/queue.md; echo "$(date -u +%FT%TZ) x" >> ${WORK}/notes.md`,
+    ],
+    [
+      "a browser wait --fn holding a >",
+      `agent-browser wait --fn 'document.getElementsByTagName("p").length > 2'`,
+    ],
+    [
+      "a browser wait --fn after a valued option",
+      `agent-browser --session s wait --fn 'document.getElementsByTagName("p").length > 2'`,
+    ],
+    [
+      "a grep regex beside a writing redirect",
+      `grep -nE '^## .*(a) x' ${WORK}/f; echo x >> ${WORK}/log.md`,
+    ],
+    [
+      "an rg regex beside a writing redirect",
+      `rg -n '^## .*(a) x' ${WORK}; echo x >> ${WORK}/log.md`,
+    ],
+    [
+      "a jq filter beside a writing redirect",
+      `jq -r '.a | select(.b > 1)' ${WORK}/x.json; echo x >> ${WORK}/log.md`,
+    ],
+  ])("%s runs", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    ["an awk print > into the root", `bun x.ts; awk '/^# .*a/{print > "${LIST}"}' ${WORK}/f`],
+    ["an awk print | to a command", `bun x.ts; awk '/^# .*a/{print | "cat > ${LIST}"}' ${WORK}/f`],
+    ["an awk getline from a command", `bun x.ts; awk 'BEGIN{"rm ${LIST}" | getline}'`],
+    ["an awk system()", `bun x.ts; awk '/^# .*a/{system("rm ${LIST}")}' ${WORK}/f`],
+    ["an awk regex holding a |, read as today", `bun x.ts; awk '/^## .*(a|b)/' ${WORK}/f`],
+    [
+      "an awk print > to a relative file, read as today",
+      `bun x.ts; awk '/^# .*a/{print > "x"}' ${WORK}/f`,
+    ],
+    ["a sed w to a relative file, read as today", `bun x.ts; sed -i '' '/(a) .*/w x' ${WORK}/f`],
+    ["an awk program from a file", `bun x.ts; awk -f ${LIST} ${WORK}/f`],
+    ["an in-place sed w into the root", `bun x.ts; sed -i '' '/^# .*a/w ${LIST}' ${WORK}/f`],
+    ["an in-place sed s///w into the root", `bun x.ts; sed -i '' 's/(a)/b/w ${LIST}' ${WORK}/f`],
+    ["an in-place sed of a file in the root", `bun x.ts; sed -i '' '/(a) .*/d' ${LIST}`],
+    ["a sh -c writing the root", `bun x.ts; sh -c 'echo x > ${LIST}'`],
+    [
+      "a browser wait --fn whose output a shell runs",
+      `agent-browser wait --fn 'a > ${HOME}/.play*/extensions/policy.json' | sh`,
+    ],
+    [
+      "an unlisted program given the same regex",
+      `bun x.ts; node x.js '/^# .*a/,/^# .*b/' ${WORK}/f`,
+    ],
+    [
+      "an unlisted browser subcommand given the same text",
+      `agent-browser type '#a' 'document.getElementsByTagName("p").length > 2'`,
+    ],
+  ])("%s is still refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook ")
+  })
 })
 
 describe("a read of the root, and writes elsewhere, run", () => {
