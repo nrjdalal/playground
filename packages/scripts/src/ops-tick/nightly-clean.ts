@@ -91,7 +91,7 @@ const cloneOf = (path: string): number | undefined => {
   return n ? Number(n) : undefined
 }
 
-// Pure: the worktrees whose PR is merged or closed, each with that PR: its branch's newest PR, else a review-<n> or test-<n> clone's PR n; a worktree with no PR, or an open one, stays.
+// Pure: the worktrees whose PR is merged or closed, each with that PR: its branch's newest PR, else a review-<n>, test-<n> or test-<n>-before clone's PR n; a worktree with no PR, or an open one, stays.
 export const staleWorktrees = (worktrees: Worktree[], prs: Prs): (Worktree & { pr: Pr })[] =>
   worktrees.flatMap((w) => {
     const n = cloneOf(w.path)

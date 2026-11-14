@@ -262,16 +262,16 @@ async function otherClones(
   return { clones: clonesAt(leaves, n, main), n, pr: target.pr }
 }
 
-// Pure: the live reviewer and tester rows a roster's text has on a PR, by name; null when the text holds no agents list.
+// Pure: the live reviewer and tester rows a roster's text has on a PR, as their pr or in their prs list, by name; null when the text holds no agents list.
 export const checkersOf = (text: string, pr: string): string[] | null => {
   try {
     const { agents } = JSON.parse(text) as { agents: unknown }
     if (!Array.isArray(agents)) return null
     return agents.flatMap(
-      (a: { kind?: unknown; name?: unknown; pr?: unknown; status?: unknown }) =>
+      (a: { kind?: unknown; name?: unknown; pr?: unknown; prs?: unknown; status?: unknown }) =>
         a &&
         typeof a.name === "string" &&
-        a.pr === pr &&
+        (a.pr === pr || (Array.isArray(a.prs) && a.prs.includes(pr))) &&
         STATUSES.live.includes(String(a.status)) &&
         CLONES[kindOf(a.name, a.kind) ?? ""]
           ? [a.name]
