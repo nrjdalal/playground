@@ -40,3 +40,19 @@ test("a worker's start script resolves its checker's account into $acct and make
   expect(text).toContain("`uv sync --frozen`")
   expect(text).toContain("never borrows another worktree's")
 })
+
+// issue 2166: the Builder's standing brief lines live here, so a lead's brief adds only its item's own steps
+test("the worker template's Standing lines hold the lead's standing brief rules", async () => {
+  const text = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/new-worker.md")).text()
+  const standing = text.slice(text.indexOf("## Standing lines"))
+  expect(text).toContain("## Standing lines")
+  expect(standing).toContain("as a count and a one-line class, and the lead files it")
+  expect(standing).toContain("retry every 2 minutes and tell your lead once")
+  expect(standing).toContain("by its seat name or `$acct`")
+  expect(standing).toContain(
+    "a test stubs the live dashboard, its database, a live session's pane and a real token",
+  )
+  expect(standing).toContain("Every commit and push runs its hooks")
+  expect(standing).toContain("-handoff.md` (mode 600) with every push")
+  expect(standing).toContain("**signal** and **slots** rules")
+})

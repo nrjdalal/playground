@@ -9,7 +9,7 @@ For a guarded org's repo, that checkout is the one in the org's folder under the
 
 ## This PR
 
-Its scope as your worker's lead ruled it, the bar you score against, and any harness you re-run:
+Its scope as your worker's lead ruled it, the bar you score against, and any harness you re-run, each premise about how a tool behaves citing its file:line plus the line quoted, or else its file:line at a named sha (playbook's SESSIONS.md, Spawn's brief step):
 
 `__SPEC__`
 

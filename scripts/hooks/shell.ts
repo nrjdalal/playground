@@ -1633,10 +1633,54 @@ async function runAll(
     // a script in another language is not read as shell
     consumer.runsStdin = kind !== "code"
   }
-  for (const cmd of lexed.commands) {
-    const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins)
+  const unbind = new Map<Command, () => void>()
+  for (const [k, cmd] of lexed.commands.entries()) {
+    const at = envOf(cmd.scope)
+    const verdict = await examine(cmd, at, visit, builtins)
     if (verdict) return verdict
+    unbind.get(cmd)?.()
+    bind(lexed.commands, k, at, unbind)
   }
+}
+
+// A binder (`binds`) gives its names a value the reader cannot read in walk order, in its own scope: a for or select header for its own body alone, back to what they held at its close, since its body runs only once it has bound and its list may be empty; any other binder for the commands after it, where the shell runs it unconditionally there
+function bind(commands: Command[], k: number, env: Env, unbind: Map<Command, () => void>): void {
+  const cmd = commands[k]
+  const names = binds(cmd)
+  if (names.length === 0 || cmd.detached) return
+  const close = loopHeader(cmd) ? loopClose(commands, k) : undefined
+  if (!close && (loopHeader(cmd) || cmd.unsure || cmd.chained || cmd.kept)) return
+  const before = names.map((name) => [name, env.vars.get(name)] as const)
+  for (const name of names) setVar(env.vars, name, unknown("a value a builtin gives"))
+  if (close)
+    unbind.set(close, () => {
+      for (const [name, held] of before) held ? setVar(env.vars, name, held) : env.vars.delete(name)
+    })
+}
+
+// The leading words of a command the shell reads as reserved, an opening or a closing word, in order (`do for`, `done`, `{ read`)
+function heads({ words }: Command): string[] {
+  const out: string[] = []
+  for (const w of words) {
+    if (w.quoted || !(RESERVED.has(w.value) || OPENS.has(w.value) || CLOSES.has(w.value))) break
+    out.push(w.value)
+  }
+  return out
+}
+
+const loopHeader = (cmd: Command): boolean => {
+  const last = heads(cmd).at(-1)
+  return last === "for" || last === "select"
+}
+
+// The command whose `done` closes the loop the header at k opens, by counting the opening and closing words after it
+function loopClose(commands: Command[], k: number): Command | undefined {
+  let depth = 1
+  for (const cmd of commands.slice(k + 1))
+    for (const word of heads(cmd)) {
+      if (CLOSES.has(word) && --depth === 0) return cmd
+      if (OPENS.has(word)) depth++
+    }
 }
 
 const subshell = (env: Env): Env => ({ ...env, vars: new Map(env.vars) })
@@ -1657,7 +1701,12 @@ export async function examine(
     env.cwdUnread = true
   }
   const [primary, ...others] = readings(parse(cmd))
-  const expanded = [...expandTilde(cmd, primary.name, env), ...splitHeld(cmd, primary.name, env)]
+  const vanished = emptyProgram(cmd, env)
+  const expanded = [
+    ...expandTilde(cmd, primary.name, env),
+    ...splitHeld(cmd, primary.name, env),
+    ...vanished,
+  ]
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env
   const verdict = await examineReading(cmd, primary, env, visit, builtins)
@@ -1669,6 +1718,12 @@ export async function examine(
   for (const variant of expanded) {
     const verdict = await examineExpanded(cmd, variant, before, visit, builtins)
     if (verdict) return verdict
+  }
+  // a cd behind words that may expand to none may run or not, so the folder it names joins those the shell may be in, as an `||`'s cd does
+  for (const variant of vanished) {
+    const parsed = parse(variant)
+    if (MOVES.has(parsed.name))
+      await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env)
   }
   // piped input the command may run as code is judged as a script it runs, unless its own reading took that input as its script already
   if (!cmd.runsStdin || stdinScript(primary)) return
@@ -1810,6 +1865,79 @@ function splitValue(value: string, seps: RegExp): Word[] {
         ? { quoted: false, unknown: "a shell variable", value: part }
         : { quoted: false, value: tildeHome(part) },
     )
+}
+
+// One part of a word the shell may expand to no word: a bare read (`$X`, `$@`, `$*`, `$1`, zsh's `$=X`, `$~X`), a braced read of a name, an array or an indirection whose operator yields nothing on an unset or empty value (`${X}`, `${X:-}`, `${X=}`, `${X:+y}`, `${X#a}`, `${X/a/b}`, `${X:0}`, `${X[@]}`, `${!X}`, zsh's `${=X}`), or a quoted `"$@"` or `"${X[@]}"`, which expands to no word with no elements
+const VANISHING_PART =
+  /\$[=~^]*(?:\w+|[@*])|\$\{[=~^]*!?(?:\w+|[@*])(?:\[[@*]\])?(?::?[-=]|:?\+[^{}]*|(?:#|%|\/|:(?![-=?+]))[^{}]*)?\}|"\$(?:@|\{@\}|\{\w+\[@\]\})"/y
+const MOVES = new Set(["cd", "popd", "pushd"])
+
+// Whether a source is made of VANISHING_PART alone
+const vanishingParts = (source: string): boolean => {
+  VANISHING_PART.lastIndex = 0
+  while (VANISHING_PART.lastIndex < source.length) if (!VANISHING_PART.exec(source)) return false
+  return true
+}
+
+// read's options that take a value, which binds no name (bash manual, Bourne Shell Builtins and Bash Builtins: read)
+const READ_VALUES = new Set(["d", "i", "n", "N", "p", "t", "u"])
+const NAME = /^[A-Za-z_]\w*$/
+
+// The names one command gives a value without an `=` (bind reads them), each at its builtin's binding place as the bash manual gives it: `for NAME in`, `select NAME in`, `read [options] NAME…` and its `-a NAME`, `getopts OPTSTRING NAME` and `printf -v NAME`; a declaration builtin gives none, its `=` part read as an assignment
+function binds({ words }: Command): string[] {
+  let at = 0
+  while (
+    at < words.length &&
+    ((!words[at].quoted && RESERVED.has(words[at].value)) || ASSIGN.test(words[at].value))
+  )
+    at++
+  const [head, ...rest] = words.slice(at).map((w) => w.value)
+  if (head === "for" || head === "select") return rest[0] && NAME.test(rest[0]) ? [rest[0]] : []
+  if (head === "getopts") return rest[1] && NAME.test(rest[1]) ? [rest[1]] : []
+  if (head === "printf") {
+    const v = rest.findIndex((w) => w === "-v" || /^-v\w/.test(w))
+    const name = v < 0 ? undefined : rest[v] === "-v" ? rest[v + 1] : rest[v].slice(2)
+    return name && NAME.test(name) ? [name] : []
+  }
+  if (head !== "read") return []
+  const names: string[] = []
+  for (let i = 0; i < rest.length; i++) {
+    const w = rest[i]
+    if (w === "--" || !w.startsWith("-") || w.length < 2) {
+      names.push(...rest.slice(w === "--" ? i + 1 : i))
+      break
+    }
+    // a cluster's last letter takes its value attached or as the next word: `-a NAME` binds it, every other value binds none
+    const letters = w.slice(1)
+    const taker = [...letters].findIndex((c) => c === "a" || READ_VALUES.has(c))
+    if (taker < 0) continue
+    const value = letters.slice(taker + 1) || rest[++i]
+    if (letters[taker] === "a" && value) names.push(value)
+  }
+  return names.filter((w) => NAME.test(w))
+}
+
+// Whether a word may expand to no word: the reader read none of it, and it is VANISHING_PART alone with every variable it names one the line never set (a binder sets one, `binds`) or set to nothing, or an unread part of a word a script the line built carries (`eval $X …`, `bash -c "$X …"`), which keeps no source of its own
+const mayVanish = (w: Word, env: Env): boolean =>
+  !!w.source &&
+  /^\u0000+$/.test(w.value) &&
+  (/^\u0000+$/.test(w.source) ||
+    (vanishingParts(w.source) &&
+      [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
+        const set = env.vars.get(name)
+        return !set || (!set.unknown && set.value === "")
+      })))
+
+// The empty reading of a command: each program word that may expand to no word (mayVanish) dropped, until one that stays leads, so the word after it is judged as the program (`$X git commit`, `nice $X git commit`, `$X $Y git commit`); none when the program word stays. It is judged beside the typed reading, so a verdict only moves to refused.
+function emptyProgram(cmd: Command, env: Env): Command[] {
+  if (!cmd.words.some((w) => mayVanish(w, env))) return []
+  let words = cmd.words
+  for (let { first } = parse(cmd); first && words.includes(first) && mayVanish(first, env);) {
+    const dropped = first
+    words = words.filter((w) => w !== dropped)
+    ;({ first } = parse({ ...cmd, words }))
+  }
+  return words === cmd.words ? [] : [{ ...cmd, words }]
 }
 
 // The expanded words are judged on the command itself, swapped in and back, since hooks key their notes on the command, and on a copy of the env before it, as every other reading is.
