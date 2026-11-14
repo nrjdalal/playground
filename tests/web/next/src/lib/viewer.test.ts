@@ -2,15 +2,11 @@ import { describe, expect, test } from "bun:test"
 
 import {
   asViewerPage,
+  documentNonce,
   fenced,
   frameLoad,
   viewerFrameMessage,
 } from "../../../../../web/next/src/lib/viewer"
-import * as viewer from "../../../../../web/next/src/lib/viewer"
-
-const stamped = viewer.asViewerPage as (html: string, nonce?: string) => string
-const documentNonce = (viewer as unknown as Record<string, (doc?: unknown) => string | undefined>)
-  .documentNonce!
 
 describe("viewerFrameMessage", () => {
   test("takes only the viewer's own messages", () => {
@@ -140,7 +136,7 @@ function page(scroll = { clientWidth: 800, scrollLeft: 0, scrollWidth: 800 }) {
 describe("asViewerPage", () => {
   // the hosted build's page CSP reaches a srcdoc frame too, so each script in it carries the page's nonce to run; the frame's sandbox, with no same-origin (documents.test.ts), keeps the nonce from the Dashboard's storage
   test("on the hosted build, every script in the page and the keys script carries the page's nonce", () => {
-    const served = stamped(
+    const served = asViewerPage(
       "<p>hi</p><script>a()</script><SCRIPT src=x></SCRIPT><scripts>",
       "bm9uY2U=",
     )
@@ -151,7 +147,7 @@ describe("asViewerPage", () => {
 
   test("with no nonce, as on the local build, the page is served as before", () => {
     const html = "<p>hi</p><script>a()</script>"
-    expect(stamped(html, undefined)).toBe(asViewerPage(html))
+    expect(asViewerPage(html, undefined)).toBe(asViewerPage(html))
     expect(asViewerPage(html)).not.toContain("nonce")
   })
 
