@@ -5,7 +5,7 @@ export const groups: Group[] = [
   {
     folders: ["home", "process worktree"],
     guards: ["no-extensions-write"],
-    rows: ({ ROOT }) => [
+    rows: ({ HOME, ROOT }) => [
       ["ex in script mode after a cd to a variable", `cd "$X" && ex -sc 'wq' f`],
       ["vim running a write after a cd to a variable", `cd "$X" && vim -c wq f`],
       ["patch from an absolute diff after a cd to a variable", `cd "$X" && patch -p1 < /tmp/d`],
@@ -152,6 +152,62 @@ export const groups: Group[] = [
       [
         "a write after a cd to a variable set from the head of another",
         `W=${ROOT}/hooks; T=$W:h; cd "$X" && cd $T && echo x > f`,
+      ],
+      [
+        "git with a git folder by its variable after a cd to a variable",
+        `cd "$X" && GIT_DIR=/tmp/r/.git git checkout -- f`,
+      ],
+      [
+        "git with a git folder and an unread work tree after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/r/.git --work-tree="$Y" checkout -- f`,
+      ],
+      [
+        "git mv with a git folder alone after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/x/.git mv a b`,
+      ],
+      [
+        "git clean with a git folder alone after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/x/.git clean -f`,
+      ],
+      [
+        "git stash with a git folder alone after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/x/.git stash`,
+      ],
+      [
+        "git with a git folder and the root as its work tree after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/r/.git --work-tree=${ROOT} checkout -- f`,
+      ],
+      [
+        "git with a git folder and home as its work tree after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/x/.git --work-tree=${HOME} checkout -- f`,
+      ],
+      [
+        "git with a git folder and the folder above home as its work tree after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/x/.git --work-tree=${HOME}/.. checkout -- f`,
+      ],
+      [
+        "git with a git folder and /var as its work tree after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/x/.git --work-tree=/var checkout -- f`,
+      ],
+      [
+        "git with a git folder and /private as its work tree after a cd to a variable",
+        `cd "$X" && git --git-dir=/tmp/x/.git --work-tree=/private checkout -- f`,
+      ],
+      [
+        "a write after a cd to a variable with an escaped modifier",
+        `W=/tmp; cd "$X" && cd $W\\:t && echo x > f`,
+      ],
+      [
+        "a write after a cd to a variable with a quoted-empty modifier",
+        `W=/tmp; cd "$X" && cd $W'':t && echo x > f`,
+      ],
+      [
+        "a write after a cd to a braced variable followed by a colon",
+        `W=/tmp; cd "$X" && cd \${W}:t && echo x > f`,
+      ],
+      [
+        "a write after a cd to a variable followed by a colon path",
+        `W=/tmp; cd "$X" && cd $W:/x && echo x > f`,
       ],
     ],
   },

@@ -1354,6 +1354,9 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
     "C=/elsewhere/read-org-repo; cd ..; cd $C:t; sed -n 1,5p README.md",
     'C=/elsewhere/read-org-repo; cd .. && cd "$C:t" && cat README.md',
     "C=$ORG/src; cd $C:h && cat README.md",
+    "C=$ORG/src; env -C $C:h cat README.md",
+    "C=$ORG/src; T=$C:h; cd $T && cat README.md",
+    "C=/elsewhere/read-org-repo; cd .. && pushd $C:t && cat README.md",
   ])(
     "a read after a cd through a modifier of a variable the line sets is refused on GLM: %s",
     async (form) => {
