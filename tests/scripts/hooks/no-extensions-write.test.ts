@@ -2261,7 +2261,7 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["a bare mktemp", `cd "$X"; mktemp`],
     ["mktemp of a template in the temp folder", `cd "$X"; mktemp -t x.XXXX`],
     ["mktemp of a template in an absolute folder", `cd "$X"; mktemp -p /tmp/scratch x.XXXX`],
-    ["chmod under xargs of an absolute file", `cd "$X"; xargs chmod 644 /tmp/p`],
+    ["chmod under xargs of an absolute file", `cd "$X"; echo /tmp/q | xargs chmod 644 /tmp/p`],
     ["GNU chmod of an absolute file", `cd "$X"; gchmod 644 /tmp/p`],
     ["sort's shortened --output to an absolute file", `cd "$X"; sort --outp /tmp/p /tmp/a`],
     ["tar's -f before its -C", `cd "$X"; tar -x -f /tmp/a.tar -C /tmp/out`],

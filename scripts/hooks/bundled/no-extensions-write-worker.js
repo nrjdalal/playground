@@ -10672,7 +10672,7 @@ async function inspect(raw, environment, unknown = false) {
         ...values
       ] : WRITERS.has(tool) ? writeTargets(tool, given, gnu, posix) : [];
     };
-    const unlisted = !remover && !WRITERS.has(tool) ? unreadCdWrites(tool, args, env, !gnu || posix) : [];
+    const unlisted = !remover && !WRITERS.has(tool) ? shapes.flatMap((typed) => unreadCdWrites(tool, typed, env, !gnu || posix)) : [];
     const loose = [...shapes.flatMap(operandsOf), ...unlisted].find((word) => !placed(word, env, steady));
     if (!loose)
       return;
