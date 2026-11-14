@@ -409,4 +409,37 @@ describe("the poll", () => {
       "@bo mentioned you in #ops",
     ])
   })
+
+  test("a login an object already names, such as constructor or __proto__, counts from 0 and is capped like any other, across polls (#2091)", async () => {
+    const file = join(DIR, "marks-cap-names.json")
+    const cards: Card[] = []
+    const post = async (card: Card) => void cards.push(card)
+    const at = (i: number) => `2026-10-30T11:${String(i).padStart(2, "0")}:00.000Z`
+    const from = (login: string, i: number) =>
+      message({ at: at(i), from: { device: "studio", login }, id: `${login}-${i}` })
+    const sent = Array.from({ length: 22 }, (_, i) => [
+      from("constructor", i),
+      from("__proto__", i),
+    ]).flat()
+    await pollWaiting(
+      client([channel()], []).yard,
+      { post, tell: noTell },
+      WEB,
+      file,
+      new Date("2026-10-30T00:00:00Z"),
+    )
+    await pollWaiting(
+      client([channel()], sent.slice(0, 20)).yard,
+      { post, tell: noTell },
+      WEB,
+      file,
+    )
+    await pollWaiting(client([channel()], sent).yard, { post, tell: noTell }, WEB, file)
+    const titles = (login: string) => cards.filter((c) => c.title.startsWith(`@${login} `))
+    for (const login of ["constructor", "__proto__"])
+      expect(titles(login).map((c) => c.title)).toEqual([
+        ...Array.from({ length: 20 }, () => `@${login} mentioned you in #ops`),
+        `@${login} mentioned you more than 20 times today`,
+      ])
+  })
 })
