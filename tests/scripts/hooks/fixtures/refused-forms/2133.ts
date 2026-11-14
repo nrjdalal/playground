@@ -26,6 +26,73 @@ export const groups: Group[] = [
         "a kill by pattern behind an unset variable with an empty default for unset alone",
         "${X-} pkill -f watcher",
       ],
+      ["a kill by pattern behind an unset variable's alternate value", "${X:+y} pkill -f watcher"],
+      [
+        "a kill by pattern behind an unset variable's alternate value for unset alone",
+        "${X+y} pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind an unset variable assigned an empty default",
+        "${X:=} pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind an unset variable assigned an empty default for unset alone",
+        "${X=} pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind an unset variable with a prefix removed",
+        "${X#a} pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind an unset variable with a suffix removed",
+        "${X%a} pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind an unset variable with its longest prefix removed",
+        "${X##*} pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind an unset variable with a replacement",
+        "${X/a/b} pkill -f watcher",
+      ],
+      ["a kill by pattern behind an unset variable's substring", "${X:0} pkill -f watcher"],
+      ["a kill by pattern behind an unset array's elements", "${X[@]} pkill -f watcher"],
+      ["a kill by pattern behind an unset array's joined elements", "${X[*]} pkill -f watcher"],
+      ["a kill by pattern behind an unset array's quoted elements", '"${X[@]}" pkill -f watcher'],
+      ["a kill by pattern behind an indirect read of an unset variable", "${!X} pkill -f watcher"],
+      [
+        "a kill by pattern behind an unset variable joined to a quoted list of no arguments",
+        '$X"$@" pkill -f watcher',
+      ],
+      [
+        "a kill by pattern behind a quoted list of no arguments joined to an unset variable",
+        '"$@"$X pkill -f watcher',
+      ],
+      [
+        "a kill by pattern behind two quoted lists of no arguments joined",
+        '"$@""$@" pkill -f watcher',
+      ],
+      [
+        "a kill by pattern behind an unset variable read with zsh's split flag",
+        "$=X pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind an unset variable read with zsh's braced split flag",
+        "${=X} pkill -f watcher",
+      ],
+      [
+        "a kill by pattern behind an unset variable read with zsh's glob flag",
+        "$~X pkill -f watcher",
+      ],
+      ["a kill by pattern behind an unset variable in an eval's words", "eval $X pkill -f watcher"],
+      [
+        "a kill by pattern behind an unset variable in an eval's quoted script",
+        'eval "$X pkill -f watcher"',
+      ],
+      [
+        "a kill by pattern behind an unset variable in a shell's script",
+        'bash -c "$X pkill -f watcher"',
+      ],
     ],
   },
   {
@@ -40,6 +107,21 @@ export const groups: Group[] = [
       [
         "a commit after a cd behind an unset variable, from a worktree",
         `$X cd ${MAIN} && git commit -m x`,
+        "checkout",
+      ],
+      [
+        "a commit after a cd behind an unset variable's alternate value, from a worktree",
+        `\${X:+y} cd ${MAIN} && git commit -m x`,
+        "checkout",
+      ],
+      [
+        "a commit after a cd behind an unset variable joined to a quoted list of no arguments, from a worktree",
+        `$X"$@" cd ${MAIN} && git commit -m x`,
+        "checkout",
+      ],
+      [
+        "a commit after a pushd behind an unset variable, from a worktree",
+        `$X pushd ${MAIN} && git commit -m x`,
         "checkout",
       ],
     ],
