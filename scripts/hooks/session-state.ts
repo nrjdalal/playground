@@ -279,11 +279,24 @@ export async function sessionAbove(
   pid: number = process.ppid,
   procs: (pid: number) => Proc | undefined = procOf,
 ): Promise<{ pid: number; role: string; sessionId?: string } | undefined> {
+  const above = await claudeAbove(pid, procs)
+  if (!above) return undefined
+  const { config: _config, env: _env, ...session } = above
+  return session
+}
+
+// sessionAbove's walk with the claude process's own environment and the config folder its registry was read from, for a reader that reads every folder from that process rather than its caller (ship:yard's launch).
+export async function claudeAbove(
+  pid: number = process.ppid,
+  procs: (pid: number) => Proc | undefined = procOf,
+): Promise<
+  { config?: string; env: Environment; pid: number; role: string; sessionId?: string } | undefined
+> {
   for (let at = pid, hop = 0; at > 1 && hop < HOPS; hop++) {
     const proc = procs(at)
     if (!proc) return undefined
     if (isClaude(proc.comm)) {
-      if (!Object.keys(proc.env).length) return { pid: at, role: "" }
+      if (!Object.keys(proc.env).length) return { env: {}, pid: at, role: "" }
       const config =
         proc.env.CLAUDE_CONFIG_DIR || (proc.env.HOME ? join(proc.env.HOME, ".claude") : "")
       const entry = (
@@ -295,7 +308,13 @@ export async function sessionAbove(
       ) as { pid?: unknown; sessionId?: unknown } | null
       const sessionId =
         entry?.pid === at && typeof entry.sessionId === "string" ? entry.sessionId : undefined
-      return { pid: at, role: proc.env.PLAYGROUND_ROLE ?? "", sessionId }
+      return {
+        config: config || undefined,
+        env: proc.env,
+        pid: at,
+        role: proc.env.PLAYGROUND_ROLE ?? "",
+        sessionId,
+      }
     }
     at = proc.ppid
   }

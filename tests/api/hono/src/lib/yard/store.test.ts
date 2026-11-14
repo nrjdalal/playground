@@ -547,6 +547,64 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
         status: 429,
       })
     })
+
+    // waits out an hour's last 30 s, so every call of a budget lands in one hourly window
+    const inOneHour = async () => {
+      const left = 3_600_000 - (Date.now() % 3_600_000)
+      if (left < 30_000) await Bun.sleep(left + 10)
+    }
+
+    // a member of its own for one budget's test, so its counts reach no other test's caller
+    const member = async (id: string): Promise<Caller> => {
+      await sql`insert into "user" (id, name, email, login, role) values (${id}, ${id}, ${`${id}@example.com`}, ${id}, 'member')`
+      return web(id)
+    }
+
+    test("joining a channel stops at 30 an hour for one caller", async () => {
+      const caller = await member("joiner")
+      const channel = await store.createChannel(db, caller, { name: "join-budget" })
+      await inOneHour()
+      for (let i = 0; i < 30; i++) await store.joinChannel(db, caller, channel.id)
+      await expect(store.joinChannel(db, caller, channel.id)).rejects.toMatchObject({
+        status: 429,
+      })
+    }, 60_000)
+
+    test("opening a DM stops at 30 an hour for one caller", async () => {
+      const caller = await member("dm-opener")
+      await inOneHour()
+      for (let i = 0; i < 30; i++) await store.openDm(db, caller, "di")
+      await expect(store.openDm(db, caller, "di")).rejects.toMatchObject({ status: 429 })
+    }, 60_000)
+
+    test("redeeming an invite stops at 10 tries an hour for one caller, a wrong code included", async () => {
+      const caller = await member("redeemer")
+      await inOneHour()
+      for (let i = 0; i < 10; i++)
+        await expect(store.redeemInvite(db, caller, "NOPE-NOPE-NOPE")).rejects.toMatchObject({
+          status: 404,
+        })
+      await expect(store.redeemInvite(db, caller, "NOPE-NOPE-NOPE")).rejects.toMatchObject({
+        status: 429,
+      })
+    }, 60_000)
+
+    test("a bot's reads of the log stop at 120 an hour, before the read reaches the Mac", async () => {
+      const maker = await member("bot-maker")
+      const { secret } = await store.createBot(db, maker, "log-budget", { log: true })
+      const owner = (await store.tokenOwner(db, secret))!
+      const bot = {
+        bot: { madeBy: owner.bot!.madeBy, readsLog: true },
+        device: owner.device,
+        id: owner.user.id,
+        login: owner.user.login!,
+        owner: false,
+        via: "token" as const,
+      }
+      await inOneHour()
+      for (let i = 0; i < 120; i++) await store.logReadOf(db, bot)
+      await expect(store.logReadOf(db, bot)).rejects.toMatchObject({ status: 429 })
+    }, 60_000)
   })
 
   describe("tokens", () => {

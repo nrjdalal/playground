@@ -70,6 +70,7 @@ Apply with `db:migrate` alone: with no TTY attached, `drizzle-kit push` stops at
 
 For the dashboard, which is never deployed, this is local or ad-hoc only, so ZeroStarter's deploy-time auto-apply never runs for it: the runner hosting the live dashboard runs `bun run db:migrate` in its checkout after a reset that brings a migration (the dev skill's "The live dashboard's build").
 The hosted build (Yard, `PLAYGROUND_HOSTED=1`) is the one deploy: `api/hono/vercel.json` runs that auto-apply, `packages/scripts/src/migrate-on-deploy.ts`, before `build:vercel`, so a production or `canary` deploy applies pending migrations to the hosted database, while a PR preview skips them.
+The release skill's step 4 deploys it with `bun run ship:yard <tag>`, which stops on a tag that changes the schema or a migration until it runs again with `--schema-cleared <Inbox id>` naming this step 0's decision.
 
 Done when `bun run db:migrate` exits 0 and `docker exec playground-<worktree>-db psql -U postgres -d postgres -c '\d <table>'` lists the new table or column.
 

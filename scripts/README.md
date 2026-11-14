@@ -2,7 +2,7 @@
 
 The factory's own scripts: `spawn.sh`, which starts and resumes every factory session, `link-skills.sh`, which installs the skills, the herdr servers' ops job, a worktree's `node_modules` clone and `bun run test:skills`.
 AGENTS.md keeps one line for each, and this file holds the text that line stands for.
-It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes, the rule for an edit script's replacements, and where a factory script's orphan is ended.
+It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes, the rule for an edit script's replacements, a zsh loop's variable names, and where a factory script's orphan is ended.
 Read a section before you change its script or its tests, or when it refuses a start you did not expect.
 The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
@@ -303,8 +303,9 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   It reads past the window since a GLM session runs now and then, so a day's transcripts can hold none of its calls, and it reads every transcript whole (13008 files, 26 GB on 7 Nov), so it runs through run-slot as a heavy step, which a bare start queues on its own.
   That registry links the real config folder's `plugins/`, `settings.json` and `skills/`, each where it exists, so a hook that reads the installed skills (writing-first) reads the real ones; the run writes nothing through them, since every hook's `check()` writes only into the data folder and its own temp files.
   A session whose name the roster lacks, or that no agent-name line names, keeps the default, `PLAYGROUND_ROLE` unset, where a hook places it by its name itself, and its calls are counted as `default role`.
-  A hook whose `check()` takes the main checkout third (`TAKES_MAIN`: no-main-checkout and no-unslotted-run) gets the head's on both sides, the folder above its git common dir, since canary's tree below is no git checkout and would otherwise read as main on canary's side alone; a test holds `TAKES_MAIN` to the hooks whose `check()` declares that parameter.
+  A hook whose `check()` takes the main checkout third (`TAKES_MAIN`: no-main-checkout and no-unslotted-run) gets the head's on both sides, the folder above its git common dir, since canary's tree below is no checkout of the repository and would otherwise read as main on canary's side alone; a test holds `TAKES_MAIN` to the hooks whose `check()` declares that parameter.
   Both sides run with `PLAYGROUND_REPO` set to the head's main checkout, the caller's value put back after, so `mainCheckout()` (`packages/scripts/src/main-checkout.ts`, read by no-desktop-owner-app's main-checkout allowance) gives canary's side the same root as the head's.
+  Canary's tree takes the head main checkout's origin (`git init`, then `remote.origin.url`), so no-protected-push, whose `factoryRepo` (`packages/scripts/src/playground/setting.ts`) reads its own checkout's origin while `factory.repo` is unset, reads the same repository on both sides; with no origin there, canary's side would count every repository as the factory's.
   `ROOT_READS` names every file in the hooks' import graph that finds a path from its own folder, each with why both sides read alike: pinned, a file that ships with each version, unreached by a Bash call, or only in a refusal's text.
   A test walks that graph through relative, `@packages/*`, a package's own `@/` and dynamic imports, and fails on a new such read until `ROOT_READS` places it.
   Canary's hooks load from canary's whole tree at the sha, unpacked by `git archive` and installed from its own lockfile (`bun install --frozen-lockfile --ignore-scripts`), so every hook loads canary's packages, `extensions/core` and dependencies, and the install leaves the shared git hooks alone.
@@ -325,3 +326,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 An edit script that writes code or text with JavaScript passes each replacement that may hold `$` through a replacer function, `s.replace(a, () => b)`, or `split(a).join(b)`, since a string replacement reads `$$`, `$&`, `` $` ``, `$'` and `$1` as patterns: `"a".replace("a", "echo $$")` gives `echo $`, and an edit script once turned `$$` into `$` in `run-slot.sh` with no error.
 In the repo's TypeScript, `tests/packages/scripts/src/replace-dollar.test.ts` fails on a literal replacement holding `$$`, `` $` `` or `$'`, or `$&` after a string search, naming the file, the line and the fix.
+
+## A zsh loop's variable names
+
+In zsh, `path` is tied to `PATH`, so name loop variables `p` or `file`, never `path`: a loop whose variable is `path` sets `PATH` to each item in turn, so every command after it that is not a builtin fails as not found, and a check written `cmd && echo ok || echo MISSING` then reports every item missing.
