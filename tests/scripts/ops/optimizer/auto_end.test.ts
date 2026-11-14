@@ -1134,6 +1134,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     const rmOf = (data: string, main: string, prHead: string): RmDeps => ({
       clones: () => [],
       data,
+      defaultBranch: () => null,
       home: data,
       main,
       merged: () => null,

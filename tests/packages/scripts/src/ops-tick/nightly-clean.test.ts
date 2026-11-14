@@ -1679,6 +1679,40 @@ describe("other repos' worktrees", () => {
     expect(readdirSync(wrong)).toEqual(["0001-other.patch"])
   })
 
+  // #2132: a remote-tracking ref is the remote's branch as last fetched, so the step reads the remote itself
+  test("a worktree with no PR whose remote branch was deleted since, its tracking ref kept, has its commit archived before it goes", async () => {
+    const { ctx, data, deps, sent, site, w } = night()
+    const head = git(w.pushed, "rev-parse", "HEAD").trim()
+    git(
+      dirname(site),
+      "--git-dir",
+      join(dirname(site), "site-origin.git"),
+      "branch",
+      "-D",
+      "pushed",
+    )
+    expect(git(w.pushed, "rev-parse", "refs/remotes/origin/pushed").trim()).toBe(head)
+    const archive = join(data, "scratchpad", "archive", "site", `pushed-${head.slice(0, 7)}`)
+    await nightlyClean(deps)(ctx)
+    expect(existsSync(w.pushed)).toBe(false)
+    expect(patchesIn(archive)).toEqual([head])
+    expect(outbox(sent)).toContain(
+      `worktree ${w.pushed} by git worktree remove, its branch pushed kept, its 1 commit no remote holds archived at ${archive}`,
+    )
+  })
+
+  // #2132: a remote the step cannot read tells it nothing, so the tree stays for a night it can
+  test("a worktree with no PR whose remote cannot be read is kept, the outbox line naming the remote", async () => {
+    const { ctx, data, deps, sent, site, w } = night()
+    git(site, "remote", "set-url", "origin", join(dirname(site), "gone.git"))
+    await nightlyClean(deps)(ctx)
+    expect(existsSync(w.pushed)).toBe(true)
+    expect(outbox(sent)).toContain(
+      `worktree ${w.pushed} kept: it has no PR and its remote origin cannot be read`,
+    )
+    expect(existsSync(join(data, "scratchpad", "archive", "site"))).toBe(false)
+  })
+
   test("a worktree whose branch a roster row's branch names is kept, though no roster text holds its path", async () => {
     const { ctx, deps, sent, w } = night()
     await nightlyClean(deps)(ctx)
