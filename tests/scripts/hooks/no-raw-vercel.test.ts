@@ -232,6 +232,37 @@ describe("Ops' ship of the hosted build", () => {
   })
 })
 
+// The release skill's Yard ship step, which runs vercel deploy --prod itself, so the hook reads the step's own command line as the production move it makes.
+const YARD_SHIP: [string, string][] = [
+  ["by its script", "bun run ship:yard v0.0.111"],
+  ["after a cd", "cd /Users/x/playground && bun run ship:yard v0.0.111 --since v0.0.110"],
+  ["through run-slot", "~/.playground/ops/run-slot.sh ops-ship -- bun run ship:yard v0.0.111"],
+  ["by its file", "bun packages/scripts/src/ship/yard.ts v0.0.111 --schema-cleared i123"],
+  ["by its file's full path", "bun /Users/x/playground/packages/scripts/src/ship/yard.ts v0.0.111"],
+]
+
+describe("the Yard ship step", () => {
+  test.each(YARD_SHIP)("passes for the Ops lead %s", async (_, command) => {
+    expect(await as("ops", command)).toBeUndefined()
+  })
+
+  test.each(YARD_SHIP)("is refused for a worker %s", async (_, command) => {
+    expect(await as("worker", command)).toContain(REFUSED)
+  })
+
+  test.each(YARD_SHIP)("is refused for a lead that is not Ops %s", async (_, command) => {
+    expect(await as("builder", command)).toContain(REFUSED)
+  })
+
+  test("loses the Ops lead's pass with the role as a prefix", async () => {
+    expect(await as("ops", "PLAYGROUND_ROLE=lead bun run ship:yard v0.0.111")).toContain(REFUSED)
+  })
+
+  test("its help passes", async () => {
+    expect(await as("worker", "bun run ship:yard --help")).toBeUndefined()
+  })
+})
+
 describe("the Ops lead's production moves", () => {
   test.each(PRODUCTION.filter(([, command]) => !command.includes("$")))(
     "pass: %s",
