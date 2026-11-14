@@ -116,15 +116,18 @@ const closedOf = (home: string, work: string[], data = join(home, ".playground")
       ...(temp ? [temp.replace(/\/$/, "")] : []),
       ...work,
     ].sort(),
+    // the Keychain's folder on macOS and, on Linux, Claude Code's login file and the secret store's folder
     denyRead: [
+      join(home, ".claude", ".credentials.json"),
       join(home, "Library", "Keychains"),
       join(data, "dumps"),
       join(data, "remote-key.json"),
+      join(data, "secrets"),
       join(data, "whatsapp"),
     ].sort(),
     // the secret files refuse writes as well as reads, beside the probe's main-checkout and extensions-root entries
     denyWrite: expect.arrayContaining(
-      ["dumps", "remote-key.json", "whatsapp"].map((name) => join(data, name)),
+      ["dumps", "remote-key.json", "secrets", "whatsapp"].map((name) => join(data, name)),
     ),
   },
   network: {
