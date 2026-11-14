@@ -314,6 +314,30 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     expect([closed, lines]).toEqual([[], []])
   })
 
+  // issue 2030: a worker leaves its checkers to this beat, which holds one idle under 10 minutes and closes it on the first beat past 10
+  test("a checker whose worker has ended stays while idle under 10 minutes and closes on the first beat past 10", async () => {
+    const roster = {
+      "h8tq2m-reviewer": { kind: "reviewer", name: "h8tq2m-reviewer", worker: "h8tq2m-worker" },
+    }
+    const beat = (minutes: number) => {
+      const { closed, deps } = fakes()
+      const ran = sweep(
+        input({
+          roster,
+          sessions: {
+            "h8tq2m-reviewer": live("h8tq2m-reviewer", {
+              statusUpdatedAt: (NOW - minutes * 60) * 1000,
+            }),
+          },
+        }),
+        deps,
+      )
+      return ran.then(() => closed)
+    }
+    expect(await beat(9)).toEqual([])
+    expect(await beat(11)).toEqual(["h8tq2m-reviewer"])
+  })
+
   // GitHub closes a PR's issue a beat after its merge, so the issue never counts as the last close
   test("a merged PR beside the issue it closes, closed a beat later, still ends the worker as merged", async () => {
     const { closed, deps, reported } = fakes()

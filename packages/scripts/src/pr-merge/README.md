@@ -96,7 +96,7 @@ A refusal `--explain` shows to be wrong goes to the Builder, who alone may merge
 
 ## The merge queue
 
-`bun run pr:train` (`train.ts` beside it; `--help` gives each command) reads the merge queue, `merge-queue.json` beside the merge lock (`PLAYGROUND_MERGE_QUEUE` moves it, as the tests do): the owner's open PRs in its order, then any other by number; an outside author's PR never merges on ready.
+`bun run pr:train` (`train.ts` beside it; `--help` gives each command) reads the merge queue, `merge-queue.json` beside the merge lock (`PLAYGROUND_MERGE_QUEUE` moves it, as the tests do), which the Builder keeps by playbook's SWEEP.md (step 4): the owner's open PRs in its order, then any other by number; an outside author's PR never merges on ready.
 `ready` is merge-on-ready (`ready.ts`, which the merge-train ops job runs every cycle): the first PR, in that order, whose every gate passes at its head merges at once through pr:merge; one merge a call.
 A PR whose facts cannot be read (any read `factsOf` makes throws, such as a `gh` read on a rate limit or a failed fetch of its head) is held as `not gated: facts unreadable (<error>)` (`gatedOf` in `train.ts`), so the pass goes on to the next PR in order rather than ending.
 `pr:train ready` prints each such PR on stderr as `✗ #<n> not gated: facts unreadable (<error>)`, and exits 1 when one was unreadable and nothing merged, so the merge train's log, which keeps a failing run, keeps the error.

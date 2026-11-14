@@ -24,7 +24,7 @@ When the stop at a conflict fired, run `git merge-tree --write-tree origin/canar
 The factory's sessions start and end as its work needs them; none of that waits on the owner (a request from outside the chain is the one exception, under [DISPATCH.md](DISPATCH.md)).
 Sessions that work together share a workspace as full-height columns ([SPAWN.md](SPAWN.md#layout)): the managers one (the dispatcher, the Planner, the Builder, Ops), and each worker its own, with its checkers and probes beside it.
 
-- **Workers** are spawned by the Builder, one per chore, and close with their checkers once their chore is done.
+- **Workers** are spawned by the Builder, one per chore, and close once their chore is done, their checkers by auto-end (below).
   A worker ends when its chore is done: its PR merged (or dropped with the Builder's ok), its branch pushed (`git push origin <branch>`), so its commits show on origin even with no PR,
   its probes cleaned up, and its final report sent, naming the pushed head.
   Its worktrees, their containers and its branches go when it ends ([SESSIONS.md](SESSIONS.md#end)'s cleanup), as its reviewer's and tester's do; one the cleanup keeps, named in its lead's line, the nightly clean (below) tries again once its PR is merged or closed, discarding what it holds then, or the lead removes it by hand from the main checkout with `playground rm --worktree <path>`.
@@ -33,6 +33,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   It takes only a folder directly under the main checkout's `.claude/worktrees/`, so a tree nested in another goes with its parent, which AGENTS.md's worktree rule prevents.
   The Builder then closes its workspace, which takes any split still open in it, and its slot returns to the pool.
   Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead.
+  A worker leaves its checkers to auto-end's beat and does not close them itself: a checker idle under 10 minutes after its worker ends stays open, and the first beat past 10 closes it.
   The Builder closes a session by hand only on a `Not ended` line, whose reason names what to fix first, and reassigns or closes a worker on a `Kept` line, whose last PR closed unmerged.
   The Builder may also end a worker mid-chore to drop or reassign the chore, recording why.
   A parked chore gets its branch pushed (`git push origin <branch>`) and a handoff note ([SESSIONS.md](SESSIONS.md#write-a-handoff)), `~/.playground/handoffs/<ID>.md`, and its worker closes, its final report naming the pushed head; the chore restarts later from the note, its branch and its PR.
@@ -98,11 +99,13 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   one line to `ops/log/nightly-clean.log` with the free disk before and after and each step's measured change, one outbox line to ops naming each removal with its trash id, archive tag, container name or `git worktree remove` and each keep with why, and an Inbox update when it freed 1 GB or more, linking the System page; it asks no decision),
   the dashboard watch (every minute: once the live dashboard's `/api/health` has failed 5 minutes in a row, a gap of over 2 minutes with no check starting the count again, one macOS banner and one ops line through `notify.sh` with `NOTIFY_MAC=1`, since the Inbox shows only on the dashboard, and one more when it answers again,
   its state in `ops/tick/dashboard-watch.json`), the relay watch (every 5 minutes:
-  a line the relay would send, read by ops-outbox's `pending()`, is timed from the first cycle it reads pending, and once it has waited 10 minutes with no relay cursor moved since, the stop goes to the session that can act on it, the way unstick routes a stuck session:
-  one line into the managers' waiter queue (`ops-stuck-alert.jsonl`, stuck-alert's own shape, which each alerts-wait reads within seconds without the relay, the stalled relay or sweep being the thing the stop names), then one for the dispatcher once `unstick.escalateMinutes` (5 by default) has passed with Ops yet to pick it up,
+  a line the relay would send, read by ops-outbox's `pending()`, is timed from the first cycle it reads pending, or from `unstick.escalateMinutes` (5 by default, ops-session-resume's window) after the machine's last boot or wake when that is later (`sysctl -n kern.boottime kern.waketime`), so time the machine spent off or asleep never counts,
+  and once it has waited 10 minutes with no relay cursor moved since, the stop goes to the session that can act on it, the way unstick routes a stuck session:
+  one line into the managers' waiter queue (`ops-stuck-alert.jsonl`, stuck-alert's own shape, which each alerts-wait reads within seconds without the relay, the stalled relay or sweep being the thing the stop names), then one for the dispatcher once `unstick.escalateMinutes` has passed with Ops yet to pick it up,
   telling it to post to the owner's Inbox only if it cannot resolve the stop;
-  the Inbox alert update under the ops manager's name (`bun run ask new`, resolved with `bun run ask resolve` once a cursor moves or its item is gone) is for the owner alone, and posts only while Ops itself is down, while no alerts-wait of its own is live (`waiterLive`), the one absence no other check reports;
-  while `ops/sweep-hold-until` holds a future ISO 8601 time with its zone, the watch keeps quiet, resolving an open alert of its own first and clearing its state, so it judges unheld time only, and a missing, empty, past or unreadable time leaves it on;
+  while Ops itself is down, no alerts-wait of its own live (`waiterLive`), the dispatcher's line goes at once in place of Ops' line, and the watch itself posts nothing to the Inbox,
+  resolving on its first cycle (`bun run ask resolve`) an Inbox alert an earlier watch left open;
+  while `ops/sweep-hold-until` holds a future ISO 8601 time with its zone, the watch keeps quiet, clearing its state, so it judges unheld time only, and a missing, empty, past or unreadable time leaves it on;
   Ops sets the file when it slows or pauses its sweep on purpose, a usage squeeze or maintenance (SESSIONS.md, Keep the sweep running), renewing it or leaving it to pass;
   the line says to resume runner-plain-relay on a machine with that session's roster row or resume record;
   a machine with neither relays through Ops' sweep (SWEEP.md step 2), so there a line may wait 30 minutes, two sweeps, and the line says Ops' sweep is late and Ops runs it, naming no relay session;
