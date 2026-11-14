@@ -16,8 +16,9 @@ set -euo pipefail
 #      a small worker keeping an eighth in its place for the reviewers and testers; a load at or over
 #      that line refuses whatever the CPU's idle share, so the load stays under the cores, but for a
 #      --priority start while a priority file stands (PRIORITY_FILE), logged as readings.priority,
-#      and a resume within 15 minutes of close ending a row that read live (JUST_CLOSED), logged as
-#      readings.just_closed
+#      a resume within 15 minutes of close ending a row that read live (JUST_CLOSED), logged as
+#      readings.just_closed, and a manager's start or resume (role dispatcher or lead) while the
+#      CPU reads 40% idle or more (top -l 2 -n 0), logged as readings.cpu_idle
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
 #      free at 8% or more (kern.memorystatus_level); a fresh worker start also needs swap-ins
 #      under 100/s (vm_stat -c 2 1, gates.glmSwapinsMax), since free memory counts compressible
@@ -58,7 +59,7 @@ set -euo pipefail
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again once its resume finds the session gone so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again once its resume finds the session gone so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, then every other manager's, then the rest, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row just before the pane closes, putting its status back when herdr refuses the close
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
@@ -358,6 +359,15 @@ def loadavg():
     except (IndexError, ValueError):
         return None
 
+# the CPU's idle share from top's second sample, as run-slot's gauges read it (the first reads since boot), or None when it cannot be read
+def cpu_idle():
+    try:
+        out = subprocess.run(["top", "-l", "2", "-n", "0"], capture_output=True, text=True, timeout=10).stdout
+        shares = re.findall(r"^CPU usage:.* ([0-9.]+)% idle", out, re.M)
+        return float(shares[1]) if len(shares) == 2 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
 # the last second's swap-ins, from vm_stat's last row under a header naming each column, or None when it cannot be read
 def swapins():
     try:
@@ -388,6 +398,16 @@ def pct(part, whole):
 
 def fmt(x):
     return f"{x:g}"
+
+# a manager (spawn.sh's dispatcher and lead roles) over the load line passes while the CPU reads MANAGER_IDLE_MIN% idle or more, run-slot's default bar for slots 2 to 4 (after a reboot load5 still carries the boot's spike and every settled start still counts, so the line held the managers' restore at 63% idle)
+MANAGER_ROLES = ("dispatcher", "lead")
+MANAGER_IDLE_MIN = 40
+
+def manager_room():
+    if role not in MANAGER_ROLES:
+        return False
+    readings["cpu_idle"] = cpu_idle()
+    return readings["cpu_idle"] is not None and readings["cpu_idle"] >= MANAGER_IDLE_MIN
 
 if backend == "glm":
     try:
@@ -463,19 +483,20 @@ else:
         share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
         keep = cap * share
         readings["reserve"] = keep
-        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --priority start passes while a priority file stands (PRIORITY_FILE), since priority work comes first, and a resume of a row spawn.sh closed live in the last 15 minutes passes (JUST_CLOSED), since that session already counts in the load; the memory gate still reads both
+        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --priority start passes while a priority file stands (PRIORITY_FILE), since priority work comes first, a resume of a row spawn.sh closed live in the last 15 minutes passes (JUST_CLOSED), since that session already counts in the load, and a manager passes while the CPU reads idle (manager_room); the memory gate still reads all three
         if priority:
             readings["priority"] = priority
         elif just_closed:
             readings["just_closed"] = just_closed
-        elif readings["load5"] + starts >= cap - keep:
+        elif readings["load5"] + starts >= cap - keep and not manager_room():
             at = (
                 f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
                 if mult != 1
                 else f"the {cores} cores"
             )
             at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
-            refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}. Wait for it to fall, or close a session that is done, and run it again.")
+            idle = "" if role not in MANAGER_ROLES else f", and the CPU's idle share, which passes a manager at {MANAGER_IDLE_MIN}% or more, does not read (top -l 2 -n 0)" if readings["cpu_idle"] is None else f", and the CPU reads {readings['cpu_idle']:g}% idle (top -l 2 -n 0), under the {MANAGER_IDLE_MIN}% a manager needs to pass it"
+            refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}{idle}. Wait for it to fall, or close a session that is done, and run it again.")
     except Skip:
         pass
 
@@ -1084,13 +1105,20 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
 PY
   }
   lines=$(restore_list) || refuse "it cannot read the roster or the resume files"
-  # The first dispatcher's record runs first, so the owner's dispatcher is back before any other resume takes the gate's room.
+  # The first dispatcher's record runs first, so the owner's dispatcher is back before any other resume takes the gate's room, then every other manager's line (role_of_kind's dispatcher and lead), then the rest in their order, so the managers are back before the workers.
+  # A run line's kind is kind_of's; a skip line, which starts nothing and may number in the hundreds, takes its name's kind alone (kind_of_name), since kind_of reads the roster once a call.
   first=$(dispatcher_of 1)
-  lead= rest=
+  lead= ahead= rest=
   while IFS= read -r line; do
-    case "$line" in "run"$'\t'"$first"$'\t'*) lead+="$line"$'\n' ;; *) rest+="$line"$'\n' ;; esac
+    name=${line#*$'\t'} name=${name%%$'\t'*}
+    case "$line" in
+      "run"$'\t'"$first"$'\t'*) lead+="$line"$'\n'; continue ;;
+      "run"$'\t'*) kind=$(kind_of "$name") ;;
+      *) kind=$(kind_of_name "$name") ;;
+    esac
+    case "$(role_of_kind "$kind")" in dispatcher | lead) ahead+="$line"$'\n' ;; *) rest+="$line"$'\n' ;; esac
   done <<<"$lines"
-  lines="$lead$rest"
+  lines="$lead$ahead$rest"
   # A resume that waits (restore_waits) comes back on a later restore, so it is progress, printed as waiting, and leaves the exit 0; any other miss fails the restore.
   failed=0
   while IFS=$'\t' read -r -a args; do
@@ -1653,12 +1681,19 @@ BUILT="$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k.json"
 TREE=
 if [ -n "$SANDBOX_ARG" ] && [ -z "$IN_DIR" ] && [[ $ROLE =~ ^(worker|reviewer)$ ]]; then
   leaf=$NAME first=${PR_ARG%%,*}
-  origin=$(git -C "$MAIN" remote get-url origin 2>/dev/null) || origin=
+  # origin as configured, which names the PR's repository even where an insteadOf points its fetches elsewhere
+  origin=$(git -C "$MAIN" config --get remote.origin.url 2>/dev/null) || origin=
   [[ $origin =~ github\.com[:/]([^/]+/[^/]+)$ ]] && origin=${BASH_REMATCH[1]%.git} || origin=
-  if [[ $first =~ ^#?([1-9][0-9]*)$ ]] || { [ -n "$origin" ] && [[ $first =~ ^https://github\.com/$origin/pull/([1-9][0-9]*)$ ]]; }; then leaf=review-${BASH_REMATCH[1]}; fi
+  ref=refs/heads/canary
+  if [[ $first =~ ^#?([1-9][0-9]*)$ ]] || { [ -n "$origin" ] && [[ $first =~ ^https://github\.com/$origin/pull/([1-9][0-9]*)$ ]]; }; then leaf=review-${BASH_REMATCH[1]} ref=refs/pull/${BASH_REMATCH[1]}/head; fi
   TREE="$MAIN/.claude/worktrees/$leaf"
   if [ ! -e "$TREE" ]; then
-    made=$(git -C "$MAIN" worktree add -q --detach "$TREE" 2>&1) || refuse "git worktree add $TREE failed, so $NAME has no worktree to start in: ${made%%$'\n'*}"
+    # The worktree starts at the commit the session works from, its PR's head for a reviewer of this checkout's PR and origin's canary for any other, fetched here, so its first checkout changes no file: the sandbox shuts .claude/ and skills/zerostarter/, which .claude/skills links to, so a checkout that changes either fails inside it (SPAWN.md, --sandbox).
+    at=$(git -C "$MAIN" ls-remote origin "$ref" 2>/dev/null) && at=${at%%[[:space:]]*} || at=
+    [ -n "$at" ] || refuse "git ls-remote origin $ref read no commit, so $NAME has no commit to start its worktree at"
+    git -C "$MAIN" cat-file -e "$at^{commit}" 2>/dev/null || git -C "$MAIN" fetch -q --no-write-fetch-head origin "$ref" 2>/dev/null
+    git -C "$MAIN" cat-file -e "$at^{commit}" 2>/dev/null || refuse "git fetch origin $ref did not bring $at, so $NAME has no commit to start its worktree at"
+    made=$(git -C "$MAIN" worktree add -q --detach "$TREE" "$at" 2>&1) || refuse "git worktree add $TREE failed, so $NAME has no worktree to start in: ${made%%$'\n'*}"
   fi
   DIR=$(cd -P "$TREE" && pwd -P)
 fi
@@ -1839,6 +1874,9 @@ COMMAND="($COMMAND)"
 LAUNCH_DIR="$DATA/launch"
 mkdir -p "$LAUNCH_DIR" && chmod 700 "$LAUNCH_DIR" || refuse "it cannot prepare $LAUNCH_DIR"
 LAUNCH_FILE="$LAUNCH_DIR/$NAME.sh"
+# A session writes its notes and logs to its own scratchpad from its first step, so the folder is there, owner-only, before the pane opens.
+SCRATCHPAD="$DATA/scratchpad/$NAME"
+mkdir -p "$SCRATCHPAD" && chmod 700 "$SCRATCHPAD" || refuse "it cannot prepare $SCRATCHPAD"
 [ -z "$BEAT" ] || rm -f -- "$BEAT"
 # The factory's hooks read PLAYGROUND_REPO before the session's own folder, so the launch file's second line exports this script's main checkout: a session in a worktree, or outside any Playground checkout, runs the main checkout's guards.
 HEAD_LINES=

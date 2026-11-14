@@ -74,7 +74,7 @@ Cite a rule by its name, in bold; read it whole with `playground rules <name>` w
 - [SESSIONS.md](SESSIONS.md): the commands to spawn, brief, rename, check and end a session, how a worker answers a review round (Fix pushes and nits), and the headless run that writes a docs tool's pages for a session without its MCP server.
 - [SPAWN.md](SPAWN.md): each spawn mode's command and the gates, flags and launch spawn.sh applies to a start, which SESSIONS.md's Spawn step 2 points to.
 - [ROSTER.md](ROSTER.md): what to write to the roster, and when.
-- [VERCEL.md](VERCEL.md): the Vercel CLI's traps: the env `vercel link` and `vercel integration add` pull, `vercel api`'s first line and an empty `vercel logs`.
+- [VERCEL.md](VERCEL.md): the Vercel CLI's guard, no-raw-vercel, and its traps: the env `vercel link` and `vercel integration add` pull, `vercel api`'s first line and an empty `vercel logs`.
   Read it before you run any `vercel` command.
 
 ## Keep the skills learning

@@ -170,7 +170,7 @@ pre-push:
       run: "bun --no-env-file packages/scripts/src/hooks-bundle.ts --check --merged origin/canary # {files}"
   # the jobs that read the pushed refs on stdin run from .lefthook/pre-push/, since lefthook skips every pre-push command while the checked-out branch has nothing new against its upstream, and runs a script on every push
   scripts:
-    # a pushed commit no remote holds yet whose message holds a Co-authored-by trailer, since a commit made with --no-verify skips commit-msg
+    # a pushed commit no remote holds yet whose message holds a Co-authored-by trailer, since a commit made with --no-verify skips commit-msg, and such a commit's message or a pushed branch or tag name holding a term from no-public-leak's list
     "commit-trailer.sh":
       runner: bash
       use_stdin: true

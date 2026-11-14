@@ -22,7 +22,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | File a Linear ticket                                                                                                     | the **tickets** rule                                                                                                  |
 | Write anything an org sees                                                                                               | the **classified** rule                                                                                               |
 | Post in the factory's channel, or take an ask from there                                                                 | the org's `doc channel` (`playground ext show`)                                                                       |
-| Run a `vercel` command, a deploy among them                                                                              | the Vercel CLI's three traps (`VERCEL.md`)                                                                            |
+| Run a `vercel` command, a deploy among them                                                                              | the no-raw-vercel guard and the Vercel CLI's three traps (`VERCEL.md`)                                                |
 | Stop a process                                                                                                           | the **signal** rule                                                                                                   |
 | Hand off a build, a read or research                                                                                     | the **workers** rule                                                                                                  |
 | Run long, spawn a reviewer again, or wait on something                                                                   | the **context**, **rounds** and **polling** rules                                                                     |
@@ -71,6 +71,7 @@ A worker is spawned for one chore and ends when the chore is done, so the room i
 Before a lead spawns a worker it reads the machine's room, the Dashboard's System panel through `bun run verify system`, so the factory grows as far as the Mac allows, counting every membership rather than holding for usage.
 Every factory session starts through one script, `scripts/spawn.sh`, which refuses when the machine has no room for it (its gate reads the load against the cores, memory pressure, for a new worker (a `--reads-only` one aside) a free run slot with the load room for a run, or an empty run queue, and the model's usage windows, and names the reading that failed),
 or a live session already holds the name it would start;
+a manager passes the load check while the CPU is at least 40% idle, however high the load reads;
 it counts no sessions, so Ops watches the live board, since cmux once stopped answering at 49 live sessions and load 97; a hook turns back a session started any other way; a worker runs its dev stack only while it tests.
 A heavy run, such as a suite, takes one of a few run slots and gives it back when it ends, so nothing long-lived holds one.
 Nobody builds a demo stack for the owner: he tries changes on the live dashboard alone.
@@ -103,7 +104,8 @@ A finished worker, reviewer or tester also ends by itself: right after its PR me
 A worker whose last PR closed unmerged stays open too, and its lead gets a `Kept` line to reassign or end it.
 Sessions already running move at their next restart, so nothing is closed just to re-arrange it.
 
-The leads keep watch with a sweep: every 15 minutes each one runs `playground sweep`, which prints only what changed since its last sweep (new alerts, the merge queue, the load, ETAs that have passed, a parked row's hold that has closed, and for Ops, once an hour, each ops switch still on with its reason) or `quiet`,
+The leads keep watch with a sweep: every 15 minutes each one runs `playground sweep`, which prints only what changed since its last sweep (new alerts, the merge queue, the load, ETAs that have passed, a parked row's hold that has closed,
+for the Builder, a merge queue file that is missing or out of step with the open PRs, and for Ops, once an hour, each ops switch still on with its reason) or `quiet`,
 and on news it checks its own agents for a picker waiting, a permission prompt, silence with no report, or a session gone, and acts on it.
 A stuck session tells its manager at once: the manager allows a permission prompt when the command is needed and otherwise denies it with a simpler way to do it (`playground picker`), citing the standing rule that settles the answer when one does, and a session still stuck after 5 minutes goes to Playground;
 what only the owner can answer becomes a decision in Playground's Inbox, since he reads the Inbox rather than every chat.
@@ -193,7 +195,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused (that row read again once its resume finds the session gone, so a session you closed stays down), one that never got its first message included,
-  the first dispatcher first and past the busy-machine check,
+  the first dispatcher first and past the busy-machine check, then the other managers, which pass that check while the CPU is at least 40% idle, then the rest,
   on the account its start named, else the login with the most room, the model it started with, an effort other than high and, for a reviewer or tester, the PRs its roster row serves, and skips any still running.
   It prints one line for each session it brings back, leaves down or cannot bring back, naming the reason, so a session the busy-machine check held back is named with the check's words, and counts as on its way back, not as a failure.
   A factory session can only read from herdr: the `no-raw-spawn` hook refuses any herdr call that types into, closes or speaks for another pane, since herdr lets anything on the machine control it.
