@@ -1,5 +1,6 @@
 // PreToolUse hook on Bash: runs every Bash guard's check in this one process, as each guard's own main block runs it, and refuses with every refusal they give, so a Bash call starts one bun rather than one a guard; a guard that throws refuses the call, naming it.
 
+import { withLiveBudget } from "../../packages/safe-delete/src/live-refs"
 import { check as desktopOwnerApp } from "./no-desktop-owner-app"
 import { check as envDump } from "./no-env-dump"
 import { check as extensionRepoWrite } from "./no-extension-repo-write"
@@ -81,15 +82,18 @@ export async function check(
   guards: readonly Guard[] = GUARDS,
 ): Promise<string | undefined> {
   let factory: Promise<boolean> | undefined
-  const reasons = await Promise.all(
-    guards.map(async ({ factory: gated, name, run }) => {
-      try {
-        if (gated && !(await (factory ??= fromFactory(raw, environment)))) return
-        return await run(raw, environment)
-      } catch (error) {
-        return threw(name, error)
-      }
-    }),
+  // every guard's live reads of a push's remote share one budget, so a hung remote leaves the call inside its timeout
+  const reasons = await withLiveBudget(() =>
+    Promise.all(
+      guards.map(async ({ factory: gated, name, run }) => {
+        try {
+          if (gated && !(await (factory ??= fromFactory(raw, environment)))) return
+          return await run(raw, environment)
+        } catch (error) {
+          return threw(name, error)
+        }
+      }),
+    ),
   )
   return reasons.filter(Boolean).join("\n\n") || undefined
 }

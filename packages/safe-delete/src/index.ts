@@ -19,6 +19,8 @@ import { basename, dirname, join, resolve, sep } from "node:path"
 
 import { hasManagerRole, placedKindOf } from "@packages/config/kinds"
 
+import { liveHeads, present, type Tip } from "./live-refs"
+
 // The folders a delete starts from, passed in so a test builds them on a mkdtemp root of its own.
 export type Roots = { home: string; main: string; trash: string }
 
@@ -652,6 +654,15 @@ const linkHolder = (at: string, roots: Roots, places: string[]): string | null =
   return `${at} is linked into by ${links.sort().slice(0, 3).join(", ")}${more}: repoint or remove each link first`
 }
 
+// The pull request URLs a roster row serves: its pr and every /pull/<n> entry of its prs, once each, leaving out an issue's URL and an extension item.
+export const rowPullRequests = (row: { pr?: unknown; prs?: unknown }): string[] => [
+  ...new Set(
+    [row.pr, ...(Array.isArray(row.prs) ? row.prs : [])].filter(
+      (u): u is string => typeof u === "string" && /\/pull\/\d+$/.test(u),
+    ),
+  ),
+]
+
 // Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit its base, origin/canary or another repo's default branch, holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree, on that repo's default branch (defaultBase), or on a branch the remote itself holds now (remoteHolding), or, given an archive folder, archiveUnlanded has archived, with every remote read, each of its commits no remote holds.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
@@ -663,6 +674,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     kind?: unknown
     name?: unknown
     pr?: unknown
+    prs?: unknown
     status?: unknown
   } | null)[]
   try {
@@ -697,11 +709,13 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const byId = /\d/.test(id) && where.includes(id)
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
-    // --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
-    const lifted = agent.pr === holders.pr && (!holders.discard || holders.freed !== undefined)
-    const pr =
-      typeof agent.pr === "string" && !lifted ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1] : undefined
-    const byPr = pr !== undefined && new RegExp(`(^|\\D)${pr}(\\D|$)`).test(where)
+    // a row holds by its pr and every PR in its prs; --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
+    const liftable = !holders.discard || holders.freed !== undefined
+    const prs = rowPullRequests(agent)
+      .filter((u) => !(liftable && u === holders.pr))
+      .flatMap((u) => /\/pull\/(\d+)$/.exec(u)?.[1] ?? [])
+      .filter((n) => new RegExp(`(^|\\D)${n}(\\D|$)`).test(where))
+    const byPr = prs.length > 0
     if (!byBranch && !byPr && !byName && !byId) continue
     // a clean detached checkout at a commit its base holds (origin/canary, or another repo's default branch) is a reader of that base, not the row's work, so a live row holds it no more
     const base =
@@ -715,7 +729,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     // a finished PR frees its worktree from a row that names it by its branch or by that PR's own number alone, so a row naming another PR, or the session by name or id, still holds it; commits past the freed PR's head keep the hold, named with them, so --discard cannot take unmerged work
     const freed = holders.freed
     const ownRow =
-      !byName && !byId && (!byPr || (freed !== undefined && pr === String(freed.number)))
+      !byName && !byId && prs.every((n) => freed !== undefined && n === String(freed.number))
     if (freed && ownRow && freed.head === head) {
       holders.note?.(
         `${at} is freed by #${freed.number}, which reads ${freed.state}, past ${agent.name}'s roster row (${agent.status})`,
@@ -803,49 +817,27 @@ const remoteHolding = (
   return ahead.tips.find((t) => git("merge-base", "--is-ancestor", "HEAD", t.sha).ok)?.ref ?? null
 }
 
-// The commits HEAD holds that no remote holds now, past each branch tip ls-remote reads from each remote itself, since a remote-tracking ref is only the remote's last fetch; tips names those this repo has, as <remote>/<branch> at its sha, and unread each remote ls-remote could not read in 30 s, with ssh never prompting, which holds none. Null when the commits cannot be read.
-export function unpushed(
-  at: string,
-): { shas: string[]; tips: { ref: string; sha: string }[]; unread: string[] } | null {
-  const git = (args: string[], env?: Record<string, string>, timeout?: number) => {
+// The commits HEAD holds that no remote holds now, past each branch tip ls-remote reads from each remote itself (liveHeads, live-refs.ts); tips names those this repo has, as <remote>/<branch> at its sha, and unread each remote ls-remote could not read in 30 s, which holds none. Null when the commits cannot be read.
+export function unpushed(at: string): { shas: string[]; tips: Tip[]; unread: string[] } | null {
+  const git = (args: string[]) => {
     const run = Bun.spawnSync(["git", "-C", at, ...args], {
-      env: env && { ...process.env, ...env },
       stderr: "ignore",
       stdin: "ignore",
       stdout: "pipe",
-      timeout,
     })
     return { ok: run.exitCode === 0, out: run.stdout.toString() }
   }
   const remotes = git(["remote"])
   if (!remotes.ok) return null
-  const listed: { ref: string; sha: string }[] = []
+  const listed: Tip[] = []
   const unread: string[] = []
-  // ssh's options go on the command git would run (GIT_SSH_COMMAND, else core.sshCommand, else ssh), and none under GIT_SSH alone, whose program may take no -o
-  const command =
-    process.env.GIT_SSH_COMMAND ||
-    git(["config", "--get", "core.sshCommand"]).out.trim() ||
-    (process.env.GIT_SSH ? "" : "ssh")
-  const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0" }
-  if (command) env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`
   for (const remote of remotes.out.split("\n").filter(Boolean)) {
-    const live = git(["ls-remote", "--heads", "--", remote], env, 30_000)
-    if (!live.ok) {
-      unread.push(remote)
-      continue
-    }
-    for (const line of live.out.split("\n")) {
-      const [sha, name] = line.split("\t")
-      if (/^[0-9a-f]{40,64}$/.test(sha ?? "") && name?.startsWith("refs/heads/"))
-        listed.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha: sha! })
-    }
+    const live = liveHeads(at, remote, 30_000)
+    if (live) listed.push(...live)
+    else unread.push(remote)
   }
-  const had = listed.length
-    ? git(["rev-list", "--no-walk", "--ignore-missing", ...listed.map((t) => t.sha)])
-    : { ok: true, out: "" }
-  if (!had.ok) return null
-  const here = new Set(had.out.split("\n").filter(Boolean))
-  const tips = listed.filter((t) => here.has(t.sha))
+  const tips = present(at, listed)
+  if (!tips) return null
   const past = git(["rev-list", "HEAD", "--not", ...tips.map((t) => t.sha)])
   if (!past.ok) return null
   return { shas: past.out.split("\n").filter(Boolean), tips, unread }
