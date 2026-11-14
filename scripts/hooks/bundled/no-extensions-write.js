@@ -63,6 +63,7 @@ var dataDir = (env = process.env) => dataDirOf(env);
 
 // packages/settings/src/folder.ts
 import {
+  appendFileSync,
   chmodSync,
   existsSync as existsSync2,
   mkdirSync,

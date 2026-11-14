@@ -6,7 +6,7 @@ import { readPolicyOrDefaults } from "../../packages/settings/src/rendered"
 import { implicitRepos, remoteRepo, type Repo, repoOf } from "./github"
 import { REF_MOVE } from "./no-prepare-write"
 import { gitCommand } from "./no-stash"
-import { builderLead } from "./role"
+import { builderLead, namesRole } from "./role"
 import {
   type ApiRequest,
   type Command,
@@ -379,10 +379,6 @@ function judgeTool(tool: string, input: Record<string, unknown>, factory: string
   const what = typeof branch === "string" && branch !== "" ? branch : "the default branch, canary"
   return `no-protected-push hook refuses ${tool}: it writes ${what} of ${place}. ${ROUTE} ${FIX}`
 }
-
-// Whether a command may set the role variable a merge's pass reads, or source a file that may: the pass then goes, since the hook reads the role from its own launch.
-const namesRole = (command: string): boolean =>
-  /PLAYGROUND_ROLE/.test(command) || /(?:^|[\s;&|({`])(?:source|\.)\s/.test(command)
 
 // A gh pr merge on the factory's repository, which only the Builder runs by hand, in the one form pr:merge's README names.
 async function judgeMerge(

@@ -221,7 +221,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
   Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
-  no-prepare-write and no-protected-push, checks with no process of their own, run behind `fromFactory` through their `check`, and [no-playground-leak](#no-playground-leak)'s process runs both on the GitHub tools.
+  no-prepare-write, no-protected-push and no-raw-vercel, checks with no process of their own, run behind `fromFactory` through their `check`, and [no-playground-leak](#no-playground-leak)'s process runs the first two on the GitHub tools.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
@@ -371,6 +371,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Under both sits the root's file lock, the fence for every process: macOS's user immutable flag on the root and everything under it (`chflags -R uchg`), so a plain write meets EPERM.
   The CLI is its lifter: `withLock` in `packages/settings/src/folder.ts`, which every writer of the root goes through, lifts the part of a locked root its write touches, locks it again after and logs both steps' time, and `playground ext lock` and `playground ext unlock` set and clear it.
   A write to one scope that leaves the root's own files alone lifts that scope's folder alone, so every other scope stays locked while it runs; a write that touches the root itself (its `policy.json`, its `login` file, a `hooks/` list or a new scope) lifts the whole root.
+  Each lift appends one line to the data folder's `ops/log/ext-lock.log`: its time, the folders it lifted, the lift and relock's duration, load5 and the caller (its entry script, with the session's role when it has one), and a write that fails still relocks and logs its line.
   The walk skips a file inside its tree gone by the time it reaches it, since git maintenance can remove one of a scope's `.git` files mid-walk, and fails on a missing tree or any other error.
   The ops tick's extensions-lock beat locks a root that stands unlocked, at its top or at a scope folder a write killed mid-way left lifted, every 5 minutes (playbook's LIFECYCLE.md); a machine with no `chflags` (Linux) has no lock.
   It refuses a file tool's path in the root, `~` expanded, and a redirect into it, a group's, a subshell's, `exec`'s, a shell's, `eval`'s, `source`'s, `.`'s, `cd`'s, `pushd`'s, `popd`'s or a bare one included, and zsh's `>!` and `>>!` with them.
@@ -1039,6 +1040,30 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It is a speed bump, not a wall: a script file a session writes and runs passes it, as does an interpreter's own delete call (`fs.rmSync` in `bun -e`), and only an OS sandbox contains those.
   It fails closed only on a call it cannot read that reads as a delete, and its tests are `bun run test:file tests/scripts/hooks/no-raw-delete.test.ts tests/scripts/hooks/refused-forms.test.ts`.
   The repo's own scripts are held by `tests/no-raw-delete.test.ts` instead, which reads the repo's text and fails on a raw recursive delete outside its allowed folders and named carve-outs.
+
+## no-raw-vercel
+
+- Production ships from `main` through the release skill's `ship:merge`, and Ops ships the hosted build by hand, `vercel deploy --prod --yes` once a project with its `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` set in the call's environment.
+  A production deploy of the hosted build migrates the hosted database first (`packages/scripts/src/migrate-on-deploy.ts`), so a hand production move is the Ops lead's alone.
+  `scripts/hooks/no-raw-vercel.ts`, run on Bash by [guards](#guards) for a factory session, reads `vercel` and `vc` by any path or case wherever the shell walker finds a command (behind `env`, `exec`, `command`, `time`, `nohup`, `timeout`, `sudo`, `xargs`, in `sh -c`, `eval`, a subshell, a group or a substitution).
+  It also reads it through `bun x`, `bunx` or `npx` (`toolWords` in `scripts/hooks/no-main-checkout.ts`); another package runner is not read.
+- It judges each call by vercel 65.8.0's own commands, each alias it registers read as its command (`ln` and `aliases` as `alias`, `rr` as `rolling-release`, `i` as `install`, `log` as `logs`), and by the options its `--help` lists, global (`--team`, `--api`, `--scope` and the rest) and of each command it judges.
+  An option on neither list is read both ways, as a flag and as taking the next word, and the graver verdict stands, so an option the hook does not know never hides a word; one letter reads by its command (deploy's `-f` is its force flag; api's `-f` takes a field).
+  A read that passes whatever its options (`help`, `inspect`, `logs`, `ls`, `whoami`) is read up to its name alone; any other call with more such readings than 64 is refused.
+- It allows reads by name and refuses every other call, a command a later CLI adds included, since a list of refused commands always trails the CLI.
+  The reads: `whoami`, `ls` (`list`), `inspect`, `logs`, `help`, `--help` and `--version` on any command, the `ls` or `list` of `alias`, `dns`, `domains`, `integration`, `project` and `teams`,
+  `env ls` without its values (no `--json`, no `--format` or `-F` of `json`), `promote status`, `rollback status`, `rolling-release inspect`, and `vercel api list` and a `vercel api` GET with no body on an endpoint with no `env` segment, such as playbook's VERCEL.md form.
+  A preview deploy runs too: `deploy` or its `init`, or the default command when no word or a path (a word holding `.`, `/` or `~`) comes first, with no `--prod` and no `--environment` or `--target` naming `production`; and a `redeploy` whose `--environment`, `-e` or `--target` names another environment.
+- A production move is refused with a reason naming `ship:merge`: a deploy with `--prod`, a production `--environment` or `--target`, a `deploy continue`, whose target the hook cannot read, a `redeploy` into production or into the original's environment, its default, a `promote` or `rollback` but its `status`, an `alias` but its list, and a `rolling-release` step but `inspect`.
+  Deploy's `-e` is `--env`'s letter in 65.8.0, but the same letter names the environment on `redeploy` and `env`, and a letter's meaning can move between versions, so an `-e` whose value is no `KEY=VALUE` reads as production too.
+  The Ops lead alone passes them, from a session whose role is `lead` (its launch's `PLAYGROUND_ROLE`, else its roster row) and whose registry name has the roster's kind `ops` (`opsLead` in `role.ts`), in a call whose text names `PLAYGROUND_ROLE` in no form and runs no `source` or `.` (`namesRole` in `role.ts`, which no-protected-push's Builder pass reads too).
+- Every other call is refused for every session, the Ops lead included: among them `link`, `pull`, `build`, `env pull`, `env run`, `env add`, `env rm`, `install`, `integration add`, `remove`, a project, domain, DNS, redirect, firewall, flag, deploy hook or team change, and a `vercel api` call with a method other than `GET` or any body.
+  A word after `deploy` that is no path and no `init` or `continue` reads as a subcommand and is refused too, `describe` or one a later CLI adds.
+  A secret reaches a project through an Inbox secret ask instead (`.agents/dashboard/asks.md`).
+- It refuses what it cannot read where the word decides: a subcommand built at run time, any word built at run time on a deploy, a `redeploy`, an `env ls` or a `vercel api` call, and a program built at run time on a line that names `vercel` or `vc` as a word.
+  A call `xargs` feeds to a command other than a read is refused for every session, whatever its words, since xargs puts stdin's words among them, appended or in place of its `-I` or `-J` string.
+- It is a check with no process of its own, which [guards](#guards) runs, so it goes live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
+  Its tests are `bun run test:file tests/scripts/hooks/no-raw-vercel.test.ts`.
 
 ## no-raw-wa
 
