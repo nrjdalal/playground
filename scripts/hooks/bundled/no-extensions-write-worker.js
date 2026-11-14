@@ -9816,14 +9816,14 @@ function isCli(word, dirs) {
   const cli = (sep2 + CLI).toLowerCase();
   return paths.some((path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
 }
-var RUNNERS2 = new Set(["bun", "bunx", "npx"]);
+var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
 function runnerDirs(name, args, env) {
   if (name === "bunx")
     return runnerDirs("bun", [X, ...args], env);
   if (name === "npx") {
     const at = runnerTarget(args);
     const started = toolName(args[at]?.value);
-    return RUNNERS2.has(started) ? runnerDirs(started, args.slice(at + 1), env) : [];
+    return STARTED_RUNNERS.has(started) ? runnerDirs(started, args.slice(at + 1), env) : [];
   }
   if (name !== "bun")
     return [];
@@ -9831,7 +9831,7 @@ function runnerDirs(name, args, env) {
   const x = words[0] === "x";
   const own = x ? [cwd, chained] : [cwd];
   const started = x || words[0] === "run" ? toolName(args[at]?.value) : "";
-  if (!RUNNERS2.has(started))
+  if (!STARTED_RUNNERS.has(started))
     return own;
   return [...own, ...runnerDirs(started, args.slice(at + 1), { ...env, cwd: x ? chained : cwd })];
 }
