@@ -28,7 +28,7 @@ export type Gate = { detail: string; name: string; ok: boolean }
 export const REQUIRED_CHECKS = ["Audit, Lint, and Build", "test"]
 
 // The workflow each required check's job runs in, so a run that finished without that job reads apart from one GitHub has yet to start.
-const REQUIRED_WORKFLOWS: Record<string, string> = {
+export const REQUIRED_WORKFLOWS: Record<string, string> = {
   "Audit, Lint, and Build": "auto-check-build",
   test: "auto-test",
 }
@@ -83,7 +83,7 @@ export function verdictsAt(facts: Pick<PrFacts, "comments" | "head" | "owner">) 
   return newest
 }
 
-const PASSED = new Set(["NEUTRAL", "SKIPPED", "SUCCESS"])
+export const PASSED = new Set(["NEUTRAL", "SKIPPED", "SUCCESS"])
 
 // gitGuardian: the head must carry a GitGuardian check (a head it never started on ran no secret scan); outsideAuthor: the one login besides the repo's owner whose PR may merge, named on purpose.
 export type GateOptions = { gitGuardian?: boolean; outsideAuthor?: string }
