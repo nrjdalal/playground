@@ -7739,6 +7739,7 @@ async function runAll(lexed, env, visit, builtins) {
     producer.feedsShell = true;
     consumer.runsStdin = kind !== "code";
   }
+  env.namings ??= namings(lexed.commands);
   const unbind = new Map;
   for (const [k, cmd] of lexed.commands.entries()) {
     const at = envOf(cmd.scope);
@@ -7868,11 +7869,45 @@ function change(cmd, env) {
       setVar(env.vars, key, CHANGED);
   }
 }
+function namings(commands) {
+  const counts = new Map;
+  const add = (name) => void counts.set(name, (counts.get(name) ?? 0) + 1);
+  const count = (source, value) => {
+    for (const [, name] of (source ?? "").matchAll(/\$\{?[#!+^=~]?([A-Za-z_]\w*)/g))
+      add(name);
+    const text = value ?? "";
+    for (const [, name] of text.matchAll(/(?<=^|=)([A-Za-z_]\w*)(?=\[|\+?=|$)/g))
+      add(name);
+    const cluster = text.match(/^-(\w+)/)?.[1] ?? "";
+    for (let k = 1;k < cluster.length; k++) {
+      const name = cluster.slice(k).match(/^[A-Za-z_]\w*/)?.[0];
+      if (name && /^(?:\[|\+?=|$)/.test(text.slice(k + 1 + name.length)))
+        add(name);
+    }
+  };
+  for (const cmd of commands) {
+    const { args, first, name } = parse3(cmd);
+    if (name === "eval")
+      for (const a of args)
+        for (const [key] of a.value.matchAll(/[A-Za-z_]\w*/g))
+          add(key);
+    for (const w of cmd.words)
+      if (w !== first || !WHOLE_RUN.test(w.raw ?? w.source ?? ""))
+        count(w.source ?? w.raw, w.value);
+    for (const r of cmd.redirects) {
+      count(r.target?.source, r.target?.value);
+      count(r.body?.value, undefined);
+    }
+  }
+  return counts;
+}
 function arrayRun(cmd, first, env) {
-  const key = (first?.raw ?? first?.source)?.match(/^"?\$\{([A-Za-z_]\w*)\[@\]\}"?$/)?.[1];
+  const key = (first?.raw ?? first?.source)?.match(WHOLE_RUN)?.[1];
   const set = key ? env.vars.get(key) : undefined;
-  if (!set)
+  if (!key || !set)
     return;
+  if ((env.namings?.get(key) ?? 0) > 1)
+    return null;
   if (set.unknown !== undefined || set.vanishes)
     return null;
   const inner = set.source?.match(/^[A-Za-z_]\w*=\(([\s\S]*)\)$/)?.[1];
@@ -8131,6 +8166,7 @@ var vanishingParts = (source) => {
 var READ_VALUES = new Set(["d", "i", "n", "N", "p", "t", "u"]);
 var NAME = /^[A-Za-z_]\w*$/;
 var SUBSCRIPTED = /^([A-Za-z_]\w*)(?:\[[^\]]*\]\+?|\+)=/;
+var WHOLE_RUN = /^"?\$\{([A-Za-z_]\w*)\[@\]\}"?$/;
 function binds({ words }) {
   let at = 0;
   while (at < words.length && (!words[at].quoted && RESERVED.has(words[at].value) || ASSIGN.test(words[at].value)))
@@ -8943,7 +8979,7 @@ function quotedBodiesOut(command) {
   }
   return docs.length ? command : out;
 }
-function namings(command) {
+function namings2(command) {
   const counts = new Map;
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
@@ -11329,7 +11365,7 @@ async function inspect(raw, environment, unknown = false) {
     const unread = fromArgFile.has(loose) ? "the file its -a names" : fed && fromStdin.has(loose) && (fed.unknown || unsplit) ? fed.unknown ?? (delimiter ? "stdin split on its -d delimiter" : fedSplit ? "stdin holding a part it cannot read" : "stdin holding a quote it does not close") : undefined;
     return refuse(afterUnreadCd(unread ? `${verb} under xargs on the words it reads from ${unread}` : `${verb} on ${shown(loose)}`));
   };
-  const named = namings(command);
+  const named = namings2(command);
   const known = knownVariables(command, environment, directory);
   const steered = Object.keys(known).filter((key) => named.counts.has(key));
   if (unknown)

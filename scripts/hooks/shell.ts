@@ -107,6 +107,8 @@ export type Env = {
   // Set by a hook that holds the line's steady variables (`steady.ts`): a cd's folder word with those it reads put in, else undefined, so a cd through one is read by the folder it names, and one through a literal absolute path (`landsHeld`) is read as a cd to that path
   hold?: (word: Word, cmd: Command, env: Env) => Word | undefined
   known: Record<string, string>
+  // How many times the whole line names each name, a whole array run as a program word aside (`namings`), so `arrayRun` reads an array only where its one assignment names it
+  namings?: Map<string, number>
   old?: { dir?: string }
   // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
   oldFrom?: string[]
@@ -1678,6 +1680,8 @@ async function runAll(
     // a script in another language is not read as shell
     consumer.runsStdin = kind !== "code"
   }
+  // a script the line runs keeps the whole line's count, which a hook's own reading of the line again leaves as it is
+  env.namings ??= namings(lexed.commands)
   const unbind = new Map<Command, () => void>()
   for (const [k, cmd] of lexed.commands.entries()) {
     const at = envOf(cmd.scope)
@@ -1848,10 +1852,41 @@ function change(cmd: Command, env: Env): void {
 }
 
 // An array the line holds, run whole as the program word (`"${A[@]}"`), runs its elements as the command's first words: the command with them in its place when each is a word the reader reads as written, null when one is not or something may have changed the array, so the program may be any; undefined for any other program word, or a name the line never set to an array
+// Each time the line names a variable, counted, a whole array run as a program word aside: an expansion as written (`$A`, `${A[1]}`, `${#A[@]}`), and a word whose value names it as a setter or an assignment takes a name (`A`, `A[0]`, `A=x`, `A+=(x)`, `x=A`, `-vA[0]`)
+function namings(commands: Command[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  const add = (name: string): void => void counts.set(name, (counts.get(name) ?? 0) + 1)
+  const count = (source: string | undefined, value: string | undefined): void => {
+    for (const [, name] of (source ?? "").matchAll(/\$\{?[#!+^=~]?([A-Za-z_]\w*)/g)) add(name)
+    const text = value ?? ""
+    for (const [, name] of text.matchAll(/(?<=^|=)([A-Za-z_]\w*)(?=\[|\+?=|$)/g)) add(name)
+    const cluster = text.match(/^-(\w+)/)?.[1] ?? ""
+    for (let k = 1; k < cluster.length; k++) {
+      const name = cluster.slice(k).match(/^[A-Za-z_]\w*/)?.[0]
+      if (name && /^(?:\[|\+?=|$)/.test(text.slice(k + 1 + name.length))) add(name)
+    }
+  }
+  for (const cmd of commands) {
+    const { args, first, name } = parse(cmd)
+    // eval's text runs in the line's own shell, so every name it holds counts as the line's, read in one pass so a deep chain of evals stays linear
+    if (name === "eval")
+      for (const a of args) for (const [key] of a.value.matchAll(/[A-Za-z_]\w*/g)) add(key)
+    for (const w of cmd.words)
+      if (w !== first || !WHOLE_RUN.test(w.raw ?? w.source ?? "")) count(w.source ?? w.raw, w.value)
+    for (const r of cmd.redirects) {
+      count(r.target?.source, r.target?.value)
+      count(r.body?.value, undefined)
+    }
+  }
+  return counts
+}
+
 function arrayRun(cmd: Command, first: Word | undefined, env: Env): Command | null | undefined {
-  const key = (first?.raw ?? first?.source)?.match(/^"?\$\{([A-Za-z_]\w*)\[@\]\}"?$/)?.[1]
+  const key = (first?.raw ?? first?.source)?.match(WHOLE_RUN)?.[1]
   const set = key ? env.vars.get(key) : undefined
-  if (!set) return
+  if (!key || !set) return
+  // an array the line names anywhere but its one whole assignment and its runs may have changed there (`read "A[0]"`, `export "A[1]=x"`, `: ${A[1]}`)
+  if ((env.namings?.get(key) ?? 0) > 1) return null
   if (set.unknown !== undefined || set.vanishes) return null
   // an assignment's word keeps its source in the line's variables, an array's `A=(…)` as written
   const inner = (set as Partial<Word>).source?.match(/^[A-Za-z_]\w*=\(([\s\S]*)\)$/)?.[1]
@@ -2153,6 +2188,8 @@ const READ_VALUES = new Set(["d", "i", "n", "N", "p", "t", "u"])
 const NAME = /^[A-Za-z_]\w*$/
 // An array element's assignment or an append as written, its name captured: `A[1]=x`, `A[$k]+=x`, zsh's `A[1]=()`, `A+=(x)`
 const SUBSCRIPTED = /^([A-Za-z_]\w*)(?:\[[^\]]*\]\+?|\+)=/
+// A whole array run as written, its name captured: `"${A[@]}"`, `${A[@]}`
+const WHOLE_RUN = /^"?\$\{([A-Za-z_]\w*)\[@\]\}"?$/
 
 // The names one command gives a value without an `=` (bind reads them), each at its builtin's binding place as the bash manual gives it: `for NAME in`, `select NAME in`, `read [options] NAME…` and its `-a NAME`, `getopts OPTSTRING NAME` and `printf -v NAME`; a declaration builtin gives none, its `=` part read as an assignment
 function binds({ words }: Command): string[] {
