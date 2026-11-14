@@ -1654,12 +1654,19 @@ function ifsSplit(env) {
 function splitValue(value, seps) {
   return value.split(seps).filter(Boolean).map((part) => marked(part) ? { quoted: false, unknown: "a shell variable", value: part } : { quoted: false, value: tildeHome(part) });
 }
-var MAY_VANISH = /^(?:\$(?:\w+|[@*])|\$\{(?:\w+|[@*])(?::?-)?\})+$|^"\$(?:@|\{@\})"$/;
+var VANISHING_PART = /\$[=~^]*(?:\w+|[@*])|\$\{[=~^]*!?(?:\w+|[@*])(?:\[[@*]\])?(?::?[-=]|:?\+[^{}]*|(?:#|%|\/|:(?![-=?+]))[^{}]*)?\}|"\$(?:@|\{@\}|\{\w+\[@\]\})"/y;
 var MOVES = new Set(["cd", "popd", "pushd"]);
-var mayVanish = (w, env) => !!w.source && /^\u0000+$/.test(w.value) && MAY_VANISH.test(w.source) && [...w.source.matchAll(/\$\{?(\w+)/g)].every(([, name]) => {
+var vanishingParts = (source) => {
+  VANISHING_PART.lastIndex = 0;
+  while (VANISHING_PART.lastIndex < source.length)
+    if (!VANISHING_PART.exec(source))
+      return false;
+  return true;
+};
+var mayVanish = (w, env) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source) && [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
   const set = env.vars.get(name);
   return !set || !set.unknown && set.value === "";
-});
+}));
 function emptyProgram(cmd, env) {
   if (!cmd.words.some((w) => mayVanish(w, env)))
     return [];

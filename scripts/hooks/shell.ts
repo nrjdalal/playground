@@ -1810,19 +1810,28 @@ function splitValue(value: string, seps: RegExp): Word[] {
     )
 }
 
-// A word of expansions alone, each one the shell may expand to no word (`$X`, `${X}`, `${X:-}`, `${X-}`, `$@`, `$*`, `"$@"`), which it then drops
-const MAY_VANISH = /^(?:\$(?:\w+|[@*])|\$\{(?:\w+|[@*])(?::?-)?\})+$|^"\$(?:@|\{@\})"$/
+// One part of a word the shell may expand to no word: a bare read (`$X`, `$@`, `$*`, `$1`, zsh's `$=X`, `$~X`), a braced read of a name, an array or an indirection whose operator yields nothing on an unset or empty value (`${X}`, `${X:-}`, `${X=}`, `${X:+y}`, `${X#a}`, `${X/a/b}`, `${X:0}`, `${X[@]}`, `${!X}`, zsh's `${=X}`), or a quoted `"$@"` or `"${X[@]}"`, which expands to no word with no elements
+const VANISHING_PART =
+  /\$[=~^]*(?:\w+|[@*])|\$\{[=~^]*!?(?:\w+|[@*])(?:\[[@*]\])?(?::?[-=]|:?\+[^{}]*|(?:#|%|\/|:(?![-=?+]))[^{}]*)?\}|"\$(?:@|\{@\}|\{\w+\[@\]\})"/y
 const MOVES = new Set(["cd", "popd", "pushd"])
 
-// Whether a word may expand to no word: it matches MAY_VANISH, the reader read none of it, and every variable it names is one the line never set or set to nothing
+// Whether a source is made of VANISHING_PART alone
+const vanishingParts = (source: string): boolean => {
+  VANISHING_PART.lastIndex = 0
+  while (VANISHING_PART.lastIndex < source.length) if (!VANISHING_PART.exec(source)) return false
+  return true
+}
+
+// Whether a word may expand to no word: the reader read none of it, and it is VANISHING_PART alone with every variable it names one the line never set or set to nothing, or an unread part of a word a script the line built carries (`eval $X …`, `bash -c "$X …"`), which keeps no source of its own
 const mayVanish = (w: Word, env: Env): boolean =>
   !!w.source &&
   /^\u0000+$/.test(w.value) &&
-  MAY_VANISH.test(w.source) &&
-  [...w.source.matchAll(/\$\{?(\w+)/g)].every(([, name]) => {
-    const set = env.vars.get(name)
-    return !set || (!set.unknown && set.value === "")
-  })
+  (/^\u0000+$/.test(w.source) ||
+    (vanishingParts(w.source) &&
+      [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
+        const set = env.vars.get(name)
+        return !set || (!set.unknown && set.value === "")
+      })))
 
 // The empty reading of a command: each program word that may expand to no word (mayVanish) dropped, until one that stays leads, so the word after it is judged as the program (`$X git commit`, `nice $X git commit`, `$X $Y git commit`); none when the program word stays. It is judged beside the typed reading, so a verdict only moves to refused.
 function emptyProgram(cmd: Command, env: Env): Command[] {
