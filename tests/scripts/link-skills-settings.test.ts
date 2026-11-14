@@ -109,7 +109,12 @@ describe("link-skills.sh links the playground command and its brief templates", 
     expect(readlinkSync(join(home, ".bun", "bin", "playground"))).toBe(
       join(repo, "packages", "scripts", "src", "playground", "cli.ts"),
     )
-    for (const brief of ["new-reviewer.md", "new-tester.md", "new-worker.md"])
+    for (const brief of [
+      "new-research-worker.md",
+      "new-reviewer.md",
+      "new-tester.md",
+      "new-worker.md",
+    ])
       expect(readlinkSync(join(home, ".playground", "handoffs", brief))).toBe(
         join(repo, "scripts", "briefs", brief),
       )
