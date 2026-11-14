@@ -166,6 +166,20 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     expect(handed).toEqual([URL])
   })
 
+  test("a worker the sweep ends hands its cleanup no pr, so its worktrees keep their own PR's reading", async () => {
+    const handed: (string | undefined)[] = []
+    const { deps } = fakes({ cleanup: async (target) => (handed.push(target.pr), []) })
+    await sweep(
+      input({
+        roster: { "q6dmtb-worker": { kind: "worker", name: "q6dmtb-worker", pr: URL } },
+        sessions: { "q6dmtb-worker": live("q6dmtb-worker") },
+        workerPrs: async (name) => (name === "q6dmtb-worker" ? [URL] : []),
+      }),
+      deps,
+    )
+    expect(handed).toEqual([undefined])
+  })
+
   test("a reviewer idle 30+ minutes on a scored head ends with its resume named and its worktrees left for that resume; a tester does not", async () => {
     const scored: PrState = { head: "abc1234567", state: "open", verdicts: ["abc1234"] }
     const cleaned: string[] = []
