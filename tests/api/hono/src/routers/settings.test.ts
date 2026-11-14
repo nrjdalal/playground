@@ -208,8 +208,8 @@ describe("WhatsApp's numbers through /api/v1/settings (#1797)", () => {
   )
 })
 
-// #2142: Settings > Privacy saves owner.names through this PUT, and the answer names each one-word entry with the tracked files trace-count's ownerName kind counts it in; this file holds the made-up one, so it is the file the answer names.
-describe("owner.names' one-word warning through PUT /api/v1/settings (#2142)", () => {
+// Settings > Privacy saves owner.names through this PUT, and the answer names each one-word entry with the tracked files trace-count's ownerName kind counts it in; this file holds the made-up one, so it is the file the answer names.
+describe("owner.names' one-word warning through PUT /api/v1/settings", () => {
   const write = (value: string[]) =>
     app.request(
       "http://127.0.0.1/owner.names",
