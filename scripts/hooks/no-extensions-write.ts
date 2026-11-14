@@ -24,6 +24,7 @@ import {
   real,
   runnerReadings,
   runnerTarget,
+  STARTED_RUNNERS,
   toolName,
   UNREAD_CWD,
   X,
@@ -871,34 +872,34 @@ function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   )
 }
 
-// the package runners runnerDirs follows when a runner starts one
-const STARTED_RUNNERS = new Set(["bun", "bunx", "npx"])
-
 // The folders a bun, bunx or npx call's word may land in: bun's last --cwd, for bun x and bunx also the folder their --cwd options chain to, and for a bun, bunx or npx that bunx, bun x, npx or bun run starts, its own folders read from the folder the runner starts it in, as no-main-checkout's runs() reads a bun x program.
-function runnerDirs(name: string, args: Word[], env: Env): (string | undefined)[] {
-  // each reading of the runner's options (runnerReadings), and an unread folder past them
-  return runnerReadings(name, args).flatMap((reading) =>
-    reading[1] === UNREAD_CWD ? [undefined] : readingDirs(name, reading, env),
-  )
+function runnerDirs(name: string, args: Word[], env: Env, depth = 0): (string | undefined)[] {
+  // each reading of the runner's options (runnerReadings), and an unread folder past them; past RUNNER_DEPTH runners, whose readings multiply at each one, the folder is unread
+  if (depth > RUNNER_DEPTH) return [undefined]
+  return runnerReadings(name, args).flatMap((reading) => readingDirs(name, reading, env, depth))
 }
-function readingDirs(name: string, args: Word[], env: Env): (string | undefined)[] {
-  if (name === "bunx") return readingDirs("bun", [X, ...args], env)
-  if (name === "npx") return startedDirs(args.slice(runnerTarget(args)), env)
+const RUNNER_DEPTH = 3
+function readingDirs(name: string, args: Word[], env: Env, depth: number): (string | undefined)[] {
+  if (args[1] === UNREAD_CWD) return [undefined]
+  if (name === "bunx") return readingDirs("bun", [X, ...args], env, depth)
+  if (name === "npx") return startedDirs(args.slice(runnerTarget(args)), env, depth)
   if (name !== "bun") return []
   const { at, chained, cwd, words } = bunCall(args, env)
   const x = words[0] === "x"
   const own = x ? [cwd, chained] : [cwd]
   const started = x || words[0] === "run" ? args.slice(at) : []
-  return [...own, ...startedDirs(started, { ...env, cwd: x ? chained : cwd })]
+  return [...own, ...startedDirs(started, { ...env, cwd: x ? chained : cwd }, depth)]
 }
 
 // The folders of a package runner that a runner starts in env's folder, behind any wrapper the reader parses (env, nice), whose env -C moves it
-function startedDirs(words: Word[], env: Env): (string | undefined)[] {
+function startedDirs(words: Word[], env: Env, depth: number): (string | undefined)[] {
   if (words.length === 0) return []
   const { args, chdir, name } = parse({ redirects: [], scope: 0, words })
   const tool = toolName(name)
   if (!STARTED_RUNNERS.has(tool)) return []
-  return runnerDirs(tool, args, chdir ? { ...env, cwd: pathOf(chdir, env) } : env)
+  // a runner started straight by a runner is already read both ways in the outer reading (runnerReadings), so only one behind a wrapper is read again
+  if (toolName(words[0]?.value) === tool) return readingDirs(tool, args, env, depth)
+  return runnerDirs(tool, args, chdir ? { ...env, cwd: pathOf(chdir, env) } : env, depth + 1)
 }
 
 // The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare, a package runner's word read in each folder runnerDirs names too.
@@ -916,7 +917,8 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
         dirs.push(...runnerDirs(tool, words.slice(at + 1), { ...env, cwd: here }))
     if (word.value === "-execdir" || word.value === "-okdir") dirs.push(undefined)
   }
-  return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
+  const unique = [...new Set(dirs)]
+  return words.flatMap((word, at) => (isCli(word, unique) ? [words.slice(at + 1)] : []))
 }
 
 // The variables a score's author is read from (store.ts, terminalIo); an ext score whose line clears or sets one reads as another author.

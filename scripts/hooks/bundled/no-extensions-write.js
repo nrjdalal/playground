@@ -10018,31 +10018,37 @@ function isCli(word, dirs) {
   const cli = (sep2 + CLI).toLowerCase();
   return paths.some((path) => path === undefined ? /^cli(?:\.ts)?$/.test(program(word.value)) : [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
 }
-var STARTED_RUNNERS2 = new Set(["bun", "bunx", "npx"]);
-function runnerDirs(name, args, env) {
-  return runnerReadings(name, args).flatMap((reading) => reading[1] === UNREAD_CWD ? [undefined] : readingDirs(name, reading, env));
+function runnerDirs(name, args, env, depth = 0) {
+  if (depth > RUNNER_DEPTH)
+    return [undefined];
+  return runnerReadings(name, args).flatMap((reading) => readingDirs(name, reading, env, depth));
 }
-function readingDirs(name, args, env) {
+var RUNNER_DEPTH = 3;
+function readingDirs(name, args, env, depth) {
+  if (args[1] === UNREAD_CWD)
+    return [undefined];
   if (name === "bunx")
-    return readingDirs("bun", [X, ...args], env);
+    return readingDirs("bun", [X, ...args], env, depth);
   if (name === "npx")
-    return startedDirs(args.slice(runnerTarget(args)), env);
+    return startedDirs(args.slice(runnerTarget(args)), env, depth);
   if (name !== "bun")
     return [];
   const { at, chained, cwd, words } = bunCall(args, env);
   const x = words[0] === "x";
   const own = x ? [cwd, chained] : [cwd];
   const started = x || words[0] === "run" ? args.slice(at) : [];
-  return [...own, ...startedDirs(started, { ...env, cwd: x ? chained : cwd })];
+  return [...own, ...startedDirs(started, { ...env, cwd: x ? chained : cwd }, depth)];
 }
-function startedDirs(words, env) {
+function startedDirs(words, env, depth) {
   if (words.length === 0)
     return [];
   const { args, chdir, name } = parse3({ redirects: [], scope: 0, words });
   const tool = toolName(name);
-  if (!STARTED_RUNNERS2.has(tool))
+  if (!STARTED_RUNNERS.has(tool))
     return [];
-  return runnerDirs(tool, args, chdir ? { ...env, cwd: pathOf(chdir, env) } : env);
+  if (toolName(words[0]?.value) === tool)
+    return readingDirs(tool, args, env, depth);
+  return runnerDirs(tool, args, chdir ? { ...env, cwd: pathOf(chdir, env) } : env, depth + 1);
 }
 function cliCalls(parsed, env) {
   const { args, first, name } = parsed;
@@ -10053,13 +10059,14 @@ function cliCalls(parsed, env) {
   for (const [at, word] of words.entries()) {
     const tool = toolName(word.value);
     const bases = [...new Set(dirs)];
-    if (at > 0 && STARTED_RUNNERS2.has(tool))
+    if (at > 0 && STARTED_RUNNERS.has(tool))
       for (const here of bases.length > 16 ? [undefined] : bases)
         dirs.push(...runnerDirs(tool, words.slice(at + 1), { ...env, cwd: here }));
     if (word.value === "-execdir" || word.value === "-okdir")
       dirs.push(undefined);
   }
-  return words.flatMap((word, at) => isCli(word, dirs) ? [words.slice(at + 1)] : []);
+  const unique = [...new Set(dirs)];
+  return words.flatMap((word, at) => isCli(word, unique) ? [words.slice(at + 1)] : []);
 }
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];
 var SETS = /^(?:CLAUDE_CODE_SESSION_ID|CLAUDE_CONFIG_DIR|PLAYGROUND_ROLE)\+?=/;
@@ -10829,7 +10836,7 @@ async function inspect(raw, environment, unknown = false) {
     const shownEval = evaluated && masked !== undefined ? { ...evaluated, value: masked } : undefined;
     const own = (word) => word === evaluated && shownEval ? shownEval : word;
     const shownText = new Set([...wholeText].map(own));
-    const started = STARTED_RUNNERS2.has(name) ? places(env).flatMap((here) => runnerDirs(name, args, here)) : [];
+    const started = STARTED_RUNNERS.has(name) ? places(env).flatMap((here) => runnerDirs(name, args, here)) : [];
     const ranIn = started.filter((dir) => dir !== undefined);
     const textEnv = started.length === 0 ? env : {
       ...env,
