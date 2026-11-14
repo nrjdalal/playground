@@ -10260,7 +10260,7 @@ function xargsGrep(cmd, parsed, env) {
   const { also, chdir, first, local, name, xargs } = parsed;
   const lead = cmd.words.find((word) => /(?:^|\/)xargs$/.test(word.value));
   const system = /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/;
-  return !!xargs && !!first && name === "grep" && also.length === 0 && !chdir && local.size === 0 && ownFirst(cmd, lead) && system.test(lead.value) && system.test(first.value) && xargsOptions(cmd, first).every((value) => !marked(value) && !WRAPPERS.has(program(value))) && reads(parsed, env);
+  return !!xargs && !!first && name === "grep" && also.length === 0 && !chdir && local.size === 0 && ownFirst(cmd, lead) && system.test(lead.value) && system.test(first.value) && (xargs.replace === undefined || !first.value.includes(xargs.replace)) && xargsOptions(cmd, first).every((value) => !marked(value) && !WRAPPERS.has(program(value)) && !/^--process-slot-var(?:=|$)/.test(value)) && reads(parsed, env);
 }
 function narrow(cmd, env) {
   const parsed = parse3(cmd);

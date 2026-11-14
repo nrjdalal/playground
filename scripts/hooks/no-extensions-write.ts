@@ -1307,7 +1307,7 @@ const FLAGS = /\$\{\([^)]*[eP][^)]*\)[^}]*\}?/g
 const FILE_RUN = /(?:^|[\s;&|(<>])=\(/
 const FILE_RUNS = /=\([^)]*\)?/g
 
-// Whether a call is grep that xargs starts, read as a direct grep is: xargs its command's own first word, bare or by a system path, then only its own options, each read one way (no other reading in `also`, no wrapper's name among them), no variable set, and grep bare or by a system path
+// Whether a call is grep that xargs starts, read as a direct grep is: xargs its command's own first word, bare or by a system path, then only its own options, each read one way (no other reading in `also`, no wrapper's name among them), no variable set, its own --process-slot-var included, no replace string inside grep's own word, which stdin would put in place of the program, and grep bare or by a system path
 function xargsGrep(cmd: Command, parsed: Parsed, env: Env): boolean {
   const { also, chdir, first, local, name, xargs } = parsed
   const lead = cmd.words.find((word) => /(?:^|\/)xargs$/.test(word.value))
@@ -1322,7 +1322,13 @@ function xargsGrep(cmd: Command, parsed: Parsed, env: Env): boolean {
     ownFirst(cmd, lead) &&
     system.test(lead.value) &&
     system.test(first.value) &&
-    xargsOptions(cmd, first).every((value) => !marked(value) && !WRAPPERS.has(program(value))) &&
+    (xargs.replace === undefined || !first.value.includes(xargs.replace)) &&
+    xargsOptions(cmd, first).every(
+      (value) =>
+        !marked(value) &&
+        !WRAPPERS.has(program(value)) &&
+        !/^--process-slot-var(?:=|$)/.test(value),
+    ) &&
     reads(parsed, env)
   )
 }
