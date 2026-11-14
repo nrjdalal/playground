@@ -413,7 +413,10 @@ const guardsOf = (
         PLAYGROUND_ROLE: "worker",
       }),
   },
-  "no-kill-by-name": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => c.killByName(raw) },
+  "no-kill-by-name": {
+    folders: { checkout: [CHECKOUT, HOME], home: [HOME, HOME] },
+    run: (raw) => c.killByName(raw),
+  },
   "no-linear-ticket": {
     folders: { checkout: [CHECKOUT, HOME], "data folder": [DATA, HOME] },
     run: (raw, home) =>
