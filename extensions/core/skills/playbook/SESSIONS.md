@@ -262,7 +262,7 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
   `--discard` first writes its commits no remote holds to a git bundle beside it in the trash, and another repo's such worktree stays.
   The live dashboard's checkout stays, by its branch.
   A Playground worktree in `.claude/worktrees/` that a live session or a clone holds stays, where a hold by the merged PR's number alone, from the worker still merging it, does not count, nor does a row naming it by its branch or its own PR's number once that PR has merged or closed and the worktree sits at that PR's head (`playground rm`'s `freed by` line;
-  commits past that head keep the hold, named with them).
+  commits past that head keep the hold, named with them), nor does any live row on a worktree sitting clean, detached, at a commit `origin/canary` holds.
   A before-shot worktree's branch is named `before-PG-<n>-<slug>`, with no worker id, since safe-delete's byId rule (`packages/safe-delete/src/index.ts`) keeps a worktree whose folder or branch holds a live session's id until that session's row ends.
   So does one a symlink outside it points into (another worktree's, a marked scratch folder's or a session scratchpad's, at its top level or one level into its `node_modules`), and its line names the first three links.
   Any other whose `.turbo/dev.pgid` records a stack has it stopped first (`bun run dev:stop` there, whose refusal keeps it), so a clone with no record, a reviewer's with no `node_modules` among them, goes on with nothing to stop.

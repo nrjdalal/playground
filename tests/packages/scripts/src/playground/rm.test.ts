@@ -481,7 +481,7 @@ const canaryRepo = () => {
   return { deps, main, wt }
 }
 
-// PG-2017: a live row holds a worktree no more when it sits clean, detached, at a commit origin/canary holds; each broken condition keeps the hold. The row holds by the folder's name, since a detached tree reads no branch.
+// PG-2017: a live row holds a worktree no more when it sits clean, detached, at a commit origin/canary holds; each broken condition keeps the hold. The row holds by the folder's name, since a detached tree reads no branch, and each case runs under --discard, so only the row's hold refuses.
 const detach = (wt: string) => git(wt, "checkout", "-q", "--detach", "origin/canary")
 const withRow = (deps: RmDeps) =>
   writeFileSync(
@@ -525,7 +525,7 @@ test.each([
   const { deps, main, wt } = canaryRepo()
   arm(wt)
   withRow(deps)
-  expect(await runRm(["--worktree", wt], deps)).toBe(code)
+  expect(await runRm(["--worktree", wt, "--discard"], deps)).toBe(code)
   expect(existsSync(wt)).toBe(code !== 0)
   if (code === 0) expect(git(main, "worktree", "list")).not.toContain("pg-1")
 })
