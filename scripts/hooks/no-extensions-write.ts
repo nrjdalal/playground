@@ -1758,20 +1758,21 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
-  // What an in-place sed's script writes that a shell may run later (sedWrites), its quotes dropped: the root in its text, else a word, or a part of a brace list, under ~, $HOME or / that can name the root or a path in it (reaches), or that holds the root's own parts after any / (follows), from its start too when the cwd is above the root, so a glob or an escaped slash spells the root no other way than its literal path
+  // What an in-place sed's script writes that a shell may run later (sedWrites), its quotes dropped: the root in its text, else a word, or a part of a brace list, under ~, $HOME or / that can name the root or a path in it (reaches), or that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), or from its start when the cwd is above the root, so a glob or an escaped slash spells the root no other way than its literal path
   const scriptNames = (script: string, env: Env): string | undefined => {
     const near = relative(env)?.split(sep)
     for (const text of sedWrites(script)) {
       const plain = text.replace(/['"]/g, "")
       if (holds(plain, env)) return `${root} in its text`
-      for (const token of plain.split(/[\s;&`<>=:]+/))
+      for (const token of plain.split(/[\s;&<>=]+/))
         for (const word of [token, ...token.split(/[{},]/)]) {
           const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word)
           const value = tilde ? home + word.slice(tilde[0].length) : word
           if (value.startsWith(sep) && reaches(value)) return value
           const parts = word.split(sep)
           if (near && follows(parts, near)) return word
-          if (parts.some((_, k) => k > 0 && follows(parts.slice(k), rootParts))) return word
+          const expands = (k: number) => parts.slice(0, k).some((part) => /[$~`]/.test(part))
+          if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts))) return word
         }
     }
   }
@@ -2069,7 +2070,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const tool = GNU_NAMED.exec(name)?.[1] ?? name
     const gnu = tool !== name || first.value.includes("/gnubin/")
     const remover = REMOVERS.has(tool)
-    // an in-place sed's scripts: sedInPlace's, else on a sed spelled off its list (-I, --in-place=, s|||) every word but the files inPlace reads, each read whole by sedWrites
+    // an in-place sed's scripts for the root reading (scriptNames): sedInPlace's, the sed half of sedScripts but on a line read whole too, else on a sed spelled off its list (-I, --in-place=, s|||) every word but the files inPlace reads, each read whole by sedWrites
     const edited = new Set(inPlace(tool, args))
     const sedEdit =
       sedInPlace(cmd, parsed) ??
@@ -2138,7 +2139,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         const named = names({ ...value, quoted: false }, here, remover)
         if (named) return refuse(`${verb} with a variable on ${named}`)
       }
-      for (const script of sedEdit ?? []) {
+      for (const script of sedEdit) {
         const named = scriptNames(script.value, here)
         if (named) return refuse(`${verb} with a script that names ${named}`)
       }

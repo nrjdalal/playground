@@ -10863,7 +10863,7 @@ async function inspect(raw, environment, unknown = false) {
       const plain = text.replace(/['"]/g, "");
       if (holds(plain, env))
         return `${root} in its text`;
-      for (const token of plain.split(/[\s;&`<>=:]+/))
+      for (const token of plain.split(/[\s;&<>=]+/))
         for (const word of [token, ...token.split(/[{},]/)]) {
           const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word);
           const value = tilde ? home + word.slice(tilde[0].length) : word;
@@ -10872,7 +10872,8 @@ async function inspect(raw, environment, unknown = false) {
           const parts = word.split(sep2);
           if (near && follows(parts, near))
             return word;
-          if (parts.some((_, k) => k > 0 && follows(parts.slice(k), rootParts)))
+          const expands = (k) => parts.slice(0, k).some((part) => /[$~`]/.test(part));
+          if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts)))
             return word;
         }
     }
@@ -11089,7 +11090,7 @@ async function inspect(raw, environment, unknown = false) {
         if (named)
           return refuse(`${verb} with a variable on ${named}`);
       }
-      for (const script of sedEdit ?? []) {
+      for (const script of sedEdit) {
         const named = scriptNames(script.value, here);
         if (named)
           return refuse(`${verb} with a script that names ${named}`);
