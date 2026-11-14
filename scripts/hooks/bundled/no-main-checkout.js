@@ -5546,6 +5546,9 @@ function lex(src, known = {}) {
   const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() };
   list(lx, 0, false);
   calledAgain(lx.commands, src);
+  if (/chpwd/.test(src))
+    for (const c of lx.commands)
+      c.cdRedefined = true;
   braced(lx.commands);
   return { commands: lx.commands, scopes: lx.scopes };
 }
@@ -7849,7 +7852,11 @@ function runnerReadings(name, args) {
     out.push([...head, ...args.slice(k)]);
   };
   walk(0, []);
-  return out.length > OPTION_READINGS ? [...out.slice(0, OPTION_READINGS), [{ quoted: false, value: "--cwd" }, UNREAD_CWD, ...args]] : out;
+  return out.length > OPTION_READINGS ? [
+    args,
+    ...out.slice(0, OPTION_READINGS - 1),
+    [{ quoted: false, value: "--cwd" }, UNREAD_CWD, ...args]
+  ] : out;
 }
 function runnerTarget(args) {
   let k = 0;

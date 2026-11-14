@@ -32,7 +32,7 @@ export type Command = {
   atLeastOnce?: boolean
   // Set on the bare copy run() hands a hook's visit for a followed command with a redirect: the command it stands for
   bareOf?: Command
-  // Set on every command of a line that defines a function named cd or chpwd, so each cd there is unread
+  // Set on every command of a line that defines a function named cd or chpwd, or names zsh's chpwd hooks anywhere (`chpwd_functions`, `add-zsh-hook chpwd`), so each cd there is unread
   cdRedefined?: boolean
   // The token of the run of commands this one belongs to: it changes at each operator that runs a command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and carries into every group, body and pipeline the run reaches, so a cd is read as having moved the shell only for the commands whose token is its own
   chain?: number
@@ -844,6 +844,7 @@ export function lex(src: string, known: Record<string, string> = {}): Lexed {
   const lx: Lexer = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() }
   list(lx, 0, false)
   calledAgain(lx.commands, src)
+  if (/chpwd/.test(src)) for (const c of lx.commands) c.cdRedefined = true
   braced(lx.commands)
   return { commands: lx.commands, scopes: lx.scopes }
 }

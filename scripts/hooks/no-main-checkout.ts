@@ -448,7 +448,7 @@ export function runnerFolders(
   return xCwd ? [...folders, xCwd.dir] : folders
 }
 
-// bun's options whose value bunCall reads itself, and the most readings runnerReadings makes of one call, past which a --cwd the hook cannot read (UNREAD_CWD) joins them, so the call's folder reads as unread
+// bun's options whose value bunCall reads itself, and the most readings runnerReadings makes of one call, past which the call as typed and a --cwd the hook cannot read (UNREAD_CWD) join them, so the call's folder reads as unread too
 const BUN_SPLITS = new Set(["--cwd", "--filter", "-F"])
 const OPTION_READINGS = 16
 export const UNREAD_CWD: Word = {
@@ -480,7 +480,11 @@ export function runnerReadings(name: string, args: Word[]): Word[][] {
   }
   walk(0, [])
   return out.length > OPTION_READINGS
-    ? [...out.slice(0, OPTION_READINGS), [{ quoted: false, value: "--cwd" }, UNREAD_CWD, ...args]]
+    ? [
+        args,
+        ...out.slice(0, OPTION_READINGS - 1),
+        [{ quoted: false, value: "--cwd" }, UNREAD_CWD, ...args],
+      ]
     : out
 }
 

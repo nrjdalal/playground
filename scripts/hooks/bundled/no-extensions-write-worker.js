@@ -7015,6 +7015,9 @@ function lex(src, known = {}) {
   const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() };
   list(lx, 0, false);
   calledAgain(lx.commands, src);
+  if (/chpwd/.test(src))
+    for (const c of lx.commands)
+      c.cdRedefined = true;
   braced(lx.commands);
   return { commands: lx.commands, scopes: lx.scopes };
 }
@@ -9170,7 +9173,11 @@ function runnerReadings(name, args) {
     out.push([...head, ...args.slice(k)]);
   };
   walk(0, []);
-  return out.length > OPTION_READINGS ? [...out.slice(0, OPTION_READINGS), [{ quoted: false, value: "--cwd" }, UNREAD_CWD, ...args]] : out;
+  return out.length > OPTION_READINGS ? [
+    args,
+    ...out.slice(0, OPTION_READINGS - 1),
+    [{ quoted: false, value: "--cwd" }, UNREAD_CWD, ...args]
+  ] : out;
 }
 function runnerTarget(args) {
   let k = 0;
@@ -9419,7 +9426,7 @@ function reads(parsed, env) {
     return false;
   const { rest, sub } = gitCall(args, env);
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
-  return !!sub && (GIT_READS.has(sub) || sub === "worktree" && rest[0] === "list") && !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--out|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
+  return !!sub && (GIT_READS.has(sub) || sub === "worktree" && rest[0] === "list") && !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--out|-O|--op|--ext(?:-|$)|--textc)/.test(w));
 }
 var GH_READS = new Set([
   "api",
@@ -9960,8 +9967,10 @@ function cliCalls(parsed, env) {
   const dirs = [env.cwd, ...runnerDirs(name, args, env)];
   for (const [at, word] of words.entries()) {
     const tool = toolName(word.value);
+    const bases = [...new Set(dirs)];
     if (at > 0 && STARTED_RUNNERS.has(tool))
-      dirs.push(...runnerDirs(tool, words.slice(at + 1), env));
+      for (const here of bases.length > 16 ? [undefined] : bases)
+        dirs.push(...runnerDirs(tool, words.slice(at + 1), { ...env, cwd: here }));
     if (word.value === "-execdir" || word.value === "-okdir")
       dirs.push(undefined);
   }

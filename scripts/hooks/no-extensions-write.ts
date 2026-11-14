@@ -295,7 +295,7 @@ function reads(parsed: Parsed, env: Env): boolean {
     !!sub &&
     (GIT_READS.has(sub) || (sub === "worktree" && rest[0] === "list")) &&
     !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) &&
-    !rest.some((w) => /^(?:--out|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w))
+    !rest.some((w) => /^(?:--out|-O|--op|--ext(?:-|$)|--textc)/.test(w))
   )
 }
 
@@ -903,11 +903,13 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   if (!first) return []
   const words = [first, ...args]
   const dirs = [env.cwd, ...runnerDirs(name, args, env)]
-  // a runner behind a wrapper the reader does not parse (find -exec, arch, watch) reads its folders from the shell's, and find's -execdir runs it in a folder the hook cannot read
+  // a runner behind a wrapper the reader does not parse (find -exec, arch, watch) reads its folders from each one found before it (the shell's, an outer runner's), all unread past 16, and find's -execdir runs it in a folder the hook cannot read
   for (const [at, word] of words.entries()) {
     const tool = toolName(word.value)
+    const bases = [...new Set(dirs)]
     if (at > 0 && STARTED_RUNNERS.has(tool))
-      dirs.push(...runnerDirs(tool, words.slice(at + 1), env))
+      for (const here of bases.length > 16 ? [undefined] : bases)
+        dirs.push(...runnerDirs(tool, words.slice(at + 1), { ...env, cwd: here }))
     if (word.value === "-execdir" || word.value === "-okdir") dirs.push(undefined)
   }
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
