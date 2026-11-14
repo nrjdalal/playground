@@ -187,22 +187,14 @@ describe("addCommand", () => {
 
   test("a worker- name is used as given, as a worker on the fixed new-worker brief", () => {
     expect(addCommand(["worker-brave-otter"], all, pick, MODELS)).toEqual({
-      argv: ["worker", "worker-brave-otter", "handoffs/new-worker.md", "--no-sandbox"],
+      argv: ["worker", "worker-brave-otter", "handoffs/new-worker.md"],
       started: "Started worker-brave-otter",
     })
   })
 
-  // issue 2059: an owner-added worker's chore may run a stack, which the closed sandbox, spawn.sh's default for a fresh worker, shuts out, so add starts it open; a runner takes no sandbox flag.
-  test("a worker starts open with --no-sandbox, and a runner with no sandbox flag", () => {
-    const worker = addCommand(["worker-brave-otter"], all, pick, MODELS)
-    expect("argv" in worker && worker.argv).toContain("--no-sandbox")
-    const runner = addCommand(["--kind", "runner", "runner-calm-owl"], all, pick, MODELS)
-    expect("argv" in runner && runner.argv.some((word) => word.endsWith("sandbox"))).toBe(false)
-  })
-
   test("with no name, takes a worker's name from the picker", () => {
     expect(addCommand([], all, pick, MODELS)).toEqual({
-      argv: ["worker", "worker-brave-otter", "handoffs/new-worker.md", "--no-sandbox"],
+      argv: ["worker", "worker-brave-otter", "handoffs/new-worker.md"],
       started: "Started worker-brave-otter",
     })
   })
@@ -218,7 +210,6 @@ describe("addCommand", () => {
         "handoffs/new-worker.md",
         "--title",
         "Fix the CSV export",
-        "--no-sandbox",
       ],
       started: "Started worker-brave-otter",
     })
@@ -235,7 +226,6 @@ describe("addCommand", () => {
         "handoffs/new-worker.md",
         "--account",
         "blue@example.com",
-        "--no-sandbox",
       ],
       started: "Started worker-brave-otter",
     })
@@ -250,7 +240,7 @@ describe("addCommand", () => {
 
   test("an <id>-<kind> name is used as given (#966)", () => {
     expect(addCommand(["k3m9px-worker"], all, pick, MODELS)).toEqual({
-      argv: ["worker", "k3m9px-worker", "handoffs/new-worker.md", "--no-sandbox"],
+      argv: ["worker", "k3m9px-worker", "handoffs/new-worker.md"],
       started: "Started k3m9px-worker",
     })
   })
@@ -299,7 +289,6 @@ describe("addCommand", () => {
         "claude-fable-5-1",
         "--backend",
         "claude",
-        "--no-sandbox",
       ],
       started: "Started worker-otter",
     })
@@ -357,7 +346,7 @@ describe("addCommand", () => {
     "../x.md",
   ])("a given brief %s goes to spawn.sh as typed, for its one brief rule (#1546)", (brief) => {
     expect(addCommand(["worker-otter", "--brief", brief], () => false, pick, MODELS)).toEqual({
-      argv: ["worker", "worker-otter", brief, "--no-sandbox"],
+      argv: ["worker", "worker-otter", brief],
       started: "Started worker-otter",
     })
   })

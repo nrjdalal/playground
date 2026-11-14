@@ -331,15 +331,7 @@ export async function spawn(
     mode?.startsWith("worker") || (mode === "column" && ["reviewer", "tester"].includes(name ?? ""))
   const title =
     titled && !args.includes("--title") && !env.NO_TITLE ? ["--title", "Plain test work"] : []
-  // A fresh worker's or reviewer's start takes the closed sandbox by default, whose worktree spawn.sh makes in the checkout it sits in, the live main checkout for the suite's own script, so each such case opts out unless it names --sandbox or --no-sandbox, or SANDBOX_DEFAULT asks for the default on a scratch checkout.
-  const open =
-    (mode === "worker" || (mode === "column" && name === "reviewer")) &&
-    !args.includes("--sandbox") &&
-    !args.includes("--no-sandbox") &&
-    !env.SANDBOX_DEFAULT
-      ? ["--no-sandbox"]
-      : []
-  const proc = Bun.spawn(["bash", path, ...title, ...open, ...args], {
+  const proc = Bun.spawn(["bash", path, ...title, ...args], {
     env: {
       FAKE_LSTART: LSTART,
       HOME: home,
