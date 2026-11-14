@@ -8265,11 +8265,55 @@ async function runAll(lexed, env, visit, builtins) {
     producer.feedsShell = true;
     consumer.runsStdin = kind !== "code";
   }
-  for (const cmd of lexed.commands) {
-    const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins);
+  const unbind = new Map;
+  for (const [k, cmd] of lexed.commands.entries()) {
+    const at = envOf(cmd.scope);
+    const verdict = await examine(cmd, at, visit, builtins);
     if (verdict)
       return verdict;
+    unbind.get(cmd)?.();
+    bind(lexed.commands, k, at, unbind);
   }
+}
+function bind(commands, k, env, unbind) {
+  const cmd = commands[k];
+  const names = binds(cmd);
+  if (names.length === 0 || cmd.detached)
+    return;
+  const close = loopHeader(cmd) ? loopClose(commands, k) : undefined;
+  if (!close && (loopHeader(cmd) || cmd.unsure || cmd.chained || cmd.kept))
+    return;
+  const before = names.map((name) => [name, env.vars.get(name)]);
+  for (const name of names)
+    setVar(env.vars, name, unknown2("a value a builtin gives"));
+  if (close)
+    unbind.set(close, () => {
+      for (const [name, held] of before)
+        held ? setVar(env.vars, name, held) : env.vars.delete(name);
+    });
+}
+function heads({ words }) {
+  const out = [];
+  for (const w of words) {
+    if (w.quoted || !(RESERVED.has(w.value) || OPENS.has(w.value) || CLOSES.has(w.value)))
+      break;
+    out.push(w.value);
+  }
+  return out;
+}
+var loopHeader = (cmd) => {
+  const last = heads(cmd).at(-1);
+  return last === "for" || last === "select";
+};
+function loopClose(commands, k) {
+  let depth = 1;
+  for (const cmd of commands.slice(k + 1))
+    for (const word of heads(cmd)) {
+      if (CLOSES.has(word) && --depth === 0)
+        return cmd;
+      if (OPENS.has(word))
+        depth++;
+    }
 }
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
@@ -8307,9 +8351,6 @@ async function examine(cmd, env, visit, builtins) {
     if (MOVES.has(parsed.name))
       await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env);
   }
-  if (!cmd.unsure && !cmd.chained && !cmd.detached && !cmd.kept)
-    for (const name of binds(cmd))
-      setVar(env.vars, name, unknown2("a value a builtin gives"));
   if (!cmd.runsStdin || stdinScript(primary))
     return;
   for (const script of await scriptStdin(cmd, env)) {

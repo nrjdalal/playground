@@ -1620,10 +1620,54 @@ async function runAll(
     // a script in another language is not read as shell
     consumer.runsStdin = kind !== "code"
   }
-  for (const cmd of lexed.commands) {
-    const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins)
+  const unbind = new Map<Command, () => void>()
+  for (const [k, cmd] of lexed.commands.entries()) {
+    const at = envOf(cmd.scope)
+    const verdict = await examine(cmd, at, visit, builtins)
     if (verdict) return verdict
+    unbind.get(cmd)?.()
+    bind(lexed.commands, k, at, unbind)
   }
+}
+
+// A binder (`binds`) gives its names a value the reader cannot read in walk order, in its own scope: a for or select header for its own body alone, back to what they held at its close, since its body runs only once it has bound and its list may be empty; any other binder for the commands after it, where the shell runs it unconditionally there
+function bind(commands: Command[], k: number, env: Env, unbind: Map<Command, () => void>): void {
+  const cmd = commands[k]
+  const names = binds(cmd)
+  if (names.length === 0 || cmd.detached) return
+  const close = loopHeader(cmd) ? loopClose(commands, k) : undefined
+  if (!close && (loopHeader(cmd) || cmd.unsure || cmd.chained || cmd.kept)) return
+  const before = names.map((name) => [name, env.vars.get(name)] as const)
+  for (const name of names) setVar(env.vars, name, unknown("a value a builtin gives"))
+  if (close)
+    unbind.set(close, () => {
+      for (const [name, held] of before) held ? setVar(env.vars, name, held) : env.vars.delete(name)
+    })
+}
+
+// The leading words of a command the shell reads as reserved, an opening or a closing word, in order (`do for`, `done`, `{ read`)
+function heads({ words }: Command): string[] {
+  const out: string[] = []
+  for (const w of words) {
+    if (w.quoted || !(RESERVED.has(w.value) || OPENS.has(w.value) || CLOSES.has(w.value))) break
+    out.push(w.value)
+  }
+  return out
+}
+
+const loopHeader = (cmd: Command): boolean => {
+  const last = heads(cmd).at(-1)
+  return last === "for" || last === "select"
+}
+
+// The command whose `done` closes the loop the header at k opens, by counting the opening and closing words after it
+function loopClose(commands: Command[], k: number): Command | undefined {
+  let depth = 1
+  for (const cmd of commands.slice(k + 1))
+    for (const word of heads(cmd)) {
+      if (CLOSES.has(word) && --depth === 0) return cmd
+      if (OPENS.has(word)) depth++
+    }
 }
 
 const subshell = (env: Env): Env => ({ ...env, vars: new Map(env.vars) })
@@ -1668,9 +1712,6 @@ export async function examine(
     if (MOVES.has(parsed.name))
       await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env)
   }
-  // a binder the shell runs unconditionally here gives its names a value the reader cannot read, for the commands after it in this scope
-  if (!cmd.unsure && !cmd.chained && !cmd.detached && !cmd.kept)
-    for (const name of binds(cmd)) setVar(env.vars, name, unknown("a value a builtin gives"))
   // piped input the command may run as code is judged as a script it runs, unless its own reading took that input as its script already
   if (!cmd.runsStdin || stdinScript(primary)) return
   for (const script of await scriptStdin(cmd, env)) {
@@ -1829,7 +1870,7 @@ const vanishingParts = (source: string): boolean => {
 const READ_VALUES = new Set(["d", "i", "n", "N", "p", "t", "u"])
 const NAME = /^[A-Za-z_]\w*$/
 
-// The names one command gives a value without an `=`, each at its builtin's binding place as the bash manual gives it: `for NAME in`, `select NAME in`, `read [options] NAME…` and its `-a NAME`, `getopts OPTSTRING NAME` and `printf -v NAME`; a declaration builtin gives none, its `=` part read as an assignment
+// The names one command gives a value without an `=` (bind reads them), each at its builtin's binding place as the bash manual gives it: `for NAME in`, `select NAME in`, `read [options] NAME…` and its `-a NAME`, `getopts OPTSTRING NAME` and `printf -v NAME`; a declaration builtin gives none, its `=` part read as an assignment
 function binds({ words }: Command): string[] {
   let at = 0
   while (
