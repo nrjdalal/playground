@@ -519,7 +519,7 @@ stdbuf||-e -i -o --error --input --output
 sudo|-A -B -b -E -e -H -i -K -k -l -N -n -P -S -s -V -v --askpass --background --bell --edit --help --list --login --non-interactive --preserve-env --preserve-groups --remove-timestamp --reset-timestamp --set-home --shell --stdin --validate --version|-C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user
 time|-a -h -l -p -q -V -v --append --portability --quiet --verbose|-f -o --format --output
 timeout|-f -p -v --foreground --preserve-status --verbose|-k -s --kill-after --signal
-xargs|-0 -i -o -p -r -t -x --exit --interactive --no-run-if-empty --null --open-tty --replace --show-limits --verbose|-a -d -E -I -J -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-lines --max-procs --process-slot-var
+xargs|-0 -i -o -p -r -t -x --exit --interactive --max-lines --no-run-if-empty --null --open-tty --replace --show-limits --verbose|-a -d -E -I -J -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-procs --process-slot-var
 "
 CHAIN_COUNTED="repeat timeout"
 CHAIN_WRAPPERS=

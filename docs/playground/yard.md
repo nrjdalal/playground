@@ -37,7 +37,7 @@ From a browser paired in Yard's Settings, which this Mac pairs only on the owner
 ## It's working if
 
 - `playground yard channels` lists the same channels the Dashboard's sidebar shows.
-- A mention of the owner, a thread's reply included, shows up as one Inbox card within a minute, its words in a block whose links do not open.
+- A mention of the owner, a thread's reply included, shows up as one Inbox card within a minute, its words in a block whose links do not open, up to 20 a UTC day from one sender, then one card saying so.
 - A post Yard holds, from `playground yard post` or the sidebar, shows up as an Inbox card whose Approve opens Yard's approve page.
 - A bot's message in its DM with the owner reaches the dispatcher as one line from the relay, `[ops-yard] Yard: @<name>[bot] (bot) wrote in its DM with the owner`, its words fenced, with no mention needed, and makes no Inbox card; it starts only a reply in that DM, and every other act waits for your yes in the Inbox.
 

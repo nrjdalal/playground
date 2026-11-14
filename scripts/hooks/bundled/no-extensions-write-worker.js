@@ -6477,8 +6477,8 @@ var WRAPPERS = new Map(Object.entries({
   ],
   timeout: ["-f -p -v --foreground --preserve-status --verbose", "-k -s --kill-after --signal"],
   xargs: [
-    "-0 -o -p -r -t -x --exit --interactive --no-run-if-empty --null --open-tty --show-limits --verbose",
-    "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-lines --max-procs --process-slot-var"
+    "-0 -o -p -r -t -x --exit --interactive --max-lines --no-run-if-empty --null --open-tty --show-limits --verbose",
+    "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-procs --process-slot-var"
   ]
 }).map(([name, [flags, values]]) => [
   name,
@@ -7613,9 +7613,10 @@ function unwrap(state, inside, budget) {
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
         state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length);
         take();
-      } else if (state.xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
+      } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
+        state.xargs ??= {};
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
       } else if (wrapper === "env" && v === "-") {
         take();
@@ -8157,7 +8158,9 @@ async function existing(path, env) {
 }
 async function outputOf(cmd, env) {
   tick();
-  const { args, name } = parse3(cmd);
+  const { args, name, xargs } = parse3(cmd);
+  if (xargs)
+    return unknown2(`the output of ${name || "echo"} under xargs`);
   if (name === "") {
     if (cmd.inner)
       return outputs(cmd.inner(), env);
@@ -8189,7 +8192,7 @@ async function outputOf(cmd, env) {
   if (hidden)
     return hidden;
   if (name === "printf")
-    return { value: printf(values.map((v) => v.value)) };
+    return { value: printf(values.slice(values[0]?.value === "--" ? 1 : 0).map((v) => v.value)) };
   let k = 0;
   while (k < values.length && /^-[neE]+$/.test(values[k].value))
     k++;

@@ -296,6 +296,9 @@
   and a script after it that posts Escape and a Left or Right the page left alone, read by `viewerFrameMessage`: one that changed nothing on the page by two frames on, so a deck that moves its slides without taking the key keeps it.
   The frame takes the focus once its page says it is ready, and again when its slide comes back, so the page's own arrows run it.
   It runs in an `<iframe sandbox="allow-scripts">` from `srcdoc` alone, since its blob is plain text, and its Open in new tab holds it in the same sandbox (`pageTab`).
+  On the hosted build the Dashboard page's CSP (stack.md's hosted rule) reaches that frame and the tab's blob too, so each `<script` in the page's text, the keys script's and one inside a script's own string included, carries the page's own nonce (`documentNonce`), which the sandbox's opaque origin keeps from the Dashboard's storage.
+  The nonce goes in unquoted with a space after it, so a string that names a script tag stays whole and its value then holds the nonce.
+  Two things a page does run on the local build alone: an inline handler, such as `onclick=`, and a script it builds at run time with no nonce; a built script that copies `document.currentScript.nonce` runs on both.
   A link clicked in it opens in a browser tab of its own, http or https alone (`viewer: "link"`), and one to a place on the page scrolls there with no load.
   Since a policy reaches no navigation, each load is judged by whether its page posted `viewer: "ready"` (`frameLoad`): a page a script or a refresh sent the frame off to is put back once, then stopped on a notice, each request that took it off having left.
   A `doc` renders through `TranscriptMarkdown` and a `code` file as one fenced block named by its extension (`fenced`), both in a region that keeps Up and Down for scrolling;
