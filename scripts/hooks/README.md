@@ -1056,6 +1056,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A runner's command line (`npm exec -c`, `npx --call`, pnpm's shell mode) is read as `sh -c`'s is, and one the hook cannot read is the step on a line naming `yard`.
   A `--help` or `-h` before any `--` reads as help through `bun` alone, since `bun run` hands the step what follows `--`.
   The guard reads the step by its script name and file path alone: a copy or link of the file, a wrapper script, an `eval` or an encoded command is outside what it reads, the known limit of this guard family.
+  The step is its own backstop: before any git or vercel call it stops unless its launch is the Ops lead's, read as this guard's pass reads it (`PLAYGROUND_ROLE` lead, the roster's ops kind for the session's registry name), so each of those ways stops at the step.
   A production deploy of the hosted build migrates the hosted database first (`packages/scripts/src/migrate-on-deploy.ts`), so a hand production move is the Ops lead's alone.
   `scripts/hooks/no-raw-vercel.ts`, run on Bash by [guards](#guards) for a factory session, reads `vercel` and `vc` by any path or case wherever the shell walker finds a command (behind `env`, `exec`, `command`, `time`, `nohup`, `timeout`, `sudo`, `xargs`, in `sh -c`, `eval`, a subshell, a group or a substitution).
   It also reads it through `bun x`, `bunx` or `npx` (`toolWords` in `scripts/hooks/no-main-checkout.ts`), and after `run-slot.sh`'s `--` (`slotWords` in `shell.ts`); another package runner is not read.
