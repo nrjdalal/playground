@@ -108,6 +108,7 @@ const API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"])
 const READINGS = 64
 
 const MENTION = /\bv(?:ercel|c)\b|\byard\b/i
+const STEP_NAMED = /\byard\b/i
 // vercel or vc as a word of its own (an assignment's value, a tool at a version), so a program built at run time on such a line may be it.
 const NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i
 
@@ -302,36 +303,53 @@ function yardStep(name: string, args: Word[], shell: Env): boolean {
   )
 }
 
-// The package runners that may hand bun its words (bunx, bun x, npx, and npm, pnpm or yarn by exec, x, dlx or a bin's name): each runner's words after the first one naming bun.
+// The package runners that may hand bun its words (bunx, bun x, npx, and npm, pnpm or yarn by exec, x, dlx or a bin's name): each runner's words after each word naming bun, since one may be an option's value (npx -p bun bun ...).
 const PACKAGE_RUNNERS = new Set(["bunx", "npm", "npx", "pnpm", "yarn"])
-// A runner's options that may move the folder bun runs in (bun x --cwd, pnpm -C or --dir, npm --prefix or a workspace), so the step's file is then read as any yard.ts.
-const MOVES = /^(?:--(?:cwd|dir|prefix|workspace)(?:=|$)|-[Cw])/
+// A runner's words that may move the folder bun runs in (bun x --cwd, pnpm -C, --dir or --filter, npm --prefix or a workspace, yarn's workspace command), so the step's file is then read as any yard.ts.
+const MOVES = /^(?:--(?:cwd|dir|filter|prefix|workspace)(?:=|$)|-[CFw]|workspaces?$)/
+// The runners' options whose value is a command line they run in a shell (npm exec -c, npx --call, pnpm's shell mode).
+const CALLS = new Set(["--call", "--shell-mode", "-c"])
 
-function runnerBun(
-  name: string,
-  args: Word[],
-  shell: Env,
-): { args: Word[]; shell: Env } | undefined {
+type Reached = { args: Word[]; shell: Env }
+
+function runnerBuns(name: string, args: Word[], shell: Env): Reached[] {
   let offset = 0
   if (name === "bun") {
     const { sub, words } = bunCall(args, shell)
-    if (words[0] !== "x") return
+    if (words[0] !== "x") return []
     offset = sub + 1
-  } else if (!PACKAGE_RUNNERS.has(name)) return
-  const at = args.findIndex((a, k) => k >= offset && toolName(a.value) === "bun")
-  if (at === -1) return
-  const moved = args.slice(0, at).some((a) => MOVES.test(a.value))
-  return { args: args.slice(at + 1), shell: moved ? { ...shell, cwd: undefined } : shell }
-}
-
-// Each bun a chain of package runners reaches (npx bun x bun ...), outermost first.
-function throughRunners(name: string, args: Word[], shell: Env): { args: Word[]; shell: Env }[] {
-  const reached: { args: Word[]; shell: Env }[] = []
-  for (let next = runnerBun(name, args, shell); next && reached.length < 8;) {
-    reached.push(next)
-    next = runnerBun("bun", next.args, next.shell)
+  } else if (!PACKAGE_RUNNERS.has(name)) return []
+  const reached: Reached[] = []
+  for (let at = offset; at < args.length; at++) {
+    if (toolName(args[at]!.value) !== "bun") continue
+    const moved = args.slice(0, at).some((a) => MOVES.test(a.value))
+    reached.push({ args: args.slice(at + 1), shell: moved ? { ...shell, cwd: undefined } : shell })
   }
   return reached
+}
+
+// Each bun a chain of package runners may reach (npx bun x bun ...), bounded so a long line costs a bounded time.
+function throughRunners(name: string, args: Word[], shell: Env): Reached[] {
+  const reached: Reached[] = []
+  const queue = runnerBuns(name, args, shell)
+  while (queue.length > 0 && reached.length < 32) {
+    const next = queue.shift()!
+    reached.push(next)
+    queue.push(...runnerBuns("bun", next.args, next.shell))
+  }
+  return reached
+}
+
+// The command lines a runner runs in a shell, each the value of its -c, --call or shell-mode option.
+function runnerCalls(name: string, args: Word[]): Word[] {
+  if (!PACKAGE_RUNNERS.has(name) || name === "bunx") return []
+  const calls: Word[] = []
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k]!.value
+    if (CALLS.has(v) && args[k + 1]) calls.push(args[k + 1]!)
+    else if (v.startsWith("--call=")) calls.push({ ...args[k]!, value: v.slice(7) })
+  }
+  return calls
 }
 
 export async function check(
@@ -366,6 +384,15 @@ export async function check(
       throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell))
     )
       verdicts.push({ production: true, what: "the Yard ship step, which deploys production" })
+    // a runner's -c line runs in a shell, so it is read as sh -c's is, and one the hook cannot read is the step on a line naming it
+    for (const call of runnerCalls(name, args))
+      if (!unreadable(call))
+        await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit)
+      else if (STEP_NAMED.test(command))
+        verdicts.push({
+          production: true,
+          what: "a runner's command line built at run time on a line naming the Yard ship step",
+        })
     const words = toolWords(NAMES, name, args, shell)
     // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string
     const verdict =

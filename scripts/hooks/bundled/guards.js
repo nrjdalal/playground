@@ -16643,6 +16643,7 @@ var HELP2 = new Set(["--help", "--version", "-h", "-v"]);
 var API_BODY = new Set(["--field", "--input", "--raw-field", "-F", "-f"]);
 var READINGS2 = 64;
 var MENTION2 = /\bv(?:ercel|c)\b|\byard\b/i;
+var STEP_NAMED = /\byard\b/i;
 var NAMED = /(?:^|[\s=;&|(`'"])v(?:ercel|c)(?=$|[\s;&|)`'"@])/i;
 function readingsOf(args, { flags, takes }, toSub = false) {
   const out = [];
@@ -16816,29 +16817,48 @@ function yardStep(name, args, shell) {
   return step && !args.slice(at + 1, end === -1 ? undefined : end).some((a) => STEP_HELP.has(a.value));
 }
 var PACKAGE_RUNNERS = new Set(["bunx", "npm", "npx", "pnpm", "yarn"]);
-var MOVES2 = /^(?:--(?:cwd|dir|prefix|workspace)(?:=|$)|-[Cw])/;
-function runnerBun(name, args, shell) {
+var MOVES2 = /^(?:--(?:cwd|dir|filter|prefix|workspace)(?:=|$)|-[CFw]|workspaces?$)/;
+var CALLS = new Set(["--call", "--shell-mode", "-c"]);
+function runnerBuns(name, args, shell) {
   let offset = 0;
   if (name === "bun") {
     const { sub, words } = bunCall(args, shell);
     if (words[0] !== "x")
-      return;
+      return [];
     offset = sub + 1;
   } else if (!PACKAGE_RUNNERS.has(name))
-    return;
-  const at = args.findIndex((a, k) => k >= offset && toolName(a.value) === "bun");
-  if (at === -1)
-    return;
-  const moved = args.slice(0, at).some((a) => MOVES2.test(a.value));
-  return { args: args.slice(at + 1), shell: moved ? { ...shell, cwd: undefined } : shell };
+    return [];
+  const reached = [];
+  for (let at = offset;at < args.length; at++) {
+    if (toolName(args[at].value) !== "bun")
+      continue;
+    const moved = args.slice(0, at).some((a) => MOVES2.test(a.value));
+    reached.push({ args: args.slice(at + 1), shell: moved ? { ...shell, cwd: undefined } : shell });
+  }
+  return reached;
 }
 function throughRunners(name, args, shell) {
   const reached = [];
-  for (let next = runnerBun(name, args, shell);next && reached.length < 8; ) {
+  const queue = runnerBuns(name, args, shell);
+  while (queue.length > 0 && reached.length < 32) {
+    const next = queue.shift();
     reached.push(next);
-    next = runnerBun("bun", next.args, next.shell);
+    queue.push(...runnerBuns("bun", next.args, next.shell));
   }
   return reached;
+}
+function runnerCalls(name, args) {
+  if (!PACKAGE_RUNNERS.has(name) || name === "bunx")
+    return [];
+  const calls = [];
+  for (let k = 0;k < args.length; k++) {
+    const v = args[k].value;
+    if (CALLS.has(v) && args[k + 1])
+      calls.push(args[k + 1]);
+    else if (v.startsWith("--call="))
+      calls.push({ ...args[k], value: v.slice(7) });
+  }
+  return calls;
 }
 async function check22(raw, environment = process.env) {
   const {
@@ -16863,6 +16883,14 @@ async function check22(raw, environment = process.env) {
     const args = slotted ? slotted.slice(1) : parsed.args;
     if (yardStep(name, args, shell) || throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell)))
       verdicts.push({ production: true, what: "the Yard ship step, which deploys production" });
+    for (const call of runnerCalls(name, args))
+      if (!unreadable(call))
+        await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit);
+      else if (STEP_NAMED.test(command))
+        verdicts.push({
+          production: true,
+          what: "a runner's command line built at run time on a line naming the Yard ship step"
+        });
     const words = toolWords(NAMES2, name, args, shell);
     const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
     if (verdict)

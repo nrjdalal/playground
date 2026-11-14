@@ -285,6 +285,32 @@ const YARD_SHIP: [string, string][] = [
   ["through bunx at a version", "bunx bun@1 packages/scripts/src/ship/yard.ts v0.0.111"],
   ["through npx, then bun x", "npx bun x bun packages/scripts/src/ship/yard.ts v0.0.111"],
   ["through bun's --cwd, then x", "bun --cwd packages/scripts x bun src/ship/yard.ts v0.0.111"],
+  [
+    "through npx, bun as -p's value first",
+    "npx -p bun bun packages/scripts/src/ship/yard.ts v0.0.111",
+  ],
+  [
+    "through npx, bun as --package's value first",
+    "npx --package bun bun packages/scripts/src/ship/yard.ts v0.0.111",
+  ],
+  [
+    "through bunx, bun as --package's value first",
+    "bunx --package bun bun packages/scripts/src/ship/yard.ts v0.0.111",
+  ],
+  [
+    "through bunx, bun as -p's value first",
+    "bunx -p bun bun packages/scripts/src/ship/yard.ts v0.0.111",
+  ],
+  ["through pnpm --filter and exec", "pnpm --filter scripts exec bun src/ship/yard.ts v0.0.111"],
+  ["through pnpm -F and exec", "pnpm -F scripts exec bun src/ship/yard.ts v0.0.111"],
+  ["through yarn workspace and exec", "yarn workspace scripts exec bun src/ship/yard.ts v0.0.111"],
+  ["in npm exec's -c line", "npm exec -c 'bun run ship:yard v0.0.111'"],
+  ["in npx's -c line", "npx -c 'bun run ship:yard v0.0.111'"],
+  ["in npx's --call= line", "npx --call='bun packages/scripts/src/ship/yard.ts v0.0.111'"],
+  [
+    "in a -c line the hook cannot read, on a line naming the step",
+    'S="bun run ship:yard v0.0.111"; npx -c "$S"',
+  ],
   ["behind env", "env FOO=1 bun run ship:yard v0.0.111"],
   ["after a pushd", "pushd packages/scripts && bun src/ship/yard.ts v0.0.111"],
   ["in a subshell", "(cd packages/scripts/src/ship && bun yard.ts v0.0.111)"],
@@ -326,6 +352,14 @@ describe("the Yard ship step", () => {
       "npm exec -- bun packages/scripts/src/playground/yard.ts channels",
     ],
     ["the step's help through npx", "npx bun run ship:yard --help"],
+    ["a build through pnpm --filter", "pnpm --filter web exec bun run build"],
+    ["an install of bun", "npm install bun"],
+    ["an add of bun and its types", "pnpm add -D bun @types/bun"],
+    ["bun's version through npx", "npx bun --version"],
+    [
+      "a -c line running the Yard CLI",
+      "npx -c 'bun packages/scripts/src/playground/yard.ts channels'",
+    ],
   ])("passes for a worker: %s", async (_, command) => {
     expect(await as("worker", command)).toBeUndefined()
   })
