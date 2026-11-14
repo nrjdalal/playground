@@ -2,7 +2,7 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-extensions-write.ts
-import { existsSync as existsSync4, readFileSync as readFileSync4, statSync as statSync3 } from "fs";
+import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
 import { homedir as homedir4 } from "os";
 import { dirname as dirname4, join as join7, resolve as resolve5, sep as sep2 } from "path";
 
@@ -7062,6 +7062,9 @@ function calledAgain(commands, src) {
     }
     const body = commands.slice(k, end + 1);
     const name = word.value.replace(/\(\)$/, "");
+    if (name === "cd" || name === "chpwd")
+      for (const c of commands)
+        c.cdRedefined = true;
     if (word.quoted || !/^[\w.:-]+$/.test(name)) {
       for (const c of body)
         c.repeated = true;
@@ -7448,6 +7451,8 @@ function dollar(lx, plain = false) {
     const from = lx.i;
     while (/\w/.test(src[lx.i] ?? ""))
       lx.i++;
+    if (/^:[A-Za-z&]/.test(src.slice(lx.i, lx.i + 2)))
+      return unknown2("a zsh modifier");
     return variable(src.slice(from, lx.i));
   }
   if (next === "$") {
@@ -7549,6 +7554,7 @@ function mktempPath(cmd, known) {
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`;
 }
 var SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/;
+var chdirOf = (state, word) => state.chdir && word ? { ...word, ...unknown2("a second env -C") } : word;
 var READINGS = 16;
 function parse3(cmd) {
   const state = { local: new Map, rest: cmd.words.toReversed(), xargs: undefined };
@@ -7612,9 +7618,9 @@ function unwrap(state, inside, budget) {
           rest.push({ quoted: false, value: split[j] });
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         take();
-        state.chdir = take();
+        state.chdir = chdirOf(state, take());
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
-        state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length);
+        state.chdir = chdirOf(state, slice(w, v.startsWith("-C") ? 2 : "--chdir=".length));
         take();
       } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
@@ -7953,6 +7959,8 @@ function cdTargets(name, cmd, parsed, env, from) {
     const word = env.hold?.(typed, cmd, env) ?? typed;
     if (word !== typed && !landsHeld(typed, cmd, env))
       unread = true;
+    if (env.cwdUnread && pathOf(word, { ...env, cwd: undefined }) === undefined)
+      unread = true;
     for (const base of from.length > 0 ? from : [undefined]) {
       tick();
       const path = pathOf(word, { ...env, cwd: base });
@@ -8006,7 +8014,8 @@ async function chdirTo(name, cmd, parsed, env) {
   const back = [...new Set([...env.cwdBack ?? [], ...from])];
   const bases = [...new Set([...from, ...env.cwdHeld ?? []])];
   const move = name === "popd" ? { back: true, paths: [], unread: true } : tildeMove(cdTargets(name, cmd, parsed, env, bases), name, parsed, env, from, back);
-  const { paths, unread } = move;
+  const { paths } = move;
+  const unread = move.unread || !!cmd.cdRedefined;
   const named = [left, env.cwd].filter((dir) => dir !== undefined);
   env.cwdBack = keep([...new Set([...back, ...paths, ...named])], env);
   if (cmd.held) {
@@ -8018,6 +8027,8 @@ async function chdirTo(name, cmd, parsed, env) {
   if (sureToRun(cmd, parsed) && !unread && paths.length === 1 && (chained || isFolder(paths[0]))) {
     env.cwdSure = paths[0];
     env.cwdMaybe = [];
+    if (chained)
+      env.cwdChainUnread ||= env.cwdUnread;
     env.cwdUnread = false;
     env.cwdOr = chained ? undefined : { before: from, cdChain: cmd.chain, scope: cmd.scope };
     if (env.old)
@@ -8068,9 +8079,18 @@ function orElse(cmd, env) {
   env.cwdOr = undefined;
 }
 function unchain(cmd, env) {
-  if (!env.cwdChain?.length || cmd.chain === env.cwdChainToken)
+  if (!env.cwdChain?.length && !env.cwdChainUnread || cmd.chain === env.cwdChainToken)
     return;
-  env.cwdMaybe = keep([...new Set([...env.cwdMaybe ?? [], ...env.cwdSure ? [env.cwdSure] : [], ...env.cwdChain])], env);
+  if (env.cwdChainUnread)
+    env.cwdUnread = true;
+  env.cwdChainUnread = undefined;
+  env.cwdMaybe = keep([
+    ...new Set([
+      ...env.cwdMaybe ?? [],
+      ...env.cwdSure ? [env.cwdSure] : [],
+      ...env.cwdChain ?? []
+    ])
+  ], env);
   env.cwdSure = undefined;
   if (env.old)
     env.oldFrom = [];
@@ -9123,6 +9143,38 @@ var RUNNER_TAKES = new Set([
   "--registry",
   "-p"
 ]);
+var BUN_SPLITS = new Set(["--cwd", "--filter", "-F"]);
+var OPTION_READINGS = 16;
+var UNREAD_CWD = {
+  quoted: false,
+  ...unknown2("a runner's option past the readings the hook makes")
+};
+function runnerReadings(name, args) {
+  if (name !== "bun" && name !== "bunx" && name !== "npx")
+    return [args];
+  const out = [];
+  const walk = (from, head) => {
+    let k = from;
+    for (;k < args.length && out.length <= OPTION_READINGS; k++) {
+      const word = args[k];
+      const next = args[k + 1];
+      const v = word.value;
+      if (!v.startsWith("-") || v === "-") {
+        if (v !== "run" && v !== "x")
+          break;
+      } else if (BUN_SPLITS.has(v) && next) {
+        head = [...head, word, next];
+        k++;
+        continue;
+      } else if (!v.includes("=") && next && !next.value.startsWith("-"))
+        walk(k + 2, [...head, { ...word, value: `${v}=${next.value}` }]);
+      head = [...head, word];
+    }
+    out.push([...head, ...args.slice(k)]);
+  };
+  walk(0, []);
+  return out.length > OPTION_READINGS ? [...out.slice(0, OPTION_READINGS), [{ quoted: false, value: "--cwd" }, UNREAD_CWD, ...args]] : out;
+}
 function runnerTarget(args) {
   let k = 0;
   while (k < args.length && args[k].value.startsWith("-"))
@@ -9370,7 +9422,7 @@ function reads(parsed, env) {
     return false;
   const { rest, sub } = gitCall(args, env);
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
-  return !!sub && (GIT_READS.has(sub) || sub === "worktree" && rest[0] === "list") && !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
+  return !!sub && (GIT_READS.has(sub) || sub === "worktree" && rest[0] === "list") && !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--out|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
 }
 var GH_READS = new Set([
   "api",
@@ -9612,17 +9664,7 @@ function remoteName(v) {
   }
   return false;
 }
-var UNREAD_CD_JUDGED = new Set([
-  "chmod",
-  "curl",
-  "mktemp",
-  "perl",
-  "sed",
-  "shred",
-  "sort",
-  "tar",
-  "truncate"
-]);
+var UNREAD_CD_JUDGED = new Set(["chmod", "curl", "mktemp", "shred", "sort", "tar", "truncate"]);
 var NO_WRITES = new Set([
   ":",
   "basename",
@@ -9883,28 +9925,35 @@ function isCli(word, dirs) {
     return false;
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir }));
   if (program(word.value) === "playground")
-    return !word.value.includes("/") || !paths.some((path) => !!path && existsSync4(path) && statSync3(path).isDirectory());
+    return !word.value.includes("/") || paths.some((path) => !path || !isFolder(path));
   const cli = (sep2 + CLI).toLowerCase();
-  return paths.some((path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
+  return paths.some((path) => path === undefined ? /^cli(?:\.ts)?$/.test(program(word.value)) : [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
 }
 var STARTED_RUNNERS = new Set(["bun", "bunx", "npx"]);
 function runnerDirs(name, args, env) {
+  return runnerReadings(name, args).flatMap((reading) => reading[1] === UNREAD_CWD ? [undefined] : readingDirs(name, reading, env));
+}
+function readingDirs(name, args, env) {
   if (name === "bunx")
-    return runnerDirs("bun", [X, ...args], env);
-  if (name === "npx") {
-    const at = runnerTarget(args);
-    const started = toolName(args[at]?.value);
-    return STARTED_RUNNERS.has(started) ? runnerDirs(started, args.slice(at + 1), env) : [];
-  }
+    return readingDirs("bun", [X, ...args], env);
+  if (name === "npx")
+    return startedDirs(args.slice(runnerTarget(args)), env);
   if (name !== "bun")
     return [];
   const { at, chained, cwd, words } = bunCall(args, env);
   const x = words[0] === "x";
   const own = x ? [cwd, chained] : [cwd];
-  const started = x || words[0] === "run" ? toolName(args[at]?.value) : "";
-  if (!STARTED_RUNNERS.has(started))
-    return own;
-  return [...own, ...runnerDirs(started, args.slice(at + 1), { ...env, cwd: x ? chained : cwd })];
+  const started = x || words[0] === "run" ? args.slice(at) : [];
+  return [...own, ...startedDirs(started, { ...env, cwd: x ? chained : cwd })];
+}
+function startedDirs(words, env) {
+  if (words.length === 0)
+    return [];
+  const { args, chdir, name } = parse3({ redirects: [], scope: 0, words });
+  const tool = toolName(name);
+  if (!STARTED_RUNNERS.has(tool))
+    return [];
+  return runnerDirs(tool, args, chdir ? { ...env, cwd: pathOf(chdir, env) } : env);
 }
 function cliCalls(parsed, env) {
   const { args, first, name } = parsed;
@@ -9912,6 +9961,13 @@ function cliCalls(parsed, env) {
     return [];
   const words = [first, ...args];
   const dirs = [env.cwd, ...runnerDirs(name, args, env)];
+  for (const [at, word] of words.entries()) {
+    const tool = toolName(word.value);
+    if (at > 0 && STARTED_RUNNERS.has(tool))
+      dirs.push(...runnerDirs(tool, words.slice(at + 1), env));
+    if (word.value === "-execdir" || word.value === "-okdir")
+      dirs.push(undefined);
+  }
   return words.flatMap((word, at) => isCli(word, dirs) ? [words.slice(at + 1)] : []);
 }
 var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];
@@ -10098,6 +10154,9 @@ function sedInPlace(cmd, parsed) {
   const { args, local, name } = parsed;
   if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed))
     return;
+  return sedEdits(args);
+}
+function sedEdits(args) {
   const scripts = [];
   const operands = [];
   let inPlace = false;
@@ -10132,9 +10191,11 @@ function sedInPlace(cmd, parsed) {
   return new Set(read);
 }
 function perlInPlace(cmd, parsed, env) {
-  const { args, local, name } = parsed;
-  if (program(name) !== "perl" || !ownProgram(cmd, parsed))
+  if (program(parsed.name) !== "perl" || !ownProgram(cmd, parsed))
     return;
+  return perlEdits(parsed, env);
+}
+function perlEdits({ args, local }, env) {
   if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL")))
     return;
   const scripts = [];
@@ -10166,6 +10227,11 @@ function perlInPlace(cmd, parsed, env) {
   return new Set(scripts);
 }
 var PERL_IN_PLACE = /^-[lnpw]*[ei]?$/;
+function scriptRead(tool, parsed, env) {
+  const edits = { ...parsed, args: parsed.xargs ? [...parsed.args, XARGS_FILE] : parsed.args };
+  return tool === "sed" ? !!(sedReadScripts(parsed.args) || parsed.local.size === 0 && sedEdits(edits.args)) : tool === "perl" && (perlReads(parsed, env) || !!perlEdits(edits, env));
+}
+var XARGS_FILE = { quoted: false, value: "/dev/stdin" };
 var inPlaceScripts = (cmd, parsed, env) => sedInPlace(cmd, parsed) ?? perlInPlace(cmd, parsed, env);
 var PERL_FLAG = /^-[alnpw]*[eE]?$/;
 var PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
@@ -10663,6 +10729,15 @@ async function inspect(raw, environment, unknown = false) {
     const shownEval = evaluated && masked !== undefined ? { ...evaluated, value: masked } : undefined;
     const own = (word) => word === evaluated && shownEval ? shownEval : word;
     const shownText = new Set([...wholeText].map(own));
+    const started = STARTED_RUNNERS.has(name) ? places(env).flatMap((here) => runnerDirs(name, args, here)) : [];
+    const ranIn = started.filter((dir) => dir !== undefined);
+    const textEnv = started.length === 0 ? env : {
+      ...env,
+      cwd: undefined,
+      cwdMaybe: [...new Set([...places(env).flatMap(({ cwd }) => cwd ?? []), ...ranIn])],
+      cwdSure: undefined,
+      cwdUnread: env.cwdUnread || started.length > ranIn.length
+    };
     for (const raw of reader ? [] : [
       ...script,
       ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine, shownText)
@@ -10672,7 +10747,7 @@ async function inspect(raw, environment, unknown = false) {
         continue;
       seen.add(line);
       textDepth++;
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map }, visit, true).finally(() => textDepth--);
+      const verdict = await run(lex(line, env.known), { ...textEnv, vars: new Map }, visit, true).finally(() => textDepth--);
       if (verdict)
         return verdict;
     }
@@ -10742,7 +10817,7 @@ async function inspect(raw, environment, unknown = false) {
     if (!env.cwdUnread)
       return;
     const git = tool === "git" ? gitCall(args, { ...env, cwd: undefined }) : undefined;
-    if (textDepth === 0 && !remover && !WRITERS.has(tool) && !NO_WRITES.has(tool) && !portlessRead(tool, args) && !reads(parsed, env) && (git ? git.sub !== "rm" && gitPlaced(args, env) === undefined : !UNREAD_CD_JUDGED.has(tool)))
+    if (textDepth === 0 && !remover && !WRITERS.has(tool) && !NO_WRITES.has(tool) && !portlessRead(tool, args) && !reads(parsed, env) && !scriptRead(tool, parsed, env) && (git ? git.sub !== "rm" && gitPlaced(args, env) === undefined : !UNREAD_CD_JUDGED.has(tool)))
       return refuse(afterUnreadCd(`${git ? `git ${git.sub && !marked(git.sub) ? git.sub : "with a subcommand it cannot read"}, which may write in the shell's folder (an absolute git -C places it),` : `${verb}, which may write in the shell's folder,`}`));
     const unsplit = fed && !fed.unknown && (marked(fed.value) || delimiter || !fedSplit);
     const fedWords = unsplit ? [{ quoted: false, value: UNKNOWN }, ...argWord ? [argWord] : []] : stdinWords;

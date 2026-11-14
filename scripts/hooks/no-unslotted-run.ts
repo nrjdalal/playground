@@ -12,6 +12,7 @@ import {
   real,
   RUNNER_TAKES,
   ranIn,
+  runnerReadings,
   runnerFolders,
   toolName,
   turboWords,
@@ -470,29 +471,31 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     }
     // a line that names more folders than the reader carries may run in a worktree, whatever folder it started in
     if (env.cwdAnywhere) {
-      const found = heavy(name, args, { ...env, cwd: undefined })
+      const found = runnerReadings(name, args)
+        .map((reading) => heavy(name, reading, { ...env, cwd: undefined }))
+        .find(
+          (found) =>
+            found &&
+            (found.anywhere ||
+              ranIn(found.dir, found.also).some((dir) => dir === undefined || inWorktree(dir))),
+        )
       const line = words()
       if (found?.anywhere && line !== undefined)
         return refuseDocker(found.what, "", line, found.fix)
-      if (
-        found &&
-        line !== undefined &&
-        ranIn(found.dir, found.also).some((dir) => dir === undefined || inWorktree(dir))
-      )
-        return anywhere(found.what, line)
+      if (found && line !== undefined) return anywhere(found.what, line)
     }
     // every folder the shell may be in, so a heavy run after a cd the reader cannot be sure of is caught wherever that cd may have left it
     for (const here of places(env)) {
-      const found = heavy(name, args, here)
-      if (
-        !found ||
-        !(
-          found.anywhere ||
-          unreadFolder(found.also) ||
-          ranIn(found.dir, found.also).some(inWorktree)
+      const found = runnerReadings(name, args)
+        .map((reading) => heavy(name, reading, here))
+        .find(
+          (found) =>
+            found &&
+            (found.anywhere ||
+              unreadFolder(found.also) ||
+              ranIn(found.dir, found.also).some(inWorktree)),
         )
-      )
-        continue
+      if (!found) continue
       // run-slot execs the first word after its --, so the fix keeps the program, its words and every assignment before it behind env, and drops every wrapper (exec, timeout, env's own options)
       const line = words()
       if (line === undefined) return

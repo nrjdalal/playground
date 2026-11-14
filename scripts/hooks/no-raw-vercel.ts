@@ -1,7 +1,7 @@
 // A check for the factory's sessions, run on Bash by guards.ts, so it has no main block of its own: lets a Vercel CLI call (vercel or vc, by any path or case, run as the shell walker reads a command and through bun x, bunx or npx) run only as a read (whoami, ls, inspect, logs, help, the ls of alias, dns, domains, integration, project and teams, env ls without its values, promote and rollback status, rolling-release inspect, a vercel api GET outside /env) or a preview deploy, and refuses every other call, a command or deploy subcommand a later CLI adds included; a production move (a production deploy, which also migrates the hosted database, a deploy continue, a redeploy, a promote, a rollback, an alias or a rolling release) passes for the Ops lead alone, in a call that names no role variable and sources no file.
 import { basename, isAbsolute, resolve } from "node:path"
 
-import { bunCall, toolName, toolWords } from "./no-main-checkout"
+import { bunCall, runnerReadings, toolName, toolWords } from "./no-main-checkout"
 import { namesRole, opsLead } from "./role"
 import {
   type Env,
@@ -335,7 +335,8 @@ function throughRunners(name: string, args: Word[], shell: Env): Reached[] {
   while (queue.length > 0 && reached.length < 32) {
     const next = queue.shift()!
     reached.push(next)
-    queue.push(...runnerBuns("bun", next.args, next.shell))
+    for (const reading of runnerReadings("bun", next.args))
+      queue.push(...runnerBuns("bun", reading, next.shell))
   }
   return reached
 }
@@ -378,30 +379,32 @@ export async function check(
     // run-slot.sh runs the words after its -- as the command
     const slotted = slotWords(parsed)
     const name = slotted ? program(slotted[0]?.value ?? "") : parsed.name
-    const args = slotted ? slotted.slice(1) : parsed.args
-    if (
-      yardStep(name, args, shell) ||
-      throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell))
-    )
-      verdicts.push({ production: true, what: "the Yard ship step, which deploys production" })
-    // a runner's -c line runs in a shell, so it is read as sh -c's is, and one the hook cannot read is the step on a line naming it
-    for (const call of runnerCalls(name, args))
-      if (!unreadable(call))
-        await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit)
-      else if (STEP_NAMED.test(command))
-        verdicts.push({
-          production: true,
-          what: "a runner's command line built at run time on a line naming the Yard ship step",
-        })
-    const words = toolWords(NAMES, name, args, shell)
-    // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string
-    const verdict =
-      words &&
-      judgeAll(
-        words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })),
-        parsed.xargs !== undefined,
+    // each reading of a runner's options is judged, so a value the reader takes for the program hides no deploy
+    for (const args of runnerReadings(name, slotted ? slotted.slice(1) : parsed.args)) {
+      if (
+        yardStep(name, args, shell) ||
+        throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell))
       )
-    if (verdict) verdicts.push(verdict)
+        verdicts.push({ production: true, what: "the Yard ship step, which deploys production" })
+      // a runner's -c line runs in a shell, so it is read as sh -c's is, and one the hook cannot read is the step on a line naming it
+      for (const call of runnerCalls(name, args))
+        if (!unreadable(call))
+          await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit)
+        else if (STEP_NAMED.test(command))
+          verdicts.push({
+            production: true,
+            what: "a runner's command line built at run time on a line naming the Yard ship step",
+          })
+      const words = toolWords(NAMES, name, args, shell)
+      // xargs hands it words from stdin, which the hook cannot read: appended, or in place of its -I or -J string
+      const verdict =
+        words &&
+        judgeAll(
+          words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })),
+          parsed.xargs !== undefined,
+        )
+      if (verdict) verdicts.push(verdict)
+    }
     return undefined
   }
   const env: Env = {

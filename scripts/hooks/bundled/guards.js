@@ -869,6 +869,9 @@ function calledAgain(commands, src) {
     }
     const body = commands.slice(k, end + 1);
     const name = word.value.replace(/\(\)$/, "");
+    if (name === "cd" || name === "chpwd")
+      for (const c of commands)
+        c.cdRedefined = true;
     if (word.quoted || !/^[\w.:-]+$/.test(name)) {
       for (const c of body)
         c.repeated = true;
@@ -1255,6 +1258,8 @@ function dollar(lx, plain = false) {
     const from = lx.i;
     while (/\w/.test(src[lx.i] ?? ""))
       lx.i++;
+    if (/^:[A-Za-z&]/.test(src.slice(lx.i, lx.i + 2)))
+      return unknown("a zsh modifier");
     return variable(src.slice(from, lx.i));
   }
   if (next === "$") {
@@ -1356,6 +1361,7 @@ function mktempPath(cmd, known) {
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`;
 }
 var SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/;
+var chdirOf = (state, word) => state.chdir && word ? { ...word, ...unknown("a second env -C") } : word;
 var READINGS = 16;
 function parse(cmd) {
   const state = { local: new Map, rest: cmd.words.toReversed(), xargs: undefined };
@@ -1419,9 +1425,9 @@ function unwrap(state, inside, budget) {
           rest.push({ quoted: false, value: split[j] });
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         take();
-        state.chdir = take();
+        state.chdir = chdirOf(state, take());
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
-        state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length);
+        state.chdir = chdirOf(state, slice(w, v.startsWith("-C") ? 2 : "--chdir=".length));
         take();
       } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
@@ -1760,6 +1766,8 @@ function cdTargets(name, cmd, parsed, env, from) {
     const word = env.hold?.(typed, cmd, env) ?? typed;
     if (word !== typed && !landsHeld(typed, cmd, env))
       unread = true;
+    if (env.cwdUnread && pathOf(word, { ...env, cwd: undefined }) === undefined)
+      unread = true;
     for (const base of from.length > 0 ? from : [undefined]) {
       tick();
       const path = pathOf(word, { ...env, cwd: base });
@@ -1813,7 +1821,8 @@ async function chdirTo(name, cmd, parsed, env) {
   const back = [...new Set([...env.cwdBack ?? [], ...from])];
   const bases = [...new Set([...from, ...env.cwdHeld ?? []])];
   const move = name === "popd" ? { back: true, paths: [], unread: true } : tildeMove(cdTargets(name, cmd, parsed, env, bases), name, parsed, env, from, back);
-  const { paths, unread } = move;
+  const { paths } = move;
+  const unread = move.unread || !!cmd.cdRedefined;
   const named = [left, env.cwd].filter((dir) => dir !== undefined);
   env.cwdBack = keep([...new Set([...back, ...paths, ...named])], env);
   if (cmd.held) {
@@ -1825,6 +1834,8 @@ async function chdirTo(name, cmd, parsed, env) {
   if (sureToRun(cmd, parsed) && !unread && paths.length === 1 && (chained || isFolder(paths[0]))) {
     env.cwdSure = paths[0];
     env.cwdMaybe = [];
+    if (chained)
+      env.cwdChainUnread ||= env.cwdUnread;
     env.cwdUnread = false;
     env.cwdOr = chained ? undefined : { before: from, cdChain: cmd.chain, scope: cmd.scope };
     if (env.old)
@@ -1875,9 +1886,18 @@ function orElse(cmd, env) {
   env.cwdOr = undefined;
 }
 function unchain(cmd, env) {
-  if (!env.cwdChain?.length || cmd.chain === env.cwdChainToken)
+  if (!env.cwdChain?.length && !env.cwdChainUnread || cmd.chain === env.cwdChainToken)
     return;
-  env.cwdMaybe = keep([...new Set([...env.cwdMaybe ?? [], ...env.cwdSure ? [env.cwdSure] : [], ...env.cwdChain])], env);
+  if (env.cwdChainUnread)
+    env.cwdUnread = true;
+  env.cwdChainUnread = undefined;
+  env.cwdMaybe = keep([
+    ...new Set([
+      ...env.cwdMaybe ?? [],
+      ...env.cwdSure ? [env.cwdSure] : [],
+      ...env.cwdChain ?? []
+    ])
+  ], env);
   env.cwdSure = undefined;
   if (env.old)
     env.oldFrom = [];
@@ -12655,6 +12675,38 @@ function runnerFolders(name, args, env, tool) {
   const folders = [cwdFlag(tool, { ...env, cwd: chained })];
   return xCwd ? [...folders, xCwd.dir] : folders;
 }
+var BUN_SPLITS = new Set(["--cwd", "--filter", "-F"]);
+var OPTION_READINGS = 16;
+var UNREAD_CWD = {
+  quoted: false,
+  ...unknown("a runner's option past the readings the hook makes")
+};
+function runnerReadings(name, args) {
+  if (name !== "bun" && name !== "bunx" && name !== "npx")
+    return [args];
+  const out = [];
+  const walk = (from, head) => {
+    let k = from;
+    for (;k < args.length && out.length <= OPTION_READINGS; k++) {
+      const word = args[k];
+      const next = args[k + 1];
+      const v = word.value;
+      if (!v.startsWith("-") || v === "-") {
+        if (v !== "run" && v !== "x")
+          break;
+      } else if (BUN_SPLITS.has(v) && next) {
+        head = [...head, word, next];
+        k++;
+        continue;
+      } else if (!v.includes("=") && next && !next.value.startsWith("-"))
+        walk(k + 2, [...head, { ...word, value: `${v}=${next.value}` }]);
+      head = [...head, word];
+    }
+    out.push([...head, ...args.slice(k)]);
+  };
+  walk(0, []);
+  return out.length > OPTION_READINGS ? [...out.slice(0, OPTION_READINGS), [{ quoted: false, value: "--cwd" }, UNREAD_CWD, ...args]] : out;
+}
 function runnerTarget(args) {
   let k = 0;
   while (k < args.length && args[k].value.startsWith("-"))
@@ -12921,8 +12973,8 @@ async function inspect5(raw, environment, main) {
     const { args, local, name } = parsed;
     if (env.cwdAnywhere) {
       const blind = { ...env, cwd: undefined };
-      const ran = runs(name, args, local, blind);
-      if (ran && ranIn(ran.cwd, ran.also).some((dir) => dir === undefined || inMain(dir)))
+      const ran = runnerReadings(name, args).map((reading) => runs(name, reading, local, blind)).find((ran) => ran && ranIn(ran.cwd, ran.also).some((dir) => dir === undefined || inMain(dir)));
+      if (ran)
         return refuse6(ran.what, ANYWHERE_FIX);
       const blindWrite = writeTargets(cmd, name, args).find((t) => {
         const path = pathOf(t, blind);
@@ -12947,8 +12999,8 @@ async function inspect5(raw, environment, main) {
       const script = await fedScript(cmd, here, sure, inMain, visit);
       if (script)
         return script;
-      const ran = runs(name, args, local, here);
-      if (ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)))
+      const ran = runnerReadings(name, args).map((reading) => runs(name, reading, local, here)).find((ran) => ran && (ranIn(ran.cwd, ran.also).some((dir) => inMain(dir)) || unreadFolder(ran.also)));
+      if (ran)
         return refuse6(ran.what, fixFor2(sure, ran.fix));
       const moved = name === "git" ? await liveRefusal(args, local, here, inLive, fixFor2(sure, LIVE_FIX)) : undefined;
       if (moved)
@@ -13043,17 +13095,7 @@ var GH_POSTS = new Set([
   "pr create",
   "pr edit"
 ]);
-var UNREAD_CD_JUDGED = new Set([
-  "chmod",
-  "curl",
-  "mktemp",
-  "perl",
-  "sed",
-  "shred",
-  "sort",
-  "tar",
-  "truncate"
-]);
+var UNREAD_CD_JUDGED = new Set(["chmod", "curl", "mktemp", "shred", "sort", "tar", "truncate"]);
 var NO_WRITES = new Set([
   ":",
   "basename",
@@ -16911,7 +16953,8 @@ function throughRunners(name, args, shell) {
   while (queue.length > 0 && reached.length < 32) {
     const next = queue.shift();
     reached.push(next);
-    queue.push(...runnerBuns("bun", next.args, next.shell));
+    for (const reading of runnerReadings("bun", next.args))
+      queue.push(...runnerBuns("bun", reading, next.shell));
   }
   return reached;
 }
@@ -16948,21 +16991,22 @@ async function check22(raw, environment = process.env) {
       });
     const slotted = slotWords(parsed);
     const name = slotted ? program(slotted[0]?.value ?? "") : parsed.name;
-    const args = slotted ? slotted.slice(1) : parsed.args;
-    if (yardStep(name, args, shell) || throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell)))
-      verdicts.push({ production: true, what: "the Yard ship step, which deploys production" });
-    for (const call of runnerCalls(name, args))
-      if (!unreadable(call))
-        await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit);
-      else if (STEP_NAMED.test(command))
-        verdicts.push({
-          production: true,
-          what: "a runner's command line built at run time on a line naming the Yard ship step"
-        });
-    const words = toolWords(NAMES2, name, args, shell);
-    const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
-    if (verdict)
-      verdicts.push(verdict);
+    for (const args of runnerReadings(name, slotted ? slotted.slice(1) : parsed.args)) {
+      if (yardStep(name, args, shell) || throughRunners(name, args, shell).some((bun) => yardStep("bun", bun.args, bun.shell)))
+        verdicts.push({ production: true, what: "the Yard ship step, which deploys production" });
+      for (const call of runnerCalls(name, args))
+        if (!unreadable(call))
+          await run(lex(call.value), { ...shell, vars: new Map(shell.vars) }, visit);
+        else if (STEP_NAMED.test(command))
+          verdicts.push({
+            production: true,
+            what: "a runner's command line built at run time on a line naming the Yard ship step"
+          });
+      const words = toolWords(NAMES2, name, args, shell);
+      const verdict = words && judgeAll(words.map((w) => ({ ...w, ...viaXargs(w, parsed.xargs) })), parsed.xargs !== undefined);
+      if (verdict)
+        verdicts.push(verdict);
+    }
     return;
   };
   const env = {
@@ -17754,16 +17798,16 @@ function inspect18(raw, environment, main) {
       ].join(" ");
     };
     if (env.cwdAnywhere) {
-      const found = heavy2(name, args, { ...env, cwd: undefined });
+      const found = runnerReadings(name, args).map((reading) => heavy2(name, reading, { ...env, cwd: undefined })).find((found) => found && (found.anywhere || ranIn(found.dir, found.also).some((dir) => dir === undefined || inWorktree(dir))));
       const line = words();
       if (found?.anywhere && line !== undefined)
         return refuseDocker(found.what, "", line, found.fix);
-      if (found && line !== undefined && ranIn(found.dir, found.also).some((dir) => dir === undefined || inWorktree(dir)))
+      if (found && line !== undefined)
         return anywhere(found.what, line);
     }
     for (const here of places(env)) {
-      const found = heavy2(name, args, here);
-      if (!found || !(found.anywhere || unreadFolder(found.also) || ranIn(found.dir, found.also).some(inWorktree)))
+      const found = runnerReadings(name, args).map((reading) => heavy2(name, reading, here)).find((found) => found && (found.anywhere || unreadFolder(found.also) || ranIn(found.dir, found.also).some(inWorktree)));
+      if (!found)
         continue;
       const line = words();
       if (line === undefined)

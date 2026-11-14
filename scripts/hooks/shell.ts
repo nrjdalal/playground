@@ -32,6 +32,8 @@ export type Command = {
   atLeastOnce?: boolean
   // Set on the bare copy run() hands a hook's visit for a followed command with a redirect: the command it stands for
   bareOf?: Command
+  // Set on every command of a line that defines a function named cd or chpwd, so each cd there is unread
+  cdRedefined?: boolean
   // The token of the run of commands this one belongs to: it changes at each operator that runs a command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and carries into every group, body and pipeline the run reaches, so a cd is read as having moved the shell only for the commands whose token is its own
   chain?: number
   // Set when the command runs only if the one before it succeeded (it sits on the right of an `&&`), so a cd of its own has certainly run for every command the same chain joins after it
@@ -85,6 +87,8 @@ export type Env = {
   cwdBack?: string[]
   // The folders the shell was in before a cd an `&&` alone made sure, which become the shell's again at the first command outside that cd's own run, since such a command runs whether or not the cd did
   cwdChain?: string[]
+  // Set when the shell's folder was unread before such a cd, so it is unread again there
+  cwdChainUnread?: boolean
   // The `Command.chain` token of that cd, so only a command of its own run keeps the folder it named
   cwdChainToken?: number
   // The folders the cd that opens a body on the line may reach, which no later cd clears, since the shell may run that body at any point of the line
@@ -892,6 +896,8 @@ function calledAgain(commands: Command[], src: string): void {
     }
     const body = commands.slice(k, end + 1)
     const name = word.value.replace(/\(\)$/, "")
+    // a line's own cd function or zsh chpwd hook may move the shell anywhere at each cd
+    if (name === "cd" || name === "chpwd") for (const c of commands) c.cdRedefined = true
     if (word.quoted || !/^[\w.:-]+$/.test(name)) {
       for (const c of body) c.repeated = true
       continue
@@ -1299,6 +1305,8 @@ function dollar(lx: Lexer, plain = false): Text {
     lx.i += flagged ? 2 : 1
     const from = lx.i
     while (/\w/.test(src[lx.i] ?? "")) lx.i++
+    // zsh applies a history modifier after an unbraced name, quoted or not (`$W:h`, `"$W:t"`), so the word is one the reader cannot know
+    if (/^:[A-Za-z&]/.test(src.slice(lx.i, lx.i + 2))) return unknown("a zsh modifier")
     return variable(src.slice(from, lx.i))
   }
   // the shell's pid is digits whatever its value, so a path built around it is judged by where it lands
@@ -1445,6 +1453,9 @@ export type Parsed = {
 const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
 
 type State = { chdir?: Word; local: Map<string, Text>; rest: Word[]; xargs: Xargs }
+// env's folder word, which a second -C leaves unread, since one env moves by each in turn and another by the last alone
+const chdirOf = (state: State, word: Word | undefined): Word | undefined =>
+  state.chdir && word ? { ...word, ...unknown("a second env -C") } : word
 // The other readings one command's parse makes at most, so options it cannot read cost a bounded time; past them it reads each as canary did, a flag
 const READINGS = 16
 type Budget = { capped?: boolean; left: number }
@@ -1516,9 +1527,9 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         for (let j = split.length - 1; j >= 0; j--) rest.push({ quoted: false, value: split[j] })
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         take()
-        state.chdir = take()
+        state.chdir = chdirOf(state, take())
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
-        state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length)
+        state.chdir = chdirOf(state, slice(w, v.startsWith("-C") ? 2 : "--chdir=".length))
         take()
       } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
@@ -1964,7 +1975,7 @@ async function folder(path: string | undefined): Promise<string | undefined> {
 // Where a cd or pushd may leave the shell: each folder its own words name, whether its target names a folder the reader cannot read at all, and `back` for a form that returns to a folder the line named before, so every one of those is a candidate too. `cd -` and a bare `pushd` are such forms, and so is zsh's two-operand cd, which replaces part of the path the shell is in: its operands go in as candidates, since one of them is the folder a one-operand reading would reach. A bare `pushd` takes the home as well, which zsh's PUSHD_TO_HOME makes it reach.
 type Move = { back?: boolean; paths: string[]; unread: boolean }
 
-// The folder word a steady variable holds as a literal absolute path with no glob, colon or blank (`W=/abs; cd "$W"`), which a cd or env -C lands in as if typed; undefined for any other value, a relative one included, which stays unread, and so for one holding a colon, which is what the lexer leaves of a zsh modifier on an unbraced name (`$W:t`, `$W:h`), read as text where zsh applies it, and so for one holding a blank, which sh_word_split splits into zsh's two-operand cd
+// The folder word a steady variable holds as a literal absolute path with no glob, colon or blank (`W=/abs; cd "$W"`), which a cd or env -C lands in as if typed; undefined for any other value, a relative one included, which stays unread, and so for one holding a colon or a blank, which sh_word_split splits into zsh's two-operand cd
 const landsHeld = (word: Word, cmd: Command, env: Env): Word | undefined => {
   const held = env.hold?.(word, cmd, env)
   return held && isAbsolute(held.value) && !held.glob && !/[:\s]/.test(held.value)
@@ -1989,6 +2000,8 @@ function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: s
     // a steady variable's value is read in, so its target, and whether it climbs, is the folder it names; the unread reading the cd had stays beside it, so it is never read looser than before, unless that value is a literal absolute path
     const word = env.hold?.(typed, cmd, env) ?? typed
     if (word !== typed && !landsHeld(typed, cmd, env)) unread = true
+    // a relative target after a cd the reader cannot read lands under that folder, so it stays unread
+    if (env.cwdUnread && pathOf(word, { ...env, cwd: undefined }) === undefined) unread = true
     for (const base of from.length > 0 ? from : [undefined]) {
       tick()
       const path = pathOf(word, { ...env, cwd: base })
@@ -2062,7 +2075,8 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     name === "popd"
       ? { back: true, paths: [], unread: true }
       : tildeMove(cdTargets(name, cmd, parsed, env, bases), name, parsed, env, from, back)
-  const { paths, unread } = move
+  const { paths } = move
+  const unread = move.unread || !!cmd.cdRedefined
   // the folder `Env.cwd`'s own reading left and the one it lands in join them, so the one folder `Env.old` names is always one a `cd -` or a `pushd ~-` of the reader's may go back to
   const named = [left, env.cwd].filter((dir): dir is string => dir !== undefined)
   env.cwdBack = keep([...new Set([...back, ...paths, ...named])], env)
@@ -2076,6 +2090,8 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
   if (sureToRun(cmd, parsed) && !unread && paths.length === 1 && (chained || isFolder(paths[0]))) {
     env.cwdSure = paths[0]
     env.cwdMaybe = []
+    // the cd may not run, or may fail, so a command after its chain is where the shell was before it, an unread folder too
+    if (chained) env.cwdChainUnread ||= env.cwdUnread
     env.cwdUnread = false
     env.cwdOr = chained ? undefined : { before: from, cdChain: cmd.chain, scope: cmd.scope }
     if (env.old) env.oldFrom = bases
@@ -2151,9 +2167,17 @@ function orElse(cmd: Command, env: Env): void {
 
 // A cd an `&&` alone made sure holds for its own run of commands alone: any other command runs whether or not that cd did, so the folders from before it are the shell's again beside the one it named. A command keeps the folder only by proof, its own token matching the cd's, which every operator that frees a command takes away and no group, body, pipeline or script grants.
 function unchain(cmd: Command, env: Env): void {
-  if (!env.cwdChain?.length || cmd.chain === env.cwdChainToken) return
+  if ((!env.cwdChain?.length && !env.cwdChainUnread) || cmd.chain === env.cwdChainToken) return
+  if (env.cwdChainUnread) env.cwdUnread = true
+  env.cwdChainUnread = undefined
   env.cwdMaybe = keep(
-    [...new Set([...(env.cwdMaybe ?? []), ...(env.cwdSure ? [env.cwdSure] : []), ...env.cwdChain])],
+    [
+      ...new Set([
+        ...(env.cwdMaybe ?? []),
+        ...(env.cwdSure ? [env.cwdSure] : []),
+        ...(env.cwdChain ?? []),
+      ]),
+    ],
     env,
   )
   env.cwdSure = undefined
