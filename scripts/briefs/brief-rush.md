@@ -7,7 +7,7 @@ You are worker-<name>: fill in the name your lead gave you. You are a fresh work
 
 Chore: ONE small UI slice in the RUSH, the owner's priority, verbatim: "Instead of big tickets, let's focus on small tickets for now, like the UI enhancement there that we are talking about in the sidebar and whatnot. Just rush it: split the workers and get it done." One PR into canary, about 1h or less.
 
-Your spec is the slice file your lead names, in ~/.playground/notes/rush/. It lists the files you OWN and the files you must NOT touch, the done list, the evidence and the source words. Several workers build other slices in parallel, so:
+Your spec is the slice file your lead names, in ~/.playground/notes/rush/. It lists the files you OWN and the files you must NOT touch, the done list, the evidence and the source words. A premise in it or in your plan about how a tool behaves carries the file:line it was read at, such as "`scripts/spawn.sh:1234`: a worker starts in the main checkout", and your lead's plan review sends back one with no cite (playbook's SESSIONS.md, Spawn's brief step). Several workers build other slices in parallel, so:
 
 - Change only the files you own. If you need a change in a file you don't own, stop and tell the Builder: it goes to that file's slice, or waits.
 - Keep the diff small: no refactors, no renames, no drive-by fixes.
