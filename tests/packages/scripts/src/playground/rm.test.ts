@@ -414,6 +414,57 @@ test("an end leaves its own scratch or scratchpad folder over the tripwire in pl
   }
 })
 
+// The own folder's plain refusal reaches nothing else: each path here, over the tripwire, keeps its alert.
+test("over the tripwire, another session's folder, a folder above the own one, the own folder as a symlink and that symlink's target still alert", async () => {
+  const own = (data: string, dir: string) => join(data, dir, "j6rjgy-worker")
+  const filled = (path: string, at = path) => {
+    overCount(path)
+    return at
+  }
+  const linked = (data: string, home: string, at: string) => {
+    overCount(join(home, "big"))
+    mkdirSync(join(data, "scratchpad"), { recursive: true })
+    symlinkSync(join(home, "big"), own(data, "scratchpad"))
+    return at
+  }
+  const cases: [string, (data: string, home: string) => string][] = [
+    ["another session's scratch", (data) => filled(join(data, "scratch", "a4b5c6-worker"))],
+    ["another session's scratchpad", (data) => filled(join(data, "scratchpad", "a4b5c6-worker"))],
+    ["scratch/ itself", (data) => filled(own(data, "scratch"), join(data, "scratch"))],
+    ["scratchpad/ itself", (data) => filled(own(data, "scratchpad"), join(data, "scratchpad"))],
+    ["the own folder as a symlink", (data, home) => linked(data, home, own(data, "scratchpad"))],
+    ["the own folder's symlink target", (data, home) => linked(data, home, join(home, "big"))],
+  ]
+  for (const [name, at] of cases) {
+    const { deps, home, told } = pads([
+      { name: "j6rjgy-worker", status: "working" },
+      { name: "a4b5c6-worker", status: "working" },
+    ])
+    const path = at(deps.data, home)
+    const error = console.error
+    console.error = () => {}
+    try {
+      expect([name, await runRm([path], deps)]).toEqual([name, 1])
+    } finally {
+      console.error = error
+    }
+    expect([name, listTrash(join(deps.data, "trash"))]).toEqual([name, []])
+    expect([name, told.length]).toEqual([name, 1])
+  }
+})
+
+test("a symlink inside the own scratch folder to a folder over the tripwire moves alone, its target whole, with no alert", async () => {
+  const { deps, home, told } = machine()
+  const link = join(deps.data, "scratch", "j6rjgy-worker", "out")
+  overCount(join(home, "big"))
+  mkdirSync(dirname(link), { recursive: true })
+  symlinkSync(join(home, "big"), link)
+  expect(await runRm([link], deps)).toBe(0)
+  expect(listTrash(join(deps.data, "trash")).map((entry) => entry.path)).toEqual([link])
+  expect(existsSync(join(home, "big", "clone", "0", "0"))).toBe(true)
+  expect(told).toEqual([])
+})
+
 test("--restore refuses a path inside an ended folder while a symlink stands at that folder or at a folder between", async () => {
   const { deps, home, pad } = pads([])
   mkdirSync(join(home, "kept"), { recursive: true })
