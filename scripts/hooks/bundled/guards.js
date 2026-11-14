@@ -79,6 +79,24 @@ function heldBy(at, remote, timeout = 5000) {
   ];
 }
 
+// scripts/hooks/input.ts
+var DEADLINE = 13000;
+async function input(name, kind, deadline = DEADLINE) {
+  let timer;
+  const raw = await Promise.race([
+    Bun.stdin.text(),
+    new Promise((done) => {
+      timer = setTimeout(() => done(undefined), deadline - performance.now());
+    })
+  ]).finally(() => clearTimeout(timer));
+  if (raw !== undefined)
+    return raw;
+  if (kind === "recorder")
+    process.exit(0);
+  console.error(`${name} hook: the call's input did not arrive by its deadline, about ${deadline / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`);
+  process.exit(2);
+}
+
 // scripts/hooks/no-desktop-owner-app.ts
 import { realpathSync as realpathSync2 } from "fs";
 import { join as join5, resolve as resolve3 } from "path";
@@ -1442,6 +1460,7 @@ function mktempPath(cmd, known) {
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`;
 }
 var SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/;
+var splitFrom = new WeakMap;
 var chdirOf = (state, word) => state.chdir && word ? { ...word, ...unknown("a second env -C") } : word;
 var READINGS = 16;
 function parse(cmd) {
@@ -1486,9 +1505,21 @@ function unwrap(state, inside, budget) {
   };
   for (let wrapper = inside;; wrapper = undefined) {
     if (!wrapper) {
-      wrapper = program(peek()?.value ?? "");
+      const word = peek();
+      const held = [state.xargs?.replace ?? "", ...state.xargs?.outer ?? []];
+      for (const replace of held.filter((r) => r && word?.value.includes(r)))
+        if (word) {
+          const typed = splitFrom.get(word) ?? word;
+          state.xargs = {
+            ...state.xargs,
+            filled: [...state.xargs?.filled ?? [], [typed, replace]]
+          };
+        }
+      wrapper = program(word?.value ?? "");
       if (!WRAPPERS.has(wrapper))
         break;
+      if (wrapper === "xargs" && state.xargs?.replace)
+        state.xargs = { ...state.xargs, outer: [...state.xargs.outer ?? [], state.xargs.replace] };
       if (wrapper === "xargs")
         state.xargs ??= {};
       take();
@@ -1501,9 +1532,14 @@ function unwrap(state, inside, budget) {
       else if (wrapper === "env" && SPLIT.test(v)) {
         const attached = SPLIT.exec(v)?.[1] ?? "";
         take();
-        const split = (attached || take()?.value || "").split(/\s+/).filter(Boolean);
-        for (let j = split.length - 1;j >= 0; j--)
-          rest.push({ quoted: false, value: split[j] });
+        const from = attached ? w : take();
+        const split = (attached || from?.value || "").split(/\s+/).filter(Boolean);
+        for (let j = split.length - 1;j >= 0; j--) {
+          const word = { quoted: false, value: split[j] };
+          if (from)
+            splitFrom.set(word, splitFrom.get(from) ?? from);
+          rest.push(word);
+        }
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         take();
         state.chdir = chdirOf(state, take());
@@ -1653,7 +1689,8 @@ async function examine(cmd, env, visit, builtins) {
   const expanded = [
     ...expandTilde(cmd, primary.name, env),
     ...splitHeld(cmd, primary.name, env),
-    ...vanished
+    ...vanished,
+    ...await xargsFilled(cmd, [primary, ...others], env)
   ];
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
@@ -1689,6 +1726,32 @@ function stdinScript({ args, name }) {
     return false;
   const { inline, operand } = shellOperand(args, name);
   return !operand || !inline && STDIN_PATHS.has(operand.value);
+}
+async function xargsFilled(cmd, parsed, env) {
+  const filled = new Map;
+  for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
+    filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
+  if (filled.size === 0)
+    return [];
+  const fed = await stdinOf(cmd, env);
+  const raw = fed.unknown ? [] : [fed.value, ...fed.value.split(`
+`), ...fed.value.split(/\s+/)];
+  const quoted = raw.some((text) => /["'\\]/.test(text));
+  const texts = [...new Set(raw.map((text) => text.replace(/["'\\]/g, "").trim()))].filter(Boolean);
+  const fill = (text) => ({
+    ...cmd,
+    words: cmd.words.flatMap((w) => {
+      const held = filled.get(w);
+      if (!held)
+        return [w];
+      if (text === undefined)
+        return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }];
+      return held.reduce((value, replace) => value.replaceAll(replace, text), w.value).split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
+    })
+  });
+  if (fed.unknown || texts.length > READINGS)
+    return [fill(undefined)];
+  return [...texts.map(fill), ...quoted ? [fill(undefined)] : []];
 }
 var BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line";
 function expandTilde(cmd, name, env) {
@@ -18228,7 +18291,6 @@ var GUARDS = [
   { factory: true, name: "no-stash", run: (raw, env) => check3(raw, env) },
   { factory: true, name: "no-unslotted-run", run: (raw, env) => check25(raw, env) }
 ];
-var DEADLINE = 13000;
 var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`;
 var late = (names) => `guards hook: ${names.join(", ")} did not answer by its deadline, about ${DEADLINE / 1000} s, inside the runner's 15 s timeout, so the call is refused; split it into smaller calls, or report it to your lead.`;
 async function check26(raw, environment = process.env, guards = GUARDS, wait = DEADLINE) {
@@ -18256,16 +18318,9 @@ async function check26(raw, environment = process.env, guards = GUARDS, wait = D
 
 `) || undefined;
 }
-var unread3 = `guards hook: the call's input did not arrive by its deadline, about ${DEADLINE / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`;
 async function hook(guards = GUARDS, deadline = DEADLINE) {
-  let timer;
-  const raw = await Promise.race([
-    Bun.stdin.text(),
-    new Promise((done) => {
-      timer = setTimeout(() => done(undefined), deadline - performance.now());
-    })
-  ]).finally(() => clearTimeout(timer));
-  const reason = raw === undefined ? unread3 : await check26(raw, process.env, guards, deadline - performance.now());
+  const raw = await input("guards", "guard", deadline);
+  const reason = await check26(raw, process.env, guards, deadline - performance.now());
   if (!reason)
     return 0;
   console.error(reason);
@@ -18274,7 +18329,6 @@ async function hook(guards = GUARDS, deadline = DEADLINE) {
 if (import.meta.main)
   process.exit(await hook());
 export {
-  DEADLINE,
   GUARDS,
   check26 as check,
   hook

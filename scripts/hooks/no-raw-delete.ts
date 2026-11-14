@@ -3,6 +3,7 @@
 import { realpathSync } from "node:fs"
 import { basename, dirname, resolve, sep } from "node:path"
 
+import { input } from "./input"
 import { gitCommand } from "./no-stash"
 import {
   type Command,
@@ -455,7 +456,7 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const reason = await check(await Bun.stdin.text())
+  const reason = await check(await input("no-raw-delete", "guard"))
   if (reason) {
     console.error(reason)
     process.exit(2)

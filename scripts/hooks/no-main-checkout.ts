@@ -6,6 +6,7 @@ import { dataDirOf } from "../../packages/env/src/data-dir"
 import { liveSettings } from "../../packages/settings/src/live"
 import { readPolicySync } from "../../packages/settings/src/rendered"
 import { eachInput } from "./codex"
+import { input } from "./input"
 import { fromFactory, registryName, rosterKind, sessionOf, sessionRole } from "./role"
 import {
   codeFed,
@@ -924,7 +925,7 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-main-checkout", "guard")
   const reason = (await fromFactory(raw)) ? await check(raw) : undefined
   if (reason) {
     console.error(reason)
