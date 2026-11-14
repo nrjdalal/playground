@@ -1051,7 +1051,7 @@ export function InboxCard({
   const secretAsk = secretKey !== null
   // a secret ask's or a reveal card's Reply stays in its own box, never the chat's composer, so its value reaches no chat (the API refuses a reveal card's comment that holds its value)
   const keepsReply = secretAsk || (item.kind === "decision" && item.preview.type === "reveal")
-  // set by such a card's empty-box Reply, so a muted line under its box says where the note goes
+  // set by such a card's empty-box Reply, so a muted line under its box says where the note goes, until the box holds text
   const [hinted, setHinted] = useState(false)
   const titleId = useId()
   // every write the card makes goes through here, and a card whose answer the relay does not carry sends nothing; a refusal shows in the Mac's own words
@@ -1142,7 +1142,7 @@ export function InboxCard({
     if (route !== "send") {
       // only a folded card is opened, so one open by default still folds once answered
       if (folded) flushSync(() => setToggled(true))
-      if (keepsReply) setHinted(true)
+      if (keepsReply && text === "") setHinted(true)
       document.getElementById(commentId)?.focus()
       return
     }
@@ -1625,9 +1625,12 @@ export function InboxCard({
           }
           readOnly={pending}
           value={note}
-          onChange={(event) => setNote(event.target.value)}
+          onChange={(event) => {
+            setNote(event.target.value)
+            if (event.target.value.trim() !== "") setHinted(false)
+          }}
         />
-        {hinted && note.trim() === "" && (
+        {hinted && (
           <p className="text-muted-foreground mt-2 text-xs">
             Type your note in the box above, then press Reply. The token goes in its own field
           </p>
