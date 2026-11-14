@@ -18,6 +18,7 @@ import { dirname, join } from "node:path"
 
 import { hasManagerRole, ROSTER_KINDS } from "../../../../packages/config/src/kinds"
 import {
+  archiveUnlanded,
   bundleToTrash,
   CARVE_OUTS,
   type CarveOut,
@@ -36,6 +37,7 @@ import {
   restore,
   type Roots,
   stripTrash,
+  unpushed,
   worktreeRefusal,
 } from "../../../../packages/safe-delete/src"
 
@@ -1131,6 +1133,95 @@ describe("worktreeRefusal", () => {
     expect(moved.id).toBeDefined()
     expect(moved.bundle).toBeUndefined()
     expect(readdirSync(dirname(dirname(moved.to))).filter((f) => f.endsWith(".bundle"))).toEqual([])
+  })
+
+  // #2132: a remote-tracking ref is the remote's branch as last fetched, so --discard reads the remote itself: a branch deleted there since, its tracking ref kept, and a remote that cannot be read each hold no commit
+  test.each([
+    [
+      "whose remote branch was deleted since, its tracking ref kept",
+      (roots: Roots) =>
+        git(roots.root, "--git-dir", join(roots.root, "remote.git"), "branch", "-D", "PG-1-thing"),
+    ],
+    [
+      "whose remote cannot be read",
+      (roots: Roots & { root: string }) =>
+        git(roots.main, "remote", "set-url", "origin", join(roots.root, "gone.git")),
+    ],
+  ])("--discard bundles the commits of a pushed worktree %s, which bring HEAD back", (_, arm) => {
+    const { holders, roots, wt } = withWorktree()
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    arm(roots)
+    expect(git(wt, "rev-parse", "--verify", "-q", "refs/remotes/origin/PG-1-thing")).not.toBe("")
+    const head = git(wt, "rev-parse", "HEAD")
+    const discard = { ...holders, discard: true, merged: () => false }
+    const moved = quarantine(wt, { ...opts, worktree: discard }, roots, { now: NOW }) as Quarantined
+    expect(existsSync(wt)).toBe(false)
+    expect(moved.bundle).toBe(join(dirname(dirname(moved.to)), "pg-1.bundle"))
+    git(roots.main, "worktree", "prune")
+    git(roots.main, "branch", "-D", "PG-1-thing")
+    git(roots.main, "fetch", "-q", moved.bundle!, "HEAD:refs/heads/back")
+    expect(git(roots.main, "rev-parse", "back")).toBe(head)
+  })
+
+  // #2132: archiveUnlanded counts a commit as held only when the remote itself holds it now
+  test("archiveUnlanded archives a commit whose remote branch was deleted since, its tracking ref kept, and leaves out one the remote holds", () => {
+    const { roots, wt } = withWorktree()
+    const archive = join(roots.root, "archive")
+    const work = git(wt, "rev-parse", "HEAD")
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    expect(archiveUnlanded(wt, archive)).toEqual({
+      refused: "it holds no commit past its remotes to archive",
+    })
+    git(roots.root, "--git-dir", join(roots.root, "remote.git"), "branch", "-D", "PG-1-thing")
+    const path = join(archive, "playground", `pg-1-${work.slice(0, 7)}`)
+    expect(archiveUnlanded(wt, archive)).toEqual({ count: 1, path })
+    expect(
+      readdirSync(path).map(
+        (f) => /^From ([0-9a-f]+) /.exec(readFileSync(join(path, f), "utf8"))?.[1],
+      ),
+    ).toEqual([work])
+  })
+
+  // #2132: a remote that cannot be read holds no commit, so every commit HEAD holds is archived
+  test("archiveUnlanded archives every commit of a worktree whose remote cannot be read", () => {
+    const { roots, wt } = withWorktree()
+    const archive = join(roots.root, "archive")
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    git(roots.main, "remote", "set-url", "origin", join(roots.root, "gone.git"))
+    const path = join(archive, "playground", `pg-1-${git(wt, "rev-parse", "HEAD").slice(0, 7)}`)
+    expect(archiveUnlanded(wt, archive)).toEqual({ count: 2, path })
+  })
+
+  // #2132: a short archive written while the remote could not be read, a merge commit's patch missing, lets the tree go once the remote reads again and lists fewer commits
+  test("archiveUnlanded refuses a short archive of the whole history while the remote cannot be read, then passes the same folder once it reads", () => {
+    const { roots, wt } = withWorktree()
+    const archive = join(roots.root, "archive")
+    const side = git(wt, "commit-tree", "-p", "HEAD", "-m", "side", "HEAD^{tree}")
+    git(wt, "merge", "-q", "--no-ff", "-m", "merge", side)
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    file(join(wt, "late.txt"))
+    git(wt, "add", ".")
+    git(wt, "commit", "-qm", "late")
+    const late = git(wt, "rev-parse", "HEAD")
+    const path = join(archive, "playground", `pg-1-${late.slice(0, 7)}`)
+    git(roots.main, "remote", "set-url", "origin", join(roots.root, "gone.git"))
+    expect(archiveUnlanded(wt, archive)).toEqual({
+      refused: `its archive at ${path} holds 4 patches, 4 of its 5 commits no remote holds`,
+    })
+    git(roots.main, "remote", "set-url", "origin", join(roots.root, "remote.git"))
+    expect(archiveUnlanded(wt, archive)).toEqual({ count: 1, path })
+  })
+
+  // #2132: ssh's options go on the command git would run, so a configured core.sshCommand still reads the remote
+  test("unpushed reads an ssh remote through core.sshCommand, with BatchMode and a connect limit added", () => {
+    const { roots, wt } = withWorktree()
+    const said = join(roots.root, "ssh-args")
+    const ssh = file(join(roots.root, "fake-ssh"), `#!/bin/sh\necho "$@" > '${said}'\nexit 1\n`)
+    chmodSync(ssh, 0o755)
+    git(roots.main, "config", "core.sshCommand", ssh)
+    git(roots.main, "remote", "set-url", "origin", "ssh://git@example.invalid/remote.git")
+    expect(unpushed(wt)).toMatchObject({ unread: ["origin"] })
+    expect(readFileSync(said, "utf8")).toStartWith("-o BatchMode=yes -o ConnectTimeout=10 ")
   })
 
   test("bundleToTrash holds each ref at its sha past the excluded ones, its sha list beside it, and leaves out a ref the exclusion holds", () => {

@@ -5,7 +5,13 @@ import { basename, dirname, join } from "node:path"
 
 import { managerOf } from "@packages/config/kinds"
 import { configDirOf } from "@packages/env/data-dir"
-import { archiveUnlanded, bundleToTrash, quarantine, type Roots } from "@packages/safe-delete"
+import {
+  archiveUnlanded,
+  bundleToTrash,
+  quarantine,
+  type Roots,
+  unpushed,
+} from "@packages/safe-delete"
 import { codeRoot, guardedOrgs, readPolicyOrDefaults, type Settings } from "@packages/settings"
 
 import {
@@ -455,7 +461,7 @@ export const nightlyClean =
       const all = [...said.ended, ...said.kept]
       return all.length ? all.join("; ") : "none"
     })
-    // Every other repo the factory works in: a worktree goes by git worktree remove, with no force flag, so git refuses a dirty tree, only when its PR merged or closed (or it has none, and every commit is on a remote or archiveUnlanded has archived each one no remote holds under the data folder's scratchpad/archive), it holds no work but build output, and no live process or roster row has it; each kept one is named with why, and its branch stays, so git worktree add <path> <branch> brings it back.
+    // Every other repo the factory works in: a worktree goes by git worktree remove, with no force flag, so git refuses a dirty tree, only when its PR merged or closed (or it has none, and every commit is on a branch a remote holds now, which unpushed reads live, or, with each remote read, archiveUnlanded has archived each one no remote holds under the data folder's scratchpad/archive), it holds no work but build output, and no live process or roster row has it; each kept one is named with why, and its branch stays, so git worktree add <path> <branch> brings it back.
     await step("other repos", async () => {
       const repos = await otherRepos(await deps.roots(data, main), main)
       if (!repos.length) return "none with a .claude/worktrees folder"
@@ -497,15 +503,11 @@ export const nightlyClean =
             const status = await at(t.path, ["status", "--porcelain", "--ignored"])
             const work = status.code === 0 ? workIn(status.out) : "its status could not be read"
             if (work || pr) return work
-            const ahead = await at(t.path, [
-              "rev-list",
-              "--max-count=1",
-              "HEAD",
-              "--not",
-              "--remotes",
-            ])
-            if (ahead.code !== 0) return "its commits could not be read"
-            if (!ahead.out.trim()) return undefined
+            const ahead = unpushed(t.path)
+            if (ahead === null) return "its commits could not be read"
+            if (!ahead.shas.length) return undefined
+            if (ahead.unread.length)
+              return `it has no PR and its remote ${ahead.unread.join(", ")} cannot be read`
             const archived = archiveUnlanded(t.path, join(data, "scratchpad", "archive"))
             if ("refused" in archived)
               return `it has no PR and a commit no remote holds, and ${archived.refused}`

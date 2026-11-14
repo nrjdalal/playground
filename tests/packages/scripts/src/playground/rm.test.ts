@@ -484,10 +484,10 @@ const canaryRepo = () => {
 
 // PG-2017: a live row holds a worktree no more when it sits clean, detached, at a commit origin/canary holds; each broken condition keeps the hold. The row holds by the folder's name, since a detached tree reads no branch, and each case runs under --discard, so only the row's hold refuses.
 const detach = (wt: string) => git(wt, "checkout", "-q", "--detach", "origin/canary")
-const withRow = (deps: RmDeps) =>
+const withRow = (deps: RmDeps, name = "pg-1") =>
   writeFileSync(
     join(deps.data, "roster.json"),
-    JSON.stringify({ agents: [{ name: "pg-1", status: "working" }] }),
+    JSON.stringify({ agents: [{ name, status: "working" }] }),
   )
 test.each([
   [
@@ -1188,6 +1188,20 @@ test("--worktree keeps origin/canary for this checkout's own worktree: one whose
     `playground: ${own}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): `,
   )
   expect(existsSync(own)).toBe(true)
+})
+
+// #2132: the live-row lift measures another repo's clean detached tree against that repo's own default branch, as the landed check does; each case runs under --discard, so only the row's hold refuses
+test.each([
+  ["frees one at a commit origin/main holds", "origin/main", 0],
+  ["keeps one at a commit origin/main lacks", "APP-1-thing", 1],
+])("runRm --worktree, under a live row, %s in another repo with no canary", async (_, at, code) => {
+  const { deps, home, root } = machine()
+  const { repo, wt } = otherRepo(root, home)
+  git(wt, "checkout", "-q", "--detach", at)
+  withRow(deps, "app-1")
+  expect(await runRm(["--worktree", wt, "--discard"], deps)).toBe(code)
+  expect(existsSync(wt)).toBe(code !== 0)
+  if (code === 0) expect(git(repo, "worktree", "list")).not.toContain("app-1")
 })
 
 test("--worktree refuses, in another repo, a folder in its .claude/worktrees git does not list as its worktree, the repo's own checkout, and its worktree outside .claude/worktrees", async () => {
