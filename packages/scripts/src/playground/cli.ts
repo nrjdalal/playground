@@ -387,6 +387,23 @@ const alertsWaitFor = async (name: string): Promise<number> => {
   return 0
 }
 
+// playground ci-wait: blocks until the PR's required checks exist at its head and conclude (ci-wait.ts), loaded only for this command.
+const ciWaitFor = async (words: string[]): Promise<number> => {
+  const { runCiWait } = await import("./ci-wait")
+  const { factoryRepoOf } = await import("./setting")
+  return runCiWait(words, {
+    err: console.error,
+    gh: (args) => {
+      const run = Bun.spawnSync(["gh", ...args], { stderr: "pipe", stdout: "pipe" })
+      return { code: run.exitCode, stderr: run.stderr.toString(), stdout: run.stdout.toString() }
+    },
+    now: Date.now,
+    out: console.log,
+    repo: () => factoryRepoOf(),
+    sleep: (seconds) => Bun.sleep(seconds * 1000),
+  })
+}
+
 // playground focus's reads and writes: the data folder, held-prs.json, the clock and this checkout's run-slot.sh, loaded only for this command.
 const focusDeps = async () => {
   const { heldPath } = await import("../pr-merge/held")
@@ -514,7 +531,9 @@ const code =
                                                     ).runHerdrPin(rest.slice(1))
                                                   : VERBS.includes(command)
                                                     ? await verb(command, rest)
-                                                    : fail(
-                                                        `no command ${command}; playground --help lists them`,
-                                                      )
+                                                    : command === "ci-wait"
+                                                      ? await ciWaitFor(rest)
+                                                      : fail(
+                                                          `no command ${command}; playground --help lists them`,
+                                                        )
 process.exit(code)
