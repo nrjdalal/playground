@@ -1464,6 +1464,80 @@ function mktempPath(cmd, known) {
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`;
 }
 var SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/;
+var XARGS_LONG = [
+  "arg-file",
+  "delimiter",
+  "eof",
+  "exit",
+  "help",
+  "interactive",
+  "max-args",
+  "max-chars",
+  "max-lines",
+  "max-procs",
+  "no-run-if-empty",
+  "null",
+  "open-tty",
+  "process-slot-var",
+  "replace",
+  "show-limits",
+  "verbose",
+  "version"
+];
+var XARGS_READ = new Set(["arg-file", "delimiter", "null", "replace"]);
+var XARGS_FLAGS = "0oprtx";
+function delimiterOf(word) {
+  if (!word || word.unknown)
+    return;
+  if (word.value.length === 1)
+    return word.value;
+  const [, hex, octal, letter] = /^\\(?:x([\da-f]+)|([0-7]+)|(.))$/i.exec(word.value) ?? [];
+  const code = hex ? parseInt(hex, 16) : octal ? parseInt(octal, 8) : undefined;
+  if (code !== undefined)
+    return code < 256 ? String.fromCharCode(code) : undefined;
+  return letter ? ESCAPES[letter] : undefined;
+}
+function xargsOption(xargs, w, take) {
+  const long = /^--([^=]+)(=?)/.exec(w.value);
+  let name;
+  let value;
+  if (long) {
+    const names = XARGS_LONG.filter((n) => n.startsWith(long[1]));
+    name = names.includes(long[1]) ? long[1] : names.length === 1 ? names[0] : undefined;
+    if (!name || !XARGS_READ.has(name))
+      return false;
+    if (long[2])
+      value = slice(w, long[0].length);
+  } else {
+    if (!w.value.startsWith("-"))
+      return false;
+    let k = 1;
+    while (XARGS_FLAGS.includes(w.value[k] ?? "-"))
+      k++;
+    if (w.value.slice(1, k).includes("0"))
+      xargs.delimiters = [...xargs.delimiters ?? [], "\x00"];
+    name = w.value[k];
+    if (!name || !"adIiJ".includes(name))
+      return false;
+    if (k + 1 < w.value.length)
+      value = slice(w, k + 1);
+  }
+  take();
+  if (name === "i" || name === "replace")
+    xargs.replace = value?.value || "{}";
+  else if (name === "null")
+    xargs.delimiters = [...xargs.delimiters ?? [], "\x00"];
+  else {
+    value ??= take();
+    if (name === "I" || name === "J")
+      xargs.replace = value?.value;
+    else if (name === "a" || name === "arg-file")
+      xargs.files = [...xargs.files ?? [], ...value ? [value] : []];
+    else
+      xargs.delimiters = [...xargs.delimiters ?? [], delimiterOf(value)];
+  }
+  return true;
+}
 var splitFrom = new WeakMap;
 var chdirOf = (state, word) => state.chdir && word ? { ...word, ...unknown("a second env -C") } : word;
 var READINGS = 16;
@@ -1550,12 +1624,9 @@ function unwrap(state, inside, budget) {
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
         state.chdir = chdirOf(state, slice(w, v.startsWith("-C") ? 2 : "--chdir=".length));
         take();
-      } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
-        const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
-        take();
-        state.xargs ??= {};
-        state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
-      } else if (wrapper === "env" && v === "-") {
+      } else if (wrapper === "xargs" && xargsOption(state.xargs ??= {}, w, take))
+        continue;
+      else if (wrapper === "env" && v === "-") {
         take();
       } else if (v === "--") {
         take();
@@ -1725,17 +1796,39 @@ function stdinScript({ args, name }) {
   const { inline, operand } = shellOperand(args, name);
   return !operand || !inline && STDIN_PATHS.has(operand.value);
 }
+var argFile = async (file, env) => held2(file.procs ? await outputs(file.procs, env) : await readPath(file, env));
+var itemsOf = (fed, split) => {
+  if (fed.unknown || split === undefined)
+    return;
+  if (split === null)
+    return [fed.value, ...fed.value.split(`
+`), ...fed.value.split(/\s+/)];
+  return [fed.value, ...fed.value.split(split)];
+};
 async function xargsFilled(cmd, parsed, env) {
   const filled = new Map;
   for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
     filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
   if (filled.size === 0)
     return [];
-  const fed = await stdinOf(cmd, env);
-  const raw = fed.unknown ? [] : [fed.value, ...fed.value.split(`
-`), ...fed.value.split(/\s+/)];
-  const quoted = raw.some((text) => /["'\\]/.test(text));
-  const texts = [...new Set(raw.map((text) => text.replace(/["'\\]/g, "").trim()))].filter(Boolean);
+  const xargs = parsed.map((p) => p.xargs);
+  const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !STDIN_PATHS.has(f.value));
+  const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))];
+  const inputs = [
+    await stdinOf(cmd, env),
+    ...await Promise.all(files.map((f) => argFile(f, env)))
+  ];
+  const texts = new Set;
+  for (const raw of inputs.flatMap((fed) => splits.map((split) => itemsOf(fed, split)))) {
+    const items = [...new Set(raw?.map((text) => text.replace(/["'\\]/g, "").trim()))].filter(Boolean);
+    if (!raw || items.length > READINGS)
+      texts.add(undefined);
+    else
+      for (const text of items)
+        texts.add(text);
+    if (raw?.some((text) => /["'\\]/.test(text)))
+      texts.add(undefined);
+  }
   const fill = (text) => ({
     ...cmd,
     words: cmd.words.flatMap((w) => {
@@ -1747,9 +1840,7 @@ async function xargsFilled(cmd, parsed, env) {
       return held.reduce((value, replace) => value.replaceAll(replace, text), w.value).split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
     })
   });
-  if (fed.unknown || texts.length > READINGS)
-    return [fill(undefined)];
-  return [...texts.map(fill), ...quoted ? [fill(undefined)] : []];
+  return [...texts].map(fill);
 }
 var BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line";
 function expandTilde(cmd, name, env) {

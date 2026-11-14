@@ -1435,8 +1435,16 @@ function mktempPath(cmd: Command, known: Record<string, string>): string | undef
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`
 }
 
-// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from stdin.
-export type Xargs = { filled?: [Word, string][]; outer?: string[]; replace?: string } | undefined
+// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
+export type Xargs =
+  | {
+      delimiters?: (string | undefined)[]
+      files?: Word[]
+      filled?: [Word, string][]
+      outer?: string[]
+      replace?: string
+    }
+  | undefined
 
 export type Parsed = {
   // the other readings of a wrapper's option it cannot read, each judged as the command too
@@ -1453,6 +1461,72 @@ export type Parsed = {
 
 // env's split-string option, attached or not, with the text it carries attached
 const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
+// GNU xargs' long options, each of which it takes by any unique prefix (`--delim=,`), and the ones among them xargsOption reads
+const XARGS_LONG = [
+  "arg-file",
+  "delimiter",
+  "eof",
+  "exit",
+  "help",
+  "interactive",
+  "max-args",
+  "max-chars",
+  "max-lines",
+  "max-procs",
+  "no-run-if-empty",
+  "null",
+  "open-tty",
+  "process-slot-var",
+  "replace",
+  "show-limits",
+  "verbose",
+  "version",
+]
+const XARGS_READ = new Set(["arg-file", "delimiter", "null", "replace"])
+// GNU's and BSD's short xargs options that take no value, as a cluster (`-rJ`, `-0I`) reads them before the one that takes a value
+const XARGS_FLAGS = "0oprtx"
+// The one character GNU xargs' -d names, itself or a backslash escape: a letter $'…' reads, an octal number, or \x and a hex one; undefined when the reader cannot decode it
+function delimiterOf(word: Word | undefined): string | undefined {
+  if (!word || word.unknown) return
+  if (word.value.length === 1) return word.value
+  const [, hex, octal, letter] = /^\\(?:x([\da-f]+)|([0-7]+)|(.))$/i.exec(word.value) ?? []
+  const code = hex ? parseInt(hex, 16) : octal ? parseInt(octal, 8) : undefined
+  if (code !== undefined) return code < 256 ? String.fromCharCode(code) : undefined
+  return letter ? ESCAPES[letter] : undefined
+}
+
+// Reads one xargs option word that sets where its input comes from, how it splits, or its replace string, as GNU and BSD read it: -I, -J, -i and --replace, GNU's -a and --arg-file, -d and --delimiter, -0 and --null, a short one at the end of a cluster of flags (`-rJ`) and a long one by its prefix; true when it took the word and any value after it, false for every other option, which unwrap reads as before
+function xargsOption(xargs: NonNullable<Xargs>, w: Word, take: () => Word | undefined): boolean {
+  const long = /^--([^=]+)(=?)/.exec(w.value)
+  let name: string | undefined
+  let value: Word | undefined
+  if (long) {
+    const names = XARGS_LONG.filter((n) => n.startsWith(long[1]))
+    name = names.includes(long[1]) ? long[1] : names.length === 1 ? names[0] : undefined
+    if (!name || !XARGS_READ.has(name)) return false
+    if (long[2]) value = slice(w, long[0].length)
+  } else {
+    if (!w.value.startsWith("-")) return false
+    let k = 1
+    while (XARGS_FLAGS.includes(w.value[k] ?? "-")) k++
+    if (w.value.slice(1, k).includes("0")) xargs.delimiters = [...(xargs.delimiters ?? []), "\0"]
+    name = w.value[k]
+    if (!name || !"adIiJ".includes(name)) return false
+    if (k + 1 < w.value.length) value = slice(w, k + 1)
+  }
+  take()
+  if (name === "i" || name === "replace") xargs.replace = value?.value || "{}"
+  else if (name === "null") xargs.delimiters = [...(xargs.delimiters ?? []), "\0"]
+  else {
+    value ??= take()
+    if (name === "I" || name === "J") xargs.replace = value?.value
+    else if (name === "a" || name === "arg-file")
+      xargs.files = [...(xargs.files ?? []), ...(value ? [value] : [])]
+    else xargs.delimiters = [...(xargs.delimiters ?? []), delimiterOf(value)]
+  }
+  return true
+}
+
 // Each word env -S splits out of its string, to the typed word in cmd.words that string came from, so xargsFilled fills the typed word; keyed on parse's own words alone, so no call's state is kept
 const splitFrom = new WeakMap<Word, Word>()
 
@@ -1552,12 +1626,8 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
         state.chdir = chdirOf(state, slice(w, v.startsWith("-C") ? 2 : "--chdir=".length))
         take()
-      } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
-        const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
-        take()
-        state.xargs ??= {}
-        state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
-      } else if (wrapper === "env" && v === "-") {
+      } else if (wrapper === "xargs" && xargsOption((state.xargs ??= {}), w, take)) continue
+      else if (wrapper === "env" && v === "-") {
         // a lone `-` is env's -i, and BSD env reads its options on after it
         take()
       } else if (v === "--") {
@@ -1763,16 +1833,39 @@ function stdinScript({ args, name }: Parsed): boolean {
   return !operand || (!inline && STDIN_PATHS.has(operand.value))
 }
 
-// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J) or an outer xargs' one, which xargs fills from stdin, so it runs a program no typed word names: each such word filled with stdin's text, as a whole, line by line and item by item (-n), a text holding a quote or a backslash with them stripped, as xargs strips them, and split at blanks into the words xargs runs; or unread when the hook cannot read stdin, stdin holds more texts than READINGS, or a text holds a quote or a backslash, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
+// The text GNU xargs' -a reads in place of stdin: a process substitution's output, else the file, which readPath reads only when it is a regular file within MAX_BYTES, so any other reads as unread
+const argFile = async (file: Word, env: Env): Promise<Text> =>
+  held(file.procs ? await outputs(file.procs, env) : await readPath(file, env))
+
+// The texts xargs may fill in from one input: by default (`split` null) the whole, each line and each blank-separated item (-n), and under a -d or -0 delimiter the whole and each item it splits off; undefined when the reader cannot read the input or decode the delimiter
+const itemsOf = (fed: Text, split: string | null | undefined): string[] | undefined => {
+  if (fed.unknown || split === undefined) return
+  if (split === null) return [fed.value, ...fed.value.split("\n"), ...fed.value.split(/\s+/)]
+  return [fed.value, ...fed.value.split(split)]
+}
+
+// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J) or an outer xargs' one, which xargs fills from its input, so it runs a program no typed word names: each such word filled with each text itemsOf reads from stdin and from each file GNU's -a names (stdin's name aside, which stdin's reading covers), split by default and at each -d or -0 delimiter, a text holding a quote or a backslash with them stripped, as xargs strips them, and split at blanks into the words xargs runs; or unread when the hook cannot read an input or decode a delimiter, one input's split holds more texts than READINGS, or a text holds a quote or a backslash, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
 async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Command[]> {
   const filled = new Map<Word, string[]>()
   for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
     filled.set(word, [...new Set([...(filled.get(word) ?? []), replace])])
   if (filled.size === 0) return []
-  const fed = await stdinOf(cmd, env)
-  const raw = fed.unknown ? [] : [fed.value, ...fed.value.split("\n"), ...fed.value.split(/\s+/)]
-  const quoted = raw.some((text) => /["'\\]/.test(text))
-  const texts = [...new Set(raw.map((text) => text.replace(/["'\\]/g, "").trim()))].filter(Boolean)
+  const xargs = parsed.map((p) => p.xargs)
+  const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !STDIN_PATHS.has(f.value))
+  const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))]
+  const inputs = [
+    await stdinOf(cmd, env),
+    ...(await Promise.all(files.map((f) => argFile(f, env)))),
+  ]
+  const texts = new Set<string | undefined>()
+  for (const raw of inputs.flatMap((fed) => splits.map((split) => itemsOf(fed, split)))) {
+    const items = [...new Set(raw?.map((text) => text.replace(/["'\\]/g, "").trim()))].filter(
+      Boolean,
+    )
+    if (!raw || items.length > READINGS) texts.add(undefined)
+    else for (const text of items) texts.add(text)
+    if (raw?.some((text) => /["'\\]/.test(text))) texts.add(undefined)
+  }
   const fill = (text: string | undefined) => ({
     ...cmd,
     words: cmd.words.flatMap((w): Word[] => {
@@ -1787,8 +1880,7 @@ async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Co
         .map((value) => ({ quoted: false, value }))
     }),
   })
-  if (fed.unknown || texts.length > READINGS) return [fill(undefined)]
-  return [...texts.map(fill), ...(quoted ? [fill(undefined)] : [])]
+  return [...texts].map(fill)
 }
 
 const BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line"
