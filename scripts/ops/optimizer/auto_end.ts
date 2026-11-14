@@ -198,8 +198,12 @@ async function cwdsOf(sessionId: string, projectsDir: string): Promise<string[] 
   return [...cwds]
 }
 
-// The worktrees a session used: each linked worktree its transcript ran in, and for a worker each worktree on its PRs' branches; null when its transcript cannot be read.
-export async function worktreesOf(target: Target, projectsDir: string): Promise<string[] | null> {
+// The worktrees a session used: each linked worktree its transcript ran in, for a worker each worktree on its PRs' branches, and, given the main checkout, a checker's clones of that checkout's PR n, a reviewer's review-<n> and a tester's test-<n> and test-<n>-before, which no cwd names when read from outside; null when its transcript cannot be read.
+export async function worktreesOf(
+  target: Target,
+  projectsDir: string,
+  main?: string,
+): Promise<string[] | null> {
   const dirs = new Set<string>()
   const cwds = target.sessionId ? await cwdsOf(target.sessionId, projectsDir) : []
   if (!cwds) return null
@@ -220,7 +224,28 @@ export async function worktreesOf(target: Target, projectsDir: string): Promise<
       if (path && branch && target.refs.includes(branch)) dirs.add(path)
     }
   }
+  const leaves = CLONES[target.kind ?? ""]
+  const n = main && leaves ? await ownPr(target.pr, main) : undefined
+  if (main && leaves && n)
+    for (const leaf of leaves) {
+      const clone = join(main, ".claude", "worktrees", leaf.replace("<n>", n))
+      if (existsSync(clone)) dirs.add(clone)
+    }
   return [...dirs]
+}
+
+// A checker's clones of its PR n in .claude/worktrees: code-review-loop's for a reviewer, new-tester.md's for a tester.
+const CLONES: Record<string, string[]> = {
+  reviewer: ["review-<n>"],
+  tester: ["test-<n>", "test-<n>-before"],
+}
+
+// The number of a PR on the main checkout's own origin repository, else undefined.
+async function ownPr(pr: string | undefined, main: string): Promise<string | undefined> {
+  const origin = await git(main, ["config", "--get", "remote.origin.url"])
+  const repo = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/.exec(origin ?? "")?.[1]
+  const prefix = `https://github.com/${repo}/pull/`
+  return repo && pr?.startsWith(prefix) ? /^\d+$/.exec(pr.slice(prefix.length))?.[0] : undefined
 }
 
 // Why the work in a worktree the session used is not saved, or null; a Playground worktree whose PR has merged or closed holds no end, since its cleanup discards it.
@@ -417,12 +442,12 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
 
 // After a session closes, each worktree it used, one at a time.
 export const cleanupLive =
-  (projectsDir: string) =>
+  (projectsDir: string, depsOf: () => Promise<CleanupDeps | null> = cleanupDeps) =>
   async (target: Target): Promise<string[]> => {
-    const dirs = await worktreesOf(target, projectsDir)
+    const deps = await depsOf()
+    const dirs = await worktreesOf(target, projectsDir, deps?.main)
     if (!dirs) return [`could not read its transcript in ${projectsDir}, so nothing was cleaned`]
     if (!dirs.length) return []
-    const deps = await cleanupDeps()
     if (!deps) return ["could not find the main checkout, so nothing was cleaned"]
     const lines: string[] = []
     for (const dir of dirs)
