@@ -1848,6 +1848,17 @@ describe("relay watch", () => {
     expect(waiterLines(ops).map((l) => l.to)).toEqual([OLD.dispatcher])
   })
 
+  test("an Inbox alert left open from before this route is resolved on the first cycle while a sweep hold stands", async () => {
+    const ops = scratch()
+    outbox(ops, at(14, 7))
+    openAlert(ops, at(14, 30))
+    writeFileSync(join(ops, "sweep-hold-until"), `${iso(at(16, 0))}\n`)
+    const held = watch(ops, at(14, 35), "pending: ops-unstick.jsonl")
+    await beat("relay-watch").run(held.ctx)
+    expect(held.asks.map((a) => a.argv)).toEqual([resolveArgv(MOVED_ROUTE)])
+    expect(existsSync(join(ops, "tick", "relay-watch.json"))).toBe(false)
+  })
+
   test("a resolve that fails throws for the heartbeat and keeps its state, so the next cycle tries again, and an item already gone counts as resolved", async () => {
     const ops = scratch()
     outbox(ops, at(14, 7))
