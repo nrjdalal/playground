@@ -1518,7 +1518,12 @@ async function examine(cmd, env, visit, builtins) {
     env.cwdUnread = true;
   }
   const [primary, ...others] = readings(parse(cmd));
-  const expanded = [...expandTilde(cmd, primary.name, env), ...splitHeld(cmd, primary.name, env)];
+  const vanished = emptyProgram(cmd, env);
+  const expanded = [
+    ...expandTilde(cmd, primary.name, env),
+    ...splitHeld(cmd, primary.name, env),
+    ...vanished
+  ];
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
   if (verdict)
@@ -1532,6 +1537,11 @@ async function examine(cmd, env, visit, builtins) {
     const verdict = await examineExpanded(cmd, variant, before, visit, builtins);
     if (verdict)
       return verdict;
+  }
+  for (const variant of vanished) {
+    const parsed = parse(variant);
+    if (MOVES.has(parsed.name))
+      await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env);
   }
   if (!cmd.runsStdin || stdinScript(primary))
     return;
@@ -1643,6 +1653,23 @@ function ifsSplit(env) {
 }
 function splitValue(value, seps) {
   return value.split(seps).filter(Boolean).map((part) => marked(part) ? { quoted: false, unknown: "a shell variable", value: part } : { quoted: false, value: tildeHome(part) });
+}
+var MAY_VANISH = /^(?:\$(?:\w+|[@*])|\$\{(?:\w+|[@*])(?::?-)?\})+$|^"\$(?:@|\{@\})"$/;
+var MOVES = new Set(["cd", "popd", "pushd"]);
+var mayVanish = (w, env) => !!w.source && /^\u0000+$/.test(w.value) && MAY_VANISH.test(w.source) && [...w.source.matchAll(/\$\{?(\w+)/g)].every(([, name]) => {
+  const set = env.vars.get(name);
+  return !set || !set.unknown && set.value === "";
+});
+function emptyProgram(cmd, env) {
+  if (!cmd.words.some((w) => mayVanish(w, env)))
+    return [];
+  let words = cmd.words;
+  for (let { first } = parse(cmd);first && words.includes(first) && mayVanish(first, env); ) {
+    const dropped = first;
+    words = words.filter((w) => w !== dropped);
+    ({ first } = parse({ ...cmd, words }));
+  }
+  return words === cmd.words ? [] : [{ ...cmd, words }];
 }
 async function examineExpanded(cmd, expanded, before, visit, builtins) {
   const { redirects, words } = cmd;
@@ -16567,7 +16594,7 @@ var SCRATCH_GROUPS = new Set([
   "workspace",
   "worktree"
 ]);
-var MOVES = /^--(?:machine|remote|session)(?:=|$)/;
+var MOVES2 = /^--(?:machine|remote|session)(?:=|$)/;
 var STARTS_CLAUDE = /(?<![.\w])claude(?!\w)/i;
 function scratchWorld(args, local, env) {
   const session = local.get("HERDR_SESSION");
@@ -16581,7 +16608,7 @@ function scratchWorld(args, local, env) {
   const servers = (env.process.PLAYGROUND_HERDR_SESSIONS ?? "").split(",");
   if (unreadable(session) || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(session.value) || ["default", "factory", "playground", "playground-probes", "probes", ...servers].includes(session.value))
     return "a scratch herdr call whose HERDR_SESSION is not a word of its own: herdr keeps a server's state under ~/.config/herdr/sessions/<name>, so default, Playground's servers (playground, playground-probes) and the factory's (factory, probes) stay theirs";
-  if (args.some((a) => MOVES.test(a.value)))
+  if (args.some((a) => MOVES2.test(a.value)))
     return "a scratch herdr call with --session, --machine or --remote, which moves it off the scratch socket";
   const [head] = herdrWords(args);
   if (!SCRATCH_GROUPS.has(head ?? ""))
@@ -16968,7 +16995,7 @@ function yardStep(name, args, shell) {
   return step && !args.slice(at + 1, end === -1 ? undefined : end).some((a) => STEP_HELP.has(a.value));
 }
 var PACKAGE_RUNNERS = new Set(["bunx", "npm", "npx", "pnpm", "yarn"]);
-var MOVES2 = /^(?:--(?:cwd|dir|filter|prefix|workspace)(?:=|$)|-[CFw]|workspaces?$)/;
+var MOVES3 = /^(?:--(?:cwd|dir|filter|prefix|workspace)(?:=|$)|-[CFw]|workspaces?$)/;
 var CALLS = new Set(["--call", "--shell-mode", "-c"]);
 function runnerBuns(name, args, shell) {
   let offset = 0;
@@ -16983,7 +17010,7 @@ function runnerBuns(name, args, shell) {
   for (let at = offset;at < args.length; at++) {
     if (toolName(args[at].value) !== "bun")
       continue;
-    const moved = args.slice(0, at).some((a) => MOVES2.test(a.value));
+    const moved = args.slice(0, at).some((a) => MOVES3.test(a.value));
     reached.push({ args: args.slice(at + 1), shell: moved ? { ...shell, cwd: undefined } : shell });
   }
   return reached;

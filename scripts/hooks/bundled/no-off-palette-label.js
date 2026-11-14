@@ -1330,7 +1330,12 @@ async function examine(cmd, env, visit, builtins) {
     env.cwdUnread = true;
   }
   const [primary, ...others] = readings(parse(cmd));
-  const expanded = [...expandTilde(cmd, primary.name, env), ...splitHeld(cmd, primary.name, env)];
+  const vanished = emptyProgram(cmd, env);
+  const expanded = [
+    ...expandTilde(cmd, primary.name, env),
+    ...splitHeld(cmd, primary.name, env),
+    ...vanished
+  ];
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
   if (verdict)
@@ -1344,6 +1349,11 @@ async function examine(cmd, env, visit, builtins) {
     const verdict = await examineExpanded(cmd, variant, before, visit, builtins);
     if (verdict)
       return verdict;
+  }
+  for (const variant of vanished) {
+    const parsed = parse(variant);
+    if (MOVES.has(parsed.name))
+      await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env);
   }
   if (!cmd.runsStdin || stdinScript(primary))
     return;
@@ -1455,6 +1465,23 @@ function ifsSplit(env) {
 }
 function splitValue(value, seps) {
   return value.split(seps).filter(Boolean).map((part) => marked(part) ? { quoted: false, unknown: "a shell variable", value: part } : { quoted: false, value: tildeHome(part) });
+}
+var MAY_VANISH = /^(?:\$(?:\w+|[@*])|\$\{(?:\w+|[@*])(?::?-)?\})+$|^"\$(?:@|\{@\})"$/;
+var MOVES = new Set(["cd", "popd", "pushd"]);
+var mayVanish = (w, env) => !!w.source && /^\u0000+$/.test(w.value) && MAY_VANISH.test(w.source) && [...w.source.matchAll(/\$\{?(\w+)/g)].every(([, name]) => {
+  const set = env.vars.get(name);
+  return !set || !set.unknown && set.value === "";
+});
+function emptyProgram(cmd, env) {
+  if (!cmd.words.some((w) => mayVanish(w, env)))
+    return [];
+  let words = cmd.words;
+  for (let { first } = parse(cmd);first && words.includes(first) && mayVanish(first, env); ) {
+    const dropped = first;
+    words = words.filter((w) => w !== dropped);
+    ({ first } = parse({ ...cmd, words }));
+  }
+  return words === cmd.words ? [] : [{ ...cmd, words }];
 }
 async function examineExpanded(cmd, expanded, before, visit, builtins) {
   const { redirects, words } = cmd;

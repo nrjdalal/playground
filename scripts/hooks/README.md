@@ -28,6 +28,10 @@ The typed reading stands beside the split one, so the split adds refusals alone,
 A word the split reading cannot build stays unread, and each guard judges it by its own rule for a word it cannot read.
 The line splits at blanks, and at the characters a line set `IFS` to a literal (`IFS=:; C="a:b"; $C`); three cases stay as residual risk, each its own follow-up: an `IFS` the reader cannot read; a copy whose source is set again afterwards, read inside a subshell, whose scope copy carries no capture of the value at the copy;
 and that same reassigned copy in no-false-green's own tracker, which resolves a copy where it is read.
+Every hook also judges a command with its program word dropped where that word may expand to no word (`emptyProgram` in `scripts/hooks/shell.ts`): an unquoted word of expansions alone (`$X`, `${X}`, `$X$Y`, `${X:-}`, `${X-}`, `$@`, `$*`) or a quoted `"$@"`, each variable one the line never set or set to nothing,
+dropped again while the next program word is one too (`$X $Y pkill`, `nice $X pkill`, a run-slot call's `-- $X pkill`), so the word after it is judged as the program; a quoted `"$X"` or `$X""` stays one empty word, which runs nothing.
+A `cd`, `pushd` or `popd` reached this way may run or not, so the folder it names joins the folders the shell may be in, as an `||`'s `cd` does, and each command after it is judged in both.
+The typed reading stands beside the empty one, so it adds refusals alone; a variable the line sets to a value the reader cannot read, and a command substitution in the program's place, keep their typed reading.
 A command's parse makes at most 16 other readings (`READINGS`), so a call holding many such options is read in bounded time; past them, an option is read as a flag alone, as canary read it.
 Only the first reading moves the folder, sets variables and records files for the commands after it; each other reading runs on its own copy of them, taken before the command.
 Each `withDeadline` call holds its own deadline in its async context (an `AsyncLocalStorage` in `scripts/hooks/shell.ts`), so checks that overlap in one process each time out on their own.

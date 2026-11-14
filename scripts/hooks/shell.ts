@@ -1644,7 +1644,12 @@ export async function examine(
     env.cwdUnread = true
   }
   const [primary, ...others] = readings(parse(cmd))
-  const expanded = [...expandTilde(cmd, primary.name, env), ...splitHeld(cmd, primary.name, env)]
+  const vanished = emptyProgram(cmd, env)
+  const expanded = [
+    ...expandTilde(cmd, primary.name, env),
+    ...splitHeld(cmd, primary.name, env),
+    ...vanished,
+  ]
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env
   const verdict = await examineReading(cmd, primary, env, visit, builtins)
@@ -1656,6 +1661,12 @@ export async function examine(
   for (const variant of expanded) {
     const verdict = await examineExpanded(cmd, variant, before, visit, builtins)
     if (verdict) return verdict
+  }
+  // a cd behind words that may expand to none may run or not, so the folder it names joins those the shell may be in, as an `||`'s cd does
+  for (const variant of vanished) {
+    const parsed = parse(variant)
+    if (MOVES.has(parsed.name))
+      await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env)
   }
   // piped input the command may run as code is judged as a script it runs, unless its own reading took that input as its script already
   if (!cmd.runsStdin || stdinScript(primary)) return
@@ -1797,6 +1808,32 @@ function splitValue(value: string, seps: RegExp): Word[] {
         ? { quoted: false, unknown: "a shell variable", value: part }
         : { quoted: false, value: tildeHome(part) },
     )
+}
+
+// A word of expansions alone, each one the shell may expand to no word (`$X`, `${X}`, `${X:-}`, `${X-}`, `$@`, `$*`, `"$@"`), which it then drops
+const MAY_VANISH = /^(?:\$(?:\w+|[@*])|\$\{(?:\w+|[@*])(?::?-)?\})+$|^"\$(?:@|\{@\})"$/
+const MOVES = new Set(["cd", "popd", "pushd"])
+
+// Whether a word may expand to no word: it matches MAY_VANISH, the reader read none of it, and every variable it names is one the line never set or set to nothing
+const mayVanish = (w: Word, env: Env): boolean =>
+  !!w.source &&
+  /^\u0000+$/.test(w.value) &&
+  MAY_VANISH.test(w.source) &&
+  [...w.source.matchAll(/\$\{?(\w+)/g)].every(([, name]) => {
+    const set = env.vars.get(name)
+    return !set || (!set.unknown && set.value === "")
+  })
+
+// The empty reading of a command: each program word that may expand to no word (mayVanish) dropped, until one that stays leads, so the word after it is judged as the program (`$X pkill`, `nice $X pkill`, `$X $Y pkill`); none when the program word stays. It is judged beside the typed reading, so a verdict only moves to refused.
+function emptyProgram(cmd: Command, env: Env): Command[] {
+  if (!cmd.words.some((w) => mayVanish(w, env))) return []
+  let words = cmd.words
+  for (let { first } = parse(cmd); first && words.includes(first) && mayVanish(first, env);) {
+    const dropped = first
+    words = words.filter((w) => w !== dropped)
+    ;({ first } = parse({ ...cmd, words }))
+  }
+  return words === cmd.words ? [] : [{ ...cmd, words }]
 }
 
 // The expanded words are judged on the command itself, swapped in and back, since hooks key their notes on the command, and on a copy of the env before it, as every other reading is.
