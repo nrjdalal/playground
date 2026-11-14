@@ -587,11 +587,11 @@ const portlessRead = (tool: string, args: Word[]): boolean => {
   return (tool === "portless" || words !== args) && PORTLESS_READS.has(words[0]?.value ?? "")
 }
 
-// Whether git's options place both its work tree and its index with no shell folder: a -C the hook reads, or both --git-dir and --work-tree read, since git takes the shell's folder as the work tree for a --git-dir alone and finds the repository from it for a --work-tree alone
-const gitPlaced = (args: Word[], env: Env): boolean => {
+// The folder git's options place its work with no shell folder: its --work-tree when a -C or a --git-dir the hook reads goes with it, else the folder a -C the hook reads names; undefined otherwise, since git takes the shell's folder as the work tree for a --git-dir alone and finds the repository from it for a --work-tree alone
+const gitPlaced = (args: Word[], env: Env): string | undefined => {
   let cwd: string | undefined
   let dir = false
-  let tree = false
+  let tree: string | undefined
   for (let k = 0; k < args.length && args[k].value.startsWith("-"); k++) {
     const v = args[k].value
     const flag = ["-C", "--git-dir", "--work-tree"].find(
@@ -603,12 +603,12 @@ const gitPlaced = (args: Word[], env: Env): boolean => {
     }
     const word = v === flag ? args[++k] : { ...args[k], value: v.slice(flag.length + 1) }
     const at = word && pathOf(word, { ...env, cwd })
-    if (at === undefined) return false
+    if (at === undefined) return undefined
     if (flag === "-C") cwd = at
     else if (flag === "--git-dir") dir = true
-    else tree = true
+    else tree = at
   }
-  return cwd !== undefined || (dir && tree)
+  return tree === undefined ? cwd : dir || cwd !== undefined ? tree : undefined
 }
 
 // a word macOS chmod takes as a dash-led mode (-w, -go+x) rather than an option
@@ -638,8 +638,9 @@ function unreadCdWrites(tool: string, args: Word[], env: Env, stopsAtOperand: bo
   }
   if (tool === "sort") return optionValues(args, "o", "koStT", ["--output"])
   if (tool === "git") {
-    const { cwd, rest, sub } = gitCall(args, { ...env, cwd: undefined })
+    const { rest, sub } = gitCall(args, { ...env, cwd: undefined })
     if (sub !== "rm") return []
+    const cwd = gitPlaced(args, env)
     const words = args.slice(args.length - rest.length)
     // a pathspec file names paths the hook does not read, each from git's own folder
     const listed = words.some((w) => longOf(w.value.split("=")[0], ["--pathspec-from-file"]))
@@ -2030,7 +2031,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       !NO_WRITES.has(tool) &&
       !portlessRead(tool, args) &&
       !reads(parsed, env) &&
-      (git ? git.sub !== "rm" && !gitPlaced(args, env) : !UNREAD_CD_JUDGED.has(tool))
+      (git ? git.sub !== "rm" && gitPlaced(args, env) === undefined : !UNREAD_CD_JUDGED.has(tool))
     )
       return refuse(
         afterUnreadCd(
