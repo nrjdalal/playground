@@ -22,6 +22,11 @@ export const sandbox = () => {
   }
   fake("claude", "no test may start a session")
   fake("gh", "no test may reach GitHub; put a fake gh ahead of it on PATH")
+  // git refuses every network transport from the scratch HOME's config, so a remote a test names by its GitHub URL is read by no git ls-remote or fetch, where the credential helper would hand it a real token; a test's remote is a local bare repo
+  writeFileSync(
+    join(home, ".gitconfig"),
+    ["git", "http", "https", "ssh"].map((p) => `[protocol "${p}"]\n\tallow = never\n`).join(""),
+  )
   // uv's Pythons and cache stay the real home's, read before the swap, so a child's `uv run --python 3.13` downloads no CPython into the scratch home (66 MB, which under load ran past the unstick tests' timeouts)
   const uvBin = Bun.which("uv", { PATH: process.env.PATH ?? "" })
   const uv = (what: string) =>

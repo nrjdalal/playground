@@ -5,6 +5,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, join } from "node:path"
 
 import { dataDir, dataDirOf } from "../../packages/env/src/data-dir"
+import { heldBy, pushRemote } from "../../packages/safe-delete/src/live-refs"
 import { guardedOrgs } from "../../packages/settings/src/ext"
 import { coreDir, readPolicy, readPolicySync } from "../../packages/settings/src/rendered"
 import { gatedSendsSchema } from "../../packages/settings/src/slack"
@@ -765,7 +766,7 @@ function unplaced(what: string, source: (Repo | undefined)[], env: Env): string 
   )
 }
 
-// What `gh pr create` publishes beyond its flags: with no --head, the branch it opens from and the commits it may push (with --head it opens from that branch, already pushed, and pushes nothing; gh keeps the last --head, and only a non-empty literal counts, so one empty, only whitespace, unreadable, or holding $, a backtick, a glob character or a quote reads as none), and with --fill the messages it reads.
+// What `gh pr create` publishes beyond its flags: with no --head, the branch it opens from and the commits it may push, those its branch's push remote holds no live branch of (heldBy) (with --head it opens from that branch, already pushed, and pushes nothing; gh keeps the last --head, and only a non-empty literal counts, so one empty, only whitespace, unreadable, or holding $, a backtick, a glob character or a quote reads as none), and with --fill the messages it reads.
 function prCreate(rest: Word[], flags: Flag[], env: Env): Placed[] {
   const values = rest.map((w) => w.value)
   const texts: Placed[] = []
@@ -774,7 +775,7 @@ function prCreate(rest: Word[], flags: Flag[], env: Env): Placed[] {
     texts.push(
       ...commitTexts(
         env.cwd,
-        ["HEAD", "--not", "--remotes"],
+        ["HEAD", "--not", ...(env.cwd ? heldBy(env.cwd, pushRemote(env.cwd)) : [])],
         "the commits it may push",
         ", which it may push",
       ),
@@ -1445,7 +1446,7 @@ function branchHead(dir: string): boolean {
   return !defaults.has(name)
 }
 
-// git push publishes the names of the refs it pushes and the messages of every commit the remote does not hold yet.
+// git push publishes the names of the refs it pushes and the messages of every commit the remote it pushes to (the one it names, else git's push remote) holds no live branch of (heldBy), each one when that remote cannot be read.
 async function push(
   rest: Word[],
   env: Env,
@@ -1470,13 +1471,17 @@ async function push(
   const names = new Set(flags.map((f) => f.name))
   const [remote, ...refspecs] = positionals
   let target: Target
-  let remoteName: string | undefined
-  if (!remote) target = decide(env.cwd ? checkout : [undefined])
-  else if (remote.unknown || remote.reads?.length || remote.value.includes(UNKNOWN))
+  let pushTo: string | undefined
+  if (!remote) {
+    target = decide(env.cwd ? checkout : [undefined])
+    pushTo = env.cwd && pushRemote(env.cwd)
+  } else if (remote.unknown || remote.reads?.length || remote.value.includes(UNKNOWN))
     target = decide([undefined])
-  else if (/[:/]/.test(remote.value)) target = decide([remoteRepo(remote.value)])
-  else {
-    remoteName = remote.value
+  else if (/[:/]/.test(remote.value)) {
+    target = decide([remoteRepo(remote.value)])
+    pushTo = remote.value
+  } else {
+    pushTo = remote.value
     const url = gitText(
       env.cwd,
       ["remote", "get-url", remote.value],
@@ -1531,9 +1536,13 @@ async function push(
     sources.push("HEAD")
   }
   if (sources.length > 0) {
-    const not = remoteName ? `--remotes=${remoteName}` : "--remotes"
+    const held = env.cwd && pushTo ? heldBy(env.cwd, pushTo) : []
     texts.push(
-      ...commitTexts(env.cwd, [...sources, "--not", not], "the messages of the commits it pushes"),
+      ...commitTexts(
+        env.cwd,
+        [...sources, "--not", ...held],
+        "the messages of the commits it pushes",
+      ),
     )
   }
   return judge("git push", target, texts, env)

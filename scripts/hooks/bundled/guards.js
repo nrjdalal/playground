@@ -2802,6 +2802,72 @@ import {
 } from "fs";
 import { basename as basename2, dirname as dirname3, join as join7, relative } from "path";
 
+// packages/safe-delete/src/live-refs.ts
+var run2 = (at, args, env, timeout) => {
+  const proc = Bun.spawnSync(["git", "-C", at, ...args], {
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", ...env },
+    stderr: "ignore",
+    stdin: "ignore",
+    stdout: "pipe",
+    timeout
+  });
+  return { ok: proc.exitCode === 0, out: proc.stdout.toString() };
+};
+function liveHeads(at, remote, timeout) {
+  const command = process.env.GIT_SSH_COMMAND || run2(at, ["config", "--get", "core.sshCommand"]).out.trim() || (process.env.GIT_SSH ? "" : "ssh");
+  const env = { GIT_TERMINAL_PROMPT: "0" };
+  if (command)
+    env.GIT_SSH_COMMAND = `${command} -o BatchMode=yes -o ConnectTimeout=10`;
+  const live = run2(at, ["ls-remote", "--heads", "--", remote], env, timeout);
+  if (!live.ok)
+    return null;
+  const tips = [];
+  for (const line of live.out.split(`
+`)) {
+    const [sha, name] = line.split("\t");
+    if (/^[0-9a-f]{40,64}$/.test(sha ?? "") && name?.startsWith("refs/heads/"))
+      tips.push({ ref: `${remote}/${name.slice("refs/heads/".length)}`, sha });
+  }
+  return tips;
+}
+function present(at, tips) {
+  if (!tips.length)
+    return [];
+  const had = run2(at, ["rev-list", "--no-walk", "--ignore-missing", ...tips.map((t) => t.sha)]);
+  if (!had.ok)
+    return null;
+  const here = new Set(had.out.split(`
+`).filter(Boolean));
+  return tips.filter((t) => here.has(t.sha));
+}
+function pushRemote(at, branch = run2(at, ["symbolic-ref", "-q", "--short", "HEAD"]).out.trim()) {
+  const config = (key) => run2(at, ["config", "--get", key]).out.trim() || undefined;
+  return branch && config(`branch.${branch}.pushRemote`) || config("remote.pushDefault") || branch && config(`branch.${branch}.remote`) || "origin";
+}
+function heldBy(at, remote, timeout = 5000) {
+  const live = liveHeads(at, remote, timeout);
+  if (!live?.length)
+    return [];
+  const here = present(at, live) ?? [];
+  const had = new Set(here.map((t) => t.ref));
+  const tracked = new Map;
+  if (live.length > here.length && !/[:/\\]/.test(remote))
+    for (const line of run2(at, [
+      "for-each-ref",
+      "--format=%(objectname) %(refname)",
+      `refs/remotes/${remote}/`
+    ]).out.split(`
+`)) {
+      const [sha, ref] = line.split(" ");
+      if (sha && ref)
+        tracked.set(ref.slice("refs/remotes/".length), sha);
+    }
+  return [
+    ...here.map((t) => t.sha),
+    ...live.flatMap((t) => had.has(t.ref) || !tracked.has(t.ref) ? [] : [tracked.get(t.ref)])
+  ];
+}
+
 // packages/safe-delete/src/index.ts
 var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
 var PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/;
@@ -10801,7 +10867,7 @@ function prCreate2(rest, flags, env) {
   const texts = [];
   const head = flags.findLast((f) => f.name === "-H" || f.name === "--head")?.value;
   if (!head || unreadable(head) || !head.value.trim() || /[$`*?[\]'"]/.test(head.value))
-    texts.push(...commitTexts(env.cwd, ["HEAD", "--not", "--remotes"], "the commits it may push", ", which it may push"), withPlace(branch(env.cwd), "the branch it opens from"));
+    texts.push(...commitTexts(env.cwd, ["HEAD", "--not", ...env.cwd ? heldBy(env.cwd, pushRemote(env.cwd)) : []], "the commits it may push", ", which it may push"), withPlace(branch(env.cwd), "the branch it opens from"));
   if (values.some((v) => v === "-f" || v.startsWith("--fill"))) {
     const at = values.findIndex((v) => /^(?:-B|--base)(?:=|$)/.test(v));
     const base = at === -1 ? "HEAD" : values[at].includes("=") ? values[at].split("=")[1] : values[at + 1];
@@ -11345,15 +11411,17 @@ async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
   const names = new Set(flags.map((f) => f.name));
   const [remote, ...refspecs] = positionals;
   let target;
-  let remoteName;
-  if (!remote)
+  let pushTo;
+  if (!remote) {
     target = decide(env.cwd ? checkout : [undefined]);
-  else if (remote.unknown || remote.reads?.length || remote.value.includes(UNKNOWN))
+    pushTo = env.cwd && pushRemote(env.cwd);
+  } else if (remote.unknown || remote.reads?.length || remote.value.includes(UNKNOWN))
     target = decide([undefined]);
-  else if (/[:/]/.test(remote.value))
+  else if (/[:/]/.test(remote.value)) {
     target = decide([remoteRepo(remote.value)]);
-  else {
-    remoteName = remote.value;
+    pushTo = remote.value;
+  } else {
+    pushTo = remote.value;
     const url = gitText(env.cwd, ["remote", "get-url", remote.value], `the URL of remote ${remote.value}`);
     target = decide([url.unknown ? undefined : remoteRepo(url.value)]);
   }
@@ -11384,8 +11452,8 @@ async function push(rest, env, checkout, takes = PUSH_TAKES2, plain = false) {
     sources.push("HEAD");
   }
   if (sources.length > 0) {
-    const not = remoteName ? `--remotes=${remoteName}` : "--remotes";
-    texts.push(...commitTexts(env.cwd, [...sources, "--not", not], "the messages of the commits it pushes"));
+    const held = env.cwd && pushTo ? heldBy(env.cwd, pushTo) : [];
+    texts.push(...commitTexts(env.cwd, [...sources, "--not", ...held], "the messages of the commits it pushes"));
   }
   return judge3("git push", target, texts, env);
 }
@@ -13610,12 +13678,11 @@ async function commit(rest, dir, chained, forced) {
     return `no-glm-heavy-path hook refuses this git commit: ${heavyFiles.join(", ")} is on disk and not staged, and the hook cannot tell before the call runs whether the git add before it stages it, while this session runs on GLM and that is Opus work. Run git commit as its own call.`;
   return refuse8("git commit", heavyFiles);
 }
-function rebased(dir, named, source, dest, not) {
+function rebased(dir, named, source, dest, held) {
   const branch = dest === "HEAD" ? names2(dir, ["symbolic-ref", "-q", "--short", "HEAD"])?.[0] : dest.replace(/^refs\/heads\//, "");
   if (!branch)
     return;
-  const config = (key) => names2(dir, ["config", "--get", key])?.[0];
-  const remote = named ?? config(`branch.${branch}.pushRemote`) ?? config("remote.pushDefault") ?? config(`branch.${branch}.remote`) ?? "origin";
+  const remote = named ?? pushRemote(dir, branch);
   const old = names2(dir, ["rev-parse", "-q", "--verify", `refs/remotes/${remote}/${branch}`])?.[0];
   if (!old)
     return;
@@ -13625,7 +13692,14 @@ function rebased(dir, named, source, dest, not) {
   });
   if (ancestor.exitCode !== 1)
     return;
-  const oldest = names2(dir, ["rev-list", "--reverse", "--topo-order", source, "--not", not])?.[0];
+  const oldest = names2(dir, [
+    "rev-list",
+    "--reverse",
+    "--topo-order",
+    source,
+    "--not",
+    ...held
+  ])?.[0];
   const base = oldest && names2(dir, ["rev-parse", "-q", "--verify", `${oldest}^`])?.[0];
   return base ? [old, base] : undefined;
 }
@@ -13658,8 +13732,7 @@ function push2(rest, dir, branchReads) {
   if (deleting && sources.length === 0)
     return;
   const name = remote && !/[:/]/.test(remote.value) ? remote.value : undefined;
-  const tracked = name && names2(dir, ["for-each-ref", "--count=1", `refs/remotes/${name}`])?.length;
-  const not = tracked ? `--remotes=${name}` : "--remotes";
+  const held = heldBy(dir, remote?.value ?? pushRemote(dir));
   const listed = pathsOf(dir, [
     "log",
     "--name-only",
@@ -13668,9 +13741,9 @@ function push2(rest, dir, branchReads) {
     "--format=",
     ...sources,
     "--not",
-    not
+    ...held
   ]);
-  const merges = names2(dir, ["rev-list", "--merges", ...sources, "--not", not]);
+  const merges = names2(dir, ["rev-list", "--merges", ...sources, "--not", ...held]);
   if (listed === null || merges === null)
     return unread2("git push", "the files of the commits it pushes");
   const files = new Set(listed);
@@ -13703,7 +13776,7 @@ function push2(rest, dir, branchReads) {
     for (const file of made)
       files.add(file);
   }
-  const bases = sources.length === 1 && dests.length === 1 && (!remote || name) ? rebased(dir, name, sources[0], dests[0], not) : undefined;
+  const bases = sources.length === 1 && dests.length === 1 && (!remote || name) ? rebased(dir, name, sources[0], dests[0], held) : undefined;
   if (bases)
     beyondMerge(files, bases[0], bases[1], (tree) => [pathsOf(dir, ["diff", "--name-only", "--no-renames", tree, sources[0]])], dir);
   const heavyFiles = [...files].filter(heavy).sort();
