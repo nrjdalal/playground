@@ -184,7 +184,7 @@ describe("ToolStep's redraw", () => {
   })
 })
 
-// the stream's now moves on every inbox read, every 5s, so a row compares what the clock shows in it (its time's day, the owner's Undo), not the moment; a row it leaves keeps its render count
+// the stream's now moves on every inbox read, every 5s, so a row compares what the clock shows in it (the day changing, the owner's Undo), not the moment; a row it leaves keeps its render count
 describe("StepRow's redraw on a tick", () => {
   const compare = sameStep as (a: unknown, b: unknown) => boolean
   // local times, so the day a time names is the same in every zone the suite runs in
