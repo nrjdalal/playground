@@ -88,9 +88,10 @@ export const deliveryEvent = (
         ),
       }
 
-// Why a delivery did not happen, or has not yet. INPUT_NOT_EMPTY, NOT_FOUND, ON_PICKER and SESSIONS_FAILED come before anything is typed (SESSIONS_FAILED includes a send herdr refused before sending anything, tried twice here), so they can succeed on a retry once the session or herdr changes, but for an INPUT_NOT_EMPTY marked `pasted`, whose message sits unsent in the box for its retry to press Enter on; AMBIGUOUS, COMMAND, EMPTY and TOO_LONG cannot until the text or the names change. INTERRUPTED means typing began and did not finish, or a held message left the screen with a transcript that cannot be read back to when it was queued: some or all of the message may be in the session's input or already sent, so it is never retried unseen. QUEUED means Claude Code holds a herdr session's message, in its box while it compacts or in its queue while it works, and takes it on its own: a retry under the same id types nothing and reads it again, and LOST is that retry finding it neither on the screen nor in the transcript QUEUED_MS after it was queued, so Retry sends it again.
+// Why a delivery did not happen, or has not yet. BUSY, INPUT_NOT_EMPTY, NOT_FOUND, ON_PICKER and SESSIONS_FAILED come before anything is typed (BUSY: a model switch to a session working a turn or compacting, whose confirm would come with no one to answer it, or its own paste such a session held, cleared) (SESSIONS_FAILED includes a send herdr refused before sending anything, tried twice here), so they can succeed on a retry once the session or herdr changes, but for an INPUT_NOT_EMPTY marked `pasted`, whose message sits unsent in the box for its retry to press Enter on; AMBIGUOUS, COMMAND, EMPTY and TOO_LONG cannot until the text or the names change. INTERRUPTED means typing began and did not finish, or a held message left the screen with a transcript that cannot be read back to when it was queued: some or all of the message may be in the session's input or already sent, so it is never retried unseen. QUEUED means Claude Code holds a herdr session's message, in its box while it compacts or in its queue while it works, and takes it on its own: a retry under the same id types nothing and reads it again, and LOST is that retry finding it neither on the screen nor in the transcript QUEUED_MS after it was queued, so Retry sends it again.
 export const DELIVERY_FAILURES = [
   "AMBIGUOUS",
+  "BUSY",
   "COMMAND",
   "EMPTY",
   "INPUT_NOT_EMPTY",
@@ -108,6 +109,7 @@ export type DeliveryFailure = (typeof DELIVERY_FAILURES)[number]
 // How a route reports each refusal: its HTTP status and the API's error code, with the reason's own code under `delivery`.
 export const FAILURE_STATUS: Record<DeliveryFailure, [ContentfulStatusCode, ErrorCode]> = {
   AMBIGUOUS: [409, "CONFLICT"],
+  BUSY: [409, "CONFLICT"],
   COMMAND: [400, "VALIDATION_ERROR"],
   EMPTY: [400, "VALIDATION_ERROR"],
   INPUT_NOT_EMPTY: [409, "CONFLICT"],
@@ -287,11 +289,11 @@ const statusLine = (screen: string): string => {
   return flat(lines.slice(lines.findLastIndex((line) => RULE.test(line)) + 1).join(" "))
 }
 
-// The model the session's status line names, by its alias as a whole word (Opus 5.5 reads opus); null when it names none, or no box shows, since a prompt drawn over the box names models of its own.
+// The model the session's status line names, by its alias followed by its version (Opus 5.5 reads opus), so a folder or branch named for a model is not one; null when it names none, or no box shows, since a prompt drawn over the box names models of its own.
 const statusModel = (screen: string): string | null => {
   if (!inputBox(screen)) return null
   const status = statusLine(screen)
-  return SESSION_MODELS.find((alias) => new RegExp(`\\b${alias}\\b`, "i").test(status)) ?? null
+  return SESSION_MODELS.find((alias) => new RegExp(`\\b${alias} \\d`, "i").test(status)) ?? null
 }
 
 const cut = (words: string): string => (words.length > 300 ? `${words.slice(0, 299)}…` : words)
@@ -345,10 +347,14 @@ const firstLine = (text: string): string =>
     .find((line) => line.trim() && !line.startsWith(ATTACHED_LABEL))
     ?.trim() ?? ""
 
+// Whether the spinner above the box says Claude Code compacts.
+const compacting = (screen: string): boolean =>
+  aboveBox(screen).some((line) => line.includes("Compacting conversation"))
+
 // Pure: whether Claude Code holds the message to take on its own: in its box while its spinner says it compacts (its "Compacting conversation" status), or drawn in its queue above a box showing a queue hint while it works. Either goes once the session is free, so it reads queued rather than failed.
 export const holdsQueued = (screen: string, text: string): boolean => {
   const above = aboveBox(screen)
-  if (above.some((line) => line.includes("Compacting conversation"))) {
+  if (compacting(screen)) {
     return holdsMessage(screen, text)
   }
   const start = firstLine(text)
@@ -574,6 +580,7 @@ export async function deliver(
   const { refused: refusedText, skill, words } = deliveryWords(delivery, true)
   if (refusedText) return refusedText
   const text = withAttachments(words, attachments)
+  const switching = delivery.setting && "model" in delivery.setting ? delivery.setting.model : null
   const images = attachments.filter((file) => file.kind === "image").map((file) => file.path)
   // A paste is this message's when it carries this id, or, for a message with none, these words.
   const isThis = (paste: Paste): boolean =>
@@ -600,6 +607,11 @@ export async function deliver(
     const { surface, worker } = found
     if (skill && !(await deps.skills(worker.cwd)).has(skill)) return commandRefusal(skill)
     const event = deliveryEvent(delivery, worker.name, words)
+    const busy = (model: string, cleared = false): Refusal =>
+      refused(
+        "BUSY",
+        `${worker.name} is working a turn or compacting, so the switch to ${model} ${cleared ? "it held was cleared" : "was not typed"}: its confirm would come with no one to answer it. Pick it again once it is idle.`,
+      )
     // One try, from reading the screen to the Enter. A first send herdr refused before sending anything typed nothing and comes back as BeforeTyping, which the loop below tries once more at once, since the screen is read again and finds anything that landed after all.
     const attempt = async (): Promise<DeliveryResult | BeforeTyping> => {
       let screen: string
@@ -612,6 +624,7 @@ export async function deliver(
         )
       }
       const input = inputState(screen)
+      if (switching && (worker.light === "working" || compacting(screen))) return busy(switching)
       // QUEUED carries when the message was pasted, which a queued_command's stamp follows within moments, so the outbox's retry after a restart reads the transcript from there
       const stillQueued = (at: number): Refusal => ({
         ...refused(
@@ -833,7 +846,15 @@ export async function deliver(
           } catch (error) {
             throw new TypingFailed(1, true, lost ?? error)
           }
-          if (delivery.id && holdsQueued(screen, text)) throw queueIt(true)
+          if (holdsQueued(screen, text)) {
+            if (!holdsUnsent(screen, text, [])) {
+              throw notSwitched(
+                "it waits in its queue behind the session's turn, and its confirm will need an answer in the session.",
+              )
+            }
+            await press(Array.from(text, () => ({ key: "backspace" as const })))
+            throw new TypingStopped(busy(model, true), "held")
+          }
           const input = inputState(screen)
           if (input === "empty") {
             if (statusModel(screen) === model) return
@@ -870,8 +891,6 @@ export async function deliver(
           `${shownOn(screen)} after ${(SWITCH_READS * SETTLE_GAP_MS) / 1000}s. Check the session before you pick again.`,
         )
       }
-      const switching =
-        delivery.setting && "model" in delivery.setting ? delivery.setting.model : null
       try {
         await deps.record(event, async () => {
           // read once more before the send: a herdr pane's id changes when it moves, so this read names where the session is now

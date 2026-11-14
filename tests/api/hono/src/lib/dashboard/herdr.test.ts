@@ -830,7 +830,9 @@ describe("switchKeys", () => {
       keys(confirm("Change the model?", " ❯ 1. Stay on Opus 9.9", "   2. Ask me later")),
     ).toBeNull()
     expect(
-      keys(confirm("Switch?", " ❯ 1. Yes, switch now", "   2. Switch to Sonnet 9.9 later")),
+      keys(
+        confirm("Switch?", " ❯ 1. Switch to Sonnet 9.9 now", "   2. Switch to Sonnet 9.9 later"),
+      ),
     ).toBeNull()
     expect(keys(SWITCH_TODAY.replace("❯", " "))).toBeNull()
     expect(keys(confirm("Switch?", " ❯ 1. [ ] Yes, switch", "   2. [ ] No"))).toBeNull()

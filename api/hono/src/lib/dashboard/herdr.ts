@@ -761,19 +761,16 @@ export function answerKeys(screen: ScreenPrompt, ask: Ask): Keys {
   return { keys: [...keys, ...moves(at, submit), { key: "enter" }], ok: true }
 }
 
-// Words that carry out a switch, and words that turn one down, as a choice prompt's option reads them.
-const GOES = /\b(?:confirm|continue|ok|proceed|switch|use|yes)\b/i
+// Words that turn a switch down, as a choice prompt's option reads them.
 const STAYS = /\b(?:back|cancel|don't|keep|no|not|stay)\b/i
 
-// Pure: the keys that take the one option of a single-select prompt with a cursor that carries out a switch to `model`, read by meaning, never by position or exact words: its words say yes or switch, or name the model, and none turn it down. Null when no option or more than one reads so, or the screen shows no live single-select, so nothing is pressed.
+// Pure: the keys that take the one option of a single-select prompt with a cursor that carries out a switch to `model`, read by meaning, never by position or exact words: its own words name the model by its alias, and none turn it down, so a permission prompt or any other question drawn over the box gets nothing. Null when no option or more than one reads so, or the screen shows no live single-select, so nothing is pressed.
 export function switchKeys(screen: ScreenPrompt, model: string): KeyStep[] | null {
   const { options } = screen
   const cursor = options.findIndex((o) => o.on)
   if (cursor < 0 || options.some((o) => o.checked !== null)) return null
   const named = new RegExp(`\\b${model}\\b`, "i")
-  const goes = options.flatMap((o, i) =>
-    (GOES.test(o.label) || named.test(o.label)) && !STAYS.test(o.label) ? [i] : [],
-  )
+  const goes = options.flatMap((o, i) => (named.test(o.label) && !STAYS.test(o.label) ? [i] : []))
   return goes.length === 1 ? [...moves(cursor, goes[0] ?? 0), { key: "enter" }] : null
 }
 
