@@ -33,6 +33,9 @@ A part is a bare read (`$X`, `$@`, `$*`, `$1`, zsh's `$=X` and `$~X`), a braced 
 an unread part of a script the line built (`eval $X …`, `bash -c "$X …"`) reads as one as well, since the outer shell expanded it before the script is read.
 The word is dropped again while the next program word is one too (`$X $Y git commit`, `nice $X git commit`, a run-slot call's `-- $X git commit`), so the word after it is judged as the program.
 These keep their typed reading, since each leaves a word or stops the command: a quoted `"$X"`, `"$1"`, `"${@:-}"` or `$X""`, a default with text (`${X:-a}`), a length (`${#X}`), an arithmetic `$((0))`, and an error (`${X:?}`, `${X^^}` in bash 3.2).
+A variable a builtin on the line binds without `=` counts as set and keeps its typed reading too, from the shared list of binders (`binds` in `scripts/hooks/shell.ts`),
+each at its binding place in the bash manual: `for NAME in`, `select NAME in`, `read [options] NAME…` with its `-a NAME`, `getopts OPTSTRING NAME`, `printf -v NAME`, and `local`, `declare`, `typeset`, `export` or `readonly` NAME.
+A name the line writes anywhere else (an argument, read's prompt) binds nothing.
 A `cd`, `pushd` or `popd` reached this way may run or not, so the folder it names joins the folders the shell may be in, as an `||`'s `cd` does, and each command after it is judged in both.
 The typed reading stands beside the empty one, so it adds refusals alone; a variable the line sets to a value the reader cannot read, and a command substitution in the program's place, keep their typed reading.
 A command's parse makes at most 16 other readings (`READINGS`), so a call holding many such options is read in bounded time; past them, an option is read as a flag alone, as canary read it.

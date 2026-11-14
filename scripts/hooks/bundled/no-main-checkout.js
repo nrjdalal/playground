@@ -6207,6 +6207,7 @@ async function run(lexed, env, visit, builtins = false) {
 var running = 0;
 var MAX_RUNS = 256;
 async function runAll(lexed, env, visit, builtins) {
+  env.bound = new Set([...env.bound ?? [], ...lexed.commands.flatMap(binds)]);
   const envs = new Map([[0, env]]);
   const envOf = (scope) => {
     const found = envs.get(scope);
@@ -6384,8 +6385,47 @@ var vanishingParts = (source) => {
       return false;
   return true;
 };
+var READ_VALUES = new Set(["d", "i", "n", "N", "p", "t", "u"]);
+var NAME = /^[A-Za-z_]\w*$/;
+function binds({ words }) {
+  let at = 0;
+  while (at < words.length && (!words[at].quoted && RESERVED.has(words[at].value) || ASSIGN.test(words[at].value)))
+    at++;
+  const [head, ...rest] = words.slice(at).map((w) => w.value);
+  if (head === "for" || head === "select")
+    return rest[0] && NAME.test(rest[0]) ? [rest[0]] : [];
+  if (head === "getopts")
+    return rest[1] && NAME.test(rest[1]) ? [rest[1]] : [];
+  if (head === "printf") {
+    const v = rest.findIndex((w) => w === "-v" || /^-v\w/.test(w));
+    const name = v < 0 ? undefined : rest[v] === "-v" ? rest[v + 1] : rest[v].slice(2);
+    return name && NAME.test(name) ? [name] : [];
+  }
+  if (head && EXPORTS.has(head))
+    return rest.filter((w) => !w.startsWith("-")).map((w) => w.split("=")[0]).filter((w) => NAME.test(w));
+  if (head !== "read")
+    return [];
+  const names = [];
+  for (let i = 0;i < rest.length; i++) {
+    const w = rest[i];
+    if (w === "--" || !w.startsWith("-") || w.length < 2) {
+      names.push(...rest.slice(w === "--" ? i + 1 : i));
+      break;
+    }
+    const letters = w.slice(1);
+    const taker = [...letters].findIndex((c) => c === "a" || READ_VALUES.has(c));
+    if (taker < 0)
+      continue;
+    const value = letters.slice(taker + 1) || rest[++i];
+    if (letters[taker] === "a" && value)
+      names.push(value);
+  }
+  return names.filter((w) => NAME.test(w));
+}
 var mayVanish = (w, env) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source) && [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
   const set = env.vars.get(name);
+  if (env.bound?.has(name))
+    return false;
   return !set || !set.unknown && set.value === "";
 }));
 function emptyProgram(cmd, env) {

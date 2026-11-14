@@ -106,6 +106,8 @@ export type Env = {
   oldFrom?: string[]
   process: Record<string, string | undefined>
   vars: Map<string, Text>
+  // The names a builtin on the line binds at its own binding place (`binds`), which the empty reading counts as set
+  bound?: Set<string>
   // Set by a hook that judges a shell the line starts as a program too, so its visit sees the shell's own words and assignments before the walk follows its script; a script file the walk cannot read is otherwise followed as an empty one
   visitShells?: boolean
 }
@@ -1605,6 +1607,7 @@ async function runAll(
   visit: Visit,
   builtins: boolean,
 ): Promise<string | undefined> {
+  env.bound = new Set([...(env.bound ?? []), ...lexed.commands.flatMap(binds)])
   const envs = new Map<number, Env>([[0, env]])
   const envOf = (scope: number): Env => {
     const found = envs.get(scope)
@@ -1822,7 +1825,50 @@ const vanishingParts = (source: string): boolean => {
   return true
 }
 
-// Whether a word may expand to no word: the reader read none of it, and it is VANISHING_PART alone with every variable it names one the line never set or set to nothing, or an unread part of a word a script the line built carries (`eval $X …`, `bash -c "$X …"`), which keeps no source of its own
+// read's options that take a value, which binds no name (bash manual, Bourne Shell Builtins and Bash Builtins: read)
+const READ_VALUES = new Set(["d", "i", "n", "N", "p", "t", "u"])
+const NAME = /^[A-Za-z_]\w*$/
+
+// The names one command binds without an `=` of its own, each at its builtin's binding place as the bash manual gives it: `for NAME in`, `select NAME in`, `read [options] NAME…` and its `-a NAME`, `getopts OPTSTRING NAME`, `printf -v NAME`, and a declaration builtin's NAME (`local`, `declare`, `typeset`, `export`, `readonly`), with or without `=`
+function binds({ words }: Command): string[] {
+  let at = 0
+  while (
+    at < words.length &&
+    ((!words[at].quoted && RESERVED.has(words[at].value)) || ASSIGN.test(words[at].value))
+  )
+    at++
+  const [head, ...rest] = words.slice(at).map((w) => w.value)
+  if (head === "for" || head === "select") return rest[0] && NAME.test(rest[0]) ? [rest[0]] : []
+  if (head === "getopts") return rest[1] && NAME.test(rest[1]) ? [rest[1]] : []
+  if (head === "printf") {
+    const v = rest.findIndex((w) => w === "-v" || /^-v\w/.test(w))
+    const name = v < 0 ? undefined : rest[v] === "-v" ? rest[v + 1] : rest[v].slice(2)
+    return name && NAME.test(name) ? [name] : []
+  }
+  if (head && EXPORTS.has(head))
+    return rest
+      .filter((w) => !w.startsWith("-"))
+      .map((w) => w.split("=")[0])
+      .filter((w) => NAME.test(w))
+  if (head !== "read") return []
+  const names: string[] = []
+  for (let i = 0; i < rest.length; i++) {
+    const w = rest[i]
+    if (w === "--" || !w.startsWith("-") || w.length < 2) {
+      names.push(...rest.slice(w === "--" ? i + 1 : i))
+      break
+    }
+    // a cluster's last letter takes its value attached or as the next word: `-a NAME` binds it, every other value binds none
+    const letters = w.slice(1)
+    const taker = [...letters].findIndex((c) => c === "a" || READ_VALUES.has(c))
+    if (taker < 0) continue
+    const value = letters.slice(taker + 1) || rest[++i]
+    if (letters[taker] === "a" && value) names.push(value)
+  }
+  return names.filter((w) => NAME.test(w))
+}
+
+// Whether a word may expand to no word: the reader read none of it, and it is VANISHING_PART alone with every variable it names one the line never set nor bound (`binds`), or set to nothing, or an unread part of a word a script the line built carries (`eval $X …`, `bash -c "$X …"`), which keeps no source of its own
 const mayVanish = (w: Word, env: Env): boolean =>
   !!w.source &&
   /^\u0000+$/.test(w.value) &&
@@ -1830,6 +1876,7 @@ const mayVanish = (w: Word, env: Env): boolean =>
     (vanishingParts(w.source) &&
       [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
         const set = env.vars.get(name)
+        if (env.bound?.has(name)) return false
         return !set || (!set.unknown && set.value === "")
       })))
 
