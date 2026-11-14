@@ -92,12 +92,12 @@ export const groups: Group[] = [
     rows: ({ MAIN }) => [
       [
         "bun's build past more unlisted options than the readings hold",
-        `bun --cwd ${MAIN}/.claude/worktrees/a run --oa build --o0 v0 --o1 v1 --o2 v2 --o3 v3 --o4 v4 --o5 v5 --o6 v6 --o7 v7 --o8 v8 --o9 v9 --o10 v10 --o11 v11 --o12 v12 --o13 v13 --o14 v14`,
+        `cd ${MAIN}/.claude/worktrees/a && bun run --oa build --o0 v0 --o1 v1 --o2 v2 --o3 v3 --o4 v4 --o5 v5 --o6 v6 --o7 v7 --o8 v8 --o9 v9 --o10 v10 --o11 v11 --o12 v12 --o13 v13 --o14 v14`,
       ],
       // a control, refused before this source's fix
       [
         "bun's build past as many unlisted options as the readings hold",
-        `bun --cwd ${MAIN}/.claude/worktrees/a run --oa build --o0 v0 --o1 v1 --o2 v2 --o3 v3 --o4 v4 --o5 v5 --o6 v6 --o7 v7 --o8 v8 --o9 v9 --o10 v10 --o11 v11 --o12 v12 --o13 v13`,
+        `cd ${MAIN}/.claude/worktrees/a && bun run --oa build --o0 v0 --o1 v1 --o2 v2 --o3 v3 --o4 v4 --o5 v5 --o6 v6 --o7 v7 --o8 v8 --o9 v9 --o10 v10 --o11 v11 --o12 v12 --o13 v13`,
       ],
     ],
   },
