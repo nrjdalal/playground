@@ -10415,7 +10415,7 @@ function sedEdits(args) {
       break;
     } else if (suffix) {
       inPlace = true;
-      if (suffix[1])
+      if (suffix[1] || process.platform === "linux")
         continue;
       const word = args[++k];
       if (!word || !literal2(word) || !SED_SUFFIX.test(word.value))
@@ -11047,7 +11047,7 @@ async function inspect(raw, environment, unknown = false) {
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
     const tool = GNU_NAMED.exec(name)?.[1] ?? name;
-    const gnu = tool !== name || first.value.includes("/gnubin/");
+    const gnu = tool !== name || first.value.includes("/gnubin/") || process.platform === "linux";
     const remover = REMOVERS.has(tool);
     const edited = new Set(inPlace(tool, args));
     const sedEdit = sedInPlace(cmd, parsed) ?? (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : []);

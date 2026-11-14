@@ -1207,7 +1207,8 @@ function sedEdits(args: Word[]): Set<Word> | undefined {
       break
     } else if (suffix) {
       inPlace = true
-      if (suffix[1]) continue
+      // GNU sed, Linux's, takes a suffix only attached, so the word after its bare -i is a script or a file
+      if (suffix[1] || process.platform === "linux") continue
       const word = args[++k]
       if (!word || !literal(word) || !SED_SUFFIX.test(word.value)) return undefined
     } else if (value.startsWith("-") && value !== "-") {
@@ -2071,9 +2072,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
     const verb = name && !marked(name) ? name : "a program it cannot read"
-    // a GNU build named by its g prefix or reached by its gnubin path reads as the tool it builds, with GNU's options
+    // a GNU build named by its g prefix or reached by its gnubin path reads as the tool it builds, with GNU's options, as every bare build does on Linux, whose builds are GNU's
     const tool = GNU_NAMED.exec(name)?.[1] ?? name
-    const gnu = tool !== name || first.value.includes("/gnubin/")
+    const gnu = tool !== name || first.value.includes("/gnubin/") || process.platform === "linux"
     const remover = REMOVERS.has(tool)
     // an in-place sed's scripts for the root reading (scriptNames): sedInPlace's, the sed half of sedScripts but on a line read whole too, else on a sed spelled off its list (-I, --in-place=, s|||) every word but the files inPlace reads, each read whole by sedWrites
     const edited = new Set(inPlace(tool, args))
