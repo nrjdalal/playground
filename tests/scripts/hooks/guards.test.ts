@@ -257,6 +257,27 @@ describe("each guard keeps its own per-call state in one process", () => {
   })
 })
 
+// #2183: the deadline covers the input read, so a stdin left open refuses at the deadline, not after it
+describe("hook", () => {
+  test("a stdin left open is refused at the deadline, not waited on", async () => {
+    const proc = Bun.spawn(
+      [
+        "bun",
+        "--no-env-file",
+        "-e",
+        `import { hook } from ${JSON.stringify(join(HOOKS, "guards.ts"))}\nprocess.exit(await hook([], 2_000))`,
+      ],
+      { cwd: ROOT, stderr: "pipe", stdin: "pipe", stdout: "pipe" },
+    )
+    const code = await Promise.race([proc.exited, Bun.sleep(10_000).then(() => "still reading")])
+    if (code === "still reading") proc.kill()
+    expect(code).toBe(2)
+    expect(await new Response(proc.stderr).text()).toContain(
+      "guards hook: the call's input did not arrive by its deadline",
+    )
+  }, 20_000)
+})
+
 // The bundle, run as its own process with the input on stdin, as guard-probe runs it.
 describe("the bundle runs as a hook", () => {
   const run = async (raw: string) => {
