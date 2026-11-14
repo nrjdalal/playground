@@ -647,18 +647,27 @@ test("the pre-push list check refuses a pushed commit message or branch name hol
     expect(named.code).not.toBe(0)
     expect(named.out).toContain("the pushed ref's name holds a handles term")
     printsNoTerm(named.out)
+    // a tag's name is read as a branch's is
+    const tag = run(
+      ["bash", "-c", trailer],
+      `refs/tags/v1-qmarsh ${clean} refs/tags/v1-qmarsh ${ZERO}\n`,
+    )
+    expect(tag.code).not.toBe(0)
+    expect(tag.out).toContain("the pushed ref's name holds a handles term")
+    printsNoTerm(tag.out)
     const term = commit("c.txt", "fix: thanks Quilla Marsh")
     const refused = push(term)
     expect(refused.code).not.toBe(0)
     expect(refused.out).toContain(`${term.slice(0, 9)}'s message holds a names term`)
     printsNoTerm(refused.out)
-    // a delete reads nothing, and with no list in the data folder the push passes
+    // a delete reads nothing
     expect(push(ZERO)).toEqual({ code: 0, out: "" })
     // a list file that is not the list is refused by its path, as the commit step refuses it
     writeFileSync(join(data, "extensions", "hooks", "no-public-leak.json"), "{")
     const broken = push(clean)
     expect(broken.code).not.toBe(0)
     expect(broken.out).toContain("is not no-public-leak's list")
+    // with no list in the data folder the push passes
     rmSync(join(data, "extensions", "hooks", "no-public-leak.json"))
     expect(push(term)).toEqual({ code: 0, out: "" })
   } finally {
