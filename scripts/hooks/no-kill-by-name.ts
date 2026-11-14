@@ -1,7 +1,20 @@
-// PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). A kill given a literal pid, $! or a pid file's contents passes, as does every search alone and `ps -p <pid>`.
+// PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser, the words after run-slot.sh's -- read as the command), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). A kill given a literal pid, $! or a pid file's contents passes, as does every search alone and `ps -p <pid>`.
 
 import { fromFactory } from "./role"
-import { lex, parse, program, run, UNKNOWN, type Command, type Visit, type Word } from "./shell"
+import {
+  examine,
+  lex,
+  parse,
+  program,
+  run,
+  shellSlot,
+  SHELLS,
+  slotWords,
+  UNKNOWN,
+  type Command,
+  type Visit,
+  type Word,
+} from "./shell"
 
 const BY_NAME = new Set(["killall", "pkill"])
 const SEARCHES = new Set(["fuser", "lsof", "pgrep", "pidof", "ps"])
@@ -43,13 +56,30 @@ async function inspect(raw: string) {
   const fresh = () => ({ files: new Map(), known: {}, process: {}, vars: new Map() })
   // the whole call is read for a search first, since a loop's `done < <(pgrep …)` is read after the kill it feeds
   let search: string | undefined
-  await run(lexed, fresh(), async (_cmd, { args, name }) => {
-    if (isSearch(name, args)) search ??= name
+  const find: Visit = async (cmd, parsed, env) => {
+    const slot = slotWords(parsed)
+    if (slot?.length) return examine({ ...cmd, words: slot }, env, find, false)
+    if (isSearch(parsed.name, parsed.args)) search ??= parsed.name
     return undefined
-  })
+  }
+  await run(lexed, fresh(), find)
   // a pid xargs hands a shell it starts arrives as the -I string (`xargs -I{} sh -c 'kill {}'`)
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || [])
-  const visit: Visit = async (cmd, { args, first, name, xargs }) => {
+  const visit: Visit = async (cmd, parsed, env) => {
+    // run-slot.sh, typed bare or as a shell's script, runs the words after its -- as the command, with the input an xargs running run-slot hands that command alone
+    const slot =
+      slotWords(parsed) ??
+      (SHELLS.has(parsed.name) ? shellSlot(parsed.args, parsed.name) : undefined)
+    if (slot?.length) {
+      const slotted = { ...cmd, words: slot }
+      return examine(
+        slotted,
+        env,
+        (c, p, e) => visit(c, c === slotted ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e),
+        false,
+      )
+    }
+    const { args, first, name, xargs } = parsed
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args)) return refuse(name)
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
       return refuse("fuser -k")
@@ -63,7 +93,7 @@ async function inspect(raw: string) {
         ` Run a kill of a pid you hold in a Bash call of its own, apart from the search.`,
       )
   }
-  return run(lexed, fresh(), visit)
+  return run(lexed, { ...fresh(), visitShells: true }, visit)
 }
 
 // Fails open: a call the hook cannot read runs, so a parser bug never blocks a Bash command.
