@@ -6116,6 +6116,24 @@ function remotes(cwd) {
   });
 }
 
+// scripts/hooks/input.ts
+var DEADLINE = 13000;
+async function input(name, kind, deadline = DEADLINE) {
+  let timer;
+  const raw = await Promise.race([
+    Bun.stdin.text(),
+    new Promise((done) => {
+      timer = setTimeout(() => done(undefined), deadline - performance.now());
+    })
+  ]).finally(() => clearTimeout(timer));
+  if (raw !== undefined)
+    return raw;
+  if (kind === "recorder")
+    process.exit(0);
+  console.error(`${name} hook: the call's input did not arrive by its deadline, about ${deadline / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`);
+  process.exit(2);
+}
+
 // scripts/hooks/lists.ts
 import { existsSync as existsSync2 } from "fs";
 var storeMarker = (environment = process.env) => markerPath(dataDir(environment));
@@ -11294,7 +11312,7 @@ async function inspect2(raw, environment) {
     return mcp(tool, input);
 }
 if (import.meta.main) {
-  const raw = await Bun.stdin.text();
+  const raw = await input("no-playground-leak", "guard");
   const reason = await fromFactory(raw) ? await check(raw) ?? await check2(raw) ?? await check3(raw) : undefined;
   if (reason) {
     console.error(reason);

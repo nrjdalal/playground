@@ -7,6 +7,7 @@ import type { SessionState } from "../../packages/config/src/session-state"
 import { dataDir } from "../../packages/env/src/data-dir"
 import { alertFor } from "../../packages/scripts/src/stuck-alert"
 import { writeAtomic } from "../../packages/scripts/src/write-atomic"
+import { input } from "./input"
 import { loadNames } from "./role"
 
 type Environment = Record<string, string | undefined>
@@ -344,5 +345,5 @@ if (import.meta.main) {
     const [bin = "", ...rest] = process.argv.slice(3)
     const child = Bun.spawn([bin, ...rest], { stderr: "ignore", stdout: "ignore", timeout: 2000 })
     await child.exited
-  } else await run(await Bun.stdin.text())
+  } else await run(await input("session-state", "recorder"))
 }

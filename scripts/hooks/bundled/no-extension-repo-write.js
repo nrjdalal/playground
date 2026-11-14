@@ -336,6 +336,24 @@ function remotes(cwd) {
   });
 }
 
+// scripts/hooks/input.ts
+var DEADLINE = 13000;
+async function input(name, kind, deadline = DEADLINE) {
+  let timer;
+  const raw = await Promise.race([
+    Bun.stdin.text(),
+    new Promise((done) => {
+      timer = setTimeout(() => done(undefined), deadline - performance.now());
+    })
+  ]).finally(() => clearTimeout(timer));
+  if (raw !== undefined)
+    return raw;
+  if (kind === "recorder")
+    process.exit(0);
+  console.error(`${name} hook: the call's input did not arrive by its deadline, about ${deadline / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`);
+  process.exit(2);
+}
+
 // scripts/hooks/no-playground-leak.ts
 import { AsyncLocalStorage as AsyncLocalStorage3 } from "async_hooks";
 import { basename as basename3, join as join6 } from "path";
@@ -10738,7 +10756,7 @@ async function check(raw, environment = process.env, budget = 8000) {
   return withDeadline(budget, () => inspectAs(policy(repos), raw, environment));
 }
 if (import.meta.main) {
-  const raw = await Bun.stdin.text();
+  const raw = await input("no-extension-repo-write", "guard");
   const reason = await fromFactory(raw) ? await check(raw) : undefined;
   if (reason) {
     console.error(reason);

@@ -15,6 +15,7 @@ import {
 } from "../../packages/scripts/src/trace-count/kinds"
 import { ownerSettings } from "../../packages/settings/src/owner"
 import { readPolicy } from "../../packages/settings/src/rendered"
+import { input } from "./input"
 import { guardList } from "./lists"
 import { type Hit, inspectAs, type Policy, refusedList } from "./no-playground-leak"
 import { fromFactory } from "./role"
@@ -139,7 +140,7 @@ export async function check(
 }
 
 if (import.meta.main) {
-  const raw = await Bun.stdin.text()
+  const raw = await input("no-public-leak", "guard")
   const reason = (await fromFactory(raw)) ? await check(raw) : undefined
   if (reason) {
     console.error(reason)

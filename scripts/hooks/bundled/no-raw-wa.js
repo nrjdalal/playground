@@ -109,6 +109,24 @@ async function eachInput(raw, guard, judge) {
   }
 }
 
+// scripts/hooks/input.ts
+var DEADLINE = 13000;
+async function input(name, kind, deadline = DEADLINE) {
+  let timer;
+  const raw = await Promise.race([
+    Bun.stdin.text(),
+    new Promise((done) => {
+      timer = setTimeout(() => done(undefined), deadline - performance.now());
+    })
+  ]).finally(() => clearTimeout(timer));
+  if (raw !== undefined)
+    return raw;
+  if (kind === "recorder")
+    process.exit(0);
+  console.error(`${name} hook: the call's input did not arrive by its deadline, about ${deadline / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`);
+  process.exit(2);
+}
+
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
 import { join as join2 } from "path";
@@ -2614,7 +2632,7 @@ async function check(raw, environment = process.env) {
   }
 }
 if (import.meta.main) {
-  const raw = await Bun.stdin.text();
+  const raw = await input("no-raw-wa", "guard");
   const reason = await fromFactory(raw) ? await check(raw) : undefined;
   if (reason) {
     console.error(reason);
