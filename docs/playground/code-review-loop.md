@@ -74,9 +74,9 @@ While the head's `Audit, Lint, and Build` and `test` checks are not both green, 
 - A dependency-bump PR whose advisory is answered as exactly pinned is scored only after the audit skill's rung 2 read of each parent's newest in-range version, since a parent's range often already carries the fix.
 - A stacked child is scored on its own lines, read from its parent's branch, and a child that fails playbook's stack test is a blocking finding.
 - The touched tests run in one form, `bun --cwd=<clone> run test:file <files>` through run-slot with no `NODE_ENV`, which reads the same on the runner box as on the Mac.
+  `test:file` builds every shared package whose `dist` is missing, beside the unbuilt packages the files import, before it runs, so a fresh clone runs it directly.
 - When the touched tests are the whole suite (a change to the root `package.json` or `bun.lock`), the reviewer runs them in chunks of 200 files a call, since one call misses the sandbox's deadline, and CI does not stand in for that run; a wait on a run's log ends on its `Ran N tests` summary line.
 - A pnpm repo's package installs and runs its tests from its own folder (`/usr/bin/env -C <clone>/<pkg> pnpm ...`), since pnpm's `--dir` from a Bun checkout fails.
-  `test:file` builds every shared package whose `dist` is missing, beside the unbuilt packages the files import, before it runs, so a fresh clone runs it directly.
 - Neither side of a review queues a run the other side has already measured at the same head: the result is asked for and cited.
   A box run's id is `ci-<first 12 of the tree>-<random>`, so a cited run's prefix is checked against the first 12 characters of `git -C <clone> rev-parse <head>^{tree}` before citing.
 - When a merge with canary moves a path a test fixture uses, the reviewer points the fixture's reader at a missing path and checks each fixture-reading case goes red, since a reader that fails open passes a fixture left at the old path.

@@ -115,6 +115,7 @@ On a Mac whose inscope exports a workspace's own `CLAUDE_CONFIG_DIR` (its `insco
 `--account <email>`, with any mode and anywhere among its words, has the session log in as that Claude account: the lead names it to pin a login (`spawn.sh resume dispatcher <dir> <session-id> --account <email>`, `spawn.sh worker <name> <brief> --title "<title>" --in <dir> --account <email>`), and a running session never switches accounts by itself.
 A start script resolves the login into `$acct` first, `acct=$(bun packages/scripts/src/playground/cli.ts accounts list | grep -o "<pattern>" | head -1)`, and passes `--account "$acct"`,
 so no call's input holds a full email address, which makes the privacy hook ask the owner to confirm.
+`<pattern>` matches the whole address while it spells only the login's local part, such as `<local part>@[^:]*`, since `grep -o` prints only the text it matches and a domain alone can match two logins.
 A worker's, reviewer's or tester's Claude start names its login by full email, never its domain alone, since one domain can match two logins: while `usage.accounts` lists a Claude row, spawn.sh refuses one with no `--account`, listing those rows in their order, a parked one with its `parkedUntil`,
 since the account split below ranks logins by week left per hour and cannot follow which login takes which work.
 A fresh install lists no Claude row, so its bare start stays on the machine's own login; a runner, probe, manager, resume or restore starts bare as below, a probe's `--account` being optional.

@@ -55,7 +55,7 @@ type Readings = {
   holds: Record<string, HoldState>
   load5: number
   now: Date
-  open: number[] | null
+  open: OpenPrs | null
   queue: unknown
   roster: unknown
   single: Single
@@ -89,16 +89,19 @@ const queueLine = (queue: unknown): string => {
 
 const prList = (prs: number[]) => prs.map((pr) => `#${pr}`).join(", ")
 
-// The Builder's queue check (issue 2030): a missing queue while PRs are open, a closed PR it lists or an open one it leaves out, its parked PRs counting as listed; empty when it is in step or no open list was read.
-const queueCheckOf = (queue: unknown, open: number[] | null): string => {
+// The factory repo's open PRs: every one, and the owner's into canary, which the queue holds.
+export type OpenPrs = { all: number[]; mine: number[] }
+
+// The Builder's queue check (issue 2030): a missing queue while the owner's PRs are open, a listed PR no longer open or an owner's open one it leaves out, its parked PRs counting as listed; empty when it is in step or no open list was read.
+const queueCheckOf = (queue: unknown, open: OpenPrs | null): string => {
   if (!open) return ""
-  const sorted = [...open].sort((a, b) => a - b)
+  const sorted = [...open.mine].sort((a, b) => a - b)
   if (queue === null) return sorted.length ? `merge queue missing: open ${prList(sorted)}` : ""
   const listed = [...listOf(queue, "queue"), ...listOf(queue, "parked")].flatMap((e) => {
     const { pr } = (e ?? {}) as { pr?: unknown }
     return typeof pr === "number" ? [pr] : []
   })
-  const closed = [...new Set(listed.filter((pr) => !open.includes(pr)))]
+  const closed = [...new Set(listed.filter((pr) => !open.all.includes(pr)))]
   const left = sorted.filter((pr) => !listed.includes(pr))
   const parts = [
     ...(closed.length ? [`lists closed ${prList(closed)}`] : []),
@@ -331,8 +334,8 @@ const singleOf = (ops: string, on: boolean, cap: number, load5: number, now: Dat
   return load5 < cap && at - last <= LIFT_GAP && at - first >= LIFT_HOLD ? "lifted" : "held"
 }
 
-// Reads the factory repo owner's open PRs into canary, drafts included, in one REST call a sweep (the **github** rule); null when it does not read.
-export const readOpenPrs = (factory: string) => async (): Promise<number[] | null> => {
+// Reads the factory repo's open PRs, drafts included, and which are the owner's into canary, in one REST call a sweep (the **github** rule); null when it does not read.
+export const readOpenPrs = (factory: string) => async (): Promise<OpenPrs | null> => {
   const owner = factory.split("/")[0]?.toLowerCase()
   if (!owner) return null
   try {
@@ -340,15 +343,19 @@ export const readOpenPrs = (factory: string) => async (): Promise<number[] | nul
       [
         "gh",
         "api",
-        `repos/${factory}/pulls?state=open&base=canary&per_page=100`,
+        `repos/${factory}/pulls?state=open&per_page=100`,
         "--jq",
-        `[.[] | select(.user.login | ascii_downcase == "${owner}") | .number]`,
+        `{all: [.[].number], mine: [.[] | select(.base.ref == "canary" and (.user.login | ascii_downcase) == "${owner}") | .number]}`,
       ],
       { stderr: "ignore", stdout: "pipe" },
     )
     if (run.exitCode !== 0) return null
-    const prs = JSON.parse(run.stdout.toString()) as unknown
-    return Array.isArray(prs) && prs.every((pr) => typeof pr === "number") ? prs : null
+    const { all, mine } = JSON.parse(run.stdout.toString()) as Partial<
+      Record<keyof OpenPrs, unknown>
+    >
+    const numbers = (list: unknown): list is number[] =>
+      Array.isArray(list) && list.every((pr) => typeof pr === "number")
+    return numbers(all) && numbers(mine) ? { all, mine } : null
   } catch {
     return null
   }
@@ -361,7 +368,7 @@ export async function runSweep(
   now = new Date(),
   load5 = loadavg()[1],
   hold: (hold: string) => Promise<HoldState> = async () => null,
-  open: () => Promise<number[] | null> = async () => null,
+  open: () => Promise<OpenPrs | null> = async () => null,
 ): Promise<string[]> {
   const roster = readJson(join(dir, "roster.json"))
   const leads = leadsOf(roster)

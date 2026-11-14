@@ -323,10 +323,14 @@ describe("playground sweep", () => {
 
   // issue 2030: a worker's merge-tree check reads the queue, so the Builder's sweep says when it is missing or out of step with the open PRs
   describe("the merge queue against the owner's open PRs", () => {
+    // the owner's open PRs into canary, beside any other open PR (another base or author) in `others`
     const open =
       (...prs: number[]) =>
-      async () =>
-        prs
+      async () => ({ all: prs, mine: prs })
+    const openBeside = (mine: number[], others: number[]) => async () => ({
+      all: [...mine, ...others],
+      mine,
+    })
     const queued = (dir: string, queue: number[], parked: number[] = []) =>
       writeFileSync(
         join(dir, "merge-queue.json"),
@@ -342,10 +346,13 @@ describe("playground sweep", () => {
       now: Date,
       load5: number,
       hold: undefined,
-      open: () => Promise<number[] | null>,
+      open: () => Promise<{ all: number[]; mine: number[] } | null>,
     ) => Promise<string[]> = runSweep
-    const check = (dir: string, prs: () => Promise<number[] | null>, lead = "builder") =>
-      withOpen(lead, dir, NOW, 4, undefined, prs)
+    const check = (
+      dir: string,
+      prs: () => Promise<{ all: number[]; mine: number[] } | null>,
+      lead = "builder",
+    ) => withOpen(lead, dir, NOW, 4, undefined, prs)
 
     test("a missing file while PRs are open prints one line, once", async () => {
       const dir = folder()
@@ -383,6 +390,12 @@ describe("playground sweep", () => {
       expect(await check(dir, open(20, 22))).toEqual(["quiet"])
     })
 
+    test("a listed PR still open on another base or by another author is not called closed", async () => {
+      const dir = folder()
+      queued(dir, [20, 30])
+      expect(await check(dir, openBeside([20], [30]))).toEqual(["queue: #20, #30"])
+    })
+
     test("no open PR, an unread list or the ops lead's sweep prints nothing", async () => {
       const dir = folder()
       rmSync(join(dir, "merge-queue.json"))
@@ -396,7 +409,7 @@ describe("playground sweep", () => {
       let calls = 0
       const counted = async () => {
         calls++
-        return [20, 21, 22]
+        return { all: [20, 21, 22], mine: [20, 21, 22] }
       }
       await check(dir, counted)
       expect(calls).toBe(1)
