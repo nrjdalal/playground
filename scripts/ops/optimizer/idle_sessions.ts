@@ -276,7 +276,8 @@ export async function collect(input: CollectInput): Promise<Row[]> {
       kind,
       lead: r.lead ?? (worker ? roster[worker]?.lead : undefined),
       name,
-      pr: r.pr,
+      // a checker's roster pr, which its cleanup finds its clones by; a worker's stays unset, so each of its worktrees is read against its own PR
+      pr: checker ? r.pr : undefined,
       quiet,
       refs,
       sessionId: d.sessionId,
