@@ -282,6 +282,7 @@ const KNOWN_KEYS: readonly string[] = [
   "mode",
   "owner",
   "pr",
+  "priority",
   "prs",
   "prs+",
   "prs-",

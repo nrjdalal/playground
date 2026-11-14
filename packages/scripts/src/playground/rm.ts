@@ -1,11 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { dirname, join } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
 import {
   type Clone,
-  inWorktrees,
   isAgentBrowser,
   linkPlaces,
   listTrash,
@@ -17,20 +16,17 @@ import {
   worktreeRepo,
 } from "@packages/safe-delete"
 
-import { targetWords } from "../../../../api/hono/src/lib/dashboard/delete-targets"
-import { procOf, sessionAbove, type Proc as Process } from "../../../../scripts/hooks/session-state"
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { mainCheckout } from "../main-checkout"
 import { sessionName } from "../trash"
 
 export const RM_USAGE =
-  'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--discard [--decision <id>]] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
+  'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
 
 export type RmArgs =
   | { list: true }
   | { restore: string }
   | {
-      decision?: string
       discard: boolean
       path: string
       pr?: string
@@ -38,7 +34,7 @@ export type RmArgs =
       worktree: boolean
     }
 
-// playground rm's words: one path, or --worktree's with an optional --discard and its --decision and an optional --pr, with an optional --reason; --list or --restore <id> alone.
+// playground rm's words: one path, or --worktree's with an optional --discard and an optional --pr, with an optional --reason; --list or --restore <id> alone.
 export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   if (words.length === 1 && words[0] === "--list") return { list: true }
   if (words.length === 2 && words[0] === "--restore") return { restore: words[1]! }
@@ -46,14 +42,11 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   let reason = "playground rm"
   let worktree = false
   let discard = false
-  let decision: string | undefined
   let pr: string | undefined
   for (let i = 0; i < words.length; i++) {
     const word = words[i]!
     if (word === "--reason" && words[i + 1] !== undefined) reason = words[++i]!
     else if (word === "--discard" && !discard) discard = true
-    else if (word === "--decision" && words[i + 1] !== undefined && decision === undefined)
-      decision = words[++i]!
     else if (word === "--pr" && words[i + 1] !== undefined && pr === undefined) pr = words[++i]!
     else if (word === "--worktree" && words[i + 1] !== undefined && path === undefined) {
       worktree = true
@@ -61,26 +54,15 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
     } else if (!word.startsWith("--") && path === undefined) path = word
     else return { error: RM_USAGE }
   }
-  return path === undefined ||
-    (discard && !worktree) ||
-    (decision !== undefined && !discard) ||
-    (pr !== undefined && !worktree)
+  return path === undefined || (discard && !worktree) || (pr !== undefined && !worktree)
     ? { error: RM_USAGE }
     : {
-        ...(decision === undefined ? {} : { decision }),
         discard,
         path,
         ...(pr === undefined ? {} : { pr }),
         reason,
         worktree,
       }
-}
-
-// An Inbox item as bun run ask get prints it, read for a delete decision's status and what.
-export type Decision = {
-  kind?: string
-  preview?: { type?: string; what?: string }
-  status?: string
 }
 
 export type PrState = "CLOSED" | "MERGED" | "OPEN"
@@ -93,12 +75,10 @@ export const freedOf = (
     ? { head: pr.head, number: pr.number, state: pr.state }
     : undefined
 
-// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR state by its --pr or else its branch ("none" when gh answers with no PR, null when no PR of its own reads), the session the caller is (callerOf), and the session's name.
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR state by its --pr or else its branch ("none" when gh answers with no PR, null when no PR of its own reads), and the session's name.
 export type RmDeps = {
-  caller: () => Promise<string | undefined>
   clones: () => Clone[]
   data: string
-  decision: (id: string) => Promise<Decision | null>
   home: string
   main: string
   merged: (sha: string, at: string) => boolean | null
@@ -107,20 +87,6 @@ export type RmDeps = {
   prState: (path: string, pr?: string) => Promise<Pr | "none" | null>
   procs: () => Proc[] | null
   session: () => Promise<string>
-}
-
-// Who a caller that may be a session is, or undefined for a terminal no Claude Code session runs in: its PLAYGROUND_ROLE, a call detached from its parent or whose parent the system cannot read, since no terminal's own call is, else the claude process the shell-pane caller check (sessionAbove) finds above it, which no prefix on the call reaches.
-export const callerOf = async (
-  environment: Record<string, string | undefined>,
-  pid: number,
-  procs: (pid: number) => Process | undefined = procOf,
-): Promise<string | undefined> => {
-  if (environment.PLAYGROUND_ROLE) return `a session (role ${environment.PLAYGROUND_ROLE})`
-  if (pid <= 1) return "a detached call (its parent is pid 1)"
-  if (!procs(pid)) return `a call whose parent the system cannot read (pid ${pid})`
-  const above = await sessionAbove(pid, procs)
-  if (!above) return undefined
-  return `a session (${above.sessionId ? `session ${above.sessionId}` : `claude pid ${above.pid}`})`
 }
 
 // lsof -F's names for each pid: its "p<pid>" line, then each "n<name>" line under it.
@@ -259,31 +225,10 @@ const prState = async (path: string, pr?: string): Promise<Pr | "none" | null> =
   )
 }
 
-// An Inbox item from bun run ask get in the Dashboard's checkout, which holds the Inbox's database, or null when none reads.
-const decisionOf =
-  (repo: string) =>
-  async (id: string): Promise<Decision | null> => {
-    try {
-      const { dashboardCheckout } = await import("./probe")
-      const checkout = dashboardCheckout(repo)
-      if (!checkout) return null
-      const run = Bun.spawnSync(["bun", "run", "--cwd", checkout, "ask", "get", id], {
-        stderr: "ignore",
-        stdout: "pipe",
-      })
-      const out = run.stdout.toString()
-      return run.exitCode === 0 ? (JSON.parse(out.slice(out.indexOf("{"))) as Decision) : null
-    } catch {
-      return null
-    }
-  }
-
-// This machine's: the caller above this process, run-slot's running clone, HOME, the data folder, the Inbox through the Dashboard's checkout, the main checkout, gh for a merged PR, notify.sh to the dispatcher, linkPlaces' temp and scratchpad folders, lsof and ps, and the Claude Code registry's name for this session, else "shell".
+// This machine's: run-slot's running clone, HOME, the data folder, the main checkout, gh for a merged PR, notify.sh to the dispatcher, linkPlaces' temp and scratchpad folders, lsof and ps, and the Claude Code registry's name for this session, else "shell".
 export const rmDeps = (repo: string): RmDeps => ({
-  caller: () => callerOf(process.env, process.ppid),
   clones: clones(dataDir()),
   data: dataDir(),
-  decision: decisionOf(repo),
   home: homedir(),
   main: mainCheckout(repo),
   merged,
@@ -298,37 +243,6 @@ export const rmDeps = (repo: string): RmDeps => ({
   procs: processes,
   session: sessionName,
 })
-
-// Why a caller callerOf names may not pass --discard here, or null: the worktree's PR has merged or closed, so its work is done with, or it names with --decision an approved Inbox delete decision whose what names this path, so the owner's Approve is the authority and the session runs it; a PR state that cannot be read keeps the decision's gate.
-export const discardRefusal = async (
-  path: string,
-  id: string | undefined,
-  caller: string,
-  deps: Pick<RmDeps, "decision" | "prState">,
-  pr?: string,
-): Promise<string | null> => {
-  const route = `post an Inbox delete decision with bun run ask new naming ${resolve(path)} and why (bun run ask example delete prints one to start from), then run playground rm --worktree ${path} --discard --decision <id> once it is approved`
-  if (id === undefined) {
-    const read = await deps.prState(path, pr)
-    const state = read === "none" ? undefined : read?.state
-    if (state === "MERGED" || state === "CLOSED") return null
-    return `${caller} passes --discard only with --decision <id>: ${route}`
-  }
-  const item = await deps.decision(id)
-  if (!item)
-    return `--decision ${id} names no Inbox item the Dashboard's checkout can read: ${route}`
-  if (item.kind !== "decision" || item.preview?.type !== "delete")
-    return `--decision ${id} is not a delete decision: ${route}`
-  if (item.status !== "approved")
-    return `--decision ${id} is ${item.status ?? "of no status"}, not approved: ${route}`
-  const paths = new Set([resolve(path)])
-  try {
-    paths.add(realpathSync(path))
-  } catch {}
-  if (!targetWords(item.preview.what ?? "").some((word) => paths.has(word)))
-    return `--decision ${id}'s delete names another path, not ${resolve(path)}: ${route}`
-  return null
-}
 
 const gitIn = (cwd: string, ...args: string[]) => {
   const run = Bun.spawnSync(["git", "-C", cwd, ...args], { stderr: "pipe", stdout: "pipe" })
@@ -352,7 +266,7 @@ export const worktreeGit = (path: string): WorktreeGit | undefined => {
 const repoOf = (git: WorktreeGit): string => dirname(dirname(dirname(git.gitdir)))
 
 // Why a worktree's restore would leave it on another commit or unreadable, or null; a record folder still there is kept as it is.
-const relinkRefusal = (main: string, git: WorktreeGit): string | null => {
+const relinkRefusal = (main: string, git: WorktreeGit, bundle?: string): string | null => {
   if (existsSync(git.gitdir)) return null
   const at = git.branch
     ? gitIn(main, "rev-parse", "--verify", "--quiet", `refs/heads/${git.branch}`)
@@ -360,7 +274,7 @@ const relinkRefusal = (main: string, git: WorktreeGit): string | null => {
   if (at?.ok && at.out !== git.sha)
     return `the branch ${git.branch} now points at ${at.out}, not ${git.sha}, the commit the worktree held, so the restore leaves both as they are`
   if (at?.ok || gitIn(main, "cat-file", "-e", `${git.sha}^{commit}`).ok) return null
-  return `the commit ${git.sha} the worktree held is gone from ${main}, so its restore would leave a folder git cannot read: ${git.branch ? `fetch that commit, run git -C ${main} branch ${git.branch} ${git.sha}, then restore it again` : "fetch that commit, then restore it again"}`
+  return `the commit ${git.sha} the worktree held is gone from ${main}, so its restore would leave a folder git cannot read: ${bundle ? `git -C ${main} fetch ${bundle} HEAD brings it back from the bundle --discard kept; ` : ""}${git.branch ? `fetch that commit, run git -C ${main} branch ${git.branch} ${git.sha}, then restore it again` : "fetch that commit, then restore it again"}`
 }
 
 // Writes a gone git record back, recreates a gone branch at its commit and rebuilds the index from HEAD, keeping the files: null when done, else the step that failed.
@@ -392,20 +306,6 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     return 2
   }
   const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
-  // the worktree's own PR, asked of GitHub once a run, as the discard gate and the roster's hold both read it for args.path and args.pr
-  let ownRead: Promise<Pr | "none" | null> | undefined
-  const read: RmDeps = { ...deps, prState: (path, pr) => (ownRead ??= deps.prState(path, pr)) }
-  // a folder outside the worktrees folder skips the gate, since quarantine refuses its --worktree naming plain playground rm
-  if ("discard" in args && args.discard && inWorktrees(args.path, roots)) {
-    const caller = await deps.caller()
-    const refusal = caller
-      ? await discardRefusal(args.path, args.decision, caller, read, args.pr)
-      : null
-    if (refusal) {
-      console.error(`playground: ${refusal}`)
-      return 1
-    }
-  }
   if ("list" in args) {
     for (const entry of listTrash(roots.trash))
       console.log(
@@ -418,7 +318,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
       ? listTrash(roots.trash).find((entry) => entry.id === args.restore)
       : undefined
   const keptGit = kept?.git
-  const relinkRefused = keptGit && relinkRefusal(repoOf(keptGit), keptGit)
+  const relinkRefused = keptGit && relinkRefusal(repoOf(keptGit), keptGit, kept?.bundle)
   if (relinkRefused) {
     console.error(`playground: ${relinkRefused}`)
     return 1
@@ -428,7 +328,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   const repo = "worktree" in args && args.worktree ? worktreeRepo(args.path, roots) : null
   // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold; on gh's clean answer of no PR alone, another repo's worktree may go once archiveUnlanded archives its commits no remote holds
   const own =
-    "worktree" in args && args.worktree ? await read.prState(args.path, args.pr) : undefined
+    "worktree" in args && args.worktree ? await deps.prState(args.path, args.pr) : undefined
   const freed = own === undefined ? undefined : freedOf(own)
   const done =
     "restore" in args
@@ -476,7 +376,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   }
   if (repo) Bun.spawnSync(["git", "-C", repo, "worktree", "prune"])
   console.log(
-    `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back${done.stripped ? ", and a bun install in it rebuilds what the strip removed" : ""}${done.stripFailed ? ` (the strip stopped partway: ${done.stripFailed}; the hourly strip takes the rest)` : ""}`,
+    `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back${done.stripped ? ", and a bun install in it rebuilds what the strip removed" : ""}${done.stripFailed ? ` (the strip stopped partway: ${done.stripFailed}; the hourly strip takes the rest)` : ""}${done.bundle ? `; its commits no remote holds are kept in ${done.bundle}, which git -C ${repo ?? deps.main} fetch ${done.bundle} HEAD brings back` : ""}`,
   )
   return 0
 }

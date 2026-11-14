@@ -46,6 +46,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 
 - Every verdict's first line reads `## ReviewBot · round <r>: <s>/5 at <sha7>`, at the head it names, and `bun run pr:merge` accepts the last one.
 - Every verdict sets its PR's `Review • <s>/5` label, colored by its score (green for 5/5, orange for 4/5, red below) from the table in `references/COMMENTS.md`, so a label never lands in GitHub's gray.
+  It removes the PR's older score labels in the same step, through `gh pr edit --remove-label` on an extension repository's PR, so the labels carry the newest score alone.
 - Each finding of a round below 5/5 sits on its line in Files changed as well as in the verdict, while a 5/5's nits sit in the verdict alone, and the threads still open are exactly the findings still open.
 - A push gets its round within a few minutes, announced or not.
 - Round 1 of a PR that adds a member to a kind (a status, a type, a choice, a button) files every list still naming the kind's old members as one finding, found by one grep for each list's wording, so later rounds spend no turn on lists outside the diff.
@@ -53,6 +54,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
   When the PR moves text out of a file, it greps the old file's name over the whole repo, code comments included, since pointers to the old file can sit anywhere.
 - A reviewer reuses its newest free review clone, one whose PR has merged or closed and that no live reviewer holds, moving it to `review-<n>` before it checks out PR n, since the nightly clean reads a detached clone's PR from its folder's name; it makes a fresh clone, about 115k files, only when none is free.
   Once it moves a clone, it sends the session it reports to the old and new paths, so the cleanup that clone's last PR handed it to drops the old one.
+- A reviewer reads its clone through `git -C`, `bun --cwd` and absolute paths from the folder its session starts in, as its brief's one-plain-command line says, so its shell's folder stays outside the clone and the cleanup can remove the clone once the review ends.
 - A verdict posts with every blank filled, and a review's sub-agents search inside its clone and the paths its brief names, stopping every background task of theirs before they report.
   Each sub-agent makes its scratch folder first and writes every probe output to an absolute path inside it.
 - No verdict stands on stale CI: the reviewer reads the head's checks again right before it posts, and a check gone red since its earlier read is a blocking finding in that verdict.
@@ -107,14 +109,18 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 - The reviewer posts the 5/5 verdict and its `Review • 5/5` label; GitHub's two checks green at the head are the next gate, never an input to the score, and a run cited where CI stands in is evidence of the touched tests and check-types alone.
 - A round left with only nits scores 5/5: the reviewer lists them, or hands the small edit over as a patch, for the worker to keep or drop by playbook's SESSIONS.md, Fix pushes and nits, since that head merges as it stands and a push after it would need a fresh full read.
   A nit that would widen a permission, a setting or a guard's reach if a rare event happens goes to the worker's lead first, and the 5/5 waits for the lead's ruling, since a worker can merge seconds after a 5/5 posts.
+- A gap a round finds beside the PR's class, one the PR does not open, goes to the worker's lead as a new issue, and the PR is scored against its own class alone, so its rounds stay bounded.
 - A PR body with no `test:skills` result in it is a nit, since GitHub Actions runs the suite at the head.
 - When the ticket carries samples, the verdict holds a samples table, and a sample left unhandled holds the score down.
 - When the diff holds a long-lived connection (a socket, a pub/sub subscriber, a retrying client), the PR's Evidence holds a lifecycle table, one row per path from connect to close, and a missing table holds the score at 3.
 - When the diff loosens a guard, the PR's Evidence holds a `canary | head` table of refusal rows from round 1 for each refused-forms row it adds or allows and each bypass the review finds that canary refuses, with the refused-forms test's pass count for the rest, and a row canary refuses that runs at the head, unless the fixture's allow list names it, holds the score at 3.
   The review first checks that the loosening passes the docs-path rule in playbook's `SESSIONS.md` (Spawn), and a loosening that fails it holds the score at 3.
+  Every form a verdict lists as refused, a control's as well as a bypass's, is pinned as a refused row in the same push, so a later rewrite cannot drop it unseen.
   When the diff changes how one hook reads a reader other hooks share, those forms also go to every hook that imports the reader, since a hook left on the old reading can let a call through that it used to refuse.
 - When the diff changes a hook, the reviewer runs the `bun run hooks:differential` command the PR's Evidence names, its base written as `--canary <sha>`, and quotes its `reused:` line when it shows, since that line is the author's run at the same head and base; a moved head or base runs fresh on its own, and `--fresh` is for a run the reviewer doubts.
   In round 1 of a guard PR, the reviewer also probes ordinary safe calls for each program the PR newly reads, as pass controls (`curl -X`, `-H` and `-b`, `sort -k`, `tar -t`), since the over-refusals a PR adds are otherwise found one round at a time.
+  A replay takes at least one `--hook <name>` and exits 2 with its usage without one, so the reviewer checks that the command it copies names its hooks.
+  A replay of the reviewer's own reads the clone for about 40 minutes, so it finishes, or the reviewer stops it, before the next round checks out a new head.
   A hook the PR adds replays against a baseline that allows every call, and a hook that judges by role replays under `--role <role>`, or `--role session` for each call's own session, since with no role it allows every call.
 - A working bypass the review finds in a guard is explained on the PR by its mechanism alone, and its exact forms go to the worker in a message until the fix refuses them, so no working payload sits in a public comment.
 - A PR that changes a skill, an agent guide or a docs page has its writing judged against writing-for-agents in the verdict, beside the code.
