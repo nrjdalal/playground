@@ -8,6 +8,7 @@ import {
   type CleanupDeps,
   cleanWorktree,
   cleanupHeld,
+  cleanupLive,
   containersFor,
   type EndDeps,
   endMerged,
@@ -16,6 +17,7 @@ import {
   sweep,
   type Target,
   unsavedLive,
+  worktreesOf,
 } from "../../../../scripts/ops/optimizer/auto_end"
 import type {
   CollectInput,
@@ -1171,6 +1173,82 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     const { calls, deps } = fakes(main, listed)
     expect(await cleanWorktree(wt, "r ended", deps)).toBe(`removed ${wt}, branch PG-1-thing`)
     expect(calls.filter((c) => c.startsWith("docker"))).toEqual([])
+  })
+
+  // PG-2120: a reviewer reads its review-<n> clone from outside it, so no transcript cwd names the clone
+  const cloned = () => {
+    const { main, root } = machine()
+    run(main, "git", "remote", "set-url", "origin", "https://github.com/o/r.git")
+    const clone = join(main, ".claude", "worktrees", "review-7")
+    run(main, "git", "worktree", "add", "-q", "--detach", clone)
+    const projects = join(root, "projects")
+    mkdirSync(join(projects, "-scratch"), { recursive: true })
+    writeFileSync(
+      join(projects, "-scratch", "sess-1.jsonl"),
+      `${JSON.stringify({ cwd: root, type: "user" })}\n`,
+    )
+    const target: Target = {
+      kind: "reviewer",
+      name: "k3m9px-reviewer",
+      pr: "https://github.com/o/r/pull/7",
+      refs: [],
+      sessionId: "sess-1",
+    }
+    return { clone, main, projects, target }
+  }
+
+  test("a checker whose row names the main checkout's PR n has its review-<n> clone found and cleaned, though its transcript never ran there", async () => {
+    const { clone, main, projects, target } = cloned()
+    expect(await worktreesOf(target, projects, main)).toEqual([clone])
+    expect(await worktreesOf({ ...target, kind: "tester" }, projects, main)).toEqual([clone])
+    const { calls, deps } = fakes(main, [])
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual([`removed ${clone}`])
+    expect(calls).toEqual([`rm ${clone} (k3m9px-reviewer ended)`])
+    expect(existsSync(clone)).toBe(false)
+  })
+
+  test("a transcript that cannot be read cleans nothing, the review clone included, and says so", async () => {
+    const { clone, main, projects, target } = cloned()
+    const { calls, deps } = fakes(main, [])
+    const file = join(projects, "..", "not-a-folder")
+    writeFileSync(file, "")
+    expect(await cleanupLive(file, async () => deps)(target)).toEqual([
+      `could not read its transcript in ${file}, so nothing was cleaned`,
+    ])
+    expect(calls).toEqual([])
+    expect(existsSync(clone)).toBe(true)
+  })
+
+  test("a held or dirty review-<n> clone is found, then kept and named", async () => {
+    const { clone, main, projects, target } = cloned()
+    expect(await worktreesOf(target, projects, main)).toEqual([clone])
+    const holder = `${clone} is held by k3m9px-worker, which the roster lists as working`
+    const held = fakes(main, [], undefined, { held: async () => holder })
+    expect(await cleanWorktree(clone, "r ended", held.deps, { pr: target.pr })).toBe(
+      `kept ${clone}: ${holder}`,
+    )
+    writeFileSync(join(clone, "wip.txt"), "x\n")
+    const dirty = fakes(main, [])
+    expect(await cleanWorktree(clone, "r ended", dirty.deps, { pr: target.pr })).toBe(
+      `kept ${clone}: uncommitted work`,
+    )
+    expect([...held.calls, ...dirty.calls]).toEqual([])
+    expect(existsSync(clone)).toBe(true)
+  })
+
+  test("a checker with no PR on its row, a PR of another repo or of a missing clone, a worker, or no main checkout given finds no review clone", async () => {
+    const { main, projects, target } = cloned()
+    expect(await worktreesOf({ ...target, kind: "reviewer" }, projects, main)).toHaveLength(1)
+    const { pr: _pr, ...bare } = target
+    expect(await worktreesOf(bare, projects, main)).toEqual([])
+    expect(
+      await worktreesOf({ ...target, pr: "https://github.com/x/r/pull/7" }, projects, main),
+    ).toEqual([])
+    expect(
+      await worktreesOf({ ...target, pr: "https://github.com/o/r/pull/8" }, projects, main),
+    ).toEqual([])
+    expect(await worktreesOf({ ...target, kind: "worker" }, projects, main)).toEqual([])
+    expect(await worktreesOf(target, projects)).toEqual([])
   })
 })
 

@@ -199,7 +199,11 @@ async function cwdsOf(sessionId: string, projectsDir: string): Promise<string[] 
 }
 
 // The worktrees a session used: each linked worktree its transcript ran in, and for a worker each worktree on its PRs' branches; null when its transcript cannot be read.
-export async function worktreesOf(target: Target, projectsDir: string): Promise<string[] | null> {
+export async function worktreesOf(
+  target: Target,
+  projectsDir: string,
+  _main?: string,
+): Promise<string[] | null> {
   const dirs = new Set<string>()
   const cwds = target.sessionId ? await cwdsOf(target.sessionId, projectsDir) : []
   if (!cwds) return null
@@ -417,12 +421,12 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
 
 // After a session closes, each worktree it used, one at a time.
 export const cleanupLive =
-  (projectsDir: string) =>
+  (projectsDir: string, depsOf: () => Promise<CleanupDeps | null> = cleanupDeps) =>
   async (target: Target): Promise<string[]> => {
     const dirs = await worktreesOf(target, projectsDir)
     if (!dirs) return [`could not read its transcript in ${projectsDir}, so nothing was cleaned`]
     if (!dirs.length) return []
-    const deps = await cleanupDeps()
+    const deps = await depsOf()
     if (!deps) return ["could not find the main checkout, so nothing was cleaned"]
     const lines: string[] = []
     for (const dir of dirs)
