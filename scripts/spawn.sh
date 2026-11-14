@@ -1681,7 +1681,8 @@ BUILT="$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k.json"
 TREE=
 if [ -n "$SANDBOX_ARG" ] && [ -z "$IN_DIR" ] && [[ $ROLE =~ ^(worker|reviewer)$ ]]; then
   leaf=$NAME first=${PR_ARG%%,*}
-  origin=$(git -C "$MAIN" remote get-url origin 2>/dev/null) || origin=
+  # origin as configured, which names the PR's repository even where an insteadOf points its fetches elsewhere
+  origin=$(git -C "$MAIN" config --get remote.origin.url 2>/dev/null) || origin=
   [[ $origin =~ github\.com[:/]([^/]+/[^/]+)$ ]] && origin=${BASH_REMATCH[1]%.git} || origin=
   if [[ $first =~ ^#?([1-9][0-9]*)$ ]] || { [ -n "$origin" ] && [[ $first =~ ^https://github\.com/$origin/pull/([1-9][0-9]*)$ ]]; }; then leaf=review-${BASH_REMATCH[1]}; fi
   TREE="$MAIN/.claude/worktrees/$leaf"
