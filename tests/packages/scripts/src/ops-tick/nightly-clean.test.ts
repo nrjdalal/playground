@@ -274,7 +274,6 @@ test("branches: a superseded subject, a closed issue a subject names, and a merg
   const plan = staleBranches({
     checkedOut: new Set(),
     issues: new Map([
-      [50, "OPEN"],
       [51, "CLOSED"],
       [53, "OPEN"],
     ]),
@@ -298,6 +297,24 @@ test("branches: a superseded subject, a closed issue a subject names, and a merg
     local: ["PG-52-done"],
     remote: [],
   })
+})
+
+test("branches: a branch whose issue is open and which is no copy stays, though its subject says superseded or its head is a merged branch's; a copy of it still goes", () => {
+  const plan = staleBranches({
+    checkedOut: new Set(),
+    issues: new Map([[70, "OPEN"]]),
+    keep: new Set(["canary"]),
+    local: [
+      { name: "PG-70-old", sha: "a", subject: "chore(PG-70): superseded by #71" },
+      { name: "PG-70-done", sha: "b" },
+      { name: "PG-70-same", sha: "b" },
+      { name: "PG-70-backup", sha: "c" },
+    ],
+    merged: new Set(["PG-70-done"]),
+    prs: new Map(),
+    remote: [],
+  })
+  expect(plan).toEqual({ archive: [], bundle: ["PG-70-backup"], local: ["PG-70-done"], remote: [] })
 })
 
 test("containers: an exited worktree container whose folder is gone goes; the live dashboard's, pglaunch's, a Vibeground copy, a running one and one whose folder stands stay", () => {
