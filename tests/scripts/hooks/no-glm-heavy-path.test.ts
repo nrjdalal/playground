@@ -909,6 +909,11 @@ describe("a GLM session's org tools", () => {
       command: `gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "PRRT_x"}) { thread { isResolved } } }'`,
       names: "REST",
     },
+    {
+      $label: "an org gh call held in a variable that resolves (PG-2127)",
+      command: `C="gh pr list -R acme-blue/demo"; $C`,
+      names: "acme-blue/demo",
+    },
   ])(
     "$label is refused on GLM, naming it and the glm rule, and passes on Claude",
     async ({ command, names }) => {
@@ -1115,6 +1120,14 @@ describe("a GLM session's org tools", () => {
       command: "gh api https://api.github.com/repos/qzx-labs/playground/pulls",
     },
     { $label: "gh api's markdown render", command: "gh api markdown -f text=hi" },
+    {
+      $label: "a gh pr view over a loop variable (PG-2127)",
+      command: "for n in 2086 2078; do gh pr view $n --json state; done",
+    },
+    {
+      $label: "a read over a loop variable the line's assignments never set (PG-2127)",
+      command: "for f in a.md b.md; do cat $f; done",
+    },
   ])("$label passes on GLM", async ({ command }) => {
     expect(await refusal(input(command), ON_GLM, CALM)).toBeUndefined()
   })

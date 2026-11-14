@@ -1716,7 +1716,7 @@ const holdsCommand = (w: Word): boolean =>
       .replace(/\$[=~^](?=\w)/g, "$"),
   )
 
-// The split readings of a command: each word that holds a command (holdsCommand), and the program word where it holds a read among literal text (`$C/x`, `/usr/bin/$C`), re-lexed with the variables the line set, resolved through one another, and split at blanks and the line's IFS, each unread part kept as one unread word so the program word is still judged (`C="git push"; $C`, `$C""`, `${=C}`, a copy `A=git; C=$A; $C`, a partial `C="git push $X"; $C`). It is judged beside the typed reading, so a verdict only moves to refused; none when no word holds a command, and a cd keeps its own words, which chdirTo reads.
+// The split readings of a command: each word that holds a command (holdsCommand), and the program word where it holds a read among literal text (`$C/x`, `/usr/bin/$C`), re-lexed with the variables the line set, resolved through one another, and split at blanks and the line's IFS, each unread part kept as one unread word so the program word is still judged (`C="git push"; $C`, `$C""`, `${=C}`, a copy `A=git; C=$A; $C`, a partial `C="git push $X"; $C`). A word whose read resolves to nothing the reader can build (an unset variable, a loop's own `$n`) keeps its typed reading, so the split never hands a guard an unread word the typed reading did not already hold. It is judged beside the typed reading, so a verdict only moves to refused; none when no word resolves to a readable part, and a cd keeps its own words, which chdirTo reads.
 export function splitHeld(cmd: Command, name: string, env: Env): Command[] {
   if (name === "cd" || name === "popd" || name === "pushd") return []
   // the program word is resolved only when a read sharing its word with literal text could be it, so an ordinary line pays no extra parse
@@ -1732,8 +1732,11 @@ export function splitHeld(cmd: Command, name: string, env: Env): Command[] {
     if (!holds(w) || !w.raw) return [w]
     const value = relexedValue(w.raw, known)
     if (value === undefined) return [w]
+    const parts = splitValue(value, seps)
+    // nothing the reader could build, so the word stays as typed and the split adds no unread word of its own
+    if (!parts.some((part) => !part.unknown)) return [w]
     split = true
-    return splitValue(value, seps)
+    return parts
   })
   return split ? [{ ...cmd, words }] : []
 }
@@ -1744,15 +1747,16 @@ function relexedValue(raw: string, known: Record<string, string>): string | unde
   return words?.length === 1 ? words[0].value : undefined
 }
 
-// The home an assignment expands the value's leading ~ to (`S=~/x`), which the held value keeps as written, applied to a word the reader can still read whole.
-const tildeHome = (value: string): string =>
-  marked(value) ? value : value.replace(/^~(?=\/|$)/, homedir())
+// The home an unquoted assignment expands the value's leading ~ to (`S=~/x`), which the held value keeps as written; a quoted value (`S="~/x"`) keeps its ~ literal, as bash does, so a quoted assignment passes quoted true.
+const tildeHome = (value: string, quoted = false): string =>
+  quoted || marked(value) ? value : value.replace(/^~(?=\/|$)/, homedir())
 
 // The variables the line set whose value the reader can build, each resolved through those set before it and an unread part kept, over the base environment; a copy's raw holds `key=value`, so its value is read after the first `=`. A copy's value captured where it was set (heldResolved) overrides this read, so a later reassignment of its source does not leak in; the read stands alone across a scope copy, whose fresh vars map carries no capture.
 function heldKnown(env: Env): Record<string, string> {
   const known: Record<string, string> = { ...env.known }
   for (const [key, text] of env.vars) {
-    if (!text.unknown && !marked(text.value)) known[key] = tildeHome(text.value)
+    if (!text.unknown && !marked(text.value))
+      known[key] = tildeHome(text.value, "quoted" in text && text.quoted === true)
     else if ("raw" in text && typeof text.raw === "string") {
       const value = relexedValue(text.raw, known)
       const eq = value?.indexOf("=") ?? -1
@@ -1767,7 +1771,8 @@ const heldResolved = new WeakMap<Map<string, Text>, Record<string, string>>()
 function recordHeld(env: Env, key: string, value: Text): void {
   let record = heldResolved.get(env.vars)
   if (!record) heldResolved.set(env.vars, (record = {}))
-  if (!value.unknown && !marked(value.value)) record[key] = tildeHome(value.value)
+  if (!value.unknown && !marked(value.value))
+    record[key] = tildeHome(value.value, "quoted" in value && value.quoted === true)
   else if ("raw" in value && typeof value.raw === "string") {
     const built = relexedValue(value.raw, { ...env.known, ...record })
     const eq = built?.indexOf("=") ?? -1

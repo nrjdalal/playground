@@ -6291,8 +6291,11 @@ function splitHeld(cmd, name, env) {
     const value = relexedValue(w.raw, known);
     if (value === undefined)
       return [w];
+    const parts = splitValue(value, seps);
+    if (!parts.some((part) => !part.unknown))
+      return [w];
     split = true;
-    return splitValue(value, seps);
+    return parts;
   });
   return split ? [{ ...cmd, words }] : [];
 }
@@ -6300,12 +6303,12 @@ function relexedValue(raw, known) {
   const words = lex(raw.replace(/\$\{[=~^]+/g, "${"), known).commands.at(-1)?.words;
   return words?.length === 1 ? words[0].value : undefined;
 }
-var tildeHome = (value) => marked(value) ? value : value.replace(/^~(?=\/|$)/, homedir3());
+var tildeHome = (value, quoted = false) => quoted || marked(value) ? value : value.replace(/^~(?=\/|$)/, homedir3());
 function heldKnown(env) {
   const known = { ...env.known };
   for (const [key, text] of env.vars) {
     if (!text.unknown && !marked(text.value))
-      known[key] = tildeHome(text.value);
+      known[key] = tildeHome(text.value, "quoted" in text && text.quoted === true);
     else if ("raw" in text && typeof text.raw === "string") {
       const value = relexedValue(text.raw, known);
       const eq = value?.indexOf("=") ?? -1;
@@ -6321,7 +6324,7 @@ function recordHeld(env, key, value) {
   if (!record)
     heldResolved.set(env.vars, record = {});
   if (!value.unknown && !marked(value.value))
-    record[key] = tildeHome(value.value);
+    record[key] = tildeHome(value.value, "quoted" in value && value.quoted === true);
   else if ("raw" in value && typeof value.raw === "string") {
     const built = relexedValue(value.raw, { ...env.known, ...record });
     const eq = built?.indexOf("=") ?? -1;
