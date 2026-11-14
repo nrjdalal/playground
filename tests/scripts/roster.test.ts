@@ -1379,6 +1379,15 @@ describe("holders", () => {
     expect(bytes(config)).toBe("{")
   })
 
+  test("a roster holding a row that is no object exits 2, never 1", async () => {
+    const config = configWith([null as unknown as Agent, ...rows])
+    const before = bytes(config)
+    const r = await run(config, ["holders", "7"])
+    expect([r.code, r.out]).toEqual([2, ""])
+    expect(r.err).toContain("cannot read the roster")
+    expect(bytes(config)).toBe(before)
+  })
+
   test("refuses a word that is no PR, and a second one", async () => {
     for (const argv of [["holders", "abc"], ["holders", "7", "8"], ["holders"]]) {
       const r = await run(configWith(rows), argv)
