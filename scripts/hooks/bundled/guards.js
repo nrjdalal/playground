@@ -17233,9 +17233,14 @@ var CALLS = new Set(["--call", "--shell-mode", "-c"]);
 function runnerBuns(name, args, shell) {
   let offset = 0;
   if (name === "bun") {
-    const { sub, words } = bunCall(args, shell);
-    if (words[0] !== "x")
-      return [];
+    const { at, chained, sub, words } = bunCall(args, shell);
+    if (words[0] !== "x") {
+      const started = toolName(args[at]?.value);
+      const there = { ...shell, cwd: chained };
+      if (started === "bun")
+        return [{ args: args.slice(at + 1), shell: there }];
+      return PACKAGE_RUNNERS.has(started) ? runnerBuns(started, args.slice(at + 1), there) : [];
+    }
     offset = sub + 1;
   } else if (!PACKAGE_RUNNERS.has(name))
     return [];
@@ -17272,22 +17277,28 @@ function runnerCalls(name, args) {
   }
   return calls;
 }
+var builtName = (word) => !!word && marked(word.value.slice(word.value.lastIndexOf("/") + 1));
 function chain(name, args, shell) {
   const links = [];
   for (;; ) {
     if (args[1] === UNREAD_CWD)
-      return [...links, "unread"];
+      return [...links, { unread: "a runner call past the readings the hook makes" }];
     links.push({ args, name });
     if (!STARTED_RUNNERS.has(name) || toolWords(NAMES2, name, args, shell))
       return links;
     let rest = args;
+    let at;
     if (name === "bun") {
-      const { sub, words } = bunCall(args, shell);
-      if (words[0] !== "x")
-        return links;
-      rest = args.slice(sub + 1);
-    }
-    const at = runnerTarget(rest);
+      const call = bunCall(args, shell);
+      at = call.at;
+      if (call.words[0] === "x") {
+        rest = args.slice(call.sub + 1);
+        at = runnerTarget(rest);
+      }
+    } else
+      at = runnerTarget(rest);
+    if (builtName(rest[at]))
+      return [...links, { unread: "a runner's program built at run time" }];
     const started = toolName(rest[at]?.value);
     if (!STARTED_RUNNERS.has(started))
       return links;
@@ -17320,12 +17331,9 @@ async function check22(raw, environment = process.env) {
         verdicts.push({ production: true, what: "the Yard ship step, which deploys production" });
       let scanned = false;
       for (const link of chain(name, args, shell)) {
-        if (link === "unread") {
+        if ("unread" in link) {
           if (NAMED.test(command))
-            verdicts.push({
-              production: false,
-              what: "a runner call past the readings the hook makes on a line naming vercel"
-            });
+            verdicts.push({ production: false, what: `${link.unread} on a line naming vercel` });
           continue;
         }
         if (!scanned) {
