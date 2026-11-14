@@ -2201,8 +2201,8 @@ describe("a clone card (PG-2205)", () => {
     expect(html).toContain(`${FOLDER}/made-up-me`)
     expect(html).toContain(`${FOLDER}/made-up-tools`)
     expect(html).toContain("Why: This new machine has no extensions yet")
-    expect(named(html, "Clone the 2 repos")).not.toBe("")
-    expect(named(html, "Do not clone")).not.toBe("")
+    expect(html).toContain(">Clone the 2 repos<")
+    expect(html).toContain(">Do not clone<")
   })
 
   test("once approved, reads the clone's result line, green or red by its exit code", () => {
