@@ -79,9 +79,9 @@ export const freedOf = (
 export type RmDeps = {
   clones: () => Clone[]
   data: string
+  defaultBranch: (at: string) => string | null
   home: string
   main: string
-  defaultBranch: (at: string) => string | null
   merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
   places: () => string[]
@@ -240,8 +240,8 @@ const prState = async (path: string, pr?: string): Promise<Pr | "none" | null> =
 export const rmDeps = (repo: string): RmDeps => ({
   clones: clones(dataDir()),
   data: dataDir(),
-  home: homedir(),
   defaultBranch,
+  home: homedir(),
   main: mainCheckout(repo),
   merged,
   notify: (text) =>
