@@ -1621,6 +1621,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`
   const seen = new Set<string>()
   let steadyAt: (cmd: Command) => Steady = () => NONE
+  // the typed command each run-slot.sh call's own words came from, so a cd or env -C among them holds the steady variables the line set before that call
+  const slotOf = new WeakMap<Command, Command>()
   let whole = false
   let rootLine = false
   let patterns = new Set<Command>()
@@ -1687,16 +1689,19 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (shellCall) return
     }
     const slot = slotWords(parsed)
-    if (slot)
+    if (slot) {
+      const inner = { ...cmd, words: slot }
+      slotOf.set(inner, slotOf.get(cmd) ?? cmd)
       return slot.length === 0
         ? undefined
         : examine(
-            { ...cmd, words: slot },
+            inner,
             // run-slot.sh runs its words in a process of its own, so a cd among them moves no folder for the commands after it
             { ...env, files: new Map(env.files), vars: new Map(env.vars) },
             visit,
             false,
           )
+    }
     const { args, first, name, xargs } = parsed
     // findutils' g names are read again as find and xargs, so every check those two take reads them; the words swap in place, keeping the Command steadyAt knows and the program's path
     const findutils = GNU_NAMED.exec(name)?.[1]
@@ -2098,7 +2103,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     cwdSure: directory,
     files: new Map(),
     // a cd or env -C through a steady variable holding a literal absolute path is read by that path (landsHeld in shell.ts)
-    hold: (word, cmd, here) => heldWord(word, here, steadyAt(cmd)),
+    hold: (word, cmd, here) => heldWord(word, here, steadyAt(slotOf.get(cmd) ?? cmd)),
     known,
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },

@@ -10497,6 +10497,7 @@ async function inspect(raw, environment, unknown = false) {
   const afterUnreadCd = (write) => `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`;
   const seen = new Set;
   let steadyAt = () => NONE2;
+  const slotOf = new WeakMap;
   let whole = false;
   let rootLine = false;
   let patterns = new Set;
@@ -10539,8 +10540,11 @@ async function inspect(raw, environment, unknown = false) {
         return;
     }
     const slot = slotWords(parsed);
-    if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, { ...env, files: new Map(env.files), vars: new Map(env.vars) }, visit, false);
+    if (slot) {
+      const inner = { ...cmd, words: slot };
+      slotOf.set(inner, slotOf.get(cmd) ?? cmd);
+      return slot.length === 0 ? undefined : examine(inner, { ...env, files: new Map(env.files), vars: new Map(env.vars) }, visit, false);
+    }
     const { args, first, name, xargs } = parsed;
     const findutils = GNU_NAMED.exec(name)?.[1];
     if (first && (findutils === "find" || findutils === "xargs")) {
@@ -10754,7 +10758,7 @@ async function inspect(raw, environment, unknown = false) {
     cwd: directory,
     cwdSure: directory,
     files: new Map,
-    hold: (word, cmd, here) => heldWord(word, here, steadyAt(cmd)),
+    hold: (word, cmd, here) => heldWord(word, here, steadyAt(slotOf.get(cmd) ?? cmd)),
     known,
     old: { dir: directory },
     process: environment,
