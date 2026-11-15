@@ -2481,7 +2481,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           ? target
           : dirname(target)
       }
-      // what a copy reads: each source resolved to one file, whose text is read, and its stdin; any other source reads as text the hook cannot read (a glob, a folder, a value it cannot hold, a piped program's output, a file the line writes before the copy reads it), while a source no file is at and the line writes none of names nothing a copy can take
+      // what a copy reads: each source resolved to one file, whose text is read, and its stdin; any other source reads as text the hook cannot read (a glob, a folder, a value it cannot hold, a piped program's output, a file a redirect or an earlier copy on the line writes before the copy reads it), while a source no file is at and the line writes none of names nothing a copy can take
       const copied: string[] = []
       let unread = false
       for (const typed of sources) {
