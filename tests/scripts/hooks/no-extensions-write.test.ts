@@ -3681,3 +3681,26 @@ describe("an xargs input option beside a typed program keeps the call's verdict"
     )
   })
 })
+
+// #2248: a printer's text written into a file of the folder core.hooksPath names is judged as text written into .git/hooks is, while the same text into another file of that repo keeps canary's verdict
+describe("an echo into the folder core.hooksPath names is judged as one into a git hook (PG-2248)", () => {
+  const REPO = join(HOME, "hooked")
+  mkdirSync(join(REPO, "githooks"), { recursive: true })
+  const git = (...args: string[]) =>
+    Bun.spawnSync(["git", "-C", REPO, ...args], { stderr: "ignore", stdout: "ignore" })
+  git("init", "-q")
+  git("config", "core.hooksPath", "githooks")
+
+  test.each([
+    ["by its path", `echo 'touch ~/.playground/extensions/x' > ${REPO}/githooks/pre-commit`, HOME],
+    ["from the repo", "echo 'touch ~/.play*/extensions/x' > githooks/pre-commit", REPO],
+  ])("an echo of the data folder into it %s is refused", async (_, command, cwd) => {
+    expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses")
+  })
+
+  test("an echo of the data folder into another file of the repo runs", async () => {
+    expect(
+      await bash("echo 'touch ~/.playground/extensions/x' > notes/run.sh", REPO),
+    ).toBeUndefined()
+  })
+})
