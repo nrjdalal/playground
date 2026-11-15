@@ -9,6 +9,8 @@ import {
 } from "node:fs"
 import { basename, join } from "node:path"
 
+import { quarantine, type Roots } from "@packages/safe-delete"
+
 // The record of every page `playground page` kept, one JSON line each, beside the pages in the previews folder.
 export const PAGES_FILE = "pages.jsonl"
 
@@ -116,3 +118,19 @@ export const keepPage = (
   appendFileSync(join(folder, PAGES_FILE), `${JSON.stringify(line)}\n`)
   return { path }
 }
+
+export type RemoveDeps = {
+  move?: typeof quarantine
+  now?: Date
+  roots: Roots
+  session: string
+}
+
+// Takes one kept page off the Pages tab and moves its files to the trash. The trash ids of the moved files, or why it is refused.
+export const removePage = (
+  _target: string,
+  _data: string,
+  _deps: RemoveDeps,
+): { moved: { file: string; id: string }[] } | { error: string } => ({
+  error: "playground page --remove is not built yet",
+})

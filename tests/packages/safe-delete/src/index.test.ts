@@ -29,6 +29,7 @@ import {
   listTrash,
   MARKER,
   makeScratch,
+  movesLeft,
   type Proc,
   purgeTrash,
   quarantine,
@@ -654,11 +655,11 @@ describe.each(Object.entries(CARVE_OUTS))("the %s carve-out", (name, carve) => {
   test("lets its own entry through and refuses its parent, a sibling and an entry over its cap", () => {
     const roots = machine()
     const folder = join(roots.home, carve.home ? "" : ".playground", carve.folder)
-    // a named carve-out's own entry is the Playground file its pattern takes: a plist or a unit
+    // a named carve-out's own entry is the file its pattern takes: a Playground plist or unit, or a kept page
     const named = (stem: string) =>
-      [".plist", ".service"]
-        .map((end) => `com.playground.${stem}${end}`)
-        .find((n) => carve.name!.test(n))!
+      [`com.playground.${stem}.plist`, `com.playground.${stem}.service`, `${stem}.html`].find((n) =>
+        carve.name!.test(n),
+      )!
     const own = file(join(folder, carve.name ? named("own") : "own"))
     const sibling = file(join(folder, "..", "sibling-of-carve-out", "own"))
     const over = join(folder, carve.name ? named("over") : "over")
@@ -1671,4 +1672,53 @@ test("a path outside a tree's node_modules and web/next/.next is never removed o
   expect(existsSync(join(tree, "web", "next", ".next-cache", "y.js"))).toBe(true)
   expect(existsSync(join(tree, "packages", "app", ".next", "y.js"))).toBe(true)
   expect(existsSync(join(tree, "src", "index.ts"))).toBe(true)
+})
+
+// #2191: playground page --remove moves one kept page's files out of the previews folder in the data folder, which holds pages.jsonl and every other preview beside them.
+test("the page carve-out moves only a plain HTML, caption or PDF directly in previews, never pages.jsonl, and restore puts it back; with no carve-out each stays refused", () => {
+  const roots = machine()
+  const previews = join(roots.home, ".playground", "previews")
+  const named = { ...opts, carveOut: "page" }
+  const html = file(join(previews, "report.html"), "page")
+  const caption = file(join(previews, "report.txt"), "caption")
+  const pdf = file(join(previews, "report.pdf"), "pdf")
+  const index = file(join(previews, "pages.jsonl"), "{}\n")
+  const image = file(join(previews, "shot.png"), "png")
+  const deeper = file(join(previews, "sub", "deep.html"))
+  for (const path of [html, caption, pdf, index])
+    expect(quarantine(path, opts, roots, { now: NOW })).toMatchObject({ kind: "protected" })
+  for (const path of [index, image])
+    expect(quarantine(path, named, roots, { now: NOW })).toMatchObject({
+      kind: "protected",
+      refused: expect.stringContaining("not a file the page carve-out names"),
+    })
+  expect(quarantine(deeper, named, roots, { now: NOW })).toMatchObject({
+    kind: "protected",
+    refused: expect.stringContaining("not directly in"),
+  })
+  for (const path of [html, caption, pdf])
+    expect(quarantine(path, named, roots, { now: NOW })).toMatchObject({ files: 1 })
+  expect(readdirSync(previews).sort()).toEqual(["pages.jsonl", "shot.png", "sub"])
+  for (const entry of listTrash(roots.trash))
+    expect(restore(entry.id, roots)).toEqual({ path: entry.path })
+  expect(readFileSync(html, "utf8")).toBe("page")
+  expect(readFileSync(caption, "utf8")).toBe("caption")
+  expect(readFileSync(pdf, "utf8")).toBe("pdf")
+})
+
+// #2191: playground page --remove asks how many moves a session has left before it moves a page's first file, so the per-minute cap never stops a page partway.
+test("movesLeft counts a session's own moves inside the minute and changes nothing", () => {
+  const roots = machine()
+  expect(movesLeft(roots.trash, opts.session, NOW)).toBe(LIMITS.perMinute)
+  for (const name of ["a", "b"])
+    expect(quarantine(file(join(roots.root, name)), opts, roots, { now: NOW })).toMatchObject({
+      files: 1,
+    })
+  const before = readdirSync(roots.trash).sort()
+  expect(movesLeft(roots.trash, opts.session, NOW)).toBe(LIMITS.perMinute - 2)
+  expect(movesLeft(roots.trash, "other-worker", NOW)).toBe(LIMITS.perMinute)
+  expect(movesLeft(roots.trash, opts.session, new Date(NOW.getTime() + 61_000))).toBe(
+    LIMITS.perMinute,
+  )
+  expect(readdirSync(roots.trash).sort()).toEqual(before)
 })
