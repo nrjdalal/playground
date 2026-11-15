@@ -24,6 +24,7 @@ import {
   GLM_BASE_URL,
   keyOf,
   linesOf,
+  loadedTree,
   parse,
   replay,
   resultPath,
@@ -36,6 +37,7 @@ import {
   sweep,
   TAKES_MAIN,
   type Check,
+  unloaded,
 } from "../../../../packages/scripts/src/hook-differential"
 
 const SCRIPT = join(import.meta.dir, "../../../../packages/scripts/src/hook-differential.ts")
@@ -146,6 +148,59 @@ describe("canaryTree", () => {
     ).toThrow("could not install abc")
     canaryTree({ base, root: "/repo", run: recorder(steps), sha: "abc" })
     expect(steps).toHaveLength(6)
+  })
+})
+
+describe("a canary tree the temp cleaner emptied", () => {
+  // a tree as canaryTree leaves it: guards loads no-extensions-write, whose settings import zod, and the hook starts its worker module; emptied, zod keeps its folders and loses every file, as macOS's temp cleaner leaves an installed package by its age
+  const tree = (name: string, emptied: boolean) => {
+    const at = join(DIR, name)
+    const hooks = join(at, "scripts", "hooks")
+    const zod = join(at, "packages", "settings", "node_modules", "zod")
+    mkdirSync(hooks, { recursive: true })
+    mkdirSync(join(at, "packages", "settings", "src"), { recursive: true })
+    mkdirSync(join(zod, "v4"), { recursive: true })
+    writeFileSync(join(at, ".installed"), "")
+    writeFileSync(
+      join(at, "packages", "settings", "src", "settings.ts"),
+      'import { z } from "zod"\nexport const field = z.string()\n',
+    )
+    writeFileSync(
+      join(hooks, "no-extensions-write.ts"),
+      'import "../../packages/settings/src/settings"\nexport const check = () => undefined\n',
+    )
+    writeFileSync(join(hooks, "no-extensions-write-worker.ts"), 'import "./no-extensions-write"\n')
+    writeFileSync(
+      join(hooks, "guards.ts"),
+      'import "./no-extensions-write"\nexport const check = () => undefined\n',
+    )
+    if (!emptied) {
+      writeFileSync(join(zod, "package.json"), '{ "name": "zod", "main": "index.js" }')
+      writeFileSync(join(zod, "index.js"), "module.exports = { z: { string: () => ({}) } }\n")
+    }
+    return at
+  }
+
+  test("a guards Worker loads in a whole tree, and in an emptied one names the package it cannot find", async () => {
+    expect(await unloaded(tree("whole", false), ["guards"])).toBeUndefined()
+    expect(await unloaded(tree("emptied", true), ["guards"])).toContain("Cannot find package 'zod'")
+  })
+
+  test("an emptied tree is moved aside and built again, and one that stays emptied fails the run", async () => {
+    const emptied = tree("rebuilt", true)
+    const builds: string[] = []
+    const built = await loadedTree(() => {
+      builds.push(emptied)
+      if (builds.length === 2) tree("rebuilt", false)
+      return emptied
+    }, ["guards"])
+    expect(built).toBe(emptied)
+    expect(builds).toHaveLength(2)
+    expect(readdirSync(DIR).filter((n) => n.startsWith("rebuilt.pruned-"))).toHaveLength(1)
+    const stays = tree("stays", true)
+    await expect(
+      loadedTree(() => (existsSync(stays) ? stays : tree("stays", true)), ["guards"]),
+    ).rejects.toThrow("Cannot find package 'zod'")
   })
 })
 

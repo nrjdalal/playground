@@ -399,6 +399,11 @@ export function canaryTree({
   return dir
 }
 
+export const unloaded = async (_tree: string, _hooks: string[]): Promise<string | undefined> =>
+  undefined
+
+export const loadedTree = async (build: () => string, _hooks: string[]) => build()
+
 const option = (args: string[], name: string) => {
   const at = args.indexOf(name)
   return at === -1 ? undefined : args[at + 1]
