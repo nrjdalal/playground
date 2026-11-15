@@ -415,6 +415,19 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
   })
 
   test.each([
+    ["the PR's clone", OUTSIDE],
+    ["a scratch folder", `${PAD}/store`],
+  ])("a playground verb from %s holding its own bunfig.toml is refused", async (_, cwd) => {
+    const raw = call("playground ext score acme-owner skill triage abc123 5", cwd, "s-item")
+    const held: Lookup = {
+      ...mainBunfig,
+      holds: (folder, entry) =>
+        (folder === `${PAD}/store` && entry === "bunfig.toml") || mainBunfig.holds(folder, entry),
+    }
+    expect(await check(raw, as("reviewer"), held)).toContain("no-outside-pr-code")
+  })
+
+  test.each([
     [
       "the item's tests through run-slot",
       `${SLOT} ${ITEM_REVIEWER} -- bun --cwd ${PAD}/store test.ts x`,
