@@ -247,7 +247,7 @@ function perlInline(args: Word[]): boolean {
     const cluster = v.slice(1).replace(/l\d*|0(?:x[\da-f]*|\d*)/gi, (m) => m[0])
     for (const c of cluster) {
       if (c === "e" || c === "E") return true
-      if ("CdDiImMx".includes(c)) break
+      if ("CdDFiImMVx".includes(c)) break
     }
   }
   return false
@@ -2505,13 +2505,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       ...[...sedEdit].flatMap((script) => sedWrites(script.value)),
       ...perlEdit.flatMap((script) => sedWrites(script.value, PERL_STEP, perlText)),
     ]
-    // a sed's script from a file (-f after sed's bare flags, as SED_IN_PLACE reads -i, or --file by any prefix getopt_long reads) and its in-place edit by any spelling (-i, or a prefix of --in-place), which inPlace reads by their full names alone
+    // a sed's script from a file (-f after any of GNU's and macOS's no-value flags, -l counted as one so GNU's -l value fails closed, or --file by any prefix getopt_long reads) and its in-place edit by any spelling (-i, or a prefix of --in-place), which inPlace reads by their full names alone
     const sedLong = (word: Word) => longOf(word.value.split("=")[0], SED_LONG)
     const sedFile =
-      tool === "sed" && args.some((w) => /^-[Enrsuz]*f/.test(w.value) || sedLong(w) === "--file")
+      tool === "sed" && args.some((w) => /^-[Eablnrsuz]*f/.test(w.value) || sedLong(w) === "--file")
     const sedEditFlag =
       tool === "sed" &&
-      args.some((w) => /^-[Enrsuz]*i/.test(w.value) || sedLong(w) === "--in-place")
+      args.some((w) => /^-[Eablnrsuz]*i/.test(w.value) || sedLong(w) === "--in-place")
     // the files an in-place edit edits (inPlace), else for such a sed every operand, since none of them is its script
     const editedFiles =
       edited.size > 0

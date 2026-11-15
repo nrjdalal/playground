@@ -133,6 +133,22 @@ const held = (): Row[] => [
     "gsed -i --fil=/tmp/s.sed .git/hooks/pre-commit",
   ],
   [
+    "an in-place macOS sed whose script is a file, after an -a in its -f cluster",
+    "sed -i '' -af /tmp/s.sed .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place macOS sed by -I whose script is a file, after an -a in its -f cluster",
+    "sed -I '' -af /tmp/s.sed .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place GNU sed whose script is a file, after a -b in its -f cluster",
+    "gsed -i -bf /tmp/s.sed .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place perl whose script is a file, after a -F pattern holding an e",
+    "perl -i -Fe /tmp/s.pl .git/hooks/pre-commit",
+  ],
+  [
     "an echo of a glob of the data folder into a git hook named through /dev/..",
     "echo 'touch ~/.play*/extensions/x' > /dev/../tmp/r/.git/hooks/pre-commit",
   ],
@@ -211,6 +227,10 @@ const controls = (): Row[] => [
   [
     "an in-place perl -lne whose script is its -e, on a git hook",
     "perl -i -lne 'print' .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place perl -ane with a -F pattern, on a git hook",
+    "perl -i -F: -ane 'print' .git/hooks/pre-commit",
   ],
   [
     "an in-place perl with a backup suffix and a -pe script, on a git hook",

@@ -10105,7 +10105,7 @@ function perlInline(args) {
     for (const c of cluster) {
       if (c === "e" || c === "E")
         return true;
-      if ("CdDiImMx".includes(c))
+      if ("CdDFiImMVx".includes(c))
         break;
     }
   }
@@ -11903,8 +11903,8 @@ async function inspect(raw, environment, unknown = false) {
       ...perlEdit.flatMap((script) => sedWrites(script.value, PERL_STEP, perlText))
     ];
     const sedLong = (word) => longOf(word.value.split("=")[0], SED_LONG);
-    const sedFile = tool === "sed" && args.some((w) => /^-[Enrsuz]*f/.test(w.value) || sedLong(w) === "--file");
-    const sedEditFlag = tool === "sed" && args.some((w) => /^-[Enrsuz]*i/.test(w.value) || sedLong(w) === "--in-place");
+    const sedFile = tool === "sed" && args.some((w) => /^-[Eablnrsuz]*f/.test(w.value) || sedLong(w) === "--file");
+    const sedEditFlag = tool === "sed" && args.some((w) => /^-[Eablnrsuz]*i/.test(w.value) || sedLong(w) === "--in-place");
     const editedFiles = edited.size > 0 ? [...edited] : sedFile && sedEditFlag ? args.filter((w) => !w.value.startsWith("-")) : [];
     const unreadScript = editedFiles.length > 0 && (args.some((word) => !edited.has(word) && marked(word.value)) || sedFile || tool === "perl" && !perlInline(args));
     const escaped = [...sedEdit, ...perlEdit].length > 0 ? [] : escapedWrites(parsed, env);
