@@ -1120,9 +1120,11 @@ const SED_BODY = String.raw`(?:[^/\\\n[]|\\.|${SED_BRACKET})*/`
 // a replacement's text up to its closing /
 const SED_TEXT = String.raw`(?:[^/\\\n]|\\.)*/`
 const SED_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
-const SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[=dlnNpPqQ]|s/${SED_BODY}${SED_TEXT}[giImMp0-9]*)[ \t]*`
+const SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[=dlnNpPqQ]|s/${SED_BODY}(${SED_TEXT})[giImMp0-9]*)[ \t]*`
 // a sed script read whole by a closed grammar: addresses, then =, d, l, n, N, p, P, q, Q or s/// with flags from g, i, I, m, M, p and digits, so it holds no w or W write, no e run and no r read of another file
 const SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`)
+// one item of a read-only sed's script and its separator, its s/// replacement captured, read in turn from where the last ended
+const SED_STEP = new RegExp(String.raw`${SED_ITEM}(?:[;\n]|$)`, "y")
 
 // The scripts of a sed call that only reads and prints, or undefined: every option on SED_FLAG's list, and every script (each -e value, else the first operand) a literal word, unglobbed, that SED_SCRIPT holds
 function sedReadScripts(args: Word[]): Word[] | undefined {
@@ -1166,6 +1168,7 @@ const SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/
 // a bare -i's suffix word: empty or a dot and letters, so a GNU sed, which reads that word as its script, reads it as no command or none it knows
 const SED_SUFFIX = /^(?:\.[\w.~-]*)?$/
 const SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
+// one item of an in-place sed's script, its s/// replacement captured
 const SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}(${SED_TEXT})[gpI0-9]*)[ \t]*`
 // an in-place sed's script read whole by its allowlist: line, $ or /regex/ addresses and their ranges, then d, p, or s/// with flags from g, p, I and digits; every other command and flag (w, W, r, R, e, s///w, s///e) is off it
 const SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`)
@@ -1185,18 +1188,19 @@ function follows(have: string[], want: string[]): boolean {
 }
 // one item of an in-place sed's script and its separator, read in turn from where the last ended
 const SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y")
-// The text each s/// of an in-place sed's script writes, as sed reads it: a backslash dropped (`\/` reads as /, `\n` as a line break) and the matched text (&, \1 to \9) read as a *, since it can be anything; the whole script read so when its items do not read in turn
-function sedWrites(script: string): string[] {
-  const read = (text: string) =>
-    text.replace(/\\(.)|&/gs, (m, c?: string) =>
-      m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? "\n" : (c ?? m),
-    )
+// a sed replacement as sed writes it: a backslash dropped (`\/` reads as /, `\n` as a line break) and the matched text (&, \1 to \9) read as a *, since it can be anything
+const sedText = (text: string) =>
+  text.replace(/\\(.)|&/gs, (m, c?: string) =>
+    m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? "\n" : (c ?? m),
+  )
+// The text each s/// of a sed script writes (or a perl one's, by its step and its read), its items read in turn by `step`, which captures each replacement, and spelled as `read` writes it; the whole script read so when its items do not read in turn
+function sedWrites(script: string, step = SED_EDIT_STEP, read = sedText): string[] {
   const writes: string[] = []
-  SED_EDIT_STEP.lastIndex = 0
-  while (SED_EDIT_STEP.lastIndex < script.length) {
-    const at = SED_EDIT_STEP.lastIndex
-    const item = SED_EDIT_STEP.exec(script)
-    if (!item || SED_EDIT_STEP.lastIndex === at) return [read(script)]
+  step.lastIndex = 0
+  while (step.lastIndex < script.length) {
+    const at = step.lastIndex
+    const item = step.exec(script)
+    if (!item || step.lastIndex === at) return [read(script)]
     if (item[1]) writes.push(read(item[1].slice(0, -1)))
   }
   return writes
@@ -1293,17 +1297,24 @@ const PERL_MATCH = String.raw`\$[1-9&](?![[{]|->)`
 // a value print may name: a string holding only text, \n, \t and the match variables $1 to $9 and $&, or one of those variables, or $_
 const PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|${PERL_MATCH})*"|\$[1-9&_])`
 const PERL_PRINT = String.raw`print(?:[ \t]+${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*)?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`
-const PERL_SUB = String.raw`s/${PERL_BODY}(?:[^/\\\n@$]|\\.|${PERL_MATCH})*/[gimsx]*`
+const PERL_SUB = String.raw`s/${PERL_BODY}((?:[^/\\\n@$]|\\.|${PERL_MATCH})*/)[gimsx]*`
 const PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`
 // a perl one-liner read whole by a closed grammar: print statements of match variables and plain strings, each optionally under for, if, unless or while a regex, and s/// with flags from g, i, m, s and x, so no regex holds a variable, an array or a code block and no replacement interpolates code
 const PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`)
+// one item of a PERL_SCRIPT one-liner and its separator, its s/// replacement captured, read in turn from where the last ended
+const PERL_STEP = new RegExp(String.raw`${PERL_ITEM}(?:;[ \t]*|$)`, "y")
+// a perl replacement as perl writes it, a double-quoted string: a backslash dropped (`\/` reads as /, `\n` and `\t` as a line break and a tab) and the matched text ($1 to $9, $&, and \1 to \9, which perl reads as $1 to $9) read as a *
+const perlText = (text: string) =>
+  text.replace(/\\(.)|\$[1-9&]/gs, (m, c?: string) =>
+    c === undefined || /[1-9]/.test(c) ? "*" : c === "n" ? "\n" : c === "t" ? "\t" : c,
+  )
 
 // a file operand perl's -n and -p open as a file alone: its 2-arg open runs a name ending or starting in | as a command, and reads <, >, + and & as modes
 const PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/
 
-// Whether a perl call only reads and prints: every option on PERL_FLAG's list, at least one -e or -E script, every script a literal word, unglobbed, that PERL_SCRIPT holds, every file operand a literal PERL_FILE, and no PERL variable set, since PERL5OPT and PERL5LIB load code
-function perlReads({ args, local }: Parsed, env: Env): boolean {
-  if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL"))) return false
+// The scripts of a perl call that only reads and prints, or undefined: every option on PERL_FLAG's list, at least one -e or -E script, every script a literal word, unglobbed, that PERL_SCRIPT holds, every file operand a literal PERL_FILE, and no PERL variable set, since PERL5OPT and PERL5LIB load code
+function perlReadScripts({ args, local }: Parsed, env: Env): Word[] | undefined {
+  if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL"))) return undefined
   const scripts: Word[] = []
   let k = 0
   for (; k < args.length; k++) {
@@ -1313,17 +1324,32 @@ function perlReads({ args, local }: Parsed, env: Env): boolean {
       break
     }
     if (!value.startsWith("-") || value === "-") break
-    if (!PERL_FLAG.test(value)) return false
+    if (!PERL_FLAG.test(value)) return undefined
     if (/[eE]$/.test(value)) {
-      if (!args[k + 1]) return false
+      if (!args[k + 1]) return undefined
       scripts.push(args[++k])
     }
   }
   const files = args.slice(k)
-  return (
-    scripts.length > 0 &&
+  return scripts.length > 0 &&
     scripts.every((w) => literal(w) && PERL_SCRIPT.test(w.value)) &&
     files.every((w) => literal(w) && PERL_FILE.test(w.value))
+    ? scripts
+    : undefined
+}
+// Whether a perl call only reads and prints, by perlReadScripts' reading of it
+const perlReads = (parsed: Parsed, env: Env) => !!perlReadScripts(parsed, env)
+
+// What a sed or perl call that edits no file in place writes, for the root reading its literal twin gets: a read's s/// replacements as sed or perl writes them (sedWrites), else, off both grammars, each word with its escaped slashes read as the slashes they spell; none for any other program
+function escapedWrites(parsed: Parsed, env: Env): string[] {
+  const tool = program(parsed.name)
+  const unescaped = () => parsed.args.map((word) => word.value.replaceAll("\\/", "/"))
+  if (SEDS.has(tool))
+    return sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEP)) ?? unescaped()
+  if (tool !== "perl") return []
+  return (
+    perlReadScripts(parsed, env)?.flatMap((w) => sedWrites(w.value, PERL_STEP, perlText)) ??
+    unescaped()
   )
 }
 
@@ -1776,39 +1802,48 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
-  // What an in-place sed's script writes that a shell may run later (sedWrites), its quotes dropped: the root in its text, else a word, or a part of a brace list, under ~, $HOME or / that can name the root or a path in it (reaches), a relative one holding a / or a glob that can once resolved against the cwd, its .. collapsed, or one that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), so a glob or an escaped slash spells the root no other way than its literal path
-  const scriptNames = (script: string, env: Env): string | undefined => {
-    for (const text of sedWrites(script)) {
-      const plain = text.replace(/['"]/g, "")
-      if (holds(plain, env)) return `${root} in its text`
-      for (const token of plain.split(/[\s;&<>=]+/))
-        for (const word of [token, ...token.split(/[{},]/)]) {
-          const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word)
-          const value = tilde ? home + word.slice(tilde[0].length) : word
-          if (value.startsWith(sep) && reaches(value)) return value
-          if (
-            env.cwd &&
-            !value.startsWith(sep) &&
-            /[/*?[(]/.test(value) &&
-            reaches(resolve(env.cwd, value))
-          )
-            return word
-          const parts = word.split(sep)
-          const expands = (k: number) => parts.slice(0, k).some((part) => /[$~`]/.test(part))
-          if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts))) return word
-        }
-    }
+  // What an in-place sed's or perl's script writes that a shell may run later (sedWrites), its quotes dropped: the root in its text, else a word, or a part of a brace list, under ~, $HOME or / that can name the root, a path in it or a folder between the home and it (reaches), a relative one holding a / or a glob that can once resolved against the cwd, its .. collapsed, or one that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), so a glob or an escaped slash spells the root no other way than its literal path
+  const scriptNames = (text: string, env: Env): string | undefined => {
+    const plain = text.replace(/['"]/g, "")
+    if (holds(plain, env)) return `${root} in its text`
+    for (const token of plain.split(/[\s;&<>=]+/))
+      for (const word of [token, ...token.split(/[{},]/)]) {
+        const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word)
+        const value = tilde ? home + word.slice(tilde[0].length) : word
+        if (value.startsWith(sep) && reaches(value)) return value
+        if (
+          env.cwd &&
+          !value.startsWith(sep) &&
+          /[/*?[(]/.test(value) &&
+          reaches(resolve(env.cwd, value))
+        )
+          return word
+        const parts = word.split(sep)
+        const expands = (k: number) => parts.slice(0, k).some((part) => /[$~`]/.test(part))
+        if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts))) return word
+      }
   }
   // the root's parts as a script may spell them: from the home when the root is under it, else from /
   const rootParts = needle.split(sep).filter(Boolean)
-  // Whether an absolute path or glob can name the root or a path in it: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any
+  // the home's part count (1 when the root is not under the home), which a folder holding the root must pass, so the home itself and every folder above it are no such folder
+  const floor = needle === root ? 1 : real(home).split(sep).length
+  // Whether an absolute path or glob can name the root, a path in it or a folder below the floor that holds it: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any; for a folder below the floor a glob part matches a dot name only when it or one of its brace or zsh group alternatives starts with a dot, as the shell's globs do
   const reaches = (path: string) => {
     const parts = path.split(sep)
     const at = parts.findIndex((part) => GLOB.test(part))
-    if (at < 0) return inRoot(path)
-    const base = real(parts.slice(0, at).join(sep) || sep)
-    const have = [...(base === sep ? [""] : base.split(sep)), ...parts.slice(at)]
-    return follows(have, root.split(sep))
+    const want = root.split(sep)
+    const base = real(at < 0 ? path : parts.slice(0, at).join(sep) || sep)
+    const have = [...(base === sep ? [""] : base.split(sep)), ...(at < 0 ? [] : parts.slice(at))]
+    const spelled = have.at(-1) === "" ? have.slice(0, -1) : have
+    // a folder below the floor that holds the root only adds a refusal, so canary's reading stands for every other path
+    if (
+      spelled.length > floor &&
+      spelled.length < want.length &&
+      spelled.every((part, k) => !want[k].startsWith(".") || /(?:^|[{(|,])\./.test(part)) &&
+      follows(spelled, want.slice(0, spelled.length))
+    )
+      return true
+    return at < 0 ? inRoot(path) : follows(have, want)
   }
   // whether the hook places a write's path, the whole word, with no folder of the shell's: absolute, under ~, or through a variable the call holds
   const placed = (word: Word, env: Env, steady: Steady) =>
@@ -2098,6 +2133,17 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const sedEdit =
       sedInPlace(cmd, parsed) ??
       (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : [])
+    // what those scripts write, and an in-place perl edit's replacements (perlInPlace, else on a perl spelled off its grammar, such as s|||, every word but the files inPlace reads, read whole), each read as sed or perl writes it (sedWrites)
+    const perlEdit = [
+      ...(perlInPlace(cmd, parsed, env) ??
+        (tool === "perl" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : [])),
+    ]
+    const written = [
+      ...[...sedEdit].flatMap((script) => sedWrites(script.value)),
+      ...perlEdit.flatMap((script) => sedWrites(script.value, PERL_STEP, perlText)),
+    ]
+    // what any other sed or perl call writes, judged for the root as its literal twin is (escapedWrites)
+    const escaped = [...sedEdit, ...perlEdit].length > 0 ? [] : escapedWrites(parsed, env)
     // POSIXLY_CORRECT set in the call, by a prefix or on its line, makes a GNU build stop its options at the first operand
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"))
     // on Linux POSIXLY_CORRECT can reach a bare build by a route the hook does not carry (a shell's -c, eval, a function, a sourced file), so gnuReadings judges its words both permuted and stopped at the first operand
@@ -2162,10 +2208,12 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         const named = names({ ...value, quoted: false }, here, remover)
         if (named) return refuse(`${verb} with a variable on ${named}`)
       }
-      for (const script of sedEdit) {
-        const named = scriptNames(script.value, here)
+      for (const text of written) {
+        const named = scriptNames(text, here)
         if (named) return refuse(`${verb} with a script that names ${named}`)
       }
+      if (escaped.some((text) => holds(text, here)))
+        return refuse(`${verb} with a script that names ${root} in its text`)
       const literal = !whole && narrow(cmd, here)
       for (const word of [first, ...args].map(
         (word) => heldWord(own(word), here, steady) ?? own(word),
