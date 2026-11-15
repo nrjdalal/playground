@@ -16749,7 +16749,6 @@ var VERIFIED = new Set(["commit", "merge", "pull"]);
 var SHORT_TAKES = new Set(["F", "X", "m", "o", "s"]);
 var ATTACHED = new Set(["S", "j", "u"]);
 var ALIAS_DEPTH = 8;
-var BRACE2 = "a brace expansion";
 var SEQUENCE = /\{[^{}]*\.\.[^{}]*\}/;
 var INSTEAD3 = "Merge canary in plainly instead: git merge origin/canary, and resolve each conflict keeping both sides' meaning. With ours, the PR's squash onto canary deletes whatever canary added that the merge ignored, while every gate still reads green.";
 var AGAIN = "Run it again without --no-verify (or a commit's -n), so git runs the hooks of the commit it makes. A reviewer's local merge of canary drops --no-verify too: git -C <clone> merge --no-edit origin/canary runs the clone's own hooks.";
@@ -16784,7 +16783,7 @@ function walk2(sub, args) {
   let unread;
   const commit = sub === "commit";
   const value = (k) => {
-    if (args[k]?.unknown === BRACE2)
+    if (args[k]?.unknown === BRACE)
       unread ??= args[k];
     return k;
   };
@@ -16792,7 +16791,7 @@ function walk2(sub, args) {
     const v = args[k].value;
     if (v === "--")
       break;
-    if (args[k].unknown === BRACE2)
+    if (args[k].unknown === BRACE)
       unread ??= args[k];
     else if (v.startsWith("--")) {
       if (v === "--verify")
@@ -16956,7 +16955,7 @@ async function readGit(args, env, depth, cluster) {
   if (!SUBS.has(sub.value))
     return;
   for (const { flag, value } of strategies(rest)) {
-    if (value && (marked(value.value) || value.unknown === BRACE2))
+    if (value && (marked(value.value) || value.unknown === BRACE))
       return `no-ours-merge hook refuses git ${sub.value} ${flag} with a value it cannot read (${visible(value.source ?? value.value)}). ${INSTEAD3}`;
     if (value?.value === "ours")
       return `no-ours-merge hook refuses git ${sub.value} ${flag} ours. ${INSTEAD3}`;
@@ -16968,7 +16967,7 @@ var judged = (args) => {
   return sub !== undefined && (VERIFIED.has(sub) || marked(sub));
 };
 var expanded = (args) => args.flatMap((w) => {
-  if (w.unknown !== BRACE2)
+  if (w.unknown !== BRACE)
     return [w];
   const words = braceWords(w.value);
   if (!words || words.some((v) => SEQUENCE.test(v)))
