@@ -104,6 +104,10 @@ const rows = (): Row[] => [
     String.raw`sed -i '' 's/a/rm $(cd; pwd)/' .git/hooks/pre-commit`,
   ],
   [
+    "an in-place sed whose s/// writes a remover of the home by a substitution that prints $HOME/",
+    String.raw`sed -i '' 's/a/rm $(echo $HOME\/)/' .git/hooks/pre-commit`,
+  ],
+  [
     "an in-place sed whose s/// writes a remover of the data folder by a variable the text sets to it",
     String.raw`sed -i '' 's/a/X=~\/.playground; rm "$X"/' .git/hooks/pre-commit`,
   ],
@@ -150,6 +154,14 @@ const rows = (): Row[] => [
   [
     "an in-place sed whose s/// writes a remover of the files a substitution lists",
     String.raw`sed -i '' 's/a/rm -f $(git ls-files -d)/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the files a substitution lists under the home",
+    String.raw`sed -i '' 's/x/rm -f $(ls ~\/.cache\/*.tmp)/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the files a backtick substitution lists under $HOME",
+    "sed -i '' 's/x/rm -f `ls $HOME\\/.cache\\/*.tmp`/' .git/hooks/pre-commit",
   ],
   [
     "an in-place sed whose s/// writes a change into the home into a git hook",
@@ -239,6 +251,8 @@ const allowedCalls = [
   "an in-place sed whose s/// writes an echo of $HOME after a find's own command",
   "an in-place sed whose s/// writes a remover of a path under a variable",
   "an in-place sed whose s/// writes a remover of the files a substitution lists",
+  "an in-place sed whose s/// writes a remover of the files a substitution lists under the home",
+  "an in-place sed whose s/// writes a remover of the files a backtick substitution lists under $HOME",
   "an in-place sed whose s/// writes a remover of a repo's own extensions folder",
   "an in-place sed whose s/// writes a remover of a build folder in a repo's own extensions folder",
 ]
