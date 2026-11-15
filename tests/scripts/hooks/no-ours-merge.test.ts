@@ -145,6 +145,57 @@ describe("a merge, pull or commit that skips its hooks is refused", () => {
   })
 })
 
+describe("a git call that defines an alias on its own line is refused", () => {
+  test.each([
+    [
+      "an alias behind run-slot",
+      "~/.playground/ops/run-slot.sh w -- git -c 'alias.ci=commit -n' ci -m x",
+    ],
+    [
+      "an alias for a plain commit behind a wrapper",
+      "uv run git -c alias.c=commit c --no-verify -m x",
+    ],
+    ["an alias behind a wrapper", "uv run git -c 'alias.ci=commit -n' ci -m x"],
+    ["an alias after a git the hook cannot read", "$G -c 'alias.ci=commit -n' ci -m x"],
+    ["an ours alias behind a wrapper", "uv run git -c 'alias.m=merge -s ours' m x"],
+    [
+      "a shell alias calling an alias the call defines",
+      "git -c 'alias.a=!git b' -c 'alias.b=commit -n' a -m x",
+    ],
+    [
+      "a shell alias calling an ours alias the call defines",
+      "git -c 'alias.a=!git b' -c 'alias.b=merge -s ours' a x",
+    ],
+    [
+      "a shell alias forwarding its words",
+      `git -c 'alias.x=!f() { git commit -m x "$@"; }; f' x --no-verify`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command)).toContain("no-ours-merge hook refuses")
+  })
+
+  test.each([
+    ["an alias for a plain commit", "git -c alias.c=commit c -m 'fix: x'"],
+    ["an alias named for a git command", "git -c 'alias.commit=commit -n' commit -m x"],
+    ["an alias for a plain merge", "git -c alias.m=merge m --no-ff origin/canary"],
+    ["an alias with a quoted message", `git -c 'alias.c=commit -m "fix: x"' c`],
+    ["an alias for a command that makes no commit", "git -c alias.st=status st"],
+    ["an alias whose section is in capitals", "git -c ALIAS.st=status st"],
+    [
+      "an alias chain inside the depth the hook follows",
+      "git -c alias.a1=a2 -c alias.a2=a3 -c alias.a3=a4 -c alias.a4=a5 -c alias.a5=a6 -c alias.a6=a7 -c alias.a7=commit a1 -m x",
+    ],
+    ["an alias set with --config-env", "git --config-env alias.c=VALUE c -m x"],
+    ["an alias set with an attached --config-env", "git --config-env=Alias.c=VALUE c -m x"],
+    ["a -c the hook cannot read", 'git -c "$KEY" commit -m x'],
+    ["an alias behind env", "env git -c alias.st=status st"],
+  ])("%s", async (_, command) => {
+    const reason = await bash(command)
+    expect(reason).toContain("no-ours-merge hook refuses")
+    expect(reason).toContain("Run the git command directly")
+  })
+})
+
 describe("every other call runs", () => {
   test.each([
     ["a plain merge", "git merge origin/canary"],
@@ -170,20 +221,17 @@ describe("every other call runs", () => {
     ["commit --verify after -n", "git commit -n --verify -m 'fix: x'"],
     ["echo of a merge", "echo git merge --no-verify"],
     ["a push", "git push --no-verify origin HEAD:x"],
-    ["an alias for a plain commit", "git -c alias.c=commit c -m 'fix: x'"],
-    [
-      "an alias named for a git command, which git runs as the command",
-      "git -c 'alias.commit=commit -n' commit -m x",
-    ],
-    ["an alias for a plain merge", "git -c alias.m=merge m --no-ff origin/canary"],
     ["a brace list of branches", "git merge {origin/canary,origin/main}"],
-    ["an alias with a quoted message", `git -c 'alias.c=commit -m "fix: x"' c`],
     ["a brace in a commit message", "git commit -m 'fix: x {a..b} y'"],
     ["a brace in a double-quoted commit message", `git commit -m "fix: x {a,b} y"`],
+    ["a -c of another key", "git -c user.name=x commit -m y"],
     [
-      "an alias chain inside the depth the hook follows",
-      "git -c alias.a1=a2 -c alias.a2=a3 -c alias.a3=a4 -c alias.a4=a5 -c alias.a5=a6 -c alias.a6=a7 -c alias.a7=commit a1 -m x",
+      "a -c of another key behind run-slot",
+      "~/.playground/ops/run-slot.sh w -- git -c commit.gpgsign=false commit -m y",
     ],
+    ["a --config-env of another key", "git --config-env=user.name=NAME commit -m y"],
+    ["an alias set in a config file", "git config alias.st status"],
+    ["echo of a call that defines an alias", "echo git -c alias.c=commit c -m x"],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })
