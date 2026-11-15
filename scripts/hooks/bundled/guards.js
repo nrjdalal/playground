@@ -2080,21 +2080,22 @@ function globSpells(text, names) {
   return false;
 }
 function spelledText(text) {
-  const spelled = text.replace(/\\\n/g, "").replace(/\\/g, "").split(/[\s;&<>`]+/).filter((token) => /[{(]/.test(token)).flatMap((token) => (braceWords(token) ?? [anyText(token, /\{[^{}]*\}/g)]).flatMap((word) => {
+  const spelled = text.replace(/\\\n/g, "").replace(/\\/g, "").split(/[\s;&<>`]+/).filter((token) => /[{(]/.test(token)).flatMap((token) => (braceWords(token) ?? anyText(token, /\{[^{}]*\}/g)).flatMap((word) => {
     const sequenced = word.replace(SEQUENCE, sequenceSpelling);
-    const spelled = sequenced.replace(/\([^()|]*\)$/, "");
-    const words = groupWords(spelled, true);
-    const out = words === null ? [anyText(spelled, /\([^()]*\)/g)] : words ?? [word];
+    const unqualified = sequenced.replace(/\([^()|]*\)$/, "");
+    const words = groupWords(unqualified, true);
+    const out = words === null ? anyText(unqualified, /\([^()]*\)/g) : words ?? [word];
     return sequenced === word ? out : [word, ...out];
-  })).map((word) => word.replace(/["']/g, ""));
+  })).map((word) => word.replace(/["']/g, "")).flatMap((word) => /^[*?]+$/.test(word.slice(word.lastIndexOf("/") + 1)) ? [word, ANY_NAME] : [word]);
   return spelled.length > 0 ? `${text} ${spelled.join(" ")}` : text;
 }
 var SEQUENCE = /\{(-?\d+|[^{},.\s])\.\.(-?\d+|[^{},.\s])(?:\.\.-?\d+)?\}/g;
-var sequenceSpelling = (_, from, to) => /\d/.test(from + to) ? "*" : `[${from < to ? from : to}-${from < to ? to : from}]`;
+var sequenceSpelling = (_, from, to) => /^[A-Za-z]$/.test(from) && /^[A-Za-z]$/.test(to) ? `[${from < to ? from : to}-${from < to ? to : from}]` : "*";
 function anyText(word, part) {
   const spelled = word.replace(part, "*");
-  return spelled === word ? word : anyText(spelled, part);
+  return spelled === word ? [word] : anyText(spelled, part);
 }
+var ANY_NAME = "[!.]*";
 function repass(commands, envs) {
   for (const cmd of commands) {
     if (!cmd.repeated)
