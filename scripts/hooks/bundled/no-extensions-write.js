@@ -11056,19 +11056,36 @@ async function printed(cmd, env) {
   const tool = GNU_NAMED.exec(parsed.name)?.[1] ?? parsed.name;
   return inPlace(tool, parsed.args).length > 0 ? [] : escapedWrites(parsed, env);
 }
-var hookFolders = new Map;
-function hookFolder(dir) {
-  if (!hookFolders.has(dir)) {
-    const read = existsSync4(dir) ? Bun.spawnSync(["git", "-C", dir, "rev-parse", "--git-path", "hooks"], {
-      stderr: "ignore",
-      stdout: "pipe"
-    }) : undefined;
-    const out = read?.exitCode === 0 ? read.stdout.toString().trim() : "";
-    hookFolders.set(dir, out ? real(resolve5(dir, out)) : undefined);
+function readHookFolder(dir) {
+  if (!existsSync4(dir))
+    return false;
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_") && key !== "LC_ALL"));
+  try {
+    const read = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--git-path", "hooks"], {
+      env: { ...env, LC_ALL: "C" },
+      stderr: "pipe",
+      stdout: "pipe",
+      timeout: 2000
+    });
+    if (read.exitCode === 0)
+      return real(resolve5(dir, read.stdout.toString().trim()));
+    return read.exitCode !== 128 || !read.stderr.toString().includes("not a git repository");
+  } catch {
+    return true;
   }
-  return hookFolders.get(dir);
 }
-var hookFile = (path) => !!path && (/(?:^|\/)\.git\/hooks\//.test(path) || hookFolder(dirname4(path)) === real(dirname4(path)));
+var hookFolders = new Map;
+function hookFile(path) {
+  if (!path)
+    return false;
+  if (/(?:^|\/)\.git\/hooks\//.test(path))
+    return true;
+  const dir = dirname4(path);
+  if (!hookFolders.has(dir))
+    hookFolders.set(dir, readHookFolder(dir));
+  const folder = hookFolders.get(dir);
+  return folder === true || folder === real(dir);
+}
 function narrow(cmd, env) {
   const parsed = parse3(cmd);
   const { args, first } = parsed;

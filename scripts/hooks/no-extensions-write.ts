@@ -1548,25 +1548,36 @@ async function printed(cmd: Command, env: Env): Promise<string[]> {
   const tool = GNU_NAMED.exec(parsed.name)?.[1] ?? parsed.name
   return inPlace(tool, parsed.args).length > 0 ? [] : escapedWrites(parsed, env)
 }
-// the folder git runs each folder's repo's hooks from (core.hooksPath, else .git/hooks), read once a folder by git itself, none outside a repo
-const hookFolders = new Map<string, string | undefined>()
-function hookFolder(dir: string): string | undefined {
-  if (!hookFolders.has(dir)) {
-    const read = existsSync(dir)
-      ? Bun.spawnSync(["git", "-C", dir, "rev-parse", "--git-path", "hooks"], {
-          stderr: "ignore",
-          stdout: "pipe",
-        })
-      : undefined
-    const out = read?.exitCode === 0 ? read.stdout.toString().trim() : ""
-    hookFolders.set(dir, out ? real(resolve(dir, out)) : undefined)
+// the folder git runs a folder's repo's hooks from (core.hooksPath, else .git/hooks), read by git itself with every GIT_ variable dropped, in the C locale and under a 2 s cap: false outside a repo or for a folder that does not exist, and true, any folder may be one, when git fails another way or runs past the cap
+function readHookFolder(dir: string): string | boolean {
+  if (!existsSync(dir)) return false
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_") && key !== "LC_ALL"),
+  )
+  try {
+    const read = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--git-path", "hooks"], {
+      env: { ...env, LC_ALL: "C" },
+      stderr: "pipe",
+      stdout: "pipe",
+      timeout: 2000,
+    })
+    if (read.exitCode === 0) return real(resolve(dir, read.stdout.toString().trim()))
+    return read.exitCode !== 128 || !read.stderr.toString().includes("not a git repository")
+  } catch {
+    return true
   }
-  return hookFolders.get(dir)
 }
-// Whether a path is a hook file: one in a .git/hooks folder, or in the folder its repo's hooks run from
-const hookFile = (path: string | undefined) =>
-  !!path &&
-  (/(?:^|\/)\.git\/hooks\//.test(path) || hookFolder(dirname(path)) === real(dirname(path)))
+// each folder's hook folder (readHookFolder), read once a folder
+const hookFolders = new Map<string, string | boolean>()
+// Whether a path is a hook file: one in a .git/hooks folder, or in the folder its repo's hooks run from, or any file in a folder git could not answer for
+function hookFile(path: string | undefined): boolean {
+  if (!path) return false
+  if (/(?:^|\/)\.git\/hooks\//.test(path)) return true
+  const dir = dirname(path)
+  if (!hookFolders.has(dir)) hookFolders.set(dir, readHookFolder(dir))
+  const folder = hookFolders.get(dir)
+  return folder === true || folder === real(dir)
+}
 
 // Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, date, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, a bash -c of a script of such readers, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
